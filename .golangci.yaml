@@ -1,0 +1,172 @@
+version: "2"
+run:
+  go: "1.25"
+  modules-download-mode: readonly
+  tests: true
+output:
+  path-prefix: ""
+linters:
+  default: none
+  enable:
+    - asciicheck
+    - bidichk
+    - decorder
+    - durationcheck
+    - errcheck
+    - errname
+    - errorlint
+    - goconst
+    - gocritic
+    - godot
+    - gosec
+    - govet
+    - importas
+    - ineffassign
+    - lll
+    - makezero
+    - misspell
+    - nakedret
+    - nilerr
+    - prealloc
+    - predeclared
+    - revive
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+    - usestdlibvars
+    - whitespace
+  settings:
+    decorder:
+      dec-order:
+        - const
+        - var
+        - func
+      disable-dec-order-check: true
+      disable-init-func-first-check: false
+    errorlint:
+      errorf: true
+      asserts: true
+      comparison: true
+    goconst:
+      min-len: 3
+      min-occurrences: 10
+    godot:
+      scope: all
+      exclude:
+        - '(?i)^ FIXME:'
+        - '(?i)^ TODO:'
+        - '(?i)^ SPDX\-License\-Identifier:'
+        - (?i)^ +
+      capital: false
+      period: true
+    gosec:
+      excludes:
+        - G101
+        - G107
+        - G112
+        - G115
+        - G122
+        - G404
+        - G703
+        - G704
+      severity: low
+      confidence: low
+    lll:
+      line-length: 150
+      tab-width: 1
+    makezero:
+      always: false
+    misspell:
+      locale: US
+      extra-words:
+        - typo: "Creater"
+          correction: "Creater"
+      mode: restricted
+    nakedret:
+      max-func-lines: 60
+    revive:
+      rules:
+        - name: var-naming
+          arguments:
+            - - HTTP
+              - ID
+              - TLS
+              - TCP
+              - UDP
+              - API
+              - CA
+              - URL
+              - DNS
+          disabled: true
+    staticcheck:
+      checks:
+        - all
+        - -SA1019
+        - -SA2002
+        - -SA5008
+        - -ST1003
+    unparam:
+      check-exported: false
+    unused:
+      field-writes-are-uses: true
+      post-statements-are-reads: true
+      exported-fields-are-used: true
+      parameters-are-used: true
+      local-variables-are-used: true
+      generated-is-used: true
+    usestdlibvars:
+      http-method: true
+      http-status-code: true
+      time-weekday: true
+      time-month: true
+      time-layout: true
+      crypto-hash: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - lll
+          - makezero
+      - path: binding/
+        linters:
+          - errname
+          - godot
+          - lll
+    paths:
+      - doc.go
+      - zz_generated.*.go
+      - generated.*.go
+      - staging/
+formatters:
+  enable:
+    - gofmt
+    - gofumpt
+  settings:
+    gofmt:
+      simplify: true
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+        - pattern: a[b:len(a)]
+          replacement: a[b:]
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+      - gpustack.ai/gpustack
+  exclusions:
+    generated: lax
+    paths:
+      - doc.go
+      - zz_generated.*.go
+      - generated.*.go
+      - staging/

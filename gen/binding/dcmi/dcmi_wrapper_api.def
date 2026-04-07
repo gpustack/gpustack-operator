@@ -1,0 +1,27 @@
+#define DCMI_API_LIST(X) \
+    X(int, dcmi_get_driver_version, (char *driver_ver, unsigned int len), (driver_ver, len)) \
+    X(int, dcmi_get_card_list, (int *card_num, int *card_list, int list_len), (card_num, card_list, list_len)) \
+    X(int, dcmi_get_device_num_in_card, (int card_id, int *device_num), (card_id, device_num)) \
+    X(int, dcmi_get_device_type, (int card_id, int device_id, enum dcmi_unit_type *device_type), (card_id, device_id, device_type)) \
+    X(int, dcmi_get_device_chip_info, (int card_id, int device_id, struct dcmi_chip_info *chip_info), (card_id, device_id, chip_info)) \
+    X(int, dcmi_get_device_chip_info_v2, (int card_id, int device_id, struct dcmi_chip_info_v2 *device_info), (card_id, device_id, device_info)) \
+    X(int, dcmi_get_device_die, (int card_id, int device_id, struct dcmi_soc_die_stru *device_die), (card_id, device_id, device_die)) \
+    X(int, dcmi_get_device_die_v2, (int card_id, int device_id, enum dcmi_die_type input_type, struct dcmi_die_id *die_id), (card_id, device_id, input_type, die_id)) \
+    X(int, dcmi_get_device_utilization_rate, (int card_id, int device_id, int input_type, unsigned int *utilization_rate), (card_id, device_id, input_type, utilization_rate)) \
+    X(int, dcmi_get_device_utilization_rate_v2, (int card_id, int device_id, struct dcmi_multi_utilization_info *util_info), (card_id, device_id, util_info)) \
+    X(int, dcmi_get_device_temperature, (int card_id, int device_id, int *temperature), (card_id, device_id, temperature)) \
+    X(int, dcmi_get_device_power_info, (int card_id, int device_id, int *power), (card_id, device_id, power)) \
+    X(int, dcmi_get_device_logic_id, (int *device_logic_id, int card_id, int device_id), (device_logic_id, card_id, device_id)) \
+    X(int, dcmi_get_device_phyid_from_logicid, (unsigned int logicid, unsigned int *phyid), (logicid, phyid)) \
+    X(int, dcmi_get_device_pcie_info, (int card_id, int device_id, struct dcmi_pcie_info *pcie_info), (card_id, device_id, pcie_info)) \
+    X(int, dcmi_get_device_pcie_info_v2, (int card_id, int device_id, struct dcmi_pcie_info_all *pcie_info), (card_id, device_id, pcie_info)) \
+    X(int, dcmi_get_device_hbm_info, (int card_id, int device_id, struct dcmi_hbm_info *hbm_info), (card_id, device_id, hbm_info)) \
+    X(int, dcmi_get_device_memory_info_v2, (int card_id, int device_id, struct dcmi_memory_info *memory_info), (card_id, device_id, memory_info)) \
+    X(int, dcmi_get_device_memory_info_v3, (int card_id, int device_id, struct dcmi_get_memory_info_stru *memory_info), (card_id, device_id, memory_info)) \
+    X(int, dcmi_get_device_ecc_info, (int card_id, int device_id, enum dcmi_device_type input_type, struct dcmi_ecc_info *device_ecc_info), (card_id, device_id, input_type, device_ecc_info)) \
+    X(int, dcmi_get_affinity_cpu_info_by_device_id, (int card_id, int device_id, char *affinity_cpu, int *length), (card_id, device_id, affinity_cpu, length)) \
+    X(int, dcmi_get_topo_info_by_device_id, (int card_id1, int device_id1, int card_id2, int device_id2, int *topo_type), (card_id1, device_id1, card_id2, device_id2, topo_type)) \
+    X(int, dcmi_get_device_ip, (int card_id, int device_id, enum dcmi_port_type input_type, int port_id, struct dcmi_ip_addr *ip, struct dcmi_ip_addr *mask), (card_id, device_id, input_type, port_id, ip, mask)) \
+    X(int, dcmi_get_device_gateway, (int card_id, int device_id, enum dcmi_port_type input_type, int port_id, struct dcmi_ip_addr *gateway), (card_id, device_id, input_type, port_id, gateway)) \
+    X(int, dcmi_get_device_info, (int card_id, int device_id, enum dcmi_main_cmd main_cmd, unsigned int sub_cmd, void *buf, unsigned int *size), (card_id, device_id, main_cmd, sub_cmd, buf, size))
+

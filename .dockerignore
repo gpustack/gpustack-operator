@@ -1,0 +1,35 @@
+# Files
+.DS_Store
+*.lock
+*.test
+*.out
+*.swp
+*.swo
+# *.db
+*.exe
+*.exe~
+*.dll
+# *.so
+*.dylib
+*.log
+*.rej
+*.orig
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.*
+
+# Dirs
+/.idea
+/.vscode
+/.kube
+/.vagrant
+/.bundle
+/.cache
+/.docker
+/.entc
+# /.sbin
+# /.dist
+/log
+/certs
+.terraform

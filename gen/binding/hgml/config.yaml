@@ -1,0 +1,63 @@
+---
+GENERATOR:
+  PackageName: hgml
+  PackageDescription: "Package HGML bindings"
+  PackageLicense: |-
+    SPDX-FileCopyrightText: 2026 GPUStack, Inc.
+    SPDX-License-Identifier: Apache-2.0
+  Includes:
+    - "hgml.h"
+  FlagGroups:
+    - { name: "LDFLAGS", traits: [ "linux" ], flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
+    - { name: "LDFLAGS", traits: [ "darwin" ], flags: [ "-Wl,-undefined,dynamic_lookup" ] }
+    - { name: "CFLAGS", flags: [ "-w" ] }
+PARSER:
+  SourcesPaths:
+    - "hgml.h"
+TRANSLATOR:
+  ConstRules:
+    defines: eval
+    enum: eval
+  PtrTips:
+    function:
+      - { target: "^hgml", default: "sref" }
+  MemTips:
+    - { target: "^hgml", default: "raw" }
+  Rules:
+    const:
+      - { action: ignore, from: "^__" }
+      - { action: accept, from: "^HGML_" }
+      - { action: accept, from: "^hgml" }
+      - { action: ignore, from: "HGML_VGPU_VIRTUALIZATION_CAP_MIGRATION" }
+      - { action: ignore, from: "HGML_VGPU_PGPU_VIRTUALIZATION_CAP_MIGRATION" }
+      - { action: ignore, from: "hgmlEccBitType_t" }
+      - { action: replace, from: "^HGML_" }
+      - { action: replace, from: "^hgml" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+    type:
+      - { action: accept, from: "^hgml" }
+      - { action: ignore, from: "^hgmlGpuThermalSettings_t$" }
+      - { action: ignore, from: "^hgmlGpuDynamicPstatesInfo_t$" }
+      - { action: replace, from: "^hgml" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+      - { action: replace, from: "^Device$", to: "hgmlDevice" }
+      - { action: replace, from: "^Unit$", to: "hgmlUnit" }
+      - { action: replace, from: "^EventSet$", to: "hgmlEventSet" }
+      - { action: replace, from: "^EventData$", to: "hgmlEventData" }
+      - { action: replace, from: "^GpmSample$", to: "hgmlGpmSample" }
+      - { action: replace, from: "^ComputeInstance$", to: "hgmlComputeInstance" }
+      - { action: replace, from: "^ComputeInstanceInfo$", to: "hgmlComputeInstanceInfo" }
+      - { action: replace, from: "^GpuInstance$", to: "hgmlGpuInstance" }
+      - { action: replace, from: "^GpuInstanceInfo$", to: "hgmlGpuInstanceInfo" }
+      - { action: replace, from: "^VgpuInstance$", to: "hgmlVgpuInstance" }
+      - { action: replace, from: "^VgpuTypeId$", to: "hgmlVgpuTypeId" }
+      - { action: replace, from: "^VgpuMetadata", to: "hgmlVgpuMetadata" }
+      - { action: replace, from: "^VgpuPgpuMetadata", to: "hgmlVgpuPgpuMetadata" }
+      - { action: replace, from: "^GpmMetricsGet", to: "hgmlGpmMetricsGetType" }
+    function:
+      - { action: accept, from: "^hgml" }
+      - { action: ignore, from: "^hgmlDeviceGetThermalSettings$" }
+      - { action: ignore, from: "^hgmlDeviceGetDynamicPstatesInfo$" }
+      - { transform: unexport }

@@ -1,0 +1,43 @@
+diff --git a/cmd/register-gen/generators/register_external.go b/cmd/register-gen/generators/register_external.go
+index 4c3fd37e..3254268d 100644
+--- a/cmd/register-gen/generators/register_external.go
++++ b/cmd/register-gen/generators/register_external.go
+@@ -87,9 +87,24 @@ var GroupVersion = $.groupVersion|raw${Group: GroupName, Version: "$.version$"}
+ // Deprecated: use GroupVersion instead.
+ var SchemeGroupVersion = $.schemaGroupVersion|raw${Group: GroupName, Version: "$.version$"}
+ 
+-// Resource takes an unqualified resource and returns a Group qualified GroupResource
+-func Resource(resource string) $.schemaGroupResource|raw$ {
+-	return SchemeGroupVersion.WithResource(resource).GroupResource()
++// Resource takes an unqualified resource and returns a Group qualified GroupResource.
++func Resource(resource string) schema.GroupResource {
++	return SchemeGroupVersionResource(resource).GroupResource()
++}
++
++// SchemeGroupVersionResource is a convenience method to return the GroupVersionResource for a resource.
++func SchemeGroupVersionResource(resource string) schema.GroupVersionResource {
++	return SchemeGroupVersion.WithResource(resource)
++}
++
++// Kind takes an unqualified kind and returns a Group qualified GroupKind.
++func Kind(kind string) schema.GroupKind {
++	return SchemeGroupVersionKind(kind).GroupKind()
++}
++
++// SchemeGroupVersionKind is a convenience method to return the GroupVersionKind for a kind.
++func SchemeGroupVersionKind(kind string) schema.GroupVersionKind {
++	return SchemeGroupVersion.WithKind(kind)
+ }
+ 
+ var (
+diff --git a/doc.go b/doc.go
+index 3ef48f75..b517d11b 100644
+--- a/doc.go
++++ b/doc.go
+@@ -1,3 +1,6 @@
++// Copyright (c) 2026 GPUStack, Inc.
++// SPDX-License-Identifier: Apache-2.0
++
+ /*
+ Copyright 2021 The Kubernetes Authors.
+ 

@@ -1,0 +1,78 @@
+---
+GENERATOR:
+  PackageName: mtml
+  PackageDescription: "Package MTML bindings"
+  PackageLicense: |-
+    SPDX-FileCopyrightText: 2026 GPUStack, Inc.
+    SPDX-License-Identifier: Apache-2.0
+    
+    Copyright ©2020-2022 Moore Threads Technology Co., Ltd ("Moore Threads"). All rights reserved.
+    
+    This software ("this software and its documentations" or "the software") is
+    protected by Copyright and the information contained herein is confidential.
+    
+    The software contained herein is PROPRIETARY to Moore Threads and is being provided under the terms and
+    conditions of a form of Moore Threads software license agreement by and
+    between Moore Threads and Licensee ("License Agreement") or electronically
+    accepted by Licensee. Notwithstanding any terms or conditions to
+    the contrary in the License Agreement, copy or disclosure
+    of the software to any third party without the express
+    written consent of Moore Threads is prohibited.
+    
+    NOTWITHSTANDING ANY TERMS OR CONDITIONS TO THE CONTRARY IN THE
+    LICENSE AGREEMENT, MOORE THREADS MAKES NO REPRESENTATION ABOUT ANY WARRANTIES, INCLUDING BUT NOT LIMITED TO THE
+    SUITABILITY OF THE SOFTWARE FOR ANY PURPOSE. IT IS
+    PROVIDED "AS IS" WITHOUT EXPRESS OR IMPLIED WARRANTY OF ANY KIND.
+    MOORE THREADS DISCLAIMS ALL WARRANTIES WITH REGARD TO THE
+    SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY,
+    NONINFRINGEMENT, AND FITNESS FOR A PARTICULAR PURPOSE.
+    NOTWITHSTANDING ANY TERMS OR CONDITIONS TO THE CONTRARY IN THE
+    LICENSE AGREEMENT, IN NO EVENT SHALL MOORE THREADS BE LIABLE FOR ANY
+    SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL DAMAGES, OR ANY
+    DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,
+    WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS
+    ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE
+    OF THE SOFTWARE.
+  Includes:
+    - "mtml.h"
+  FlagGroups:
+    - { name: "LDFLAGS", traits: [ "linux" ], flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
+    - { name: "LDFLAGS", traits: [ "darwin" ], flags: [ "-Wl,-undefined,dynamic_lookup" ] }
+    - { name: "CFLAGS", flags: [ "-w" ] }
+PARSER:
+  SourcesPaths:
+    - "mtml.h"
+TRANSLATOR:
+  ConstRules:
+    defines: eval
+    enum: eval
+  PtrTips:
+    function:
+      - { target: "^mtml", default: "sref" }
+      - { target: "^Mtml", default: "sref" }
+  MemTips:
+    - { target: "^mtml", default: "raw" }
+    - { target: "^Mtml", default: "raw" }
+  Rules:
+    const:
+      - { action: ignore, from: "^__" }
+      - { action: accept, from: "^MTML_" }
+      - { action: accept, from: "^Mtml_" }
+      - { action: replace, from: "^MTML_" }
+      - { action: replace, from: "^Mtml_" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+    type:
+      - { action: accept, from: "^Mtml" }
+      - { action: replace, from: "^Mtml" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+      - { action: replace, from: "^Gpu$", to: "mtmlGpu" }
+      - { action: replace, from: "^Memory$", to: "mtmlMemory" }
+      - { action: replace, from: "^Vpu$", to: "mtmlVpu" }
+      - { action: replace, from: "^Device$", to: "mtmlDevice" }
+      - { action: replace, from: "^System$", to: "mtmlSystem" }
+      - { action: replace, from: "^Library$", to: "mtmlLibrary" }
+    function:
+      - { action: accept, from: "^mtml" }
+      - { transform: unexport }

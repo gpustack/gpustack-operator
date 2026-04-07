@@ -1,0 +1,78 @@
+---
+GENERATOR:
+  PackageName: mxsml
+  PackageDescription: "Package MXSML bindings"
+  PackageLicense: |-
+    SPDX-FileCopyrightText: 2026 GPUStack, Inc.
+    SPDX-License-Identifier: Apache-2.0
+    
+    Copyright © 2022 MetaX Integrated Circuits (Shanghai) Co., Ltd. All Rights Reserved.
+    
+    This software and associated documentation files (hereinafter collectively referred to as
+    "Software") is a proprietary commercial software developed by MetaX Integrated Circuits
+    (Shanghai) Co., Ltd. and/or its affiliates (hereinafter collectively referred to as “MetaX”).
+    The information presented in the Software belongs to MetaX. Without prior written permission
+    from MetaX, no entity or individual has the right to obtain a copy of the Software to deal in
+    the Software, including but not limited to use, copy, modify, merge, disclose, publish,
+    distribute, sublicense, and/or sell copies of the Software or substantial portions of the Software.
+    
+    The Software is provided for reference only, without warranty of any kind, either express or
+    implied, including but not limited to the warranty of merchantability, fitness for any purpose
+    and/or noninfringement. In no case shall MetaX be liable for any claim, damage or other liability
+    arising from, out of or in connection with the Software.
+    
+    If the Software need to be used in conjunction with any third-party software or open source
+    software, the rights to the third-party software or open source software still belong to the
+    copyright owners. For details, please refer to the respective notices or licenses. Please comply
+    with the provisions of the relevant notices or licenses. If the open source software licenses
+    additionally require the disposal of rights related to this Software, please contact MetaX
+    immediately and obtain MetaX 's written consent.
+    
+    MetaX reserves the right, at its sole discretion, to change, modify, add or remove portions of the
+    Software, at any time. MetaX reserves all the right for the final explanation.
+  Includes:
+    - "MxSml.h"
+  FlagGroups:
+    - { name: "LDFLAGS", traits: [ "linux" ], flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
+    - { name: "LDFLAGS", traits: [ "darwin" ], flags: [ "-Wl,-undefined,dynamic_lookup" ] }
+    - { name: "CFLAGS", flags: [ "-w" ] }
+PARSER:
+  SourcesPaths:
+    - "MxSml.h"
+TRANSLATOR:
+  ConstRules:
+    defines: eval
+    enum: eval
+  PtrTips:
+    function:
+      - { target: "^mxSml", default: "sref" }
+  MemTips:
+    - { target: "^mxSml", default: "raw" }
+  Rules:
+    const:
+      - { action: accept }
+      - { action: ignore, from: "^__" }
+      - { action: ignore, from: "^_" }
+      - { action: ignore, from: "^TARGET_" }
+      - { action: accept, from: "^MXSML_" }
+      - { action: accept, from: "^MxSml" }
+      - { action: accept, from: "^mxSml" }
+      - { action: accept, from: "^mxsml" }
+      - { action: replace, from: "^MXSML_" }
+      - { action: replace, from: "^MxSml" }
+      - { action: replace, from: "^mxSml" }
+      - { action: replace, from: "^mxsml" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+    type:
+      - { action: accept, from: "^MxSml" }
+      - { action: accept, from: "^mxSml" }
+      - { action: replace, from: "^MxSml" }
+      - { action: replace, from: "^mxSml" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+    function:
+      - { action: accept, from: "^mxSml" }
+      - { action: ignore, from: "^mxSmlGetLocalAndRemoteUuid$" }
+      - { action: ignore, from: "^mxSmlGetLocalAndMultipleRemoteUuid$" }
+      - { transform: unexport }

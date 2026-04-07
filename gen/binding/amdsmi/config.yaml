@@ -1,0 +1,75 @@
+---
+GENERATOR:
+  PackageName: amdsmi
+  PackageDescription: "Package AMDSMI bindings"
+  PackageLicense: |-
+    SPDX-FileCopyrightText: 2026 GPUStack, Inc.
+    SPDX-License-Identifier: Apache-2.0
+    
+    Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+    
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+    
+    The above copyright notice and this permission notice shall be included in
+    all copies or substantial portions of the Software.
+    
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+  Includes:
+    - "amdsmi.h"
+  FlagGroups:
+    - { name: "LDFLAGS", traits: [ "linux" ], flags: [ "-Wl,--export-dynamic", "-Wl,--unresolved-symbols=ignore-in-object-files" ] }
+    - { name: "LDFLAGS", traits: [ "darwin" ], flags: [ "-Wl,-undefined,dynamic_lookup" ] }
+    - { name: "CFLAGS", flags: [ "-w" ] }
+PARSER:
+  SourcesPaths:
+    - "amdsmi.h"
+TRANSLATOR:
+  ConstRules:
+    defines: eval
+    enum: eval
+  PtrTips:
+    function:
+      - { target: "^amdsmi", default: "sref" }
+  MemTips:
+    - { target: "^amdsmi", default: "raw" }
+  Rules:
+    const:
+      - { action: accept, from: "^AMDSMI_" }
+      - { action: accept, from: "^amdsmi_" }
+      - { action: replace, from: "^AMDSMI_" }
+      - { action: replace, from: "^amdsmi_" }
+      - { action: replace, from: "_t$" }
+      - { action: ignore, from: "^AMDSMI_INIT_ALL_PROCESSORS$" }
+      - { action: ignore, from: "^AMDSMI_GPU_BLOCK_RESERVED$" }
+      - { action: ignore, from: "^AMDSMI_STATUS_MAP_ERROR$" }
+      - { action: ignore, from: "^AMDSMI_STATUS_UNKNOWN_ERROR$" }
+      - { action: ignore, from: "_INVALID$" }
+      - { transform: export }
+    type:
+      - { action: accept, from: "^amdsmi_" }
+      - { action: accept, from: "^amd_" }
+      - { action: accept, from: "^processor_" }
+      - { action: ignore, from: "^amdsmi_cper_notify_type_t$"}
+      - { action: replace, from: "^amdsmi_status_t$", to: "amdsmi_return_t" }
+      - { action: replace, from: "^amdsmi" }
+      - { action: replace, from: "^amd" }
+      - { action: replace, from: "_t$" }
+      - { transform: export }
+      - { load: snakecase }
+    function:
+      - { action: accept, from: "^amdsmi" }
+      - { action: ignore, from: "^amdsmi_get_esmi_err_msg$" }
+      - { action: ignore, from: "^amdsmi_status_code_to_string$" }
+      - { transform: unexport }
+      - { load: snakecase }

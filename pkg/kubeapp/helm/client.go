@@ -1,0 +1,335 @@
+package helm
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"time"
+
+	helmaction "helm.sh/helm/v3/pkg/action"
+	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	helmregistry "helm.sh/helm/v3/pkg/registry"
+	helmrelease "helm.sh/helm/v3/pkg/release"
+	helmdriver "helm.sh/helm/v3/pkg/storage/driver"
+	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/rest"
+	klog "k8s.io/klog/v2"
+	apireg "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
+
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
+	"gpustack.ai/gpustack/pkg/kubeconfig"
+)
+
+type (
+	// Client is a Helm client.
+	Client struct {
+		// getter is the Kubernetes REST client getter.
+		getter genericclioptions.RESTClientGetter
+		// defaultNamespace is the name of default Kubernetes Namespace, which to place the release info.
+		defaultNamespace string
+		// Timeout is the timeout of the action.
+		timeout time.Duration
+	}
+
+	// ClientOption is a function to set the configuration of the Client.
+	ClientOption func(*Client)
+)
+
+// WithDefaultNamespace returns a ClientOption to set the name of default Kubernetes Namespace,
+// which to place the release info.
+func WithDefaultNamespace(namespace string) func(*Client) {
+	return func(c *Client) {
+		c.defaultNamespace = namespace
+	}
+}
+
+// WithTimeout returns a ClientOption to set the timeout of the action.
+func WithTimeout(timeout time.Duration) func(*Client) {
+	return func(c *Client) {
+		c.timeout = timeout
+	}
+}
+
+// NewClient creates a new Helm configuration from a Kubernetes rest.Config.
+//
+// The given defaultNamespace is used to place the release info.
+func NewClient(restCfg rest.Config, opts ...ClientOption) (*Client, error) {
+	restCfg.ContentType = runtime.ContentTypeJSON
+	c := &Client{
+		getter:           kubeconfig.ConvertRestConfigToRestClientGetter(&restCfg),
+		defaultNamespace: core.NamespaceDefault,
+		timeout:          5 * time.Minute,
+	}
+	for i := range opts {
+		opts[i](c)
+	}
+
+	return c, nil
+}
+
+// DefaultNamespace returns the name of default Kubernetes Namespace,
+// which to place the release info.
+func (c *Client) DefaultNamespace() string {
+	return c.defaultNamespace
+}
+
+// KubeRestClientGetter returns the Kubernetes REST client getter.
+func (c *Client) KubeRestClientGetter() genericclioptions.RESTClientGetter {
+	return c.getter
+}
+
+// KubeClientSet returns the Kubernetes clientset.
+func (c *Client) KubeClientSet() kubernetes.Interface {
+	conf, _ := c.getter.ToRESTConfig()
+	return kubernetes.NewForConfigOrDie(conf)
+}
+
+// Install installs the given chart, and returns the values.
+//
+// If the release has been found, it will be done.
+func (c *Client) Install(ctx context.Context, chart *Chart, overrideNamespace ...string) (helmchartutil.Values, error) {
+	next := func(r *helmrelease.Release) NextStepType {
+		switch r.Info.Status {
+		case helmrelease.StatusDeployed, helmrelease.StatusSuperseded:
+			if r.Chart.Metadata.Version != "" {
+				lv := r.Chart.Metadata.Version
+				rv := chart.Version
+				if lv != rv {
+					return NextStepUpgrade
+				}
+			}
+			if rv := r.Config; rv != nil {
+				cv, err := chart.Values.GetValues(ctx)
+				if err != nil {
+					return NextStepDone
+				}
+				if !reflect.DeepEqual(rv, cv) {
+					return NextStepUpgrade
+				}
+			}
+			return NextStepDone
+		case helmrelease.StatusPendingInstall, helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
+			if time.Since(r.Info.LastDeployed.Time) > c.timeout {
+				return _NextStepInstall
+			}
+			return NextStepRequeue
+		default:
+			return NextStepReinstall
+		}
+	}
+	return c.InstallWith(ctx, chart, next, overrideNamespace...)
+}
+
+// NextStepType is the type of the next step.
+type NextStepType uint8
+
+const (
+	NextStepDone NextStepType = iota
+	NextStepRequeue
+	NextStepUpgrade
+	NextStepReinstall
+	_NextStepInstall
+)
+
+// NextStepConditionFunc is a function to determine what to do next by the given release.
+type NextStepConditionFunc func(release *helmrelease.Release) (next NextStepType)
+
+// InstallWith installs the given chart with the given condition function.
+//
+// The condition function is used to determine what to do next by the given release,
+// which only calls when the release has been found.
+func (c *Client) InstallWith(
+	ctx context.Context,
+	chart *Chart,
+	next NextStepConditionFunc,
+	overrideNamespace ...string,
+) (helmchartutil.Values, error) {
+	// Validate.
+	if err := chart.Validate(); err != nil {
+		return nil, fmt.Errorf("validate chart: %w", err)
+	}
+	if next == nil {
+		return nil, errors.New("next is required")
+	}
+
+	// Create config.
+	namespace := c.defaultNamespace
+	if len(overrideNamespace) > 0 {
+		namespace = overrideNamespace[0]
+	}
+	{
+		// Ensure the namespace exists, otherwise Helm will fail to create the release.
+		_, err := kubeclientset.Create(
+			ctx,
+			c.KubeClientSet().CoreV1().Namespaces(),
+			&core.Namespace{
+				ObjectMeta: meta.ObjectMeta{
+					Name: namespace,
+				},
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create namespace %s: %w", namespace, err)
+		}
+	}
+
+	config, err := c.createConfig(namespace)
+	if err != nil {
+		return nil, fmt.Errorf("create helm config: %w", err)
+	}
+
+	logger := klog.Background().WithName(chart.Name).WithValues("release", chart.Release)
+
+	// Get release.
+	g := helmaction.NewGet(config)
+	r, err := g.Run(chart.Release)
+	if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
+		return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
+	}
+
+	// Next.
+	for {
+		n := _NextStepInstall
+		if r != nil {
+			n = next(r)
+		} else if isApiServiceReady(ctx, c, chart.DisableInstallIfApiServiceReady) {
+			return nil, nil
+		}
+
+		switch n {
+		case NextStepRequeue:
+			// Requeue.
+			logger.Info("requeueing")
+			time.Sleep(10 * time.Second)
+			r, err = g.Run(chart.Release)
+			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
+				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
+			}
+		case NextStepUpgrade:
+			// Upgrade.
+			logger.Info("upgrading")
+			u := helmaction.NewUpgrade(config)
+			u.Timeout = c.timeout
+			u.Atomic = true
+			u.Recreate = true
+			u.Force = true
+			ch, err := chart.Load(ctx, config)
+			if err != nil {
+				return nil, fmt.Errorf("helm upgrade: load chart: %w", err)
+			}
+			vs, err := chart.Values.GetValues(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("helm upgrade: get values: %w", err)
+			}
+			r, err = u.RunWithContext(ctx, chart.Release, ch, vs)
+			if err != nil {
+				return nil, fmt.Errorf("helm upgrade: release %s: %w", chart.Release, err)
+			}
+			logger.Infof("upgraded: %s", r.Info.Status.String())
+		case NextStepReinstall:
+			// Uninstall.
+			logger.Info("uninstalling")
+			ui := helmaction.NewUninstall(config)
+			ui.Timeout = c.timeout
+			ui.IgnoreNotFound = true
+			ui.KeepHistory = false
+			ui.Wait = true
+			ui.DeletionPropagation = string(meta.DeletePropagationForeground)
+			r, err := ui.Run(chart.Release)
+			if err != nil && errors.Is(err, helmdriver.ErrReleaseNotFound) {
+				return nil, fmt.Errorf("helm uninstall: release %s: %w", chart.Release, err)
+			}
+			logger.Infof("uninstalled: %s", r.Info)
+			fallthrough
+		case _NextStepInstall:
+			// Install.
+			logger.Info("installing")
+			i := helmaction.NewInstall(config)
+			i.Timeout = c.timeout
+			i.ReleaseName = chart.Release
+			i.Namespace = namespace
+			i.Atomic = true
+			i.IncludeCRDs = !chart.DisabledInstallCRDs
+			ch, err := chart.Load(ctx, config)
+			if err != nil {
+				return nil, fmt.Errorf("helm install: load chart: %w", err)
+			}
+			vs, err := chart.Values.GetValues(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("helm install: get values: %w", err)
+			}
+			r, err = i.RunWithContext(ctx, ch, vs)
+			if err != nil {
+				return nil, fmt.Errorf("helm install: release %s: %w", chart.Release, err)
+			}
+			logger.Infof("installed: %s", r.Info.Status.String())
+		default:
+			return helmchartutil.MergeValues(r.Chart, r.Config)
+		}
+	}
+}
+
+// createConfig creates a new Helm action configuration.
+func (c *Client) createConfig(namespace string) (*helmaction.Configuration, error) {
+	logger := klog.Background().WithName("helm")
+
+	// Initialize.
+	//
+	// NB(thxCode): borrowed from helm.sh/helm/cmd/helm/helm.go
+	var config helmaction.Configuration
+	cd := "secret"
+	cdl := func(format string, v ...any) {
+		logger.Infof(format, v...)
+	}
+	err := config.Init(c.getter, namespace, cd, cdl)
+	if err != nil {
+		return nil, err
+	}
+
+	// Refill the registry client.
+	//
+	// NB(thxCode): borrowed from helm.sh/helm/cmd/helm/root.go
+	ropts := []helmregistry.ClientOption{
+		helmregistry.ClientOptDebug(true),
+		helmregistry.ClientOptEnableCache(true),
+		helmregistry.ClientOptWriter(logger),
+	}
+	config.RegistryClient, err = helmregistry.NewClient(ropts...)
+	if err != nil {
+		return nil, fmt.Errorf("create registry client: %w", err)
+	}
+
+	return &config, nil
+}
+
+func isApiServiceReady(ctx context.Context, c *Client, apiSvcName string) bool {
+	if apiSvcName == "" {
+		return false
+	}
+
+	svcCli := c.KubeClientSet().ApiregistrationV1().APIServices()
+
+	svc, err := svcCli.Get(ctx, apiSvcName, meta.GetOptions{ResourceVersion: "0"})
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return false
+		}
+		return false
+	}
+
+	ready := false
+	for i := range svc.Status.Conditions {
+		if svc.Status.Conditions[i].Type != apireg.Available {
+			continue
+		}
+		ready = svc.Status.Conditions[i].Status == apireg.ConditionTrue
+		break
+	}
+	return ready
+}
