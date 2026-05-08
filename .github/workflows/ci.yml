@@ -281,7 +281,7 @@ jobs:
         run: |
           for MANIFEST_IMAGE in $(echo "${INPUT_MANIFEST_IMAGES}" | jq -r '.[]'); do
             docker manifest create --amend "${MANIFEST_IMAGE}" \
-              $(echo "${INPUT_MATRIX}" | jq -r '.[].platform | "${MANIFEST_IMAGE}-" + gsub("/"; "-")')
+              $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
             docker manifest inspect "${MANIFEST_IMAGE}"
             docker manifest push --purge "${MANIFEST_IMAGE}"
           done
