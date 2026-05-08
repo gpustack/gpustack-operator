@@ -130,7 +130,7 @@ jobs:
           path: |-
             ${{ github.workspace }}/.cache
             ${{ github.workspace }}/.sbin
-          key: ${{ hashFiles('go.sum') }}
+          key: ci-${{ matrix.platform }}-${{ hashFiles('go.sum') }}
       - name: Restore BuildX Cache
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
