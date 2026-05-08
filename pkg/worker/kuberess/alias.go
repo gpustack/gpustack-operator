@@ -21,7 +21,7 @@ var (
 )
 
 func init() {
-	SystemRoutingServiceName = osx.Getenv("KUBERNETES_SERVICE_NAME", "gpustack-worker")
+	SystemRoutingServiceName = osx.Getenv("KUBERNETES_SERVICE_NAME", "gpustack-operator-worker")
 }
 
 // InstallSystemNamespace creates the system namespace.

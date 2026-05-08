@@ -11,13 +11,13 @@ import (
 	"github.com/golang/groupcache/singleflight"
 	"github.com/gorilla/mux"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	openspec3 "k8s.io/kube-openapi/pkg/spec3"
 	openvalidatespec "k8s.io/kube-openapi/pkg/validation/spec"
 
 	"gpustack.ai/gpustack/pkg/utils/httpx"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
-	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 // Extender extends the given OpenAPI3 spec and return it.
@@ -149,7 +149,7 @@ func decoratePaths(spec *openspec3.OpenAPI) {
 		{
 			var pPath string
 			pRes, pPath, _ = strings.Cut(path[len(prefix):], "/")
-			for ; pPath != "" && pPath != "{name}"; {
+			for pPath != "" && pPath != "{name}" {
 				if pRes != "namespaces" && pRes != "{namespace}" && pRes != "watch" {
 					break
 				}

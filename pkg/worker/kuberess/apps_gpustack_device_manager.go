@@ -46,20 +46,20 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   namespace: {{ $.Namespace }}
-  name: gpustack-device-manager
+  name: gpustack-operator-device-manager
   labels:
-    "app.kubernetes.io/part-of": "gpustack-device-manager"
+    "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: gpustack-device-manager
+  name: gpustack-operator-device-manager
   labels:
-    "app.kubernetes.io/part-of": "gpustack-device-manager"
+    "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
 subjects:
   - kind: ServiceAccount
     namespace: {{ $.Namespace }}
-    name: gpustack-device-manager
+    name: gpustack-operator-device-manager
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -69,14 +69,14 @@ apiVersion: v1
 kind: Service
 metadata:
   namespace: {{ $.Namespace }}
-  name: gpustack-device-manager
+  name: gpustack-operator-device-manager
   labels:
-    "app.kubernetes.io/part-of": "gpustack-device-manager"
+    "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
 spec:
   selector:
-    "app.kubernetes.io/part-of": "gpustack"
+    "app.kubernetes.io/part-of": "gpustack-operator"
     "app.kubernetes.io/component": "device-manager"
-    "app.kubernetes.io/name": "gpustack-device-manager"
+    "app.kubernetes.io/name": "gpustack-operator-device-manager"
   sessionAffinity: ClientIP
   ports:
     - name: https
@@ -85,7 +85,7 @@ spec:
 {{- range $.Manufacturers }}
 {{- $manu := . }}
 {{- $manuPciID := getPciID $manu }}
-{{- if not (lookup "apps/v1" "DaemonSet" $.Namespace (printf "gpustack-device-manager-%s" $manu)) }}
+{{- if not (lookup "apps/v1" "DaemonSet" $.Namespace (printf "gpustack-operator-device-manager-%s" $manu)) }}
 {{- if has $manu (list "nvidia" "mthreads") }}
 {{- if not (lookup "node.k8s.io/v1" "RuntimeClass" "" $manu) }}
 ---
@@ -101,11 +101,11 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   namespace: "{{ $.Namespace }}"
-  name: gpustack-device-manager-{{ $manu }}
+  name: gpustack-operator-device-manager-{{ $manu }}
   labels:
-    "app.kubernetes.io/part-of": "gpustack"
+    "app.kubernetes.io/part-of": "gpustack-operator"
     "app.kubernetes.io/component": "device-manager"
-    "app.kubernetes.io/name": "gpustack-device-manager"
+    "app.kubernetes.io/name": "gpustack-operator-device-manager"
 spec:
   updateStrategy:
     type: RollingUpdate
@@ -115,15 +115,15 @@ spec:
   revisionHistoryLimit: 5
   selector:
     matchLabels:
-      "app.kubernetes.io/part-of": "gpustack"
+      "app.kubernetes.io/part-of": "gpustack-operator"
       "app.kubernetes.io/component": "device-manager"
-      "app.kubernetes.io/name": "gpustack-device-manager"
+      "app.kubernetes.io/name": "gpustack-operator-device-manager"
   template:
     metadata:
       labels:
-        "app.kubernetes.io/part-of": "gpustack"
+        "app.kubernetes.io/part-of": "gpustack-operator"
         "app.kubernetes.io/component": "device-manager"
-        "app.kubernetes.io/name": "gpustack-device-manager"
+        "app.kubernetes.io/name": "gpustack-operator-device-manager"
     spec:
 {{- if $.ImagePullSecrets }}
       imagePullSecrets:
@@ -138,7 +138,7 @@ spec:
         # Rely on NFD.
         #
         feature.node.kubernetes.io/pci-{{ $manuPciID }}.present: "true"
-      serviceAccountName: gpustack-device-manager
+      serviceAccountName: gpustack-operator-device-manager
       tolerations:
         - operator: "Exists"
       containers:
@@ -192,6 +192,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: KUBERNTES_SERVICE_NAME
+              value: "gpustack-operator-device-manager"
           ports:
             - name: https
               containerPort: {{ $.SecurePort }}

@@ -246,9 +246,9 @@ resource "kubectl_manifest" "gpustack_system" {
       apiVersion = "v1"
       kind       = "Namespace"
       metadata = {
-        name = "gpustack-system"
+        name = "gpustack-operator-system"
         labels = {
-          "app.kubernetes.io/part-of" = "gpustack"
+          "app.kubernetes.io/part-of" = "gpustack-operator"
         }
       }
     }
@@ -267,10 +267,10 @@ resource "kubernetes_service_account_v1" "gpustack_worker" {
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
-    name      = "gpustack-worker"
+    name      = "gpustack-operator-worker"
     namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
     labels = {
-      "app.kubernetes.io/part-of" = "gpustack-worker"
+      "app.kubernetes.io/part-of" = "gpustack-operator-worker"
     }
   }
 }
@@ -279,9 +279,9 @@ resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
-    name = "gpustack-worker"
+    name = "gpustack-operator-worker"
     labels = {
-      "app.kubernetes.io/part-of" = "gpustack-worker"
+      "app.kubernetes.io/part-of" = "gpustack-operator-worker"
     }
   }
   subject {
@@ -300,17 +300,17 @@ resource "kubernetes_service_v1" "gpustack_worker" {
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
-    name      = "gpustack-worker"
+    name      = "gpustack-operator-worker"
     namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
     labels = {
-      "app.kubernetes.io/part-of" = "gpustack-worker"
+      "app.kubernetes.io/part-of" = "gpustack-operator-worker"
     }
   }
   spec {
     selector = {
-      "app.kubernetes.io/part-of"   = "gpustack"
+      "app.kubernetes.io/part-of"   = "gpustack-operator"
       "app.kubernetes.io/component" = "worker"
-      "app.kubernetes.io/name"      = "gpustack-worker"
+      "app.kubernetes.io/name"      = "gpustack-operator-worker"
     }
     session_affinity = "ClientIP"
     port {
@@ -329,10 +329,10 @@ resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
       apiVersion = "cert-manager.io/v1"
       kind       = "Issuer"
       metadata = {
-        name      = "gpustack-worker-selfsigned-issuer"
+        name      = "gpustack-operator-worker-selfsigned-issuer"
         namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
         labels = {
-          "app.kubernetes.io/part-of" = "gpustack-worker"
+          "app.kubernetes.io/part-of" = "gpustack-operator-worker"
         }
       }
       spec = {
@@ -350,19 +350,19 @@ resource "kubectl_manifest" "gpustack_worker_cert" {
       apiVersion = "cert-manager.io/v1"
       kind       = "Certificate"
       metadata = {
-        name      = "gpustack-worker-cert"
+        name      = "gpustack-operator-worker-cert"
         namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
         labels = {
-          "app.kubernetes.io/part-of" = "gpustack-worker"
+          "app.kubernetes.io/part-of" = "gpustack-operator-worker"
         }
       }
       spec = {
-        secretName = "gpustack-worker-cert"
+        secretName = "gpustack-operator-worker-cert"
         issuerRef = {
-          name = "gpustack-worker-selfsigned-issuer"
+          name = "gpustack-operator-worker-selfsigned-issuer"
           kind = "Issuer"
         }
-        commonName = "gpustack-worker"
+        commonName = "gpustack-operator-worker"
         dnsNames = [
           "${kubernetes_service_v1.gpustack_worker.metadata[0].name}.${kubernetes_service_v1.gpustack_worker.metadata[0].namespace}.svc.cluster.local",
           "${kubernetes_service_v1.gpustack_worker.metadata[0].name}.${kubernetes_service_v1.gpustack_worker.metadata[0].namespace}.svc",
@@ -380,29 +380,29 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
   wait_for_rollout = false
 
   metadata {
-    name      = "gpustack-worker"
+    name      = "gpustack-operator-worker"
     namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
     labels = {
-      "app.kubernetes.io/part-of"   = "gpustack"
+      "app.kubernetes.io/part-of"   = "gpustack-operator"
       "app.kubernetes.io/component" = "worker"
-      "app.kubernetes.io/name"      = "gpustack-worker"
+      "app.kubernetes.io/name"      = "gpustack-operator-worker"
     }
   }
   spec {
     replicas = 1
     selector {
       match_labels = {
-        "app.kubernetes.io/part-of"   = "gpustack"
+        "app.kubernetes.io/part-of"   = "gpustack-operator"
         "app.kubernetes.io/component" = "worker"
-        "app.kubernetes.io/name"      = "gpustack-worker"
+        "app.kubernetes.io/name"      = "gpustack-operator-worker"
       }
     }
     template {
       metadata {
         labels = {
-          "app.kubernetes.io/part-of"   = "gpustack"
+          "app.kubernetes.io/part-of"   = "gpustack-operator"
           "app.kubernetes.io/component" = "worker"
-          "app.kubernetes.io/name"      = "gpustack-worker"
+          "app.kubernetes.io/name"      = "gpustack-operator-worker"
         }
       }
       spec {
@@ -416,7 +416,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
                   match_expressions {
                     key      = "app.kubernetes.io/part-of"
                     operator = "In"
-                    values   = ["gpustack"]
+                    values   = ["gpustack-operator"]
                   }
                   match_expressions {
                     key      = "app.kubernetes.io/component"
@@ -426,7 +426,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
                   match_expressions {
                     key      = "app.kubernetes.io/name"
                     operator = "In"
-                    values   = ["gpustack-worker"]
+                    values   = ["gpustack-operator-worker"]
                   }
                 }
               }
@@ -488,6 +488,10 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
               }
             }
           }
+          env {
+            name = "KUBERNETES_SERVICE_NAME"
+            value = "gpustack-operator-worker"
+          }
           port {
             name           = "https"
             container_port = 31443
@@ -538,7 +542,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
         volume {
           name = "gpustack-cert-dir"
           secret {
-            secret_name = "gpustack-worker-cert"
+            secret_name = "gpustack-operator-worker-cert"
           }
         }
       }

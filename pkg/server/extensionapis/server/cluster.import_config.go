@@ -118,26 +118,26 @@ kind: Namespace
 metadata:
   name: {{ $.Namespace }}
   labels:
-    "app.kubernetes.io/part-of": "gpustack"
+    "app.kubernetes.io/part-of": "gpustack-operator"
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   namespace: {{ $.Namespace }}
-  name: gpustack-worker
+  name: gpustack-operator-worker
   labels:
-    "app.kubernetes.io/part-of": "gpustack-worker"
+    "app.kubernetes.io/part-of": "gpustack-operator-worker"
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: gpustack-worker
+  name: gpustack-operator-worker
   labels:
-    "app.kubernetes.io/part-of": "gpustack-worker"
+    "app.kubernetes.io/part-of": "gpustack-operator-worker"
 subjects:
   - kind: ServiceAccount
     namespace: {{ $.Namespace }}
-    name: gpustack-worker
+    name: gpustack-operator-worker
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -147,14 +147,14 @@ apiVersion: v1
 kind: Service
 metadata:
   namespace: {{ $.Namespace }}
-  name: gpustack-worker
+  name: gpustack-operator-worker
   labels:
-    "app.kubernetes.io/part-of": "gpustack-worker"
+    "app.kubernetes.io/part-of": "gpustack-operator-worker"
 spec:
   selector:
-    "app.kubernetes.io/part-of": "gpustack"
+    "app.kubernetes.io/part-of": "gpustack-operator"
     "app.kubernetes.io/component": "worker"
-    "app.kubernetes.io/name": "gpustack-worker"
+    "app.kubernetes.io/name": "gpustack-operator-worker"
   sessionAffinity: ClientIP
   ports:
     - name: https
@@ -165,24 +165,24 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   namespace: {{ $.Namespace }}
-  name: gpustack-worker
+  name: gpustack-operator-worker
   labels:
-    "app.kubernetes.io/part-of": "gpustack"
+    "app.kubernetes.io/part-of": "gpustack-operator"
     "app.kubernetes.io/component": "worker"
-    "app.kubernetes.io/name": "gpustack-worker"
+    "app.kubernetes.io/name": "gpustack-operator-worker"
 spec:
   replicas: 1
   selector:
     matchLabels:
-      "app.kubernetes.io/part-of": "gpustack"
+      "app.kubernetes.io/part-of": "gpustack-operator"
       "app.kubernetes.io/component": "worker"
-      "app.kubernetes.io/name": "gpustack-worker"
+      "app.kubernetes.io/name": "gpustack-operator-worker"
   template:
     metadata:
       labels:
-        "app.kubernetes.io/part-of": "gpustack"
+        "app.kubernetes.io/part-of": "gpustack-operator"
         "app.kubernetes.io/component": "worker"
-        "app.kubernetes.io/name": "gpustack-worker"
+        "app.kubernetes.io/name": "gpustack-operator-worker"
     spec:
       affinity:
         podAntiAffinity:
@@ -195,7 +195,7 @@ spec:
                     - key: "app.kubernetes.io/part-of"
                       operator: In
                       values:
-                        - "gpustack"
+                        - "gpustack-operator"
                     - key: "app.kubernetes.io/component"
                       operator: In
                       values:
@@ -203,9 +203,9 @@ spec:
                     - key: "app.kubernetes.io/name"
                       operator: In
                       values:
-                        - "gpustack-worker"
+                        - "gpustack-operator-worker"
       restartPolicy: Always
-      serviceAccountName: gpustack-worker
+      serviceAccountName: gpustack-operator-worker
       containers:
         - name: main
 {{- $image := "" }}
@@ -252,6 +252,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: KUBERNETES_SERVICE_NAME
+              value: "gpustack-operator-worker"
             # Pass container registry and namespace settings to worker, which can be used for pulling images in the future.
             #
             - name: GPUSTACK_CONTAINER_REGISTRY
