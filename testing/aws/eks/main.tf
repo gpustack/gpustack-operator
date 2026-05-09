@@ -302,6 +302,12 @@ resource "kubernetes_service_v1" "gpustack_worker" {
   metadata {
     name      = "gpustack-operator-worker"
     namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
+    annotations = {
+      "prometheus.io/scrape" = "true"
+      "prometheus.io/port"   = "443"
+      "prometheus.io/path"   = "/metrics"
+      "prometheus.io/scheme" = "https"
+    }
     labels = {
       "app.kubernetes.io/part-of" = "gpustack-operator-worker"
     }
@@ -489,7 +495,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
             }
           }
           env {
-            name = "KUBERNETES_SERVICE_NAME"
+            name  = "KUBERNETES_SERVICE_NAME"
             value = "gpustack-operator-worker"
           }
           port {

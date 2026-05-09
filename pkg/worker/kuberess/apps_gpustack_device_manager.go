@@ -70,6 +70,11 @@ kind: Service
 metadata:
   namespace: {{ $.Namespace }}
   name: gpustack-operator-device-manager
+  annotations:
+	"prometheus.io/scrape": "true"
+	"prometheus.io/port": "443"
+    "prometheus.io/path": "/metrics"
+    "prometheus.io/scheme": "https"
   labels:
     "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
 spec:
