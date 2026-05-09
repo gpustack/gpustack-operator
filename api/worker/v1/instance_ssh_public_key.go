@@ -17,8 +17,22 @@ type InstanceSSHPublicKey struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
+	Spec InstanceSSHPublicKeySpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
+}
+
+type InstanceSSHPublicKeySpec struct {
+	// DisplayName is the display name of the InstanceSSHPublicKey.
+	//
+	// +k8s:validation:maxLength=64
+	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,1,opt,name=displayName"`
+
+	// Description is the description of the InstanceSSHPublicKey.
+	//
+	// +k8s:validation:maxLength=1024
+	Description string `json:"description,omitempty" protobuf:"bytes,2,opt,name=description"`
+
 	// Data is the SSH public key data.
-	Data string `json:"data" protobuf:"bytes,2,name=data"`
+	Data string `json:"data,omitempty" protobuf:"bytes,3,opt,name=data"`
 }
 
 var _ runtime.Object = (*InstanceSSHPublicKey)(nil)

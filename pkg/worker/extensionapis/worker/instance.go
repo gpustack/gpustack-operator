@@ -346,65 +346,70 @@ func (h *InstanceHandler) OnGet(ctx context.Context, key types.NamespacedName, o
 }
 
 func (h *InstanceHandler) OnUpdate(ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions) (runtime.Object, error) {
+	// Validate.
 	inst, instOld := obj.(*worker.Instance), oldObj.(*worker.Instance)
 	if inst.Spec.Type != instOld.Spec.Type {
-		return nil, field.Invalid(
-			field.NewPath("spec.type"), inst.Spec.Type, "type is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.type"), "type is immutable")
 	}
 	if inst.Spec.Image != instOld.Spec.Image {
-		return nil, field.Invalid(
-			field.NewPath("spec.image"), inst.Spec.Image, "image is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.image"), "image is immutable")
 	}
 	if inst.Spec.ImagePullPolicy != instOld.Spec.ImagePullPolicy {
-		return nil, field.Invalid(
-			field.NewPath("spec.imagePullPolicy"), inst.Spec.ImagePullPolicy, "imagePullPolicy is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Command, instOld.Spec.Command) {
-		return nil, field.Invalid(
-			field.NewPath("spec.command"), inst.Spec.Command, "command is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.command"), "command is immutable")
 	}
 	if inst.Spec.Privileged != instOld.Spec.Privileged {
-		return nil, field.Invalid(
-			field.NewPath("spec.privileged"), inst.Spec.Privileged, "privileged is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.privileged"), "privileged is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Ports, instOld.Spec.Ports) {
-		return nil, field.Invalid(
-			field.NewPath("spec.ports"), inst.Spec.Ports, "ports is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.ports"), "ports is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Env, instOld.Spec.Env) {
-		return nil, field.Invalid(
-			field.NewPath("spec.env"), inst.Spec.Env, "env is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.env"), "env is immutable")
 	}
 	if inst.Spec.VolumeMount != instOld.Spec.VolumeMount {
-		return nil, field.Invalid(
-			field.NewPath("spec.volumeMount"), inst.Spec.VolumeMount, "volumeMount is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.volumeMount"), "volumeMount is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.ImagePullSecret, instOld.Spec.ImagePullSecret) {
-		return nil, field.Invalid(
-			field.NewPath("spec.imagePullSecret"), inst.Spec.ImagePullSecret, "imagePullSecret is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Resources, instOld.Spec.Resources) {
-		return nil, field.Invalid(
-			field.NewPath("spec.resources"), inst.Spec.Resources, "resources is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.resources"), "resources is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Volume, instOld.Spec.Volume) {
-		return nil, field.Invalid(
-			field.NewPath("spec.volume"), inst.Spec.Volume, "volume is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.volume"), "volume is immutable")
 	}
 	if !kubemeta.DeepEqual(inst.Spec.SSHPublicKey, instOld.Spec.SSHPublicKey) {
-		return nil, field.Invalid(
-			field.NewPath("spec.sshPublicKey"), inst.Spec.SSHPublicKey, "sshPublicKey is immutable")
+		return nil, field.Forbidden(
+			field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable")
 	}
 
-	pod := new(core.Pod)
-	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), pod)
+	oldPod := new(core.Pod)
+	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), oldPod,
+		&ctrlcli.GetOptions{
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
+		})
 	if err != nil {
 		return nil, err
 	}
 
-	oldPod := pod.DeepCopy()
-	pod.Annotations = inst.Annotations
-	pod.Labels = inst.Labels
+	pod := oldPod.DeepCopy()
+	pod.ObjectMeta = inst.ObjectMeta
 	systemmeta.NoteResource(pod, _InstanceResource, map[string]string{
 		"displayName": inst.Spec.DisplayName,
 		"description": inst.Spec.Description,
@@ -755,6 +760,25 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 							Value: e.Value,
 						}
 					}),
+					Resources: func() *worker.InstanceResources {
+						ret := &worker.InstanceResources{}
+						for n := range mainC.Resources.Limits {
+							q := mainC.Resources.Limits[n]
+							switch n {
+							case core.ResourceCPU:
+								ret.CPU = q
+							case core.ResourceMemory:
+								ret.RAM = q
+							case core.ResourceEphemeralStorage:
+								ret.LocalStorage = q
+							default:
+								if devicefeature.IsKnownResourceName(n) {
+									ret.Accelerator = &q
+								}
+							}
+						}
+						return ret
+					}(),
 					VolumeMount: mainC.VolumeMounts[0].MountPath,
 					ImagePullSecret: func() *core.LocalObjectReference {
 						if notes["imagePullSecretName"] == "" {
@@ -765,25 +789,6 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 						}
 					}(),
 				},
-				Resources: func() *worker.InstanceResources {
-					ret := &worker.InstanceResources{}
-					for n := range mainC.Resources.Limits {
-						q := mainC.Resources.Limits[n]
-						switch n {
-						case core.ResourceCPU:
-							ret.CPU = q
-						case core.ResourceMemory:
-							ret.RAM = q
-						case core.ResourceEphemeralStorage:
-							ret.LocalStorage = q
-						default:
-							if devicefeature.IsKnownResourceName(n) {
-								ret.Accelerator = &q
-							}
-						}
-					}
-					return ret
-				}(),
 				Volume: worker.InstanceVolume{
 					Ephemeral: func() *worker.InstanceEphemeralVolume {
 						if notes["volumeEphemeralCapacity"] == "" {

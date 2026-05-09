@@ -8,6 +8,7 @@ import (
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,7 +34,7 @@ const _InstancePersistentVolumeResource = "instancepersistentvolumes"
 // which is named as the InstancePersistentVolume's name.
 type InstancePersistentVolumeHandler struct {
 	extensionapi.ObjectInfo
-	extensionapi.NoUpdateOperations
+	extensionapi.CurdOperations
 
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader
@@ -102,7 +103,7 @@ func (h *InstancePersistentVolumeHandler) SetupHandler(
 
 	// As storage.
 	h.ObjectInfo = &worker.InstancePersistentVolume{}
-	h.NoUpdateOperations = extensionapi.WithNoUpdate(tc, h)
+	h.CurdOperations = extensionapi.WithCurd(tc, h)
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()
@@ -117,6 +118,8 @@ var (
 	_ rest.Lister            = (*InstancePersistentVolumeHandler)(nil)
 	_ rest.Watcher           = (*InstancePersistentVolumeHandler)(nil)
 	_ rest.Getter            = (*InstancePersistentVolumeHandler)(nil)
+	_ rest.Updater           = (*InstancePersistentVolumeHandler)(nil)
+	_ rest.Patcher           = (*InstancePersistentVolumeHandler)(nil)
 	_ rest.GracefulDeleter   = (*InstancePersistentVolumeHandler)(nil)
 	_ rest.CollectionDeleter = (*InstancePersistentVolumeHandler)(nil)
 )
@@ -175,6 +178,9 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 		}
 	}
 	// Default.
+	if instPV.Spec.Capacity.IsZero() {
+		instPV.Spec.Capacity = resource.MustParse("20Gi")
+	}
 	if instPV.Spec.AccessMode == nil {
 		if ptr.Deref(stgClass.VolumeBindingMode, storage.VolumeBindingImmediate) == storage.VolumeBindingImmediate {
 			if ptr.Deref(stgClass.AllowVolumeExpansion, false) {
@@ -313,6 +319,51 @@ func (h *InstancePersistentVolumeHandler) OnGet(ctx context.Context, key types.N
 	return instPV, nil
 }
 
+func (h *InstancePersistentVolumeHandler) OnUpdate(
+	ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions,
+) (runtime.Object, error) {
+	// Validate.
+	instPV, instPVOld := obj.(*worker.InstancePersistentVolume), oldObj.(*worker.InstancePersistentVolume)
+	if !ptr.Equal(instPV.Spec.Type, instPVOld.Spec.Type) {
+		return nil, field.Forbidden(
+			field.NewPath("spec.type"), "field is immutable")
+	}
+	if !instPV.Spec.Capacity.Equal(instPVOld.Spec.Capacity) {
+		return nil, field.Forbidden(
+			field.NewPath("spec.capacity"), "field is immutable")
+	}
+	if !ptr.Equal(instPV.Spec.AccessMode, instPVOld.Spec.AccessMode) {
+		return nil, field.Forbidden(
+			field.NewPath("spec.accessMode"), "field is immutable")
+	}
+
+	oldPvc := new(core.PersistentVolumeClaim)
+	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instPV), oldPvc,
+		&ctrlcli.GetOptions{
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	pvc := oldPvc.DeepCopy()
+	pvc.ObjectMeta = instPV.ObjectMeta
+	systemmeta.NoteResource(pvc, _InstancePersistentVolumeResource, map[string]string{
+		"displayName": instPV.Spec.DisplayName,
+		"description": instPV.Spec.Description,
+	})
+	err = h.Client.Patch(ctx, pvc, ctrlcli.MergeFrom(oldPvc))
+	if err != nil {
+		return nil, kerrors.NewInternalError(
+			fmt.Errorf("update corresponding persistent volume claim of instance persistent volume: %w", err))
+	}
+
+	instPV = convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc)
+	return instPV, nil
+}
+
 func (h *InstancePersistentVolumeHandler) OnDelete(ctx context.Context, obj runtime.Object, opts ctrlcli.DeleteOptions) error {
 	instPV := obj.(*worker.InstancePersistentVolume)
 
@@ -347,7 +398,10 @@ func convertPersistentVolumeClaimFromInstancePersistentVolume(instPV *worker.Ins
 		},
 	}
 
-	systemmeta.NoteResource(pvc, _InstancePersistentVolumeResource, nil)
+	systemmeta.NoteResource(pvc, _InstancePersistentVolumeResource, map[string]string{
+		"displayName": instPV.Spec.DisplayName,
+		"description": instPV.Spec.Description,
+	})
 
 	return pvc
 }
@@ -357,7 +411,7 @@ func convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc *core.Persiste
 		return nil
 	}
 
-	resType := systemmeta.DescribeResourceType(pvc)
+	resType, notes := systemmeta.UnnoteResource(pvc)
 	if resType != _InstancePersistentVolumeResource {
 		return nil
 	}
@@ -365,9 +419,11 @@ func convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc *core.Persiste
 	return &worker.InstancePersistentVolume{
 		ObjectMeta: pvc.ObjectMeta,
 		Spec: worker.InstancePersistentVolumeSpec{
-			Type:       pvc.Spec.StorageClassName,
-			Capacity:   pvc.Spec.Resources.Requests[core.ResourceStorage],
-			AccessMode: &pvc.Spec.AccessModes[0],
+			DisplayName: notes["displayName"],
+			Description: notes["description"],
+			Type:        pvc.Spec.StorageClassName,
+			Capacity:    pvc.Spec.Resources.Requests[core.ResourceStorage],
+			AccessMode:  &pvc.Spec.AccessModes[0],
 		},
 		Status: worker.InstancePersistentVolumeStatus{
 			Phase: pvc.Status.Phase,

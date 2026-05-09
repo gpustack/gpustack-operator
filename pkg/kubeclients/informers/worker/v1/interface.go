@@ -19,6 +19,8 @@ type Interface interface {
 	Instances() InstanceInformer
 	// InstanceImagePullSecrets returns a InstanceImagePullSecretInformer.
 	InstanceImagePullSecrets() InstanceImagePullSecretInformer
+	// InstancePersistentVolumes returns a InstancePersistentVolumeInformer.
+	InstancePersistentVolumes() InstancePersistentVolumeInformer
 	// InstanceSSHPublicKeys returns a InstanceSSHPublicKeyInformer.
 	InstanceSSHPublicKeys() InstanceSSHPublicKeyInformer
 	// InstanceTypes returns a InstanceTypeInformer.
@@ -49,6 +51,11 @@ func (v *version) Instances() InstanceInformer {
 // InstanceImagePullSecrets returns a InstanceImagePullSecretInformer.
 func (v *version) InstanceImagePullSecrets() InstanceImagePullSecretInformer {
 	return &instanceImagePullSecretInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// InstancePersistentVolumes returns a InstancePersistentVolumeInformer.
+func (v *version) InstancePersistentVolumes() InstancePersistentVolumeInformer {
+	return &instancePersistentVolumeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }
 
 // InstanceSSHPublicKeys returns a InstanceSSHPublicKeyInformer.

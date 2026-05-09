@@ -41,6 +41,11 @@ func (in InstanceImagePullSecretList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceImagePullSecretSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceImagePullSecretSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceList"
 }
@@ -83,6 +88,11 @@ func (in InstanceSSHPublicKey) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceSSHPublicKeyList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceSSHPublicKeyList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceSSHPublicKeySpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceSSHPublicKeySpec"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

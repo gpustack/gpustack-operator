@@ -12,26 +12,40 @@ import (
 //
 // InstanceSpec defines the desired state of Instance.
 type InstanceSpecApplyConfiguration struct {
-	// Type is the name of InstanceType that provisions corresponding resources.
-	Type *string `json:"type,omitempty"`
-	// InstanceTemplate is the template for the Instance to run.
-	InstanceTemplateApplyConfiguration `json:",inline"`
-	// Resources is the resource requirements for the Instance.
-	Resources *InstanceResourcesApplyConfiguration `json:"resources,omitempty"`
-	// Volume is the volume to mount in the Instance.
-	Volume *InstanceVolumeApplyConfiguration `json:"volume,omitempty"`
-	// SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
-	SSHPublicKey *corev1.LocalObjectReferenceApplyConfiguration `json:"sshPublicKey,omitempty"`
 	// DisplayName is the display name of the Instance.
 	DisplayName *string `json:"displayName,omitempty"`
 	// Description is the description of the Instance.
 	Description *string `json:"description,omitempty"`
+	// Type is the name of InstanceType that provisions corresponding resources.
+	Type *string `json:"type,omitempty"`
+	// InstanceTemplate is the template for the Instance to run.
+	InstanceTemplateApplyConfiguration `json:",inline"`
+	// Volume is the volume to mount in the Instance.
+	Volume *InstanceVolumeApplyConfiguration `json:"volume,omitempty"`
+	// SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
+	SSHPublicKey *corev1.LocalObjectReferenceApplyConfiguration `json:"sshPublicKey,omitempty"`
 }
 
 // InstanceSpecApplyConfiguration constructs a declarative configuration of the InstanceSpec type for use with
 // apply.
 func InstanceSpec() *InstanceSpecApplyConfiguration {
 	return &InstanceSpecApplyConfiguration{}
+}
+
+// WithDisplayName sets the DisplayName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DisplayName field is set to the value of the last call.
+func (b *InstanceSpecApplyConfiguration) WithDisplayName(value string) *InstanceSpecApplyConfiguration {
+	b.DisplayName = &value
+	return b
+}
+
+// WithDescription sets the Description field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Description field is set to the value of the last call.
+func (b *InstanceSpecApplyConfiguration) WithDescription(value string) *InstanceSpecApplyConfiguration {
+	b.Description = &value
+	return b
 }
 
 // WithType sets the Type field in the declarative configuration to the given value
@@ -102,6 +116,14 @@ func (b *InstanceSpecApplyConfiguration) WithEnv(values ...*InstanceEnvVarApplyC
 	return b
 }
 
+// WithResources sets the Resources field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Resources field is set to the value of the last call.
+func (b *InstanceSpecApplyConfiguration) WithResources(value *InstanceResourcesApplyConfiguration) *InstanceSpecApplyConfiguration {
+	b.InstanceTemplateApplyConfiguration.Resources = value
+	return b
+}
+
 // WithVolumeMount sets the VolumeMount field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the VolumeMount field is set to the value of the last call.
@@ -118,14 +140,6 @@ func (b *InstanceSpecApplyConfiguration) WithImagePullSecret(value *corev1.Local
 	return b
 }
 
-// WithResources sets the Resources field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Resources field is set to the value of the last call.
-func (b *InstanceSpecApplyConfiguration) WithResources(value *InstanceResourcesApplyConfiguration) *InstanceSpecApplyConfiguration {
-	b.Resources = value
-	return b
-}
-
 // WithVolume sets the Volume field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Volume field is set to the value of the last call.
@@ -139,21 +153,5 @@ func (b *InstanceSpecApplyConfiguration) WithVolume(value *InstanceVolumeApplyCo
 // If called multiple times, the SSHPublicKey field is set to the value of the last call.
 func (b *InstanceSpecApplyConfiguration) WithSSHPublicKey(value *corev1.LocalObjectReferenceApplyConfiguration) *InstanceSpecApplyConfiguration {
 	b.SSHPublicKey = value
-	return b
-}
-
-// WithDisplayName sets the DisplayName field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the DisplayName field is set to the value of the last call.
-func (b *InstanceSpecApplyConfiguration) WithDisplayName(value string) *InstanceSpecApplyConfiguration {
-	b.DisplayName = &value
-	return b
-}
-
-// WithDescription sets the Description field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Description field is set to the value of the last call.
-func (b *InstanceSpecApplyConfiguration) WithDescription(value string) *InstanceSpecApplyConfiguration {
-	b.Description = &value
 	return b
 }

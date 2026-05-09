@@ -540,6 +540,8 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().Instances().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("instanceimagepullsecrets"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstanceImagePullSecrets().Informer()}, nil
+	case workerv1.SchemeGroupVersion.WithResource("instancepersistentvolumes"):
+		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstancePersistentVolumes().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("instancesshpublickeys"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Worker().V1().InstanceSSHPublicKeys().Informer()}, nil
 	case workerv1.SchemeGroupVersion.WithResource("instancetypes"):

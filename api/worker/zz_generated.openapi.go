@@ -28,6 +28,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceEphemeralVolume{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceEphemeralVolume(ref),
 		v1.InstanceImagePullSecret{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref),
 		v1.InstanceImagePullSecretList{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref),
+		v1.InstanceImagePullSecretSpec{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretSpec(ref),
 		v1.InstanceList{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceList(ref),
 		v1.InstancePersistentVolume{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
 		v1.InstancePersistentVolumeList{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
@@ -37,6 +38,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceResources{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstanceResources(ref),
 		v1.InstanceSSHPublicKey{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref),
 		v1.InstanceSSHPublicKeyList{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref),
+		v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref),
 		v1.InstanceServicePort{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1_InstanceServicePort(ref),
 		v1.InstanceSpec{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceSpec(ref),
 		v1.InstanceStatus{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceStatus(ref),
@@ -578,18 +580,17 @@ func schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref common.ReferenceC
 							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
 					},
-					"data": {
+					"spec": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Data is the image pull secret data.\n\nThis field is a write-only input, and it is expected to be a JSON string that contains the image pull secret data.",
-							Type:        []string{"string"},
-							Format:      "",
+							Default: map[string]interface{}{},
+							Ref:     ref(v1.InstanceImagePullSecretSpec{}.OpenAPIModelName()),
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			metav1.ObjectMeta{}.OpenAPIModelName()},
+			v1.InstanceImagePullSecretSpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -639,6 +640,63 @@ func schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref common.Refere
 		},
 		Dependencies: []string{
 			v1.InstanceImagePullSecret{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceImagePullSecretSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceImagePullSecretSpec defines the desired state of InstanceImagePullSecret.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the display name of the InstanceImagePullSecret.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the description of the InstanceImagePullSecret.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"registry": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Registry is the registry of the image pull secret.\n\nThis field is a write-only input, and it is required in writing.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"username": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Username is the username of the image pull secret.\n\nThis field is a write-only input, and it is required in writing.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"password": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Password is the password of the image pull secret.\n\nThis field is a write-only input, and it is required in writing.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"email": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Email is the email of the image pull secret.\n\nThis field is a write-only input, and it is optional in writing.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -795,29 +853,45 @@ func schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref common.Refer
 				Description: "InstancePersistentVolumeSpec defines the desired state of InstancePersistentVolume.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the display name of the InstancePersistentVolume.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the description of the InstancePersistentVolume.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"type": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Type is the name of Kubernetes StorageClass that provisions corresponding Kubernetes PersistentVolume.",
+							Description: "Type is the name of Kubernetes StorageClass that provisions corresponding Kubernetes PersistentVolume.\n\nImmutable after creation.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"capacity": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Capacity is the capacity of the InstanceVolume.",
+							Description: "Capacity is the capacity of the InstanceVolume.\n\nImmutable after creation.",
+							Default:     "20Gi",
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
 					"accessMode": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AccessMode is the access mode of the InstanceVolume.\n\n\nPossible enum values:\n - `\"ReadOnlyMany\"` can be mounted in read-only mode to many hosts\n - `\"ReadWriteMany\"` can be mounted in read/write mode to many hosts\n - `\"ReadWriteOnce\"` can be mounted in read/write mode to exactly 1 host\n - `\"ReadWriteOncePod\"` can be mounted in read/write mode to exactly 1 pod cannot be used in combination with other access modes",
+							Description: "AccessMode is the access mode of the InstanceVolume.\n\nImmutable after creation.\n\n\nPossible enum values:\n - `\"ReadOnlyMany\"` can be mounted in read-only mode to many hosts\n - `\"ReadWriteMany\"` can be mounted in read/write mode to many hosts\n - `\"ReadWriteOnce\"` can be mounted in read/write mode to exactly 1 host\n - `\"ReadWriteOncePod\"` can be mounted in read/write mode to exactly 1 pod cannot be used in combination with other access modes",
 							Type:        []string{"string"},
 							Format:      "",
 							Enum:        []interface{}{"ReadOnlyMany", "ReadWriteMany", "ReadWriteOnce", "ReadWriteOncePod"},
 						},
 					},
 				},
-				Required: []string{"capacity"},
 			},
 		},
 		Dependencies: []string{
@@ -951,20 +1025,17 @@ func schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref common.ReferenceCall
 							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
 						},
 					},
-					"data": {
+					"spec": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Data is the SSH public key data.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
+							Default: map[string]interface{}{},
+							Ref:     ref(v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName()),
 						},
 					},
 				},
-				Required: []string{"data"},
 			},
 		},
 		Dependencies: []string{
-			metav1.ObjectMeta{}.OpenAPIModelName()},
+			v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -1017,6 +1088,41 @@ func schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref common.Reference
 	}
 }
 
+func schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the display name of the InstanceSSHPublicKey.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the description of the InstanceSSHPublicKey.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"data": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Data is the SSH public key data.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1_InstanceServicePort(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1061,6 +1167,22 @@ func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) co
 				Description: "InstanceSpec defines the desired state of Instance.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the display name of the Instance.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the description of the Instance.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"type": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Type is the name of InstanceType that provisions corresponding resources.",
@@ -1162,6 +1284,12 @@ func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) co
 							},
 						},
 					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is the resource requirements for the Instance.",
+							Ref:         ref(v1.InstanceResources{}.OpenAPIModelName()),
+						},
+					},
 					"volumeMount": {
 						SchemaProps: spec.SchemaProps{
 							Description: "VolumeMount is a path to mount the volume in the Instance.",
@@ -1176,12 +1304,6 @@ func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) co
 						SchemaProps: spec.SchemaProps{
 							Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
 							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-					"resources": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Resources is the resource requirements for the Instance.",
-							Ref:         ref(v1.InstanceResources{}.OpenAPIModelName()),
 						},
 					},
 					"volume": {
@@ -1200,22 +1322,6 @@ func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) co
 						SchemaProps: spec.SchemaProps{
 							Description: "SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.",
 							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-					"displayName": {
-						SchemaProps: spec.SchemaProps{
-							Description: "DisplayName is the display name of the Instance.",
-							MaxLength:   ptr.To[int64](64),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"description": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Description is the description of the Instance.",
-							MaxLength:   ptr.To[int64](1024),
-							Type:        []string{"string"},
-							Format:      "",
 						},
 					},
 				},
@@ -1429,6 +1535,12 @@ func schema_gpustack_api_worker_v1_InstanceTemplate(ref common.ReferenceCallback
 							},
 						},
 					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is the resource requirements for the Instance.",
+							Ref:         ref(v1.InstanceResources{}.OpenAPIModelName()),
+						},
+					},
 					"volumeMount": {
 						SchemaProps: spec.SchemaProps{
 							Description: "VolumeMount is a path to mount the volume in the Instance.",
@@ -1450,7 +1562,7 @@ func schema_gpustack_api_worker_v1_InstanceTemplate(ref common.ReferenceCallback
 			},
 		},
 		Dependencies: []string{
-			v1.InstanceEnvVar{}.OpenAPIModelName(), v1.InstancePort{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1.InstanceEnvVar{}.OpenAPIModelName(), v1.InstancePort{}.OpenAPIModelName(), v1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 

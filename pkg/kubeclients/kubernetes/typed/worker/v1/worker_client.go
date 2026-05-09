@@ -20,6 +20,7 @@ type WorkerV1Interface interface {
 	DevicesGetter
 	InstancesGetter
 	InstanceImagePullSecretsGetter
+	InstancePersistentVolumesGetter
 	InstanceSSHPublicKeysGetter
 	InstanceTypesGetter
 }
@@ -39,6 +40,10 @@ func (c *WorkerV1Client) Instances(namespace string) InstanceInterface {
 
 func (c *WorkerV1Client) InstanceImagePullSecrets(namespace string) InstanceImagePullSecretInterface {
 	return newInstanceImagePullSecrets(c, namespace)
+}
+
+func (c *WorkerV1Client) InstancePersistentVolumes(namespace string) InstancePersistentVolumeInterface {
+	return newInstancePersistentVolumes(c, namespace)
 }
 
 func (c *WorkerV1Client) InstanceSSHPublicKeys(namespace string) InstanceSSHPublicKeyInterface {

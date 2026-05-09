@@ -17,11 +17,44 @@ type InstanceImagePullSecret struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
-	// Data is the image pull secret data.
+	Spec InstanceImagePullSecretSpec `json:"spec,omitempty" protobuf:"bytes,2,opt,name=spec"`
+}
+
+// InstanceImagePullSecretSpec defines the desired state of InstanceImagePullSecret.
+type InstanceImagePullSecretSpec struct {
+	// DisplayName is the display name of the InstanceImagePullSecret.
+	//
+	// +k8s:validation:maxLength=64
+	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,1,opt,name=displayName"`
+
+	// Description is the description of the InstanceImagePullSecret.
+	//
+	// +k8s:validation:maxLength=1024
+	Description string `json:"description,omitempty" protobuf:"bytes,2,opt,name=description"`
+
+	// Registry is the registry of the image pull secret.
 	//
 	// This field is a write-only input,
-	// and it is expected to be a JSON string that contains the image pull secret data.
-	Data string `json:"data,omitempty" protobuf:"bytes,2,opt,name=data"`
+	// and it is required in writing.
+	Registry string `json:"registry,omitempty" protobuf:"bytes,3,opt,name=registry"`
+
+	// Username is the username of the image pull secret.
+	//
+	// This field is a write-only input,
+	// and it is required in writing.
+	Username string `json:"username,omitempty" protobuf:"bytes,4,opt,name=username"`
+
+	// Password is the password of the image pull secret.
+	//
+	// This field is a write-only input,
+	// and it is required in writing.
+	Password string `json:"password,omitempty" protobuf:"bytes,5,opt,name=password"`
+
+	// Email is the email of the image pull secret.
+	//
+	// This field is a write-only input,
+	// and it is optional in writing.
+	Email string `json:"email,omitempty" protobuf:"bytes,6,opt,name=email"`
 }
 
 var _ runtime.Object = (*InstanceSSHPublicKey)(nil)

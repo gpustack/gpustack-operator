@@ -27,6 +27,14 @@ type InstanceImagePullSecretListerExpansion interface{}
 // InstanceImagePullSecretNamespaceLister.
 type InstanceImagePullSecretNamespaceListerExpansion interface{}
 
+// InstancePersistentVolumeListerExpansion allows custom methods to be added to
+// InstancePersistentVolumeLister.
+type InstancePersistentVolumeListerExpansion interface{}
+
+// InstancePersistentVolumeNamespaceListerExpansion allows custom methods to be added to
+// InstancePersistentVolumeNamespaceLister.
+type InstancePersistentVolumeNamespaceListerExpansion interface{}
+
 // InstanceSSHPublicKeyListerExpansion allows custom methods to be added to
 // InstanceSSHPublicKeyLister.
 type InstanceSSHPublicKeyListerExpansion interface{}

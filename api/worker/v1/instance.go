@@ -27,36 +27,33 @@ var _ runtime.Object = (*Instance)(nil)
 
 // InstanceSpec defines the desired state of Instance.
 type InstanceSpec struct {
+	// DisplayName is the display name of the Instance.
+	//
+	// +k8s:validation:maxLength=64
+	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,1,opt,name=displayName"`
+
+	// Description is the description of the Instance.
+	//
+	// +k8s:validation:maxLength=1024
+	Description string `json:"description,omitempty" protobuf:"bytes,2,opt,name=description"`
+
 	// Type is the name of InstanceType that provisions corresponding resources.
 	//
 	// +required
-	Type string `json:"type" protobuf:"bytes,1,name=type"`
+	Type string `json:"type" protobuf:"bytes,3,name=type"`
 
 	// InstanceTemplate is the template for the Instance to run.
-	InstanceTemplate `json:",inline" protobuf:"bytes,2,name=instanceTemplate"`
-
-	// Resources is the resource requirements for the Instance.
-	Resources *InstanceResources `json:"resources,omitempty" protobuf:"bytes,3,opt,name=resources"`
+	InstanceTemplate `json:",inline" protobuf:"bytes,4,name=instanceTemplate"`
 
 	// Volume is the volume to mount in the Instance.
 	//
 	// +required
 	// +k8s:validation:cel[0]:rule="has(self.ephemeral) != has(self.persistent)"
 	// +k8s:validation:cel[0]:message="exactly one of ephemeral and persistent of volume should be specified"
-	Volume InstanceVolume `json:"volume,omitempty" protobuf:"bytes,4,opt,name=volume"`
+	Volume InstanceVolume `json:"volume,omitempty" protobuf:"bytes,5,opt,name=volume"`
 
 	// SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
-	SSHPublicKey *core.LocalObjectReference `json:"sshPublicKey,omitempty" protobuf:"bytes,5,opt,name=sshPublicKey"`
-
-	// DisplayName is the display name of the Instance.
-	//
-	// +k8s:validation:maxLength=64
-	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,6,opt,name=displayName"`
-
-	// Description is the description of the Instance.
-	//
-	// +k8s:validation:maxLength=1024
-	Description string `json:"description,omitempty" protobuf:"bytes,7,opt,name=description"`
+	SSHPublicKey *core.LocalObjectReference `json:"sshPublicKey,omitempty" protobuf:"bytes,6,opt,name=sshPublicKey"`
 }
 
 // InstanceTemplate defines the template for the Instance to run.
@@ -98,15 +95,18 @@ type InstanceTemplate struct {
 	// +listMapKey=name
 	Env []InstanceEnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,rep,name=env"`
 
+	// Resources is the resource requirements for the Instance.
+	Resources *InstanceResources `json:"resources,omitempty" protobuf:"bytes,7,opt,name=resources"`
+
 	// VolumeMount is a path to mount the volume in the Instance.
 	//
 	// +default="/workspace"
 	// +k8s:validation:pattern="^(/[^/]+)+$"
 	// +k8s:validation:maxLength=1024
-	VolumeMount string `json:"volumeMount,omitempty" protobuf:"bytes,7,opt,name=volumeMount"`
+	VolumeMount string `json:"volumeMount,omitempty" protobuf:"bytes,8,opt,name=volumeMount"`
 
 	// ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
-	ImagePullSecret *core.LocalObjectReference `json:"imagePullSecret,omitempty" protobuf:"bytes,8,opt,name=imagePullSecret"`
+	ImagePullSecret *core.LocalObjectReference `json:"imagePullSecret,omitempty" protobuf:"bytes,9,opt,name=imagePullSecret"`
 }
 
 // InstancePort defines the port to expose from the Instance.

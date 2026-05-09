@@ -2298,6 +2298,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceEphemeralVolumeApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceImagePullSecret"):
 		return &applyconfigurationworkerv1.InstanceImagePullSecretApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstanceImagePullSecretSpec"):
+		return &applyconfigurationworkerv1.InstanceImagePullSecretSpecApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolume"):
+		return &applyconfigurationworkerv1.InstancePersistentVolumeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeSpec"):
+		return &applyconfigurationworkerv1.InstancePersistentVolumeSpecApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeStatus"):
+		return &applyconfigurationworkerv1.InstancePersistentVolumeStatusApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstancePort"):
 		return &applyconfigurationworkerv1.InstancePortApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceResources"):
@@ -2308,6 +2316,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceSpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceSSHPublicKey"):
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeyApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstanceSSHPublicKeySpec"):
+		return &applyconfigurationworkerv1.InstanceSSHPublicKeySpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceStatus"):
 		return &applyconfigurationworkerv1.InstanceStatusApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceTemplate"):

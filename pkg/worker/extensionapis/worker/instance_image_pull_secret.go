@@ -18,7 +18,10 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
+	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const _InstanceImagePullSecretResource = "instanceimagepullsecrets"
@@ -94,8 +97,14 @@ func (h *InstanceImagePullSecretHandler) Destroy() {
 func (h *InstanceImagePullSecretHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctrlcli.CreateOptions) (runtime.Object, error) {
 	// Validate.
 	instImgPullSec := obj.(*worker.InstanceImagePullSecret)
-	if instImgPullSec.Data == "" {
-		return nil, field.Invalid(field.NewPath("data"), "", "data field is required")
+	if instImgPullSec.Spec.Registry == "" {
+		return nil, field.Invalid(field.NewPath("spec.registry"), "", "registry is required")
+	}
+	if instImgPullSec.Spec.Username == "" {
+		return nil, field.Invalid(field.NewPath("spec.username"), "", "username is required")
+	}
+	if instImgPullSec.Spec.Password == "" {
+		return nil, field.Invalid(field.NewPath("spec.password"), "", "password is required")
 	}
 
 	// Create.
@@ -223,7 +232,17 @@ func (h *InstanceImagePullSecretHandler) OnGet(ctx context.Context, key types.Na
 func (h *InstanceImagePullSecretHandler) OnUpdate(
 	ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions,
 ) (runtime.Object, error) {
+	// Validate.
 	instImgPullSec := obj.(*worker.InstanceImagePullSecret)
+	if instImgPullSec.Spec.Registry == "" {
+		return nil, field.Invalid(field.NewPath("spec.registry"), "", "registry is required")
+	}
+	if instImgPullSec.Spec.Username == "" {
+		return nil, field.Invalid(field.NewPath("spec.username"), "", "username is required")
+	}
+	if instImgPullSec.Spec.Password == "" {
+		return nil, field.Invalid(field.NewPath("spec.password"), "", "password is required")
+	}
 
 	// Update.
 	{
@@ -247,13 +266,36 @@ func (h *InstanceImagePullSecretHandler) OnDelete(ctx context.Context, obj runti
 }
 
 func convertSecretFromInstanceImagePullSecret(instImgPullSec *worker.InstanceImagePullSecret) *core.Secret {
+	// {"auths":{"your.private.registry.example.com":{"username":"janedoe","password":"xxxxxxxxxxx","email":"jdoe@example.com","auth":"c3R...zE2"}}}
+
+	dcrCfg := map[string]any{
+		"auths": map[string]any{
+			instImgPullSec.Spec.Registry: func() (auth map[string]string) {
+				auth = map[string]string{
+					"auth": stringx.EncodeBase64(instImgPullSec.Spec.Username + ":" + instImgPullSec.Spec.Password),
+				}
+				if instImgPullSec.Spec.Email != "" {
+					auth["email"] = instImgPullSec.Spec.Email
+				}
+				return auth
+			},
+		},
+	}
+	dcrCfgJson := json.MustMarshal(dcrCfg)
+
 	sec := &core.Secret{
 		ObjectMeta: instImgPullSec.ObjectMeta,
 		Type:       core.SecretTypeDockerConfigJson,
 		StringData: map[string]string{
-			core.DockerConfigJsonKey: instImgPullSec.Data,
+			core.DockerConfigJsonKey: stringx.FromBytes(&dcrCfgJson),
 		},
 	}
+
+	systemmeta.NoteResource(sec, "", map[string]string{
+		"displayName": instImgPullSec.Spec.DisplayName,
+		"description": instImgPullSec.Spec.Description,
+	})
+
 	return sec
 }
 
@@ -261,14 +303,20 @@ func convertInstanceImagePullSecretFromSecret(sec *core.Secret) *worker.Instance
 	if sec == nil {
 		return nil
 	}
-
 	if sec.Type != core.SecretTypeDockerConfigJson {
 		return nil
 	}
 
-	return &worker.InstanceImagePullSecret{
+	_, notes := systemmeta.UnnoteResource(sec)
+
+	instImgPullSec := &worker.InstanceImagePullSecret{
 		ObjectMeta: sec.ObjectMeta,
+		Spec: worker.InstanceImagePullSecretSpec{
+			DisplayName: notes["displayName"],
+			Description: notes["description"],
+		},
 	}
+	return instImgPullSec
 }
 
 func convertInstanceImagePullSecretListFromSecretList(secList *core.SecretList, opts ctrlcli.ListOptions) *worker.InstanceImagePullSecretList {

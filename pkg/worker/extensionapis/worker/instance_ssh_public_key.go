@@ -260,10 +260,13 @@ func convertSecretListOptsFromInstanceSSHPublicKeyListOpts(in ctrlcli.ListOption
 func convertSecretFromInstanceSSHPublicKey(instSSHKey *worker.InstanceSSHPublicKey) *core.Secret {
 	sec := &core.Secret{
 		ObjectMeta: instSSHKey.ObjectMeta,
-		Data:       map[string][]byte{"authorized-keys": stringx.ToBytes(&instSSHKey.Data)},
+		Data:       map[string][]byte{"authorized-keys": stringx.ToBytes(&instSSHKey.Spec.Data)},
 	}
 
-	systemmeta.NoteResource(sec, _InstanceSSHPublicKeyResource, nil)
+	systemmeta.NoteResource(sec, _InstanceSSHPublicKeyResource, map[string]string{
+		"displayName": instSSHKey.Spec.DisplayName,
+		"description": instSSHKey.Spec.Description,
+	})
 
 	return sec
 }
@@ -273,7 +276,7 @@ func convertInstanceSSHPublicKeyFromSecret(sec *core.Secret) *worker.InstanceSSH
 		return nil
 	}
 
-	resType := systemmeta.DescribeResourceType(sec)
+	resType, notes := systemmeta.UnnoteResource(sec)
 	if resType != _InstanceSSHPublicKeyResource {
 		return nil
 	}
@@ -285,7 +288,11 @@ func convertInstanceSSHPublicKeyFromSecret(sec *core.Secret) *worker.InstanceSSH
 
 	return &worker.InstanceSSHPublicKey{
 		ObjectMeta: sec.ObjectMeta,
-		Data:       secData,
+		Spec: worker.InstanceSSHPublicKeySpec{
+			DisplayName: notes["displayName"],
+			Description: notes["description"],
+			Data:        secData,
+		},
 	}
 }
 

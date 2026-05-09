@@ -13,6 +13,8 @@ type InstanceExpansion interface{}
 
 type InstanceImagePullSecretExpansion interface{}
 
+type InstancePersistentVolumeExpansion interface{}
+
 type InstanceSSHPublicKeyExpansion interface{}
 
 type InstanceTypeExpansion interface{}

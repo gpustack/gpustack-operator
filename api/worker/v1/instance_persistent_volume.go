@@ -12,7 +12,7 @@ import (
 // Underhood, an InstancePersistentVolume is mapping to a Kubernetes PersistentVolumeClaim,
 // and the InstancePersistentVolume's name is the same as the Kubernetes PersistentVolumeClaim's name.
 //
-// +genclient:onlyVerbs=create,get,list,watch,delete,deleteCollection
+// +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 type InstancePersistentVolume struct {
@@ -27,18 +27,36 @@ var _ runtime.Object = (*InstancePersistentVolume)(nil)
 
 // InstancePersistentVolumeSpec defines the desired state of InstancePersistentVolume.
 type InstancePersistentVolumeSpec struct {
+	// DisplayName is the display name of the InstancePersistentVolume.
+	//
+	// +k8s:validation:maxLength=64
+	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,1,opt,name=displayName"`
+
+	// Description is the description of the InstancePersistentVolume.
+	//
+	// +k8s:validation:maxLength=1024
+	Description string `json:"description,omitempty" protobuf:"bytes,2,opt,name=description"`
+
 	// Type is the name of Kubernetes StorageClass that provisions corresponding Kubernetes PersistentVolume.
-	Type *string `json:"type,omitempty" protobuf:"bytes,1,opt,name=type"`
+	//
+	// Immutable after creation.
+	//
+	Type *string `json:"type,omitempty" protobuf:"bytes,3,opt,name=type"`
 
 	// Capacity is the capacity of the InstanceVolume.
 	//
-	// +required
-	Capacity resource.Quantity `json:"capacity" protobuf:"bytes,2,name=capacity"`
+	// Immutable after creation.
+	//
+	// +default="20Gi"
+	//
+	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,4,name=capacity"`
 
 	// AccessMode is the access mode of the InstanceVolume.
 	//
+	// Immutable after creation.
+	//
 	// +k8s:validation:enum=["ReadWriteMany","ReadWriteOnce","ReadOnlyMany","ReadWriteOncePod"]
-	AccessMode *core.PersistentVolumeAccessMode `json:"accessMode,omitempty" protobuf:"bytes,3,opt,name=accessMode"`
+	AccessMode *core.PersistentVolumeAccessMode `json:"accessMode,omitempty" protobuf:"bytes,5,opt,name=accessMode"`
 }
 
 // InstancePersistentVolumeStatus defines the observed state of InstancePersistentVolume.

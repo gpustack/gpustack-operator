@@ -18,11 +18,7 @@ import (
 type InstanceImagePullSecretApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
-	// Data is the image pull secret data.
-	//
-	// This field is a write-only input,
-	// and it is expected to be a JSON string that contains the image pull secret data.
-	Data *string `json:"data,omitempty"`
+	Spec                                 *InstanceImagePullSecretSpecApplyConfiguration `json:"spec,omitempty"`
 }
 
 // InstanceImagePullSecret constructs a declarative configuration of the InstanceImagePullSecret type for use with
@@ -196,11 +192,11 @@ func (b *InstanceImagePullSecretApplyConfiguration) ensureObjectMetaApplyConfigu
 	}
 }
 
-// WithData sets the Data field in the declarative configuration to the given value
+// WithSpec sets the Spec field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Data field is set to the value of the last call.
-func (b *InstanceImagePullSecretApplyConfiguration) WithData(value string) *InstanceImagePullSecretApplyConfiguration {
-	b.Data = &value
+// If called multiple times, the Spec field is set to the value of the last call.
+func (b *InstanceImagePullSecretApplyConfiguration) WithSpec(value *InstanceImagePullSecretSpecApplyConfiguration) *InstanceImagePullSecretApplyConfiguration {
+	b.Spec = value
 	return b
 }
 

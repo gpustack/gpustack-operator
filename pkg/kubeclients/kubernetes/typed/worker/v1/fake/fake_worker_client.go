@@ -29,6 +29,10 @@ func (c *FakeWorkerV1) InstanceImagePullSecrets(namespace string) v1.InstanceIma
 	return newFakeInstanceImagePullSecrets(c, namespace)
 }
 
+func (c *FakeWorkerV1) InstancePersistentVolumes(namespace string) v1.InstancePersistentVolumeInterface {
+	return newFakeInstancePersistentVolumes(c, namespace)
+}
+
 func (c *FakeWorkerV1) InstanceSSHPublicKeys(namespace string) v1.InstanceSSHPublicKeyInterface {
 	return newFakeInstanceSSHPublicKeys(c, namespace)
 }

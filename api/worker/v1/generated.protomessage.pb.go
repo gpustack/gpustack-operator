@@ -24,6 +24,8 @@ func (*InstanceImagePullSecret) ProtoMessage() {}
 
 func (*InstanceImagePullSecretList) ProtoMessage() {}
 
+func (*InstanceImagePullSecretSpec) ProtoMessage() {}
+
 func (*InstanceList) ProtoMessage() {}
 
 func (*InstancePersistentVolume) ProtoMessage() {}
@@ -41,6 +43,8 @@ func (*InstanceResources) ProtoMessage() {}
 func (*InstanceSSHPublicKey) ProtoMessage() {}
 
 func (*InstanceSSHPublicKeyList) ProtoMessage() {}
+
+func (*InstanceSSHPublicKeySpec) ProtoMessage() {}
 
 func (*InstanceServicePort) ProtoMessage() {}
 

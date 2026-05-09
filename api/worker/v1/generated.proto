@@ -90,11 +90,7 @@ message InstanceEphemeralVolume {
 message InstanceImagePullSecret {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
-  // Data is the image pull secret data.
-  //
-  // This field is a write-only input,
-  // and it is expected to be a JSON string that contains the image pull secret data.
-  optional string data = 2;
+  optional InstanceImagePullSecretSpec spec = 2;
 }
 
 // InstanceImagePullSecretList holds the list of InstanceImagePullSecret.
@@ -104,6 +100,43 @@ message InstanceImagePullSecretList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated InstanceImagePullSecret items = 2;
+}
+
+// InstanceImagePullSecretSpec defines the desired state of InstanceImagePullSecret.
+message InstanceImagePullSecretSpec {
+  // DisplayName is the display name of the InstanceImagePullSecret.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is the description of the InstanceImagePullSecret.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
+  // Registry is the registry of the image pull secret.
+  //
+  // This field is a write-only input,
+  // and it is required in writing.
+  optional string registry = 3;
+
+  // Username is the username of the image pull secret.
+  //
+  // This field is a write-only input,
+  // and it is required in writing.
+  optional string username = 4;
+
+  // Password is the password of the image pull secret.
+  //
+  // This field is a write-only input,
+  // and it is required in writing.
+  optional string password = 5;
+
+  // Email is the email of the image pull secret.
+  //
+  // This field is a write-only input,
+  // and it is optional in writing.
+  optional string email = 6;
 }
 
 // InstanceList holds the list of Instance.
@@ -120,7 +153,7 @@ message InstanceList {
 // Underhood, an InstancePersistentVolume is mapping to a Kubernetes PersistentVolumeClaim,
 // and the InstancePersistentVolume's name is the same as the Kubernetes PersistentVolumeClaim's name.
 //
-// +genclient:onlyVerbs=create,get,list,watch,delete,deleteCollection
+// +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message InstancePersistentVolume {
@@ -142,18 +175,34 @@ message InstancePersistentVolumeList {
 
 // InstancePersistentVolumeSpec defines the desired state of InstancePersistentVolume.
 message InstancePersistentVolumeSpec {
+  // DisplayName is the display name of the InstancePersistentVolume.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is the description of the InstancePersistentVolume.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
   // Type is the name of Kubernetes StorageClass that provisions corresponding Kubernetes PersistentVolume.
-  optional string type = 1;
+  //
+  // Immutable after creation.
+  optional string type = 3;
 
   // Capacity is the capacity of the InstanceVolume.
   //
-  // +required
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity capacity = 2;
+  // Immutable after creation.
+  //
+  // +default="20Gi"
+  optional .k8s.io.apimachinery.pkg.api.resource.Quantity capacity = 4;
 
   // AccessMode is the access mode of the InstanceVolume.
   //
+  // Immutable after creation.
+  //
   // +k8s:validation:enum=["ReadWriteMany","ReadWriteOnce","ReadOnlyMany","ReadWriteOncePod"]
-  optional string accessMode = 3;
+  optional string accessMode = 5;
 }
 
 // InstancePersistentVolumeStatus defines the observed state of InstancePersistentVolume.
@@ -209,8 +258,7 @@ message InstanceResources {
 message InstanceSSHPublicKey {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
-  // Data is the SSH public key data.
-  optional string data = 2;
+  optional InstanceSSHPublicKeySpec spec = 2;
 }
 
 // InstanceSSHPublicKeyList holds the list of InstanceSSHPublicKey.
@@ -220,6 +268,21 @@ message InstanceSSHPublicKeyList {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
 
   repeated InstanceSSHPublicKey items = 2;
+}
+
+message InstanceSSHPublicKeySpec {
+  // DisplayName is the display name of the InstanceSSHPublicKey.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is the description of the InstanceSSHPublicKey.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
+  // Data is the SSH public key data.
+  optional string data = 3;
 }
 
 // InstanceServicePort defines the port to expose from the container and the port to expose on the node.
@@ -232,36 +295,33 @@ message InstanceServicePort {
 
 // InstanceSpec defines the desired state of Instance.
 message InstanceSpec {
+  // DisplayName is the display name of the Instance.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is the description of the Instance.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
   // Type is the name of InstanceType that provisions corresponding resources.
   //
   // +required
-  optional string type = 1;
+  optional string type = 3;
 
   // InstanceTemplate is the template for the Instance to run.
-  optional InstanceTemplate instanceTemplate = 2;
-
-  // Resources is the resource requirements for the Instance.
-  optional InstanceResources resources = 3;
+  optional InstanceTemplate instanceTemplate = 4;
 
   // Volume is the volume to mount in the Instance.
   //
   // +required
   // +k8s:validation:cel[0]:rule="has(self.ephemeral) != has(self.persistent)"
   // +k8s:validation:cel[0]:message="exactly one of ephemeral and persistent of volume should be specified"
-  optional InstanceVolume volume = 4;
+  optional InstanceVolume volume = 5;
 
   // SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
-  optional .k8s.io.api.core.v1.LocalObjectReference sshPublicKey = 5;
-
-  // DisplayName is the display name of the Instance.
-  //
-  // +k8s:validation:maxLength=64
-  optional string displayName = 6;
-
-  // Description is the description of the Instance.
-  //
-  // +k8s:validation:maxLength=1024
-  optional string description = 7;
+  optional .k8s.io.api.core.v1.LocalObjectReference sshPublicKey = 6;
 }
 
 // InstanceStatus defines the observed state of Instance.
@@ -337,15 +397,18 @@ message InstanceTemplate {
   // +listMapKey=name
   repeated InstanceEnvVar env = 6;
 
+  // Resources is the resource requirements for the Instance.
+  optional InstanceResources resources = 7;
+
   // VolumeMount is a path to mount the volume in the Instance.
   //
   // +default="/workspace"
   // +k8s:validation:pattern="^(/[^/]+)+$"
   // +k8s:validation:maxLength=1024
-  optional string volumeMount = 7;
+  optional string volumeMount = 8;
 
   // ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
-  optional .k8s.io.api.core.v1.LocalObjectReference imagePullSecret = 8;
+  optional .k8s.io.api.core.v1.LocalObjectReference imagePullSecret = 9;
 }
 
 // InstanceType is the schema for worker.gpustack.ai.

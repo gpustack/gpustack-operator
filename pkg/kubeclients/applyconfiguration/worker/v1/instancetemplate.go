@@ -25,6 +25,8 @@ type InstanceTemplateApplyConfiguration struct {
 	Ports []InstancePortApplyConfiguration `json:"ports,omitempty"`
 	// Env is the list of environment variables to set in the Instance.
 	Env []InstanceEnvVarApplyConfiguration `json:"env,omitempty"`
+	// Resources is the resource requirements for the Instance.
+	Resources *InstanceResourcesApplyConfiguration `json:"resources,omitempty"`
 	// VolumeMount is a path to mount the volume in the Instance.
 	VolumeMount *string `json:"volumeMount,omitempty"`
 	// ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
@@ -94,6 +96,14 @@ func (b *InstanceTemplateApplyConfiguration) WithEnv(values ...*InstanceEnvVarAp
 		}
 		b.Env = append(b.Env, *values[i])
 	}
+	return b
+}
+
+// WithResources sets the Resources field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Resources field is set to the value of the last call.
+func (b *InstanceTemplateApplyConfiguration) WithResources(value *InstanceResourcesApplyConfiguration) *InstanceTemplateApplyConfiguration {
+	b.Resources = value
 	return b
 }
 
