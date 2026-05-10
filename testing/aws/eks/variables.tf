@@ -38,5 +38,5 @@ variable "eks_gpu_instance_types" {
 variable "image" {
   description = "Container image to deploy for testing"
   type        = string
-  default     = "gpustack/gpustack-operator:dev"
+  default     = ""
 }

@@ -200,6 +200,20 @@ module "eks" {
       to_port     = 32767
       cidr_blocks = ["0.0.0.0/0"]
     }
+    allow-gpustack-tcp = {
+      description = "Allow ingress access to the nodes on gpustack tcp ports"
+      protocol    = "tcp"
+      from_port   = 10000
+      to_port     = 20000
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+    allow-gpustack-udp = {
+      description = "Allow ingress access to the nodes on gpustack udp ports"
+      protocol    = "udp"
+      from_port   = 10000
+      to_port     = 20000
+      cidr_blocks = ["0.0.0.0/0"]
+    }
   }
 
   tags = {
@@ -239,6 +253,7 @@ provider "kubectl" {
 }
 
 resource "kubectl_manifest" "gpustack_system" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   yaml_body = yamlencode(
@@ -256,19 +271,21 @@ resource "kubectl_manifest" "gpustack_system" {
 }
 
 data "kubernetes_namespace_v1" "gpustack_system" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
-    name = yamldecode(kubectl_manifest.gpustack_system.yaml_body)["metadata"]["name"]
+    name = yamldecode(kubectl_manifest.gpustack_system[0].yaml_body)["metadata"]["name"]
   }
 }
 
 resource "kubernetes_service_account_v1" "gpustack_worker" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
     name      = "gpustack-operator-worker"
-    namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
+    namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
     labels = {
       "app.kubernetes.io/part-of" = "gpustack-operator-worker"
     }
@@ -276,6 +293,7 @@ resource "kubernetes_service_account_v1" "gpustack_worker" {
 }
 
 resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
@@ -286,8 +304,8 @@ resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
   }
   subject {
     kind      = "ServiceAccount"
-    name      = kubernetes_service_account_v1.gpustack_worker.metadata[0].name
-    namespace = kubernetes_service_account_v1.gpustack_worker.metadata[0].namespace
+    name      = kubernetes_service_account_v1.gpustack_worker[0].metadata[0].name
+    namespace = kubernetes_service_account_v1.gpustack_worker[0].metadata[0].namespace
   }
   role_ref {
     api_group = "rbac.authorization.k8s.io"
@@ -297,11 +315,12 @@ resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
 }
 
 resource "kubernetes_service_v1" "gpustack_worker" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
     name      = "gpustack-operator-worker"
-    namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
+    namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
     annotations = {
       "prometheus.io/scrape" = "true"
       "prometheus.io/port"   = "443"
@@ -328,6 +347,7 @@ resource "kubernetes_service_v1" "gpustack_worker" {
 }
 
 resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   yaml_body = yamlencode(
@@ -336,7 +356,7 @@ resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
       kind       = "Issuer"
       metadata = {
         name      = "gpustack-operator-worker-selfsigned-issuer"
-        namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
+        namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
         labels = {
           "app.kubernetes.io/part-of" = "gpustack-operator-worker"
         }
@@ -349,6 +369,7 @@ resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
 }
 
 resource "kubectl_manifest" "gpustack_worker_cert" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   yaml_body = yamlencode(
@@ -357,7 +378,7 @@ resource "kubectl_manifest" "gpustack_worker_cert" {
       kind       = "Certificate"
       metadata = {
         name      = "gpustack-operator-worker-cert"
-        namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
+        namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
         labels = {
           "app.kubernetes.io/part-of" = "gpustack-operator-worker"
         }
@@ -370,10 +391,10 @@ resource "kubectl_manifest" "gpustack_worker_cert" {
         }
         commonName = "gpustack-operator-worker"
         dnsNames = [
-          "${kubernetes_service_v1.gpustack_worker.metadata[0].name}.${kubernetes_service_v1.gpustack_worker.metadata[0].namespace}.svc.cluster.local",
-          "${kubernetes_service_v1.gpustack_worker.metadata[0].name}.${kubernetes_service_v1.gpustack_worker.metadata[0].namespace}.svc",
-          "${kubernetes_service_v1.gpustack_worker.metadata[0].name}.${kubernetes_service_v1.gpustack_worker.metadata[0].namespace}",
-          kubernetes_service_v1.gpustack_worker.metadata[0].name,
+          "${kubernetes_service_v1.gpustack_worker[0].metadata[0].name}.${kubernetes_service_v1.gpustack_worker[0].metadata[0].namespace}.svc.cluster.local",
+          "${kubernetes_service_v1.gpustack_worker[0].metadata[0].name}.${kubernetes_service_v1.gpustack_worker[0].metadata[0].namespace}.svc",
+          "${kubernetes_service_v1.gpustack_worker[0].metadata[0].name}.${kubernetes_service_v1.gpustack_worker[0].metadata[0].namespace}",
+          kubernetes_service_v1.gpustack_worker[0].metadata[0].name,
         ]
       }
     }
@@ -381,13 +402,14 @@ resource "kubectl_manifest" "gpustack_worker_cert" {
 }
 
 resource "kubernetes_deployment_v1" "gpustack_worker" {
+  count = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   wait_for_rollout = false
 
   metadata {
     name      = "gpustack-operator-worker"
-    namespace = data.kubernetes_namespace_v1.gpustack_system.metadata[0].name
+    namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
     labels = {
       "app.kubernetes.io/part-of"   = "gpustack-operator"
       "app.kubernetes.io/component" = "worker"
@@ -440,7 +462,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
           }
         }
         restart_policy       = "Always"
-        service_account_name = kubernetes_service_account_v1.gpustack_worker.metadata[0].name
+        service_account_name = kubernetes_service_account_v1.gpustack_worker[0].metadata[0].name
         container {
           name              = "main"
           image             = var.image
