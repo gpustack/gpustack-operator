@@ -1,0 +1,4 @@
+#@data/values
+---
+certmanagerEnabled: false
+namespaceName: "gpustack-system"
