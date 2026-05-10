@@ -12,6 +12,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/typex"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const (
@@ -61,14 +62,14 @@ func applyLabelsOfAccelerators(labels map[string]string, group device.DevicesGro
 	// "${prefix}${manufacturer}.${id}=true"
 	labels[selfLabelKey] = "true"
 	// "${prefix}${manufacturer}.${id}.product=${name}"
-	labels[selfLabelKey+".product"] = group.Name
+	labels[selfLabelKey+".product"] = stringx.EncodeBase64(group.Name) // Encode to avoid invalid characters in label value.
 	// "${prefix}${manufacturer}.${id}.memory=${memory}"
 	labels[selfLabelKey+".memory"] = strconvx.Itoa(group.Memory) + "Mi"
 	// "${prefix}${manufacturer}.${id}.cores=${cores}"
 	labels[selfLabelKey+".cores"] = strconvx.Itoa(group.Cores)
 	// "${prefix}${manufacturer}.${id}.family=${family}"
 	if v := group.Family; v != "" {
-		labels[selfLabelKey+".family"] = v
+		labels[selfLabelKey+".family"] = stringx.EncodeBase64(v) // Encode to avoid invalid characters in label value.
 	}
 	// "${prefix}${manufacturer}.${id}.accelerators=${count}"
 	labels[selfLabelKey+".accelerators"] = strconv.Itoa(len(group.Accelerators))
@@ -158,11 +159,11 @@ func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
 		break
 	}
 	ndf.Manufacturer = manufacturer
-	ndf.Product = node.Labels[FeatureLabelPrefix+key+".product"]
+	ndf.Product, _ = stringx.DecodeBase64(node.Labels[FeatureLabelPrefix+key+".product"])
 	ndf.Memory = node.Labels[FeatureLabelPrefix+key+".memory"]
 	ndf.Cores = node.Labels[FeatureLabelPrefix+key+".cores"]
 	ndf.ComputeCapability = node.Labels[FeatureLabelPrefix+manufacturer+".compute-capability"]
-	ndf.Family = node.Labels[FeatureLabelPrefix+key+".family"]
+	ndf.Family, _ = stringx.DecodeBase64(node.Labels[FeatureLabelPrefix+key+".family"])
 	ndf.Accelerator = node.Status.Allocatable[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
 	ndf.CPU = node.Status.Capacity[core.ResourceCPU]
 	ndf.RAM = node.Status.Capacity[core.ResourceMemory]

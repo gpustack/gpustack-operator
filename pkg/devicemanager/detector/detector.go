@@ -227,7 +227,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
 	eNf := &nfd.NodeFeature{
 		ObjectMeta: meta.ObjectMeta{
-			Name: "gpustack-labels-for" + nodeName,
+			Name: "gpustack-labels-for-" + nodeName,
 			Labels: map[string]string{
 				nfd.NodeFeatureObjNodeNameLabel: nodeName,
 			},
@@ -242,7 +242,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	nfAlignFn := func(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, skip bool, err error) {
 		skip = true
 
-		if !mapx.Contains(aNf.Labels, eNf.Labels) {
+		if !mapx.Contains(aNf.Spec.Labels, eNf.Spec.Labels) {
 			skip = false
 
 			// 1, construct manufacturer label keys of allowed manufacturers.
@@ -252,8 +252,8 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 
 			// 2, iterate existing labels,
 			// keep the labels whose don't start with the manufacturer label keys.
-			labels := maps.Clone(eNf.Labels)
-			for k := range aNf.Labels {
+			specLabels := maps.Clone(eNf.Spec.Labels)
+			for k := range aNf.Spec.Labels {
 				keep := true
 				for i := range manuLabelKeys {
 					if strings.HasPrefix(k, manuLabelKeys[i]) {
@@ -262,15 +262,18 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 					}
 				}
 				if keep {
-					labels[k] = aNf.Labels[k]
+					specLabels[k] = aNf.Spec.Labels[k]
 				}
 			}
-		}
 
-		if !kubemeta.IsControlledBy(aNf, node) {
+			// 3. update labels.
+			aNf.Spec.Labels = specLabels
+
 			// 5, update owner references.
-			kubemeta.ControlOnWithoutBlock(aNf, node, core.SchemeGroupVersion.WithKind("Node"))
-			skip = false
+			if !kubemeta.IsControlledBy(aNf, node) {
+				kubemeta.ControlOnWithoutBlock(aNf, node, core.SchemeGroupVersion.WithKind("Node"))
+				skip = false
+			}
 		}
 
 		return aNf, skip, err
