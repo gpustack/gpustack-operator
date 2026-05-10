@@ -3,8 +3,7 @@
 package v1
 
 import (
-	applyconfigurationcorev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
-	corev1 "k8s.io/api/core/v1"
+	corev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
 )
 
 // InstancePersistentVolumeStatusApplyConfiguration represents a declarative configuration of the InstancePersistentVolumeStatus type for use
@@ -13,9 +12,9 @@ import (
 // InstancePersistentVolumeStatus defines the observed state of InstancePersistentVolume.
 type InstancePersistentVolumeStatusApplyConfiguration struct {
 	// Phase is the phase of the InstanceVolume.
-	Phase *corev1.PersistentVolumeClaimPhase `json:"phase,omitempty"`
+	Phase *string `json:"phase,omitempty"`
 	// Volume is the reference to the Kubernetes PersistentVolume that is bound to the InstanceVolume.
-	Volume *applyconfigurationcorev1.ObjectReferenceApplyConfiguration `json:"volume,omitempty"`
+	Volume *corev1.ObjectReferenceApplyConfiguration `json:"volume,omitempty"`
 }
 
 // InstancePersistentVolumeStatusApplyConfiguration constructs a declarative configuration of the InstancePersistentVolumeStatus type for use with
@@ -27,7 +26,7 @@ func InstancePersistentVolumeStatus() *InstancePersistentVolumeStatusApplyConfig
 // WithPhase sets the Phase field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Phase field is set to the value of the last call.
-func (b *InstancePersistentVolumeStatusApplyConfiguration) WithPhase(value corev1.PersistentVolumeClaimPhase) *InstancePersistentVolumeStatusApplyConfiguration {
+func (b *InstancePersistentVolumeStatusApplyConfiguration) WithPhase(value string) *InstancePersistentVolumeStatusApplyConfiguration {
 	b.Phase = &value
 	return b
 }
@@ -35,7 +34,7 @@ func (b *InstancePersistentVolumeStatusApplyConfiguration) WithPhase(value corev
 // WithVolume sets the Volume field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Volume field is set to the value of the last call.
-func (b *InstancePersistentVolumeStatusApplyConfiguration) WithVolume(value *applyconfigurationcorev1.ObjectReferenceApplyConfiguration) *InstancePersistentVolumeStatusApplyConfiguration {
+func (b *InstancePersistentVolumeStatusApplyConfiguration) WithVolume(value *corev1.ObjectReferenceApplyConfiguration) *InstancePersistentVolumeStatusApplyConfiguration {
 	b.Volume = value
 	return b
 }

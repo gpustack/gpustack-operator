@@ -4205,7 +4205,7 @@ func (m *InstancePersistentVolumeStatus) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Phase = k8s_io_api_core_v1.PersistentVolumeClaimPhase(dAtA[iNdEx:postIndex])
+			m.Phase = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {

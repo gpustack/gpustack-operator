@@ -62,7 +62,7 @@ type InstancePersistentVolumeSpec struct {
 // InstancePersistentVolumeStatus defines the observed state of InstancePersistentVolume.
 type InstancePersistentVolumeStatus struct {
 	// Phase is the phase of the InstanceVolume.
-	Phase core.PersistentVolumeClaimPhase `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
+	Phase string `json:"phase,omitempty" protobuf:"bytes,1,opt,name=phase"`
 
 	// Volume is the reference to the Kubernetes PersistentVolume that is bound to the InstanceVolume.
 	Volume *core.ObjectReference `json:"volume,omitempty" protobuf:"bytes,2,opt,name=volume"`

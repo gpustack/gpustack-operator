@@ -416,6 +416,16 @@ func convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc *core.Persiste
 		return nil
 	}
 
+	var phase string
+	switch pvc.Status.Phase {
+	case core.ClaimBound:
+		phase = "Available"
+	case core.ClaimLost:
+		phase = "Unavailable"
+	default:
+		phase = "Pending"
+	}
+
 	return &worker.InstancePersistentVolume{
 		ObjectMeta: pvc.ObjectMeta,
 		Spec: worker.InstancePersistentVolumeSpec{
@@ -426,7 +436,7 @@ func convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc *core.Persiste
 			AccessMode:  &pvc.Spec.AccessModes[0],
 		},
 		Status: worker.InstancePersistentVolumeStatus{
-			Phase: pvc.Status.Phase,
+			Phase: phase,
 			Volume: func() *core.ObjectReference {
 				if pvc.Spec.VolumeName == "" {
 					return nil
