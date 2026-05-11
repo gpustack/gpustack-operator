@@ -1,6 +1,9 @@
 ARG GO_VERSION="1.25.8"
 ARG SKOPEO_VERSION="1.22.0"
 ARG HELM_VERSION="3.20.0"
+ARG VALS_VERSION="0.44.0"
+ARG KUSTOMIZE_VERSION="5.8.1"
+ARG YTT_VERSION="0.54.0"
 ARG K3S_VERSION="1.35.3-k3s1"
 ARG ETCDCTL_VERSION="3.6.7"
 ARG GPUSTACK_DATA_DIR="/var/lib/gpustack"
@@ -169,6 +172,80 @@ RUN <<EOF
         && rm -rf /var/lib/apt/lists/*
 EOF
 
+# Install vals
+
+ARG VALS_VERSION
+
+RUN <<EOF
+    # vals
+    set -exo pipefail
+
+    # Download
+    aria2c -x $(nproc) -s $(nproc) -c -o /tmp/vals.tar.gz "https://github.com/helmfile/vals/releases/download/v${VALS_VERSION}/vals_${VALS_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz"
+
+    # Install
+    tar -xzf /tmp/vals.tar.gz --directory /usr/bin/ vals --no-same-owner
+    chmod a+x /usr/bin/vals
+
+    # Review
+    vals version
+
+    # Cleanup
+    rm -rf /var/tmp/* \
+        && rm -rf /tmp/* \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+EOF
+
+# Install Kustomize
+
+ARG KUSTOMIZE_VERSION
+
+RUN <<EOF
+    # Kustomize
+    set -exo pipefail
+
+    # Download
+    aria2c -x $(nproc) -s $(nproc) -c -o /tmp/kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_${TARGETOS}_${TARGETARCH}.tar.gz"
+
+    # Install
+    tar -xzf /tmp/kustomize.tar.gz --directory /usr/bin/ kustomize --no-same-owner
+    chmod a+x /usr/bin/kustomize
+
+    # Review
+    kustomize version
+
+    # Cleanup
+    rm -rf /var/tmp/* \
+        && rm -rf /tmp/* \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+EOF
+
+# Install ytt
+
+ARG YTT_VERSION
+
+RUN <<EOF
+    # ytt
+    set -exo pipefail
+
+    # Download
+    aria2c -x $(nproc) -s $(nproc) -c -o /tmp/ytt "https://github.com/carvel-dev/ytt/releases/download/v${YTT_VERSION}/ytt-${TARGETOS}-${TARGETARCH}"
+
+    # Install
+    mv /tmp/ytt /usr/bin/ytt
+    chmod a+x /usr/bin/ytt
+
+    # Review
+    ytt version
+
+    # Cleanup
+    rm -rf /var/tmp/* \
+        && rm -rf /tmp/* \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+EOF
 
 # Install K3S
 
