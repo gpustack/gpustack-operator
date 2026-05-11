@@ -11,8 +11,8 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
-	"gpustack.ai/gpustack/pkg/utils/typex"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
+	"gpustack.ai/gpustack/pkg/utils/typex"
 )
 
 const (

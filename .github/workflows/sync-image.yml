@@ -1,0 +1,63 @@
+name: sync-image
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  workflow_dispatch:
+    inputs:
+      # Example:
+      # Input: "ghcr.io/owner/image:tag docker.io/owner/image2:tag>abc:tag"
+      # Result:
+      # - Sync "ghcr.io/owner/image:tag" to "docker.io/owner/mirrored-image:tag"
+      # - Sync "docker.io/owner/image2:tag" to "docker.io/owner/mirrored-abc:tag"
+      images:
+        description: 'List of images to sync, inform of "src-registry/src-image src-registry/src-image-2>dst-image-2 ...".'
+        required: true
+        type: string
+
+env:
+  INPUT_PASSWORD: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
+
+jobs:
+  sync:
+    runs-on: macos-14
+    steps:
+      - name: Prepare Env
+        env:
+          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
+          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
+      - name: Sync
+        run: |
+          #!/usr/bin/env bash
+          
+          echo "Checking for skopeo..."
+          if ! command -v skopeo &> /dev/null; then
+            brew install skopeo
+          fi
+          
+          echo "Logging in to Docker Hub..."
+          skopeo login docker.io -u ${{ env.INPUT_USERNAME }} -p ${{ env.INPUT_PASSWORD }}
+          
+          echo "Starting image sync..."
+          IFS=' ' read -ra IMAGES <<< "${{ inputs.images }}"
+          for image in "${IMAGES[@]}"; do
+            src="$(echo $image | cut -d '>' -f 1)"
+            dst="$(echo $image | cut -d '>' -f 2)"
+            if [[ "${src}" == "${dst}" ]]; then
+              dst="${src##*/}"
+            fi
+            dst="${dst#*/}" # Remove registry part if exists
+            dst="docker.io/${{ env.INPUT_USERNAME }}/mirrored-${dst}"
+            echo "Syncing ${src} to ${dst}"
+            skopeo copy docker://${src} docker://${dst} --all --retry-delay 5s --retry-times 10
+          done
