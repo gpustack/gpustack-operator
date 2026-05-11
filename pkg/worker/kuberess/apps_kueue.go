@@ -113,7 +113,10 @@ controllerManager:
     - operator: "Exists"
   manager:
     image:
-      registry: "{{ default "registry.k8s.io" $.ContainerRegistry }}/{{ default "kueue" $.ContainerNamespace }}/kueue" 
+{{- $registry := default "docker.io" $.ContainerRegistry -}}
+{{- $namespace := default "gpustack" $.ContainerNamespace -}}
+{{- $image = printf "%s/%s/mirrored-kueue" $registry $namespace -}}
+      registry: "{{ $image }}" 
     podAnnotations:
       {{ $.ManagedLabel }}: "true"
 {{- if $.ImagePullSecrets }}

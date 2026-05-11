@@ -154,7 +154,7 @@ spec:
 {{- else -}}
   {{- $registry := default "docker.io" $.ContainerRegistry -}}
   {{- $namespace := default "gpustack" $.ContainerNamespace -}}
-  {{- $image = printf "%s/%s/gpustack:%s" $registry $namespace $.Version -}}
+  {{- $image = printf "%s/%s/gpustack-operator:%s" $registry $namespace $.Version -}}
 {{- end }}
           image: "{{ $image }}"
           imagePullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"

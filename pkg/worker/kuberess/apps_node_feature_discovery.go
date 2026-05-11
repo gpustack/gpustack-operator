@@ -55,7 +55,10 @@ fullnameOverride: "{{ $.Release }}"
 namespaceOverride: "{{ $.Namespace }}"
 
 image:
-  repository: "{{ default "registry.k8s.io" $.ContainerRegistry }}/{{ default "nfd" $.ContainerNamespace }}/node-feature-discovery"
+{{- $registry := default "docker.io" $.ContainerRegistry -}}
+{{- $namespace := default "gpustack" $.ContainerNamespace -}}
+{{- $image = printf "%s/%s/mirrored-node-feature-discovery" $registry $namespace -}}
+  repository: "{{ $image }}"
   pullPolicy: "IfNotPresent"
 {{- if $.ImagePullSecrets }}
 imagePullSecrets:
