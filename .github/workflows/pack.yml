@@ -20,7 +20,6 @@ on:
         type: choice
         options:
           - ssh-server
-          - kube-toolbox
       tag:
         description: 'Tag of packed image.'
         required: true
