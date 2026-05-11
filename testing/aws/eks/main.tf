@@ -127,6 +127,46 @@ locals {
   )
 }
 
+module "ebs_csi_driver_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.6.0"
+
+  name                  = "ebs-csi"
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    this = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+
+  tags = {
+    Environment = "testing"
+    Terraform   = "true"
+  }
+}
+
+module "efs_csi_driver_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
+  version = "6.6.0"
+
+  name                  = "efs-csi"
+  attach_efs_csi_policy = true
+
+  oidc_providers = {
+    this = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:efs-csi-controller-sa"]
+    }
+  }
+
+  tags = {
+    Environment = "testing"
+    Terraform   = "true"
+  }
+}
+
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
   version = "21.17.1"
@@ -141,6 +181,13 @@ module "eks" {
     external-dns              = {}
     kube-proxy                = {}
     metrics-server            = {}
+    aws-ebs-csi-driver = {
+      service_account_role_arn = module.ebs_csi_driver_irsa.arn
+    }
+    aws-efs-csi-driver = {
+      service_account_role_arn = module.efs_csi_driver_irsa.arn
+    }
+    aws-ec2-local-instance-store-csi-driver = {}
     eks-pod-identity-agent = {
       before_compute = true
     }
@@ -200,20 +247,6 @@ module "eks" {
       to_port     = 32767
       cidr_blocks = ["0.0.0.0/0"]
     }
-    allow-gpustack-tcp = {
-      description = "Allow ingress access to the nodes on gpustack tcp ports"
-      protocol    = "tcp"
-      from_port   = 10000
-      to_port     = 20000
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-    allow-gpustack-udp = {
-      description = "Allow ingress access to the nodes on gpustack udp ports"
-      protocol    = "udp"
-      from_port   = 10000
-      to_port     = 20000
-      cidr_blocks = ["0.0.0.0/0"]
-    }
   }
 
   tags = {
@@ -253,7 +286,7 @@ provider "kubectl" {
 }
 
 resource "kubectl_manifest" "gpustack_system" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   yaml_body = yamlencode(
@@ -271,7 +304,7 @@ resource "kubectl_manifest" "gpustack_system" {
 }
 
 data "kubernetes_namespace_v1" "gpustack_system" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
@@ -280,7 +313,7 @@ data "kubernetes_namespace_v1" "gpustack_system" {
 }
 
 resource "kubernetes_service_account_v1" "gpustack_worker" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
@@ -293,7 +326,7 @@ resource "kubernetes_service_account_v1" "gpustack_worker" {
 }
 
 resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
@@ -315,7 +348,7 @@ resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
 }
 
 resource "kubernetes_service_v1" "gpustack_worker" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   metadata {
@@ -347,7 +380,7 @@ resource "kubernetes_service_v1" "gpustack_worker" {
 }
 
 resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   yaml_body = yamlencode(
@@ -369,7 +402,7 @@ resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
 }
 
 resource "kubectl_manifest" "gpustack_worker_cert" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   yaml_body = yamlencode(
@@ -402,7 +435,7 @@ resource "kubectl_manifest" "gpustack_worker_cert" {
 }
 
 resource "kubernetes_deployment_v1" "gpustack_worker" {
-  count = length(var.image) > 0 ? 1 : 0
+  count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
   wait_for_rollout = false

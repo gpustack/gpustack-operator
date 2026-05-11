@@ -31,7 +31,7 @@ variable "eks_cpu_instance_types" {
 variable "eks_gpu_instance_types" {
   description = "Instance types for EKS GPU node group list, check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
   type        = list(list(string))
-  default     = [["g4dn.xlarge"], ["g4dn.xlarge", "g4dn.12xlarge"]]
+  default     = [["g4dn.xlarge"], ["g4dn.xlarge", "g4dn.12xlarge"], ["g5.12xlarge", "g6.12xlarge"]]
   # default     = [["g4dn.xlarge", "g4dn.12xlarge"], ["g5.xlarge", "g5.12xlarge"], ["g6.xlarge", "g6.12xlarge"]]
 }
 
