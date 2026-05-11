@@ -25,7 +25,6 @@ import (
 	core "gpustack.ai/gpustack/pkg/kubeclients/informers/core"
 	discovery "gpustack.ai/gpustack/pkg/kubeclients/informers/discovery"
 	events "gpustack.ai/gpustack/pkg/kubeclients/informers/events"
-	extensions "gpustack.ai/gpustack/pkg/kubeclients/informers/extensions"
 	flowcontrol "gpustack.ai/gpustack/pkg/kubeclients/informers/flowcontrol"
 	internalinterfaces "gpustack.ai/gpustack/pkg/kubeclients/informers/internalinterfaces"
 	kueue "gpustack.ai/gpustack/pkg/kubeclients/informers/kueue"
@@ -283,7 +282,6 @@ type SharedInformerFactory interface {
 	Core() core.Interface
 	Discovery() discovery.Interface
 	Events() events.Interface
-	Extensions() extensions.Interface
 	Flowcontrol() flowcontrol.Interface
 	Kueue() kueue.Interface
 	Networking() networking.Interface
@@ -349,10 +347,6 @@ func (f *sharedInformerFactory) Discovery() discovery.Interface {
 
 func (f *sharedInformerFactory) Events() events.Interface {
 	return events.New(f, f.namespace, f.tweakListOptions)
-}
-
-func (f *sharedInformerFactory) Extensions() extensions.Interface {
-	return extensions.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Flowcontrol() flowcontrol.Interface {

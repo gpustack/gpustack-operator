@@ -141,6 +141,12 @@ linters:
           - errname
           - godot
           - lll
+      - path: _expansion\.go
+        linters:
+          - lll
+          - errcheck
+          - gocritic
+          - unconvert
     paths:
       - doc.go
       - zz_generated.*.go

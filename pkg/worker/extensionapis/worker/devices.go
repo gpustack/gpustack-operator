@@ -46,7 +46,7 @@ func (h *DevicesHandler) SetupHandler(
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTableConvertor()
 	if err != nil {
-		return gvr, nil, err
+		return gvr, srs, err
 	}
 
 	// As storage.

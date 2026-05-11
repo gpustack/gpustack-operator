@@ -10,8 +10,6 @@ package autoscaling
 import (
 	v1 "gpustack.ai/gpustack/pkg/kubeclients/informers/autoscaling/v1"
 	v2 "gpustack.ai/gpustack/pkg/kubeclients/informers/autoscaling/v2"
-	v2beta1 "gpustack.ai/gpustack/pkg/kubeclients/informers/autoscaling/v2beta1"
-	v2beta2 "gpustack.ai/gpustack/pkg/kubeclients/informers/autoscaling/v2beta2"
 	internalinterfaces "gpustack.ai/gpustack/pkg/kubeclients/informers/internalinterfaces"
 )
 
@@ -21,10 +19,6 @@ type Interface interface {
 	V1() v1.Interface
 	// V2 provides access to shared informers for resources in V2.
 	V2() v2.Interface
-	// V2beta1 provides access to shared informers for resources in V2beta1.
-	V2beta1() v2beta1.Interface
-	// V2beta2 provides access to shared informers for resources in V2beta2.
-	V2beta2() v2beta2.Interface
 }
 
 type group struct {
@@ -46,14 +40,4 @@ func (g *group) V1() v1.Interface {
 // V2 returns a new v2.Interface.
 func (g *group) V2() v2.Interface {
 	return v2.New(g.factory, g.namespace, g.tweakListOptions)
-}
-
-// V2beta1 returns a new v2beta1.Interface.
-func (g *group) V2beta1() v2beta1.Interface {
-	return v2beta1.New(g.factory, g.namespace, g.tweakListOptions)
-}
-
-// V2beta2 returns a new v2beta2.Interface.
-func (g *group) V2beta2() v2beta2.Interface {
-	return v2beta2.New(g.factory, g.namespace, g.tweakListOptions)
 }

@@ -267,7 +267,10 @@ func Generate(c Config) error {
 
 	clientPackageDir := path.Join(c.ProjectDir, strings.TrimPrefix(c.ClientPackage, c.Project))
 
-	_ = os.RemoveAll(path.Join(clientPackageDir, c.ClientsName))
+	// Allow expansion interfaces,
+	// we don't remove the whole clientset anymore.
+	// See https://github.com/kubernetes/community/blob/main/contributors/devel/sig-api-machinery/generating-clientset.md.
+	// _ = os.RemoveAll(path.Join(clientPackageDir, c.ClientsName))
 	allAPIs := append(slices.Clone(internalAPIs), c.ExternalAPIs...)
 
 	// Execute applyconfiguration-gen.

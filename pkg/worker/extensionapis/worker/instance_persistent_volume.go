@@ -54,7 +54,7 @@ func (h *InstancePersistentVolumeHandler) SetupHandler(
 			return []string{obj.GetName()}
 		})
 	if err != nil {
-		return schema.GroupVersionResource{}, nil, err
+		return schema.GroupVersionResource{}, srs, err
 	}
 
 	// Declare GVR.
@@ -98,7 +98,7 @@ func (h *InstancePersistentVolumeHandler) SetupHandler(
 			JSONPath: ".status.phase",
 		})
 	if err != nil {
-		return gvr, nil, err
+		return gvr, srs, err
 	}
 
 	// As storage.

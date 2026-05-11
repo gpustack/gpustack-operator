@@ -9,123 +9,63 @@ import (
 	workerv1 "gpustack.ai/gpustack/api/worker/v1"
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
 	admissionregistrationv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/admissionregistration/v1"
-	admissionregistrationv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/admissionregistration/v1alpha1"
-	admissionregistrationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/admissionregistration/v1beta1"
 	applyconfigurationapiv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/api/v1"
 	applyconfigurationapiextensionsv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/apiextensions/v1"
 	applyconfigurationapiregistrationv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/apiregistration/v1"
 	applyconfigurationapiserverinternalv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/apiserverinternal/v1alpha1"
 	applyconfigurationappsv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/apps/v1"
-	applyconfigurationappsv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/apps/v1beta1"
-	appsv1beta2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/apps/v1beta2"
 	applyconfigurationautoscalingv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/autoscaling/v1"
 	autoscalingv2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/autoscaling/v2"
-	autoscalingv2beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/autoscaling/v2beta1"
-	autoscalingv2beta2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/autoscaling/v2beta2"
 	applyconfigurationbatchv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/batch/v1"
-	applyconfigurationbatchv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/batch/v1beta1"
 	applyconfigurationcertificatesv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/certificates/v1"
-	applyconfigurationcertificatesv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/certificates/v1alpha1"
-	applyconfigurationcertificatesv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/certificates/v1beta1"
 	applyconfigurationcoordinationv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/coordination/v1"
-	coordinationv1alpha2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/coordination/v1alpha2"
-	applyconfigurationcoordinationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/coordination/v1beta1"
 	applyconfigurationcorev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
 	applyconfigurationdiscoveryv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/discovery/v1"
-	applyconfigurationdiscoveryv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/discovery/v1beta1"
 	applyconfigurationeventsv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/events/v1"
-	applyconfigurationeventsv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/events/v1beta1"
-	applyconfigurationextensionsv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/extensions/v1beta1"
 	applyconfigurationflowcontrolv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/flowcontrol/v1"
-	applyconfigurationflowcontrolv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/flowcontrol/v1beta1"
-	applyconfigurationflowcontrolv1beta2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/flowcontrol/v1beta2"
-	flowcontrolv1beta3 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/flowcontrol/v1beta3"
-	applyconfigurationimagepolicyv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/imagepolicy/v1alpha1"
+	imagepolicyv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/imagepolicy/v1alpha1"
 	internal "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/internal"
-	applyconfigurationkueuev1beta2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/kueue/v1beta2"
+	kueuev1beta2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/kueue/v1beta2"
 	applyconfigurationnetworkingv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/networking/v1"
-	applyconfigurationnetworkingv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/networking/v1beta1"
 	applyconfigurationnfdv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/nfd/v1alpha1"
 	applyconfigurationnodev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/node/v1"
-	applyconfigurationnodev1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/node/v1alpha1"
-	applyconfigurationnodev1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/node/v1beta1"
 	applyconfigurationpolicyv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/policy/v1"
-	applyconfigurationpolicyv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/policy/v1beta1"
 	applyconfigurationrbacv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/rbac/v1"
-	applyconfigurationrbacv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/rbac/v1alpha1"
-	applyconfigurationrbacv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/rbac/v1beta1"
 	applyconfigurationresourcev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/resource/v1"
-	resourcev1alpha3 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/resource/v1alpha3"
-	applyconfigurationresourcev1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/resource/v1beta1"
-	applyconfigurationresourcev1beta2 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/resource/v1beta2"
 	applyconfigurationschedulingv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/scheduling/v1"
-	applyconfigurationschedulingv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/scheduling/v1alpha1"
-	applyconfigurationschedulingv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/scheduling/v1beta1"
 	applyconfigurationserverv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/server/v1"
 	applyconfigurationserverv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/server/v1alpha1"
 	applyconfigurationstoragev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storage/v1"
-	applyconfigurationstoragev1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storage/v1alpha1"
-	applyconfigurationstoragev1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storage/v1beta1"
-	applyconfigurationstoragemigrationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storagemigration/v1beta1"
+	storagemigrationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storagemigration/v1beta1"
 	applyconfigurationworkerv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1"
 	applyconfigurationworkerv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1alpha1"
 	v1 "k8s.io/api/admissionregistration/v1"
-	v1alpha1 "k8s.io/api/admissionregistration/v1alpha1"
-	v1beta1 "k8s.io/api/admissionregistration/v1beta1"
 	apiserverinternalv1alpha1 "k8s.io/api/apiserverinternal/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
-	appsv1beta1 "k8s.io/api/apps/v1beta1"
-	v1beta2 "k8s.io/api/apps/v1beta2"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	v2 "k8s.io/api/autoscaling/v2"
-	v2beta1 "k8s.io/api/autoscaling/v2beta1"
-	v2beta2 "k8s.io/api/autoscaling/v2beta2"
 	batchv1 "k8s.io/api/batch/v1"
-	batchv1beta1 "k8s.io/api/batch/v1beta1"
 	certificatesv1 "k8s.io/api/certificates/v1"
-	certificatesv1alpha1 "k8s.io/api/certificates/v1alpha1"
-	certificatesv1beta1 "k8s.io/api/certificates/v1beta1"
 	coordinationv1 "k8s.io/api/coordination/v1"
-	v1alpha2 "k8s.io/api/coordination/v1alpha2"
-	coordinationv1beta1 "k8s.io/api/coordination/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
-	discoveryv1beta1 "k8s.io/api/discovery/v1beta1"
 	eventsv1 "k8s.io/api/events/v1"
-	eventsv1beta1 "k8s.io/api/events/v1beta1"
-	extensionsv1beta1 "k8s.io/api/extensions/v1beta1"
 	flowcontrolv1 "k8s.io/api/flowcontrol/v1"
-	flowcontrolv1beta1 "k8s.io/api/flowcontrol/v1beta1"
-	flowcontrolv1beta2 "k8s.io/api/flowcontrol/v1beta2"
-	v1beta3 "k8s.io/api/flowcontrol/v1beta3"
-	imagepolicyv1alpha1 "k8s.io/api/imagepolicy/v1alpha1"
+	v1alpha1 "k8s.io/api/imagepolicy/v1alpha1"
 	networkingv1 "k8s.io/api/networking/v1"
-	networkingv1beta1 "k8s.io/api/networking/v1beta1"
 	nodev1 "k8s.io/api/node/v1"
-	nodev1alpha1 "k8s.io/api/node/v1alpha1"
-	nodev1beta1 "k8s.io/api/node/v1beta1"
 	policyv1 "k8s.io/api/policy/v1"
-	policyv1beta1 "k8s.io/api/policy/v1beta1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	rbacv1alpha1 "k8s.io/api/rbac/v1alpha1"
-	rbacv1beta1 "k8s.io/api/rbac/v1beta1"
 	resourcev1 "k8s.io/api/resource/v1"
-	v1alpha3 "k8s.io/api/resource/v1alpha3"
-	resourcev1beta1 "k8s.io/api/resource/v1beta1"
-	resourcev1beta2 "k8s.io/api/resource/v1beta2"
 	schedulingv1 "k8s.io/api/scheduling/v1"
-	schedulingv1alpha1 "k8s.io/api/scheduling/v1alpha1"
-	schedulingv1beta1 "k8s.io/api/scheduling/v1beta1"
 	storagev1 "k8s.io/api/storage/v1"
-	storagev1alpha1 "k8s.io/api/storage/v1alpha1"
-	storagev1beta1 "k8s.io/api/storage/v1beta1"
-	storagemigrationv1beta1 "k8s.io/api/storagemigration/v1beta1"
+	v1beta1 "k8s.io/api/storagemigration/v1beta1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	managedfields "k8s.io/apimachinery/pkg/util/managedfields"
 	apiregistrationv1 "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
-	kueuev1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+	v1beta2 "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	nfdv1alpha1 "sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1"
 )
 
@@ -180,110 +120,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &admissionregistrationv1.VariableApplyConfiguration{}
 	case v1.SchemeGroupVersion.WithKind("WebhookClientConfig"):
 		return &admissionregistrationv1.WebhookClientConfigApplyConfiguration{}
-
-		// Group=admissionregistration.k8s.io, Version=v1alpha1
-	case v1alpha1.SchemeGroupVersion.WithKind("ApplyConfiguration"):
-		return &admissionregistrationv1alpha1.ApplyConfigurationApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("AuditAnnotation"):
-		return &admissionregistrationv1alpha1.AuditAnnotationApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ExpressionWarning"):
-		return &admissionregistrationv1alpha1.ExpressionWarningApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("JSONPatch"):
-		return &admissionregistrationv1alpha1.JSONPatchApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("MatchCondition"):
-		return &admissionregistrationv1alpha1.MatchConditionApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("MatchResources"):
-		return &admissionregistrationv1alpha1.MatchResourcesApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicy"):
-		return &admissionregistrationv1alpha1.MutatingAdmissionPolicyApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicyBinding"):
-		return &admissionregistrationv1alpha1.MutatingAdmissionPolicyBindingApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicyBindingSpec"):
-		return &admissionregistrationv1alpha1.MutatingAdmissionPolicyBindingSpecApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicySpec"):
-		return &admissionregistrationv1alpha1.MutatingAdmissionPolicySpecApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("Mutation"):
-		return &admissionregistrationv1alpha1.MutationApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("NamedRuleWithOperations"):
-		return &admissionregistrationv1alpha1.NamedRuleWithOperationsApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ParamKind"):
-		return &admissionregistrationv1alpha1.ParamKindApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ParamRef"):
-		return &admissionregistrationv1alpha1.ParamRefApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("TypeChecking"):
-		return &admissionregistrationv1alpha1.TypeCheckingApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicy"):
-		return &admissionregistrationv1alpha1.ValidatingAdmissionPolicyApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyBinding"):
-		return &admissionregistrationv1alpha1.ValidatingAdmissionPolicyBindingApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyBindingSpec"):
-		return &admissionregistrationv1alpha1.ValidatingAdmissionPolicyBindingSpecApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicySpec"):
-		return &admissionregistrationv1alpha1.ValidatingAdmissionPolicySpecApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyStatus"):
-		return &admissionregistrationv1alpha1.ValidatingAdmissionPolicyStatusApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("Validation"):
-		return &admissionregistrationv1alpha1.ValidationApplyConfiguration{}
-	case v1alpha1.SchemeGroupVersion.WithKind("Variable"):
-		return &admissionregistrationv1alpha1.VariableApplyConfiguration{}
-
-		// Group=admissionregistration.k8s.io, Version=v1beta1
-	case v1beta1.SchemeGroupVersion.WithKind("ApplyConfiguration"):
-		return &admissionregistrationv1beta1.ApplyConfigurationApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("AuditAnnotation"):
-		return &admissionregistrationv1beta1.AuditAnnotationApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ExpressionWarning"):
-		return &admissionregistrationv1beta1.ExpressionWarningApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("JSONPatch"):
-		return &admissionregistrationv1beta1.JSONPatchApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MatchCondition"):
-		return &admissionregistrationv1beta1.MatchConditionApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MatchResources"):
-		return &admissionregistrationv1beta1.MatchResourcesApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicy"):
-		return &admissionregistrationv1beta1.MutatingAdmissionPolicyApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicyBinding"):
-		return &admissionregistrationv1beta1.MutatingAdmissionPolicyBindingApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicyBindingSpec"):
-		return &admissionregistrationv1beta1.MutatingAdmissionPolicyBindingSpecApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MutatingAdmissionPolicySpec"):
-		return &admissionregistrationv1beta1.MutatingAdmissionPolicySpecApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MutatingWebhook"):
-		return &admissionregistrationv1beta1.MutatingWebhookApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("MutatingWebhookConfiguration"):
-		return &admissionregistrationv1beta1.MutatingWebhookConfigurationApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("Mutation"):
-		return &admissionregistrationv1beta1.MutationApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("NamedRuleWithOperations"):
-		return &admissionregistrationv1beta1.NamedRuleWithOperationsApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ParamKind"):
-		return &admissionregistrationv1beta1.ParamKindApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ParamRef"):
-		return &admissionregistrationv1beta1.ParamRefApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ServiceReference"):
-		return &admissionregistrationv1beta1.ServiceReferenceApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("TypeChecking"):
-		return &admissionregistrationv1beta1.TypeCheckingApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicy"):
-		return &admissionregistrationv1beta1.ValidatingAdmissionPolicyApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyBinding"):
-		return &admissionregistrationv1beta1.ValidatingAdmissionPolicyBindingApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyBindingSpec"):
-		return &admissionregistrationv1beta1.ValidatingAdmissionPolicyBindingSpecApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicySpec"):
-		return &admissionregistrationv1beta1.ValidatingAdmissionPolicySpecApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingAdmissionPolicyStatus"):
-		return &admissionregistrationv1beta1.ValidatingAdmissionPolicyStatusApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingWebhook"):
-		return &admissionregistrationv1beta1.ValidatingWebhookApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("ValidatingWebhookConfiguration"):
-		return &admissionregistrationv1beta1.ValidatingWebhookConfigurationApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("Validation"):
-		return &admissionregistrationv1beta1.ValidationApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("Variable"):
-		return &admissionregistrationv1beta1.VariableApplyConfiguration{}
-	case v1beta1.SchemeGroupVersion.WithKind("WebhookClientConfig"):
-		return &admissionregistrationv1beta1.WebhookClientConfigApplyConfiguration{}
 
 		// Group=apiextensions.k8s.io, Version=v1
 	case apiextensionsv1.SchemeGroupVersion.WithKind("CustomResourceColumnDefinition"):
@@ -387,94 +223,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case appsv1.SchemeGroupVersion.WithKind("StatefulSetUpdateStrategy"):
 		return &applyconfigurationappsv1.StatefulSetUpdateStrategyApplyConfiguration{}
 
-		// Group=apps, Version=v1beta1
-	case appsv1beta1.SchemeGroupVersion.WithKind("ControllerRevision"):
-		return &applyconfigurationappsv1beta1.ControllerRevisionApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("Deployment"):
-		return &applyconfigurationappsv1beta1.DeploymentApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("DeploymentCondition"):
-		return &applyconfigurationappsv1beta1.DeploymentConditionApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("DeploymentSpec"):
-		return &applyconfigurationappsv1beta1.DeploymentSpecApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("DeploymentStatus"):
-		return &applyconfigurationappsv1beta1.DeploymentStatusApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("DeploymentStrategy"):
-		return &applyconfigurationappsv1beta1.DeploymentStrategyApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("RollbackConfig"):
-		return &applyconfigurationappsv1beta1.RollbackConfigApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("RollingUpdateDeployment"):
-		return &applyconfigurationappsv1beta1.RollingUpdateDeploymentApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("RollingUpdateStatefulSetStrategy"):
-		return &applyconfigurationappsv1beta1.RollingUpdateStatefulSetStrategyApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSet"):
-		return &applyconfigurationappsv1beta1.StatefulSetApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSetCondition"):
-		return &applyconfigurationappsv1beta1.StatefulSetConditionApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSetOrdinals"):
-		return &applyconfigurationappsv1beta1.StatefulSetOrdinalsApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSetPersistentVolumeClaimRetentionPolicy"):
-		return &applyconfigurationappsv1beta1.StatefulSetPersistentVolumeClaimRetentionPolicyApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSetSpec"):
-		return &applyconfigurationappsv1beta1.StatefulSetSpecApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSetStatus"):
-		return &applyconfigurationappsv1beta1.StatefulSetStatusApplyConfiguration{}
-	case appsv1beta1.SchemeGroupVersion.WithKind("StatefulSetUpdateStrategy"):
-		return &applyconfigurationappsv1beta1.StatefulSetUpdateStrategyApplyConfiguration{}
-
-		// Group=apps, Version=v1beta2
-	case v1beta2.SchemeGroupVersion.WithKind("ControllerRevision"):
-		return &appsv1beta2.ControllerRevisionApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DaemonSet"):
-		return &appsv1beta2.DaemonSetApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DaemonSetCondition"):
-		return &appsv1beta2.DaemonSetConditionApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DaemonSetSpec"):
-		return &appsv1beta2.DaemonSetSpecApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DaemonSetStatus"):
-		return &appsv1beta2.DaemonSetStatusApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DaemonSetUpdateStrategy"):
-		return &appsv1beta2.DaemonSetUpdateStrategyApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("Deployment"):
-		return &appsv1beta2.DeploymentApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DeploymentCondition"):
-		return &appsv1beta2.DeploymentConditionApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DeploymentSpec"):
-		return &appsv1beta2.DeploymentSpecApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DeploymentStatus"):
-		return &appsv1beta2.DeploymentStatusApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("DeploymentStrategy"):
-		return &appsv1beta2.DeploymentStrategyApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("ReplicaSet"):
-		return &appsv1beta2.ReplicaSetApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("ReplicaSetCondition"):
-		return &appsv1beta2.ReplicaSetConditionApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("ReplicaSetSpec"):
-		return &appsv1beta2.ReplicaSetSpecApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("ReplicaSetStatus"):
-		return &appsv1beta2.ReplicaSetStatusApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("RollingUpdateDaemonSet"):
-		return &appsv1beta2.RollingUpdateDaemonSetApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("RollingUpdateDeployment"):
-		return &appsv1beta2.RollingUpdateDeploymentApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("RollingUpdateStatefulSetStrategy"):
-		return &appsv1beta2.RollingUpdateStatefulSetStrategyApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("Scale"):
-		return &appsv1beta2.ScaleApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSet"):
-		return &appsv1beta2.StatefulSetApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSetCondition"):
-		return &appsv1beta2.StatefulSetConditionApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSetOrdinals"):
-		return &appsv1beta2.StatefulSetOrdinalsApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSetPersistentVolumeClaimRetentionPolicy"):
-		return &appsv1beta2.StatefulSetPersistentVolumeClaimRetentionPolicyApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSetSpec"):
-		return &appsv1beta2.StatefulSetSpecApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSetStatus"):
-		return &appsv1beta2.StatefulSetStatusApplyConfiguration{}
-	case v1beta2.SchemeGroupVersion.WithKind("StatefulSetUpdateStrategy"):
-		return &appsv1beta2.StatefulSetUpdateStrategyApplyConfiguration{}
-
 		// Group=autoscaling, Version=v1
 	case autoscalingv1.SchemeGroupVersion.WithKind("CrossVersionObjectReference"):
 		return &applyconfigurationautoscalingv1.CrossVersionObjectReferenceApplyConfiguration{}
@@ -539,90 +287,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case v2.SchemeGroupVersion.WithKind("ResourceMetricStatus"):
 		return &autoscalingv2.ResourceMetricStatusApplyConfiguration{}
 
-		// Group=autoscaling, Version=v2beta1
-	case v2beta1.SchemeGroupVersion.WithKind("ContainerResourceMetricSource"):
-		return &autoscalingv2beta1.ContainerResourceMetricSourceApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ContainerResourceMetricStatus"):
-		return &autoscalingv2beta1.ContainerResourceMetricStatusApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("CrossVersionObjectReference"):
-		return &autoscalingv2beta1.CrossVersionObjectReferenceApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ExternalMetricSource"):
-		return &autoscalingv2beta1.ExternalMetricSourceApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ExternalMetricStatus"):
-		return &autoscalingv2beta1.ExternalMetricStatusApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("HorizontalPodAutoscaler"):
-		return &autoscalingv2beta1.HorizontalPodAutoscalerApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerCondition"):
-		return &autoscalingv2beta1.HorizontalPodAutoscalerConditionApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerSpec"):
-		return &autoscalingv2beta1.HorizontalPodAutoscalerSpecApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerStatus"):
-		return &autoscalingv2beta1.HorizontalPodAutoscalerStatusApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("MetricSpec"):
-		return &autoscalingv2beta1.MetricSpecApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("MetricStatus"):
-		return &autoscalingv2beta1.MetricStatusApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ObjectMetricSource"):
-		return &autoscalingv2beta1.ObjectMetricSourceApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ObjectMetricStatus"):
-		return &autoscalingv2beta1.ObjectMetricStatusApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("PodsMetricSource"):
-		return &autoscalingv2beta1.PodsMetricSourceApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("PodsMetricStatus"):
-		return &autoscalingv2beta1.PodsMetricStatusApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ResourceMetricSource"):
-		return &autoscalingv2beta1.ResourceMetricSourceApplyConfiguration{}
-	case v2beta1.SchemeGroupVersion.WithKind("ResourceMetricStatus"):
-		return &autoscalingv2beta1.ResourceMetricStatusApplyConfiguration{}
-
-		// Group=autoscaling, Version=v2beta2
-	case v2beta2.SchemeGroupVersion.WithKind("ContainerResourceMetricSource"):
-		return &autoscalingv2beta2.ContainerResourceMetricSourceApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ContainerResourceMetricStatus"):
-		return &autoscalingv2beta2.ContainerResourceMetricStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("CrossVersionObjectReference"):
-		return &autoscalingv2beta2.CrossVersionObjectReferenceApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ExternalMetricSource"):
-		return &autoscalingv2beta2.ExternalMetricSourceApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ExternalMetricStatus"):
-		return &autoscalingv2beta2.ExternalMetricStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HorizontalPodAutoscaler"):
-		return &autoscalingv2beta2.HorizontalPodAutoscalerApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerBehavior"):
-		return &autoscalingv2beta2.HorizontalPodAutoscalerBehaviorApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerCondition"):
-		return &autoscalingv2beta2.HorizontalPodAutoscalerConditionApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerSpec"):
-		return &autoscalingv2beta2.HorizontalPodAutoscalerSpecApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HorizontalPodAutoscalerStatus"):
-		return &autoscalingv2beta2.HorizontalPodAutoscalerStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HPAScalingPolicy"):
-		return &autoscalingv2beta2.HPAScalingPolicyApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("HPAScalingRules"):
-		return &autoscalingv2beta2.HPAScalingRulesApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("MetricIdentifier"):
-		return &autoscalingv2beta2.MetricIdentifierApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("MetricSpec"):
-		return &autoscalingv2beta2.MetricSpecApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("MetricStatus"):
-		return &autoscalingv2beta2.MetricStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("MetricTarget"):
-		return &autoscalingv2beta2.MetricTargetApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("MetricValueStatus"):
-		return &autoscalingv2beta2.MetricValueStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ObjectMetricSource"):
-		return &autoscalingv2beta2.ObjectMetricSourceApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ObjectMetricStatus"):
-		return &autoscalingv2beta2.ObjectMetricStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("PodsMetricSource"):
-		return &autoscalingv2beta2.PodsMetricSourceApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("PodsMetricStatus"):
-		return &autoscalingv2beta2.PodsMetricStatusApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ResourceMetricSource"):
-		return &autoscalingv2beta2.ResourceMetricSourceApplyConfiguration{}
-	case v2beta2.SchemeGroupVersion.WithKind("ResourceMetricStatus"):
-		return &autoscalingv2beta2.ResourceMetricStatusApplyConfiguration{}
-
 		// Group=batch, Version=v1
 	case batchv1.SchemeGroupVersion.WithKind("CronJob"):
 		return &applyconfigurationbatchv1.CronJobApplyConfiguration{}
@@ -655,16 +319,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case batchv1.SchemeGroupVersion.WithKind("UncountedTerminatedPods"):
 		return &applyconfigurationbatchv1.UncountedTerminatedPodsApplyConfiguration{}
 
-		// Group=batch, Version=v1beta1
-	case batchv1beta1.SchemeGroupVersion.WithKind("CronJob"):
-		return &applyconfigurationbatchv1beta1.CronJobApplyConfiguration{}
-	case batchv1beta1.SchemeGroupVersion.WithKind("CronJobSpec"):
-		return &applyconfigurationbatchv1beta1.CronJobSpecApplyConfiguration{}
-	case batchv1beta1.SchemeGroupVersion.WithKind("CronJobStatus"):
-		return &applyconfigurationbatchv1beta1.CronJobStatusApplyConfiguration{}
-	case batchv1beta1.SchemeGroupVersion.WithKind("JobTemplateSpec"):
-		return &applyconfigurationbatchv1beta1.JobTemplateSpecApplyConfiguration{}
-
 		// Group=certificates.k8s.io, Version=v1
 	case certificatesv1.SchemeGroupVersion.WithKind("CertificateSigningRequest"):
 		return &applyconfigurationcertificatesv1.CertificateSigningRequestApplyConfiguration{}
@@ -675,53 +329,11 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case certificatesv1.SchemeGroupVersion.WithKind("CertificateSigningRequestStatus"):
 		return &applyconfigurationcertificatesv1.CertificateSigningRequestStatusApplyConfiguration{}
 
-		// Group=certificates.k8s.io, Version=v1alpha1
-	case certificatesv1alpha1.SchemeGroupVersion.WithKind("ClusterTrustBundle"):
-		return &applyconfigurationcertificatesv1alpha1.ClusterTrustBundleApplyConfiguration{}
-	case certificatesv1alpha1.SchemeGroupVersion.WithKind("ClusterTrustBundleSpec"):
-		return &applyconfigurationcertificatesv1alpha1.ClusterTrustBundleSpecApplyConfiguration{}
-
-		// Group=certificates.k8s.io, Version=v1beta1
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("CertificateSigningRequest"):
-		return &applyconfigurationcertificatesv1beta1.CertificateSigningRequestApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("CertificateSigningRequestCondition"):
-		return &applyconfigurationcertificatesv1beta1.CertificateSigningRequestConditionApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("CertificateSigningRequestSpec"):
-		return &applyconfigurationcertificatesv1beta1.CertificateSigningRequestSpecApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("CertificateSigningRequestStatus"):
-		return &applyconfigurationcertificatesv1beta1.CertificateSigningRequestStatusApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("ClusterTrustBundle"):
-		return &applyconfigurationcertificatesv1beta1.ClusterTrustBundleApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("ClusterTrustBundleSpec"):
-		return &applyconfigurationcertificatesv1beta1.ClusterTrustBundleSpecApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("PodCertificateRequest"):
-		return &applyconfigurationcertificatesv1beta1.PodCertificateRequestApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("PodCertificateRequestSpec"):
-		return &applyconfigurationcertificatesv1beta1.PodCertificateRequestSpecApplyConfiguration{}
-	case certificatesv1beta1.SchemeGroupVersion.WithKind("PodCertificateRequestStatus"):
-		return &applyconfigurationcertificatesv1beta1.PodCertificateRequestStatusApplyConfiguration{}
-
 		// Group=coordination.k8s.io, Version=v1
 	case coordinationv1.SchemeGroupVersion.WithKind("Lease"):
 		return &applyconfigurationcoordinationv1.LeaseApplyConfiguration{}
 	case coordinationv1.SchemeGroupVersion.WithKind("LeaseSpec"):
 		return &applyconfigurationcoordinationv1.LeaseSpecApplyConfiguration{}
-
-		// Group=coordination.k8s.io, Version=v1alpha2
-	case v1alpha2.SchemeGroupVersion.WithKind("LeaseCandidate"):
-		return &coordinationv1alpha2.LeaseCandidateApplyConfiguration{}
-	case v1alpha2.SchemeGroupVersion.WithKind("LeaseCandidateSpec"):
-		return &coordinationv1alpha2.LeaseCandidateSpecApplyConfiguration{}
-
-		// Group=coordination.k8s.io, Version=v1beta1
-	case coordinationv1beta1.SchemeGroupVersion.WithKind("Lease"):
-		return &applyconfigurationcoordinationv1beta1.LeaseApplyConfiguration{}
-	case coordinationv1beta1.SchemeGroupVersion.WithKind("LeaseCandidate"):
-		return &applyconfigurationcoordinationv1beta1.LeaseCandidateApplyConfiguration{}
-	case coordinationv1beta1.SchemeGroupVersion.WithKind("LeaseCandidateSpec"):
-		return &applyconfigurationcoordinationv1beta1.LeaseCandidateSpecApplyConfiguration{}
-	case coordinationv1beta1.SchemeGroupVersion.WithKind("LeaseSpec"):
-		return &applyconfigurationcoordinationv1beta1.LeaseSpecApplyConfiguration{}
 
 		// Group=core, Version=v1
 	case corev1.SchemeGroupVersion.WithKind("Affinity"):
@@ -1153,109 +765,11 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case discoveryv1.SchemeGroupVersion.WithKind("ForZone"):
 		return &applyconfigurationdiscoveryv1.ForZoneApplyConfiguration{}
 
-		// Group=discovery.k8s.io, Version=v1beta1
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("Endpoint"):
-		return &applyconfigurationdiscoveryv1beta1.EndpointApplyConfiguration{}
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("EndpointConditions"):
-		return &applyconfigurationdiscoveryv1beta1.EndpointConditionsApplyConfiguration{}
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("EndpointHints"):
-		return &applyconfigurationdiscoveryv1beta1.EndpointHintsApplyConfiguration{}
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("EndpointPort"):
-		return &applyconfigurationdiscoveryv1beta1.EndpointPortApplyConfiguration{}
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("EndpointSlice"):
-		return &applyconfigurationdiscoveryv1beta1.EndpointSliceApplyConfiguration{}
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("ForNode"):
-		return &applyconfigurationdiscoveryv1beta1.ForNodeApplyConfiguration{}
-	case discoveryv1beta1.SchemeGroupVersion.WithKind("ForZone"):
-		return &applyconfigurationdiscoveryv1beta1.ForZoneApplyConfiguration{}
-
 		// Group=events.k8s.io, Version=v1
 	case eventsv1.SchemeGroupVersion.WithKind("Event"):
 		return &applyconfigurationeventsv1.EventApplyConfiguration{}
 	case eventsv1.SchemeGroupVersion.WithKind("EventSeries"):
 		return &applyconfigurationeventsv1.EventSeriesApplyConfiguration{}
-
-		// Group=events.k8s.io, Version=v1beta1
-	case eventsv1beta1.SchemeGroupVersion.WithKind("Event"):
-		return &applyconfigurationeventsv1beta1.EventApplyConfiguration{}
-	case eventsv1beta1.SchemeGroupVersion.WithKind("EventSeries"):
-		return &applyconfigurationeventsv1beta1.EventSeriesApplyConfiguration{}
-
-		// Group=extensions, Version=v1beta1
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DaemonSet"):
-		return &applyconfigurationextensionsv1beta1.DaemonSetApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DaemonSetCondition"):
-		return &applyconfigurationextensionsv1beta1.DaemonSetConditionApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DaemonSetSpec"):
-		return &applyconfigurationextensionsv1beta1.DaemonSetSpecApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DaemonSetStatus"):
-		return &applyconfigurationextensionsv1beta1.DaemonSetStatusApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DaemonSetUpdateStrategy"):
-		return &applyconfigurationextensionsv1beta1.DaemonSetUpdateStrategyApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("Deployment"):
-		return &applyconfigurationextensionsv1beta1.DeploymentApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DeploymentCondition"):
-		return &applyconfigurationextensionsv1beta1.DeploymentConditionApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DeploymentSpec"):
-		return &applyconfigurationextensionsv1beta1.DeploymentSpecApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DeploymentStatus"):
-		return &applyconfigurationextensionsv1beta1.DeploymentStatusApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("DeploymentStrategy"):
-		return &applyconfigurationextensionsv1beta1.DeploymentStrategyApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("HTTPIngressPath"):
-		return &applyconfigurationextensionsv1beta1.HTTPIngressPathApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("HTTPIngressRuleValue"):
-		return &applyconfigurationextensionsv1beta1.HTTPIngressRuleValueApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("Ingress"):
-		return &applyconfigurationextensionsv1beta1.IngressApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressBackend"):
-		return &applyconfigurationextensionsv1beta1.IngressBackendApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressLoadBalancerIngress"):
-		return &applyconfigurationextensionsv1beta1.IngressLoadBalancerIngressApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressLoadBalancerStatus"):
-		return &applyconfigurationextensionsv1beta1.IngressLoadBalancerStatusApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressPortStatus"):
-		return &applyconfigurationextensionsv1beta1.IngressPortStatusApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressRule"):
-		return &applyconfigurationextensionsv1beta1.IngressRuleApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressRuleValue"):
-		return &applyconfigurationextensionsv1beta1.IngressRuleValueApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressSpec"):
-		return &applyconfigurationextensionsv1beta1.IngressSpecApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressStatus"):
-		return &applyconfigurationextensionsv1beta1.IngressStatusApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IngressTLS"):
-		return &applyconfigurationextensionsv1beta1.IngressTLSApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("IPBlock"):
-		return &applyconfigurationextensionsv1beta1.IPBlockApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("NetworkPolicy"):
-		return &applyconfigurationextensionsv1beta1.NetworkPolicyApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("NetworkPolicyEgressRule"):
-		return &applyconfigurationextensionsv1beta1.NetworkPolicyEgressRuleApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("NetworkPolicyIngressRule"):
-		return &applyconfigurationextensionsv1beta1.NetworkPolicyIngressRuleApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("NetworkPolicyPeer"):
-		return &applyconfigurationextensionsv1beta1.NetworkPolicyPeerApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("NetworkPolicyPort"):
-		return &applyconfigurationextensionsv1beta1.NetworkPolicyPortApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("NetworkPolicySpec"):
-		return &applyconfigurationextensionsv1beta1.NetworkPolicySpecApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("ReplicaSet"):
-		return &applyconfigurationextensionsv1beta1.ReplicaSetApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("ReplicaSetCondition"):
-		return &applyconfigurationextensionsv1beta1.ReplicaSetConditionApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("ReplicaSetSpec"):
-		return &applyconfigurationextensionsv1beta1.ReplicaSetSpecApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("ReplicaSetStatus"):
-		return &applyconfigurationextensionsv1beta1.ReplicaSetStatusApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("RollbackConfig"):
-		return &applyconfigurationextensionsv1beta1.RollbackConfigApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("RollingUpdateDaemonSet"):
-		return &applyconfigurationextensionsv1beta1.RollingUpdateDaemonSetApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("RollingUpdateDeployment"):
-		return &applyconfigurationextensionsv1beta1.RollingUpdateDeploymentApplyConfiguration{}
-	case extensionsv1beta1.SchemeGroupVersion.WithKind("Scale"):
-		return &applyconfigurationextensionsv1beta1.ScaleApplyConfiguration{}
 
 		// Group=flowcontrol.apiserver.k8s.io, Version=v1
 	case flowcontrolv1.SchemeGroupVersion.WithKind("ExemptPriorityLevelConfiguration"):
@@ -1301,138 +815,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case flowcontrolv1.SchemeGroupVersion.WithKind("UserSubject"):
 		return &applyconfigurationflowcontrolv1.UserSubjectApplyConfiguration{}
 
-		// Group=flowcontrol.apiserver.k8s.io, Version=v1beta1
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("ExemptPriorityLevelConfiguration"):
-		return &applyconfigurationflowcontrolv1beta1.ExemptPriorityLevelConfigurationApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("FlowDistinguisherMethod"):
-		return &applyconfigurationflowcontrolv1beta1.FlowDistinguisherMethodApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("FlowSchema"):
-		return &applyconfigurationflowcontrolv1beta1.FlowSchemaApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("FlowSchemaCondition"):
-		return &applyconfigurationflowcontrolv1beta1.FlowSchemaConditionApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("FlowSchemaSpec"):
-		return &applyconfigurationflowcontrolv1beta1.FlowSchemaSpecApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("FlowSchemaStatus"):
-		return &applyconfigurationflowcontrolv1beta1.FlowSchemaStatusApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("GroupSubject"):
-		return &applyconfigurationflowcontrolv1beta1.GroupSubjectApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("LimitedPriorityLevelConfiguration"):
-		return &applyconfigurationflowcontrolv1beta1.LimitedPriorityLevelConfigurationApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("LimitResponse"):
-		return &applyconfigurationflowcontrolv1beta1.LimitResponseApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("NonResourcePolicyRule"):
-		return &applyconfigurationflowcontrolv1beta1.NonResourcePolicyRuleApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("PolicyRulesWithSubjects"):
-		return &applyconfigurationflowcontrolv1beta1.PolicyRulesWithSubjectsApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("PriorityLevelConfiguration"):
-		return &applyconfigurationflowcontrolv1beta1.PriorityLevelConfigurationApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("PriorityLevelConfigurationCondition"):
-		return &applyconfigurationflowcontrolv1beta1.PriorityLevelConfigurationConditionApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("PriorityLevelConfigurationReference"):
-		return &applyconfigurationflowcontrolv1beta1.PriorityLevelConfigurationReferenceApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("PriorityLevelConfigurationSpec"):
-		return &applyconfigurationflowcontrolv1beta1.PriorityLevelConfigurationSpecApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("PriorityLevelConfigurationStatus"):
-		return &applyconfigurationflowcontrolv1beta1.PriorityLevelConfigurationStatusApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("QueuingConfiguration"):
-		return &applyconfigurationflowcontrolv1beta1.QueuingConfigurationApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("ResourcePolicyRule"):
-		return &applyconfigurationflowcontrolv1beta1.ResourcePolicyRuleApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("ServiceAccountSubject"):
-		return &applyconfigurationflowcontrolv1beta1.ServiceAccountSubjectApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("Subject"):
-		return &applyconfigurationflowcontrolv1beta1.SubjectApplyConfiguration{}
-	case flowcontrolv1beta1.SchemeGroupVersion.WithKind("UserSubject"):
-		return &applyconfigurationflowcontrolv1beta1.UserSubjectApplyConfiguration{}
-
-		// Group=flowcontrol.apiserver.k8s.io, Version=v1beta2
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("ExemptPriorityLevelConfiguration"):
-		return &applyconfigurationflowcontrolv1beta2.ExemptPriorityLevelConfigurationApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("FlowDistinguisherMethod"):
-		return &applyconfigurationflowcontrolv1beta2.FlowDistinguisherMethodApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("FlowSchema"):
-		return &applyconfigurationflowcontrolv1beta2.FlowSchemaApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("FlowSchemaCondition"):
-		return &applyconfigurationflowcontrolv1beta2.FlowSchemaConditionApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("FlowSchemaSpec"):
-		return &applyconfigurationflowcontrolv1beta2.FlowSchemaSpecApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("FlowSchemaStatus"):
-		return &applyconfigurationflowcontrolv1beta2.FlowSchemaStatusApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("GroupSubject"):
-		return &applyconfigurationflowcontrolv1beta2.GroupSubjectApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("LimitedPriorityLevelConfiguration"):
-		return &applyconfigurationflowcontrolv1beta2.LimitedPriorityLevelConfigurationApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("LimitResponse"):
-		return &applyconfigurationflowcontrolv1beta2.LimitResponseApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("NonResourcePolicyRule"):
-		return &applyconfigurationflowcontrolv1beta2.NonResourcePolicyRuleApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("PolicyRulesWithSubjects"):
-		return &applyconfigurationflowcontrolv1beta2.PolicyRulesWithSubjectsApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("PriorityLevelConfiguration"):
-		return &applyconfigurationflowcontrolv1beta2.PriorityLevelConfigurationApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("PriorityLevelConfigurationCondition"):
-		return &applyconfigurationflowcontrolv1beta2.PriorityLevelConfigurationConditionApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("PriorityLevelConfigurationReference"):
-		return &applyconfigurationflowcontrolv1beta2.PriorityLevelConfigurationReferenceApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("PriorityLevelConfigurationSpec"):
-		return &applyconfigurationflowcontrolv1beta2.PriorityLevelConfigurationSpecApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("PriorityLevelConfigurationStatus"):
-		return &applyconfigurationflowcontrolv1beta2.PriorityLevelConfigurationStatusApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("QueuingConfiguration"):
-		return &applyconfigurationflowcontrolv1beta2.QueuingConfigurationApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("ResourcePolicyRule"):
-		return &applyconfigurationflowcontrolv1beta2.ResourcePolicyRuleApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("ServiceAccountSubject"):
-		return &applyconfigurationflowcontrolv1beta2.ServiceAccountSubjectApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("Subject"):
-		return &applyconfigurationflowcontrolv1beta2.SubjectApplyConfiguration{}
-	case flowcontrolv1beta2.SchemeGroupVersion.WithKind("UserSubject"):
-		return &applyconfigurationflowcontrolv1beta2.UserSubjectApplyConfiguration{}
-
-		// Group=flowcontrol.apiserver.k8s.io, Version=v1beta3
-	case v1beta3.SchemeGroupVersion.WithKind("ExemptPriorityLevelConfiguration"):
-		return &flowcontrolv1beta3.ExemptPriorityLevelConfigurationApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("FlowDistinguisherMethod"):
-		return &flowcontrolv1beta3.FlowDistinguisherMethodApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("FlowSchema"):
-		return &flowcontrolv1beta3.FlowSchemaApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("FlowSchemaCondition"):
-		return &flowcontrolv1beta3.FlowSchemaConditionApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("FlowSchemaSpec"):
-		return &flowcontrolv1beta3.FlowSchemaSpecApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("FlowSchemaStatus"):
-		return &flowcontrolv1beta3.FlowSchemaStatusApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("GroupSubject"):
-		return &flowcontrolv1beta3.GroupSubjectApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("LimitedPriorityLevelConfiguration"):
-		return &flowcontrolv1beta3.LimitedPriorityLevelConfigurationApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("LimitResponse"):
-		return &flowcontrolv1beta3.LimitResponseApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("NonResourcePolicyRule"):
-		return &flowcontrolv1beta3.NonResourcePolicyRuleApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("PolicyRulesWithSubjects"):
-		return &flowcontrolv1beta3.PolicyRulesWithSubjectsApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("PriorityLevelConfiguration"):
-		return &flowcontrolv1beta3.PriorityLevelConfigurationApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("PriorityLevelConfigurationCondition"):
-		return &flowcontrolv1beta3.PriorityLevelConfigurationConditionApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("PriorityLevelConfigurationReference"):
-		return &flowcontrolv1beta3.PriorityLevelConfigurationReferenceApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("PriorityLevelConfigurationSpec"):
-		return &flowcontrolv1beta3.PriorityLevelConfigurationSpecApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("PriorityLevelConfigurationStatus"):
-		return &flowcontrolv1beta3.PriorityLevelConfigurationStatusApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("QueuingConfiguration"):
-		return &flowcontrolv1beta3.QueuingConfigurationApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("ResourcePolicyRule"):
-		return &flowcontrolv1beta3.ResourcePolicyRuleApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("ServiceAccountSubject"):
-		return &flowcontrolv1beta3.ServiceAccountSubjectApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("Subject"):
-		return &flowcontrolv1beta3.SubjectApplyConfiguration{}
-	case v1beta3.SchemeGroupVersion.WithKind("UserSubject"):
-		return &flowcontrolv1beta3.UserSubjectApplyConfiguration{}
-
 		// Group=gpustack.ai, Version=v1
 	case apiv1.SchemeGroupVersion.WithKind("Condition"):
 		return &applyconfigurationapiv1.ConditionApplyConfiguration{}
@@ -1446,14 +828,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationapiv1.StatusApplyConfiguration{}
 
 		// Group=imagepolicy.k8s.io, Version=v1alpha1
-	case imagepolicyv1alpha1.SchemeGroupVersion.WithKind("ImageReview"):
-		return &applyconfigurationimagepolicyv1alpha1.ImageReviewApplyConfiguration{}
-	case imagepolicyv1alpha1.SchemeGroupVersion.WithKind("ImageReviewContainerSpec"):
-		return &applyconfigurationimagepolicyv1alpha1.ImageReviewContainerSpecApplyConfiguration{}
-	case imagepolicyv1alpha1.SchemeGroupVersion.WithKind("ImageReviewSpec"):
-		return &applyconfigurationimagepolicyv1alpha1.ImageReviewSpecApplyConfiguration{}
-	case imagepolicyv1alpha1.SchemeGroupVersion.WithKind("ImageReviewStatus"):
-		return &applyconfigurationimagepolicyv1alpha1.ImageReviewStatusApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ImageReview"):
+		return &imagepolicyv1alpha1.ImageReviewApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ImageReviewContainerSpec"):
+		return &imagepolicyv1alpha1.ImageReviewContainerSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ImageReviewSpec"):
+		return &imagepolicyv1alpha1.ImageReviewSpecApplyConfiguration{}
+	case v1alpha1.SchemeGroupVersion.WithKind("ImageReviewStatus"):
+		return &imagepolicyv1alpha1.ImageReviewStatusApplyConfiguration{}
 
 		// Group=internal.apiserver.k8s.io, Version=v1alpha1
 	case apiserverinternalv1alpha1.SchemeGroupVersion.WithKind("ServerStorageVersion"):
@@ -1466,152 +848,152 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationapiserverinternalv1alpha1.StorageVersionStatusApplyConfiguration{}
 
 		// Group=kueue.x-k8s.io, Version=v1beta2
-	case kueuev1beta2.SchemeGroupVersion.WithKind("Admission"):
-		return &applyconfigurationkueuev1beta2.AdmissionApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionCheck"):
-		return &applyconfigurationkueuev1beta2.AdmissionCheckApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionCheckParametersReference"):
-		return &applyconfigurationkueuev1beta2.AdmissionCheckParametersReferenceApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionCheckSpec"):
-		return &applyconfigurationkueuev1beta2.AdmissionCheckSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionChecksStrategy"):
-		return &applyconfigurationkueuev1beta2.AdmissionChecksStrategyApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionCheckState"):
-		return &applyconfigurationkueuev1beta2.AdmissionCheckStateApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionCheckStatus"):
-		return &applyconfigurationkueuev1beta2.AdmissionCheckStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionCheckStrategyRule"):
-		return &applyconfigurationkueuev1beta2.AdmissionCheckStrategyRuleApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("AdmissionScope"):
-		return &applyconfigurationkueuev1beta2.AdmissionScopeApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("BorrowWithinCohort"):
-		return &applyconfigurationkueuev1beta2.BorrowWithinCohortApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ClusterProfileReference"):
-		return &applyconfigurationkueuev1beta2.ClusterProfileReferenceApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ClusterQueue"):
-		return &applyconfigurationkueuev1beta2.ClusterQueueApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ClusterQueuePreemption"):
-		return &applyconfigurationkueuev1beta2.ClusterQueuePreemptionApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ClusterQueueSpec"):
-		return &applyconfigurationkueuev1beta2.ClusterQueueSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ClusterQueueStatus"):
-		return &applyconfigurationkueuev1beta2.ClusterQueueStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ClusterSource"):
-		return &applyconfigurationkueuev1beta2.ClusterSourceApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("Cohort"):
-		return &applyconfigurationkueuev1beta2.CohortApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("CohortSpec"):
-		return &applyconfigurationkueuev1beta2.CohortSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("CohortStatus"):
-		return &applyconfigurationkueuev1beta2.CohortStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("FairSharing"):
-		return &applyconfigurationkueuev1beta2.FairSharingApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("FairSharingStatus"):
-		return &applyconfigurationkueuev1beta2.FairSharingStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("FlavorFungibility"):
-		return &applyconfigurationkueuev1beta2.FlavorFungibilityApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("FlavorQuotas"):
-		return &applyconfigurationkueuev1beta2.FlavorQuotasApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("FlavorUsage"):
-		return &applyconfigurationkueuev1beta2.FlavorUsageApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("KubeConfig"):
-		return &applyconfigurationkueuev1beta2.KubeConfigApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueue"):
-		return &applyconfigurationkueuev1beta2.LocalQueueApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueueAdmissionFairSharingStatus"):
-		return &applyconfigurationkueuev1beta2.LocalQueueAdmissionFairSharingStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueueFairSharingStatus"):
-		return &applyconfigurationkueuev1beta2.LocalQueueFairSharingStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueueFlavorUsage"):
-		return &applyconfigurationkueuev1beta2.LocalQueueFlavorUsageApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueueResourceUsage"):
-		return &applyconfigurationkueuev1beta2.LocalQueueResourceUsageApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueueSpec"):
-		return &applyconfigurationkueuev1beta2.LocalQueueSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("LocalQueueStatus"):
-		return &applyconfigurationkueuev1beta2.LocalQueueStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("MultiKueueCluster"):
-		return &applyconfigurationkueuev1beta2.MultiKueueClusterApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("MultiKueueClusterSpec"):
-		return &applyconfigurationkueuev1beta2.MultiKueueClusterSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("MultiKueueClusterStatus"):
-		return &applyconfigurationkueuev1beta2.MultiKueueClusterStatusApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("MultiKueueConfig"):
-		return &applyconfigurationkueuev1beta2.MultiKueueConfigApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("MultiKueueConfigSpec"):
-		return &applyconfigurationkueuev1beta2.MultiKueueConfigSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PodSet"):
-		return &applyconfigurationkueuev1beta2.PodSetApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PodSetAssignment"):
-		return &applyconfigurationkueuev1beta2.PodSetAssignmentApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PodSetRequest"):
-		return &applyconfigurationkueuev1beta2.PodSetRequestApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PodsetSliceRequiredTopologyConstraint"):
-		return &applyconfigurationkueuev1beta2.PodsetSliceRequiredTopologyConstraintApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PodSetTopologyRequest"):
-		return &applyconfigurationkueuev1beta2.PodSetTopologyRequestApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PodSetUpdate"):
-		return &applyconfigurationkueuev1beta2.PodSetUpdateApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PreemptionGate"):
-		return &applyconfigurationkueuev1beta2.PreemptionGateApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PreemptionGateState"):
-		return &applyconfigurationkueuev1beta2.PreemptionGateStateApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("PriorityClassRef"):
-		return &applyconfigurationkueuev1beta2.PriorityClassRefApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestConfig"):
-		return &applyconfigurationkueuev1beta2.ProvisioningRequestConfigApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestConfigSpec"):
-		return &applyconfigurationkueuev1beta2.ProvisioningRequestConfigSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestPodSetUpdates"):
-		return &applyconfigurationkueuev1beta2.ProvisioningRequestPodSetUpdatesApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestPodSetUpdatesNodeSelector"):
-		return &applyconfigurationkueuev1beta2.ProvisioningRequestPodSetUpdatesNodeSelectorApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestRetryStrategy"):
-		return &applyconfigurationkueuev1beta2.ProvisioningRequestRetryStrategyApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ReclaimablePod"):
-		return &applyconfigurationkueuev1beta2.ReclaimablePodApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("RequeueState"):
-		return &applyconfigurationkueuev1beta2.RequeueStateApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ResourceFlavor"):
-		return &applyconfigurationkueuev1beta2.ResourceFlavorApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ResourceFlavorSpec"):
-		return &applyconfigurationkueuev1beta2.ResourceFlavorSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ResourceGroup"):
-		return &applyconfigurationkueuev1beta2.ResourceGroupApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ResourceQuota"):
-		return &applyconfigurationkueuev1beta2.ResourceQuotaApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("ResourceUsage"):
-		return &applyconfigurationkueuev1beta2.ResourceUsageApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("SchedulingStats"):
-		return &applyconfigurationkueuev1beta2.SchedulingStatsApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("Topology"):
-		return &applyconfigurationkueuev1beta2.TopologyApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologyAssignment"):
-		return &applyconfigurationkueuev1beta2.TopologyAssignmentApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSlice"):
-		return &applyconfigurationkueuev1beta2.TopologyAssignmentSliceApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSliceLevelIndividualValues"):
-		return &applyconfigurationkueuev1beta2.TopologyAssignmentSliceLevelIndividualValuesApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSliceLevelValues"):
-		return &applyconfigurationkueuev1beta2.TopologyAssignmentSliceLevelValuesApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSlicePodCounts"):
-		return &applyconfigurationkueuev1beta2.TopologyAssignmentSlicePodCountsApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologyLevel"):
-		return &applyconfigurationkueuev1beta2.TopologyLevelApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("TopologySpec"):
-		return &applyconfigurationkueuev1beta2.TopologySpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("UnhealthyNode"):
-		return &applyconfigurationkueuev1beta2.UnhealthyNodeApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("Workload"):
-		return &applyconfigurationkueuev1beta2.WorkloadApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("WorkloadPriorityClass"):
-		return &applyconfigurationkueuev1beta2.WorkloadPriorityClassApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("WorkloadSchedulingStatsEviction"):
-		return &applyconfigurationkueuev1beta2.WorkloadSchedulingStatsEvictionApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("WorkloadSpec"):
-		return &applyconfigurationkueuev1beta2.WorkloadSpecApplyConfiguration{}
-	case kueuev1beta2.SchemeGroupVersion.WithKind("WorkloadStatus"):
-		return &applyconfigurationkueuev1beta2.WorkloadStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("Admission"):
+		return &kueuev1beta2.AdmissionApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionCheck"):
+		return &kueuev1beta2.AdmissionCheckApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionCheckParametersReference"):
+		return &kueuev1beta2.AdmissionCheckParametersReferenceApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionCheckSpec"):
+		return &kueuev1beta2.AdmissionCheckSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionChecksStrategy"):
+		return &kueuev1beta2.AdmissionChecksStrategyApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionCheckState"):
+		return &kueuev1beta2.AdmissionCheckStateApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionCheckStatus"):
+		return &kueuev1beta2.AdmissionCheckStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionCheckStrategyRule"):
+		return &kueuev1beta2.AdmissionCheckStrategyRuleApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("AdmissionScope"):
+		return &kueuev1beta2.AdmissionScopeApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("BorrowWithinCohort"):
+		return &kueuev1beta2.BorrowWithinCohortApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ClusterProfileReference"):
+		return &kueuev1beta2.ClusterProfileReferenceApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ClusterQueue"):
+		return &kueuev1beta2.ClusterQueueApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ClusterQueuePreemption"):
+		return &kueuev1beta2.ClusterQueuePreemptionApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ClusterQueueSpec"):
+		return &kueuev1beta2.ClusterQueueSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ClusterQueueStatus"):
+		return &kueuev1beta2.ClusterQueueStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ClusterSource"):
+		return &kueuev1beta2.ClusterSourceApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("Cohort"):
+		return &kueuev1beta2.CohortApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("CohortSpec"):
+		return &kueuev1beta2.CohortSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("CohortStatus"):
+		return &kueuev1beta2.CohortStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("FairSharing"):
+		return &kueuev1beta2.FairSharingApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("FairSharingStatus"):
+		return &kueuev1beta2.FairSharingStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("FlavorFungibility"):
+		return &kueuev1beta2.FlavorFungibilityApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("FlavorQuotas"):
+		return &kueuev1beta2.FlavorQuotasApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("FlavorUsage"):
+		return &kueuev1beta2.FlavorUsageApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("KubeConfig"):
+		return &kueuev1beta2.KubeConfigApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueue"):
+		return &kueuev1beta2.LocalQueueApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueueAdmissionFairSharingStatus"):
+		return &kueuev1beta2.LocalQueueAdmissionFairSharingStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueueFairSharingStatus"):
+		return &kueuev1beta2.LocalQueueFairSharingStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueueFlavorUsage"):
+		return &kueuev1beta2.LocalQueueFlavorUsageApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueueResourceUsage"):
+		return &kueuev1beta2.LocalQueueResourceUsageApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueueSpec"):
+		return &kueuev1beta2.LocalQueueSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("LocalQueueStatus"):
+		return &kueuev1beta2.LocalQueueStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("MultiKueueCluster"):
+		return &kueuev1beta2.MultiKueueClusterApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("MultiKueueClusterSpec"):
+		return &kueuev1beta2.MultiKueueClusterSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("MultiKueueClusterStatus"):
+		return &kueuev1beta2.MultiKueueClusterStatusApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("MultiKueueConfig"):
+		return &kueuev1beta2.MultiKueueConfigApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("MultiKueueConfigSpec"):
+		return &kueuev1beta2.MultiKueueConfigSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PodSet"):
+		return &kueuev1beta2.PodSetApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PodSetAssignment"):
+		return &kueuev1beta2.PodSetAssignmentApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PodSetRequest"):
+		return &kueuev1beta2.PodSetRequestApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PodsetSliceRequiredTopologyConstraint"):
+		return &kueuev1beta2.PodsetSliceRequiredTopologyConstraintApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PodSetTopologyRequest"):
+		return &kueuev1beta2.PodSetTopologyRequestApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PodSetUpdate"):
+		return &kueuev1beta2.PodSetUpdateApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PreemptionGate"):
+		return &kueuev1beta2.PreemptionGateApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PreemptionGateState"):
+		return &kueuev1beta2.PreemptionGateStateApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("PriorityClassRef"):
+		return &kueuev1beta2.PriorityClassRefApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestConfig"):
+		return &kueuev1beta2.ProvisioningRequestConfigApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestConfigSpec"):
+		return &kueuev1beta2.ProvisioningRequestConfigSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestPodSetUpdates"):
+		return &kueuev1beta2.ProvisioningRequestPodSetUpdatesApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestPodSetUpdatesNodeSelector"):
+		return &kueuev1beta2.ProvisioningRequestPodSetUpdatesNodeSelectorApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ProvisioningRequestRetryStrategy"):
+		return &kueuev1beta2.ProvisioningRequestRetryStrategyApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ReclaimablePod"):
+		return &kueuev1beta2.ReclaimablePodApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("RequeueState"):
+		return &kueuev1beta2.RequeueStateApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ResourceFlavor"):
+		return &kueuev1beta2.ResourceFlavorApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ResourceFlavorSpec"):
+		return &kueuev1beta2.ResourceFlavorSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ResourceGroup"):
+		return &kueuev1beta2.ResourceGroupApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ResourceQuota"):
+		return &kueuev1beta2.ResourceQuotaApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("ResourceUsage"):
+		return &kueuev1beta2.ResourceUsageApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("SchedulingStats"):
+		return &kueuev1beta2.SchedulingStatsApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("Topology"):
+		return &kueuev1beta2.TopologyApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologyAssignment"):
+		return &kueuev1beta2.TopologyAssignmentApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSlice"):
+		return &kueuev1beta2.TopologyAssignmentSliceApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSliceLevelIndividualValues"):
+		return &kueuev1beta2.TopologyAssignmentSliceLevelIndividualValuesApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSliceLevelValues"):
+		return &kueuev1beta2.TopologyAssignmentSliceLevelValuesApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologyAssignmentSlicePodCounts"):
+		return &kueuev1beta2.TopologyAssignmentSlicePodCountsApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologyLevel"):
+		return &kueuev1beta2.TopologyLevelApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("TopologySpec"):
+		return &kueuev1beta2.TopologySpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("UnhealthyNode"):
+		return &kueuev1beta2.UnhealthyNodeApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("Workload"):
+		return &kueuev1beta2.WorkloadApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("WorkloadPriorityClass"):
+		return &kueuev1beta2.WorkloadPriorityClassApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("WorkloadSchedulingStatsEviction"):
+		return &kueuev1beta2.WorkloadSchedulingStatsEvictionApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("WorkloadSpec"):
+		return &kueuev1beta2.WorkloadSpecApplyConfiguration{}
+	case v1beta2.SchemeGroupVersion.WithKind("WorkloadStatus"):
+		return &kueuev1beta2.WorkloadStatusApplyConfiguration{}
 
 		// Group=networking.k8s.io, Version=v1
 	case networkingv1.SchemeGroupVersion.WithKind("HTTPIngressPath"):
@@ -1675,50 +1057,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case networkingv1.SchemeGroupVersion.WithKind("ServiceCIDRStatus"):
 		return &applyconfigurationnetworkingv1.ServiceCIDRStatusApplyConfiguration{}
 
-		// Group=networking.k8s.io, Version=v1beta1
-	case networkingv1beta1.SchemeGroupVersion.WithKind("HTTPIngressPath"):
-		return &applyconfigurationnetworkingv1beta1.HTTPIngressPathApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("HTTPIngressRuleValue"):
-		return &applyconfigurationnetworkingv1beta1.HTTPIngressRuleValueApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("Ingress"):
-		return &applyconfigurationnetworkingv1beta1.IngressApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressBackend"):
-		return &applyconfigurationnetworkingv1beta1.IngressBackendApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressClass"):
-		return &applyconfigurationnetworkingv1beta1.IngressClassApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressClassParametersReference"):
-		return &applyconfigurationnetworkingv1beta1.IngressClassParametersReferenceApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressClassSpec"):
-		return &applyconfigurationnetworkingv1beta1.IngressClassSpecApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressLoadBalancerIngress"):
-		return &applyconfigurationnetworkingv1beta1.IngressLoadBalancerIngressApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressLoadBalancerStatus"):
-		return &applyconfigurationnetworkingv1beta1.IngressLoadBalancerStatusApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressPortStatus"):
-		return &applyconfigurationnetworkingv1beta1.IngressPortStatusApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressRule"):
-		return &applyconfigurationnetworkingv1beta1.IngressRuleApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressRuleValue"):
-		return &applyconfigurationnetworkingv1beta1.IngressRuleValueApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressSpec"):
-		return &applyconfigurationnetworkingv1beta1.IngressSpecApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressStatus"):
-		return &applyconfigurationnetworkingv1beta1.IngressStatusApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IngressTLS"):
-		return &applyconfigurationnetworkingv1beta1.IngressTLSApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IPAddress"):
-		return &applyconfigurationnetworkingv1beta1.IPAddressApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("IPAddressSpec"):
-		return &applyconfigurationnetworkingv1beta1.IPAddressSpecApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("ParentReference"):
-		return &applyconfigurationnetworkingv1beta1.ParentReferenceApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("ServiceCIDR"):
-		return &applyconfigurationnetworkingv1beta1.ServiceCIDRApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("ServiceCIDRSpec"):
-		return &applyconfigurationnetworkingv1beta1.ServiceCIDRSpecApplyConfiguration{}
-	case networkingv1beta1.SchemeGroupVersion.WithKind("ServiceCIDRStatus"):
-		return &applyconfigurationnetworkingv1beta1.ServiceCIDRStatusApplyConfiguration{}
-
 		// Group=nfd.k8s-sigs.io, Version=v1alpha1
 	case nfdv1alpha1.SchemeGroupVersion.WithKind("AttributeFeatureSet"):
 		return &applyconfigurationnfdv1alpha1.AttributeFeatureSetApplyConfiguration{}
@@ -1765,24 +1103,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case nodev1.SchemeGroupVersion.WithKind("Scheduling"):
 		return &applyconfigurationnodev1.SchedulingApplyConfiguration{}
 
-		// Group=node.k8s.io, Version=v1alpha1
-	case nodev1alpha1.SchemeGroupVersion.WithKind("Overhead"):
-		return &applyconfigurationnodev1alpha1.OverheadApplyConfiguration{}
-	case nodev1alpha1.SchemeGroupVersion.WithKind("RuntimeClass"):
-		return &applyconfigurationnodev1alpha1.RuntimeClassApplyConfiguration{}
-	case nodev1alpha1.SchemeGroupVersion.WithKind("RuntimeClassSpec"):
-		return &applyconfigurationnodev1alpha1.RuntimeClassSpecApplyConfiguration{}
-	case nodev1alpha1.SchemeGroupVersion.WithKind("Scheduling"):
-		return &applyconfigurationnodev1alpha1.SchedulingApplyConfiguration{}
-
-		// Group=node.k8s.io, Version=v1beta1
-	case nodev1beta1.SchemeGroupVersion.WithKind("Overhead"):
-		return &applyconfigurationnodev1beta1.OverheadApplyConfiguration{}
-	case nodev1beta1.SchemeGroupVersion.WithKind("RuntimeClass"):
-		return &applyconfigurationnodev1beta1.RuntimeClassApplyConfiguration{}
-	case nodev1beta1.SchemeGroupVersion.WithKind("Scheduling"):
-		return &applyconfigurationnodev1beta1.SchedulingApplyConfiguration{}
-
 		// Group=policy, Version=v1
 	case policyv1.SchemeGroupVersion.WithKind("Eviction"):
 		return &applyconfigurationpolicyv1.EvictionApplyConfiguration{}
@@ -1792,16 +1112,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationpolicyv1.PodDisruptionBudgetSpecApplyConfiguration{}
 	case policyv1.SchemeGroupVersion.WithKind("PodDisruptionBudgetStatus"):
 		return &applyconfigurationpolicyv1.PodDisruptionBudgetStatusApplyConfiguration{}
-
-		// Group=policy, Version=v1beta1
-	case policyv1beta1.SchemeGroupVersion.WithKind("Eviction"):
-		return &applyconfigurationpolicyv1beta1.EvictionApplyConfiguration{}
-	case policyv1beta1.SchemeGroupVersion.WithKind("PodDisruptionBudget"):
-		return &applyconfigurationpolicyv1beta1.PodDisruptionBudgetApplyConfiguration{}
-	case policyv1beta1.SchemeGroupVersion.WithKind("PodDisruptionBudgetSpec"):
-		return &applyconfigurationpolicyv1beta1.PodDisruptionBudgetSpecApplyConfiguration{}
-	case policyv1beta1.SchemeGroupVersion.WithKind("PodDisruptionBudgetStatus"):
-		return &applyconfigurationpolicyv1beta1.PodDisruptionBudgetStatusApplyConfiguration{}
 
 		// Group=rbac.authorization.k8s.io, Version=v1
 	case rbacv1.SchemeGroupVersion.WithKind("AggregationRule"):
@@ -1820,42 +1130,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationrbacv1.RoleRefApplyConfiguration{}
 	case rbacv1.SchemeGroupVersion.WithKind("Subject"):
 		return &applyconfigurationrbacv1.SubjectApplyConfiguration{}
-
-		// Group=rbac.authorization.k8s.io, Version=v1alpha1
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("AggregationRule"):
-		return &applyconfigurationrbacv1alpha1.AggregationRuleApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("ClusterRole"):
-		return &applyconfigurationrbacv1alpha1.ClusterRoleApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("ClusterRoleBinding"):
-		return &applyconfigurationrbacv1alpha1.ClusterRoleBindingApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("PolicyRule"):
-		return &applyconfigurationrbacv1alpha1.PolicyRuleApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("Role"):
-		return &applyconfigurationrbacv1alpha1.RoleApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("RoleBinding"):
-		return &applyconfigurationrbacv1alpha1.RoleBindingApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("RoleRef"):
-		return &applyconfigurationrbacv1alpha1.RoleRefApplyConfiguration{}
-	case rbacv1alpha1.SchemeGroupVersion.WithKind("Subject"):
-		return &applyconfigurationrbacv1alpha1.SubjectApplyConfiguration{}
-
-		// Group=rbac.authorization.k8s.io, Version=v1beta1
-	case rbacv1beta1.SchemeGroupVersion.WithKind("AggregationRule"):
-		return &applyconfigurationrbacv1beta1.AggregationRuleApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("ClusterRole"):
-		return &applyconfigurationrbacv1beta1.ClusterRoleApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("ClusterRoleBinding"):
-		return &applyconfigurationrbacv1beta1.ClusterRoleBindingApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("PolicyRule"):
-		return &applyconfigurationrbacv1beta1.PolicyRuleApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("Role"):
-		return &applyconfigurationrbacv1beta1.RoleApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("RoleBinding"):
-		return &applyconfigurationrbacv1beta1.RoleBindingApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("RoleRef"):
-		return &applyconfigurationrbacv1beta1.RoleRefApplyConfiguration{}
-	case rbacv1beta1.SchemeGroupVersion.WithKind("Subject"):
-		return &applyconfigurationrbacv1beta1.SubjectApplyConfiguration{}
 
 		// Group=resource.k8s.io, Version=v1
 	case resourcev1.SchemeGroupVersion.WithKind("AllocatedDeviceStatus"):
@@ -1937,201 +1211,9 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case resourcev1.SchemeGroupVersion.WithKind("ResourceSliceSpec"):
 		return &applyconfigurationresourcev1.ResourceSliceSpecApplyConfiguration{}
 
-		// Group=resource.k8s.io, Version=v1alpha3
-	case v1alpha3.SchemeGroupVersion.WithKind("DeviceTaint"):
-		return &resourcev1alpha3.DeviceTaintApplyConfiguration{}
-	case v1alpha3.SchemeGroupVersion.WithKind("DeviceTaintRule"):
-		return &resourcev1alpha3.DeviceTaintRuleApplyConfiguration{}
-	case v1alpha3.SchemeGroupVersion.WithKind("DeviceTaintRuleSpec"):
-		return &resourcev1alpha3.DeviceTaintRuleSpecApplyConfiguration{}
-	case v1alpha3.SchemeGroupVersion.WithKind("DeviceTaintRuleStatus"):
-		return &resourcev1alpha3.DeviceTaintRuleStatusApplyConfiguration{}
-	case v1alpha3.SchemeGroupVersion.WithKind("DeviceTaintSelector"):
-		return &resourcev1alpha3.DeviceTaintSelectorApplyConfiguration{}
-
-		// Group=resource.k8s.io, Version=v1beta1
-	case resourcev1beta1.SchemeGroupVersion.WithKind("AllocatedDeviceStatus"):
-		return &applyconfigurationresourcev1beta1.AllocatedDeviceStatusApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("AllocationResult"):
-		return &applyconfigurationresourcev1beta1.AllocationResultApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("BasicDevice"):
-		return &applyconfigurationresourcev1beta1.BasicDeviceApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("CapacityRequestPolicy"):
-		return &applyconfigurationresourcev1beta1.CapacityRequestPolicyApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("CapacityRequestPolicyRange"):
-		return &applyconfigurationresourcev1beta1.CapacityRequestPolicyRangeApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("CapacityRequirements"):
-		return &applyconfigurationresourcev1beta1.CapacityRequirementsApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("CELDeviceSelector"):
-		return &applyconfigurationresourcev1beta1.CELDeviceSelectorApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("Counter"):
-		return &applyconfigurationresourcev1beta1.CounterApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("CounterSet"):
-		return &applyconfigurationresourcev1beta1.CounterSetApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("Device"):
-		return &applyconfigurationresourcev1beta1.DeviceApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceAllocationConfiguration"):
-		return &applyconfigurationresourcev1beta1.DeviceAllocationConfigurationApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceAllocationResult"):
-		return &applyconfigurationresourcev1beta1.DeviceAllocationResultApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceAttribute"):
-		return &applyconfigurationresourcev1beta1.DeviceAttributeApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceCapacity"):
-		return &applyconfigurationresourcev1beta1.DeviceCapacityApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceClaim"):
-		return &applyconfigurationresourcev1beta1.DeviceClaimApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceClaimConfiguration"):
-		return &applyconfigurationresourcev1beta1.DeviceClaimConfigurationApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceClass"):
-		return &applyconfigurationresourcev1beta1.DeviceClassApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceClassConfiguration"):
-		return &applyconfigurationresourcev1beta1.DeviceClassConfigurationApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceClassSpec"):
-		return &applyconfigurationresourcev1beta1.DeviceClassSpecApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceConfiguration"):
-		return &applyconfigurationresourcev1beta1.DeviceConfigurationApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceConstraint"):
-		return &applyconfigurationresourcev1beta1.DeviceConstraintApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceCounterConsumption"):
-		return &applyconfigurationresourcev1beta1.DeviceCounterConsumptionApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceRequest"):
-		return &applyconfigurationresourcev1beta1.DeviceRequestApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceRequestAllocationResult"):
-		return &applyconfigurationresourcev1beta1.DeviceRequestAllocationResultApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceSelector"):
-		return &applyconfigurationresourcev1beta1.DeviceSelectorApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceSubRequest"):
-		return &applyconfigurationresourcev1beta1.DeviceSubRequestApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceTaint"):
-		return &applyconfigurationresourcev1beta1.DeviceTaintApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("DeviceToleration"):
-		return &applyconfigurationresourcev1beta1.DeviceTolerationApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("NetworkDeviceData"):
-		return &applyconfigurationresourcev1beta1.NetworkDeviceDataApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("OpaqueDeviceConfiguration"):
-		return &applyconfigurationresourcev1beta1.OpaqueDeviceConfigurationApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceClaim"):
-		return &applyconfigurationresourcev1beta1.ResourceClaimApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceClaimConsumerReference"):
-		return &applyconfigurationresourcev1beta1.ResourceClaimConsumerReferenceApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceClaimSpec"):
-		return &applyconfigurationresourcev1beta1.ResourceClaimSpecApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceClaimStatus"):
-		return &applyconfigurationresourcev1beta1.ResourceClaimStatusApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceClaimTemplate"):
-		return &applyconfigurationresourcev1beta1.ResourceClaimTemplateApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceClaimTemplateSpec"):
-		return &applyconfigurationresourcev1beta1.ResourceClaimTemplateSpecApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourcePool"):
-		return &applyconfigurationresourcev1beta1.ResourcePoolApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceSlice"):
-		return &applyconfigurationresourcev1beta1.ResourceSliceApplyConfiguration{}
-	case resourcev1beta1.SchemeGroupVersion.WithKind("ResourceSliceSpec"):
-		return &applyconfigurationresourcev1beta1.ResourceSliceSpecApplyConfiguration{}
-
-		// Group=resource.k8s.io, Version=v1beta2
-	case resourcev1beta2.SchemeGroupVersion.WithKind("AllocatedDeviceStatus"):
-		return &applyconfigurationresourcev1beta2.AllocatedDeviceStatusApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("AllocationResult"):
-		return &applyconfigurationresourcev1beta2.AllocationResultApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("CapacityRequestPolicy"):
-		return &applyconfigurationresourcev1beta2.CapacityRequestPolicyApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("CapacityRequestPolicyRange"):
-		return &applyconfigurationresourcev1beta2.CapacityRequestPolicyRangeApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("CapacityRequirements"):
-		return &applyconfigurationresourcev1beta2.CapacityRequirementsApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("CELDeviceSelector"):
-		return &applyconfigurationresourcev1beta2.CELDeviceSelectorApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("Counter"):
-		return &applyconfigurationresourcev1beta2.CounterApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("CounterSet"):
-		return &applyconfigurationresourcev1beta2.CounterSetApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("Device"):
-		return &applyconfigurationresourcev1beta2.DeviceApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceAllocationConfiguration"):
-		return &applyconfigurationresourcev1beta2.DeviceAllocationConfigurationApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceAllocationResult"):
-		return &applyconfigurationresourcev1beta2.DeviceAllocationResultApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceAttribute"):
-		return &applyconfigurationresourcev1beta2.DeviceAttributeApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceCapacity"):
-		return &applyconfigurationresourcev1beta2.DeviceCapacityApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceClaim"):
-		return &applyconfigurationresourcev1beta2.DeviceClaimApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceClaimConfiguration"):
-		return &applyconfigurationresourcev1beta2.DeviceClaimConfigurationApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceClass"):
-		return &applyconfigurationresourcev1beta2.DeviceClassApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceClassConfiguration"):
-		return &applyconfigurationresourcev1beta2.DeviceClassConfigurationApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceClassSpec"):
-		return &applyconfigurationresourcev1beta2.DeviceClassSpecApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceConfiguration"):
-		return &applyconfigurationresourcev1beta2.DeviceConfigurationApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceConstraint"):
-		return &applyconfigurationresourcev1beta2.DeviceConstraintApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceCounterConsumption"):
-		return &applyconfigurationresourcev1beta2.DeviceCounterConsumptionApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceRequest"):
-		return &applyconfigurationresourcev1beta2.DeviceRequestApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceRequestAllocationResult"):
-		return &applyconfigurationresourcev1beta2.DeviceRequestAllocationResultApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceSelector"):
-		return &applyconfigurationresourcev1beta2.DeviceSelectorApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceSubRequest"):
-		return &applyconfigurationresourcev1beta2.DeviceSubRequestApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceTaint"):
-		return &applyconfigurationresourcev1beta2.DeviceTaintApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("DeviceToleration"):
-		return &applyconfigurationresourcev1beta2.DeviceTolerationApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ExactDeviceRequest"):
-		return &applyconfigurationresourcev1beta2.ExactDeviceRequestApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("NetworkDeviceData"):
-		return &applyconfigurationresourcev1beta2.NetworkDeviceDataApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("OpaqueDeviceConfiguration"):
-		return &applyconfigurationresourcev1beta2.OpaqueDeviceConfigurationApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceClaim"):
-		return &applyconfigurationresourcev1beta2.ResourceClaimApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceClaimConsumerReference"):
-		return &applyconfigurationresourcev1beta2.ResourceClaimConsumerReferenceApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceClaimSpec"):
-		return &applyconfigurationresourcev1beta2.ResourceClaimSpecApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceClaimStatus"):
-		return &applyconfigurationresourcev1beta2.ResourceClaimStatusApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceClaimTemplate"):
-		return &applyconfigurationresourcev1beta2.ResourceClaimTemplateApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceClaimTemplateSpec"):
-		return &applyconfigurationresourcev1beta2.ResourceClaimTemplateSpecApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourcePool"):
-		return &applyconfigurationresourcev1beta2.ResourcePoolApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceSlice"):
-		return &applyconfigurationresourcev1beta2.ResourceSliceApplyConfiguration{}
-	case resourcev1beta2.SchemeGroupVersion.WithKind("ResourceSliceSpec"):
-		return &applyconfigurationresourcev1beta2.ResourceSliceSpecApplyConfiguration{}
-
 		// Group=scheduling.k8s.io, Version=v1
 	case schedulingv1.SchemeGroupVersion.WithKind("PriorityClass"):
 		return &applyconfigurationschedulingv1.PriorityClassApplyConfiguration{}
-
-		// Group=scheduling.k8s.io, Version=v1alpha1
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("GangSchedulingPolicy"):
-		return &applyconfigurationschedulingv1alpha1.GangSchedulingPolicyApplyConfiguration{}
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("PodGroup"):
-		return &applyconfigurationschedulingv1alpha1.PodGroupApplyConfiguration{}
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("PodGroupPolicy"):
-		return &applyconfigurationschedulingv1alpha1.PodGroupPolicyApplyConfiguration{}
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("PriorityClass"):
-		return &applyconfigurationschedulingv1alpha1.PriorityClassApplyConfiguration{}
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("TypedLocalObjectReference"):
-		return &applyconfigurationschedulingv1alpha1.TypedLocalObjectReferenceApplyConfiguration{}
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("Workload"):
-		return &applyconfigurationschedulingv1alpha1.WorkloadApplyConfiguration{}
-	case schedulingv1alpha1.SchemeGroupVersion.WithKind("WorkloadSpec"):
-		return &applyconfigurationschedulingv1alpha1.WorkloadSpecApplyConfiguration{}
-
-		// Group=scheduling.k8s.io, Version=v1beta1
-	case schedulingv1beta1.SchemeGroupVersion.WithKind("PriorityClass"):
-		return &applyconfigurationschedulingv1beta1.PriorityClassApplyConfiguration{}
 
 		// Group=server.gpustack.ai, Version=v1
 	case serverv1.SchemeGroupVersion.WithKind("Cluster"):
@@ -2231,61 +1313,13 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 	case storagev1.SchemeGroupVersion.WithKind("VolumeNodeResources"):
 		return &applyconfigurationstoragev1.VolumeNodeResourcesApplyConfiguration{}
 
-		// Group=storage.k8s.io, Version=v1alpha1
-	case storagev1alpha1.SchemeGroupVersion.WithKind("CSIStorageCapacity"):
-		return &applyconfigurationstoragev1alpha1.CSIStorageCapacityApplyConfiguration{}
-	case storagev1alpha1.SchemeGroupVersion.WithKind("VolumeAttachment"):
-		return &applyconfigurationstoragev1alpha1.VolumeAttachmentApplyConfiguration{}
-	case storagev1alpha1.SchemeGroupVersion.WithKind("VolumeAttachmentSource"):
-		return &applyconfigurationstoragev1alpha1.VolumeAttachmentSourceApplyConfiguration{}
-	case storagev1alpha1.SchemeGroupVersion.WithKind("VolumeAttachmentSpec"):
-		return &applyconfigurationstoragev1alpha1.VolumeAttachmentSpecApplyConfiguration{}
-	case storagev1alpha1.SchemeGroupVersion.WithKind("VolumeAttachmentStatus"):
-		return &applyconfigurationstoragev1alpha1.VolumeAttachmentStatusApplyConfiguration{}
-	case storagev1alpha1.SchemeGroupVersion.WithKind("VolumeAttributesClass"):
-		return &applyconfigurationstoragev1alpha1.VolumeAttributesClassApplyConfiguration{}
-	case storagev1alpha1.SchemeGroupVersion.WithKind("VolumeError"):
-		return &applyconfigurationstoragev1alpha1.VolumeErrorApplyConfiguration{}
-
-		// Group=storage.k8s.io, Version=v1beta1
-	case storagev1beta1.SchemeGroupVersion.WithKind("CSIDriver"):
-		return &applyconfigurationstoragev1beta1.CSIDriverApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("CSIDriverSpec"):
-		return &applyconfigurationstoragev1beta1.CSIDriverSpecApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("CSINode"):
-		return &applyconfigurationstoragev1beta1.CSINodeApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("CSINodeDriver"):
-		return &applyconfigurationstoragev1beta1.CSINodeDriverApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("CSINodeSpec"):
-		return &applyconfigurationstoragev1beta1.CSINodeSpecApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("CSIStorageCapacity"):
-		return &applyconfigurationstoragev1beta1.CSIStorageCapacityApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("StorageClass"):
-		return &applyconfigurationstoragev1beta1.StorageClassApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("TokenRequest"):
-		return &applyconfigurationstoragev1beta1.TokenRequestApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeAttachment"):
-		return &applyconfigurationstoragev1beta1.VolumeAttachmentApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeAttachmentSource"):
-		return &applyconfigurationstoragev1beta1.VolumeAttachmentSourceApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeAttachmentSpec"):
-		return &applyconfigurationstoragev1beta1.VolumeAttachmentSpecApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeAttachmentStatus"):
-		return &applyconfigurationstoragev1beta1.VolumeAttachmentStatusApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeAttributesClass"):
-		return &applyconfigurationstoragev1beta1.VolumeAttributesClassApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeError"):
-		return &applyconfigurationstoragev1beta1.VolumeErrorApplyConfiguration{}
-	case storagev1beta1.SchemeGroupVersion.WithKind("VolumeNodeResources"):
-		return &applyconfigurationstoragev1beta1.VolumeNodeResourcesApplyConfiguration{}
-
 		// Group=storagemigration.k8s.io, Version=v1beta1
-	case storagemigrationv1beta1.SchemeGroupVersion.WithKind("StorageVersionMigration"):
-		return &applyconfigurationstoragemigrationv1beta1.StorageVersionMigrationApplyConfiguration{}
-	case storagemigrationv1beta1.SchemeGroupVersion.WithKind("StorageVersionMigrationSpec"):
-		return &applyconfigurationstoragemigrationv1beta1.StorageVersionMigrationSpecApplyConfiguration{}
-	case storagemigrationv1beta1.SchemeGroupVersion.WithKind("StorageVersionMigrationStatus"):
-		return &applyconfigurationstoragemigrationv1beta1.StorageVersionMigrationStatusApplyConfiguration{}
+	case v1beta1.SchemeGroupVersion.WithKind("StorageVersionMigration"):
+		return &storagemigrationv1beta1.StorageVersionMigrationApplyConfiguration{}
+	case v1beta1.SchemeGroupVersion.WithKind("StorageVersionMigrationSpec"):
+		return &storagemigrationv1beta1.StorageVersionMigrationSpecApplyConfiguration{}
+	case v1beta1.SchemeGroupVersion.WithKind("StorageVersionMigrationStatus"):
+		return &storagemigrationv1beta1.StorageVersionMigrationStatusApplyConfiguration{}
 
 		// Group=worker.gpustack.ai, Version=v1
 	case workerv1.SchemeGroupVersion.WithKind("Devices"):

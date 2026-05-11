@@ -63,7 +63,7 @@ func (h *InstanceHandler) SetupHandler(
 			return []string{obj.GetName()}
 		})
 	if err != nil {
-		return schema.GroupVersionResource{}, nil, err
+		return schema.GroupVersionResource{}, srs, err
 	}
 	err = fi.IndexField(ctx, &core.Node{}, "metadata.name",
 		func(obj ctrlcli.Object) []string {
@@ -73,7 +73,7 @@ func (h *InstanceHandler) SetupHandler(
 			return []string{obj.GetName()}
 		})
 	if err != nil {
-		return schema.GroupVersionResource{}, nil, err
+		return schema.GroupVersionResource{}, srs, err
 	}
 
 	// Declare GVR.

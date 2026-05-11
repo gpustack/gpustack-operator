@@ -10,15 +10,12 @@ package networking
 import (
 	internalinterfaces "gpustack.ai/gpustack/pkg/kubeclients/informers/internalinterfaces"
 	v1 "gpustack.ai/gpustack/pkg/kubeclients/informers/networking/v1"
-	v1beta1 "gpustack.ai/gpustack/pkg/kubeclients/informers/networking/v1beta1"
 )
 
 // Interface provides access to each of this group's versions.
 type Interface interface {
 	// V1 provides access to shared informers for resources in V1.
 	V1() v1.Interface
-	// V1beta1 provides access to shared informers for resources in V1beta1.
-	V1beta1() v1beta1.Interface
 }
 
 type group struct {
@@ -35,9 +32,4 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // V1 returns a new v1.Interface.
 func (g *group) V1() v1.Interface {
 	return v1.New(g.factory, g.namespace, g.tweakListOptions)
-}
-
-// V1beta1 returns a new v1beta1.Interface.
-func (g *group) V1beta1() v1beta1.Interface {
-	return v1beta1.New(g.factory, g.namespace, g.tweakListOptions)
 }

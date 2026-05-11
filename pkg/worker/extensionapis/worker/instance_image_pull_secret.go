@@ -52,7 +52,7 @@ func (h *InstanceImagePullSecretHandler) SetupHandler(
 			return []string{obj.GetName()}
 		})
 	if err != nil {
-		return schema.GroupVersionResource{}, nil, err
+		return schema.GroupVersionResource{}, srs, err
 	}
 
 	// Declare GVR.
@@ -61,7 +61,7 @@ func (h *InstanceImagePullSecretHandler) SetupHandler(
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTableConvertor()
 	if err != nil {
-		return gvr, nil, err
+		return gvr, srs, err
 	}
 
 	// As storage.
