@@ -113,9 +113,9 @@ controllerManager:
     - operator: "Exists"
   manager:
     image:
-{{- $registry := default "docker.io" $.ContainerRegistry -}}
-{{- $namespace := default "gpustack" $.ContainerNamespace -}}
-{{- $image = printf "%s/%s/mirrored-kueue" $registry $namespace -}}
+{{- $registry := default "docker.io" $.ContainerRegistry }}
+{{- $namespace := default "gpustack" $.ContainerNamespace }}
+{{- $image := printf "%s/%s/mirrored-kueue" $registry $namespace }}
       registry: "{{ $image }}" 
     podAnnotations:
       {{ $.ManagedLabel }}: "true"
