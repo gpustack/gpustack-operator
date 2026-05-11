@@ -331,8 +331,8 @@ ARG GPUSTACK_CHARTS_DIR
 
 ## Kueue
 
-ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.1/kueue-0.17.1.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.17.1.tgz"
-RUN skopeo copy docker://registry.k8s.io/kueue/kueue:v0.17.1 oci-archive:${GPUSTACK_IMAGES_DIR}/kueue-v0.17.1.tar
+ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.2/kueue-0.17.2.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.17.2.tgz"
+RUN skopeo copy docker://registry.k8s.io/kueue/kueue:v0.17.2 oci-archive:${GPUSTACK_IMAGES_DIR}/kueue-v0.17.2.tar
 
 ## Node Features Discovery
 
