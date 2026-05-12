@@ -515,7 +515,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 		sshdC := core.Container{
 			Name: "sshd",
 			Image: func() string {
-				img := "ssh-server:latest"
+				img := "ssh-server:v1.0.0"
 				if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
 					img = cn + "/" + img
 				} else {
