@@ -23,7 +23,6 @@ import (
 const _ProjectClustersResource = "projectclusters"
 
 type ProjectClustersHandler struct {
-	extensionapi.ObjectInfo
 	extensionapi.GetOperation
 	extensionapi.UpdateOperation
 
@@ -31,13 +30,12 @@ type ProjectClustersHandler struct {
 	APIReader ctrlcli.Reader
 }
 
-func newProjectClustersHandler(opts extensionapi.SetupOptions) *ProjectClustersHandler {
+func newProjectClustersHandler(parent rest.Scoper, opts extensionapi.SetupOptions) *ProjectClustersHandler {
 	h := &ProjectClustersHandler{}
 
 	// As storage.
-	h.ObjectInfo = &server.TeamSubjects{}
-	h.GetOperation = extensionapi.WithGet(h)
-	h.UpdateOperation = extensionapi.WithUpdate(h)
+	h.GetOperation = extensionapi.WithSubResourceGet(parent, h)
+	h.UpdateOperation = extensionapi.WithSubResourceUpdate(parent, h)
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()

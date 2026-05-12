@@ -10,7 +10,6 @@ import (
 // TeamSubjects is the subresource of Team for manage subjects.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["teamsubj"]
 type TeamSubjects struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`

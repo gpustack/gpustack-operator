@@ -26,10 +26,13 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.Instance{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_Instance(ref),
 		v1.InstanceEnvVar{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceEnvVar(ref),
 		v1.InstanceEphemeralVolume{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceEphemeralVolume(ref),
+		v1.InstanceEvents{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceEvents(ref),
 		v1.InstanceImagePullSecret{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref),
 		v1.InstanceImagePullSecretList{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref),
 		v1.InstanceImagePullSecretSpec{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretSpec(ref),
 		v1.InstanceList{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceList(ref),
+		v1.InstanceLog{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_InstanceLog(ref),
+		v1.InstanceLogOptions{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceLogOptions(ref),
 		v1.InstancePersistentVolume{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
 		v1.InstancePersistentVolumeList{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
 		v1.InstancePersistentVolumeSpec{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref),
@@ -553,6 +556,55 @@ func schema_gpustack_api_worker_v1_InstanceEphemeralVolume(ref common.ReferenceC
 	}
 }
 
+func schema_gpustack_api_worker_v1_InstanceEvents(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceEvents is the events of an Instance subresource, which provides the events related to the underlying Kubernetes Pod.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(corev1.Event{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			corev1.Event{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -746,6 +798,111 @@ func schema_gpustack_api_worker_v1_InstanceList(ref common.ReferenceCallback) co
 		},
 		Dependencies: []string{
 			v1.Instance{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceLog(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceLog is the subresource of Instance for extracting logs, which is the same as Kubernetes PodLog.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceLogOptions(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceLogOptions is the options of InstanceLog, which is the same as Kubernetes PodLogOptions.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"follow": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Follow the log stream of the Instance.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"sinceSeconds": {
+						SchemaProps: spec.SchemaProps{
+							Description: "A relative time in seconds before the current time from which to show logs. If this value precedes the time an Instance was started, only logs since the Instance start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"sinceTime": {
+						SchemaProps: spec.SchemaProps{
+							Description: "An RFC3339 timestamp from which to show logs. If this value precedes the time an Instance was started, only logs since the Instance start will be returned. If this value is in the future, no logs will be returned. Only one of sinceSeconds or sinceTime may be specified.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"timestamps": {
+						SchemaProps: spec.SchemaProps{
+							Description: "If true, add an RFC3339 or RFC3339Nano timestamp at the beginning of every line of log output.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"tailLines": {
+						SchemaProps: spec.SchemaProps{
+							Description: "If set, the number of lines from the end of the logs to show. If not specified, logs are shown from the creation of the container or sinceSeconds or sinceTime.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"limitBytes": {
+						SchemaProps: spec.SchemaProps{
+							Description: "If set, the number of bytes to read from the server before terminating the log output. This may not display a complete final line of logging, and may return slightly more or slightly less than the specified limit.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			metav1.Time{}.OpenAPIModelName()},
 	}
 }
 

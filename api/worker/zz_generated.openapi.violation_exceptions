@@ -1,3 +1,4 @@
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,InstanceEvents,Items
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,Accelerator,PhysicalIndexes
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorFeatures,RoCE
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,DeviceTopology,PciBusID

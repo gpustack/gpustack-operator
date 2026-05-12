@@ -20,6 +20,8 @@ func (*InstanceEnvVar) ProtoMessage() {}
 
 func (*InstanceEphemeralVolume) ProtoMessage() {}
 
+func (*InstanceEvents) ProtoMessage() {}
+
 func (*InstanceImagePullSecret) ProtoMessage() {}
 
 func (*InstanceImagePullSecretList) ProtoMessage() {}
@@ -27,6 +29,10 @@ func (*InstanceImagePullSecretList) ProtoMessage() {}
 func (*InstanceImagePullSecretSpec) ProtoMessage() {}
 
 func (*InstanceList) ProtoMessage() {}
+
+func (*InstanceLog) ProtoMessage() {}
+
+func (*InstanceLogOptions) ProtoMessage() {}
 
 func (*InstancePersistentVolume) ProtoMessage() {}
 

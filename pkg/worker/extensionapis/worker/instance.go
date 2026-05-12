@@ -121,6 +121,12 @@ func (h *InstanceHandler) SetupHandler(
 	h.Client = opts.Manager.GetClient()
 	h.APIReader = opts.Manager.GetAPIReader()
 
+	// Create subresource handlers.
+	srs = map[string]rest.Storage{
+		"log":    newInstanceLogHandler(h.ObjectInfo, opts),
+		"events": newInstanceEventsHandler(h.ObjectInfo, opts),
+	}
+
 	return gvr, srs, err
 }
 

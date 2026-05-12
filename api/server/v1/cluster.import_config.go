@@ -10,7 +10,6 @@ import (
 // ClusterImportConfig is the subresource of non-loopback Cluster for fetching importing configuration.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 type ClusterImportConfig struct {
 	meta.TypeMeta   `json:",inline"`
 	meta.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`

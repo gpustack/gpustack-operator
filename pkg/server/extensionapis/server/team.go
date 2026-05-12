@@ -108,7 +108,7 @@ func (h *TeamHandler) SetupHandler(
 
 	// Create subresource handlers.
 	srs = map[string]rest.Storage{
-		"subjects": newTeamSubjectsHandler(opts),
+		"subjects": newTeamSubjectsHandler(h.ObjectInfo, opts),
 	}
 
 	return gvr, srs, err

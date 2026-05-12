@@ -22,25 +22,21 @@ import (
 // ClusterConfigHandler handles v1.ClusterConfig objects,
 // which is a subresource of v1.Cluster objects.
 type ClusterConfigHandler struct {
-	extensionapi.ObjectInfo
 	extensionapi.GetOperation
 	extensionapi.UpdateOperation
 
-	Client    ctrlcli.Client
-	APIReader ctrlcli.Reader
+	Client ctrlcli.Client
 }
 
-func newClusterConfigHandler(opts extensionapi.SetupOptions) *ClusterConfigHandler {
+func newClusterConfigHandler(parent rest.Scoper, opts extensionapi.SetupOptions) *ClusterConfigHandler {
 	h := &ClusterConfigHandler{}
 
 	// As storage.
-	h.ObjectInfo = &server.ClusterConfig{}
-	h.GetOperation = extensionapi.WithGet(h)
-	h.UpdateOperation = extensionapi.WithUpdate(h)
+	h.GetOperation = extensionapi.WithSubResourceGet(parent, h)
+	h.UpdateOperation = extensionapi.WithSubResourceUpdate(parent, h)
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()
-	h.APIReader = opts.Manager.GetAPIReader()
 
 	return h
 }

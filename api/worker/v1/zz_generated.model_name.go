@@ -31,6 +31,11 @@ func (in InstanceEphemeralVolume) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceEvents) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceEvents"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceImagePullSecret) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceImagePullSecret"
 }
@@ -48,6 +53,16 @@ func (in InstanceImagePullSecretSpec) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceLog) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceLog"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceLogOptions) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceLogOptions"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

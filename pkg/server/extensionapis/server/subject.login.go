@@ -28,18 +28,16 @@ const _SubjectLoginResource = "subjectlogins"
 // SubjectLoginHandler is a handler for v1.SubjectLogin objects,
 // which is a subresource of v1.Subject objects.
 type SubjectLoginHandler struct {
-	extensionapi.ObjectInfo
 	extensionapi.CreateOperation
 
 	Client ctrlcli.Client
 }
 
-func newSubjectLoginHandler(opts extensionapi.SetupOptions) *SubjectLoginHandler {
+func newSubjectLoginHandler(parent rest.Scoper, opts extensionapi.SetupOptions) *SubjectLoginHandler {
 	h := &SubjectLoginHandler{}
 
 	// As storage.
-	h.ObjectInfo = &server.SubjectLogin{}
-	h.CreateOperation = extensionapi.WithCreate(h)
+	h.CreateOperation = extensionapi.WithSubResourceCreate(parent, h)
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()

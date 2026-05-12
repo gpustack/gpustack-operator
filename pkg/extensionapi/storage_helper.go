@@ -87,7 +87,10 @@ func convertCtrlListOptionsFromMeta(ctx context.Context, in *internalversion.Lis
 	return opts
 }
 
-func keyFuncForNamespacedScope(ctx context.Context, name string) (types.NamespacedName, error) {
+// KeyFuncForNamespacedScope returns a key function for namespaced scoped resource.
+// It will extract namespace from request context and combine it with name to create a NamespacedName object as the key.
+// It will also validate the name and namespace, and return error if validation fails.
+func KeyFuncForNamespacedScope(ctx context.Context, name string) (types.NamespacedName, error) {
 	ns, ok := request.NamespaceFrom(ctx)
 	if !ok || len(ns) == 0 {
 		return types.NamespacedName{},
@@ -104,7 +107,10 @@ func keyFuncForNamespacedScope(ctx context.Context, name string) (types.Namespac
 	return types.NamespacedName{Name: name, Namespace: ns}, nil
 }
 
-func keyFuncForClusterScope(ctx context.Context, name string) (types.NamespacedName, error) {
+// KeyFuncForClusterScope returns a key function for cluster scoped resource.
+// It will create a NamespacedName object with empty namespace and name as the key.
+// It will also validate the name, and return error if validation fails.
+func KeyFuncForClusterScope(ctx context.Context, name string) (types.NamespacedName, error) {
 	if len(name) == 0 {
 		return types.NamespacedName{},
 			kerrors.NewBadRequest("Name parameter required.")

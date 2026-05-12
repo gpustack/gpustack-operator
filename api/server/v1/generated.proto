@@ -42,7 +42,6 @@ message Cluster {
 // ClusterConfig is the subresource of non-loopback Cluster for extracting configuration.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message ClusterConfig {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
@@ -72,7 +71,6 @@ message ClusterConfigStatus {
 // ClusterImportConfig is the subresource of non-loopback Cluster for fetching importing configuration.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message ClusterImportConfig {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
@@ -130,7 +128,6 @@ message ProjectCluster {
 // ProjectClusters is the subresource of Project for manage cluster bindings.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["projcls"]
 message ProjectClusters {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
@@ -202,7 +199,6 @@ message SubjectList {
 // SubjectLogin is the subresource of Subject for login request.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message SubjectLogin {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
@@ -601,7 +597,6 @@ message SubjectSpec {
 // SubjectToken is the subresource of Subject for token request.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"]
 message SubjectToken {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
@@ -697,7 +692,6 @@ message TeamSubject {
 // TeamSubjects is the subresource of Team for manage subjects.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["teamsubj"]
 message TeamSubjects {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 

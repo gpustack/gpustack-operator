@@ -25,7 +25,6 @@ const _SubjectTokenResource = "subjecttokens"
 // SubjectTokenHandler is the handler for v1.SubjectToken objects,
 // which is a subresource of v1.Subject objects.
 type SubjectTokenHandler struct {
-	extensionapi.ObjectInfo
 	extensionapi.CreateOperation
 
 	Client ctrlcli.Client
@@ -36,12 +35,11 @@ var (
 	_ rest.Creater = (*SubjectTokenHandler)(nil)
 )
 
-func newSubjectTokenHandler(opts extensionapi.SetupOptions) *SubjectTokenHandler {
+func newSubjectTokenHandler(parent rest.Scoper, opts extensionapi.SetupOptions) *SubjectTokenHandler {
 	h := &SubjectTokenHandler{}
 
 	// As storage.
-	h.ObjectInfo = &server.SubjectToken{}
-	h.CreateOperation = extensionapi.WithCreate(h)
+	h.CreateOperation = extensionapi.WithSubResourceCreate(parent, h)
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()

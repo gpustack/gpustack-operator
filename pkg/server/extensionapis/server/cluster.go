@@ -72,8 +72,8 @@ func (h *ClusterHandler) SetupHandler(
 
 	// Create subresource handlers.
 	srs = map[string]rest.Storage{
-		"config":       newClusterConfigHandler(opts),
-		"importconfig": newClusterImportConfigHandler(opts),
+		"config":       newClusterConfigHandler(h.ObjectInfo, opts),
+		"importconfig": newClusterImportConfigHandler(h.ObjectInfo, opts),
 	}
 
 	return gvr, srs, err

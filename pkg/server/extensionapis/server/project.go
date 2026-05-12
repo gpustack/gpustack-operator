@@ -95,7 +95,7 @@ func (h *ProjectHandler) SetupHandler(
 
 	// Create subresource handlers.
 	srs = map[string]rest.Storage{
-		"clusters": newProjectClustersHandler(opts),
+		"clusters": newProjectClustersHandler(h.ObjectInfo, opts),
 	}
 
 	return gvr, srs, err

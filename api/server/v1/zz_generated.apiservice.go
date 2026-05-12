@@ -94,70 +94,6 @@ func (in *Cluster) CopyStatusTo(out runtime.Object) {
 	out.(*Cluster).Status = in.Status
 }
 
-var _ rest.Scoper = (*ClusterConfig)(nil)
-
-func (*ClusterConfig) NamespaceScoped() bool {
-	return true
-}
-
-var _ rest.KindProvider = (*ClusterConfig)(nil)
-
-func (*ClusterConfig) Kind() string {
-	return "ClusterConfig"
-}
-
-var _ rest.SingularNameProvider = (*ClusterConfig)(nil)
-
-func (*ClusterConfig) GetSingularName() string {
-	return "clusterconfig"
-}
-
-var _ rest.ShortNamesProvider = (*ClusterConfig)(nil)
-
-func (*ClusterConfig) ShortNames() []string {
-	return []string{}
-}
-
-var _ rest.CategoriesProvider = (*ClusterConfig)(nil)
-
-func (*ClusterConfig) Categories() []string {
-	return []string{
-		"gpustack",
-	}
-}
-
-var _ rest.Scoper = (*ClusterImportConfig)(nil)
-
-func (*ClusterImportConfig) NamespaceScoped() bool {
-	return true
-}
-
-var _ rest.KindProvider = (*ClusterImportConfig)(nil)
-
-func (*ClusterImportConfig) Kind() string {
-	return "ClusterImportConfig"
-}
-
-var _ rest.SingularNameProvider = (*ClusterImportConfig)(nil)
-
-func (*ClusterImportConfig) GetSingularName() string {
-	return "clusterimportconfig"
-}
-
-var _ rest.ShortNamesProvider = (*ClusterImportConfig)(nil)
-
-func (*ClusterImportConfig) ShortNames() []string {
-	return []string{}
-}
-
-var _ rest.CategoriesProvider = (*ClusterImportConfig)(nil)
-
-func (*ClusterImportConfig) Categories() []string {
-	return []string{
-		"gpustack",
-	}
-}
-
 var _ rest.Scoper = (*Project)(nil)
 
 func (*Project) NamespaceScoped() bool {
@@ -187,40 +123,6 @@ func (*Project) ShortNames() []string {
 var _ rest.CategoriesProvider = (*Project)(nil)
 
 func (*Project) Categories() []string {
-	return []string{
-		"gpustack",
-	}
-}
-
-var _ rest.Scoper = (*ProjectClusters)(nil)
-
-func (*ProjectClusters) NamespaceScoped() bool {
-	return true
-}
-
-var _ rest.KindProvider = (*ProjectClusters)(nil)
-
-func (*ProjectClusters) Kind() string {
-	return "ProjectClusters"
-}
-
-var _ rest.SingularNameProvider = (*ProjectClusters)(nil)
-
-func (*ProjectClusters) GetSingularName() string {
-	return "projectclusters"
-}
-
-var _ rest.ShortNamesProvider = (*ProjectClusters)(nil)
-
-func (*ProjectClusters) ShortNames() []string {
-	return []string{
-		"projcls",
-	}
-}
-
-var _ rest.CategoriesProvider = (*ProjectClusters)(nil)
-
-func (*ProjectClusters) Categories() []string {
 	return []string{
 		"gpustack",
 	}
@@ -260,38 +162,6 @@ func (*Subject) Categories() []string {
 	}
 }
 
-var _ rest.Scoper = (*SubjectLogin)(nil)
-
-func (*SubjectLogin) NamespaceScoped() bool {
-	return true
-}
-
-var _ rest.KindProvider = (*SubjectLogin)(nil)
-
-func (*SubjectLogin) Kind() string {
-	return "SubjectLogin"
-}
-
-var _ rest.SingularNameProvider = (*SubjectLogin)(nil)
-
-func (*SubjectLogin) GetSingularName() string {
-	return "subjectlogin"
-}
-
-var _ rest.ShortNamesProvider = (*SubjectLogin)(nil)
-
-func (*SubjectLogin) ShortNames() []string {
-	return []string{}
-}
-
-var _ rest.CategoriesProvider = (*SubjectLogin)(nil)
-
-func (*SubjectLogin) Categories() []string {
-	return []string{
-		"gpustack",
-	}
-}
-
 var _ rest.Scoper = (*SubjectProvider)(nil)
 
 func (*SubjectProvider) NamespaceScoped() bool {
@@ -326,38 +196,6 @@ func (*SubjectProvider) Categories() []string {
 	}
 }
 
-var _ rest.Scoper = (*SubjectToken)(nil)
-
-func (*SubjectToken) NamespaceScoped() bool {
-	return true
-}
-
-var _ rest.KindProvider = (*SubjectToken)(nil)
-
-func (*SubjectToken) Kind() string {
-	return "SubjectToken"
-}
-
-var _ rest.SingularNameProvider = (*SubjectToken)(nil)
-
-func (*SubjectToken) GetSingularName() string {
-	return "subjecttoken"
-}
-
-var _ rest.ShortNamesProvider = (*SubjectToken)(nil)
-
-func (*SubjectToken) ShortNames() []string {
-	return []string{}
-}
-
-var _ rest.CategoriesProvider = (*SubjectToken)(nil)
-
-func (*SubjectToken) Categories() []string {
-	return []string{
-		"gpustack",
-	}
-}
-
 var _ rest.Scoper = (*Team)(nil)
 
 func (*Team) NamespaceScoped() bool {
@@ -387,40 +225,6 @@ func (*Team) ShortNames() []string {
 var _ rest.CategoriesProvider = (*Team)(nil)
 
 func (*Team) Categories() []string {
-	return []string{
-		"gpustack",
-	}
-}
-
-var _ rest.Scoper = (*TeamSubjects)(nil)
-
-func (*TeamSubjects) NamespaceScoped() bool {
-	return true
-}
-
-var _ rest.KindProvider = (*TeamSubjects)(nil)
-
-func (*TeamSubjects) Kind() string {
-	return "TeamSubjects"
-}
-
-var _ rest.SingularNameProvider = (*TeamSubjects)(nil)
-
-func (*TeamSubjects) GetSingularName() string {
-	return "teamsubjects"
-}
-
-var _ rest.ShortNamesProvider = (*TeamSubjects)(nil)
-
-func (*TeamSubjects) ShortNames() []string {
-	return []string{
-		"teamsubj",
-	}
-}
-
-var _ rest.CategoriesProvider = (*TeamSubjects)(nil)
-
-func (*TeamSubjects) Categories() []string {
 	return []string{
 		"gpustack",
 	}

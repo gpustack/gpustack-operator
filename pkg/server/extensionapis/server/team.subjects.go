@@ -30,7 +30,6 @@ const _TeamSubjectResource = "teamsubjects"
 //
 // TeamSubjectsHandler maps the rbac RoleBinding objects to the server v1.TeamSubjects objects.
 type TeamSubjectsHandler struct {
-	extensionapi.ObjectInfo
 	extensionapi.GetOperation
 	extensionapi.UpdateOperation
 
@@ -38,13 +37,12 @@ type TeamSubjectsHandler struct {
 	APIReader ctrlcli.Reader
 }
 
-func newTeamSubjectsHandler(opts extensionapi.SetupOptions) *TeamSubjectsHandler {
+func newTeamSubjectsHandler(parent rest.Scoper, opts extensionapi.SetupOptions) *TeamSubjectsHandler {
 	h := &TeamSubjectsHandler{}
 
 	// As storage.
-	h.ObjectInfo = &server.TeamSubjects{}
-	h.GetOperation = extensionapi.WithGet(h)
-	h.UpdateOperation = extensionapi.WithUpdate(h)
+	h.GetOperation = extensionapi.WithSubResourceGet(parent, h)
+	h.UpdateOperation = extensionapi.WithSubResourceUpdate(parent, h)
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()

@@ -31,6 +31,7 @@ import (
 type (
 	// CreateHandler is an interface for a creation handler.
 	CreateHandler interface {
+		rest.Scoper
 		// New returns a new object.
 		New() runtime.Object
 		// OnCreate creates the object with the given options,
@@ -104,6 +105,32 @@ func (s CreateOperation) Create(
 		return nil, wrapError(ctx, om.GetName(), err)
 	}
 	return obj, nil
+}
+
+type (
+	// SubResourceCreateHandler is an interface for a creation handler for subresource.
+	SubResourceCreateHandler interface {
+		// New returns a new object.
+		New() runtime.Object
+		// OnCreate creates the object with the given options,
+		// and returns the created object.
+		OnCreate(ctx context.Context, object runtime.Object, opts ctrlcli.CreateOptions) (created runtime.Object, err error)
+	}
+
+	subResourceCreateHandlerAdapter struct {
+		rest.Scoper
+		SubResourceCreateHandler
+	}
+)
+
+// WithSubResourceCreate returns a CreateOperation for the given SubResourceCreateHandler.
+func WithSubResourceCreate(parent rest.Scoper, h SubResourceCreateHandler) CreateOperation {
+	return CreateOperation{
+		Handler: subResourceCreateHandlerAdapter{
+			Scoper:                   parent,
+			SubResourceCreateHandler: h,
+		},
+	}
 }
 
 type (
@@ -298,6 +325,29 @@ func WithGet(h GetHandler) GetOperation {
 	return GetOperation{Handler: h}
 }
 
+type (
+	// SubResourceGetHandler is an interface for a getting handler for subresource.
+	SubResourceGetHandler interface {
+		// OnGet returns the object with the given key and options.
+		OnGet(ctx context.Context, key types.NamespacedName, opts ctrlcli.GetOptions) (object runtime.Object, err error)
+	}
+
+	subResourceGetHandlerAdapter struct {
+		rest.Scoper
+		SubResourceGetHandler
+	}
+)
+
+// WithSubResourceGet returns a GetOperation for the given SubResourceGetHandler.
+func WithSubResourceGet(parent rest.Scoper, h SubResourceGetHandler) GetOperation {
+	return GetOperation{
+		Handler: subResourceGetHandlerAdapter{
+			Scoper:                parent,
+			SubResourceGetHandler: h,
+		},
+	}
+}
+
 func (s GetOperation) Get(
 	ctx context.Context,
 	name string,
@@ -307,9 +357,9 @@ func (s GetOperation) Get(
 		options = &meta.GetOptions{ResourceVersion: "0"}
 	}
 
-	keyFunc := keyFuncForClusterScope
+	keyFunc := KeyFuncForClusterScope
 	if s.Handler.NamespaceScoped() {
-		keyFunc = keyFuncForNamespacedScope
+		keyFunc = KeyFuncForNamespacedScope
 	}
 	key, err := keyFunc(ctx, name)
 	if err != nil {
@@ -358,6 +408,33 @@ func WithUpdate(h UpdateHandler) UpdateOperation {
 	}
 }
 
+type (
+	// SubResourceUpdateHandler is an interface for an updating handler for subresource.
+	SubResourceUpdateHandler interface {
+		SubResourceGetHandler
+		// New returns a new object.
+		New() runtime.Object
+		// OnUpdate updates the object with the given options,
+		// and returns the updated object.
+		OnUpdate(ctx context.Context, object, oldObject runtime.Object, opts ctrlcli.UpdateOptions) (updated runtime.Object, err error)
+	}
+
+	subResourceUpdateHandlerAdapter struct {
+		rest.Scoper
+		SubResourceUpdateHandler
+	}
+)
+
+// WithSubResourceUpdate returns an UpdateOperation for the given SubResourceUpdateHandler.
+func WithSubResourceUpdate(parent rest.Scoper, h SubResourceUpdateHandler) UpdateOperation {
+	return UpdateOperation{
+		Handler: subResourceUpdateHandlerAdapter{
+			Scoper:                   parent,
+			SubResourceUpdateHandler: h,
+		},
+	}
+}
+
 func (s UpdateOperation) New() runtime.Object {
 	return s.Handler.New()
 }
@@ -375,9 +452,9 @@ func (s UpdateOperation) Update(
 		options = &meta.UpdateOptions{}
 	}
 
-	keyFunc := keyFuncForClusterScope
+	keyFunc := KeyFuncForClusterScope
 	if s.Handler.NamespaceScoped() {
-		keyFunc = keyFuncForNamespacedScope
+		keyFunc = KeyFuncForNamespacedScope
 	}
 	key, err := keyFunc(ctx, name)
 	if err != nil {
@@ -556,9 +633,9 @@ func (s DeleteOperation) Delete(
 		options = &meta.DeleteOptions{GracePeriodSeconds: ptr.To[int64](0)}
 	}
 
-	keyFunc := keyFuncForClusterScope
+	keyFunc := KeyFuncForClusterScope
 	if s.Handler.NamespaceScoped() {
-		keyFunc = keyFuncForNamespacedScope
+		keyFunc = KeyFuncForNamespacedScope
 	}
 	key, err := keyFunc(ctx, name)
 	if err != nil {

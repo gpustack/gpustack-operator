@@ -103,8 +103,8 @@ func (h *SubjectHandler) SetupHandler(
 
 	// Create subresource handlers.
 	srs = map[string]rest.Storage{
-		"login": newSubjectLoginHandler(opts),
-		"token": newSubjectTokenHandler(opts),
+		"login": newSubjectLoginHandler(h.ObjectInfo, opts),
+		"token": newSubjectTokenHandler(h.ObjectInfo, opts),
 	}
 
 	return gvr, srs, err
