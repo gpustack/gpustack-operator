@@ -555,6 +555,12 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 					Limits:   requests,
 				}
 			}(),
+			Env: []core.EnvVar{
+				{
+					Name:  "VOLUME_MOUNT_PATH",
+					Value: inst.Spec.VolumeMount,
+				},
+			},
 			VolumeMounts: func() []core.VolumeMount {
 				if inst.Spec.SSHPublicKey == nil {
 					return nil
@@ -635,6 +641,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			HostIPC:                      true,
 			ShareProcessNamespace:        ptr.To(true),
 			AutomountServiceAccountToken: ptr.To(false),
+			EnableServiceLinks:           ptr.To(false),
 			ImagePullSecrets: func() []core.LocalObjectReference {
 				if inst.Spec.ImagePullSecret == nil {
 					return nil
