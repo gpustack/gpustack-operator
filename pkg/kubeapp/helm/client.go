@@ -64,7 +64,7 @@ func NewClient(restCfg rest.Config, opts ...ClientOption) (*Client, error) {
 	c := &Client{
 		getter:           kubeconfig.ConvertRestConfigToRestClientGetter(&restCfg),
 		defaultNamespace: core.NamespaceDefault,
-		timeout:          5 * time.Minute,
+		timeout:          30 * time.Minute,
 	}
 	for i := range opts {
 		opts[i](c)
