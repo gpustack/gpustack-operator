@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"text/template"
 
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -14,7 +13,6 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
-	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/system"
 )
@@ -55,41 +53,6 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 		DisableInstallIfApiServiceReady: fmt.Sprintf("%s.%s", kueue.SchemeGroupVersion.Version, kueue.SchemeGroupVersion.Group),
 	}
 	_, err := helmCli.Install(ctx, chart)
-	if err != nil {
-		return err
-	}
-
-	// Create or update the Topology.
-	eTopo := &kueue.Topology{
-		ObjectMeta: meta.ObjectMeta{
-			Name: "gpustack-default",
-		},
-		Spec: kueue.TopologySpec{
-			Levels: []kueue.TopologyLevel{
-				{
-					NodeLabel: "kubernetes.io/hostname",
-				},
-			},
-		},
-	}
-	topoAlignFn := func(aTopo *kueue.Topology) (_ *kueue.Topology, skip bool, _ error) {
-		skip = true
-
-		aLabels := sets.New[string]()
-		for i := range aTopo.Spec.Levels {
-			aLabels.Insert(aTopo.Spec.Levels[i].NodeLabel)
-		}
-		for i := range eTopo.Spec.Levels {
-			if !aLabels.Has(eTopo.Spec.Levels[i].NodeLabel) {
-				skip = false
-				aTopo.Spec.Levels = append(aTopo.Spec.Levels, eTopo.Spec.Levels[i])
-			}
-		}
-
-		return aTopo, skip, nil
-	}
-	_, err = kubeclientset.Create(ctx, helmCli.KubeClientSet().KueueV1beta2().Topologies(), eTopo,
-		kubeclientset.WithUpdateIfExisted(topoAlignFn))
 	if err != nil {
 		return err
 	}
