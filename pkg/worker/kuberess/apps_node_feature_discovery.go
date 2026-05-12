@@ -23,7 +23,7 @@ func installNodeFeatureDiscovery(ctx context.Context, helmCli *helm.Client, glob
 	}
 
 	release := "gpustack-node-feature-discovery"
-	path := filepath.Join(system.SubDataDir("charts"), fmt.Sprintf("%s-%s.tgz", name, version))
+	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", name, version))
 	download := fmt.Sprintf("https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v%[1]s/node-feature-discovery-chart-%[1]s.tgz", version) // nolint:lll
 
 	valuesContext := globalValuesContext

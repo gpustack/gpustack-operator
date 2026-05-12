@@ -28,7 +28,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 	}
 
 	release := "gpustack-kueue"
-	path := filepath.Join(system.SubDataDir("charts"), fmt.Sprintf("%s-%s.tgz", name, version))
+	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", name, version))
 	download := fmt.Sprintf("https://github.com/kubernetes-sigs/kueue/releases/download/v%[1]s/kueue-%[1]s.tgz", version)
 
 	valuesContext := globalValuesContext

@@ -73,7 +73,7 @@ func (ch Chart) Load(_ context.Context, cfg *helmaction.Configuration) (*helmcha
 	}
 
 	if f == "" {
-		f = filepath.Join(system.SubDataDir("charts/"+ch.Version), ch.Name)
+		f = filepath.Join(system.SubConfDir("charts/"+ch.Version), ch.Name)
 		if osx.IsEmptyDir(f) {
 			p := helmaction.NewPullWithOpts(helmaction.WithConfig(cfg))
 			p.Settings = cli.New()
