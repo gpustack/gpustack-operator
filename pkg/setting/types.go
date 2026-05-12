@@ -12,7 +12,6 @@ import (
 
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/system"
-	"gpustack.ai/gpustack/pkg/utils/funcx"
 )
 
 // Prop represents the properties of a setting, which can be a combination of editable, private and sensitive.
@@ -69,7 +68,7 @@ func (s Setting) Private() bool {
 
 // Configure configures the value of the setting.
 func (s Setting) Configure(ctx context.Context, newVal string) error {
-	lpCli := system.LoopbackCtrlClient.Get()
+	lpCli := system.LoopbackKubeClient.Get()
 
 	// Update.
 	eSec := &core.Secret{
@@ -96,13 +95,37 @@ func (s Setting) Configure(ctx context.Context, newVal string) error {
 		return aSec, false, nil
 	}
 
-	_, err := kubeclientset.UpdateWithCtrlClient(ctx, lpCli, eSec,
+	secCli := lpCli.CoreV1().Secrets(DelegatedSecretNamespace)
+	_, err := kubeclientset.Update(ctx, secCli, eSec,
 		kubeclientset.WithUpdateAlign(alignFn))
 	if err != nil {
 		return fmt.Errorf("configure setting %s: %w", s.name, err)
 	}
 
 	return nil
+}
+
+// ValueFromRemote returns the value of the setting by directly accessing the delegated secret in Kubernetes API server,
+// which is used for remote access and does not involve the controller-runtime client cache.
+//
+// This is useful for scenarios when the controller-runtime client cache has not been synced yet,
+// or when we want to bypass the cache for some reason.
+// However, it may have performance implications and should be used with caution.
+func (s Setting) ValueFromRemote(ctx context.Context) (string, error) {
+	lpCli := system.LoopbackKubeClient.Get()
+
+	sec, err := lpCli.CoreV1().
+		Secrets(DelegatedSecretNamespace).
+		Get(ctx, DelegatedSecretName, meta.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("get value of setting %s: %w", s.name, err)
+	}
+
+	if sec.Data == nil || sec.Data[s.name] == nil {
+		return "", fmt.Errorf("get value of setting %s: not found", s.name)
+	}
+
+	return string(sec.Data[s.name]), nil
 }
 
 // Value returns the value of the setting.
@@ -125,9 +148,18 @@ func (s Setting) Value(ctx context.Context) (string, error) {
 	return string(sec.Data[s.name]), nil
 }
 
-// ShouldValue returns the value of the setting without error.
-func (s Setting) ShouldValue(ctx context.Context) string {
-	return funcx.NoError(s.Value(ctx))
+// ValueBoolFromRemote returns the bool value of the setting by directly accessing the delegated secret in Kubernetes API server,
+// which is used for remote access and does not involve the controller-runtime client cache.
+//
+// This is useful for scenarios when the controller-runtime client cache has not been synced yet,
+// or when we want to bypass the cache for some reason.
+// However, it may have performance implications and should be used with caution.
+func (s Setting) ValueBoolFromRemote(ctx context.Context) (bool, error) {
+	v, err := s.ValueFromRemote(ctx)
+	if err != nil {
+		return false, err
+	}
+	return strconv.ParseBool(v)
 }
 
 // ValueBool returns the bool value of the setting.
@@ -139,9 +171,18 @@ func (s Setting) ValueBool(ctx context.Context) (bool, error) {
 	return strconv.ParseBool(v)
 }
 
-// ShouldValueBool returns the bool value of the setting without error.
-func (s Setting) ShouldValueBool(ctx context.Context) bool {
-	return funcx.NoError(s.ValueBool(ctx))
+// ValueInt64FromRemote returns the int value of the setting by directly accessing the delegated secret in Kubernetes API server,
+// which is used for remote access and does not involve the controller-runtime client cache.
+//
+// This is useful for scenarios when the controller-runtime client cache has not been synced yet,
+// or when we want to bypass the cache for some reason.
+func (s Setting) ValueInt64FromRemote(ctx context.Context) (int64, error) {
+	v, err := s.ValueFromRemote(ctx)
+	if err != nil {
+		return 0, err
+	}
+	i, err := strconv.ParseInt(v, 10, 64)
+	return i, err
 }
 
 // ValueInt64 returns the int64 value of the setting.
@@ -153,9 +194,19 @@ func (s Setting) ValueInt64(ctx context.Context) (int64, error) {
 	return strconv.ParseInt(v, 10, 64)
 }
 
-// ShouldValueInt64 returns the int64 value of the setting without error.
-func (s Setting) ShouldValueInt64(ctx context.Context) int64 {
-	return funcx.NoError(s.ValueInt64(ctx))
+// ValueUint64FromRemote returns the uint64 value of the setting by directly accessing the delegated secret in Kubernetes API server,
+// which is used for remote access and does not involve the controller-runtime client cache.
+//
+// This is useful for scenarios when the controller-runtime client cache has not been synced yet,
+// or when we want to bypass the cache for some reason.
+func (s Setting) ValueUint64FromRemote(ctx context.Context) (uint64, error) {
+	v, err := s.ValueFromRemote(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	i, err := strconv.ParseUint(v, 10, 64)
+	return i, err
 }
 
 // ValueUint64 returns the uint64 value of the setting.
@@ -167,9 +218,18 @@ func (s Setting) ValueUint64(ctx context.Context) (uint64, error) {
 	return strconv.ParseUint(v, 10, 64)
 }
 
-// ShouldValueUint64 returns the uint64 value of the setting without error.
-func (s Setting) ShouldValueUint64(ctx context.Context) uint64 {
-	return funcx.NoError(s.ValueUint64(ctx))
+// ValueFloat64FromRemote returns the float64 value of the setting by directly accessing the delegated secret in Kubernetes API server,
+// which is used for remote access and does not involve the controller-runtime client cache.
+//
+// This is useful for scenarios when the controller-runtime client cache has not been synced yet,
+// or when we want to bypass the cache for some reason.
+func (s Setting) ValueFloat64FromRemote(ctx context.Context) (float64, error) {
+	v, err := s.ValueFromRemote(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return strconv.ParseFloat(v, 64)
 }
 
 // ValueFloat64 returns the float64 value of the setting.
@@ -181,9 +241,18 @@ func (s Setting) ValueFloat64(ctx context.Context) (float64, error) {
 	return strconv.ParseFloat(v, 64)
 }
 
-// ShouldValueFloat64 returns the float64 value of the setting without error.
-func (s Setting) ShouldValueFloat64(ctx context.Context) float64 {
-	return funcx.NoError(s.ValueFloat64(ctx))
+// ValueURLFromRemote returns the *url.URL value of the setting by directly accessing the delegated secret in Kubernetes API server,
+// which is used for remote access and does not involve the controller-runtime client cache.
+//
+// This is useful for scenarios when the controller-runtime client cache has not been synced yet,
+// or when we want to bypass the cache for some reason.
+func (s Setting) ValueURLFromRemote(ctx context.Context) (*url.URL, error) {
+	v, err := s.ValueFromRemote(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return url.Parse(v)
 }
 
 // ValueURL returns the *url.URL value of the setting.
@@ -193,11 +262,6 @@ func (s Setting) ValueURL(ctx context.Context) (*url.URL, error) {
 		return nil, err
 	}
 	return url.Parse(v)
-}
-
-// ShouldValueURL returns the *url.URL value of the setting without error.
-func (s Setting) ShouldValueURL(ctx context.Context) *url.URL {
-	return funcx.NoError(s.ValueURL(ctx))
 }
 
 type Settings map[string]Setting

@@ -19,8 +19,8 @@ var installs = []kubeapp.Install{
 // InstallApplications installs applications.
 func InstallApplications(ctx context.Context, manufacturers []string) error {
 	gvc := map[string]any{
-		"ContainerRegistry":  funcx.NoError(settings.ContainerRegistry.Value(ctx)),
-		"ContainerNamespace": funcx.NoError(settings.ContainerNamespace.Value(ctx)),
+		"ContainerRegistry":  funcx.NoError(settings.ContainerRegistry.ValueFromRemote(ctx)),
+		"ContainerNamespace": funcx.NoError(settings.ContainerNamespace.ValueFromRemote(ctx)),
 		"Manufacturers":      manufacturers,
 	}
 

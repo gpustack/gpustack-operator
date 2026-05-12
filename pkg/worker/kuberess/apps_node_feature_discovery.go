@@ -30,7 +30,7 @@ func installNodeFeatureDiscovery(ctx context.Context, helmCli *helm.Client, glob
 	valuesContext["Release"] = release
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
 
-	values := getNfdChartTemplateValues(valuesContext)
+	values := getNfdChartTemplateValues(name, valuesContext)
 
 	chart := &helm.Chart{
 		Name:                            name,
@@ -113,9 +113,10 @@ prometheus:
   enable: false
 `
 
-func getNfdChartTemplateValues(data map[string]any) helm.TemplateValues {
+func getNfdChartTemplateValues(name string, data map[string]any) helm.TemplateValues {
 	return helm.TemplateValues{
-		Template: nfdChartValuesTemplate,
-		Context:  data,
+		Application: name,
+		Template:    nfdChartValuesTemplate,
+		Context:     data,
 	}
 }

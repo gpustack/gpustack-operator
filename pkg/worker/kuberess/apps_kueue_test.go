@@ -20,7 +20,7 @@ func Test_getKueueChartTemplateValues(t *testing.T) {
 	}
 	funcMap := extendKueueChartValuesTemplateFuncMap()
 
-	values := getKueueChartTemplateValues(data, funcMap)
+	values := getKueueChartTemplateValues("kueue", data, funcMap)
 	v, err := values.GetValues(t.Context())
 	assert.NoError(t, err, "get kueue chart template values")
 	t.Logf("Rendered kueue chart values:\n%s", string(funcx.MustNoError(yaml.Marshal(v))))

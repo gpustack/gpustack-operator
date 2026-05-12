@@ -19,7 +19,7 @@ func Test_getNfdChartTemplateValues(t *testing.T) {
 		"Namespace":          "gpustack-toolkit-system",
 	}
 
-	values := getNfdChartTemplateValues(data)
+	values := getNfdChartTemplateValues("node-feature-discovery", data)
 	v, err := values.GetValues(t.Context())
 	assert.NoError(t, err, "get nfd chart template values")
 	t.Logf("Rendered nfd chart values:\n%s", string(funcx.MustNoError(yaml.Marshal(v))))

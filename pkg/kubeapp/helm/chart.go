@@ -12,6 +12,7 @@ import (
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
+	klog "k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 
 	"gpustack.ai/gpustack/pkg/system"
@@ -106,6 +107,7 @@ func (cv StaticValues) GetValues(ctx context.Context) (map[string]any, error) {
 }
 
 type TemplateValues struct {
+	Application   string
 	Template      string
 	ExtendFuncMap template.FuncMap
 	Context       map[string]any
@@ -124,6 +126,10 @@ func (cv TemplateValues) GetValues(ctx context.Context) (map[string]any, error) 
 
 	if err = tmpl.Execute(buf, cv.Context); err != nil {
 		return nil, err
+	}
+
+	if klog.V(3).Enabled() {
+		klog.Infof("rendered application values %s:\n%s", cv.Application, buf.String())
 	}
 
 	vs := map[string]any{}

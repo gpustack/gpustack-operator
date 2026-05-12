@@ -41,7 +41,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 		return err == nil
 	}
 
-	values := getKueueChartTemplateValues(valuesContext, funcMap)
+	values := getKueueChartTemplateValues(name, valuesContext, funcMap)
 
 	chart := &helm.Chart{
 		Name:                            name,
@@ -197,8 +197,9 @@ managerConfig:
     #    afterDeactivatedByKueue: null # null indicates infinite retention, 0s means no retention at all
 `
 
-func getKueueChartTemplateValues(data map[string]any, extendFuncMap template.FuncMap) helm.TemplateValues {
+func getKueueChartTemplateValues(name string, data map[string]any, extendFuncMap template.FuncMap) helm.TemplateValues {
 	return helm.TemplateValues{
+		Application:   name,
 		Template:      kueueChartValuesTemplate,
 		ExtendFuncMap: extendFuncMap,
 		Context:       data,

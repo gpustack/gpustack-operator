@@ -516,12 +516,12 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			Name: "sshd",
 			Image: func() string {
 				img := "ssh-server:v1.0.0"
-				if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
+				if cn := funcx.NoError(settings.ContainerNamespace.Value(ctx)); cn != "" {
 					img = cn + "/" + img
 				} else {
 					img = "gpustack/" + img
 				}
-				if rn := settings.ContainerRegistry.ShouldValue(ctx); rn != "" {
+				if rn := funcx.NoError(settings.ContainerRegistry.Value(ctx)); rn != "" {
 					img = rn + "/" + img
 				}
 				return img

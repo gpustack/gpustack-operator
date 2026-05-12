@@ -33,6 +33,7 @@ import (
 	"gpustack.ai/gpustack/pkg/server/settings"
 	"gpustack.ai/gpustack/pkg/server/webhooks"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/httpx"
 )
@@ -239,7 +240,7 @@ func (s *Server) Start(ctx context.Context) error {
 			return err
 		}
 		// Configure serve URL setting.
-		if settings.ServeUrl.ShouldValue(ctx) == "" {
+		if funcx.NoError(settings.ServeUrl.Value(ctx)) == "" {
 			err = settings.ServeUrl.Configure(ctx, fmt.Sprintf("https://%s:%d", system.PrimaryIP.Get(), s.RoutingPort))
 			if err != nil {
 				return err

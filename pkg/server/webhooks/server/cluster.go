@@ -16,6 +16,7 @@ import (
 	"gpustack.ai/gpustack/pkg/server/apistatus"
 	"gpustack.ai/gpustack/pkg/server/kuberess"
 	"gpustack.ai/gpustack/pkg/server/settings"
+	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/webhook"
 )
@@ -48,7 +49,7 @@ func (r *ClusterWebhook) ValidateCreate(ctx context.Context, obj runtime.Object)
 
 	// Validate reserved cluster name and type.
 	if kuberess.IsLocalCluster(cls) {
-		if !settings.ImportLocalCluster.ShouldValueBool(ctx) {
+		if !funcx.NoError(settings.ImportLocalCluster.ValueBool(ctx)) {
 			return nil, field.Invalid(
 				field.NewPath("metadata.name"), cls.Name, "the cluster name is reserved when enabled ImportLocalCluster setting")
 		}
@@ -113,7 +114,7 @@ func (r *ClusterWebhook) ValidateDelete(ctx context.Context, obj runtime.Object)
 	}
 
 	// Cannot delete the local cluster if ImportLocalCluster is enabled.
-	if kuberess.IsLocalCluster(cls) && settings.ImportLocalCluster.ShouldValueBool(ctx) {
+	if kuberess.IsLocalCluster(cls) && funcx.NoError(settings.ImportLocalCluster.ValueBool(ctx)) {
 		return nil, field.Forbidden(
 			field.NewPath("metadata.name"), "deletion of local cluster is forbidden when enabled ImportLocalCluster setting")
 	}
