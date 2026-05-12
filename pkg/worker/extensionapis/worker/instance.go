@@ -32,6 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -203,6 +204,10 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 	if inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil {
 		return nil, field.Invalid(
 			field.NewPath("spec.volume"), "", "exactly one of ephemeral and persistent of volume should be specified")
+	}
+	if inst.Namespace == kuberess.SystemNamespaceName {
+		return nil, field.Invalid(
+			field.NewPath("metadata.namespace"), inst.Namespace, "cannot create instance in system namespace")
 	}
 	// Default.
 	if inst.Spec.VolumeMount == "" {

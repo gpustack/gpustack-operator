@@ -23,7 +23,7 @@ func InstallApplications(ctx context.Context) error {
 		ctx,
 		system.LoopbackKubeRestConfig.Get(),
 		system.DisableApplications.Get(),
-		SystemToolkitNamespaceName,
+		SystemNamespaceName,
 		installs,
 		gvc,
 	)

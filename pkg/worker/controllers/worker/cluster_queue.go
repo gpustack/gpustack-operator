@@ -72,7 +72,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		// Skip if Namespace is system toolkit namespace.
-		if ns.Name == kuberess.SystemToolkitNamespaceName {
+		if ns.Name == kuberess.SystemNamespaceName {
 			continue
 		}
 

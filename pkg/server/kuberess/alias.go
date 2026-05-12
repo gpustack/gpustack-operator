@@ -13,9 +13,6 @@ var (
 	// SystemNamespaceName is the namespace name of the system resources.
 	SystemNamespaceName = systemname.NamespaceName
 
-	// SystemToolkitNamespaceName is the namespace name of the system toolkit resources.
-	SystemToolkitNamespaceName = systemname.ToolkitNamespaceName
-
 	// SystemRoutingServiceName is the service name of the system routing service.
 	SystemRoutingServiceName string
 )

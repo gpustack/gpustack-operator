@@ -28,7 +28,7 @@ func InstallApplications(ctx context.Context, manufacturers []string) error {
 		ctx,
 		system.LoopbackKubeRestConfig.Get(),
 		system.DisableApplications.Get(),
-		SystemToolkitNamespaceName,
+		SystemNamespaceName,
 		installs,
 		gvc,
 	)

@@ -18,7 +18,7 @@ import (
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
-	"gpustack.ai/gpustack/pkg/server/kuberess"
+	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
 // NamespaceReconciler reconciles the core.Namespace object,
@@ -45,8 +45,8 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrlreconcile.R
 		return ctrl.Result{}, nil
 	}
 
-	// Skip if Namespace is system toolkit namespace.
-	if ns.Name == kuberess.SystemToolkitNamespaceName {
+	// Skip if Namespace is system namespace.
+	if ns.Name == kuberess.SystemNamespaceName {
 		return ctrl.Result{}, nil
 	}
 
