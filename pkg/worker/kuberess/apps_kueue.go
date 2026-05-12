@@ -79,7 +79,7 @@ controllerManager:
 {{- $registry := default "docker.io" $.ContainerRegistry }}
 {{- $namespace := default "gpustack" $.ContainerNamespace }}
 {{- $image := printf "%s/%s/mirrored-kueue" $registry $namespace }}
-      registry: "{{ $image }}" 
+      repository: "{{ $image }}" 
     podAnnotations:
       {{ $.ManagedLabel }}: "true"
 {{- if $.ImagePullSecrets }}
