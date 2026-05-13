@@ -243,10 +243,10 @@ spec:
 {{- end }}
 {{- if eq $manu "ascend" }}
             - name: gpustack-ascend-driver
-              mountPath: /usr/local/Ascend/driver
+              mountPath: /usr/local/dcmi
               readOnly: true
             - name: gpustack-ascend-toolkit
-              mountPath: /usr/local/Ascend/ascend-toolkit
+              mountPath: /usr/local/Ascend
               readOnly: true
 {{- end }}
 {{- if eq $manu "cambricon" }}
@@ -310,11 +310,11 @@ spec:
 {{- if eq $manu "ascend" }}
         - name: gpustack-ascend-driver
           hostPath:
-            path: /usr/local/Ascend/driver
+            path: /usr/local/dcmi
             type: DirectoryOrCreate
         - name: gpustack-ascend-toolkit
           hostPath:
-            path: /usr/local/Ascend/ascend-toolkit
+            path: /usr/local/Ascend
             type: DirectoryOrCreate
 {{- end }}
 {{- if eq $manu "cambricon" }}

@@ -79,7 +79,7 @@ func (d *Detector) DetectAccelerator(_ context.Context) (grpListMerged device.De
 		}
 
 		grpListMerged = append(grpListMerged, grpList...)
-		logger.Info("detected accelerators", "count", len(grpList))
+		logger.Info("detected accelerators")
 	}
 
 	return grpListMerged
@@ -100,7 +100,7 @@ func (d *Detector) MonitorAccelerator(_ context.Context) (grpListMerged device.M
 		}
 
 		grpListMerged = append(grpListMerged, grpList...)
-		logger.Info("monitored accelerators", "count", len(grpList))
+		logger.Info("monitored accelerators")
 	}
 
 	return grpListMerged

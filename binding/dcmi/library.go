@@ -30,15 +30,6 @@ func New(opts ...binding.LibraryOption) *DCMI {
 				filepath.Join(home, "driver", "lib64", "driver", "libdcmi.so"),
 			)
 		}
-		home = os.Getenv("CANN_DCMI_HOME")
-		if home == "" {
-			home = "/usr/local/dcmi"
-		}
-		if s, err := os.Stat(home); err == nil && s.IsDir() {
-			soPaths = append(soPaths,
-				filepath.Join(home, "libdcmi.so"),
-			)
-		}
 	}
 
 	so := binding.NewLibrary(soPaths, opts...)
@@ -51,7 +42,7 @@ func (l *DCMI) Init(logger klog.Logger) Return {
 	ret := Return(dcmiInit(l.so.Path()))
 	if !ret.IsSuccess() {
 		errStr := dcmiLastError()
-		logger.Errorf(nil, "failed to initialize DCMI library: %s", errStr)
+		logger.Errorf(nil, "dcmiInit(%s): %s", l.so.Path(), errStr)
 	}
 	return ret
 }

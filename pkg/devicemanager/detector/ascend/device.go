@@ -51,7 +51,7 @@ func (in *ascend) Name() string {
 func (in *ascend) init() {
 	in.once.Do(func() {
 		if ret := in.dcmi.Init(in.logger); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize DCMI library: %v")
+			in.logger.Error(ret, "failed to initialize DCMI library")
 		}
 		if ret := in.acl.Init(); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize ACL library")

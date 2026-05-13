@@ -391,7 +391,7 @@ ENV AMD_VISIBLE_DEVICES="all"
 ## Ascend
 ## -- Configure paths.
 ENV ASCEND_HOME_PATH="/usr/local/Ascend/ascend-toolkit/latest" \
-    LD_LIBRARY_PATH="/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/ascend-toolkit/latest/runtime/lib64:${LD_LIBRARY_PATH}"
+    LD_LIBRARY_PATH="/usr/local/dcmi:/usr/local/Ascend/driver/lib64/common:/usr/local/Ascend/driver/lib64/driver:/usr/local/Ascend/ascend-toolkit/latest/runtime/lib64:${LD_LIBRARY_PATH}"
 ## Cambricon
 ## -- Tell container runtime to inject all devices, and configure paths.
 ENV CAMBRICON_VISIBLE_DEVICES="all" \
