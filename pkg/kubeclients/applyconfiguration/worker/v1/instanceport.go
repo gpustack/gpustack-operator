@@ -15,6 +15,8 @@ type InstancePortApplyConfiguration struct {
 	Port *int32 `json:"port,omitempty"`
 	// Protocol is the protocol to use for the port.
 	Protocol *corev1.Protocol `json:"protocol,omitempty"`
+	// Name is the name of the port.
+	Name *string `json:"name,omitempty"`
 }
 
 // InstancePortApplyConfiguration constructs a declarative configuration of the InstancePort type for use with
@@ -36,5 +38,13 @@ func (b *InstancePortApplyConfiguration) WithPort(value int32) *InstancePortAppl
 // If called multiple times, the Protocol field is set to the value of the last call.
 func (b *InstancePortApplyConfiguration) WithProtocol(value corev1.Protocol) *InstancePortApplyConfiguration {
 	b.Protocol = &value
+	return b
+}
+
+// WithName sets the Name field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Name field is set to the value of the last call.
+func (b *InstancePortApplyConfiguration) WithName(value string) *InstancePortApplyConfiguration {
+	b.Name = &value
 	return b
 }

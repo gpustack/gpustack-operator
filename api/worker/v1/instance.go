@@ -119,6 +119,11 @@ type InstancePort struct {
 	// +k8s:validation:enum=["TCP","UDP","SCTP"]
 	// +k8s:validation:default="TCP"
 	Protocol core.Protocol `json:"protocol,omitempty" protobuf:"bytes,2,opt,name=protocol"`
+
+	// Name is the name of the port.
+	//
+	// +k8s:validation:maxLength=15
+	Name string `json:"name,omitempty" protobuf:"bytes,3,opt,name=name"`
 }
 
 // InstanceEnvVar defines the environment variable to set in the Instance.

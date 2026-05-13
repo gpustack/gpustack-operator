@@ -1107,6 +1107,14 @@ func schema_gpustack_api_worker_v1_InstancePort(ref common.ReferenceCallback) co
 							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
 						},
 					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the port.",
+							MaxLength:   ptr.To[int64](15),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"port"},
 			},
@@ -1300,6 +1308,14 @@ func schema_gpustack_api_worker_v1_InstanceServicePort(ref common.ReferenceCallb
 							Type:        []string{"string"},
 							Format:      "",
 							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the port.",
+							MaxLength:   ptr.To[int64](15),
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 					"nodePort": {

@@ -277,6 +277,11 @@ message InstancePort {
   // +k8s:validation:enum=["TCP","UDP","SCTP"]
   // +k8s:validation:default="TCP"
   optional string protocol = 2;
+
+  // Name is the name of the port.
+  //
+  // +k8s:validation:maxLength=15
+  optional string name = 3;
 }
 
 // InstanceResources defines the resource requirements for the Instance.

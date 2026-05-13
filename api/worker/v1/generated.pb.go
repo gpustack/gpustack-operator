@@ -860,6 +860,11 @@ func (m *InstancePort) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
+	i--
+	dAtA[i] = 0x1a
 	i -= len(m.Protocol)
 	copy(dAtA[i:], m.Protocol)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Protocol)))
@@ -1970,6 +1975,8 @@ func (m *InstancePort) Size() (n int) {
 	n += 1 + sovGenerated(uint64(m.Port))
 	l = len(m.Protocol)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -2479,6 +2486,7 @@ func (this *InstancePort) String() string {
 	s := strings.Join([]string{`&InstancePort{`,
 		`Port:` + fmt.Sprintf("%v", this.Port) + `,`,
 		`Protocol:` + fmt.Sprintf("%v", this.Protocol) + `,`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4975,6 +4983,38 @@ func (m *InstancePort) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Protocol = k8s_io_api_core_v1.Protocol(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

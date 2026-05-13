@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -31,6 +30,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -494,7 +494,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			}(),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p worker.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
-					Name:          strings.ToLower(fmt.Sprintf("%s-%d", p.Protocol, p.Port)),
+					Name:          strings.ToLower(fmt.Sprintf("%s%d", p.Protocol, p.Port)),
 					Protocol:      p.Protocol,
 					ContainerPort: p.Port,
 				}
@@ -726,8 +726,11 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			return inst.Spec.SSHPublicKey.Name
 		}(),
 	}
+	for i := range containers[0].Ports {
+		notes[containers[0].Ports[i].Name+"Alias"] = inst.Spec.Ports[i].Name
+	}
 	if instType.Spec.Acceleratable && instType.Spec.Sliced > 0 {
-		notes["resourceAcceleratorSliced"] = strconv.FormatInt(instType.Spec.Sliced, 10)
+		notes["resourceAcceleratorSliced"] = strconvx.FormatInt(instType.Spec.Sliced, 10)
 	}
 	systemmeta.NoteResource(pod, _InstanceResource, notes)
 
@@ -768,8 +771,9 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 					Command:         mainC.Command,
 					Ports: slicex.Transform(mainC.Ports, func(p core.ContainerPort) worker.InstancePort {
 						return worker.InstancePort{
-							Protocol: p.Protocol,
 							Port:     p.ContainerPort,
+							Protocol: p.Protocol,
+							Name:     notes[p.Name+"Alias"],
 						}
 					}),
 					Env: slicex.Transform(mainC.Env, func(e core.EnvVar) worker.InstanceEnvVar {
@@ -870,7 +874,7 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 							Port:     p.ContainerPort,
 							Protocol: p.Protocol,
 						},
-						NodePort: int32(funcx.NoError(strconv.Atoi(notes[p.Name]))),
+						NodePort: funcx.NoError(strconvx.Atoi[int32](notes[p.Name])),
 					}, true
 				}),
 			},
@@ -892,7 +896,7 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 
 	if inst.Spec.Resources.Accelerator != nil {
 		if notes["resourceAcceleratorSliced"] != "" {
-			sliced, err := strconv.ParseInt(notes["resourceAcceleratorSliced"], 10, 64)
+			sliced, err := strconvx.ParseInt[int64](notes["resourceAcceleratorSliced"], 10, 64)
 			if err == nil && sliced > 0 {
 				resQuantity := *inst.Spec.Resources.Accelerator
 				resQuantity = devicefeature.QuantityToOriginalValue(resQuantity, sliced)
