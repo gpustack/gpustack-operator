@@ -11,9 +11,9 @@ import (
 
 	"golang.org/x/exp/constraints"
 	"k8s.io/apimachinery/pkg/util/sets"
+	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/pkg/utils/osx"
-	"k8s.io/klog/v2"
 )
 
 var (
@@ -382,20 +382,22 @@ func GetLibFromPaths(paths []string) string {
 	for i := range paths {
 		if filepath.IsAbs(paths[i]) {
 			if osx.Exists(paths[i]) {
-				klog.V(3).Info("found library in absolute path", "path", paths[i])
+				klog.V(3).InfoS("found library in absolute path", "path", paths[i])
 				return paths[i]
 			}
 			continue
 		}
 		if path := getLibFromEnv(paths[i]); path != "" {
-			klog.V(3).Info("found library in environment variable", "name", paths[i], "path", path)
+			klog.V(3).InfoS("found library in environment variable", "name", paths[i], "path", path)
 			return path
 		}
 		if path := getLibFromLdCache(paths[i]); path != "" {
-			klog.V(3).Info("found library in ld cache", "name", paths[i], "path", path)
+			klog.V(3).InfoS("found library in ld cache", "name", paths[i], "path", path)
 			return path
 		}
 	}
+
+	klog.V(3).InfoS("used first library", "name", paths[0])
 	return paths[0]
 }
 

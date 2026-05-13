@@ -33,6 +33,7 @@ extern "C" {
 
 int w_dcmi_init(const char *path);
 int w_dcmi_shutdown(void);
+const char* w_dcmi_last_error(void);
 
 #define DECL_API(ret, name, decl_args, call_args) ret w_##name decl_args;
 

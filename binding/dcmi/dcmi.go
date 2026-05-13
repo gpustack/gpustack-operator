@@ -48,7 +48,14 @@ func dcmiShutdown() int32 {
 	return __v
 }
 
-// dcmiGetAffinityCpuInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiLastError function as declared in dcmi/dcmi_wrapper.h:36
+func dcmiLastError() string {
+	__ret := C.w_dcmi_last_error()
+	__v := packPCharString(__ret)
+	return __v
+}
+
+// dcmiGetAffinityCpuInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetAffinityCpuInfoByDeviceId(CardId int32, DeviceId int32, AffinityCpu *byte, Length *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -63,7 +70,7 @@ func dcmiGetAffinityCpuInfoByDeviceId(CardId int32, DeviceId int32, AffinityCpu 
 	return __v
 }
 
-// dcmiGetCardList function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetCardList function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetCardList(CardNum *int32, CardList *int32, ListLen int32) int32 {
 	cCardNum, cCardNumAllocMap := (*C.int)(unsafe.Pointer(CardNum)), cgoAllocsUnknown
 	cCardList, cCardListAllocMap := (*C.int)(unsafe.Pointer(CardList)), cgoAllocsUnknown
@@ -76,7 +83,7 @@ func dcmiGetCardList(CardNum *int32, CardList *int32, ListLen int32) int32 {
 	return __v
 }
 
-// dcmiGetDeviceChipInfo function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceChipInfo function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceChipInfo(CardId int32, DeviceId int32, ChipInfo *ChipInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -89,7 +96,7 @@ func dcmiGetDeviceChipInfo(CardId int32, DeviceId int32, ChipInfo *ChipInfo) int
 	return __v
 }
 
-// dcmiGetDeviceChipInfoV2 function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceChipInfoV2 function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceChipInfoV2(CardId int32, DeviceId int32, DeviceInfo *ChipInfoV2) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -102,7 +109,7 @@ func dcmiGetDeviceChipInfoV2(CardId int32, DeviceId int32, DeviceInfo *ChipInfoV
 	return __v
 }
 
-// dcmiGetDeviceDie function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceDie function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceDie(CardId int32, DeviceId int32, DeviceDie *SocDie) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -115,7 +122,7 @@ func dcmiGetDeviceDie(CardId int32, DeviceId int32, DeviceDie *SocDie) int32 {
 	return __v
 }
 
-// dcmiGetDeviceDieV2 function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceDieV2 function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceDieV2(CardId int32, DeviceId int32, InputType DieType, DieId *DieId) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -130,7 +137,7 @@ func dcmiGetDeviceDieV2(CardId int32, DeviceId int32, InputType DieType, DieId *
 	return __v
 }
 
-// dcmiGetDeviceEccInfo function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceEccInfo function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceEccInfo(CardId int32, DeviceId int32, InputType DeviceType, DeviceEccInfo *EccInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -145,7 +152,7 @@ func dcmiGetDeviceEccInfo(CardId int32, DeviceId int32, InputType DeviceType, De
 	return __v
 }
 
-// dcmiGetDeviceGateway function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceGateway function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceGateway(CardId int32, DeviceId int32, InputType PortType, PortId int32, Gateway *IpAddr) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -162,7 +169,7 @@ func dcmiGetDeviceGateway(CardId int32, DeviceId int32, InputType PortType, Port
 	return __v
 }
 
-// dcmiGetDeviceHbmInfo function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceHbmInfo function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceHbmInfo(CardId int32, DeviceId int32, HbmInfo *HbmInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -175,7 +182,7 @@ func dcmiGetDeviceHbmInfo(CardId int32, DeviceId int32, HbmInfo *HbmInfo) int32 
 	return __v
 }
 
-// dcmiGetDeviceInfo function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceInfo function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceInfo(CardId int32, DeviceId int32, MainCmd MainCmd, SubCmd uint32, Buf unsafe.Pointer, Size *uint32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -194,7 +201,7 @@ func dcmiGetDeviceInfo(CardId int32, DeviceId int32, MainCmd MainCmd, SubCmd uin
 	return __v
 }
 
-// dcmiGetDeviceIp function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceIp function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceIp(CardId int32, DeviceId int32, InputType PortType, PortId int32, Ip *IpAddr, Mask *IpAddr) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -213,7 +220,7 @@ func dcmiGetDeviceIp(CardId int32, DeviceId int32, InputType PortType, PortId in
 	return __v
 }
 
-// dcmiGetDeviceLogicId function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceLogicId function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceLogicId(DeviceLogicId *int32, CardId int32, DeviceId int32) int32 {
 	cDeviceLogicId, cDeviceLogicIdAllocMap := (*C.int)(unsafe.Pointer(DeviceLogicId)), cgoAllocsUnknown
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
@@ -226,7 +233,7 @@ func dcmiGetDeviceLogicId(DeviceLogicId *int32, CardId int32, DeviceId int32) in
 	return __v
 }
 
-// dcmiGetDeviceMemoryInfoV2 function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceMemoryInfoV2 function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceMemoryInfoV2(CardId int32, DeviceId int32, MemoryInfo *MemoryInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -239,7 +246,7 @@ func dcmiGetDeviceMemoryInfoV2(CardId int32, DeviceId int32, MemoryInfo *MemoryI
 	return __v
 }
 
-// dcmiGetDeviceMemoryInfoV3 function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceMemoryInfoV3 function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceMemoryInfoV3(CardId int32, DeviceId int32, MemoryInfo *GetMemoryInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -252,7 +259,7 @@ func dcmiGetDeviceMemoryInfoV3(CardId int32, DeviceId int32, MemoryInfo *GetMemo
 	return __v
 }
 
-// dcmiGetDeviceNumInCard function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceNumInCard function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceNumInCard(CardId int32, DeviceNum *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceNum, cDeviceNumAllocMap := (*C.int)(unsafe.Pointer(DeviceNum)), cgoAllocsUnknown
@@ -263,7 +270,7 @@ func dcmiGetDeviceNumInCard(CardId int32, DeviceNum *int32) int32 {
 	return __v
 }
 
-// dcmiGetDevicePcieInfo function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDevicePcieInfo function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDevicePcieInfo(CardId int32, DeviceId int32, PcieInfo *PcieInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -276,7 +283,7 @@ func dcmiGetDevicePcieInfo(CardId int32, DeviceId int32, PcieInfo *PcieInfo) int
 	return __v
 }
 
-// dcmiGetDevicePcieInfoV2 function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDevicePcieInfoV2 function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDevicePcieInfoV2(CardId int32, DeviceId int32, PcieInfo *PcieInfoAll) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -289,7 +296,7 @@ func dcmiGetDevicePcieInfoV2(CardId int32, DeviceId int32, PcieInfo *PcieInfoAll
 	return __v
 }
 
-// dcmiGetDevicePhyidFromLogicid function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDevicePhyidFromLogicid function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDevicePhyidFromLogicid(Logicid uint32, Phyid *uint32) int32 {
 	cLogicid, cLogicidAllocMap := (C.uint)(Logicid), cgoAllocsUnknown
 	cPhyid, cPhyidAllocMap := (*C.uint)(unsafe.Pointer(Phyid)), cgoAllocsUnknown
@@ -300,7 +307,7 @@ func dcmiGetDevicePhyidFromLogicid(Logicid uint32, Phyid *uint32) int32 {
 	return __v
 }
 
-// dcmiGetDevicePowerInfo function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDevicePowerInfo function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDevicePowerInfo(CardId int32, DeviceId int32, Power *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -313,7 +320,7 @@ func dcmiGetDevicePowerInfo(CardId int32, DeviceId int32, Power *int32) int32 {
 	return __v
 }
 
-// dcmiGetDeviceTemperature function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceTemperature function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceTemperature(CardId int32, DeviceId int32, Temperature *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -326,7 +333,7 @@ func dcmiGetDeviceTemperature(CardId int32, DeviceId int32, Temperature *int32) 
 	return __v
 }
 
-// dcmiGetDeviceType function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceType function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceType(CardId int32, DeviceId int32, DeviceType *UnitType) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -339,7 +346,7 @@ func dcmiGetDeviceType(CardId int32, DeviceId int32, DeviceType *UnitType) int32
 	return __v
 }
 
-// dcmiGetDeviceUtilizationRate function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceUtilizationRate function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceUtilizationRate(CardId int32, DeviceId int32, InputType int32, UtilizationRate *uint32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -354,7 +361,7 @@ func dcmiGetDeviceUtilizationRate(CardId int32, DeviceId int32, InputType int32,
 	return __v
 }
 
-// dcmiGetDeviceUtilizationRateV2 function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDeviceUtilizationRateV2 function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceUtilizationRateV2(CardId int32, DeviceId int32, UtilInfo *MultiUtilizationInfo) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
 	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
@@ -367,7 +374,7 @@ func dcmiGetDeviceUtilizationRateV2(CardId int32, DeviceId int32, UtilInfo *Mult
 	return __v
 }
 
-// dcmiGetDriverVersion function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetDriverVersion function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDriverVersion(DriverVer *byte, Len uint32) int32 {
 	cDriverVer, cDriverVerAllocMap := (*C.char)(unsafe.Pointer(DriverVer)), cgoAllocsUnknown
 	cLen, cLenAllocMap := (C.uint)(Len), cgoAllocsUnknown
@@ -378,7 +385,7 @@ func dcmiGetDriverVersion(DriverVer *byte, Len uint32) int32 {
 	return __v
 }
 
-// dcmiGetTopoInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:41
+// dcmiGetTopoInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetTopoInfoByDeviceId(CardId1 int32, DeviceId1 int32, CardId2 int32, DeviceId2 int32, TopoType *int32) int32 {
 	cCardId1, cCardId1AllocMap := (C.int)(CardId1), cgoAllocsUnknown
 	cDeviceId1, cDeviceId1AllocMap := (C.int)(DeviceId1), cgoAllocsUnknown

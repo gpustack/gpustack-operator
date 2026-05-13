@@ -58,3 +58,7 @@ int w_dcmi_shutdown(void)
     // There is not dcmi_shutdown function in the API, so we just close the library
     return dlclose(dcmiLib) ? ERROR_UNKNOWN : SUCCESS;
 }
+
+const char* w_dcmi_last_error(void) {
+    return dlerror();
+}

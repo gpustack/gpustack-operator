@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
+	klog "k8s.io/klog/v2"
+
 	"gpustack.ai/gpustack/binding"
 )
 
@@ -45,8 +47,13 @@ func New(opts ...binding.LibraryOption) *DCMI {
 }
 
 // Init initializes the DCMI library.
-func (l *DCMI) Init() Return {
-	return Return(dcmiInit(l.so.Path()))
+func (l *DCMI) Init(logger klog.Logger) Return {
+	ret := Return(dcmiInit(l.so.Path()))
+	if !ret.IsSuccess() {
+		errStr := dcmiLastError()
+		logger.Errorf(nil, "failed to initialize DCMI library: %s", errStr)
+	}
+	return ret
 }
 
 // GetDriverVersion retrieves the version of the DCMI driver.
