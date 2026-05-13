@@ -32,6 +32,7 @@ var logger = klog.Background().WithName("detector")
 type Detector struct {
 	noPCICheck              bool
 	manufacturers           sets.Set[string]
+	noFastFailed            bool
 	detectors               []device.Detector
 	monitorPeriod           time.Duration
 	monitorHistory          *datax.RingBuffer[device.MetricsGroupList]
@@ -57,6 +58,7 @@ func New(c *Config) (*Detector, error) {
 	return &Detector{
 		noPCICheck:              noPCICheck,
 		manufacturers:           manufacturers,
+		noFastFailed:            c.NoFastFailed,
 		detectors:               detectors,
 		monitorPeriod:           c.MonitorPeriod,
 		monitorHistory:          datax.NewRingBuffer[device.MetricsGroupList](c.MonitorHistory),
@@ -118,6 +120,8 @@ type _DeviceKey struct {
 
 // Start starts the detector to detect and monitor the devices periodically until the context is canceled.
 func (d *Detector) Start(ctx context.Context) error {
+	failedOnFirstNotDetected := !d.noFastFailed && d.manufacturers.Len() == 1
+
 	return waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 		logger.V(2).Info("detecting")
 
@@ -137,6 +141,19 @@ func (d *Detector) Start(ctx context.Context) error {
 					})
 				}
 			}
+		}
+
+		// If there is no device detected,
+		// but there is one manufacturer expected,
+		// return error directly without monitoring,
+		// which means the detector is failed.
+		if failedOnFirstNotDetected {
+			if manufacturers.Len() == 0 {
+				err := fmt.Errorf("manufacturer %s is expected but not detected", d.manufacturers.UnsortedList()[0])
+				logger.Error(err, "failed to detect, quitting...")
+				return err
+			}
+			failedOnFirstNotDetected = false
 		}
 
 		// Publish detected devices groups.

@@ -18,6 +18,7 @@ type Options struct {
 	// Control.
 	NoPCICheck     bool
 	Manufacturers  []string
+	NoFastFailed   bool
 	MonitorPeriod  time.Duration
 	MonitorHistory time.Duration
 }
@@ -27,6 +28,7 @@ func NewOptions() *Options {
 		// Control.
 		NoPCICheck:     false,
 		Manufacturers:  devicefeature.GetKnownManufacturers(),
+		NoFastFailed:   false,
 		MonitorPeriod:  5 * time.Second,
 		MonitorHistory: 5 * time.Minute,
 	}
@@ -56,6 +58,9 @@ func (o *Options) AddFlags(fs *pflag.FlagSet, opts ...FlagOption) {
 		"disable pci check.")
 	fs.StringSliceVar(&o.Manufacturers, "manufacturer", o.Manufacturers,
 		"comma separated list of manufacturers to detect.")
+	fs.BoolVar(&o.NoFastFailed, "no-fast-failed", o.NoFastFailed,
+		"disable fast failed, "+
+			"which means the detector will not fail immediately when --manufacturer configured one manufacturer.")
 	if !o.noMonitorOptions {
 		fs.DurationVar(&o.MonitorPeriod, "monitor-period", o.MonitorPeriod,
 			"the period at which the monitor checks the devices.")
@@ -89,6 +94,7 @@ func (o *Options) Complete(_ context.Context) (*Config, error) {
 	return &Config{
 		NoPCICheck:     o.NoPCICheck,
 		Manufacturers:  sets.New(o.Manufacturers...),
+		NoFastFailed:   o.NoFastFailed,
 		MonitorPeriod:  o.MonitorPeriod,
 		MonitorHistory: uint64(o.MonitorHistory / o.MonitorPeriod),
 	}, nil
