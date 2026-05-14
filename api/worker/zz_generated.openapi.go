@@ -1110,7 +1110,7 @@ func schema_gpustack_api_worker_v1_InstancePort(ref common.ReferenceCallback) co
 					"name": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Name is the name of the port.",
-							MaxLength:   ptr.To[int64](15),
+							MaxLength:   ptr.To[int64](16),
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -1313,7 +1313,7 @@ func schema_gpustack_api_worker_v1_InstanceServicePort(ref common.ReferenceCallb
 					"name": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Name is the name of the port.",
-							MaxLength:   ptr.To[int64](15),
+							MaxLength:   ptr.To[int64](16),
 							Type:        []string{"string"},
 							Format:      "",
 						},

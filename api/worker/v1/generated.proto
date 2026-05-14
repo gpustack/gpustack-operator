@@ -280,7 +280,7 @@ message InstancePort {
 
   // Name is the name of the port.
   //
-  // +k8s:validation:maxLength=15
+  // +k8s:validation:maxLength=16
   optional string name = 3;
 }
 

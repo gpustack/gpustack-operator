@@ -122,7 +122,7 @@ type InstancePort struct {
 
 	// Name is the name of the port.
 	//
-	// +k8s:validation:maxLength=15
+	// +k8s:validation:maxLength=16
 	Name string `json:"name,omitempty" protobuf:"bytes,3,opt,name=name"`
 }
 
