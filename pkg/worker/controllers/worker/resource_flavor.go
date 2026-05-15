@@ -77,8 +77,7 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				continue
 			}
 
-			reserved := isResourceFlavorReserved(resFlv, refCq)
-			if reserved {
+			if isResourceFlavorReserved(resFlv, refCq) {
 				logger.Error(nil, "cannot remove reserved resource flavor, requeue in 15s")
 				requeue = true
 				continue
@@ -142,20 +141,21 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				continue
 			}
 
-			reserved := isResourceFlavorReserved(resFlv, refCq)
-			if reserved {
-				logger.Error(nil, "cannot adjust resource flavor as reserved, requeue in 15s")
+			if isResourceFlavorReserved(resFlv, refCq) {
+				logger.Error(nil, "cannot clear resource flavor as reserved, requeue in 15s")
 				requeue = true
 				continue
 			}
 
 			if !strings.Contains(refCq.GenerateName, "-sliced-") {
-				err = r.clearResourceFlavorQuota(ctx, refCq, rgIndex, flvIndex)
+				err, cleared := r.clearResourceFlavorQuota(ctx, refCq, rgIndex, flvIndex)
 				if err != nil {
 					logger.Error(err, "clear resource flavor quota")
 					return ctrl.Result{}, err
 				}
-				logger.V(2).Info("cleared resource flavor quota")
+				if cleared {
+					logger.V(2).Info("cleared resource flavor quota")
+				}
 				continue
 			}
 
@@ -184,18 +184,21 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 
-		reserved := isResourceFlavorReserved(resFlv, refCqCurrent)
-		if reserved {
-			logger.Error(nil, "cannot adjust resource flavor as reserved, requeue in 15s")
-			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+		if isResourceFlavorReserved(resFlv, refCqCurrent) {
+			if isResourceFlavorBorrowing(resFlv.Name, refCqCurrent) {
+				logger.Error(nil, "cannot reset reserved resource flavor, requeue in 15s")
+				return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
+			}
 		}
 
-		err = r.setResourceFlavorQuota(ctx, refCqCurrent, rgIndex, flvIndex, constructFlavorQuotas(resFlv, ndf))
+		err, reset := r.resetResourceFlavorQuota(ctx, refCqCurrent, rgIndex, flvIndex, constructFlavorQuotas(resFlv, ndf))
 		if err != nil {
-			logger.Error(err, "set resource flavor quota")
+			logger.Error(err, "reset resource flavor quota")
 			return ctrl.Result{}, err
 		}
-		logger.V(2).Info("set resource flavor quota")
+		if reset {
+			logger.V(2).Info("reset resource flavor quota")
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -274,7 +277,9 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
-func (r *ResourceFlavorReconciler) fetchNode(ctx context.Context, resFlv *kueue.ResourceFlavor) (*core.Node, error) {
+func (r *ResourceFlavorReconciler) fetchNode(
+	ctx context.Context, resFlv *kueue.ResourceFlavor,
+) (*core.Node, error) {
 	ndName := resFlv.Labels[_ResourceFlavorNodeNameLabelKey]
 	if ndName == "" {
 		return nil, nil
@@ -294,7 +299,9 @@ func (r *ResourceFlavorReconciler) fetchNode(ctx context.Context, resFlv *kueue.
 	return nd, nil
 }
 
-func (r *ResourceFlavorReconciler) fetchCohort(ctx context.Context, resFlv *kueue.ResourceFlavor) (*kueue.Cohort, error) {
+func (r *ResourceFlavorReconciler) fetchCohort(
+	ctx context.Context, resFlv *kueue.ResourceFlavor,
+) (*kueue.Cohort, error) {
 	coName := resFlv.Labels[_ResourceFlavorCohortNameLabelKey]
 	if coName == "" {
 		return nil, nil
@@ -328,7 +335,9 @@ func (r *ResourceFlavorReconciler) fetchCohort(ctx context.Context, resFlv *kueu
 	return co, err
 }
 
-func (r *ResourceFlavorReconciler) groupClusterQueuesByGenerateName(ctx context.Context, co *kueue.Cohort) (map[string][]*kueue.ClusterQueue, error) {
+func (r *ResourceFlavorReconciler) groupClusterQueuesByGenerateName(
+	ctx context.Context, co *kueue.Cohort,
+) (map[string][]*kueue.ClusterQueue, error) {
 	cqList := new(kueue.ClusterQueueList)
 	err := r.Client.List(ctx, cqList,
 		ctrlcli.MatchingFields{
@@ -349,7 +358,9 @@ func (r *ResourceFlavorReconciler) groupClusterQueuesByGenerateName(ctx context.
 	return cqsByGn, nil
 }
 
-func (r *ResourceFlavorReconciler) getReferringClusterQueues(ctx context.Context, resFlv *kueue.ResourceFlavor) ([]kueue.ClusterQueue, error) {
+func (r *ResourceFlavorReconciler) getReferringClusterQueues(
+	ctx context.Context, resFlv *kueue.ResourceFlavor,
+) ([]kueue.ClusterQueue, error) {
 	cqList := new(kueue.ClusterQueueList)
 	err := r.Client.List(ctx, cqList,
 		ctrlcli.MatchingFields{
@@ -361,7 +372,9 @@ func (r *ResourceFlavorReconciler) getReferringClusterQueues(ctx context.Context
 	return cqList.Items, nil
 }
 
-func (r *ResourceFlavorReconciler) removeResourceFlavor(ctx context.Context, cq *kueue.ClusterQueue, rgIndex, flvIndex int) error {
+func (r *ResourceFlavorReconciler) removeResourceFlavor(
+	ctx context.Context, cq *kueue.ClusterQueue, rgIndex, flvIndex int,
+) error {
 	rg := &cq.Spec.ResourceGroups[rgIndex]
 	rg.Flavors = append(rg.Flavors[:flvIndex], rg.Flavors[flvIndex+1:]...)
 	if len(rg.Flavors) == 0 {
@@ -373,29 +386,34 @@ func (r *ResourceFlavorReconciler) removeResourceFlavor(ctx context.Context, cq 
 	return r.Client.Update(ctx, cq)
 }
 
-func (r *ResourceFlavorReconciler) clearResourceFlavorQuota(ctx context.Context, cq *kueue.ClusterQueue, rgIndex, flvIndex int) error {
+func (r *ResourceFlavorReconciler) clearResourceFlavorQuota(
+	ctx context.Context, cq *kueue.ClusterQueue, rgIndex, flvIndex int,
+) (error, bool) {
 	zeroQuantity := *resource.NewQuantity(0, resource.DecimalSI)
 	rg := &cq.Spec.ResourceGroups[rgIndex]
 	flv := &rg.Flavors[flvIndex]
+	flvOld := flv.DeepCopy()
 	for res := range flv.Resources {
 		flv.Resources[res].NominalQuota = zeroQuantity
 	}
-	if cq.Annotations == nil {
-		cq.Annotations = make(map[string]string)
+	if !kubemeta.DeepEqual(flv, flvOld) {
+		annotateResourceFlavorBorrowing(string(flv.Name), cq)
+		return r.Client.Update(ctx, cq), true
 	}
-	cq.Annotations[string(flv.Name)] = "borrowing"
-	return r.Client.Update(ctx, cq)
+	return nil, false
 }
 
-func (r *ResourceFlavorReconciler) setResourceFlavorQuota(
+func (r *ResourceFlavorReconciler) resetResourceFlavorQuota(
 	ctx context.Context, cq *kueue.ClusterQueue, rgIndex, flvIndex int, resQuotas kueue.FlavorQuotas,
-) error {
+) (error, bool) {
 	rg := &cq.Spec.ResourceGroups[rgIndex]
-	rg.Flavors[flvIndex] = resQuotas
-	if cq.Annotations != nil {
-		delete(cq.Annotations, string(resQuotas.Name))
+
+	if !kubemeta.DeepEqual(rg.Flavors[flvIndex], resQuotas) {
+		rg.Flavors[flvIndex] = resQuotas
+		annotateResourceFlavorUnborrowing(string(resQuotas.Name), cq)
+		return r.Client.Update(ctx, cq), true
 	}
-	return r.Client.Update(ctx, cq)
+	return nil, false
 }
 
 const (
@@ -518,6 +536,28 @@ func isResourceFlavorReserved(resFlv *kueue.ResourceFlavor, cq *kueue.ClusterQue
 			if !flvRes.Borrowed.IsZero() {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func annotateResourceFlavorBorrowing(resFlvName string, cq *kueue.ClusterQueue) {
+	if cq.Annotations == nil {
+		cq.Annotations = make(map[string]string)
+	}
+	cq.Annotations[resFlvName] = "borrowing"
+}
+
+func annotateResourceFlavorUnborrowing(resFlvName string, cq *kueue.ClusterQueue) {
+	if cq.Annotations != nil {
+		delete(cq.Annotations, resFlvName)
+	}
+}
+
+func isResourceFlavorBorrowing(resFlvName string, cq *kueue.ClusterQueue) bool {
+	for name := range cq.Annotations {
+		if name == resFlvName {
+			return cq.Annotations[name] == "borrowing"
 		}
 	}
 	return false
