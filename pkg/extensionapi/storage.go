@@ -1376,17 +1376,33 @@ func wrapError(ctx context.Context, name string, err error) error {
 			Message: ss.Message,
 		}
 	} else {
-		es = meta.Status{
-			Status: meta.StatusFailure,
-			Code:   http.StatusInternalServerError,
-			Reason: meta.StatusReasonInternalError,
-			Details: &meta.StatusDetails{
-				Name:   name,
-				Group:  gk.Group,
-				Kind:   gk.Kind,
-				Causes: []meta.StatusCause{{Message: err.Error()}},
-			},
-			Message: fmt.Sprintf("Internal error occurred: %v", err),
+		var ef *field.Error
+		if errors.As(err, &ef) {
+			es = meta.Status{
+				Status: meta.StatusFailure,
+				Code:   http.StatusBadRequest,
+				Reason: meta.StatusReasonInvalid,
+				Details: &meta.StatusDetails{
+					Name:   name,
+					Group:  gk.Group,
+					Kind:   gk.Kind,
+					Causes: []meta.StatusCause{{Message: ef.Error()}},
+				},
+				Message: fmt.Sprintf("Invalid object: %v", err),
+			}
+		} else {
+			es = meta.Status{
+				Status: meta.StatusFailure,
+				Code:   http.StatusInternalServerError,
+				Reason: meta.StatusReasonInternalError,
+				Details: &meta.StatusDetails{
+					Name:   name,
+					Group:  gk.Group,
+					Kind:   gk.Kind,
+					Causes: []meta.StatusCause{{Message: err.Error()}},
+				},
+				Message: fmt.Sprintf("Internal error occurred: %v", err),
+			}
 		}
 	}
 
