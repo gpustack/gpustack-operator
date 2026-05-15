@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"sort"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -195,18 +194,15 @@ func (h *InstanceTypeHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOpti
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(cq)
-					if resType == _InstanceTypeResource {
-						e.Object = &worker.InstanceType{ObjectMeta: cq.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(cq)
+					e.Object = &worker.InstanceType{ObjectMeta: cq.ObjectMeta}
+					c <- e
 					continue
 				}
 
 				// Convert.
 				insType := convertInstanceTypeFromClusterQueue(cq)
 				if insType == nil {
-					// Skip if not belong to the requested namespace.
 					continue
 				}
 
@@ -412,13 +408,6 @@ func convertInstanceTypeListFromClusterQueueList(
 	if cqList == nil {
 		return &worker.InstanceTypeList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(cqList.Items, func(i, j int) bool {
-		l, r := cqList.Items[i].ResourceVersion, cqList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	itList := &worker.InstanceTypeList{
 		ListMeta: cqList.ListMeta,

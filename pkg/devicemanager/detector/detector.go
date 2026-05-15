@@ -234,7 +234,10 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	}
 
 	lpCli := system.LoopbackKubeClient.Get()
-	node, err := lpCli.CoreV1().Nodes().Get(ctx, nodeName, meta.GetOptions{ResourceVersion: "0"})
+	node, err := lpCli.CoreV1().Nodes().Get(ctx, nodeName,
+		meta.GetOptions{
+			ResourceVersion: "0",
+		})
 	if err != nil {
 		return err
 	}

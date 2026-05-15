@@ -116,7 +116,8 @@ func (s Setting) ValueFromRemote(ctx context.Context) (string, error) {
 
 	sec, err := lpCli.CoreV1().
 		Secrets(DelegatedSecretNamespace).
-		Get(ctx, DelegatedSecretName, meta.GetOptions{})
+		Get(ctx, DelegatedSecretName,
+			meta.GetOptions{})
 	if err != nil {
 		return "", fmt.Errorf("get value of setting %s: %w", s.name, err)
 	}
@@ -132,11 +133,18 @@ func (s Setting) ValueFromRemote(ctx context.Context) (string, error) {
 func (s Setting) Value(ctx context.Context) (string, error) {
 	lpCli := system.LoopbackCtrlClient.Get()
 
-	sec := new(core.Secret)
-	err := lpCli.Get(ctx, ctrlcli.ObjectKey{
-		Namespace: DelegatedSecretNamespace,
-		Name:      DelegatedSecretName,
-	}, sec, &ctrlcli.GetOptions{Raw: &meta.GetOptions{ResourceVersion: "0"}})
+	sec := &core.Secret{
+		ObjectMeta: meta.ObjectMeta{
+			Name:      DelegatedSecretName,
+			Namespace: DelegatedSecretNamespace,
+		},
+	}
+	err := lpCli.Get(ctx, ctrlcli.ObjectKeyFromObject(sec), sec,
+		&ctrlcli.GetOptions{
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
+		})
 	if err != nil {
 		return "", fmt.Errorf("get value of setting %s: %w", s.name, err)
 	}

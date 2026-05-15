@@ -475,7 +475,7 @@ func schema_gpustack_api_server_v1_ClusterConfigSpec(ref common.ReferenceCallbac
 				Properties: map[string]spec.Schema{
 					"config": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Config is the config of the non-loopback Cluster, it is a write-only field to specify the config of the non-loopback Cluster.",
+							Description: "Config is the config of the non-loopback Cluster.\n\nImmutable after creation.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -495,7 +495,7 @@ func schema_gpustack_api_server_v1_ClusterConfigStatus(ref common.ReferenceCallb
 				Properties: map[string]spec.Schema{
 					"type": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Type is the type of Cluster, it is a read-only field to expose the type of the non-loopback Cluster.\n\nPossible enum values:\n - `\"Loopback\"` is a local cluster, which reuse the loopback config to connect to the cluster.\n - `\"Proxy\"` is a proxy cluster, which must provide a config to connect to the cluster.\n - `\"ReverseProxy\"` is a reverse proxy cluster, which use the in-memory config and dual connection to connect to the cluster.",
+							Description: "Type is the type of Cluster.\n\nPossible enum values:\n - `\"Loopback\"` is a local cluster, which reuse the loopback config to connect to the cluster.\n - `\"Proxy\"` is a proxy cluster, which must provide a config to connect to the cluster.\n - `\"ReverseProxy\"` is a reverse proxy cluster, which use the in-memory config and dual connection to connect to the cluster.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -504,7 +504,7 @@ func schema_gpustack_api_server_v1_ClusterConfigStatus(ref common.ReferenceCallb
 					},
 					"config": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Config is the config of the non-loopback Cluster, it is a read-only field to expose the config of the non-loopback Cluster.",
+							Description: "Config is the config of the non-loopback Cluster.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -566,7 +566,7 @@ func schema_gpustack_api_server_v1_ClusterImportConfigStatus(ref common.Referenc
 				Properties: map[string]spec.Schema{
 					"type": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Type is the type of Cluster, it is a read-only field to expose the type of the non-loopback Cluster.\n\nPossible enum values:\n - `\"Loopback\"` is a local cluster, which reuse the loopback config to connect to the cluster.\n - `\"Proxy\"` is a proxy cluster, which must provide a config to connect to the cluster.\n - `\"ReverseProxy\"` is a reverse proxy cluster, which use the in-memory config and dual connection to connect to the cluster.",
+							Description: "Type is the type of Cluster.\n\nPossible enum values:\n - `\"Loopback\"` is a local cluster, which reuse the loopback config to connect to the cluster.\n - `\"Proxy\"` is a proxy cluster, which must provide a config to connect to the cluster.\n - `\"ReverseProxy\"` is a reverse proxy cluster, which use the in-memory config and dual connection to connect to the cluster.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -575,7 +575,7 @@ func schema_gpustack_api_server_v1_ClusterImportConfigStatus(ref common.Referenc
 					},
 					"config": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Config is the config of the non-loopback Cluster, it is a read-only field to expose the config of the non-loopback Cluster.",
+							Description: "Config is the config of the non-loopback Cluster.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -2624,7 +2624,7 @@ func schema_gpustack_api_server_v1alpha1_ClusterSpec(ref common.ReferenceCallbac
 					"type": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{
-								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "type is immutable field", "rule": "oldSelf == self"}},
+								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "type is immutable", "rule": "oldSelf == self"}},
 							},
 						},
 						SchemaProps: spec.SchemaProps{

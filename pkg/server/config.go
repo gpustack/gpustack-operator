@@ -132,7 +132,10 @@ func (c *Config) Apply(ctx context.Context) (*Server, error) {
 	)
 	if system.LoopbackKubeInside.Get() || !system.LoopbackKubeNearby.Get() {
 		svc, err := lpCli.CoreV1().Services(kuberess.SystemNamespaceName).
-			Get(ctx, kuberess.SystemRoutingServiceName, meta.GetOptions{ResourceVersion: "0"})
+			Get(ctx, kuberess.SystemRoutingServiceName,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
 		if err == nil {
 			routingPort = svc.Spec.Ports[0].Port
 		}
@@ -147,7 +150,10 @@ func (c *Config) Apply(ctx context.Context) (*Server, error) {
 					meta.NamespaceSystem,
 				} {
 					cm, err := lpCli.CoreV1().ConfigMaps(ns).
-						Get(ctx, "kube-root-ca.crt", meta.GetOptions{ResourceVersion: "0"})
+						Get(ctx, "kube-root-ca.crt",
+							meta.GetOptions{
+								ResourceVersion: "0",
+							})
 					if err != nil {
 						continue
 					}

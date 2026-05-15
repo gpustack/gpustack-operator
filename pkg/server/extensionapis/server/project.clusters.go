@@ -132,7 +132,9 @@ func (h *ProjectClustersHandler) OnUpdate(ctx context.Context, obj, objOld runti
 	// Get.
 	return h.OnGet(ctx, ctrlcli.ObjectKeyFromObject(projclss),
 		ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{ResourceVersion: "0"},
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
 		})
 }
 

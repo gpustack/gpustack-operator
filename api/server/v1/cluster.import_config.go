@@ -21,11 +21,9 @@ var _ runtime.Object = (*ClusterImportConfig)(nil)
 
 // ClusterImportConfigStatus defines the observed state of ClusterImportConfig.
 type ClusterImportConfigStatus struct {
-	// Type is the type of Cluster,
-	// it is a read-only field to expose the type of the non-loopback Cluster.
+	// Type is the type of Cluster.
 	Type servercore.ClusterType `json:"type" protobuf:"bytes,1,name=type,casttype=ClusterType"`
 
-	// Config is the config of the non-loopback Cluster,
-	// it is a read-only field to expose the config of the non-loopback Cluster.
+	// Config is the config of the non-loopback Cluster.
 	Config string `json:"config,omitempty" protobuf:"bytes,2,opt,name=config"`
 }

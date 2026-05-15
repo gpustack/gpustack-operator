@@ -33,6 +33,10 @@ func (c *FakeWorkerV1) InstancePersistentVolumes(namespace string) v1.InstancePe
 	return newFakeInstancePersistentVolumes(c, namespace)
 }
 
+func (c *FakeWorkerV1) InstancePersistentVolumeTypes(namespace string) v1.InstancePersistentVolumeTypeInterface {
+	return newFakeInstancePersistentVolumeTypes(c, namespace)
+}
+
 func (c *FakeWorkerV1) InstanceSSHPublicKeys(namespace string) v1.InstanceSSHPublicKeyInterface {
 	return newFakeInstanceSSHPublicKeys(c, namespace)
 }

@@ -205,11 +205,9 @@ func (h *SettingHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions) 
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(sec)
-					if resType == _SettingResource {
-						e.Object = &gpustack.Setting{ObjectMeta: sec.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(sec)
+					e.Object = &gpustack.Setting{ObjectMeta: sec.ObjectMeta}
+					c <- e
 					continue
 				}
 
@@ -297,7 +295,9 @@ func (h *SettingHandler) OnUpdate(ctx context.Context, obj, _ runtime.Object, op
 	// Get.
 	return h.OnGet(ctx, ctrlcli.ObjectKeyFromObject(set),
 		ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{ResourceVersion: "0"},
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
 		})
 }
 

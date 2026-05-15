@@ -385,7 +385,10 @@ func extractImageConfig(ctx context.Context, cli kubernetes.Interface) (img, img
 		if podName != "" {
 			pod, err := cli.CoreV1().
 				Pods(kuberess.SystemNamespaceName).
-				Get(ctx, podName, meta.GetOptions{ResourceVersion: "0"})
+				Get(ctx, podName,
+					meta.GetOptions{
+						ResourceVersion: "0",
+					})
 			if err == nil {
 				for i := range pod.Spec.Containers {
 					ctr := &pod.Spec.Containers[i]

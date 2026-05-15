@@ -35,8 +35,12 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceLogOptions{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceLogOptions(ref),
 		v1.InstancePersistentVolume{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
 		v1.InstancePersistentVolumeList{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
+		v1.InstancePersistentVolumeSource{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeSource(ref),
 		v1.InstancePersistentVolumeSpec{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref),
 		v1.InstancePersistentVolumeStatus{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeStatus(ref),
+		v1.InstancePersistentVolumeType{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeType(ref),
+		v1.InstancePersistentVolumeTypeList{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeList(ref),
+		v1.InstancePersistentVolumeTypeSpec{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeSpec(ref),
 		v1.InstancePort{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstancePort(ref),
 		v1.InstanceResources{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstanceResources(ref),
 		v1.InstanceSSHPublicKey{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref),
@@ -52,6 +56,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceTypeSpec{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeSpec(ref),
 		v1.InstanceTypeStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceTypeStatus(ref),
 		v1.InstanceVolume{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceVolume(ref),
+		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():     schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
+		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
 		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
 		v1alpha1.AcceleratorFeatures{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_AcceleratorFeatures(ref),
@@ -720,28 +726,28 @@ func schema_gpustack_api_worker_v1_InstanceImagePullSecretSpec(ref common.Refere
 					},
 					"registry": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Registry is the registry of the image pull secret.\n\nThis field is a write-only input, and it is required in writing.",
+							Description: "Registry is the registry of the image pull secret.\n\nWrite-only input, it is required in create or update operations.\n\nIt must be provided with Username, Password, and optionally Email in once operation.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"username": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Username is the username of the image pull secret.\n\nThis field is a write-only input, and it is required in writing.",
+							Description: "Username is the username of the image pull secret.\n\nWrite-only input, it is required in create or update operations.\n\nIt must be provided with Registry, Password, and optionally Email in once operation.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"password": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Password is the password of the image pull secret.\n\nThis field is a write-only input, and it is required in writing.",
+							Description: "Password is the password of the image pull secret.\n\nWrite-only input, it is required in create or update operations.\n\nIt must be provided with Registry, Username, and optionally Email in once operation.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"email": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Email is the email of the image pull secret.\n\nThis field is a write-only input, and it is optional in writing.",
+							Description: "Email is the email of the image pull secret.\n\nWrite-only input, it is required in create or update operations.\n\nIt can be provided with Registry, Username, and Password in once operation.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -1003,6 +1009,33 @@ func schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref common.Refer
 	}
 }
 
+func schema_gpustack_api_worker_v1_InstancePersistentVolumeSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstancePersistentVolumeSource defines the source of the InstancePersistentVolumeType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"nfs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NFS represents a volume source that is managed by an NFS server.",
+							Ref:         ref(v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName()),
+						},
+					},
+					"s3": {
+						SchemaProps: spec.SchemaProps{
+							Description: "S3 represents a volume source that is managed by an S3-compatible object storage service.",
+							Ref:         ref(v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName(), v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1081,6 +1114,140 @@ func schema_gpustack_api_worker_v1_InstancePersistentVolumeStatus(ref common.Ref
 		},
 		Dependencies: []string{
 			corev1.ObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstancePersistentVolumeType(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstancePersistentVolumeType is the schema for worker.gpustack.ai.\n\nUnderhood, an InstancePersistentVolumeType is mapping to a Kubernetes StorageClass, and the InstancePersistentVolumeType's name is the same as the Kubernetes StorageClass's name.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1.InstancePersistentVolumeTypeSpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1.InstancePersistentVolumeTypeSpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstancePersistentVolumeTypeList holds the list of InstancePersistentVolumeType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.InstancePersistentVolumeType{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.InstancePersistentVolumeType{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstancePersistentVolumeTypeSpec defines the desired state of InstancePersistentVolumeType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the display name of the InstancePersistentVolumeType.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the description of the InstancePersistentVolumeType.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"nfs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NFS represents a volume source that is managed by an NFS server.",
+							Ref:         ref(v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName()),
+						},
+					},
+					"s3": {
+						SchemaProps: spec.SchemaProps{
+							Description: "S3 represents a volume source that is managed by an S3-compatible object storage service.",
+							Ref:         ref(v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName(), v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName()},
 	}
 }
 
@@ -1357,7 +1524,7 @@ func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) co
 					},
 					"type": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Type is the name of InstanceType that provisions corresponding resources.",
+							Description: "Type is the name of InstanceType that provisions corresponding resources.\n\nImmutable after creation.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
@@ -1479,20 +1646,15 @@ func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) co
 						},
 					},
 					"volume": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-validations": []interface{}{map[string]interface{}{"message": "exactly one of ephemeral and persistent of volume should be specified", "rule": "has(self.ephemeral) != has(self.persistent)"}},
-							},
-						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Volume is the volume to mount in the Instance.",
+							Description: "Volume is the volume to mount in the Instance.\n\nImmutable after creation.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1.InstanceVolume{}.OpenAPIModelName()),
 						},
 					},
 					"sshPublicKey": {
 						SchemaProps: spec.SchemaProps{
-							Description: "SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.",
+							Description: "SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.\n\nImmutable after creation.",
 							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
 						},
 					},
@@ -2022,6 +2184,127 @@ func schema_gpustack_api_worker_v1_InstanceVolume(ref common.ReferenceCallback) 
 		},
 		Dependencies: []string{
 			v1.InstanceEphemeralVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "NFSInstancePersistentVolumeSource defines the source of NFS.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"server": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Server is the hostname or IP address of the NFS server.\n\nImmutable after creation.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"path": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Path is the exported NFS share from the server. For each InstancePersistentVolume, a corresponding subpath will be created in the NFS share.\n\nImmutable after creation.",
+							Default:     "/",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mountOptions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MountOptions is the mount options for the NFS share.",
+							Default:     []interface{}{"hard", "nfsvers=4.1", "rsize=1048576", "wsize=1048576", "noatime", "nodiratime"},
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"server"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "S3InstancePersistentVolumeSource defines the source of S3.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"endpoint": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Endpoint is the endpoint of the S3-compatible object storage service.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"region": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Region is the region of the S3-compatible object storage service. For AWS, the region is required to generate the presigned URL for the S3-compatible object storage service.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"insecure": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Insecure indicates whether to use insecure connection to the S3-compatible object storage service. If it is true, the connection will not verify the TLS certificate of the S3-compatible object storage service.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"accessKey": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AccessKey is the access key of the S3-compatible object storage service.\n\nWrite-only input, it is required in create or update operations.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"secretKey": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SecretKey is the secret key of the S3-compatible object storage service.\n\nWrite-only input, it is required in create or update operations.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"bucket": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Bucket is the bucket name in the S3-compatible object storage service. If it is blank, for each InstancePersistentVolume, a corresponding bucket with the same volume ID as the InstancePersistentVolume will be created in the S3-compatible object storage service.\n\nImmutable after creation.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mountOptions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MountOptions is the mount options for [GeeseFS](https://github.com/yandex-cloud/geesefs).\n\nImmutable after creation.\n\nIntensive writing for large files:\n  disable CPU overhead, reduce freshening frequency, maximize parallelism,\n  and reduce part sizes to improve writing performance for large files.\n  [\"--no-checksum\",\"--memory-limit=4000\",\"--max-flushers=32\",\"--max-parallel-parts=32\",\"--part-sizes=25\"]\n\nSequential reading for large files:\n  increase read-ahead size and parallelism,\n  and increase the memory cache limit to improve reading performance for large files.\n  [\"--read-ahead-large=200000\",\" --large-read-cutoff=10240\",\"--read-ahead-parallel=40000\",\"--memory-limit=8000\"]\n\nRandom reading for small files:\n  decrease read-ahead size, extend metadata cache TTL,\n  and increase the entry limit to improve reading performance for small files.\n  [\"--read-ahead-small=64\",\"--small-read-cutoff=64\",\"--read-ahead=1024\",\"--stat-cache-ttl=300s\",\"--entry-limit=200000\"]\n\nHigh availability for writing:\n  increase the number of retries and enable fsync on close to improve data durability for writing.\n  [\"--sdk-max-retries=10\",\"--read-retry-attempts=5\",\"--fsync-on-close\",\"--cache=/mnt/disk-cache]\n\nFor non-Yandex S3-compatible object storage service:\n  [\"--list-type=2\",\"--no-specials\"]",
+							Default:     []interface{}{"--no-checksum", "--memory-limit=4000", "--max-flushers=32", "--max-parallel-parts=32", "--part-sizes=25", "--list-type=2", "--no-specials"},
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"endpoint"},
+			},
+		},
 	}
 }
 

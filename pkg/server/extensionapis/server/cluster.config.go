@@ -141,6 +141,8 @@ func (h *ClusterConfigHandler) OnUpdate(ctx context.Context, obj, objOld runtime
 	}
 
 	return h.OnGet(ctx, ctrlcli.ObjectKeyFromObject(clsCfg), ctrlcli.GetOptions{
-		Raw: &meta.GetOptions{ResourceVersion: "0"},
+		Raw: &meta.GetOptions{
+			ResourceVersion: "0",
+		},
 	})
 }

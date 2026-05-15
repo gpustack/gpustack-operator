@@ -62,8 +62,10 @@ func (h *SubjectLoginHandler) OnCreate(ctx context.Context, obj runtime.Object, 
 	// Validate.
 	{
 		if subjl.Spec.Credential == "" {
-			errs := field.ErrorList{field.Required(
-				field.NewPath("spec.credential"), "credential is required")}
+			errs := field.ErrorList{
+				field.Required(
+					field.NewPath("spec.credential"), "credential is required"),
+			}
 			return nil, kerrors.NewInvalid(server.Kind(_SubjectLoginResource), subjl.Name, errs)
 		}
 	}

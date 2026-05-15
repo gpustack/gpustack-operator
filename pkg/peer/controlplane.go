@@ -291,7 +291,11 @@ func (cp *ControlPlane) GetClusterKubeRestConfig(ctx context.Context, cls types.
 	var restCfg *rest.Config
 
 	lpCli := cp.config.LoopbackKubeClient
-	clsCfg, err := lpCli.ServerV1().Clusters(cls.Namespace).GetConfig(ctx, cls.Name, meta.GetOptions{ResourceVersion: "0"})
+	clsCfg, err := lpCli.ServerV1().Clusters(cls.Namespace).
+		GetConfig(ctx, cls.Name,
+			meta.GetOptions{
+				ResourceVersion: "0",
+			})
 	if err != nil {
 		return nil, fmt.Errorf("get cluster config: %w", err)
 	}
@@ -418,9 +422,10 @@ func (cp *ControlPlane) handleRegistration(ctx context.Context, p2pPub *libp2ppu
 		// Validate type and token.
 		cls, err := lpCli.ServerV1().
 			Clusters(req.Team).
-			Get(ctx, req.Cluster, meta.GetOptions{
-				ResourceVersion: "0",
-			})
+			Get(ctx, req.Cluster,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
 		if err != nil {
 			return fmt.Errorf("get cluster: %w", err)
 		}
@@ -488,7 +493,10 @@ func (cp *ControlPlane) listWatchPeerEndpoints(ctx context.Context) error {
 
 		// List the endpoints first to get the initial state.
 		epsExisted := sets.Set[string]{}
-		eps, err := epsCli.Get(ctx, cp.peerRoute.Name, meta.GetOptions{ResourceVersion: "0"})
+		eps, err := epsCli.Get(ctx, cp.peerRoute.Name,
+			meta.GetOptions{
+				ResourceVersion: "0",
+			})
 		if err != nil {
 			return err
 		}
@@ -502,10 +510,11 @@ func (cp *ControlPlane) listWatchPeerEndpoints(ctx context.Context) error {
 		}
 
 		// Watch the endpoints for changes.
-		epsWatcher, err := epsCli.Watch(ctx, meta.ListOptions{
-			ResourceVersion: "0",
-			FieldSelector:   "metadata.name=" + cp.peerRoute.Name,
-		})
+		epsWatcher, err := epsCli.Watch(ctx,
+			meta.ListOptions{
+				ResourceVersion: "0",
+				FieldSelector:   "metadata.name=" + cp.peerRoute.Name,
+			})
 		if err != nil {
 			return err
 		}
@@ -554,7 +563,10 @@ func (cp *ControlPlane) listWatchPeerEndpoints(ctx context.Context) error {
 
 	// List the endpoints first to get the initial state.
 	epExisted := sets.Set[string]{}
-	epList, err := epCli.Get(ctx, cp.peerRoute.Name, meta.GetOptions{ResourceVersion: "0"})
+	epList, err := epCli.Get(ctx, cp.peerRoute.Name,
+		meta.GetOptions{
+			ResourceVersion: "0",
+		})
 	if err != nil {
 		return err
 	}
@@ -566,10 +578,11 @@ func (cp *ControlPlane) listWatchPeerEndpoints(ctx context.Context) error {
 	}
 
 	// Watch the endpoints for changes.
-	epWatcher, err := epCli.Watch(ctx, meta.ListOptions{
-		ResourceVersion: "0",
-		FieldSelector:   "metadata.name=" + cp.peerRoute.Name,
-	})
+	epWatcher, err := epCli.Watch(ctx,
+		meta.ListOptions{
+			ResourceVersion: "0",
+			FieldSelector:   "metadata.name=" + cp.peerRoute.Name,
+		})
 	if err != nil {
 		return err
 	}

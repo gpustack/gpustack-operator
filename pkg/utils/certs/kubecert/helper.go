@@ -135,10 +135,11 @@ func (s *certState) Generate(
 		wc watch.Interface
 		cc = make(chan any)
 	)
-	wc, s.err = cli.Watch(ctx, meta.ListOptions{
-		ResourceVersion: "0",
-		FieldSelector:   "metadata.name=" + csr.Name,
-	})
+	wc, s.err = cli.Watch(ctx,
+		meta.ListOptions{
+			ResourceVersion: "0",
+			FieldSelector:   "metadata.name=" + csr.Name,
+		})
 	if s.err != nil {
 		return
 	}

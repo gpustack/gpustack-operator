@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 
 	core "k8s.io/api/core/v1"
 	rbac "k8s.io/api/rbac/v1"
@@ -169,7 +168,9 @@ func (h *TeamHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctr
 		// so we need another approach to adopt the default team.
 		_, err := h.OnGet(ctx, ctrlcli.ObjectKeyFromObject(team),
 			ctrlcli.GetOptions{
-				Raw: &meta.GetOptions{ResourceVersion: "0"},
+				Raw: &meta.GetOptions{
+					ResourceVersion: "0",
+				},
 			})
 		if err == nil {
 			return nil, kerrors.NewAlreadyExists(server.Resource(_TeamResource), team.Name)
@@ -344,18 +345,15 @@ func (h *TeamHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions) (wa
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType, _ := systemmeta.DescribeResource(ns)
-					if resType == _TeamResource {
-						e.Object = &server.Team{ObjectMeta: ns.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(ns)
+					e.Object = &server.Team{ObjectMeta: ns.ObjectMeta}
+					c <- e
 					continue
 				}
 
 				// Convert.
 				team := safeConvertTeamFromNamespace(ns, opts.Namespace)
 				if team == nil {
-					// Skip if not belong to the requested namespace.
 					continue
 				}
 
@@ -592,13 +590,6 @@ func convertTeamListFromNamespaceList(nsList *core.NamespaceList, opts ctrlcli.L
 	if nsList == nil {
 		return &server.TeamList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(nsList.Items, func(i, j int) bool {
-		l, r := nsList.Items[i].ResourceVersion, nsList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	teamList := &server.TeamList{
 		ListMeta: nsList.ListMeta,

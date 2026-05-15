@@ -315,7 +315,10 @@ func isApiServiceReady(ctx context.Context, c *Client, apiSvcName string) bool {
 
 	svcCli := c.KubeClientSet().ApiregistrationV1().APIServices()
 
-	svc, err := svcCli.Get(ctx, apiSvcName, meta.GetOptions{ResourceVersion: "0"})
+	svc, err := svcCli.Get(ctx, apiSvcName,
+		meta.GetOptions{
+			ResourceVersion: "0",
+		})
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			return false

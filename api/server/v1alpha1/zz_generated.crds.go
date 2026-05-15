@@ -94,7 +94,7 @@ func crd_gpustack_api_server_v1alpha1_Cluster() *v1.CustomResourceDefinition {
 											XValidations: []v1.ValidationRule{
 												{
 													Rule:    "oldSelf == self",
-													Message: "type is immutable field",
+													Message: "type is immutable",
 												},
 											},
 										},

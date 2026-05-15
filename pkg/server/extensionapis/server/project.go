@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -158,16 +157,14 @@ func (h *ProjectHandler) OnCreate(ctx context.Context, obj runtime.Object, opts 
 	}
 
 	// Create.
-	{
-		ns := convertNamespaceFromProject(proj)
-		kubemeta.ControlOn(ns, team, server.SchemeGroupVersionKind("Team"))
-		err = h.Client.Create(ctx, ns, &opts)
-		if err != nil {
-			return nil, err
-		}
-		proj = convertProjectFromNamespace(ns)
+	ns := convertNamespaceFromProject(proj)
+	kubemeta.ControlOn(ns, team, server.SchemeGroupVersionKind("Team"))
+	err = h.Client.Create(ctx, ns, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	proj = convertProjectFromNamespace(ns)
 	return proj, nil
 }
 
@@ -232,18 +229,15 @@ func (h *ProjectHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions) 
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(ns)
-					if resType == _ProjectResource {
-						e.Object = &server.Project{ObjectMeta: ns.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(ns)
+					e.Object = &server.Project{ObjectMeta: ns.ObjectMeta}
+					c <- e
 					continue
 				}
 
 				// Convert.
 				proj := safeConvertProjectFromNamespace(ns, opts.Namespace)
 				if proj == nil {
-					// Skip if not belong to the requested namespace.
 					continue
 				}
 
@@ -430,13 +424,6 @@ func convertProjectListFromNamespaceList(nsList *core.NamespaceList, opts ctrlcl
 	if nsList == nil {
 		return &server.ProjectList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(nsList.Items, func(i, j int) bool {
-		l, r := nsList.Items[i].ResourceVersion, nsList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	eList := &server.ProjectList{
 		ListMeta: nsList.ListMeta,

@@ -58,7 +58,10 @@ func ImportLocalCluster(ctx context.Context, cli kubernetes.Interface) error {
 		true,
 		func(ctx context.Context) (err error) {
 			projCli := cli.ServerV1().Projects(DefaultTeamName)
-			projClss, err := projCli.GetClusters(ctx, DefaultProjectName, meta.GetOptions{ResourceVersion: "0"})
+			projClss, err := projCli.GetClusters(ctx, DefaultProjectName,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
 			if err != nil {
 				return fmt.Errorf("get clusters of %s projects: %w", DefaultProjectName, err)
 			}

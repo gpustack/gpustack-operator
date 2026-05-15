@@ -89,7 +89,10 @@ func (s CreateOperation) Create(
 			return obj, nil
 		}
 
-		_, err = getter.Get(ctx, om.GetName(), &meta.GetOptions{ResourceVersion: "0"})
+		_, err = getter.Get(ctx, om.GetName(),
+			&meta.GetOptions{
+				ResourceVersion: "0",
+			})
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				return nil, wrapError(ctx, om.GetName(), err)
@@ -354,7 +357,9 @@ func (s GetOperation) Get(
 	options *meta.GetOptions,
 ) (runtime.Object, error) {
 	if options == nil {
-		options = &meta.GetOptions{ResourceVersion: "0"}
+		options = &meta.GetOptions{
+			ResourceVersion: "0",
+		}
 	}
 
 	keyFunc := KeyFuncForClusterScope
@@ -464,7 +469,9 @@ func (s UpdateOperation) Update(
 	var creating bool
 	existing, err := s.Handler.OnGet(ctx, key,
 		ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{ResourceVersion: "0"},
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
 		})
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
@@ -644,7 +651,9 @@ func (s DeleteOperation) Delete(
 
 	existing, err := s.Handler.OnGet(ctx, key,
 		ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{ResourceVersion: "0"},
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
 		})
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
@@ -1354,57 +1363,70 @@ func wrapError(ctx context.Context, name string, err error) error {
 
 	gk := qualifiedKindFromContext(ctx)
 
-	var es meta.Status
-	if st, ok := err.(kerrors.APIStatus); ok || errors.As(err, &st) {
-		ss := st.Status()
-		ssd := ss.Details
-		if ssd == nil {
-			ssd = &meta.StatusDetails{}
+	if apiStatus, ok := err.(kerrors.APIStatus); ok || errors.As(err, &apiStatus) {
+		st := apiStatus.Status()
+		std := st.Details
+		if std == nil {
+			std = &meta.StatusDetails{}
 		}
-		es = meta.Status{
-			Status: ss.Status,
-			Code:   ss.Code,
-			Reason: ss.Reason,
-			Details: &meta.StatusDetails{
-				Name:              name,
-				Group:             gk.Group,
-				Kind:              gk.Kind,
-				UID:               ssd.UID,
-				Causes:            ssd.Causes,
-				RetryAfterSeconds: ssd.RetryAfterSeconds,
+		return &kerrors.StatusError{
+			ErrStatus: meta.Status{
+				Status: st.Status,
+				Code:   st.Code,
+				Reason: st.Reason,
+				Details: &meta.StatusDetails{
+					Name:              name,
+					Group:             gk.Group,
+					Kind:              gk.Kind,
+					UID:               std.UID,
+					Causes:            std.Causes,
+					RetryAfterSeconds: std.RetryAfterSeconds,
+				},
+				Message: st.Message,
 			},
-			Message: ss.Message,
 		}
-	} else {
-		var ef *field.Error
-		if errors.As(err, &ef) {
-			es = meta.Status{
+	}
+
+	var fieldErr *field.Error
+	if errors.As(err, &fieldErr) {
+		return &kerrors.StatusError{
+			ErrStatus: meta.Status{
 				Status: meta.StatusFailure,
 				Code:   http.StatusBadRequest,
 				Reason: meta.StatusReasonInvalid,
 				Details: &meta.StatusDetails{
-					Name:   name,
-					Group:  gk.Group,
-					Kind:   gk.Kind,
-					Causes: []meta.StatusCause{{Message: ef.Error()}},
+					Name:  name,
+					Group: gk.Group,
+					Kind:  gk.Kind,
+					Causes: []meta.StatusCause{
+						{
+							Type:    meta.CauseType(fieldErr.Type), // 1-1 mapping.
+							Message: fieldErr.Detail,
+						},
+					},
 				},
 				Message: fmt.Sprintf("Invalid object: %v", err),
-			}
-		} else {
-			es = meta.Status{
-				Status: meta.StatusFailure,
-				Code:   http.StatusInternalServerError,
-				Reason: meta.StatusReasonInternalError,
-				Details: &meta.StatusDetails{
-					Name:   name,
-					Group:  gk.Group,
-					Kind:   gk.Kind,
-					Causes: []meta.StatusCause{{Message: err.Error()}},
-				},
-				Message: fmt.Sprintf("Internal error occurred: %v", err),
-			}
+			},
 		}
 	}
 
-	return &kerrors.StatusError{ErrStatus: es}
+	return &kerrors.StatusError{
+		ErrStatus: meta.Status{
+			Status: meta.StatusFailure,
+			Code:   http.StatusInternalServerError,
+			Reason: meta.StatusReasonInternalError,
+			Details: &meta.StatusDetails{
+				Name:  name,
+				Group: gk.Group,
+				Kind:  gk.Kind,
+				Causes: []meta.StatusCause{
+					{
+						Type:    meta.CauseTypeInternal,
+						Message: err.Error(),
+					},
+				},
+			},
+			Message: fmt.Sprintf("Internal error occurred: %v", err),
+		},
+	}
 }

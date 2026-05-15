@@ -25,7 +25,10 @@ const AdminSubjectName = "admin"
 // alias to Kubernetes Secret gpustack-subject-admin under the system namespace.
 func InstallAdminSubject(ctx context.Context, cli kubernetes.Interface, password string) error {
 	subCli := cli.ServerV1().Subjects(SystemNamespaceName)
-	_, err := subCli.Get(ctx, AdminSubjectName, meta.GetOptions{ResourceVersion: "0"})
+	_, err := subCli.Get(ctx, AdminSubjectName,
+		meta.GetOptions{
+			ResourceVersion: "0",
+		})
 	if err != nil && kerrors.IsNotFound(err) && password == "" {
 		// NB(thxCode): in order to avoid multiple GPUStack get different bootstrap password,
 		// we will save the bootstrap password to the Kubernetes Secret gpustack-subject-admin-bootstrap-password.

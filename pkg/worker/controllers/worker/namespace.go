@@ -52,11 +52,7 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrlreconcile.R
 
 	cqList := new(kueue.ClusterQueueList)
 	err = r.Client.List(ctx, cqList,
-		&ctrlcli.ListOptions{
-			Raw: &meta.ListOptions{
-				ResourceVersion: "0",
-			},
-		},
+		kubeclientset.NonQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list cluster queues")

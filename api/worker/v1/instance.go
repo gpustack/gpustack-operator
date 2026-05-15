@@ -39,26 +39,34 @@ type InstanceSpec struct {
 
 	// Type is the name of InstanceType that provisions corresponding resources.
 	//
+	// Immutable after creation.
+	//
 	// +required
 	Type string `json:"type" protobuf:"bytes,3,name=type"`
 
 	// InstanceTemplate is the template for the Instance to run.
+	//
+	// Immutable after creation.
 	InstanceTemplate `json:",inline" protobuf:"bytes,4,name=instanceTemplate"`
 
 	// Volume is the volume to mount in the Instance.
 	//
+	// Immutable after creation.
+	//
 	// +required
-	// +k8s:validation:cel[0]:rule="has(self.ephemeral) != has(self.persistent)"
-	// +k8s:validation:cel[0]:message="exactly one of ephemeral and persistent of volume should be specified"
 	Volume InstanceVolume `json:"volume,omitempty" protobuf:"bytes,5,opt,name=volume"`
 
 	// SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
+	//
+	// Immutable after creation.
 	SSHPublicKey *core.LocalObjectReference `json:"sshPublicKey,omitempty" protobuf:"bytes,6,opt,name=sshPublicKey"`
 }
 
 // InstanceTemplate defines the template for the Instance to run.
 type InstanceTemplate struct {
 	// Image is the container image to run.
+	//
+	// +required
 	Image string `json:"image" protobuf:"bytes,1,name=image"`
 
 	// ImagePullPolicy is the image pull policy to use.

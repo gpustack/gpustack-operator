@@ -79,7 +79,7 @@ type ClusterSpec struct {
 	//
 	// +k8s:validation:enum=["Loopback","Proxy","ReverseProxy"]
 	// +k8s:validation:cel[0]:rule="oldSelf == self"
-	// +k8s:validation:cel[0]:message="type is immutable field"
+	// +k8s:validation:cel[0]:message="type is immutable"
 	Type ClusterType `json:"type" protobuf:"bytes,1,name=type,casttype=ClusterType"`
 
 	// DisplayName is the display name of the cluster.

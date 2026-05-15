@@ -35,6 +35,14 @@ type InstancePersistentVolumeListerExpansion interface{}
 // InstancePersistentVolumeNamespaceLister.
 type InstancePersistentVolumeNamespaceListerExpansion interface{}
 
+// InstancePersistentVolumeTypeListerExpansion allows custom methods to be added to
+// InstancePersistentVolumeTypeLister.
+type InstancePersistentVolumeTypeListerExpansion interface{}
+
+// InstancePersistentVolumeTypeNamespaceListerExpansion allows custom methods to be added to
+// InstancePersistentVolumeTypeNamespaceLister.
+type InstancePersistentVolumeTypeNamespaceListerExpansion interface{}
+
 // InstanceSSHPublicKeyListerExpansion allows custom methods to be added to
 // InstanceSSHPublicKeyLister.
 type InstanceSSHPublicKeyListerExpansion interface{}

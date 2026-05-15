@@ -17,12 +17,20 @@ type InstanceSpecApplyConfiguration struct {
 	// Description is the description of the Instance.
 	Description *string `json:"description,omitempty"`
 	// Type is the name of InstanceType that provisions corresponding resources.
+	//
+	// Immutable after creation.
 	Type *string `json:"type,omitempty"`
 	// InstanceTemplate is the template for the Instance to run.
+	//
+	// Immutable after creation.
 	InstanceTemplateApplyConfiguration `json:",inline"`
 	// Volume is the volume to mount in the Instance.
+	//
+	// Immutable after creation.
 	Volume *InstanceVolumeApplyConfiguration `json:"volume,omitempty"`
 	// SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
+	//
+	// Immutable after creation.
 	SSHPublicKey *corev1.LocalObjectReferenceApplyConfiguration `json:"sshPublicKey,omitempty"`
 }
 

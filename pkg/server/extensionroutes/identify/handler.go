@@ -397,7 +397,10 @@ func profile(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		// Get profile.
 		subj, err := cli.ServerV1().Subjects(subjNamespace).
-			Get(r.Context(), subjName, meta.GetOptions{ResourceVersion: "0"})
+			Get(r.Context(), subjName,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
 		if err != nil {
 			ui.ResponseError(w, fmt.Errorf("get profile: %w", err))
 			return

@@ -17,6 +17,7 @@ import (
 	server "gpustack.ai/gpustack/api/server/v1"
 	servercore "gpustack.ai/gpustack/api/server/v1alpha1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/server/kuberess"
 	"gpustack.ai/gpustack/pkg/server/settings"
 	"gpustack.ai/gpustack/pkg/utils/bytex"
@@ -334,8 +335,8 @@ func extractImageConfig(ctx context.Context, apiReader ctrlcli.Reader) (img, img
 					Namespace: kuberess.SystemNamespaceName,
 				},
 			}
-			opts := ctrlcli.GetOptions{Raw: &meta.GetOptions{ResourceVersion: "0"}}
-			err := apiReader.Get(ctx, ctrlcli.ObjectKeyFromObject(pod), pod, &opts)
+			err := apiReader.Get(ctx, ctrlcli.ObjectKeyFromObject(pod), pod,
+				kubeclientset.NonQuorum)
 			if err == nil {
 				for i := range pod.Spec.Containers {
 					ctr := &pod.Spec.Containers[i]

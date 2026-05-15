@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"sort"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -57,10 +56,7 @@ func (h *InstanceSSHPublicKeyHandler) SetupHandler(
 	gvr = worker.SchemeGroupVersionResource(_InstanceSSHPublicKeyResource)
 
 	// Create table convertor to pretty the kubectl's output.
-	tc, err := extensionapi.NewJSONPathTableConvertor()
-	if err != nil {
-		return gvr, srs, err
-	}
+	tc := extensionapi.NewDefaultTableConvertor()
 
 	// As storage.
 	h.ObjectInfo = &worker.InstanceSSHPublicKey{}
@@ -96,15 +92,13 @@ func (h *InstanceSSHPublicKeyHandler) OnCreate(ctx context.Context, obj runtime.
 	instSSHKey := obj.(*worker.InstanceSSHPublicKey)
 
 	// Create.
-	{
-		sec := convertSecretFromInstanceSSHPublicKey(instSSHKey)
-		err := h.Client.Create(ctx, sec, &opts)
-		if err != nil {
-			return nil, err
-		}
-		instSSHKey = convertInstanceSSHPublicKeyFromSecret(sec)
+	sec := convertSecretFromInstanceSSHPublicKey(instSSHKey)
+	err := h.Client.Create(ctx, sec, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	instSSHKey = convertInstanceSSHPublicKeyFromSecret(sec)
 	return instSSHKey, nil
 }
 
@@ -122,8 +116,8 @@ func (h *InstanceSSHPublicKeyHandler) OnList(ctx context.Context, opts ctrlcli.L
 	}
 
 	// Convert.
-	itList := convertInstanceSSHPublicKeyListFromSecretList(secList, opts)
-	return itList, nil
+	instSSHKeyList := convertInstanceSSHPublicKeyListFromSecretList(secList, opts)
+	return instSSHKeyList, nil
 }
 
 func (h *InstanceSSHPublicKeyHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions) (watch.Interface, error) {
@@ -169,18 +163,15 @@ func (h *InstanceSSHPublicKeyHandler) OnWatch(ctx context.Context, opts ctrlcli.
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(sec)
-					if resType == _InstanceSSHPublicKeyResource {
-						e.Object = &worker.InstanceSSHPublicKey{ObjectMeta: sec.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(sec)
+					e.Object = &worker.InstanceSSHPublicKey{ObjectMeta: sec.ObjectMeta}
+					c <- e
 					continue
 				}
 
 				// Convert.
 				instSSHKey := convertInstanceSSHPublicKeyFromSecret(sec)
 				if instSSHKey == nil {
-					// Skip if not belong to the requested namespace.
 					continue
 				}
 
@@ -221,7 +212,9 @@ func (h *InstanceSSHPublicKeyHandler) OnGet(ctx context.Context, key types.Names
 	return instSSHKey, nil
 }
 
-func (h *InstanceSSHPublicKeyHandler) OnUpdate(ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions) (runtime.Object, error) {
+func (h *InstanceSSHPublicKeyHandler) OnUpdate(
+	ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions,
+) (runtime.Object, error) {
 	instSSHKey := obj.(*worker.InstanceSSHPublicKey)
 
 	// Update.
@@ -300,13 +293,6 @@ func convertInstanceSSHPublicKeyListFromSecretList(secList *core.SecretList, opt
 	if secList == nil {
 		return &worker.InstanceSSHPublicKeyList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(secList.Items, func(i, j int) bool {
-		l, r := secList.Items[i].ResourceVersion, secList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	instSSHKeyList := &worker.InstanceSSHPublicKeyList{
 		ListMeta: secList.ListMeta,

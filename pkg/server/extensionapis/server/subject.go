@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"golang.org/x/crypto/bcrypt"
@@ -215,19 +214,17 @@ func (h *SubjectHandler) OnCreate(ctx context.Context, obj runtime.Object, opts 
 	// NB(thxCode): the permission grant is handled by SubjectAuthzReconciler.
 
 	// Create.
-	{
-		sa, err := convertServiceAccountFromSubject(subj)
-		if err != nil {
-			return nil, kerrors.NewInternalError(err)
-		}
-		kubemeta.ControlOn(sa, subjProv, server.SchemeGroupVersionKind("SubjectProvider"))
-		err = h.Client.Create(ctx, sa, &opts)
-		if err != nil {
-			return nil, err
-		}
-		subj = convertSubjectFromServiceAccount(sa)
+	sa, err := convertServiceAccountFromSubject(subj)
+	if err != nil {
+		return nil, kerrors.NewInternalError(err)
+	}
+	kubemeta.ControlOn(sa, subjProv, server.SchemeGroupVersionKind("SubjectProvider"))
+	err = h.Client.Create(ctx, sa, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	subj = convertSubjectFromServiceAccount(sa)
 	return subj, nil
 }
 
@@ -292,11 +289,9 @@ func (h *SubjectHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions) 
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(sa)
-					if resType == _SubjectResource {
-						e.Object = &server.Subject{ObjectMeta: sa.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(sa)
+					e.Object = &server.Subject{ObjectMeta: sa.ObjectMeta}
+					c <- e
 					continue
 				}
 
@@ -548,13 +543,6 @@ func convertSubjectListFromServiceAccountList(saList *core.ServiceAccountList, o
 	if saList == nil {
 		return &server.SubjectList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(saList.Items, func(i, j int) bool {
-		l, r := saList.Items[i].ResourceVersion, saList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	sList := &server.SubjectList{
 		ListMeta: saList.ListMeta,

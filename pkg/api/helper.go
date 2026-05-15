@@ -169,7 +169,10 @@ func WaitForServicesReady(ctx context.Context, cli kubernetes.Interface, getters
 	return waitx.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, false,
 		func(ctx context.Context) error {
 			for i := range svcs {
-				svc, err := svcCli.Get(ctx, svcs[i].Name, meta.GetOptions{ResourceVersion: "0"})
+				svc, err := svcCli.Get(ctx, svcs[i].Name,
+					meta.GetOptions{
+						ResourceVersion: "0",
+					})
 				if err != nil {
 					return err
 				}

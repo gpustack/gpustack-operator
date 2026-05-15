@@ -52,19 +52,18 @@ message ClusterConfig {
 
 // ClusterConfigSpec defines the desired state of ClusterConfig.
 message ClusterConfigSpec {
-  // Config is the config of the non-loopback Cluster,
-  // it is a write-only field to specify the config of the non-loopback Cluster.
+  // Config is the config of the non-loopback Cluster.
+  //
+  // Immutable after creation.
   optional string config = 1;
 }
 
 // ClusterConfigStatus defines the observed state of ClusterConfig.
 message ClusterConfigStatus {
-  // Type is the type of Cluster,
-  // it is a read-only field to expose the type of the non-loopback Cluster.
+  // Type is the type of Cluster.
   optional string type = 1;
 
-  // Config is the config of the non-loopback Cluster,
-  // it is a read-only field to expose the config of the non-loopback Cluster.
+  // Config is the config of the non-loopback Cluster.
   optional string config = 2;
 }
 
@@ -79,12 +78,10 @@ message ClusterImportConfig {
 
 // ClusterImportConfigStatus defines the observed state of ClusterImportConfig.
 message ClusterImportConfigStatus {
-  // Type is the type of Cluster,
-  // it is a read-only field to expose the type of the non-loopback Cluster.
+  // Type is the type of Cluster.
   optional string type = 1;
 
-  // Config is the config of the non-loopback Cluster,
-  // it is a read-only field to expose the config of the non-loopback Cluster.
+  // Config is the config of the non-loopback Cluster.
   optional string config = 2;
 }
 

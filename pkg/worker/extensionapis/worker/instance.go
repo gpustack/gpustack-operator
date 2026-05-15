@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -25,6 +24,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/extensionapi"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
@@ -36,7 +36,10 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
-const _InstanceResource = "instances"
+const (
+	_InstanceResource = "instances"
+	_InstanceKind     = "Instance"
+)
 
 // InstanceHandler handles v1.Instance objects.
 //
@@ -150,17 +153,22 @@ func (h *InstanceHandler) New() runtime.Object {
 func (h *InstanceHandler) Destroy() {}
 
 func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctrlcli.CreateOptions) (runtime.Object, error) {
-	// Validate.
 	inst := obj.(*worker.Instance)
-	if inst.Spec.Type == "" {
+
+	// Validate.
+	if inst.Namespace == kuberess.SystemNamespaceName {
 		return nil, field.Invalid(
-			field.NewPath("spec.type"), "", "type must be specified")
+			field.NewPath("metadata.namespace"), inst.Namespace, "cannot create instance in system namespace")
+	}
+	if inst.Spec.Type == "" {
+		return nil, field.Required(
+			field.NewPath("spec.type"), "type must be specified")
 	}
 	for i := range inst.Spec.Ports {
 		if inst.Spec.Ports[i].Port == 22 && inst.Spec.Ports[i].Protocol == core.ProtocolTCP {
 			if inst.Spec.SSHPublicKey == nil || inst.Spec.SSHPublicKey.Name == "" {
-				return nil, field.Invalid(
-					field.NewPath("spec.sshPublicKey"), "", "sshPublicKey must be specified if allowed tcp/22 accessible")
+				return nil, field.Required(
+					field.NewPath("spec.sshPublicKey"), "sshPublicKey must be specified if allowed tcp/22 accessible")
 			}
 			break
 		}
@@ -172,43 +180,49 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 	}
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType)
 	if err != nil {
-		if kerrors.IsNotFound(err) {
-			return nil, field.Invalid(
-				field.NewPath("spec.type"), inst.Spec.Type, "instance type not found")
+		if !kerrors.IsNotFound(err) {
+			return nil, field.InternalError(
+				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
 		}
-		return nil, field.InternalError(field.NewPath("spec.type"), err)
+		return nil, field.Invalid(
+			field.NewPath("spec.type"), inst.Spec.Type, "instance type not found")
 	}
 	if inst.Spec.Resources != nil {
+		var errs field.ErrorList
 		if inst.Spec.Resources.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
-			return nil, field.Invalid(
+			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.cpu"), inst.Spec.Resources.CPU.String(),
-				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name))
+				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)),
+			)
 		}
 		if inst.Spec.Resources.RAM.Cmp(instType.Status.RAM.OnceMaxRequest) > 0 {
-			return nil, field.Invalid(
+			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.ram"), inst.Spec.Resources.RAM.String(),
-				fmt.Sprintf("exceeds the maximum RAM request of instance type %s", instType.Name))
+				fmt.Sprintf("exceeds the maximum RAM request of instance type %s", instType.Name)),
+			)
 		}
 		if inst.Spec.Resources.LocalStorage.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
-			return nil, field.Invalid(
+			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.localStorage"), inst.Spec.Resources.LocalStorage.String(),
-				fmt.Sprintf("exceeds the maximum local storage request of instance type %s", instType.Name))
+				fmt.Sprintf("exceeds the maximum local storage request of instance type %s", instType.Name)),
+			)
 		}
 		if inst.Spec.Resources.Accelerator != nil &&
 			inst.Spec.Resources.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
-			return nil, field.Invalid(
+			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.accelerator"), inst.Spec.Resources.Accelerator.String(),
-				fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name))
+				fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)),
+			)
+		}
+		if len(errs) > 0 {
+			return nil, kerrors.NewInvalid(worker.Kind(_InstanceKind), inst.Name, errs)
 		}
 	}
 	if inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil {
-		return nil, field.Invalid(
-			field.NewPath("spec.volume"), "", "exactly one of ephemeral and persistent of volume should be specified")
+		return nil, field.Required(
+			field.NewPath("spec.volume"), "exactly one of ephemeral and persistent of volume should be specified")
 	}
-	if inst.Namespace == kuberess.SystemNamespaceName {
-		return nil, field.Invalid(
-			field.NewPath("metadata.namespace"), inst.Namespace, "cannot create instance in system namespace")
-	}
+
 	// Default.
 	if inst.Spec.VolumeMount == "" {
 		inst.Spec.VolumeMount = "/workspace"
@@ -230,16 +244,15 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 			inst.Spec.Resources.Accelerator = resource.NewQuantity(1, resource.DecimalSI) // 1 accelerator
 		}
 	}
+
 	// Create.
-	{
-		pod := convertPodFromInstance(ctx, inst, instType)
-		err = h.Client.Create(ctx, pod, &opts)
-		if err != nil {
-			return nil, err
-		}
-		inst = convertInstanceFromPod(pod)
+	pod := convertPodFromInstance(ctx, inst, instType)
+	err = h.Client.Create(ctx, pod, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	inst = convertInstanceFromPod(pod)
 	return inst, nil
 }
 
@@ -304,11 +317,9 @@ func (h *InstanceHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions)
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(pod)
-					if resType == _InstanceResource {
-						e.Object = &worker.Instance{ObjectMeta: pod.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(pod)
+					e.Object = &worker.Instance{ObjectMeta: pod.ObjectMeta}
+					c <- e
 					continue
 				}
 
@@ -356,65 +367,81 @@ func (h *InstanceHandler) OnGet(ctx context.Context, key types.NamespacedName, o
 	return inst, nil
 }
 
-func (h *InstanceHandler) OnUpdate(ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions) (runtime.Object, error) {
-	// Validate.
+func (h *InstanceHandler) OnUpdate(
+	ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions,
+) (runtime.Object, error) {
 	inst, instOld := obj.(*worker.Instance), oldObj.(*worker.Instance)
+
+	// Validate.
+	var errs field.ErrorList
 	if inst.Spec.Type != instOld.Spec.Type {
-		return nil, field.Forbidden(
-			field.NewPath("spec.type"), "type is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.type"), "type is immutable"),
+		)
 	}
 	if inst.Spec.Image != instOld.Spec.Image {
-		return nil, field.Forbidden(
-			field.NewPath("spec.image"), "image is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.image"), "image is immutable"),
+		)
 	}
 	if inst.Spec.ImagePullPolicy != instOld.Spec.ImagePullPolicy {
-		return nil, field.Forbidden(
-			field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Command, instOld.Spec.Command) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.command"), "command is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.command"), "command is immutable"),
+		)
 	}
 	if inst.Spec.Privileged != instOld.Spec.Privileged {
-		return nil, field.Forbidden(
-			field.NewPath("spec.privileged"), "privileged is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.privileged"), "privileged is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Ports, instOld.Spec.Ports) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.ports"), "ports is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.ports"), "ports is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Env, instOld.Spec.Env) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.env"), "env is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.env"), "env is immutable"),
+		)
 	}
 	if inst.Spec.VolumeMount != instOld.Spec.VolumeMount {
-		return nil, field.Forbidden(
-			field.NewPath("spec.volumeMount"), "volumeMount is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.volumeMount"), "volumeMount is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.ImagePullSecret, instOld.Spec.ImagePullSecret) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Resources, instOld.Spec.Resources) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.resources"), "resources is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.resources"), "resources is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Volume, instOld.Spec.Volume) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.volume"), "volume is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.volume"), "volume is immutable"),
+		)
 	}
 	if !kubemeta.DeepEqual(inst.Spec.SSHPublicKey, instOld.Spec.SSHPublicKey) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable"),
+		)
+	}
+	if len(errs) > 0 {
+		return nil, kerrors.NewInvalid(worker.Kind(_InstanceKind), inst.Name, errs)
 	}
 
+	// Update.
 	oldPod := new(core.Pod)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), oldPod,
-		&ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{
-				ResourceVersion: "0",
-			},
-		})
+		kubeclientset.NonQuorum)
 	if err != nil {
 		return nil, err
 	}
@@ -425,9 +452,11 @@ func (h *InstanceHandler) OnUpdate(ctx context.Context, obj, oldObj runtime.Obje
 		"displayName": inst.Spec.DisplayName,
 		"description": inst.Spec.Description,
 	})
-	err = h.Client.Patch(ctx, pod, ctrlcli.MergeFrom(oldPod))
+
+	err = h.Client.Patch(ctx, pod, ctrlcli.MergeFrom(oldPod),
+		kubeclientset.ToPatchOptions(opts))
 	if err != nil {
-		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding pod of instance: %w", err))
+		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding pod: %w", err))
 	}
 
 	inst = convertInstanceFromPod(pod)
@@ -912,13 +941,6 @@ func convertInstanceListFromPodList(podList *core.PodList, opts ctrlcli.ListOpti
 	if podList == nil {
 		return &worker.InstanceList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(podList.Items, func(i, j int) bool {
-		l, r := podList.Items[i].ResourceVersion, podList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	instList := &worker.InstanceList{
 		ListMeta: podList.ListMeta,

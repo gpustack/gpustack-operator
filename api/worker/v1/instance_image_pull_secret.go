@@ -34,26 +34,30 @@ type InstanceImagePullSecretSpec struct {
 
 	// Registry is the registry of the image pull secret.
 	//
-	// This field is a write-only input,
-	// and it is required in writing.
+	// Write-only input, it is required in create or update operations.
+	//
+	// It must be provided with Username, Password, and optionally Email in once operation.
 	Registry string `json:"registry,omitempty" protobuf:"bytes,3,opt,name=registry"`
 
 	// Username is the username of the image pull secret.
 	//
-	// This field is a write-only input,
-	// and it is required in writing.
+	// Write-only input, it is required in create or update operations.
+	//
+	// It must be provided with Registry, Password, and optionally Email in once operation.
 	Username string `json:"username,omitempty" protobuf:"bytes,4,opt,name=username"`
 
 	// Password is the password of the image pull secret.
 	//
-	// This field is a write-only input,
-	// and it is required in writing.
+	// Write-only input, it is required in create or update operations.
+	//
+	// It must be provided with Registry, Username, and optionally Email in once operation.
 	Password string `json:"password,omitempty" protobuf:"bytes,5,opt,name=password"`
 
 	// Email is the email of the image pull secret.
 	//
-	// This field is a write-only input,
-	// and it is optional in writing.
+	// Write-only input, it is required in create or update operations.
+	//
+	// It can be provided with Registry, Username, and Password in once operation.
 	Email string `json:"email,omitempty" protobuf:"bytes,6,opt,name=email"`
 }
 

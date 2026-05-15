@@ -45,7 +45,8 @@ func Lookup(
 	}
 
 	if name != "" {
-		obj, err := dynCli.Get(ctx, name, meta.GetOptions{})
+		obj, err := dynCli.Get(ctx, name,
+			meta.GetOptions{})
 		if err != nil {
 			if kerrors.IsNotFound(err) {
 				return map[string]any{}, nil
@@ -55,7 +56,8 @@ func Lookup(
 		return obj.UnstructuredContent(), nil
 	}
 
-	objList, err := dynCli.List(ctx, meta.ListOptions{})
+	objList, err := dynCli.List(ctx,
+		meta.ListOptions{})
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			return map[string]any{}, nil
@@ -87,7 +89,8 @@ func LookupObject(
 		dynCli = dynNrCli
 	}
 
-	obj, err := dynCli.Get(ctx, name, meta.GetOptions{})
+	obj, err := dynCli.Get(ctx, name,
+		meta.GetOptions{})
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			return &unstructured.Unstructured{}, nil
@@ -119,7 +122,8 @@ func LookupList(
 		dynCli = dynNrCli
 	}
 
-	objList, err := dynCli.List(ctx, meta.ListOptions{})
+	objList, err := dynCli.List(ctx,
+		meta.ListOptions{})
 	if err != nil {
 		if kerrors.IsNotFound(err) {
 			return &unstructured.UnstructuredList{}, nil

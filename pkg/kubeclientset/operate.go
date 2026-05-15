@@ -99,9 +99,10 @@ func Create[T MetaObject](ctx context.Context, cli CreateClient[T], expected T, 
 
 	if name != "" {
 		if getter, ok := cli.(GetClient[T]); ok {
-			actual, err = getter.Get(ctx, name, meta.GetOptions{
-				ResourceVersion: "0",
-			})
+			actual, err = getter.Get(ctx, name,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
 			if err != nil && !kerrors.IsNotFound(err) {
 				if isRetryError(err) {
 					return Create(ctx, cli, expected, opts...)
@@ -391,9 +392,10 @@ func Update[T MetaObject](ctx context.Context, cli UpdateClient[T], expected T, 
 		return expected, errors.New("resource name may not be empty")
 	}
 
-	actual, err := cli.Get(ctx, name, meta.GetOptions{
-		ResourceVersion: "0",
-	})
+	actual, err := cli.Get(ctx, name,
+		meta.GetOptions{
+			ResourceVersion: "0",
+		})
 	if err != nil {
 		if kerrors.IsNotFound(err) && uo.CreateIfNotExisted {
 			creator, ok := cli.(CreateClient[T])
@@ -608,9 +610,10 @@ func UpdateStatus[T MetaObject](ctx context.Context, cli UpdateStatusClient[T], 
 		return expected, errors.New("resource name may not be empty")
 	}
 
-	actual, err := cli.Get(ctx, name, meta.GetOptions{
-		ResourceVersion: "0",
-	})
+	actual, err := cli.Get(ctx, name,
+		meta.GetOptions{
+			ResourceVersion: "0",
+		})
 	if err != nil {
 		if isRetryError(err) {
 			return UpdateStatus(ctx, cli, expected, opts...)
@@ -672,9 +675,12 @@ func UpdateStatusWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.C
 	}
 
 	actual := expected.DeepCopyObject().(T)
-	err := cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual, &ctrlcli.GetOptions{
-		Raw: &meta.GetOptions{ResourceVersion: "0"},
-	})
+	err := cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual,
+		&ctrlcli.GetOptions{
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
+		})
 	if err != nil {
 		if isRetryError(err) {
 			return UpdateStatusWithCtrlClient[T](ctx, cli, expected, opts...)
@@ -778,9 +784,10 @@ func Patch[T MetaObject](ctx context.Context, cli PatchClient[T], expected T, pt
 			return Patch(ctx, cli, expected, pt, data, opts...)
 		}
 		if kerrors.IsConflict(err) && po.AlignFunc != nil {
-			actual, err := cli.Get(ctx, name, meta.GetOptions{
-				ResourceVersion: "0",
-			})
+			actual, err := cli.Get(ctx, name,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
 			if err != nil {
 				if isRetryError(err) {
 					return Patch(ctx, cli, expected, pt, data, opts...)
@@ -836,9 +843,12 @@ func PatchWithCtrlClient[T MetaObject](
 		}
 		if kerrors.IsConflict(err) && po.AlignFunc != nil {
 			actual := expected.DeepCopyObject().(T)
-			err = cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual, &ctrlcli.GetOptions{
-				Raw: &meta.GetOptions{ResourceVersion: "0"},
-			})
+			err = cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual,
+				&ctrlcli.GetOptions{
+					Raw: &meta.GetOptions{
+						ResourceVersion: "0",
+					},
+				})
 			if err != nil {
 				if isRetryError(err) {
 					return PatchWithCtrlClient[T](ctx, cli, expected, pt, data, opts...)

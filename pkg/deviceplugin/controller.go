@@ -231,9 +231,17 @@ func (r *DevicesReconciler) getReconcileNotifier() <-chan struct{} {
 }
 
 func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices, error) {
-	devs := new(workercore.Devices)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: r.NodeName}, devs,
-		&ctrlcli.GetOptions{Raw: &meta.GetOptions{ResourceVersion: "0"}})
+	devs := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{
+			Name: r.NodeName,
+		},
+	}
+	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(devs), devs,
+		&ctrlcli.GetOptions{
+			Raw: &meta.GetOptions{
+				ResourceVersion: "0",
+			},
+		})
 	return devs, err
 }
 

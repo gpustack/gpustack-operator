@@ -49,11 +49,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// Create corresponding LocalQueue if not exists.
 	nsList := new(core.NamespaceList)
 	err = r.Client.List(ctx, nsList,
-		&ctrlcli.ListOptions{
-			Raw: &meta.ListOptions{
-				ResourceVersion: "0",
-			},
-		},
+		kubeclientset.NonQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list namespaces")

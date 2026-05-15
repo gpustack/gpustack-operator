@@ -23,6 +23,7 @@ import (
 
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
@@ -287,12 +288,8 @@ func (r *ResourceFlavorReconciler) fetchNode(
 
 	nd := new(core.Node)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: ndName}, nd,
-		ctrlcli.UnsafeDisableDeepCopy,
-		&ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{
-				ResourceVersion: "0",
-			},
-		})
+		kubeclientset.NonQuorum,
+		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		return nil, err
 	}
@@ -309,12 +306,8 @@ func (r *ResourceFlavorReconciler) fetchCohort(
 
 	co := new(kueue.Cohort)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: coName}, co,
-		ctrlcli.UnsafeDisableDeepCopy,
-		&ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{
-				ResourceVersion: "0",
-			},
-		})
+		kubeclientset.NonQuorum,
+		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return nil, err

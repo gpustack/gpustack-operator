@@ -76,6 +76,11 @@ func (in InstancePersistentVolumeList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstancePersistentVolumeSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstancePersistentVolumeSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstancePersistentVolumeSpec) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstancePersistentVolumeSpec"
 }
@@ -83,6 +88,21 @@ func (in InstancePersistentVolumeSpec) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstancePersistentVolumeStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstancePersistentVolumeStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstancePersistentVolumeType) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstancePersistentVolumeType"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstancePersistentVolumeTypeList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstancePersistentVolumeTypeList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstancePersistentVolumeTypeSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstancePersistentVolumeTypeSpec"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
@@ -158,4 +178,14 @@ func (in InstanceTypeStatus) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceVolume) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceVolume"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in NFSInstancePersistentVolumeSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.NFSInstancePersistentVolumeSource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in S3InstancePersistentVolumeSource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.S3InstancePersistentVolumeSource"
 }

@@ -40,7 +40,6 @@ type InstancePersistentVolumeSpec struct {
 	// Type is the name of Kubernetes StorageClass that provisions corresponding Kubernetes PersistentVolume.
 	//
 	// Immutable after creation.
-	//
 	Type *string `json:"type,omitempty" protobuf:"bytes,3,opt,name=type"`
 
 	// Capacity is the capacity of the InstanceVolume.
@@ -48,7 +47,6 @@ type InstancePersistentVolumeSpec struct {
 	// Immutable after creation.
 	//
 	// +default="20Gi"
-	//
 	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,4,name=capacity"`
 
 	// AccessMode is the access mode of the InstanceVolume.

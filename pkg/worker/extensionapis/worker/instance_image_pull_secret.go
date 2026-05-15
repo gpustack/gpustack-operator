@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"sort"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -95,28 +94,27 @@ func (h *InstanceImagePullSecretHandler) Destroy() {
 }
 
 func (h *InstanceImagePullSecretHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctrlcli.CreateOptions) (runtime.Object, error) {
-	// Validate.
 	instImgPullSec := obj.(*worker.InstanceImagePullSecret)
+
+	// Validate.
 	if instImgPullSec.Spec.Registry == "" {
-		return nil, field.Invalid(field.NewPath("spec.registry"), "", "registry is required")
+		return nil, field.Required(field.NewPath("spec.registry"), "registry is required")
 	}
 	if instImgPullSec.Spec.Username == "" {
-		return nil, field.Invalid(field.NewPath("spec.username"), "", "username is required")
+		return nil, field.Required(field.NewPath("spec.username"), "username is required")
 	}
 	if instImgPullSec.Spec.Password == "" {
-		return nil, field.Invalid(field.NewPath("spec.password"), "", "password is required")
+		return nil, field.Required(field.NewPath("spec.password"), "password is required")
 	}
 
 	// Create.
-	{
-		sec := convertSecretFromInstanceImagePullSecret(instImgPullSec)
-		err := h.Client.Create(ctx, sec, &opts)
-		if err != nil {
-			return nil, err
-		}
-		instImgPullSec = convertInstanceImagePullSecretFromSecret(sec)
+	sec := convertSecretFromInstanceImagePullSecret(instImgPullSec)
+	err := h.Client.Create(ctx, sec, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	instImgPullSec = convertInstanceImagePullSecretFromSecret(sec)
 	return instImgPullSec, nil
 }
 
@@ -179,7 +177,7 @@ func (h *InstanceImagePullSecretHandler) OnWatch(ctx context.Context, opts ctrlc
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					// TODO: is it necessary to convert bookmark event? Or just pass it through?
+					systemmeta.UnnoteResource(sec)
 					e.Object = &worker.InstanceImagePullSecret{ObjectMeta: sec.ObjectMeta}
 					c <- e
 					continue
@@ -188,7 +186,6 @@ func (h *InstanceImagePullSecretHandler) OnWatch(ctx context.Context, opts ctrlc
 				// Convert.
 				instImgPullSec := convertInstanceImagePullSecretFromSecret(sec)
 				if instImgPullSec == nil {
-					// Skip if not belong to the requested namespace.
 					continue
 				}
 
@@ -232,16 +229,17 @@ func (h *InstanceImagePullSecretHandler) OnGet(ctx context.Context, key types.Na
 func (h *InstanceImagePullSecretHandler) OnUpdate(
 	ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions,
 ) (runtime.Object, error) {
-	// Validate.
 	instImgPullSec := obj.(*worker.InstanceImagePullSecret)
+
+	// Validate.
 	if instImgPullSec.Spec.Registry == "" {
-		return nil, field.Invalid(field.NewPath("spec.registry"), "", "registry is required")
+		return nil, field.Required(field.NewPath("spec.registry"), "registry is required")
 	}
 	if instImgPullSec.Spec.Username == "" {
-		return nil, field.Invalid(field.NewPath("spec.username"), "", "username is required")
+		return nil, field.Required(field.NewPath("spec.username"), "username is required")
 	}
 	if instImgPullSec.Spec.Password == "" {
-		return nil, field.Invalid(field.NewPath("spec.password"), "", "password is required")
+		return nil, field.Required(field.NewPath("spec.password"), "password is required")
 	}
 
 	// Update.
@@ -266,8 +264,6 @@ func (h *InstanceImagePullSecretHandler) OnDelete(ctx context.Context, obj runti
 }
 
 func convertSecretFromInstanceImagePullSecret(instImgPullSec *worker.InstanceImagePullSecret) *core.Secret {
-	// {"auths":{"your.private.registry.example.com":{"username":"janedoe","password":"xxxxxxxxxxx","email":"jdoe@example.com","auth":"c3R...zE2"}}}
-
 	dcrCfg := map[string]any{
 		"auths": map[string]any{
 			instImgPullSec.Spec.Registry: func() (auth map[string]string) {
@@ -282,6 +278,8 @@ func convertSecretFromInstanceImagePullSecret(instImgPullSec *worker.InstanceIma
 		},
 	}
 	dcrCfgJson := json.MustMarshal(dcrCfg)
+	// Example:
+	// {"auths":{"your.private.registry.example.com":{"email":"jdoe@example.com","auth":"c3R...zE2"}}}
 
 	sec := &core.Secret{
 		ObjectMeta: instImgPullSec.ObjectMeta,
@@ -323,13 +321,6 @@ func convertInstanceImagePullSecretListFromSecretList(secList *core.SecretList, 
 	if secList == nil {
 		return &worker.InstanceImagePullSecretList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(secList.Items, func(i, j int) bool {
-		l, r := secList.Items[i].ResourceVersion, secList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	instImgPullSecList := &worker.InstanceImagePullSecretList{
 		ListMeta: secList.ListMeta,

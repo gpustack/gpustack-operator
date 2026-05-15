@@ -192,6 +192,38 @@ func (*InstancePersistentVolume) Categories() []string {
 	}
 }
 
+var _ rest.Scoper = (*InstancePersistentVolumeType)(nil)
+
+func (*InstancePersistentVolumeType) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*InstancePersistentVolumeType)(nil)
+
+func (*InstancePersistentVolumeType) Kind() string {
+	return "InstancePersistentVolumeType"
+}
+
+var _ rest.SingularNameProvider = (*InstancePersistentVolumeType)(nil)
+
+func (*InstancePersistentVolumeType) GetSingularName() string {
+	return "instancepersistentvolumetype"
+}
+
+var _ rest.ShortNamesProvider = (*InstancePersistentVolumeType)(nil)
+
+func (*InstancePersistentVolumeType) ShortNames() []string {
+	return []string{}
+}
+
+var _ rest.CategoriesProvider = (*InstancePersistentVolumeType)(nil)
+
+func (*InstancePersistentVolumeType) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}
+
 var _ rest.Scoper = (*InstanceSSHPublicKey)(nil)
 
 func (*InstanceSSHPublicKey) NamespaceScoped() bool {

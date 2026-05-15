@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	core "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
@@ -22,11 +21,15 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
 
-const _InstancePersistentVolumeResource = "instancepersistentvolumes"
+const (
+	_InstancePersistentVolumeResource = "instancepersistentvolumes"
+	_InstancePersistentVolumeKind     = "InstancePersistentVolume"
+)
 
 // InstancePersistentVolumeHandler handles v1.InstancePersistentVolume objects.
 //
@@ -137,18 +140,17 @@ const (
 )
 
 func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runtime.Object, opts ctrlcli.CreateOptions) (runtime.Object, error) {
+	instPV := obj.(*worker.InstancePersistentVolume)
+
 	// Validate.
 	var stgClass *storage.StorageClass
-	instPV := obj.(*worker.InstancePersistentVolume)
 	if ptr.Deref(instPV.Spec.Type, "") == "" {
 		stgClassList := new(storage.StorageClassList)
-		err := h.Client.List(ctx, stgClassList, &ctrlcli.ListOptions{
-			Raw: &meta.ListOptions{
-				ResourceVersion: "0",
-			},
-		})
+		err := h.Client.List(ctx, stgClassList,
+			kubeclientset.NonQuorum)
 		if err != nil {
-			return nil, kerrors.NewInternalError(fmt.Errorf("list storage classes: %w", err))
+			return nil, field.InternalError(
+				field.NewPath("spec.type"), fmt.Errorf("list storage classes: %w", err))
 		}
 		for i := range stgClassList.Items {
 			if len(stgClassList.Items[i].Annotations) == 0 {
@@ -161,25 +163,25 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 			}
 		}
 		if stgClass == nil {
-			return nil, field.Invalid(
-				field.NewPath("spec.type"), "",
-				"no default storage class in the cluster, please specify the type explicitly")
+			return nil, field.Required(
+				field.NewPath("spec.type"), "type is required when there is no default storage class")
 		}
 	} else {
 		stgClass = new(storage.StorageClass)
-		err := h.APIReader.Get(ctx, types.NamespacedName{Name: *instPV.Spec.Type}, stgClass)
+		err := h.Client.Get(ctx, types.NamespacedName{Name: *instPV.Spec.Type}, stgClass)
 		if err != nil {
-			if kerrors.IsNotFound(err) {
-				return nil, field.Invalid(
-					field.NewPath("spec.type"), *instPV.Spec.Type,
-					"storage class with the specified name does not exist in the cluster")
+			if !kerrors.IsNotFound(err) {
+				return nil, field.InternalError(
+					field.NewPath("spec.type"), fmt.Errorf("get storage class: %w", err))
 			}
-			return nil, kerrors.NewInternalError(fmt.Errorf("get storage class: %w", err))
+			return nil, field.NotFound(
+				field.NewPath("spec.type"), "type is not found")
 		}
 	}
+
 	// Default.
 	if instPV.Spec.Capacity.IsZero() {
-		instPV.Spec.Capacity = resource.MustParse("20Gi")
+		instPV.Spec.Capacity = *resource.NewQuantity(20*1<<30, resource.BinarySI)
 	}
 	if instPV.Spec.AccessMode == nil {
 		if ptr.Deref(stgClass.VolumeBindingMode, storage.VolumeBindingImmediate) == storage.VolumeBindingImmediate {
@@ -194,15 +196,13 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 	}
 
 	// Create.
-	{
-		pvc := convertPersistentVolumeClaimFromInstancePersistentVolume(instPV)
-		err := h.Client.Create(ctx, pvc, &opts)
-		if err != nil {
-			return nil, err
-		}
-		instPV = convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc)
+	pvc := convertPersistentVolumeClaimFromInstancePersistentVolume(instPV)
+	err := h.Client.Create(ctx, pvc, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	instPV = convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc)
 	return instPV, nil
 }
 
@@ -267,18 +267,15 @@ func (h *InstancePersistentVolumeHandler) OnWatch(ctx context.Context, opts ctrl
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(pvc)
-					if resType == _InstancePersistentVolumeResource {
-						e.Object = &worker.InstancePersistentVolume{ObjectMeta: pvc.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(pvc)
+					e.Object = &worker.InstancePersistentVolume{ObjectMeta: pvc.ObjectMeta}
+					c <- e
 					continue
 				}
 
 				// Convert.
 				instPV := convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc)
 				if instPV == nil {
-					// Skip if not belong to the requested namespace.
 					continue
 				}
 
@@ -322,28 +319,30 @@ func (h *InstancePersistentVolumeHandler) OnGet(ctx context.Context, key types.N
 func (h *InstancePersistentVolumeHandler) OnUpdate(
 	ctx context.Context, obj, oldObj runtime.Object, opts ctrlcli.UpdateOptions,
 ) (runtime.Object, error) {
-	// Validate.
 	instPV, instPVOld := obj.(*worker.InstancePersistentVolume), oldObj.(*worker.InstancePersistentVolume)
+
+	// Validate.
+	var errs field.ErrorList
 	if !ptr.Equal(instPV.Spec.Type, instPVOld.Spec.Type) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.type"), "field is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.type"), "field is immutable"))
 	}
 	if !instPV.Spec.Capacity.Equal(instPVOld.Spec.Capacity) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.capacity"), "field is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.capacity"), "field is immutable"))
 	}
 	if !ptr.Equal(instPV.Spec.AccessMode, instPVOld.Spec.AccessMode) {
-		return nil, field.Forbidden(
-			field.NewPath("spec.accessMode"), "field is immutable")
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.accessMode"), "field is immutable"))
+	}
+	if len(errs) > 0 {
+		return nil, kerrors.NewInvalid(worker.Kind("InstancePersistentVolume"), instPV.Name, errs)
 	}
 
+	// Update.
 	oldPvc := new(core.PersistentVolumeClaim)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instPV), oldPvc,
-		&ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{
-				ResourceVersion: "0",
-			},
-		})
+		kubeclientset.NonQuorum)
 	if err != nil {
 		return nil, err
 	}
@@ -354,10 +353,11 @@ func (h *InstancePersistentVolumeHandler) OnUpdate(
 		"displayName": instPV.Spec.DisplayName,
 		"description": instPV.Spec.Description,
 	})
-	err = h.Client.Patch(ctx, pvc, ctrlcli.MergeFrom(oldPvc))
+
+	err = h.Client.Patch(ctx, pvc, ctrlcli.MergeFrom(oldPvc),
+		kubeclientset.ToPatchOptions(opts))
 	if err != nil {
-		return nil, kerrors.NewInternalError(
-			fmt.Errorf("update corresponding persistent volume claim of instance persistent volume: %w", err))
+		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding persistent volume claim: %w", err))
 	}
 
 	instPV = convertInstancePersistentVolumeFromPersistentVolumeClaim(pvc)
@@ -455,13 +455,6 @@ func convertInstancePersistentVolumeListFromPersistentVolumeClaimList(
 	if pvcList == nil {
 		return &worker.InstancePersistentVolumeList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(pvcList.Items, func(i, j int) bool {
-		l, r := pvcList.Items[i].ResourceVersion, pvcList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	instPVList := &worker.InstancePersistentVolumeList{
 		ListMeta: pvcList.ListMeta,

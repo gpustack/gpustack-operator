@@ -1336,10 +1336,16 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceImagePullSecretSpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolume"):
 		return &applyconfigurationworkerv1.InstancePersistentVolumeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeSource"):
+		return &applyconfigurationworkerv1.InstancePersistentVolumeSourceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeSpec"):
 		return &applyconfigurationworkerv1.InstancePersistentVolumeSpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeStatus"):
 		return &applyconfigurationworkerv1.InstancePersistentVolumeStatusApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeType"):
+		return &applyconfigurationworkerv1.InstancePersistentVolumeTypeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeTypeSpec"):
+		return &applyconfigurationworkerv1.InstancePersistentVolumeTypeSpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstancePort"):
 		return &applyconfigurationworkerv1.InstancePortApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceResources"):
@@ -1358,6 +1364,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceTemplateApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceVolume"):
 		return &applyconfigurationworkerv1.InstanceVolumeApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
+		return &applyconfigurationworkerv1.NFSInstancePersistentVolumeSourceApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("S3InstancePersistentVolumeSource"):
+		return &applyconfigurationworkerv1.S3InstancePersistentVolumeSourceApplyConfiguration{}
 
 		// Group=worker.gpustack.ai, Version=v1alpha1
 	case workerv1alpha1.SchemeGroupVersion.WithKind("Accelerator"):

@@ -38,9 +38,17 @@ func (*InstancePersistentVolume) ProtoMessage() {}
 
 func (*InstancePersistentVolumeList) ProtoMessage() {}
 
+func (*InstancePersistentVolumeSource) ProtoMessage() {}
+
 func (*InstancePersistentVolumeSpec) ProtoMessage() {}
 
 func (*InstancePersistentVolumeStatus) ProtoMessage() {}
+
+func (*InstancePersistentVolumeType) ProtoMessage() {}
+
+func (*InstancePersistentVolumeTypeList) ProtoMessage() {}
+
+func (*InstancePersistentVolumeTypeSpec) ProtoMessage() {}
 
 func (*InstancePort) ProtoMessage() {}
 
@@ -71,3 +79,7 @@ func (*InstanceTypeSpec) ProtoMessage() {}
 func (*InstanceTypeStatus) ProtoMessage() {}
 
 func (*InstanceVolume) ProtoMessage() {}
+
+func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}
+
+func (*S3InstancePersistentVolumeSource) ProtoMessage() {}

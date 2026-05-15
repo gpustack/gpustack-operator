@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -156,15 +155,13 @@ func (h *SubjectProviderHandler) OnCreate(ctx context.Context, obj runtime.Objec
 	}
 
 	// Create.
-	{
-		sec := convertSecretFromSubjectProvider(subjProv)
-		err := h.Client.Create(ctx, sec, &opts)
-		if err != nil {
-			return nil, err
-		}
-		subjProv = convertSubjectProviderFromSecret(sec)
+	sec := convertSecretFromSubjectProvider(subjProv)
+	err := h.Client.Create(ctx, sec, &opts)
+	if err != nil {
+		return nil, err
 	}
 
+	subjProv = convertSubjectProviderFromSecret(sec)
 	return subjProv, nil
 }
 
@@ -229,11 +226,9 @@ func (h *SubjectProviderHandler) OnWatch(ctx context.Context, opts ctrlcli.ListO
 
 				// Process bookmark.
 				if e.Type == watch.Bookmark {
-					resType := systemmeta.DescribeResourceType(sec)
-					if resType == _SubjectProviderResource {
-						e.Object = &server.SubjectProvider{ObjectMeta: sec.ObjectMeta}
-						c <- e
-					}
+					systemmeta.UnnoteResource(sec)
+					e.Object = &server.SubjectProvider{ObjectMeta: sec.ObjectMeta}
+					c <- e
 					continue
 				}
 
@@ -413,13 +408,6 @@ func convertSubjectProviderListFromSecretList(secList *core.SecretList, opts ctr
 	if secList == nil {
 		return &server.SubjectProviderList{}
 	}
-
-	// Sort by resource version.
-	sort.SliceStable(secList.Items, func(i, j int) bool {
-		l, r := secList.Items[i].ResourceVersion, secList.Items[j].ResourceVersion
-		return len(l) < len(r) ||
-			(len(l) == len(r) && l < r)
-	})
 
 	spList := &server.SubjectProviderList{
 		ListMeta: secList.ListMeta,
