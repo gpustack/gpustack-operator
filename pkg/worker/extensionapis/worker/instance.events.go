@@ -29,6 +29,7 @@ func newInstanceEventsHandler(parent rest.Scoper, opts extensionapi.SetupOptions
 
 	// Set client.
 	h.Client = opts.Manager.GetClient()
+	h.APIReader = opts.Manager.GetAPIReader()
 
 	return h
 }
@@ -58,7 +59,7 @@ func (h *InstanceEventsHandler) OnGet(ctx context.Context, key types.NamespacedN
 	}
 
 	coreEvtList := new(core.EventList)
-	err = h.Client.List(ctx, coreEvtList,
+	err = h.APIReader.List(ctx, coreEvtList,
 		ctrlcli.MatchingFields{
 			"involvedObject.name":      key.Name,
 			"involvedObject.namespace": key.Namespace,
