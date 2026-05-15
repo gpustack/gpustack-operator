@@ -13,6 +13,8 @@ import (
 	clientgenargs "k8s.io/code-generator/cmd/client-gen/args"
 	clientgen "k8s.io/code-generator/cmd/client-gen/generators"
 	clientgentypes "k8s.io/code-generator/cmd/client-gen/types"
+	conversionargs "k8s.io/code-generator/cmd/conversion-gen/args"
+	conversiongen "k8s.io/code-generator/cmd/conversion-gen/generators"
 	deepcopygenargs "k8s.io/code-generator/cmd/deepcopy-gen/args"
 	deepcopygen "k8s.io/code-generator/cmd/deepcopy-gen/generators"
 	protobufgen "k8s.io/code-generator/cmd/go-to-protobuf/protobuf"
@@ -57,6 +59,41 @@ func Generate(c Config) error {
 	)
 
 	internalAPIs := append(slices.Clone(c.APIs), c.ExtensionAPIs...)
+
+	// Execute conversion-gen.
+	if len(internalAPIs) > 0 {
+		klog.Info("executing conversion-gen")
+
+		conversionArgs := conversionargs.Args{
+			OutputFile:   "zz_generated.conversion.go",
+			BasePeerDirs: conversionargs.DefaultBasePeerDirs,
+			GoHeaderFile: tempHeaderFile,
+		}
+
+		for i := range c.ExtensionAPIs {
+			extensionAPIDir := filepath.Join(
+				c.ProjectDir,
+				strings.TrimPrefix(c.ExtensionAPIs[i], c.Project),
+				conversionArgs.OutputFile,
+			)
+			_ = osx.DurableRemove(extensionAPIDir)
+		}
+
+		err := gengov2.Execute(
+			conversiongen.NameSystems(),
+			conversiongen.DefaultNameSystem(),
+			func(g *generatorv2.Context) []generatorv2.Target {
+				return conversiongen.GetTargets(g, &conversionArgs)
+			},
+			gengov2.StdBuildTag,
+			slices.Clone(internalAPIs),
+		)
+		if err != nil {
+			return fmt.Errorf("execute conversion-gen: %w", err)
+		}
+
+		klog.Info("executed conversion-gen")
+	}
 
 	// Execute deepcopy-gen.
 	if len(internalAPIs) > 0 {

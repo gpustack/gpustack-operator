@@ -221,3 +221,32 @@ func IsEmptyFile(file string) bool {
 	}
 	return s.Size() == 0
 }
+
+// DurableRemove removes the given file or directory,
+// and also syncs the parent directory to ensure the removal is durable.
+func DurableRemove(path string) error {
+	err := os.Remove(path)
+	if err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+func syncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	defer Close(d)
+
+	err = d.Sync()
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}

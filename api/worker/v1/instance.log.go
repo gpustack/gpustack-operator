@@ -21,6 +21,7 @@ var _ runtime.Object = (*InstanceLog)(nil)
 // InstanceLogOptions is the options of InstanceLog,
 // which is the same as Kubernetes PodLogOptions.
 //
+// +k8s:conversion-gen:explicit-from=net/url.Values
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type InstanceLogOptions struct {
 	meta.TypeMeta `json:",inline"`

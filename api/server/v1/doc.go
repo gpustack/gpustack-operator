@@ -8,6 +8,8 @@
 // +k8s:deepcopy-gen=package
 // +k8s:protobuf-gen=package
 // +k8s:apireg-gen:service
+// +k8s:conversion-gen=gpustack.ai/gpustack/api/server/v1alpha1
+// +k8s:conversion-gen-external-types=gpustack.ai/gpustack/api/server/v1
 // +domain=gpustack.ai
 // +groupName=server.gpustack.ai
 // +versionName=v1

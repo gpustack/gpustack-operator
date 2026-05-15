@@ -169,6 +169,7 @@ message InstanceLog {
 // InstanceLogOptions is the options of InstanceLog,
 // which is the same as Kubernetes PodLogOptions.
 //
+// +k8s:conversion-gen:explicit-from=net/url.Values
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 message InstanceLogOptions {
   // Follow the log stream of the Instance.
