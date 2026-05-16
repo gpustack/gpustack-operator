@@ -14,6 +14,8 @@ var installs = []kubeapp.Install{
 	installKueue,
 	installNodeFeatureDiscovery,
 	installGPUStackDeviceManager,
+	installCSIDriverNFS,
+	installCSIDriverS3,
 }
 
 // InstallApplications installs applications.
@@ -21,6 +23,7 @@ func InstallApplications(ctx context.Context, manufacturers []string) error {
 	gvc := map[string]any{
 		"ContainerRegistry":  funcx.NoError(settings.ContainerRegistry.ValueFromRemote(ctx)),
 		"ContainerNamespace": funcx.NoError(settings.ContainerNamespace.ValueFromRemote(ctx)),
+		"ImagePullPolicy":    "IfNotPresent",
 		"Manufacturers":      manufacturers,
 	}
 

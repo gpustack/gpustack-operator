@@ -116,10 +116,18 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 				field.NewPath("spec.nfs.server"), "server is required"),
 			)
 		}
-		if instPVType.Spec.NFS.Path == "" {
+		if instPVType.Spec.NFS.Share == "" {
 			errs = append(errs, field.Required(
-				field.NewPath("spec.nfs.path"), "path is required"),
+				field.NewPath("spec.nfs.share"), "share is required"),
 			)
+		}
+		if instPVType.Spec.NFS.MountPermissions != "" {
+			_, err := strconv.ParseUint(instPVType.Spec.NFS.MountPermissions, 8, 64)
+			if err != nil {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec.nfs.mountPermissions"),
+					instPVType.Spec.NFS.MountPermissions, "mountPermissions must be an octal string"))
+			}
 		}
 		if len(errs) > 0 {
 			return nil, kerrors.NewInvalid(worker.Kind(_InstancePersistentVolumeTypeKind), instPVType.Name, errs)
@@ -320,9 +328,9 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 			return nil, field.Forbidden(
 				field.NewPath("spec.nfs.server"), "server is immutable")
 		}
-		if instPVType.Spec.NFS.Path != instPVTypeOld.Spec.NFS.Path {
+		if instPVType.Spec.NFS.Share != instPVTypeOld.Spec.NFS.Share {
 			return nil, field.Forbidden(
-				field.NewPath("spec.nfs.path"), "path is immutable")
+				field.NewPath("spec.nfs.share"), "share is immutable")
 		}
 	case instPVType.Spec.S3 != nil:
 		if instPVType.Spec.S3.Bucket != instPVTypeOld.Spec.S3.Bucket {
@@ -415,7 +423,13 @@ func convertStorageClassFromInstancePersistentVolumeType(instPVType *worker.Inst
 
 		// Parameters.
 		stgCls.Parameters["server"] = instPVType.Spec.NFS.Server
-		stgCls.Parameters["path"] = instPVType.Spec.NFS.Path
+		stgCls.Parameters["share"] = instPVType.Spec.NFS.Share
+		if instPVType.Spec.NFS.SubDirectory != "" {
+			stgCls.Parameters["subDir"] = instPVType.Spec.NFS.SubDirectory
+		}
+		if instPVType.Spec.NFS.MountPermissions != "" {
+			stgCls.Parameters["mountPermissions"] = instPVType.Spec.NFS.MountPermissions
+		}
 
 		// MountOptions.
 		stgCls.MountOptions = instPVType.Spec.NFS.MountOptions
@@ -479,9 +493,11 @@ func convertInstancePersistentVolumeTypeFromStorageClass(stgCls *storage.Storage
 		return nil
 	case "nfs.csi.k8s.io":
 		volumeSource.NFS = &worker.NFSInstancePersistentVolumeSource{
-			Server:       stgCls.Parameters["server"],
-			Path:         stgCls.Parameters["path"],
-			MountOptions: stgCls.MountOptions,
+			Server:           stgCls.Parameters["server"],
+			Share:            stgCls.Parameters["share"],
+			SubDirectory:     stgCls.Parameters["subDir"],
+			MountPermissions: stgCls.Parameters["mountPermissions"],
+			MountOptions:     stgCls.MountOptions,
 		}
 	case "ru.yandex.s3.csi":
 		volumeSource.S3 = &worker.S3InstancePersistentVolumeSource{

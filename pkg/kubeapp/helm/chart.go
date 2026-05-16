@@ -15,7 +15,6 @@ import (
 	klog "k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
 
-	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/bytex"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
@@ -35,15 +34,18 @@ type (
 		DownloadURL string
 		// Values is the values to be passed to the chart.
 		Values ChartValues
-		// DisableCRDValidation disables the validation of CRDs during installation.
-		DisabledInstallCRDs bool
-		// DisableInstallIfApiServiceReady is the APIService name,
+		// SkippedCRDsInstallation defines whether to skip the installation of CRDs of this chart.
+		//
+		// Sometimes, the cluster has already installed the CRDs of the same API,
+		// this function is a chance to disable the installation of CRDs on this fresh installation.
+		SkippedCRDsInstallation bool
+		// SkippedInstallationIfApiServiceReady is the APIService name,
 		// if specified, the installation will be skipped if an APIService with this name already exists in the cluster.
 		//
 		// Sometimes, the cluster has already installed a same chart but not the same release,
 		// this function is a chance to check whether to continue installation on this fresh installation,
 		// or just skip.
-		DisableInstallIfApiServiceReady string
+		SkippedInstallationIfApiServiceReady string
 	}
 
 	ChartValues interface {
@@ -69,19 +71,21 @@ func (ch Chart) Validate() error {
 // Load loads the chart from local path or remote URL.
 func (ch Chart) Load(_ context.Context, cfg *helmaction.Configuration) (*helmchart.Chart, error) {
 	f := ch.Path
-	if f != "" && !osx.Exists(f) {
+	if f != "" && osx.IsEmptyFile(f) {
 		f = ""
 	}
 
 	if f == "" {
-		f = filepath.Join(system.SubConfDir("charts/"+ch.Version), ch.Name)
-		if osx.IsEmptyDir(f) {
+		if ch.DownloadURL == "" {
+			return nil, fmt.Errorf("chart path %s is not existed and download URL is not provided", ch.Path)
+		}
+		_, fn := filepath.Split(ch.DownloadURL)
+		f = filepath.Join(filepath.Dir(ch.Path), fn)
+		if osx.IsEmptyFile(f) {
 			p := helmaction.NewPullWithOpts(helmaction.WithConfig(cfg))
 			p.Settings = cli.New()
 			p.Version = ch.Version
-			p.Untar = true
-			p.UntarDir = filepath.Dir(f)
-
+			p.DestDir = filepath.Dir(ch.Path)
 			pr, err := p.Run(ch.DownloadURL)
 			if err != nil {
 				return nil, fmt.Errorf("pull chart from %s: %s: %w", ch.DownloadURL, pr, err)

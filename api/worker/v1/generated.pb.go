@@ -1912,12 +1912,22 @@ func (m *NFSInstancePersistentVolumeSource) MarshalToSizedBuffer(dAtA []byte) (i
 			copy(dAtA[i:], m.MountOptions[iNdEx])
 			i = encodeVarintGenerated(dAtA, i, uint64(len(m.MountOptions[iNdEx])))
 			i--
-			dAtA[i] = 0x1a
+			dAtA[i] = 0x2a
 		}
 	}
-	i -= len(m.Path)
-	copy(dAtA[i:], m.Path)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Path)))
+	i -= len(m.MountPermissions)
+	copy(dAtA[i:], m.MountPermissions)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.MountPermissions)))
+	i--
+	dAtA[i] = 0x22
+	i -= len(m.SubDirectory)
+	copy(dAtA[i:], m.SubDirectory)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.SubDirectory)))
+	i--
+	dAtA[i] = 0x1a
+	i -= len(m.Share)
+	copy(dAtA[i:], m.Share)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Share)))
 	i--
 	dAtA[i] = 0x12
 	i -= len(m.Server)
@@ -2629,7 +2639,11 @@ func (m *NFSInstancePersistentVolumeSource) Size() (n int) {
 	_ = l
 	l = len(m.Server)
 	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.Path)
+	l = len(m.Share)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.SubDirectory)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.MountPermissions)
 	n += 1 + l + sovGenerated(uint64(l))
 	if len(m.MountOptions) > 0 {
 		for _, s := range m.MountOptions {
@@ -3171,7 +3185,9 @@ func (this *NFSInstancePersistentVolumeSource) String() string {
 	}
 	s := strings.Join([]string{`&NFSInstancePersistentVolumeSource{`,
 		`Server:` + fmt.Sprintf("%v", this.Server) + `,`,
-		`Path:` + fmt.Sprintf("%v", this.Path) + `,`,
+		`Share:` + fmt.Sprintf("%v", this.Share) + `,`,
+		`SubDirectory:` + fmt.Sprintf("%v", this.SubDirectory) + `,`,
+		`MountPermissions:` + fmt.Sprintf("%v", this.MountPermissions) + `,`,
 		`MountOptions:` + fmt.Sprintf("%v", this.MountOptions) + `,`,
 		`}`,
 	}, "")
@@ -8618,7 +8634,7 @@ func (m *NFSInstancePersistentVolumeSource) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Path", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Share", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -8646,9 +8662,73 @@ func (m *NFSInstancePersistentVolumeSource) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Path = string(dAtA[iNdEx:postIndex])
+			m.Share = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SubDirectory", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.SubDirectory = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MountPermissions", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.MountPermissions = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field MountOptions", wireType)
 			}

@@ -56,7 +56,7 @@ type NFSInstancePersistentVolumeSource struct {
 	// +required
 	Server string `json:"server" protobuf:"bytes,1,name=server"`
 
-	// Path is the exported NFS share from the server.
+	// Share is the path of NFS share from the server.
 	// For each InstancePersistentVolume,
 	// a corresponding subpath will be created in the NFS share.
 	//
@@ -65,12 +65,31 @@ type NFSInstancePersistentVolumeSource struct {
 	// +default="/"
 	// +k8s:validation:pattern="^(/[^/]+)+$"
 	// +k8s:validation:maxLength=1024
-	Path string `json:"path,omitempty" protobuf:"bytes,2,opt,name=path"`
+	Share string `json:"path,omitempty" protobuf:"bytes,2,opt,name=path"`
+
+	// SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume.
+	// If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.
+	//
+	// It supports a specific string or the following template variables:
+	// - `${pvc.metadata.name}`: the name the corresponding PersistentVolumeClaim.
+	// - `${pvc.metadata.namespace}`: the namespace of the corresponding PersistentVolumeClaim.
+	// - `${pv.metadata.name}`: the name of the corresponding Kubernetes PersistentVolume.
+	//
+	// For example, specify `${pvc.metadata.namespace}/${pvc.metadata.name}` to create a subdirectory
+	// with the namespaced name of the corresponding PersistentVolumeClaim in the NFS share
+	// for each InstancePersistentVolume.
+	//
+	// Immutable after creation.
+	SubDirectory string `json:"subDirectory,omitempty" protobuf:"bytes,3,opt,name=subDirectory"`
+
+	// MountPermissions is the mounted directory permissions.
+	// If it is non-zero, perform a chmod with the specified permissions after mounted.
+	MountPermissions string `json:"mountPermissions,omitempty" protobuf:"bytes,4,opt,name=mountPermissions"`
 
 	// MountOptions is the mount options for the NFS share.
 	//
 	// +default=["hard","nfsvers=4.1","rsize=1048576","wsize=1048576","noatime","nodiratime"]
-	MountOptions []string `json:"mountOptions,omitempty" protobuf:"bytes,3,opt,name=mountOptions"`
+	MountOptions []string `json:"mountOptions,omitempty" protobuf:"bytes,5,opt,name=mountOptions"`
 }
 
 // S3InstancePersistentVolumeSource defines the source of S3.

@@ -9,7 +9,7 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager"
 )
 
-func Test_renderDeviceManagerApplyYamlTemplate(t *testing.T) {
+func Test_renderGPUStackDeviceManagerApplyYamlTemplate(t *testing.T) {
 	data := map[string]any{
 		"ContainerRegistry":  "",
 		"ContainerNamespace": "",

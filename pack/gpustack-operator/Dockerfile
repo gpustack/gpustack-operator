@@ -339,6 +339,12 @@ RUN skopeo copy docker://registry.k8s.io/kueue/kueue:v0.17.2 oci-archive:${GPUST
 ADD https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.18.3/node-feature-discovery-chart-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
 RUN skopeo copy docker://registry.k8s.io/nfd/node-feature-discovery:v0.18.3 oci-archive:${GPUSTACK_IMAGES_DIR}/node-feature-discovery-v0.18.3.tar
 
+## CSI Driver NFS
+ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-nfs-4.13.2.tgz"
+
+## CSI Driver S3
+ADD https://yandex-cloud.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-s3-0.43.7.tgz"
+
 # Prepare
 
 ## Build Context

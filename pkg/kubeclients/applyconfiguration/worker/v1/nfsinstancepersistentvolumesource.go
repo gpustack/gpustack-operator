@@ -11,12 +11,29 @@ type NFSInstancePersistentVolumeSourceApplyConfiguration struct {
 	//
 	// Immutable after creation.
 	Server *string `json:"server,omitempty"`
-	// Path is the exported NFS share from the server.
+	// Share is the path of NFS share from the server.
 	// For each InstancePersistentVolume,
 	// a corresponding subpath will be created in the NFS share.
 	//
 	// Immutable after creation.
-	Path *string `json:"path,omitempty"`
+	Share *string `json:"path,omitempty"`
+	// SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume.
+	// If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.
+	//
+	// It supports a specific string or the following template variables:
+	// - `${pvc.metadata.name}`: the name the corresponding PersistentVolumeClaim.
+	// - `${pvc.metadata.namespace}`: the namespace of the corresponding PersistentVolumeClaim.
+	// - `${pv.metadata.name}`: the name of the corresponding Kubernetes PersistentVolume.
+	//
+	// For example, specify `${pvc.metadata.namespace}/${pvc.metadata.name}` to create a subdirectory
+	// with the namespaced name of the corresponding PersistentVolumeClaim in the NFS share
+	// for each InstancePersistentVolume.
+	//
+	// Immutable after creation.
+	SubDirectory *string `json:"subDirectory,omitempty"`
+	// MountPermissions is the mounted directory permissions.
+	// If it is non-zero, perform a chmod with the specified permissions after mounted.
+	MountPermissions *string `json:"mountPermissions,omitempty"`
 	// MountOptions is the mount options for the NFS share.
 	MountOptions []string `json:"mountOptions,omitempty"`
 }
@@ -35,11 +52,27 @@ func (b *NFSInstancePersistentVolumeSourceApplyConfiguration) WithServer(value s
 	return b
 }
 
-// WithPath sets the Path field in the declarative configuration to the given value
+// WithShare sets the Share field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Path field is set to the value of the last call.
-func (b *NFSInstancePersistentVolumeSourceApplyConfiguration) WithPath(value string) *NFSInstancePersistentVolumeSourceApplyConfiguration {
-	b.Path = &value
+// If called multiple times, the Share field is set to the value of the last call.
+func (b *NFSInstancePersistentVolumeSourceApplyConfiguration) WithShare(value string) *NFSInstancePersistentVolumeSourceApplyConfiguration {
+	b.Share = &value
+	return b
+}
+
+// WithSubDirectory sets the SubDirectory field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the SubDirectory field is set to the value of the last call.
+func (b *NFSInstancePersistentVolumeSourceApplyConfiguration) WithSubDirectory(value string) *NFSInstancePersistentVolumeSourceApplyConfiguration {
+	b.SubDirectory = &value
+	return b
+}
+
+// WithMountPermissions sets the MountPermissions field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MountPermissions field is set to the value of the last call.
+func (b *NFSInstancePersistentVolumeSourceApplyConfiguration) WithMountPermissions(value string) *NFSInstancePersistentVolumeSourceApplyConfiguration {
+	b.MountPermissions = &value
 	return b
 }
 

@@ -18,6 +18,7 @@ var setups = []extensionapi.Setup{
 	new(worker.InstanceHandler),
 	new(worker.InstanceImagePullSecretHandler),
 	new(worker.InstancePersistentVolumeHandler),
+	new(worker.InstancePersistentVolumeTypeHandler),
 	new(worker.InstanceSSHPublicKeyHandler),
 	new(worker.InstanceTypeHandler),
 }

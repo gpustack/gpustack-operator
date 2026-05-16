@@ -44,13 +44,15 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 	values := getKueueChartTemplateValues(name, valuesContext, funcMap)
 
 	chart := &helm.Chart{
-		Name:                            name,
-		Version:                         version,
-		Release:                         release,
-		Path:                            path,
-		DownloadURL:                     download,
-		Values:                          values,
-		DisableInstallIfApiServiceReady: fmt.Sprintf("%s.%s", kueue.SchemeGroupVersion.Version, kueue.SchemeGroupVersion.Group),
+		Name:        name,
+		Version:     version,
+		Release:     release,
+		Path:        path,
+		DownloadURL: download,
+		Values:      values,
+		// Skip installation if "v1beta2.kueue.x-k8s.io" ApiService is ready,
+		// which means the cluster has already installed Kueue but not the same release.
+		SkippedInstallationIfApiServiceReady: fmt.Sprintf("%s.%s", kueue.SchemeGroupVersion.Version, kueue.SchemeGroupVersion.Group),
 	}
 	_, err := helmCli.Install(ctx, chart)
 	if err != nil {
@@ -63,7 +65,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 const kueueChartValuesTemplate = `
 {{- $hasCertManager := hasAPIResource "cert-manager.io/v1" "Certificate" }}
 
-fullnameOverride: "{{ $.Release }}"
+fullnameOverride: "kueue"
 namespaceOverride: "{{ $.Namespace }}"
 
 enablePrometheus: false
@@ -78,7 +80,8 @@ controllerManager:
     image:
 {{- $registry := default "docker.io" $.ContainerRegistry }}
 {{- $namespace := default "gpustack" $.ContainerNamespace }}
-{{- $image := printf "%s/%s/mirrored-kueue" $registry $namespace }}
+{{- $prefix := "mirrored" }}
+{{- $image := printf "%s/%s/%s-kueue" $registry $namespace $prefix }}
       repository: "{{ $image }}" 
     podAnnotations:
       {{ $.ManagedLabel }}: "true"

@@ -144,6 +144,7 @@ spec:
         #
         feature.node.kubernetes.io/pci-{{ $manuPciID }}.present: "true"
       serviceAccountName: gpustack-operator-device-manager
+      priorityClassName: system-cluster-critical
       tolerations:
         - operator: "Exists"
       containers:

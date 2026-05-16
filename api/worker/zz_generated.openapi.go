@@ -2204,10 +2204,24 @@ func schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref common.
 					},
 					"path": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Path is the exported NFS share from the server. For each InstancePersistentVolume, a corresponding subpath will be created in the NFS share.\n\nImmutable after creation.",
+							Description: "Share is the path of NFS share from the server. For each InstancePersistentVolume, a corresponding subpath will be created in the NFS share.\n\nImmutable after creation.",
 							Default:     "/",
 							MaxLength:   ptr.To[int64](1024),
 							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"subDirectory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume. If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.\n\nIt supports a specific string or the following template variables: - `${pvc.metadata.name}`: the name the corresponding PersistentVolumeClaim. - `${pvc.metadata.namespace}`: the namespace of the corresponding PersistentVolumeClaim. - `${pv.metadata.name}`: the name of the corresponding Kubernetes PersistentVolume.\n\nFor example, specify `${pvc.metadata.namespace}/${pvc.metadata.name}` to create a subdirectory with the namespaced name of the corresponding PersistentVolumeClaim in the NFS share for each InstancePersistentVolume.\n\nImmutable after creation.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mountPermissions": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MountPermissions is the mounted directory permissions. If it is non-zero, perform a chmod with the specified permissions after mounted.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

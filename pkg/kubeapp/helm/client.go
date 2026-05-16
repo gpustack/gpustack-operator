@@ -198,7 +198,7 @@ func (c *Client) InstallWith(
 		n := _NextStepInstall
 		if r != nil {
 			n = next(r)
-		} else if isApiServiceReady(ctx, c, chart.DisableInstallIfApiServiceReady) {
+		} else if isApiServiceReady(ctx, c, chart.SkippedInstallationIfApiServiceReady) {
 			return nil, nil
 		}
 
@@ -255,7 +255,7 @@ func (c *Client) InstallWith(
 			i.ReleaseName = chart.Release
 			i.Namespace = namespace
 			i.Atomic = true
-			i.IncludeCRDs = !chart.DisabledInstallCRDs
+			i.IncludeCRDs = !chart.SkippedCRDsInstallation
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm install: load chart: %w", err)

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"k8s.io/apimachinery/pkg/util/sets"
-	nfd "sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1"
 
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
 	"gpustack.ai/gpustack/pkg/system"
@@ -33,14 +32,14 @@ func installNodeFeatureDiscovery(ctx context.Context, helmCli *helm.Client, glob
 	values := getNfdChartTemplateValues(name, valuesContext)
 
 	chart := &helm.Chart{
-		Name:                            name,
-		Version:                         version,
-		Release:                         release,
-		Path:                            path,
-		DownloadURL:                     download,
-		Values:                          values,
-		DisabledInstallCRDs:             true,
-		DisableInstallIfApiServiceReady: fmt.Sprintf("%s.%s", nfd.SchemeGroupVersion.Version, nfd.SchemeGroupVersion.Group),
+		Name:        name,
+		Version:     version,
+		Release:     release,
+		Path:        path,
+		DownloadURL: download,
+		Values:      values,
+		// Skip installation the CRDs of the chart.
+		SkippedCRDsInstallation: true,
 	}
 	_, err := helmCli.Install(ctx, chart)
 	if err != nil {
@@ -51,13 +50,14 @@ func installNodeFeatureDiscovery(ctx context.Context, helmCli *helm.Client, glob
 }
 
 const nfdChartValuesTemplate = `
-fullnameOverride: "{{ $.Release }}"
+fullnameOverride: "node-feature-discovery"
 namespaceOverride: "{{ $.Namespace }}"
 
 image:
 {{- $registry := default "docker.io" $.ContainerRegistry }}
 {{- $namespace := default "gpustack" $.ContainerNamespace }}
-{{- $image := printf "%s/%s/mirrored-node-feature-discovery" $registry $namespace }}
+{{- $prefix := "mirrored" }}
+{{- $image := printf "%s/%s/%s-node-feature-discovery" $registry $namespace $prefix }}
   repository: "{{ $image }}"
   pullPolicy: "IfNotPresent"
 {{- if $.ImagePullSecrets }}
@@ -71,19 +71,32 @@ master:
   enable: true
   tolerations:
     - operator: "Exists"
+  annotations:
+    {{ $.ManagedLabel }}: "true"
+  deploymentAnnotations:
+    {{ $.ManagedLabel }}: "true"
   serviceAccount:
     create: true
     annotations:
       {{ $.ManagedLabel }}: "true"
-  annotations:
-    {{ $.ManagedLabel }}: "true"
+  config:
+    restrictions:
+      nodeFeatureNamespaceSelector:
+       matchLabels:
+         kubernetes.io/metadata.name: "{{ $.Namespace }}"
 
 worker:
   enable: true
-  annotations:
-    {{ $.ManagedLabel }}: "true"
   tolerations:
     - operator: "Exists"
+  annotations:
+    {{ $.ManagedLabel }}: "true"
+  daemonsetAnnotations:
+    {{ $.ManagedLabel }}: "true"
+  serviceAccount:
+    create: true
+    annotations:
+      {{ $.ManagedLabel }}: "true"
   config:
     sources:
       pci:
@@ -103,6 +116,8 @@ gc:
   tolerations:
     - operator: "Exists"
   annotations:
+    {{ $.ManagedLabel }}: "true"
+  deploymentAnnotations:
     {{ $.ManagedLabel }}: "true"
   serviceAccount:
     create: true

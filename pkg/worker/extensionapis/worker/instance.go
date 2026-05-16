@@ -184,8 +184,8 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 			return nil, field.InternalError(
 				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
 		}
-		return nil, field.Invalid(
-			field.NewPath("spec.type"), inst.Spec.Type, "instance type not found")
+		return nil, field.NotFound(
+			field.NewPath("spec.type"), "instance type not found")
 	}
 	if inst.Spec.Resources != nil {
 		var errs field.ErrorList
