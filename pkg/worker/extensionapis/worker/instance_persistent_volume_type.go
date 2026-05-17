@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -136,6 +137,13 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 		if instPVType.Spec.S3.Endpoint == "" {
 			return nil, field.Required(
 				field.NewPath("spec.s3.endpoint"), "endpoint is required")
+		}
+		if uri, err := url.ParseRequestURI(instPVType.Spec.S3.Endpoint); err != nil {
+			return nil, field.Invalid(
+				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL")
+		} else if uri.Scheme != "http" && uri.Scheme != "https" {
+			return nil, field.Invalid(
+				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme")
 		}
 	}
 
@@ -333,6 +341,17 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 				field.NewPath("spec.nfs.share"), "share is immutable")
 		}
 	case instPVType.Spec.S3 != nil:
+		if instPVType.Spec.S3.Endpoint == "" {
+			return nil, field.Required(
+				field.NewPath("spec.s3.endpoint"), "endpoint is required")
+		}
+		if uri, err := url.ParseRequestURI(instPVType.Spec.S3.Endpoint); err != nil {
+			return nil, field.Invalid(
+				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL")
+		} else if uri.Scheme != "http" && uri.Scheme != "https" {
+			return nil, field.Invalid(
+				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme")
+		}
 		if instPVType.Spec.S3.Bucket != instPVTypeOld.Spec.S3.Bucket {
 			return nil, field.Forbidden(
 				field.NewPath("spec.s3.bucket"), "bucket is immutable")
@@ -362,9 +381,9 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 		})
 	case instPVType.Spec.S3 != nil:
 		// Update asset.
-		sec := getInstancePersistentVolumeTypeSourceS3AccessData(instPVType)
-		kubemeta.ControlOnWithoutBlock(sec, oldStgCls, worker.SchemeGroupVersionKind(_InstancePersistentVolumeTypeKind))
-		_, err := kubeclientset.UpdateWithCtrlClient(ctx, h.Client, sec,
+		eSec := getInstancePersistentVolumeTypeSourceS3AccessData(instPVType)
+		kubemeta.ControlOnWithoutBlock(eSec, oldStgCls, worker.SchemeGroupVersionKind(_InstancePersistentVolumeTypeKind))
+		_, err := kubeclientset.UpdateWithCtrlClient(ctx, h.Client, eSec,
 			kubeclientset.WithCreateIfNotExisted[*core.Secret]())
 		if err != nil {
 			return nil, kerrors.NewInternalError(fmt.Errorf("update s3 access secret: %w", err))
@@ -376,6 +395,7 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 			"endpoint":    instPVType.Spec.S3.Endpoint,
 			"region":      instPVType.Spec.S3.Region,
 			"insecure":    strconv.FormatBool(instPVType.Spec.S3.Insecure),
+			"accessKey":   instPVType.Spec.S3.AccessKey,
 		})
 	}
 
@@ -471,6 +491,7 @@ func convertStorageClassFromInstancePersistentVolumeType(instPVType *worker.Inst
 			"endpoint":    instPVType.Spec.S3.Endpoint,
 			"region":      instPVType.Spec.S3.Region,
 			"insecure":    strconv.FormatBool(instPVType.Spec.S3.Insecure),
+			"accessKey":   instPVType.Spec.S3.AccessKey,
 		})
 	}
 
@@ -504,6 +525,7 @@ func convertInstancePersistentVolumeTypeFromStorageClass(stgCls *storage.Storage
 			Endpoint:     notes["endpoint"],
 			Region:       notes["region"],
 			Insecure:     notes["insecure"] == "true",
+			AccessKey:    notes["accessKey"],
 			Bucket:       stgCls.Parameters["bucket"],
 			MountOptions: strings.Split(stgCls.Parameters["options"], " "),
 		}
@@ -565,10 +587,10 @@ func getInstancePersistentVolumeTypeSourceS3AccessData(instPVType *worker.Instan
 		data["insecure"] = []byte("true")
 	}
 	if instPVType.Spec.S3.AccessKey != "" {
-		data["accessKey"] = []byte(instPVType.Spec.S3.AccessKey)
+		data["accessKeyID"] = []byte(instPVType.Spec.S3.AccessKey)
 	}
 	if instPVType.Spec.S3.SecretKey != "" {
-		data["secretKey"] = []byte(instPVType.Spec.S3.SecretKey)
+		data["secretAccessKey"] = []byte(instPVType.Spec.S3.SecretKey)
 	}
 
 	return &core.Secret{

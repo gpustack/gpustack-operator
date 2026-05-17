@@ -43,7 +43,6 @@ https://github.com/kubernetes/apiextensions-apiserver v0.35.3 ${staging_dir}/k8s
 https://github.com/kubernetes/klog v2.140.0 ${staging_dir}/k8s.io/klog
 https://github.com/go-logr/logr v1.4.3 ${staging_dir}/github.com/go-logr/logr
 https://github.com/gogo/protobuf v1.3.2 ${staging_dir}/github.com/gogo/protobuf
-https://github.com/dexidp/dex v2.44.0 ${staging_dir}/github.com/dexidp/dex
 EOF
   )
 }

@@ -1401,11 +1401,11 @@ func wrapError(ctx context.Context, name string, err error) error {
 					Causes: []meta.StatusCause{
 						{
 							Type:    meta.CauseType(fieldErr.Type), // 1-1 mapping.
-							Message: fieldErr.Detail,
+							Message: fieldErr.ErrorBody(),
+							Field:   fieldErr.Field,
 						},
 					},
 				},
-				Message: fmt.Sprintf("Invalid object: %v", err),
 			},
 		}
 	}

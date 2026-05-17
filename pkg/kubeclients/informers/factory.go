@@ -35,7 +35,6 @@ import (
 	rbac "gpustack.ai/gpustack/pkg/kubeclients/informers/rbac"
 	resource "gpustack.ai/gpustack/pkg/kubeclients/informers/resource"
 	scheduling "gpustack.ai/gpustack/pkg/kubeclients/informers/scheduling"
-	server "gpustack.ai/gpustack/pkg/kubeclients/informers/server"
 	storage "gpustack.ai/gpustack/pkg/kubeclients/informers/storage"
 	storagemigration "gpustack.ai/gpustack/pkg/kubeclients/informers/storagemigration"
 	worker "gpustack.ai/gpustack/pkg/kubeclients/informers/worker"
@@ -291,7 +290,6 @@ type SharedInformerFactory interface {
 	Rbac() rbac.Interface
 	Resource() resource.Interface
 	Scheduling() scheduling.Interface
-	Server() server.Interface
 	Storage() storage.Interface
 	Storagemigration() storagemigration.Interface
 	Worker() worker.Interface
@@ -383,10 +381,6 @@ func (f *sharedInformerFactory) Resource() resource.Interface {
 
 func (f *sharedInformerFactory) Scheduling() scheduling.Interface {
 	return scheduling.New(f, f.namespace, f.tweakListOptions)
-}
-
-func (f *sharedInformerFactory) Server() server.Interface {
-	return server.New(f, f.namespace, f.tweakListOptions)
 }
 
 func (f *sharedInformerFactory) Storage() storage.Interface {

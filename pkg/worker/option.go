@@ -25,7 +25,6 @@ import (
 
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/manager"
-	"gpustack.ai/gpustack/pkg/peer"
 	"gpustack.ai/gpustack/pkg/system"
 	certcache "gpustack.ai/gpustack/pkg/utils/certs/cache"
 	"gpustack.ai/gpustack/pkg/utils/certs/kubecert"
@@ -37,10 +36,9 @@ import (
 
 type Options struct {
 	// Establish.
-	BindAddress  net.IP
-	BindPort     int
-	BindPeerPort int
-	CertDir      string
+	BindAddress net.IP
+	BindPort    int
+	CertDir     string
 
 	// Manager.
 	ManagerOptions *manager.Options
@@ -62,13 +60,6 @@ type Options struct {
 	AuditPolicyFile        string
 	AuditLogFile           string
 	AuditWebhookConfigFile string
-
-	// Peer.
-	DisablePeer   bool
-	PeerServerURL string
-	PeerToken     string
-	PeerTeam      string
-	PeerCluster   string
 
 	// Device Manager.
 	Manufacturers []string
@@ -101,13 +92,6 @@ func NewOptions() *Options {
 		AuditLogFile:           "",
 		AuditWebhookConfigFile: "",
 
-		// Peer.
-		DisablePeer:   false,
-		PeerServerURL: "",
-		PeerToken:     "",
-		PeerTeam:      "",
-		PeerCluster:   "",
-
 		// Device Manager.
 		Manufacturers: devicefeature.GetKnownManufacturers(),
 	}
@@ -122,8 +106,6 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"the IP address(without port) on which to serve.")
 	fs.IntVar(&o.BindPort, "secure-port", o.BindPort,
 		"the port on which to serve HTTPS.")
-	fs.IntVar(&o.BindPeerPort, "peer-port", o.BindPeerPort,
-		"the port on which to serve peer connection, if not specified, takes one more than the secure port.")
 	fs.StringVar(&o.CertDir, "cert-dir", o.CertDir,
 		"the directory where the TLS certs are located. "+
 			"if provided, must place tls.crt and tls.key under --cert-dir.")
@@ -169,17 +151,6 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&o.AuditWebhookConfigFile, "audit-webhook-config-file", o.AuditWebhookConfigFile,
 		"path to a kubeconfig formatted file that defines the audit webhook configuration.")
 
-	// Peer.
-	fs.BoolVar(&o.DisablePeer, "disable-peer", o.DisablePeer, "Whether to disable the peer connection.")
-	fs.StringVar(&o.PeerServerURL, "peer-server-url", o.PeerServerURL,
-		"the URL of the peer server to connect to.")
-	fs.StringVar(&o.PeerToken, "peer-token", o.PeerToken,
-		"the token used for authentication with the peer server.")
-	fs.StringVar(&o.PeerTeam, "peer-team", o.PeerTeam,
-		"the team name used for authentication with the peer server.")
-	fs.StringVar(&o.PeerCluster, "peer-cluster", o.PeerCluster,
-		"the cluster name used for authentication with the peer server.")
-
 	// Device Manager.
 	fs.StringSliceVar(&o.Manufacturers, "manufacturer", o.Manufacturers,
 		"comma separated list of manufacturers to detect.")
@@ -189,9 +160,6 @@ func (o *Options) Validate(ctx context.Context) error {
 	// Establish.
 	if o.BindPort < 1 || o.BindPort > 65535 {
 		return errors.New("--secure-port: out of range")
-	}
-	if o.BindPeerPort != 0 && (o.BindPeerPort < 1 || o.BindPeerPort > 65535) {
-		return errors.New("--peer-port: out of range")
 	}
 	if o.CertDir != "" {
 		if !osx.ExistsDir(o.CertDir) {
@@ -235,22 +203,6 @@ func (o *Options) Validate(ctx context.Context) error {
 	}
 	if o.AuditWebhookConfigFile != "" && !osx.ExistsFile(o.AuditWebhookConfigFile) {
 		return errors.New("--audit-webhook-config-file: no found file")
-	}
-
-	// Peer.
-	if !o.DisablePeer {
-		if o.PeerServerURL == "" {
-			return fmt.Errorf("--peer-server-url must be provided")
-		}
-		if o.PeerToken == "" {
-			return fmt.Errorf("--peer-token must be provided")
-		}
-		if o.PeerTeam == "" {
-			return fmt.Errorf("--peer-team must be provided")
-		}
-		if o.PeerCluster == "" {
-			return fmt.Errorf("--peer-cluster must be provided")
-		}
 	}
 
 	// Device Manager.
@@ -395,30 +347,16 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 		apiSrvCfg.ShutdownWatchTerminationGracePeriod = 15 * time.Second
 	}
 
-	// Peer.
-	var peerCpCfg *peer.DataPlaneConfig
-	if !o.DisablePeer {
-		peerCpCfg = &peer.DataPlaneConfig{
-			ServerURL:              o.PeerServerURL,
-			Token:                  o.PeerToken,
-			Team:                   o.PeerTeam,
-			Cluster:                o.PeerCluster,
-			LoopbackKubeRestConfig: mgrConfig.LoopbackKubeRestConfig,
-			LoopbackKubeClient:     mgrConfig.LoopbackKubeClient,
-		}
-	}
-
 	return &Config{
-		Manufacturers:       o.Manufacturers,
-		ManagerConfig:       mgrConfig,
-		APIServerConfig:     apiSrvCfg,
-		Serve:               serve,
-		Authn:               authn,
-		Authz:               authz,
-		Audit:               audit,
-		Admit:               admit,
-		KubeNativeClient:    lpCli,
-		KubeNativeInformer:  lpInf,
-		PeerDataPlaneConfig: peerCpCfg,
+		Manufacturers:      o.Manufacturers,
+		ManagerConfig:      mgrConfig,
+		APIServerConfig:    apiSrvCfg,
+		Serve:              serve,
+		Authn:              authn,
+		Authz:              authz,
+		Audit:              audit,
+		Admit:              admit,
+		KubeNativeClient:   lpCli,
+		KubeNativeInformer: lpInf,
 	}, nil
 }

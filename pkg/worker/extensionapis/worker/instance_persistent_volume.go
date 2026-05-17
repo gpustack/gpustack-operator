@@ -175,7 +175,7 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 					field.NewPath("spec.type"), fmt.Errorf("get storage class: %w", err))
 			}
 			return nil, field.NotFound(
-				field.NewPath("spec.type"), "type is not found")
+				field.NewPath("spec.type"), *instPV.Spec.Type)
 		}
 	}
 

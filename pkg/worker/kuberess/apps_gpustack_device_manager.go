@@ -10,11 +10,11 @@ import (
 
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/devicemanager"
+	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
 	"gpustack.ai/gpustack/pkg/kubeappyaml"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
-	"gpustack.ai/gpustack/pkg/server/kuberess"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/version"
 )

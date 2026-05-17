@@ -66,10 +66,6 @@ import (
 	fakeresourcev1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/resource/v1/fake"
 	schedulingv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/scheduling/v1"
 	fakeschedulingv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/scheduling/v1/fake"
-	serverv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/server/v1"
-	fakeserverv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/server/v1/fake"
-	serverv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/server/v1alpha1"
-	fakeserverv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/server/v1alpha1/fake"
 	storagev1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/storage/v1"
 	fakestoragev1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/storage/v1/fake"
 	storagemigrationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/storagemigration/v1beta1"
@@ -191,11 +187,6 @@ var (
 	_ testing.FakeClient  = &Clientset{}
 )
 
-// ServerV1alpha1 retrieves the ServerV1alpha1Client
-func (c *Clientset) ServerV1alpha1() serverv1alpha1.ServerV1alpha1Interface {
-	return &fakeserverv1alpha1.FakeServerV1alpha1{Fake: &c.Fake}
-}
-
 // WorkerV1alpha1 retrieves the WorkerV1alpha1Client
 func (c *Clientset) WorkerV1alpha1() workerv1alpha1.WorkerV1alpha1Interface {
 	return &fakeworkerv1alpha1.FakeWorkerV1alpha1{Fake: &c.Fake}
@@ -204,11 +195,6 @@ func (c *Clientset) WorkerV1alpha1() workerv1alpha1.WorkerV1alpha1Interface {
 // GpustackV1 retrieves the GpustackV1Client
 func (c *Clientset) GpustackV1() gpustackv1.GpustackV1Interface {
 	return &fakegpustackv1.FakeGpustackV1{Fake: &c.Fake}
-}
-
-// ServerV1 retrieves the ServerV1Client
-func (c *Clientset) ServerV1() serverv1.ServerV1Interface {
-	return &fakeserverv1.FakeServerV1{Fake: &c.Fake}
 }
 
 // WorkerV1 retrieves the WorkerV1Client

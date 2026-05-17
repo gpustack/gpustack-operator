@@ -4,17 +4,12 @@ ARG HELM_VERSION="3.20.0"
 ARG VALS_VERSION="0.44.0"
 ARG KUSTOMIZE_VERSION="5.8.1"
 ARG YTT_VERSION="0.54.0"
-ARG K3S_VERSION="1.35.3-k3s1"
-ARG ETCDCTL_VERSION="3.6.7"
+ARG KUBECTL_VERSION="1.35.3"
 ARG GPUSTACK_DATA_DIR="/var/lib/gpustack"
 ARG GPUSTACK_CONF_DIR="/etc/gpustack"
-ARG GPUSTACK_IMAGES_DIR="${GPUSTACK_CONF_DIR}/images"
 ARG GPUSTACK_CHARTS_DIR="${GPUSTACK_CONF_DIR}/charts"
-ARG GPUSTACK_SERVE_UI_URL="file:///${GPUSTACK_CONF_DIR}/ui"
 
-FROM rancher/k3s:v${K3S_VERSION} AS k3s
-
-FROM ubuntu:24.04@sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9 AS gpustack
+FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b AS gpustack
 SHELL ["/bin/bash", "-c"]
 
 ARG TARGETPLATFORM
@@ -247,74 +242,23 @@ RUN <<EOF
         && rm -rf /var/lib/apt/lists/*
 EOF
 
-# Install K3S
+# Install Kubectl
 
-ARG K3S_VERSION
-ARG ETCDCTL_VERSION
-ARG GPUSTACK_IMAGES_DIR
-
-ENV K3S_RESOLV_CONF=/etc/resolv.conf \
-    ETCDCTL_API=3
-
-COPY --from=k3s \
-    /bin/blkid \
-    /bin/bandwidth \
-    /bin/cni \
-    /bin/conntrack \
-    /bin/containerd \
-    /bin/containerd-shim-runc-v2 \
-    /bin/ethtool \
-    /bin/firewall \
-    /bin/ip \
-    /bin/ipset \
-    /bin/k3s \
-    /bin/losetup \
-    /bin/pigz \
-    /bin/runc \
-    /bin/which \
-    /bin/aux/xtables-legacy-multi \
-    /usr/bin/
+ARG KUBECTL_VERSION
 
 RUN <<EOF
-    # K3S
+    # Kubectl
     set -exo pipefail
 
-    # Create symlinks
-    ln -s /usr/bin/cni /usr/bin/bridge
-    ln -s /usr/bin/cni /usr/bin/flannel
-    ln -s /usr/bin/cni /usr/bin/host-local
-    ln -s /usr/bin/cni /usr/bin/loopback
-    ln -s /usr/bin/cni /usr/bin/portmap
-    ln -s /usr/bin/k3s /usr/bin/crictl
-    ln -s /usr/bin/k3s /usr/bin/ctr
-    ln -s /usr/bin/k3s /usr/bin/k3s-agent
-    ln -s /usr/bin/k3s /usr/bin/k3s-etcd-snapshot
-    ln -s /usr/bin/k3s /usr/bin/k3s-server
-    ln -s /usr/bin/k3s /usr/bin/kubectl
-    ln -s /usr/bin/pigz /usr/bin/unpigz
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/iptables
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/iptables-save
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/iptables-restore
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/iptables-translate
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/ip6tables
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/ip6tables-save
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/ip6tables-restore
-    ln -s /usr/bin/xtables-legacy-multi /usr/bin/ip6tables-translate
+    # Download
+    aria2c -x $(nproc) -s $(nproc) -c -o /tmp/kubectl "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/${TARGETOS}/${TARGETARCH}/kubectl"
 
-    # Download airgap images
-    K3S_AIRGAP_IMAGE_URL="https://github.com/k3s-io/k3s/releases/download/v"${K3S_VERSION/-k3s/%2Bk3s}"/k3s-airgap-images-${TARGETARCH}.tar.zst"
-    mkdir -p ${GPUSTACK_IMAGES_DIR}
-    aria2c -x $(nproc) -s $(nproc) -c -o ${GPUSTACK_IMAGES_DIR}/k3s-images.tar.zst ${K3S_AIRGAP_IMAGE_URL}
-
-    # Download etcdctl
-    ETCD_URL="https://github.com/etcd-io/etcd/releases/download/v${ETCDCTL_VERSION}/etcd-v${ETCDCTL_VERSION}-${TARGETOS}-${TARGETARCH}.tar.gz"; \
-    aria2c -x $(nproc) -s $(nproc) -c -o /tmp/etcd.tar.gz ${ETCD_URL}
-    tar -xzvf /tmp/etcd.tar.gz --directory /usr/bin/ --strip-components=1 --no-same-owner etcd-v${ETCDCTL_VERSION}-${TARGETOS}-${TARGETARCH}/etcdctl
-    chmod a+x /usr/bin/etcdctl
+    # Install
+    mv /tmp/kubectl /usr/bin/kubectl
+    chmod a+x /usr/bin/kubectl
 
     # Review
-    k3s --version
-    etcdctl version
+    kubectl version --client
 
     # Cleanup
     rm -rf /var/tmp/* \
@@ -332,12 +276,10 @@ ARG GPUSTACK_CHARTS_DIR
 ## Kueue
 
 ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.2/kueue-0.17.2.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.17.2.tgz"
-RUN skopeo copy docker://registry.k8s.io/kueue/kueue:v0.17.2 oci-archive:${GPUSTACK_IMAGES_DIR}/kueue-v0.17.2.tar
 
 ## Node Features Discovery
 
 ADD https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.18.3/node-feature-discovery-chart-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
-RUN skopeo copy docker://registry.k8s.io/nfd/node-feature-discovery:v0.18.3 oci-archive:${GPUSTACK_IMAGES_DIR}/node-feature-discovery-v0.18.3.tar
 
 ## CSI Driver NFS
 ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-nfs-4.13.2.tgz"
@@ -470,12 +412,10 @@ EOF
 # Entrypoint
 
 ARG GPUSTACK_DATA_DIR
-ARG GPUSTACK_SERVE_UI_URL
 
-ENV GPUSTACK_SERVE_UI_URL=${GPUSTACK_SERVE_UI_URL} \
-    _RUNNING_INSIDE_CONTAINER_="true"
+ENV _RUNNING_INSIDE_CONTAINER_="true"
 
 VOLUME ${GPUSTACK_DATA_DIR}
 WORKDIR /
-EXPOSE 80 443 444
+EXPOSE 80 443
 ENTRYPOINT [ "tini", "--" ]

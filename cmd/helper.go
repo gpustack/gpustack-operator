@@ -56,6 +56,12 @@ func Harness(c *cobra.Command) *cobra.Command {
 		return err
 	})
 
+	// Allow unknown flags.
+	c.FParseErrWhitelist.UnknownFlags = true
+	for _, sc := range c.Commands() {
+		sc.FParseErrWhitelist.UnknownFlags = true
+	}
+
 	// Append version.
 	c.Version = version.Get()
 

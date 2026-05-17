@@ -10,8 +10,6 @@ package informers
 import (
 	fmt "fmt"
 
-	serverv1 "gpustack.ai/gpustack/api/server/v1"
-	serverv1alpha1 "gpustack.ai/gpustack/api/server/v1alpha1"
 	apiv1 "gpustack.ai/gpustack/api/v1"
 	workerv1 "gpustack.ai/gpustack/api/worker/v1"
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -252,24 +250,6 @@ func (f *sharedInformerFactory) ForResource(resource schema.GroupVersionResource
 		// Group=scheduling.k8s.io, Version=v1
 	case schedulingv1.SchemeGroupVersion.WithResource("priorityclasses"):
 		return &genericInformer{resource: resource.GroupResource(), informer: f.Scheduling().V1().PriorityClasses().Informer()}, nil
-
-		// Group=server.gpustack.ai, Version=v1
-	case serverv1.SchemeGroupVersion.WithResource("clusters"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1().Clusters().Informer()}, nil
-	case serverv1.SchemeGroupVersion.WithResource("projects"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1().Projects().Informer()}, nil
-	case serverv1.SchemeGroupVersion.WithResource("subjects"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1().Subjects().Informer()}, nil
-	case serverv1.SchemeGroupVersion.WithResource("subjectproviders"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1().SubjectProviders().Informer()}, nil
-	case serverv1.SchemeGroupVersion.WithResource("teams"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1().Teams().Informer()}, nil
-
-		// Group=server.gpustack.ai, Version=v1alpha1
-	case serverv1alpha1.SchemeGroupVersion.WithResource("clusters"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1alpha1().Clusters().Informer()}, nil
-	case serverv1alpha1.SchemeGroupVersion.WithResource("clusterbindings"):
-		return &genericInformer{resource: resource.GroupResource(), informer: f.Server().V1alpha1().ClusterBindings().Informer()}, nil
 
 		// Group=storage.k8s.io, Version=v1
 	case storagev1.SchemeGroupVersion.WithResource("csidrivers"):

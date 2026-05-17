@@ -42,7 +42,6 @@ func generate() error {
 			Specify the package paths of the CRD APIs.
 		*/
 		APIs: []string{
-			"gpustack.ai/gpustack/api/server/v1alpha1",
 			"gpustack.ai/gpustack/api/worker/v1alpha1",
 		},
 		/*
@@ -50,7 +49,6 @@ func generate() error {
 		*/
 		ExtensionAPIs: []string{
 			"gpustack.ai/gpustack/api/v1",
-			"gpustack.ai/gpustack/api/server/v1",
 			"gpustack.ai/gpustack/api/worker/v1",
 		},
 		/*
@@ -107,9 +105,7 @@ func generate() error {
 		/*
 			Specify the package paths of the Admission webhooks.
 		*/
-		Webhooks: []string{
-			"gpustack.ai/gpustack/pkg/server/webhooks/server",
-		},
+		Webhooks: []string{},
 		/*
 			Specify the exceptions to the plural form.
 		*/

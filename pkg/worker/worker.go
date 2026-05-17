@@ -23,7 +23,6 @@ import (
 
 	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/manager"
-	"gpustack.ai/gpustack/pkg/peer"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/httpx"
@@ -52,7 +51,6 @@ type Worker struct {
 	Manufacturers   []string
 	Manager         *manager.Manager
 	APIServer       *genericapiserver.GenericAPIServer
-	PeerDp          *peer.DataPlane
 }
 
 func (w *Worker) Prepare(ctx context.Context) error {
@@ -216,11 +214,5 @@ func (w *Worker) Start(ctx context.Context) error {
 		klog.Info("starting api server")
 		return w.APIServer.PrepareRun().RunWithContext(ctx)
 	})
-	if w.PeerDp != nil {
-		gp.Go(func(ctx context.Context) error {
-			klog.Info("starting peer data plane")
-			return w.PeerDp.Start(ctx)
-		})
-	}
 	return gp.Wait()
 }

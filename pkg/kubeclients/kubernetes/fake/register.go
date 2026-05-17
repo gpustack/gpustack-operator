@@ -8,8 +8,6 @@
 package fake
 
 import (
-	serverv1 "gpustack.ai/gpustack/api/server/v1"
-	serverv1alpha1 "gpustack.ai/gpustack/api/server/v1alpha1"
 	gpustackv1 "gpustack.ai/gpustack/api/v1"
 	workerv1 "gpustack.ai/gpustack/api/worker/v1"
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -53,10 +51,8 @@ var scheme = runtime.NewScheme()
 var codecs = serializer.NewCodecFactory(scheme)
 
 var localSchemeBuilder = runtime.SchemeBuilder{
-	serverv1alpha1.AddToScheme,
 	workerv1alpha1.AddToScheme,
 	gpustackv1.AddToScheme,
-	serverv1.AddToScheme,
 	workerv1.AddToScheme,
 	admissionv1.AddToScheme,
 	admissionregistrationv1.AddToScheme,

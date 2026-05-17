@@ -21,7 +21,6 @@ import (
 	"gpustack.ai/gpustack/api/worker"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/manager"
-	"gpustack.ai/gpustack/pkg/peer"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/version"
@@ -31,17 +30,16 @@ import (
 )
 
 type Config struct {
-	Manufacturers       []string
-	ManagerConfig       *manager.Config
-	APIServerConfig     *genericapiserver.RecommendedConfig
-	Serve               *genericoptions.SecureServingOptions
-	Authn               *genericoptions.DelegatingAuthenticationOptions
-	Authz               *genericoptions.DelegatingAuthorizationOptions
-	Audit               *genericoptions.AuditOptions
-	Admit               *genericoptions.AdmissionOptions
-	KubeNativeClient    kclientset.Interface
-	KubeNativeInformer  kinformers.SharedInformerFactory
-	PeerDataPlaneConfig *peer.DataPlaneConfig
+	Manufacturers      []string
+	ManagerConfig      *manager.Config
+	APIServerConfig    *genericapiserver.RecommendedConfig
+	Serve              *genericoptions.SecureServingOptions
+	Authn              *genericoptions.DelegatingAuthenticationOptions
+	Authz              *genericoptions.DelegatingAuthorizationOptions
+	Audit              *genericoptions.AuditOptions
+	Admit              *genericoptions.AdmissionOptions
+	KubeNativeClient   kclientset.Interface
+	KubeNativeInformer kinformers.SharedInformerFactory
 }
 
 func (c *Config) Apply(ctx context.Context) (*Worker, error) {
@@ -185,22 +183,11 @@ func (c *Config) Apply(ctx context.Context) (*Worker, error) {
 	}
 	klog.Infof("routing port: %d, CA bundle:\n %s", routingPort, string(routingCaBundle))
 
-	// Initialize peer data plane.
-	var peerDp *peer.DataPlane
-	if c.PeerDataPlaneConfig != nil {
-		peerDp, err = peer.NewDataPlane(*c.PeerDataPlaneConfig)
-		if err != nil {
-			return nil, fmt.Errorf("create peer data plane: %w", err)
-		}
-		system.ConfigurePeer(peerDp)
-	}
-
 	return &Worker{
 		RoutingPort:     routingPort,
 		RoutingCaBundle: routingCaBundle,
 		Manufacturers:   c.Manufacturers,
 		Manager:         mgr,
 		APIServer:       apiSrv,
-		PeerDp:          peerDp,
 	}, nil
 }

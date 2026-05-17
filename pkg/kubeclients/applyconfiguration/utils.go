@@ -3,8 +3,6 @@
 package applyconfiguration
 
 import (
-	serverv1 "gpustack.ai/gpustack/api/server/v1"
-	serverv1alpha1 "gpustack.ai/gpustack/api/server/v1alpha1"
 	apiv1 "gpustack.ai/gpustack/api/v1"
 	workerv1 "gpustack.ai/gpustack/api/worker/v1"
 	workerv1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -33,8 +31,6 @@ import (
 	applyconfigurationrbacv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/rbac/v1"
 	applyconfigurationresourcev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/resource/v1"
 	applyconfigurationschedulingv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/scheduling/v1"
-	applyconfigurationserverv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/server/v1"
-	applyconfigurationserverv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/server/v1alpha1"
 	applyconfigurationstoragev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storage/v1"
 	storagemigrationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/storagemigration/v1beta1"
 	applyconfigurationworkerv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1"
@@ -816,16 +812,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationflowcontrolv1.UserSubjectApplyConfiguration{}
 
 		// Group=gpustack.ai, Version=v1
-	case apiv1.SchemeGroupVersion.WithKind("Condition"):
-		return &applyconfigurationapiv1.ConditionApplyConfiguration{}
 	case apiv1.SchemeGroupVersion.WithKind("Setting"):
 		return &applyconfigurationapiv1.SettingApplyConfiguration{}
 	case apiv1.SchemeGroupVersion.WithKind("SettingSpec"):
 		return &applyconfigurationapiv1.SettingSpecApplyConfiguration{}
 	case apiv1.SchemeGroupVersion.WithKind("SettingStatus"):
 		return &applyconfigurationapiv1.SettingStatusApplyConfiguration{}
-	case apiv1.SchemeGroupVersion.WithKind("Status"):
-		return &applyconfigurationapiv1.StatusApplyConfiguration{}
 
 		// Group=imagepolicy.k8s.io, Version=v1alpha1
 	case v1alpha1.SchemeGroupVersion.WithKind("ImageReview"):
@@ -1214,72 +1206,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		// Group=scheduling.k8s.io, Version=v1
 	case schedulingv1.SchemeGroupVersion.WithKind("PriorityClass"):
 		return &applyconfigurationschedulingv1.PriorityClassApplyConfiguration{}
-
-		// Group=server.gpustack.ai, Version=v1
-	case serverv1.SchemeGroupVersion.WithKind("Cluster"):
-		return &applyconfigurationserverv1.ClusterApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("Project"):
-		return &applyconfigurationserverv1.ProjectApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("ProjectSpec"):
-		return &applyconfigurationserverv1.ProjectSpecApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("ProjectStatus"):
-		return &applyconfigurationserverv1.ProjectStatusApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("Subject"):
-		return &applyconfigurationserverv1.SubjectApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProvider"):
-		return &applyconfigurationserverv1.SubjectProviderApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderBitbucketConfig"):
-		return &applyconfigurationserverv1.SubjectProviderBitbucketConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderExternalConfig"):
-		return &applyconfigurationserverv1.SubjectProviderExternalConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderGiteaConfig"):
-		return &applyconfigurationserverv1.SubjectProviderGiteaConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderGitHubConfig"):
-		return &applyconfigurationserverv1.SubjectProviderGitHubConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderGitLabConfig"):
-		return &applyconfigurationserverv1.SubjectProviderGitLabConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderGoogleConfig"):
-		return &applyconfigurationserverv1.SubjectProviderGoogleConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderLDAPConfig"):
-		return &applyconfigurationserverv1.SubjectProviderLDAPConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderLDAPGroupSearch"):
-		return &applyconfigurationserverv1.SubjectProviderLDAPGroupSearchApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderLdapGroupSearchUserMatcher"):
-		return &applyconfigurationserverv1.SubjectProviderLdapGroupSearchUserMatcherApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderLDAPUserSearch"):
-		return &applyconfigurationserverv1.SubjectProviderLDAPUserSearchApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderMicrosoftConfig"):
-		return &applyconfigurationserverv1.SubjectProviderMicrosoftConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderOAuthClaimMapping"):
-		return &applyconfigurationserverv1.SubjectProviderOAuthClaimMappingApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderOAuthConfig"):
-		return &applyconfigurationserverv1.SubjectProviderOAuthConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderOIDCConfig"):
-		return &applyconfigurationserverv1.SubjectProviderOIDCConfigApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderSpec"):
-		return &applyconfigurationserverv1.SubjectProviderSpecApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectProviderStatus"):
-		return &applyconfigurationserverv1.SubjectProviderStatusApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("SubjectSpec"):
-		return &applyconfigurationserverv1.SubjectSpecApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("Team"):
-		return &applyconfigurationserverv1.TeamApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("TeamSpec"):
-		return &applyconfigurationserverv1.TeamSpecApplyConfiguration{}
-	case serverv1.SchemeGroupVersion.WithKind("TeamStatus"):
-		return &applyconfigurationserverv1.TeamStatusApplyConfiguration{}
-
-		// Group=server.gpustack.ai, Version=v1alpha1
-	case serverv1alpha1.SchemeGroupVersion.WithKind("Cluster"):
-		return &applyconfigurationserverv1alpha1.ClusterApplyConfiguration{}
-	case serverv1alpha1.SchemeGroupVersion.WithKind("ClusterBinding"):
-		return &applyconfigurationserverv1alpha1.ClusterBindingApplyConfiguration{}
-	case serverv1alpha1.SchemeGroupVersion.WithKind("ClusterReference"):
-		return &applyconfigurationserverv1alpha1.ClusterReferenceApplyConfiguration{}
-	case serverv1alpha1.SchemeGroupVersion.WithKind("ClusterSpec"):
-		return &applyconfigurationserverv1alpha1.ClusterSpecApplyConfiguration{}
-	case serverv1alpha1.SchemeGroupVersion.WithKind("ClusterStatus"):
-		return &applyconfigurationserverv1alpha1.ClusterStatusApplyConfiguration{}
 
 		// Group=storage.k8s.io, Version=v1
 	case storagev1.SchemeGroupVersion.WithKind("CSIDriver"):

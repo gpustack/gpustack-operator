@@ -39,8 +39,6 @@ import (
 	rbacv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/rbac/v1"
 	resourcev1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/resource/v1"
 	schedulingv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/scheduling/v1"
-	serverv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/server/v1"
-	serverv1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/server/v1alpha1"
 	storagev1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/storage/v1"
 	storagemigrationv1beta1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/storagemigration/v1beta1"
 	workerv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/worker/v1"
@@ -52,10 +50,8 @@ import (
 
 type Interface interface {
 	Discovery() discovery.DiscoveryInterface
-	ServerV1alpha1() serverv1alpha1.ServerV1alpha1Interface
 	WorkerV1alpha1() workerv1alpha1.WorkerV1alpha1Interface
 	GpustackV1() gpustackv1.GpustackV1Interface
-	ServerV1() serverv1.ServerV1Interface
 	WorkerV1() workerv1.WorkerV1Interface
 	AdmissionV1() admissionv1.AdmissionV1Interface
 	AdmissionregistrationV1() admissionregistrationv1.AdmissionregistrationV1Interface
@@ -91,10 +87,8 @@ type Interface interface {
 // Clientset contains the clients for groups.
 type Clientset struct {
 	*discovery.DiscoveryClient
-	serverV1alpha1          *serverv1alpha1.ServerV1alpha1Client
 	workerV1alpha1          *workerv1alpha1.WorkerV1alpha1Client
 	gpustackV1              *gpustackv1.GpustackV1Client
-	serverV1                *serverv1.ServerV1Client
 	workerV1                *workerv1.WorkerV1Client
 	admissionV1             *admissionv1.AdmissionV1Client
 	admissionregistrationV1 *admissionregistrationv1.AdmissionregistrationV1Client
@@ -127,11 +121,6 @@ type Clientset struct {
 	nfdV1alpha1             *nfdv1alpha1.NfdV1alpha1Client
 }
 
-// ServerV1alpha1 retrieves the ServerV1alpha1Client
-func (c *Clientset) ServerV1alpha1() serverv1alpha1.ServerV1alpha1Interface {
-	return c.serverV1alpha1
-}
-
 // WorkerV1alpha1 retrieves the WorkerV1alpha1Client
 func (c *Clientset) WorkerV1alpha1() workerv1alpha1.WorkerV1alpha1Interface {
 	return c.workerV1alpha1
@@ -140,11 +129,6 @@ func (c *Clientset) WorkerV1alpha1() workerv1alpha1.WorkerV1alpha1Interface {
 // GpustackV1 retrieves the GpustackV1Client
 func (c *Clientset) GpustackV1() gpustackv1.GpustackV1Interface {
 	return c.gpustackV1
-}
-
-// ServerV1 retrieves the ServerV1Client
-func (c *Clientset) ServerV1() serverv1.ServerV1Interface {
-	return c.serverV1
 }
 
 // WorkerV1 retrieves the WorkerV1Client
@@ -341,19 +325,11 @@ func NewForConfigAndClient(c *rest.Config, httpClient *http.Client) (*Clientset,
 
 	var cs Clientset
 	var err error
-	cs.serverV1alpha1, err = serverv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
-		return nil, err
-	}
 	cs.workerV1alpha1, err = workerv1alpha1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
 	}
 	cs.gpustackV1, err = gpustackv1.NewForConfigAndClient(&configShallowCopy, httpClient)
-	if err != nil {
-		return nil, err
-	}
-	cs.serverV1, err = serverv1.NewForConfigAndClient(&configShallowCopy, httpClient)
 	if err != nil {
 		return nil, err
 	}
@@ -498,10 +474,8 @@ func NewForConfigOrDie(c *rest.Config) *Clientset {
 // New creates a new Clientset for the given RESTClient.
 func New(c rest.Interface) *Clientset {
 	var cs Clientset
-	cs.serverV1alpha1 = serverv1alpha1.New(c)
 	cs.workerV1alpha1 = workerv1alpha1.New(c)
 	cs.gpustackV1 = gpustackv1.New(c)
-	cs.serverV1 = serverv1.New(c)
 	cs.workerV1 = workerv1.New(c)
 	cs.admissionV1 = admissionv1.New(c)
 	cs.admissionregistrationV1 = admissionregistrationv1.New(c)

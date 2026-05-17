@@ -135,7 +135,6 @@ spec:
             - gpustack
             - worker
             - -v=2
-            - --disable-peer
             #@ if/end data.values.certmanagerEnabled:
             - --cert-dir=/var/run/gpustack/certs
           resources:
