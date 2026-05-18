@@ -81,3 +81,60 @@ func DeleteLabel(obj MetaObject, key string) {
 	delete(ls, key)
 	obj.SetLabels(ls)
 }
+
+// SanitizeLabelValue converts a given string to a valid Kubernetes Label Value by following rules:
+// - Must be 63 characters or less,
+// - Unless empty, must begin and end with an alphanumeric character ([a-z0-9A-Z]),
+// - Could contain dashes (-), underscores (_), dots (.), and alphanumerics between.
+func SanitizeLabelValue(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	const maxLength = 63
+
+	buf := make([]rune, 0, min(len(s), maxLength))
+	var pr rune
+	for _, r := range s {
+		switch {
+		case isAlphanumericChar(r):
+		case r == ' ':
+			r = '-'
+			fallthrough
+		case isValidSignChar(r):
+			if len(buf) == 0 {
+				continue
+			}
+			if isValidSignChar(pr) {
+				continue
+			}
+		default:
+			continue
+		}
+		buf = append(buf, r)
+		pr = r
+
+		// Stop processing if the buffer has reached the maximum length.
+		if len(buf) >= maxLength {
+			break
+		}
+	}
+	if len(buf) == 0 {
+		return ""
+	}
+
+	// Trim trailing non-alphanumeric character.
+	if isValidSignChar(buf[len(buf)-1]) {
+		buf = buf[:len(buf)-1]
+	}
+
+	return string(buf)
+}
+
+func isAlphanumericChar(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+func isValidSignChar(r rune) bool {
+	return r == '-' || r == '_' || r == '.'
+}

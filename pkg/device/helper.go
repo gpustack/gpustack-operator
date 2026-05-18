@@ -40,7 +40,8 @@ func NormalizeVersion(ver string) string {
 	return ps[0] + "." + ps[1]
 }
 
-// ConstructGroupID constructs a group ID for the given manufacturer, name, and memory.
+// ConstructGroupID constructs a group ID from the given name,
+// removes the manufacturer prefix and formats the memory size if enabled.
 func ConstructGroupID(manufacturer, name string, memory uint64) string {
 	n := formatName(name, manufacturer)
 	if !constructGroupIDWithMemory {
@@ -70,8 +71,9 @@ func CalculateUtilization[U, T typex.Integer](usage U, total T) uint32 {
 }
 
 func formatName(name, manufacturer string) string {
-	var b strings.Builder
-	b.Grow(len(name))
+	maxLength := 63 - len(manufacturer) - 7 // 7 is the max length of the suffix "-memory".
+
+	buf := make([]rune, 0, min(len(name), maxLength))
 	var pr rune
 	for _, r := range name {
 		switch {
@@ -79,28 +81,42 @@ func formatName(name, manufacturer string) string {
 			r += 'a' - 'A'
 		case r >= 'a' && r <= 'z':
 		case r >= '0' && r <= '9':
-		case r == '-' || r == '_' || r == '.' || r == ' ':
-			if b.Len() == 0 {
+		case r == ' ':
+			r = '-'
+			fallthrough
+		case r == '-' || r == '_' || r == '.':
+			if len(buf) == 0 {
 				continue
 			}
-			if pr == '-' {
+			if pr == '-' || pr == '_' || pr == '.' {
 				continue
-			}
-			if r == ' ' {
-				r = '-'
 			}
 		default:
 			continue
 		}
-		b.WriteRune(r)
+		buf = append(buf, r)
 		pr = r
 
-		if b.String() == manufacturer {
-			b.Reset()
-			pr = 0
+		// Trim manufacturer prefix.
+		if len(buf) == len(manufacturer) {
+			if strings.EqualFold(string(buf), manufacturer) {
+				buf = buf[:0]
+				pr = 0
+			}
+		}
+
+		// Stop processing if the buffer has reached the maximum length.
+		if len(buf) >= maxLength {
+			break
 		}
 	}
-	return b.String()
+
+	// Trim trailing non-alphanumeric character.
+	if c := buf[len(buf)-1]; c == '-' || c == '_' || c == '.' {
+		buf = buf[:len(buf)-1]
+	}
+
+	return string(buf)
 }
 
 // formatMemory formats the given memory size in MiB to a string with the unit "Gi",

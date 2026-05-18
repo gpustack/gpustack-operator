@@ -98,7 +98,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			},
 		}
 		kubemeta.ControlOnWithoutBlock(eResFlv, nd, core.SchemeGroupVersion.WithKind("Node"))
-		// NB(thxCode): use to trigger the configure ClusterQueue automatically.
+		// NB(thxCode): use to trigger configuring ClusterQueue automatically.
 		systemmeta.NoteResource(eResFlv, "nodes", map[string]string{
 			"clusterqueue-generate-name": funcx.TernaryFunc(
 				func() bool { return ndf.Sliced == "" },

@@ -9,9 +9,9 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/typex"
 )
 
@@ -57,22 +57,27 @@ func applyLabelsOfAccelerators(labels map[string]string, group device.DevicesGro
 		labels[labelKey+".compute-capability"] = v
 	}
 
-	selfLabelKey := labelKey + "." + group.ID
+	selfLabelKey := labelKey + "-" + group.ID
 
-	// "${prefix}${manufacturer}.${id}=true"
+	// "${prefix}${manufacturer}-${id}=true"
 	labels[selfLabelKey] = "true"
-	// "${prefix}${manufacturer}.${id}.product=${name}"
-	labels[selfLabelKey+".product"] = stringx.EncodeBase64(group.Name) // Encode to avoid invalid characters in label value.
-	// "${prefix}${manufacturer}.${id}.memory=${memory}"
+	// "${prefix}${manufacturer}-${id}.product=${name}"
+	labels[selfLabelKey+".product"] = group.Name
+	// "${prefix}${manufacturer}-${id}.memory=${memory}"
 	labels[selfLabelKey+".memory"] = strconvx.Itoa(group.Memory) + "Mi"
-	// "${prefix}${manufacturer}.${id}.cores=${cores}"
+	// "${prefix}${manufacturer}-${id}.cores=${cores}"
 	labels[selfLabelKey+".cores"] = strconvx.Itoa(group.Cores)
-	// "${prefix}${manufacturer}.${id}.family=${family}"
+	// "${prefix}${manufacturer}-${id}.family=${family}"
 	if v := group.Family; v != "" {
-		labels[selfLabelKey+".family"] = stringx.EncodeBase64(v) // Encode to avoid invalid characters in label value.
+		labels[selfLabelKey+".family"] = v
 	}
-	// "${prefix}${manufacturer}.${id}.accelerators=${count}"
+	// "${prefix}${manufacturer}-${id}.accelerators=${count}"
 	labels[selfLabelKey+".accelerators"] = strconv.Itoa(len(group.Accelerators))
+
+	// Match Kubernetes label values' requirements.
+	for k := range labels {
+		labels[k] = kubemeta.SanitizeLabelValue(labels[k])
+	}
 }
 
 // ExtractNodeKeys returns accelerated node keys of the given Node.
@@ -81,7 +86,7 @@ func ExtractNodeKeys(node *core.Node) []string {
 		if strings.HasPrefix(k, FeatureLabelPrefix) {
 			if v == "true" {
 				v = strings.TrimPrefix(k, FeatureLabelPrefix)
-				if strings.Contains(v, ".") {
+				if strings.Contains(v, "-") {
 					return v, true
 				}
 			}
@@ -109,15 +114,11 @@ type NodeFeature struct {
 	Memory string
 	// Cores is the number of cores of the device.
 	Cores string
-	// DriverVersion is the version of the driver used by the device.
-	DriverVersion string
-	// RuntimeVersion is the version of the runtime used by the device.
-	RuntimeVersion string
 	// ComputeCapability is the compute capability of the device.
 	ComputeCapability string
 	// Family is the family of the device.
 	Family string
-	// Accelerator of the node.
+	// Accelerator of the node that can be allocated for workloads.
 	Accelerator resource.Quantity
 	// CPU of the node.
 	CPU resource.Quantity
@@ -128,10 +129,20 @@ type NodeFeature struct {
 }
 
 // ExtractNodeFeatureByKey extracts the NodeFeature from given node and key.
+//
+// The key is in the format of "${manufacturer}-${id}",
+// which is used to identify the device feature of the node.
 func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
-	p := strings.SplitN(key, ".", 2)
-	if len(p) != 2 {
-		ndf.NodeLabels = map[string]string{core.LabelHostname: node.Labels[core.LabelHostname]}
+	p := strings.SplitN(key, "-", 2)
+	if len(p) != 2 || p[0] == "cpu" {
+		hostname := node.Labels[core.LabelHostname]
+		if hostname == "" {
+			hostname = node.Name
+		}
+		ndf.NodeLabels = map[string]string{
+			// kubernetes.io/hostname: ${hostname}
+			core.LabelHostname: hostname,
+		}
 		ndf.CPU = node.Status.Capacity[core.ResourceCPU]
 		ndf.RAM = node.Status.Capacity[core.ResourceMemory]
 		ndf.LocalStorage = node.Status.Capacity[core.ResourceEphemeralStorage]
@@ -139,7 +150,10 @@ func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
 	}
 
 	manufacturer := p[0]
-	ndf.NodeLabels = map[string]string{FeatureLabelPrefix + key: "true"}
+	ndf.NodeLabels = map[string]string{
+		// feature.gpustack.ai/${manufacturer}-${id}: "true"
+		FeatureLabelPrefix + key: "true",
+	}
 	for i := range node.Spec.Taints {
 		taints := &node.Spec.Taints[i]
 		if taints.Key != DeviceLabelPrefix+"acclerator.sliced" {
@@ -159,11 +173,11 @@ func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
 		break
 	}
 	ndf.Manufacturer = manufacturer
-	ndf.Product, _ = stringx.DecodeBase64(node.Labels[FeatureLabelPrefix+key+".product"])
+	ndf.Product = node.Labels[FeatureLabelPrefix+key+".product"]
 	ndf.Memory = node.Labels[FeatureLabelPrefix+key+".memory"]
 	ndf.Cores = node.Labels[FeatureLabelPrefix+key+".cores"]
 	ndf.ComputeCapability = node.Labels[FeatureLabelPrefix+manufacturer+".compute-capability"]
-	ndf.Family, _ = stringx.DecodeBase64(node.Labels[FeatureLabelPrefix+key+".family"])
+	ndf.Family = node.Labels[FeatureLabelPrefix+key+".family"]
 	ndf.Accelerator = node.Status.Allocatable[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
 	ndf.CPU = node.Status.Capacity[core.ResourceCPU]
 	ndf.RAM = node.Status.Capacity[core.ResourceMemory]
