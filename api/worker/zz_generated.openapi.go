@@ -2252,7 +2252,7 @@ func schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref common.
 							Format:      "",
 						},
 					},
-					"path": {
+					"share": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Share is the path of NFS share from the server. For each InstancePersistentVolume, a corresponding subpath will be created in the NFS share.\n\nImmutable after creation.",
 							Default:     "/",
@@ -2279,7 +2279,7 @@ func schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref common.
 					"mountOptions": {
 						SchemaProps: spec.SchemaProps{
 							Description: "MountOptions is the mount options for the NFS share.",
-							Default:     []interface{}{"hard", "nfsvers=4.1", "rsize=1048576", "wsize=1048576", "noatime", "nodiratime"},
+							Default:     []interface{}{"hard", "vers=4", "rsize=1048576", "wsize=1048576", "noatime", "nodiratime"},
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{

@@ -65,7 +65,7 @@ type NFSInstancePersistentVolumeSource struct {
 	// +default="/"
 	// +k8s:validation:pattern="^(/[^/]+)+$"
 	// +k8s:validation:maxLength=1024
-	Share string `json:"path,omitempty" protobuf:"bytes,2,opt,name=path"`
+	Share string `json:"share,omitempty" protobuf:"bytes,2,opt,name=share"`
 
 	// SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume.
 	// If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.
@@ -88,7 +88,7 @@ type NFSInstancePersistentVolumeSource struct {
 
 	// MountOptions is the mount options for the NFS share.
 	//
-	// +default=["hard","nfsvers=4.1","rsize=1048576","wsize=1048576","noatime","nodiratime"]
+	// +default=["hard","vers=4","rsize=1048576","wsize=1048576","noatime","nodiratime"]
 	MountOptions []string `json:"mountOptions,omitempty" protobuf:"bytes,5,opt,name=mountOptions"`
 }
 

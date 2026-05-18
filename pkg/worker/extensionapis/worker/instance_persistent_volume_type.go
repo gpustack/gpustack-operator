@@ -153,7 +153,7 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 		if len(instPVType.Spec.NFS.MountOptions) == 0 {
 			instPVType.Spec.NFS.MountOptions = []string{
 				"hard",
-				"nfsvers=4.1",
+				"vers=4",
 				"rsize=1048576",
 				"wsize=1048576",
 				"noatime",

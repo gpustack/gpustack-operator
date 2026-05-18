@@ -24,6 +24,21 @@ resource "kubernetes_service_v1" "nfs_server" {
   }
 }
 
+resource "kubernetes_persistent_volume_claim_v1" "nfs_server" {
+  metadata {
+    name      = "nfsserver-pvc"
+    namespace = data.kubernetes_namespace_v1.gpustack_testing_system.metadata[0].name
+  }
+  spec {
+    access_modes = ["ReadWriteMany"]
+    resources {
+      requests = {
+        storage = "100Gi"
+      }
+    }
+  }
+}
+
 resource "kubernetes_deployment_v1" "nfs_server" {
   metadata {
     name      = "nfsserver"
@@ -57,14 +72,28 @@ resource "kubernetes_deployment_v1" "nfs_server" {
 
           env {
             name  = "NFS_DIR"
-            value = "/share"
+            value = "/nfs-share"
+          }
+          env {
+            name = "NFS_DOMAIN"
+            value = "*"
+          }
+          env {
+            name  = "NFS_OPTION"
+            value = "fsid=0,rw,sync,insecure,all_squash,anonuid=65534,anongid=65534,no_subtree_check,nohide"
           }
           volume_mount {
-            mount_path = "/share"
+            mount_path = "/nfs-share"
             name       = "nfs-data-dir"
           }
           security_context {
             privileged = true
+            capabilities {
+              add = [
+                "SYS_ADMIN",
+                "SETPCAP",
+              ]
+            }
           }
           port {
             name           = "tcp-2049"
@@ -79,7 +108,9 @@ resource "kubernetes_deployment_v1" "nfs_server" {
         }
         volume {
           name = "nfs-data-dir"
-          empty_dir {}
+          persistent_volume_claim {
+            claim_name = kubernetes_persistent_volume_claim_v1.nfs_server.metadata[0].name
+          }
         }
       }
     }

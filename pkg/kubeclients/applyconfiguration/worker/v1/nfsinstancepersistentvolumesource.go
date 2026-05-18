@@ -16,7 +16,7 @@ type NFSInstancePersistentVolumeSourceApplyConfiguration struct {
 	// a corresponding subpath will be created in the NFS share.
 	//
 	// Immutable after creation.
-	Share *string `json:"path,omitempty"`
+	Share *string `json:"share,omitempty"`
 	// SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume.
 	// If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.
 	//

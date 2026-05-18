@@ -658,7 +658,7 @@ message NFSInstancePersistentVolumeSource {
   // +default="/"
   // +k8s:validation:pattern="^(/[^/]+)+$"
   // +k8s:validation:maxLength=1024
-  optional string path = 2;
+  optional string share = 2;
 
   // SubDirectory is the subdirectory in the NFS share for each InstancePersistentVolume.
   // If it is blank, the subdirectory will be the same as the volume ID of the InstancePersistentVolume.
@@ -681,7 +681,7 @@ message NFSInstancePersistentVolumeSource {
 
   // MountOptions is the mount options for the NFS share.
   //
-  // +default=["hard","nfsvers=4.1","rsize=1048576","wsize=1048576","noatime","nodiratime"]
+  // +default=["hard","vers=4","rsize=1048576","wsize=1048576","noatime","nodiratime"]
   repeated string mountOptions = 5;
 }
 
