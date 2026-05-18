@@ -112,6 +112,11 @@ func (h *InstancePersistentVolumeHandler) SetupHandler(
 	h.Client = opts.Manager.GetClient()
 	h.APIReader = opts.Manager.GetAPIReader()
 
+	// Create subresource handlers.
+	srs = map[string]rest.Storage{
+		"events": newInstancePersistentVolumeEventsHandler(h.ObjectInfo, opts),
+	}
+
 	return gvr, srs, err
 }
 

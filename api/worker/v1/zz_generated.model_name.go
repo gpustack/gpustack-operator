@@ -71,6 +71,11 @@ func (in InstancePersistentVolume) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstancePersistentVolumeEvents) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstancePersistentVolumeEvents"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstancePersistentVolumeList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstancePersistentVolumeList"
 }

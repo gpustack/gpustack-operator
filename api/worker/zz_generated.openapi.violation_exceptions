@@ -1,4 +1,5 @@
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,InstanceEvents,Items
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,InstancePersistentVolumeEvents,Items
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,NFSInstancePersistentVolumeSource,MountOptions
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,S3InstancePersistentVolumeSource,MountOptions
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,Accelerator,PhysicalIndexes

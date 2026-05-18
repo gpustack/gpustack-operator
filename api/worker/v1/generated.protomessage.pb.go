@@ -36,6 +36,8 @@ func (*InstanceLogOptions) ProtoMessage() {}
 
 func (*InstancePersistentVolume) ProtoMessage() {}
 
+func (*InstancePersistentVolumeEvents) ProtoMessage() {}
+
 func (*InstancePersistentVolumeList) ProtoMessage() {}
 
 func (*InstancePersistentVolumeSource) ProtoMessage() {}

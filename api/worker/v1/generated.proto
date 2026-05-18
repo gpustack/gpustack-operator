@@ -222,6 +222,16 @@ message InstancePersistentVolume {
   optional InstancePersistentVolumeStatus status = 3;
 }
 
+// InstancePersistentVolumeEvents is the events of an InstancePersistentVolume subresource,
+// which provides the events related to the underlying Kubernetes PersistentVolumeClaim.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message InstancePersistentVolumeEvents {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  repeated .k8s.io.api.core.v1.Event items = 2;
+}
+
 // InstancePersistentVolumeList holds the list of InstancePersistentVolume.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

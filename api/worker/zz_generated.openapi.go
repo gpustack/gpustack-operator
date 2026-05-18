@@ -34,6 +34,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceLog{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_InstanceLog(ref),
 		v1.InstanceLogOptions{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceLogOptions(ref),
 		v1.InstancePersistentVolume{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
+		v1.InstancePersistentVolumeEvents{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeEvents(ref),
 		v1.InstancePersistentVolumeList{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
 		v1.InstancePersistentVolumeSource{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeSource(ref),
 		v1.InstancePersistentVolumeSpec{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref),
@@ -957,6 +958,55 @@ func schema_gpustack_api_worker_v1_InstancePersistentVolume(ref common.Reference
 		},
 		Dependencies: []string{
 			v1.InstancePersistentVolumeSpec{}.OpenAPIModelName(), v1.InstancePersistentVolumeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstancePersistentVolumeEvents(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstancePersistentVolumeEvents is the events of an InstancePersistentVolume subresource, which provides the events related to the underlying Kubernetes PersistentVolumeClaim.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(corev1.Event{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			corev1.Event{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
