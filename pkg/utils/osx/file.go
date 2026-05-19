@@ -30,6 +30,14 @@ func Open(path string) (*os.File, error) {
 	return os.Open(p)
 }
 
+// ExistsParentDir checks if the parent directory of the given path exists.
+func ExistsParentDir(path string) bool {
+	p := filepath.Clean(path)
+	p = InlineTilde(p)
+
+	return ExistsDir(filepath.Dir(p))
+}
+
 // Exists checks if the given path exists.
 func Exists(path string, checks ...func(os.FileInfo) bool) bool {
 	p := filepath.Clean(path)
@@ -222,14 +230,94 @@ func IsEmptyFile(file string) bool {
 	return s.Size() == 0
 }
 
+// Remove removes the given file or directory,
+// and also supports additional checks before removal.
+func Remove(path string, checks ...func(os.FileInfo) error) error {
+	p := filepath.Clean(path)
+	p = InlineTilde(p)
+
+	stat, err := os.Lstat(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	for i := range checks {
+		if checks[i] == nil {
+			continue
+		}
+
+		if err = checks[i](stat); err != nil {
+			return err
+		}
+	}
+
+	return os.Remove(p)
+}
+
+// RemoveDir removes the given directory, and returns an error if the path is not a directory.
+func RemoveDir(path string) error {
+	return Remove(path, func(stat os.FileInfo) error {
+		if !stat.Mode().IsDir() {
+			return fmt.Errorf("not a directory")
+		}
+		return nil
+	})
+}
+
+// RemoveFile removes the given file, and returns an error if the path is not a regular file.
+func RemoveFile(path string) error {
+	return Remove(path, func(stat os.FileInfo) error {
+		if !stat.Mode().IsRegular() {
+			return fmt.Errorf("not a regular file")
+		}
+		return nil
+	})
+}
+
+// RemoveLink removes the given symbolic link, and returns an error if the path is not a symbolic link.
+func RemoveLink(path string) error {
+	return Remove(path, func(stat os.FileInfo) error {
+		if stat.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("not a symbolic link")
+		}
+		return nil
+	})
+}
+
+// RemoveSocket removes the given socket, and returns an error if the path is not a socket.
+func RemoveSocket(path string) error {
+	return Remove(path, func(stat os.FileInfo) error {
+		if stat.Mode()&os.ModeSocket == 0 {
+			return fmt.Errorf("not a socket")
+		}
+		return nil
+	})
+}
+
+// RemoveDevice removes the given device, and returns an error if the path is not a device.
+func RemoveDevice(path string) error {
+	return Remove(path, func(stat os.FileInfo) error {
+		if stat.Mode()&os.ModeDevice == 0 {
+			return fmt.Errorf("not a device")
+		}
+		return nil
+	})
+}
+
 // DurableRemove removes the given file or directory,
 // and also syncs the parent directory to ensure the removal is durable.
 func DurableRemove(path string) error {
-	err := os.Remove(path)
+	p := filepath.Clean(path)
+	p = InlineTilde(p)
+
+	err := os.Remove(p)
 	if err != nil {
 		return err
 	}
-	return syncDir(filepath.Dir(path))
+	return syncDir(filepath.Dir(p))
 }
 
 func syncDir(dir string) error {

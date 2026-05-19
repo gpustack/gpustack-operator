@@ -58,7 +58,7 @@ func (m *Manager) Prepare(_ context.Context) error {
 // before starting the controller manager.
 func (m *Manager) Start(ctx context.Context) error {
 	cm := m.CtrlManager
-	ms := cm.GetWebhookServer()
+	mu := cm.GetWebhookServer()
 
 	// Register /metrics.
 	{
@@ -66,7 +66,7 @@ func (m *Manager) Start(ctx context.Context) error {
 			ErrorLog:      klog.NewStandardLogger("WARNING"),
 			ErrorHandling: promhttp.HTTPErrorOnError,
 		}
-		ms.Register("/metrics", promhttp.HandlerFor(ctrlmetrics.Registry, h))
+		mu.Register("/metrics", promhttp.HandlerFor(ctrlmetrics.Registry, h))
 	}
 
 	// Register /readyz.
@@ -78,7 +78,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				"log":  healthz.LogHealthz.Check,
 			},
 		}
-		ms.Register(p, http.StripPrefix(p, h))
+		mu.Register(p, http.StripPrefix(p, h))
 	}
 
 	// Register /livez.
@@ -102,18 +102,18 @@ func (m *Manager) Start(ctx context.Context) error {
 				},
 			},
 		}
-		ms.Register(p, http.StripPrefix(p, h))
+		mu.Register(p, http.StripPrefix(p, h))
 	}
 
 	// Register /debug.
 	{
 		runtime.SetBlockProfileRate(1)
-		ms.Register("/debug/pprof/", httpx.LoopbackAccessHandlerFunc(pprof.Index))
-		ms.Register("/debug/pprof/cmdline", httpx.LoopbackAccessHandlerFunc(pprof.Cmdline))
-		ms.Register("/debug/pprof/profile", httpx.LoopbackAccessHandlerFunc(pprof.Profile))
-		ms.Register("/debug/pprof/symbol", httpx.LoopbackAccessHandlerFunc(pprof.Symbol))
-		ms.Register("/debug/pprof/trace", httpx.LoopbackAccessHandlerFunc(pprof.Trace))
-		ms.Register("/debug/flags/v", httpx.LoopbackAccessHandlerFunc(routes.StringFlagPutHandler(logs.GlogSetter)))
+		mu.Register("/debug/pprof/", httpx.LoopbackAccessHandlerFunc(pprof.Index))
+		mu.Register("/debug/pprof/cmdline", httpx.LoopbackAccessHandlerFunc(pprof.Cmdline))
+		mu.Register("/debug/pprof/profile", httpx.LoopbackAccessHandlerFunc(pprof.Profile))
+		mu.Register("/debug/pprof/symbol", httpx.LoopbackAccessHandlerFunc(pprof.Symbol))
+		mu.Register("/debug/pprof/trace", httpx.LoopbackAccessHandlerFunc(pprof.Trace))
+		mu.Register("/debug/flags/v", httpx.LoopbackAccessHandlerFunc(routes.StringFlagPutHandler(logs.GlogSetter)))
 	}
 
 	// Start.

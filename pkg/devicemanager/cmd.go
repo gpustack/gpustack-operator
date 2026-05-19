@@ -17,7 +17,7 @@ func NewCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use: "device-manager",
 		Aliases: []string{
-			"devmgr",
+			"dm",
 		},
 		Short: "assists in managing hardware resources.",
 	}

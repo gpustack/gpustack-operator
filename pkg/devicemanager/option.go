@@ -49,7 +49,7 @@ func NewOptions() *Options {
 
 func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	// Server.
-	o.ServerOptions.AddFlags(fs)
+	o.ServerOptions.AddFlags(fs, webserver.WithoutBindUnixPath())
 
 	// Manager.
 	o.ManagerOptions.AddFlags(fs, manager.WithoutKubeElectionOptions())

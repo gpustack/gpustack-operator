@@ -40,3 +40,6 @@ func (null) WebhookMux() *http.ServeMux {
 func (null) HostPort() (string, int, error) {
 	return "", 0, errors.New("no listener")
 }
+
+func (null) NotFoundHandler(http.Handler) {
+}

@@ -13,7 +13,10 @@ func NewCommand() *cobra.Command {
 	o := NewOptions()
 
 	c := &cobra.Command{
-		Use:   "worker",
+		Use: "worker",
+		Aliases: []string{
+			"w",
+		},
 		Short: "assists in managing GPUStack Kubernetes resources.",
 		PreRunE: func(c *cobra.Command, args []string) error {
 			return o.Validate(c.Context())
