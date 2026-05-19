@@ -19,7 +19,7 @@ func Get() string {
 }
 
 func GetUserAgent() string {
-	return GetUserAgentWith("gpustack")
+	return GetUserAgentWith("gpustack-operator")
 }
 
 func GetUserAgentWith(name string) string {
