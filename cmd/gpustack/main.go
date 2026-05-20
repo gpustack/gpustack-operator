@@ -9,6 +9,7 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager"
 	"gpustack.ai/gpustack/pkg/utils/signalx"
 	"gpustack.ai/gpustack/pkg/worker"
+	"gpustack.ai/gpustack/pkg/workergateway"
 )
 
 func main() {
@@ -18,6 +19,7 @@ func main() {
 		Short: "manages GPUStack Kubernetes resources.",
 	}
 	c.AddCommand(worker.NewCommand())
+	c.AddCommand(workergateway.NewCommand())
 	c.AddCommand(devicemanager.NewCommand())
 	c = cmd.Harness(c)
 

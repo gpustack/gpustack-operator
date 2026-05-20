@@ -33,15 +33,20 @@ func New(c *Config) (Server, error) {
 	if c.Listener == nil {
 		return nil, errors.New("listener is required")
 	}
-	tcpAddr, ok := c.Listener.Addr().(*net.TCPAddr)
-	if !ok {
-		return nil, errors.New("listener must be a TCP listener")
+
+	var (
+		host string
+		port int
+	)
+	if tcpAddr, ok := c.Listener.Addr().(*net.TCPAddr); ok {
+		host = tcpAddr.IP.String()
+		port = tcpAddr.Port
 	}
 
 	return &server{
 		listener: c.Listener,
-		host:     tcpAddr.IP.String(),
-		port:     tcpAddr.Port,
+		host:     host,
+		port:     port,
 		runners:  c.Runners,
 		mux:      http.NewServeMux(),
 	}, nil
@@ -103,6 +108,9 @@ func (s *server) WebhookMux() *http.ServeMux {
 }
 
 func (s *server) HostPort() (string, int, error) {
+	if s.host == "" || s.port == 0 {
+		return "", 0, errors.New("server is not listening on a TCP address")
+	}
 	return s.host, s.port, nil
 }
 

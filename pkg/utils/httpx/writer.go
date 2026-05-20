@@ -36,3 +36,9 @@ func JSON(w http.ResponseWriter, code int, v any) {
 	w.WriteHeader(code)
 	_, _ = w.Write(buf.Bytes())
 }
+
+// Error is similar to http.Error,
+// but it can get the error message by the given code.
+func Error(w http.ResponseWriter, code int) {
+	http.Error(w, http.StatusText(code), code)
+}

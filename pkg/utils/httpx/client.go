@@ -179,12 +179,6 @@ func NewTraceRequest(uri string) (*http.Request, error) {
 	return http.NewRequest(http.MethodTrace, uri, nil)
 }
 
-// Error is similar to http.Error,
-// but it can get the error message by the given code.
-func Error(rw http.ResponseWriter, code int) {
-	http.Error(rw, http.StatusText(code), code)
-}
-
 // Close closes the http response body without error.
 func Close(resp *http.Response) {
 	if resp != nil && resp.Body != nil {
