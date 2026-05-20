@@ -19,9 +19,6 @@ func (l *AMDGPU) Open(cardID uint32) (Device, Return) {
 	if err != nil {
 		return Device{}, ERROR_CARD_NOTFOUND
 	}
-	defer func() {
-		_ = devFile.Close()
-	}()
 
 	var (
 		majorVersion uint32
@@ -31,15 +28,17 @@ func (l *AMDGPU) Open(cardID uint32) (Device, Return) {
 
 	ret := Return(amdgpuDeviceInitialize(int32(devFile.Fd()), &majorVersion, &minorVersion, &handle))
 	if !ret.IsSuccess() {
+		_ = devFile.Close()
 		return Device{}, ret
 	}
 
-	return Device{handle: handle, so: l.so}, SUCCESS
+	return Device{devFile: devFile, handle: handle, so: l.so}, SUCCESS
 }
 
 type Device struct {
-	handle amdgpuDevice
-	so     binding.Library
+	devFile *os.File
+	handle  amdgpuDevice
+	so      binding.Library
 }
 
 // Free releases the device handle and any resources it holds.
@@ -47,6 +46,12 @@ func (l Device) Free() Return {
 	if l.so.Lookup("amdgpu_device_deinitialize") != nil {
 		return ERROR_FUNCTION_NOT_FOUND
 	}
+
+	defer func() {
+		if l.devFile != nil {
+			_ = l.devFile.Close()
+		}
+	}()
 
 	ret := Return(amdgpuDeviceDeinitialize(l.handle))
 	return ret
