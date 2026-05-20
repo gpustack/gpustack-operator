@@ -3,11 +3,15 @@
 
 package acl
 
+/*
+#include <stdlib.h>
+*/
+import "C"
+
 import (
+	"runtime"
 	"unsafe"
 )
-
-import "C"
 
 // stringHeader is a struct that represents the internal structure of a Go string.
 type stringHeader struct {
@@ -32,8 +36,13 @@ func clen(n []byte) int {
 
 // unpackPCharString represents the data from Go string as *C.char and avoids copying.
 func unpackPCharString(str string) (*C.char, *cgoAllocMap) {
-	h := (*stringHeader)(unsafe.Pointer(&str))
-	return (*C.char)(h.Data), cgoAllocsUnknown
+	allocs := new(cgoAllocMap)
+
+	mem0 := unsafe.Pointer(C.CString(str))
+	runtime.AddCleanup(allocs, func(mem0 unsafe.Pointer) {
+		C.free(mem0)
+	}, mem0)
+	return (*C.char)(mem0), allocs
 }
 
 // packPCharString creates a Go string backed by *C.char and avoids copying.

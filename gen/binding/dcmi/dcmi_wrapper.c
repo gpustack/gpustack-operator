@@ -4,6 +4,27 @@
 
 static void *dcmiLib = NULL;
 
+// Thread-local cached error string to avoid unrelated dlerror() noise.
+static __thread char dcmi_last_err[1024];
+
+static void clear_last_error(void) {
+    dcmi_last_err[0] = '\0';
+}
+
+static void set_last_error(const char *msg) {
+    if (!msg || msg[0] == '\0') {
+        dcmi_last_err[0] = '\0';
+        return;
+    }
+    snprintf(dcmi_last_err, sizeof(dcmi_last_err), "%s", msg);
+}
+
+static void set_last_errorf(const char *prefix, const char *msg) {
+    if (!msg) msg = "unknown dynamic loader error";
+    if (!prefix) prefix = "dcmi";
+    snprintf(dcmi_last_err, sizeof(dcmi_last_err), "%s: %s", prefix, msg);
+}
+
 #define DECL_FUNC_PTR(ret, name, decl_args, call_args) \
     static ret (*name##_func) decl_args = NULL;
 
@@ -27,12 +48,45 @@ DCMI_API_LIST(IMPL_WRAPPER)
 
 int w_dcmi_init(const char *path)
 {
-    if (!path) return ERROR_LIBRARY_NOT_FOUND;
+    const char *err = NULL;
+    clear_last_error();
+
+    if (!path || path[0] == '\0') {
+        set_last_error("invalid library path");
+        return ERROR_LIBRARY_NOT_FOUND;
+    }
+
+    // Avoid leaking an existing handle if init is called more than once.
+    if (dcmiLib) {
+        dlclose(dcmiLib);
+        dcmiLib = NULL;
+    }
+
+    // Reset all cached function pointers before loading.
+    #define RESET_API_PTR(ret, name, decl_args, call_args) \
+        name##_func = NULL;
+    DCMI_API_LIST(RESET_API_PTR)
+    #undef RESET_API_PTR
+    dcmi_init_func = NULL;
 
     // Load the library
+    dlerror();
     dcmiLib = dlopen(path, RTLD_LAZY | RTLD_GLOBAL);
+    err = dlerror();
     if (!dcmiLib) {
+        set_last_errorf("dlopen", err);
         return ERROR_LIBRARY_NOT_FOUND;
+    }
+
+    // Load dcmi_init
+    dlerror();
+    dcmi_init_func = dlsym(dcmiLib, "dcmi_init");
+    err = dlerror();
+    if (!dcmi_init_func) {
+        set_last_errorf("dlsym(dcmi_init)", err);
+        dlclose(dcmiLib);
+        dcmiLib = NULL;
+        return ERROR_FUNCTION_NOT_FOUND;
     }
 
     // Load all symbols
@@ -41,24 +95,31 @@ int w_dcmi_init(const char *path)
     DCMI_API_LIST(LOAD_API)
     #undef LOAD_API
 
-    // Load dcmi_init
-    dcmi_init_func = dlsym(dcmiLib, "dcmi_init");
-    if (!dcmi_init_func) {
-        dlclose(dcmiLib);
-        dcmiLib = NULL;
-        return ERROR_FUNCTION_NOT_FOUND;
-    }
     return dcmi_init_func();
 }
 
 int w_dcmi_shutdown(void)
 {
+    clear_last_error();
+
     if (!dcmiLib) return SUCCESS;
 
-    // There is not dcmi_shutdown function in the API, so we just close the library
-    return dlclose(dcmiLib) ? ERROR_UNKNOWN : SUCCESS;
+    if (dlclose(dcmiLib) != 0) {
+        set_last_errorf("dlclose", dlerror());
+        return ERROR_UNKNOWN;
+    }
+
+    dcmiLib = NULL;
+    dcmi_init_func = NULL;
+
+    #define RESET_API_PTR(ret, name, decl_args, call_args) \
+        name##_func = NULL;
+    DCMI_API_LIST(RESET_API_PTR)
+    #undef RESET_API_PTR
+
+    return SUCCESS;
 }
 
 const char* w_dcmi_last_error(void) {
-    return dlerror();
+    return dcmi_last_err[0] ? dcmi_last_err : "";
 }
