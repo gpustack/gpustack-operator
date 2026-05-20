@@ -1,6 +1,9 @@
 package ascend
 
 import (
+	"bufio"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -10,7 +13,6 @@ import (
 	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/binding"
-	"gpustack.ai/gpustack/binding/acl"
 	"gpustack.ai/gpustack/binding/dcmi"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/devicefeature"
@@ -19,9 +21,20 @@ import (
 
 const Manufacturer = devicefeature.ManufacturerAscend
 
-var _PciVendor string
+var (
+	_ToolkitHome string
+	_PciVendor   string
+)
 
 func init() {
+	_ToolkitHome = os.Getenv("ASCEND_TOOLKIT_HOME")
+	if _ToolkitHome == "" {
+		_ToolkitHome = "/usr/local/Ascend/cann"
+		if s, err := os.Stat(_ToolkitHome); err != nil || !s.IsDir() {
+			_ToolkitHome = "/usr/local/Ascend/ascend-toolkit/latest/runtime"
+		}
+	}
+
 	pciID := devicefeature.GetPciID(Manufacturer)
 	p := strings.Split(pciID, "_")
 	_PciVendor = p[len(p)-1]
@@ -30,7 +43,6 @@ func init() {
 type ascend struct {
 	once   sync.Once
 	dcmi   *dcmi.DCMI
-	acl    *acl.ACL
 	logger klog.Logger
 }
 
@@ -39,7 +51,6 @@ func New(opts device.DetectorOptions) device.Detector {
 	logger := opts.Logger.WithName(Manufacturer)
 	return &ascend{
 		dcmi:   dcmi.New(binding.WithLogger(logger)),
-		acl:    acl.New(binding.WithLogger(logger)),
 		logger: logger,
 	}
 }
@@ -52,9 +63,6 @@ func (in *ascend) init() {
 	in.once.Do(func() {
 		if ret := in.dcmi.Init(in.logger); !ret.IsSuccess() {
 			in.logger.Error(ret, "failed to initialize DCMI library")
-		}
-		if ret := in.acl.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize ACL library")
 		}
 	})
 }
@@ -87,7 +95,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 	}
 
 	drVer, _ := in.dcmi.GetDriverVersion()
-	rtVer, _ := in.acl.GetCANNVersion()
+	rtVer := getToolkitVersion()
 
 	var index uint32
 	grpList := device.DevicesGroupList{}
@@ -197,14 +205,7 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			if grpIndex == -1 {
 				// New group.
 				cores := chipInfo.Aicore_cnt
-				var family string
-				{
-					socName, _ := in.acl.GetSocName()
-					if socName == "" {
-						socName = guessSocNameFromDeviceName(name)
-					}
-					family = getFamilyFromSocName(socName)
-				}
+				family := getFamilyFromSocName(guessSocNameFromDeviceName(name))
 				grpList = append(grpList, device.DevicesGroup{
 					ID:             device.ConstructGroupID(Manufacturer, name, memory),
 					Manufacturer:   Manufacturer,
@@ -506,5 +507,32 @@ func getFamilyFromSocName(socName string) string {
 		}
 	}
 
+	return ""
+}
+
+func getToolkitVersion() string {
+	const prefix = "Version="
+
+	for _, path := range []string{
+		filepath.Join(_ToolkitHome, "version.info"),
+		filepath.Join(_ToolkitHome, "share", "info", "runtime", "version.info"),
+	} {
+		if s, err := os.Stat(path); err == nil && s.Mode().IsRegular() {
+			f, err := os.Open(path)
+			if err != nil {
+				continue
+			}
+
+			sc := bufio.NewScanner(f)
+			for sc.Scan() {
+				line := sc.Text()
+				if strings.HasPrefix(line, prefix) {
+					_ = f.Close()
+					return strings.TrimPrefix(line, prefix)
+				}
+			}
+			_ = f.Close()
+		}
+	}
 	return ""
 }
