@@ -20,8 +20,9 @@ type InstancePersistentVolumeTypeLister interface {
 	// List lists all InstancePersistentVolumeTypes in the indexer.
 	// Objects returned here must be treated as read-only.
 	List(selector labels.Selector) (ret []*workerv1.InstancePersistentVolumeType, err error)
-	// InstancePersistentVolumeTypes returns an object that can list and get InstancePersistentVolumeTypes.
-	InstancePersistentVolumeTypes(namespace string) InstancePersistentVolumeTypeNamespaceLister
+	// Get retrieves the InstancePersistentVolumeType from the index for a given name.
+	// Objects returned here must be treated as read-only.
+	Get(name string) (*workerv1.InstancePersistentVolumeType, error)
 	InstancePersistentVolumeTypeListerExpansion
 }
 
@@ -33,27 +34,4 @@ type instancePersistentVolumeTypeLister struct {
 // NewInstancePersistentVolumeTypeLister returns a new InstancePersistentVolumeTypeLister.
 func NewInstancePersistentVolumeTypeLister(indexer cache.Indexer) InstancePersistentVolumeTypeLister {
 	return &instancePersistentVolumeTypeLister{listers.New[*workerv1.InstancePersistentVolumeType](indexer, workerv1.Resource("instancepersistentvolumetype"))}
-}
-
-// InstancePersistentVolumeTypes returns an object that can list and get InstancePersistentVolumeTypes.
-func (s *instancePersistentVolumeTypeLister) InstancePersistentVolumeTypes(namespace string) InstancePersistentVolumeTypeNamespaceLister {
-	return instancePersistentVolumeTypeNamespaceLister{listers.NewNamespaced[*workerv1.InstancePersistentVolumeType](s.ResourceIndexer, namespace)}
-}
-
-// InstancePersistentVolumeTypeNamespaceLister helps list and get InstancePersistentVolumeTypes.
-// All objects returned here must be treated as read-only.
-type InstancePersistentVolumeTypeNamespaceLister interface {
-	// List lists all InstancePersistentVolumeTypes in the indexer for a given namespace.
-	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*workerv1.InstancePersistentVolumeType, err error)
-	// Get retrieves the InstancePersistentVolumeType from the indexer for a given namespace and name.
-	// Objects returned here must be treated as read-only.
-	Get(name string) (*workerv1.InstancePersistentVolumeType, error)
-	InstancePersistentVolumeTypeNamespaceListerExpansion
-}
-
-// instancePersistentVolumeTypeNamespaceLister implements the InstancePersistentVolumeTypeNamespaceLister
-// interface.
-type instancePersistentVolumeTypeNamespaceLister struct {
-	listers.ResourceIndexer[*workerv1.InstancePersistentVolumeType]
 }

@@ -150,6 +150,41 @@ func publish[T any](b *bus, ctx context.Context, t Topic, data T) error {
 	return nil
 }
 
+// unsubscribe removes all subscribers for a typed topic.
+func unsubscribe[T any](b *bus, t Topic) error {
+	typ := typeOf[T]()
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	tm, ok := b.typedTopics[typ]
+	if !ok {
+		return nil
+	}
+
+	v, ok := tm[t]
+	if !ok {
+		return nil
+	}
+
+	h := v.(*hub[T])
+
+	// hub lock is nested under bus lock consistently with subscribe/publish paths.
+	h.mu.Lock()
+	for n, c := range h.m {
+		close(c)
+		delete(h.m, n)
+	}
+	h.mu.Unlock()
+
+	delete(tm, t)
+	if len(tm) == 0 {
+		delete(b.typedTopics, typ)
+	}
+
+	return nil
+}
+
 var globalBus = &bus{
 	typedTopics: make(map[reflect.Type]map[Topic]any),
 }
@@ -163,4 +198,9 @@ func Subscribe[T any](t Topic) (Subscriber[T], error) {
 // It returns an error if the publish operation fails.
 func Publish[T any](ctx context.Context, t Topic, data T) error {
 	return publish[T](globalBus, ctx, t, data)
+}
+
+// UnsubscribeAll unsubscribes all subscribers from a topic on the global bus.
+func UnsubscribeAll[T any](t Topic) error {
+	return unsubscribe[T](globalBus, t)
 }

@@ -22,6 +22,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/httpx"
 	"gpustack.ai/gpustack/pkg/webserver"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
+	"gpustack.ai/gpustack/pkg/workergateway/service"
 )
 
 func init() {
@@ -115,8 +116,12 @@ func (wg *WorkerGateway) Start(ctx context.Context) error {
 
 	// Register API routes.
 	{
+		svc, err := service.New(ctx, wg.Manager)
+		if err != nil {
+			return fmt.Errorf("create service: %w", err)
+		}
 		p := "/apis"
-		mu.Register(p+"/", http.StripPrefix(p, wg.getHandleApis()))
+		mu.Register(p+"/", http.StripPrefix(p, svc.Index()))
 	}
 
 	klog.Info("starting worker gateway")

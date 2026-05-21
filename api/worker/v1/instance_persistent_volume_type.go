@@ -11,6 +11,7 @@ import (
 // and the InstancePersistentVolumeType's name is the same as the Kubernetes StorageClass's name.
 //
 // +genclient
+// +genclient:nonNamespaced
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"]
 type InstancePersistentVolumeType struct {

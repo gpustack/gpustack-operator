@@ -20,11 +20,11 @@ type fakeInstancePersistentVolumeTypes struct {
 	Fake *FakeWorkerV1
 }
 
-func newFakeInstancePersistentVolumeTypes(fake *FakeWorkerV1, namespace string) typedworkerv1.InstancePersistentVolumeTypeInterface {
+func newFakeInstancePersistentVolumeTypes(fake *FakeWorkerV1) typedworkerv1.InstancePersistentVolumeTypeInterface {
 	return &fakeInstancePersistentVolumeTypes{
 		gentype.NewFakeClientWithListAndApply[*v1.InstancePersistentVolumeType, *v1.InstancePersistentVolumeTypeList, *workerv1.InstancePersistentVolumeTypeApplyConfiguration](
 			fake.Fake,
-			namespace,
+			"",
 			v1.SchemeGroupVersion.WithResource("instancepersistentvolumetypes"),
 			v1.SchemeGroupVersion.WithKind("InstancePersistentVolumeType"),
 			func() *v1.InstancePersistentVolumeType { return &v1.InstancePersistentVolumeType{} },

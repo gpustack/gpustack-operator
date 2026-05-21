@@ -31,30 +31,95 @@ func TODO(stop <-chan struct{}) context.Context {
 	return ctx
 }
 
-func WithCancel(stop <-chan struct{}) (context.Context, context.CancelFunc) {
-	return context.WithCancel(Background(stop))
+func WithCancel(ctx context.Context, ctxs ...context.Context) (context.Context, context.CancelFunc) {
+	if len(ctxs) == 0 {
+		ctxs = []context.Context{ctx}
+	} else {
+		ctxs = append(ctxs, ctx)
+	}
+
+	sctx, scancel := context.WithCancel(ctx)
+
+	for _, c := range ctxs {
+		if c == nil {
+			continue
+		}
+
+		select {
+		case <-c.Done():
+			scancel()
+			return sctx, scancel
+		default:
+		}
+
+		parent := c
+		gox.Go(func() {
+			select {
+			case <-parent.Done():
+				scancel()
+			case <-sctx.Done():
+			}
+		})
+	}
+
+	return sctx, scancel
 }
 
-func WithCancelCause(stop <-chan struct{}) (context.Context, context.CancelCauseFunc) {
-	return context.WithCancelCause(Background(stop))
+func WithCancelCause(ctx context.Context, ctxs ...context.Context) (context.Context, context.CancelCauseFunc) {
+	if len(ctxs) == 0 {
+		ctxs = []context.Context{ctx}
+	} else {
+		ctxs = append(ctxs, ctx)
+	}
+
+	sctx, scancel := context.WithCancelCause(ctx)
+
+	for _, c := range ctxs {
+		if c == nil {
+			continue
+		}
+
+		select {
+		case <-c.Done():
+			scancel(context.Cause(c))
+			return sctx, scancel
+		default:
+		}
+
+		parent := c
+		gox.Go(func() {
+			select {
+			case <-parent.Done():
+				scancel(context.Cause(parent))
+			case <-sctx.Done():
+			}
+		})
+	}
+
+	return sctx, scancel
 }
 
-func WithDeadline(stop <-chan struct{}, d time.Time) (context.Context, context.CancelFunc) {
-	return context.WithDeadline(Background(stop), d)
+func WithoutCancel(ctx context.Context, ctxs ...context.Context) context.Context {
+	ctx, _ = WithCancel(ctx, ctxs...)
+	return ctx
 }
 
-func WithDeadlineCause(stop <-chan struct{}, d time.Time, cause error) (context.Context, context.CancelFunc) {
-	return context.WithDeadlineCause(Background(stop), d, cause)
+func WithDeadline(ctx context.Context, deadline time.Time, ctxs ...context.Context) (context.Context, context.CancelFunc) {
+	sctx, scancel := context.WithDeadline(ctx, deadline)
+	return WithoutCancel(sctx, ctxs...), scancel
 }
 
-func WithTimeout(stop <-chan struct{}, timeout time.Duration) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(Background(stop), timeout)
+func WithDeadlineCause(ctx context.Context, deadline time.Time, cause error, ctxs ...context.Context) (context.Context, context.CancelFunc) {
+	sctx, scancel := context.WithDeadlineCause(ctx, deadline, cause)
+	return WithoutCancel(sctx, ctxs...), scancel
 }
 
-func WithTimeoutCause(stop <-chan struct{}, timeout time.Duration, cause error) (context.Context, context.CancelFunc) {
-	return context.WithTimeoutCause(Background(stop), timeout, cause)
+func WithTimeout(ctx context.Context, timeout time.Duration, ctxs ...context.Context) (context.Context, context.CancelFunc) {
+	sctx, scancel := context.WithTimeout(ctx, timeout)
+	return WithoutCancel(sctx, ctxs...), scancel
 }
 
-func WithValue(stop <-chan struct{}, key, val any) context.Context {
-	return context.WithValue(Background(stop), key, val)
+func WithTimeoutCause(ctx context.Context, timeout time.Duration, cause error, ctxs ...context.Context) (context.Context, context.CancelFunc) {
+	sctx, scancel := context.WithTimeoutCause(ctx, timeout, cause)
+	return WithoutCancel(sctx, ctxs...), scancel
 }

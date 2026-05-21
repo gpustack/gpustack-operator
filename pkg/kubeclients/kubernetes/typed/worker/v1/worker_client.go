@@ -47,8 +47,8 @@ func (c *WorkerV1Client) InstancePersistentVolumes(namespace string) InstancePer
 	return newInstancePersistentVolumes(c, namespace)
 }
 
-func (c *WorkerV1Client) InstancePersistentVolumeTypes(namespace string) InstancePersistentVolumeTypeInterface {
-	return newInstancePersistentVolumeTypes(c, namespace)
+func (c *WorkerV1Client) InstancePersistentVolumeTypes() InstancePersistentVolumeTypeInterface {
+	return newInstancePersistentVolumeTypes(c)
 }
 
 func (c *WorkerV1Client) InstanceSSHPublicKeys(namespace string) InstanceSSHPublicKeyInterface {

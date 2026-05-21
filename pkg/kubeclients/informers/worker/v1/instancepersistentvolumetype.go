@@ -31,45 +31,44 @@ type InstancePersistentVolumeTypeInformer interface {
 type instancePersistentVolumeTypeInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
 	tweakListOptions internalinterfaces.TweakListOptionsFunc
-	namespace        string
 }
 
 // NewInstancePersistentVolumeTypeInformer constructs a new informer for InstancePersistentVolumeType type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
-func NewInstancePersistentVolumeTypeInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredInstancePersistentVolumeTypeInformer(client, namespace, resyncPeriod, indexers, nil)
+func NewInstancePersistentVolumeTypeInformer(client kubernetes.Interface, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
+	return NewFilteredInstancePersistentVolumeTypeInformer(client, resyncPeriod, indexers, nil)
 }
 
 // NewFilteredInstancePersistentVolumeTypeInformer constructs a new informer for InstancePersistentVolumeType type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
-func NewFilteredInstancePersistentVolumeTypeInformer(client kubernetes.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
+func NewFilteredInstancePersistentVolumeTypeInformer(client kubernetes.Interface, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
 	return cache.NewSharedIndexInformer(
 		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
 			ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.WorkerV1().InstancePersistentVolumeTypes(namespace).List(context.Background(), options)
+				return client.WorkerV1().InstancePersistentVolumeTypes().List(context.Background(), options)
 			},
 			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.WorkerV1().InstancePersistentVolumeTypes(namespace).Watch(context.Background(), options)
+				return client.WorkerV1().InstancePersistentVolumeTypes().Watch(context.Background(), options)
 			},
 			ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.WorkerV1().InstancePersistentVolumeTypes(namespace).List(ctx, options)
+				return client.WorkerV1().InstancePersistentVolumeTypes().List(ctx, options)
 			},
 			WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
 					tweakListOptions(&options)
 				}
-				return client.WorkerV1().InstancePersistentVolumeTypes(namespace).Watch(ctx, options)
+				return client.WorkerV1().InstancePersistentVolumeTypes().Watch(ctx, options)
 			},
 		}, client),
 		&apiworkerv1.InstancePersistentVolumeType{},
@@ -79,7 +78,7 @@ func NewFilteredInstancePersistentVolumeTypeInformer(client kubernetes.Interface
 }
 
 func (f *instancePersistentVolumeTypeInformer) defaultInformer(client kubernetes.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredInstancePersistentVolumeTypeInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewFilteredInstancePersistentVolumeTypeInformer(client, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
 }
 
 func (f *instancePersistentVolumeTypeInformer) Informer() cache.SharedIndexInformer {

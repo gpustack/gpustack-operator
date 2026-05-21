@@ -22,7 +22,7 @@ import (
 // InstancePersistentVolumeTypesGetter has a method to return a InstancePersistentVolumeTypeInterface.
 // A group's client should implement this interface.
 type InstancePersistentVolumeTypesGetter interface {
-	InstancePersistentVolumeTypes(namespace string) InstancePersistentVolumeTypeInterface
+	InstancePersistentVolumeTypes() InstancePersistentVolumeTypeInterface
 }
 
 // InstancePersistentVolumeTypeInterface has methods to work with InstancePersistentVolumeType resources.
@@ -45,13 +45,13 @@ type instancePersistentVolumeTypes struct {
 }
 
 // newInstancePersistentVolumeTypes returns a InstancePersistentVolumeTypes
-func newInstancePersistentVolumeTypes(c *WorkerV1Client, namespace string) *instancePersistentVolumeTypes {
+func newInstancePersistentVolumeTypes(c *WorkerV1Client) *instancePersistentVolumeTypes {
 	return &instancePersistentVolumeTypes{
 		gentype.NewClientWithListAndApply[*workerv1.InstancePersistentVolumeType, *workerv1.InstancePersistentVolumeTypeList, *applyconfigurationworkerv1.InstancePersistentVolumeTypeApplyConfiguration](
 			"instancepersistentvolumetypes",
 			c.RESTClient(),
 			scheme.ParameterCodec,
-			namespace,
+			"",
 			func() *workerv1.InstancePersistentVolumeType { return &workerv1.InstancePersistentVolumeType{} },
 			func() *workerv1.InstancePersistentVolumeTypeList { return &workerv1.InstancePersistentVolumeTypeList{} },
 			gentype.PrefersProtobuf[*workerv1.InstancePersistentVolumeType](),

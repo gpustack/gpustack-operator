@@ -23,10 +23,9 @@ type InstancePersistentVolumeTypeApplyConfiguration struct {
 
 // InstancePersistentVolumeType constructs a declarative configuration of the InstancePersistentVolumeType type for use with
 // apply.
-func InstancePersistentVolumeType(name, namespace string) *InstancePersistentVolumeTypeApplyConfiguration {
+func InstancePersistentVolumeType(name string) *InstancePersistentVolumeTypeApplyConfiguration {
 	b := &InstancePersistentVolumeTypeApplyConfiguration{}
 	b.WithName(name)
-	b.WithNamespace(namespace)
 	b.WithKind("InstancePersistentVolumeType")
 	b.WithAPIVersion("worker.gpustack.ai/v1")
 	return b

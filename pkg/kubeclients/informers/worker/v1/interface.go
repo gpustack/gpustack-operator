@@ -62,7 +62,7 @@ func (v *version) InstancePersistentVolumes() InstancePersistentVolumeInformer {
 
 // InstancePersistentVolumeTypes returns a InstancePersistentVolumeTypeInformer.
 func (v *version) InstancePersistentVolumeTypes() InstancePersistentVolumeTypeInformer {
-	return &instancePersistentVolumeTypeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+	return &instancePersistentVolumeTypeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }
 
 // InstanceSSHPublicKeys returns a InstanceSSHPublicKeyInformer.
