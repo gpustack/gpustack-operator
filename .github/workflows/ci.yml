@@ -85,11 +85,6 @@ jobs:
         include: ${{ fromJson(needs.expand-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Maximize Docker Build Space
-        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
-        with:
-          deep-clean: true
-          root-reserve-mb: 20480
       - name: Prepare Env
         env:
           INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
@@ -128,14 +123,26 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |-
-            ${{ github.workspace }}/.cache
+            ${{ github.workspace }}/.cache/go-build
+            ${{ github.workspace }}/.cache/go-mod
             ${{ github.workspace }}/.sbin
           key: ci-${{ matrix.platform }}-${{ hashFiles('go.sum') }}
       - name: Restore BuildX Cache
         uses: reproducible-containers/buildkit-cache-dance@v3
         with:
           builder: ${{ steps.setup-buildx.outputs.name }}
-          cache-dir: ${{ github.workspace }}/.cache
+          cache-map: |-
+            {
+              "${{ github.workspace }}/.cache/go-build": {
+                "target": "/root/.cache/go-build"
+              },
+              "${{ github.workspace }}/.cache/go-mod": {
+                "target": "/go/pkg/mod"
+              },
+              "${{ github.workspace }}/.sbin": {
+                "target": "/usr/local/go/src/gpustack.ai/gpustack/.sbin"
+              }
+            }
           dockerfile: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
           skip-extraction: ${{ steps.setup-buildx-cache.outputs.cache-hit }}
       - name: Login DockerHub

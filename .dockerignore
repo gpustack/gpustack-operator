@@ -18,6 +18,7 @@
 *.tfstate.*
 *.tfvars
 *.tfvars.*
+*.local.json
 
 # Dirs
 /.idea

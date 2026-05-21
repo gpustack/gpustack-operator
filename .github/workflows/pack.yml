@@ -65,11 +65,6 @@ jobs:
         include: ${{ fromJson(needs.expand-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Maximize Docker Build Space
-        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
-        with:
-          deep-clean: true
-          root-reserve-mb: 20480
       - name: Prepare Env
         env:
           INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
