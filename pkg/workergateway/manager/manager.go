@@ -300,15 +300,6 @@ func newWorker(cluster string, cancel context.CancelFunc, cli kubernetes.Interfa
 	)
 	wk.Informers[instTypeGvk] = instTypeInformer
 
-	// Instance.
-	inst := worker.SchemeGroupVersionKind("Instance")
-	instInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().Instances(""),
-		&worker.Instance{},
-		resyncPeriod,
-	)
-	wk.Informers[inst] = instInformer
-
 	// Add more informers here....
 
 	return wk
