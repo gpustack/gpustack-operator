@@ -160,7 +160,7 @@ spec:
           image: "{{ $image }}"
           imagePullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
           args:
-            - gpustack
+            - gpustack-operator
             - device-manager
             - serve
             - -v=2

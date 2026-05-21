@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	n := "gpustack"
+	n := "gpustack-operator"
 	c := &cobra.Command{
 		Use:   n,
 		Short: "manages GPUStack Kubernetes resources.",

@@ -21,7 +21,7 @@ function build() {
   if [[ "$#" -gt 0 ]]; then
     IFS=" " read -r -a tasks <<<"$*"
   else
-    tasks=("gpustack")
+    tasks=("gpustack-operator")
   fi
 
   for task in "${tasks[@]}"; do

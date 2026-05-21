@@ -132,7 +132,7 @@ spec:
           image: gpustack/gpustack-operator:dev
           imagePullPolicy: Always
           args:
-            - gpustack
+            - gpustack-operator
             - worker
             - -v=2
             #@ if/end data.values.certmanagerEnabled:

@@ -397,10 +397,14 @@ RUN --mount=type=cache,target=${GOCACHE} \
     LINT_DIRTY=${CI}
     pushd ${GPUSTACK_WORKSPACE} \
         && if [[ "${CI}" == "true" ]]; then make ci; else make build; fi \
-        && cp ${GPUSTACK_WORKSPACE}/.dist/build/gpustack /usr/bin/gpustack
+        && cp ${GPUSTACK_WORKSPACE}/.dist/build/gpustack-operator /usr/bin/gpustack-operator
+
+    # Link gpustack-operator to gpustack for backward compatibility.
+    # TODO: Remove this later.
+    cp /usr/bin/gpustack-operator /usr/bin/gpustack
 
     # Review
-    gpustack --version
+    gpustack-operator --version
 
     # Cleanup
     rm -rf /var/tmp/* \
