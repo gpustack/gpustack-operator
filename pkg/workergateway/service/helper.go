@@ -19,6 +19,9 @@ type ListAggregateInstanceTypes struct {
 
 func OpListAggregateInstanceTypes() *ListAggregateInstanceTypes {
 	return &ListAggregateInstanceTypes{
+		list: AggregatedInstanceTypeList{
+			Items: make([]AggregatedInstanceType, 0),
+		},
 		itemIndexer: make(map[AggregatedInstanceTypeSpec]int),
 	}
 }
@@ -359,7 +362,11 @@ type ListClusterInstanceTypes struct {
 }
 
 func OpListClusterInstanceTypes() *ListClusterInstanceTypes {
-	return &ListClusterInstanceTypes{}
+	return &ListClusterInstanceTypes{
+		list: ClusterInstanceTypeList{
+			Items: make([]ClusterInstanceType, 0),
+		},
+	}
 }
 
 func (in *ListClusterInstanceTypes) Next(cluster string, obj runtime.Object) error {
@@ -411,7 +418,11 @@ type ListClusterInstances struct {
 }
 
 func OpListClusterInstances() *ListClusterInstances {
-	return &ListClusterInstances{}
+	return &ListClusterInstances{
+		list: ClusterInstanceList{
+			Items: make([]ClusterInstance, 0),
+		},
+	}
 }
 
 func (in *ListClusterInstances) Next(cluster string, obj runtime.Object) error {
@@ -468,7 +479,11 @@ type ListClusterInstancePersistentVolumeTypes struct {
 }
 
 func OpListClusterInstancePersistentVolumeTypes() *ListClusterInstancePersistentVolumeTypes {
-	return &ListClusterInstancePersistentVolumeTypes{}
+	return &ListClusterInstancePersistentVolumeTypes{
+		list: ClusterInstancePersistentVolumeTypeList{
+			Items: make([]ClusterInstancePersistentVolumeType, 0),
+		},
+	}
 }
 
 func (in *ListClusterInstancePersistentVolumeTypes) Next(cluster string, obj runtime.Object) error {
@@ -577,7 +592,11 @@ type ListClusterInstanceImagePullSecrets struct {
 }
 
 func OpListClusterInstanceImagePullSecrets() *ListClusterInstanceImagePullSecrets {
-	return &ListClusterInstanceImagePullSecrets{}
+	return &ListClusterInstanceImagePullSecrets{
+		list: ClusterInstanceImagePullSecretList{
+			Items: make([]ClusterInstanceImagePullSecret, 0),
+		},
+	}
 }
 
 func (in *ListClusterInstanceImagePullSecrets) Next(cluster string, obj runtime.Object) error {
@@ -634,7 +653,11 @@ type ListClusterInstanceSSHPublicKeys struct {
 }
 
 func OpListClusterInstanceSSHPublicKeys() *ListClusterInstanceSSHPublicKeys {
-	return &ListClusterInstanceSSHPublicKeys{}
+	return &ListClusterInstanceSSHPublicKeys{
+		list: ClusterInstanceSSHPublicKeyList{
+			Items: make([]ClusterInstanceSSHPublicKey, 0),
+		},
+	}
 }
 
 func (in *ListClusterInstanceSSHPublicKeys) Next(cluster string, obj runtime.Object) error {

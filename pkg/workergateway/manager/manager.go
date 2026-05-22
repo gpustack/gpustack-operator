@@ -68,7 +68,7 @@ type (
 	Manager interface {
 		// SubscribeWorker subscribes a worker for the given cluster.
 		// If force is true, it will unsubscribe the existing worker before subscribing a new one.
-		SubscribeWorker(ctx context.Context, cluster string, force bool) error
+		SubscribeWorker(ctx context.Context, cluster, token string, force bool) error
 		// UnsubscribeWorker unsubscribes the worker for the given cluster.
 		UnsubscribeWorker(ctx context.Context, cluster string)
 		// ListWorkers lists all subscribed workers with their status.
@@ -140,17 +140,17 @@ func New(ctx context.Context, config *Config) (Manager, error) {
 	}, nil
 }
 
-func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster string, force bool) error {
+func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, force bool) error {
 	logger := wm.Logger.WithValues("cluster", cluster)
 
 	if force {
 		wm.UnsubscribeWorker(ctx, cluster)
 	} else if wm.hasWorker(cluster) {
-		logger.Info("worker already exists, skip")
+		logger.V(2).Info("worker already exists, skip")
 		return nil
 	}
 
-	cfg, err := wm.ConstructRestConfig(cluster)
+	cfg, err := wm.ConstructRestConfig(cluster, token)
 	if err != nil {
 		logger.Error(err, "construct rest config")
 		return fmt.Errorf("construct rest config for cluster %q: %w", cluster, err)
@@ -172,11 +172,11 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster string, force b
 			default:
 			}
 
+			logger.Info("checking worker api services")
 			if err := apis.WaitForServicesReady(wkCtx, cli); err != nil {
 				logger.Error(err, "wait for api services ready")
 				continue
 			}
-			logger.Info("api services are ready")
 
 			wm.Lock()
 			if _, ok := wm.Workers[cluster]; ok {
@@ -441,7 +441,7 @@ func registerEventHandler(
 		DeleteFunc: func(obj any) { publishEvent(WorkerEventDeleted, obj) },
 	}
 	opts := cache.HandlerOptions{
-		Logger: ptr.To(klog.FromContext(ctx).WithValues("gvk", gvk)),
+		Logger: ptr.To(klog.FromContext(ctx).WithValues("gvk", gvk).V(4)),
 	}
 
 	_, _ = inf.AddEventHandlerWithOptions(handler, opts)
@@ -467,9 +467,8 @@ func (w *_Worker) Subscribe() error {
 			default:
 			}
 			allSynced := true
-			for gvk, inf := range w.Informers {
+			for _, inf := range w.Informers {
 				if !inf.HasSynced() {
-					logger.Info("informer not synced", "gvk", gvk)
 					allSynced = false
 					break
 				}
@@ -479,7 +478,7 @@ func (w *_Worker) Subscribe() error {
 				continue
 			}
 			w.AllReady.Store(true)
-			logger.Info("all informers are synced")
+			logger.V(2).Info("synced all informers")
 			return ctx.Err()
 		}
 	})

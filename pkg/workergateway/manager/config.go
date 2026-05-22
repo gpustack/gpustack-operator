@@ -9,7 +9,7 @@ import (
 
 type (
 	// ConstructRestConfigFunc defines a function type for constructing rest.Config for a given cluster.
-	ConstructRestConfigFunc = func(cluster string) (*rest.Config, error)
+	ConstructRestConfigFunc = func(cluster, token string) (*rest.Config, error)
 
 	Config struct {
 		ConstructRestConfig ConstructRestConfigFunc

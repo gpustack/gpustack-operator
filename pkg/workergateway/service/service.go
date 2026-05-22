@@ -37,6 +37,7 @@ func New(ctx context.Context, manager manager.Manager) (*Service, error) {
 
 func (s *Service) Index() http.Handler {
 	r := mux.NewRouter()
+	r.Use(httpx.AccessLog(s.Logger, true))
 
 	r.Path("/workers").Methods(http.MethodPost).
 		HandlerFunc(s.handleSubscribeWorker)
@@ -63,11 +64,12 @@ func (s *Service) Index() http.Handler {
 // POST /workers?cluster=cluster1&force=true
 func (s *Service) handleSubscribeWorker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
 		Cluster string `query:"cluster" json:"cluster"`
-		Force   bool   `query:"force" json:"force"`
+		Token   string `query:"token" json:"token"`
+		Force   bool   `query:"force,omitempty" json:"force,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery, httpx.BindJSON)
 
@@ -77,7 +79,7 @@ func (s *Service) handleSubscribeWorker(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err := s.Manager.SubscribeWorker(ctx, req.Cluster, req.Force)
+	err := s.Manager.SubscribeWorker(ctx, req.Cluster, req.Token, req.Force)
 	if err != nil {
 		logger.Error(err, "subscribe worker failed")
 		httpx.Error(w, http.StatusInternalServerError)
@@ -90,7 +92,7 @@ func (s *Service) handleSubscribeWorker(w http.ResponseWriter, r *http.Request) 
 // DELETE /workers?cluster=cluster1
 func (s *Service) handleUnsubscribeWorker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
 		Cluster string `query:"cluster" json:"cluster"`
@@ -103,6 +105,8 @@ func (s *Service) handleUnsubscribeWorker(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	logger.Info("unsubscribe worker", "cluster", req.Cluster)
+
 	s.Manager.UnsubscribeWorker(ctx, req.Cluster)
 }
 
@@ -111,12 +115,12 @@ func (s *Service) handleUnsubscribeWorker(w http.ResponseWriter, r *http.Request
 // GET /instancetypes?cluster=cluster1&cluster=cluster2[&watch=true&aggregated=true]
 func (s *Service) handleListInstanceTypes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Clusters   []string `query:"cluster"`
-		Watch      bool     `query:"watch"`
-		Aggregated bool     `query:"aggregated"`
+		Clusters   []string `query:"cluster,omitempty"`
+		Watch      bool     `query:"watch,omitempty"`
+		Aggregated bool     `query:"aggregated,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery)
 
@@ -164,12 +168,12 @@ func (s *Service) handleListInstanceTypes(w http.ResponseWriter, r *http.Request
 // GET /instances?cluster=cluster1&cluster=cluster2[&namespace=foo&watch=true]
 func (s *Service) handleListInstances(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Clusters  []string `query:"cluster"`
-		Namespace string   `query:"namespace"`
-		Watch     bool     `query:"watch"`
+		Clusters  []string `query:"cluster,omitempty"`
+		Namespace string   `query:"namespace,omitempty"`
+		Watch     bool     `query:"watch,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery)
 
@@ -198,11 +202,11 @@ func (s *Service) handleListInstances(w http.ResponseWriter, r *http.Request) {
 // GET /instancepersistentvolumetypes?cluster=cluster1&cluster=cluster2[&watch=true]
 func (s *Service) handleListInstancePersistentVolumeTypes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Clusters []string `query:"cluster"`
-		Watch    bool     `query:"watch"`
+		Clusters []string `query:"cluster,omitempty"`
+		Watch    bool     `query:"watch,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery)
 
@@ -230,12 +234,12 @@ func (s *Service) handleListInstancePersistentVolumeTypes(w http.ResponseWriter,
 // GET /instancepersistentvolumes?cluster=cluster1&cluster=cluster2[&namespace=foo&watch=true]
 func (s *Service) handleListInstancePersistentVolumes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Clusters  []string `query:"cluster"`
-		Namespace string   `query:"namespace"`
-		Watch     bool     `query:"watch"`
+		Clusters  []string `query:"cluster,omitempty"`
+		Namespace string   `query:"namespace,omitempty"`
+		Watch     bool     `query:"watch,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery)
 
@@ -264,12 +268,12 @@ func (s *Service) handleListInstancePersistentVolumes(w http.ResponseWriter, r *
 // GET /instanceimagepullsecrets?cluster=cluster1&cluster=cluster2[&namespace=foo&watch=true]
 func (s *Service) handleListInstanceImagePullSecrets(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Clusters  []string `query:"cluster"`
-		Namespace string   `query:"namespace"`
-		Watch     bool     `query:"watch"`
+		Clusters  []string `query:"cluster,omitempty"`
+		Namespace string   `query:"namespace,omitempty"`
+		Watch     bool     `query:"watch,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery)
 
@@ -298,7 +302,7 @@ func (s *Service) handleListInstanceImagePullSecrets(w http.ResponseWriter, r *h
 // GET /instancesshpublickeys?cluster=cluster1&cluster=cluster2[&namespace=foo&watch=true]
 func (s *Service) handleListInstanceSSHPublicKeys(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	var req struct {
 		Clusters  []string `query:"cluster"`
@@ -339,7 +343,7 @@ func (s *Service) streamResponse(
 	handler func(*manager.WorkerEvent) []*manager.WorkerEvent,
 ) {
 	ctx := r.Context()
-	logger := s.Logger.WithValues("method", r.Method, "path", r.URL.Path).V(2)
+	logger := klog.FromContext(ctx)
 
 	sub, err := topic.Subscribe[*manager.WorkerEvent](manager.WorkerEventTopic(gvk))
 	if err != nil {

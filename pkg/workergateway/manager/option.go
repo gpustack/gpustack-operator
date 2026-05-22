@@ -115,7 +115,7 @@ func (o *Options) Complete(_ context.Context) (*Config, error) {
 }
 
 func constructRestConfigByGPUStackAPI(port int, o *Options) ConstructRestConfigFunc {
-	return func(cluster string) (*rest.Config, error) {
+	return func(cluster, token string) (*rest.Config, error) {
 		scheme := o.WorkerConnGPUStackAPIScheme
 		if scheme == "" {
 			scheme = "http"
@@ -125,7 +125,8 @@ func constructRestConfigByGPUStackAPI(port int, o *Options) ConstructRestConfigF
 		}
 
 		cfg := &rest.Config{
-			Host: fmt.Sprintf("%s://localhost:%d/v2/clusters/%s/proxy", scheme, port, cluster),
+			Host:        fmt.Sprintf("%s://localhost:%d/v2/clusters/%s/proxy", scheme, port, cluster),
+			BearerToken: token,
 		}
 		cfg.UserAgent = version.GetUserAgent()
 		cfg.Timeout = o.KubeConnTimeout
@@ -152,7 +153,7 @@ func constructRestConfigByLoopback(o *Options) (ConstructRestConfigFunc, error) 
 	cfg.Burst = o.KubeConnBurst
 	cfg.ContentType = o.KubeContentType
 
-	return func(_ string) (*rest.Config, error) {
+	return func(_, _ string) (*rest.Config, error) {
 		return cfg, nil
 	}, nil
 }
