@@ -19,6 +19,7 @@ func Test_getCSIDriverNFSChartTemplateValues(t *testing.T) {
 		"Namespace":          "gpustack-system",
 		"Image":              "",
 		"ImagePullPolicy":    "IfNotPresent",
+		"DriverName":         CSIProvisionerNFS,
 	}
 
 	values := getCSIDriverNFSChartTemplateValues("csi-driver-nfs", data)

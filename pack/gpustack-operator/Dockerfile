@@ -286,7 +286,7 @@ ADD https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/
 ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-nfs-4.13.2.tgz"
 
 ## CSI Driver S3
-ADD https://yandex-cloud.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-s3-0.43.7.tgz"
+ADD https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-s3-0.43.7.tgz"
 
 # Runtime
 

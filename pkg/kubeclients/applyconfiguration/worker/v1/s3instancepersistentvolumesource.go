@@ -29,6 +29,25 @@ type S3InstancePersistentVolumeSourceApplyConfiguration struct {
 	//
 	// Immutable after creation.
 	Bucket *string `json:"bucket,omitempty"`
+	// Prefix is the prefix in the bucket for each InstancePersistentVolume.
+	// If it is blank, the prefix will be the same as the volume ID of the InstancePersistentVolume.
+	//
+	// It supports a specific string or the following template variables:
+	// - `${pvc.metadata.name}`: the name the corresponding PersistentVolumeClaim.
+	// - `${pvc.metadata.namespace}`: the namespace of the corresponding PersistentVolumeClaim.
+	// - `${pv.metadata.name}`: the name of the corresponding Kubernetes PersistentVolume.
+	//
+	// For example, specify `${pvc.metadata.namespace}/${pvc.metadata.name}` to create a prefix
+	// with the namespaced name of the corresponding PersistentVolumeClaim in the bucket
+	// for each InstancePersistentVolume.
+	//
+	// Immutable after creation.
+	Prefix *string `json:"prefix,omitempty"`
+	// Mounter is the mounter for the S3-compatible object storage service.
+	// It is used to specify the mounter for [GeeseFS](https://github.com/yandex-cloud/geesefs).
+	//
+	// Immutable after creation.
+	Mounter *string `json:"mounter,omitempty"`
 	// MountOptions is the mount options for [GeeseFS](https://github.com/yandex-cloud/geesefs).
 	//
 	// Immutable after creation.
@@ -108,6 +127,22 @@ func (b *S3InstancePersistentVolumeSourceApplyConfiguration) WithSecretKey(value
 // If called multiple times, the Bucket field is set to the value of the last call.
 func (b *S3InstancePersistentVolumeSourceApplyConfiguration) WithBucket(value string) *S3InstancePersistentVolumeSourceApplyConfiguration {
 	b.Bucket = &value
+	return b
+}
+
+// WithPrefix sets the Prefix field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Prefix field is set to the value of the last call.
+func (b *S3InstancePersistentVolumeSourceApplyConfiguration) WithPrefix(value string) *S3InstancePersistentVolumeSourceApplyConfiguration {
+	b.Prefix = &value
+	return b
+}
+
+// WithMounter sets the Mounter field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Mounter field is set to the value of the last call.
+func (b *S3InstancePersistentVolumeSourceApplyConfiguration) WithMounter(value string) *S3InstancePersistentVolumeSourceApplyConfiguration {
+	b.Mounter = &value
 	return b
 }
 

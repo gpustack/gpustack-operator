@@ -11,6 +11,10 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 )
 
+const (
+	CSIProvisionerNFS = "nfs.csi.gpustack.ai"
+)
+
 func installCSIDriverNFS(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
 	// NB: please update the following files if changed.
 	// - pack/gpustack/image/Dockerfile.
@@ -30,6 +34,7 @@ func installCSIDriverNFS(ctx context.Context, helmCli *helm.Client, globalValues
 	valuesContext := globalValuesContext
 	valuesContext["Release"] = release
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
+	valuesContext["DriverName"] = CSIProvisionerNFS
 
 	values := getCSIDriverNFSChartTemplateValues(name, valuesContext)
 
@@ -125,7 +130,7 @@ rbac:
   name: csi-nfs
 
 driver:
-  name: nfs.csi.k8s.io
+  name: {{ $.DriverName }}
   mountPermissions: 0
 
 feature:

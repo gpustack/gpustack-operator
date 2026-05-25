@@ -11,6 +11,10 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 )
 
+const (
+	CSIProvisionerS3 = "s3.csi.gpustack.ai"
+)
+
 func installCSIDriverS3(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
 	// NB: please update the following files if changed.
 	// - pack/gpustack/image/Dockerfile.
@@ -25,11 +29,12 @@ func installCSIDriverS3(ctx context.Context, helmCli *helm.Client, globalValuesC
 
 	release := "gpustack-csi-driver-s3"
 	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", name, version))
-	download := fmt.Sprintf("https://yandex-cloud.github.io/k8s-csi-s3/charts/csi-s3-%[1]s.tgz", version)
+	download := fmt.Sprintf("https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-%[1]s.tgz", version)
 
 	valuesContext := globalValuesContext
 	valuesContext["Release"] = release
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
+	valuesContext["DriverName"] = CSIProvisionerS3
 
 	values := getCSIDriverS3ChartTemplateValues(name, valuesContext)
 
@@ -63,7 +68,7 @@ images:
   #
   provisioner: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-provisioner:v6.1.0
 
-  # Original: cr.yandex/crp9ftr22d26age3hulg/yandex-cloud/csi-s3/csi-s3-driver:0.43.7
+  # Original: docker.io/thxcode/csi-s3/csi-s3-driver:0.43.7
   #
   csi: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-s3-driver:v0.43.7
 
@@ -83,6 +88,9 @@ tolerations:
   - key: "node-role.kubernetes.io/control-plane"
     operator: "Exists"
     effect: "NoSchedule"
+
+driver:
+  name: {{ $.DriverName }}
 
 `
 

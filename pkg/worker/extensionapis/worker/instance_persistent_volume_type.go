@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/registry/rest"
@@ -109,41 +110,46 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 	if instPVType.Spec.NFS != nil && instPVType.Spec.S3 != nil {
 		return nil, kerrors.NewBadRequest("only one of NFS and S3 can be specified")
 	}
-	switch {
-	case instPVType.Spec.NFS != nil:
+	{
 		var errs field.ErrorList
-		if instPVType.Spec.NFS.Server == "" {
-			errs = append(errs, field.Required(
-				field.NewPath("spec.nfs.server"), "server is required"),
-			)
-		}
-		if instPVType.Spec.NFS.Share == "" {
-			errs = append(errs, field.Required(
-				field.NewPath("spec.nfs.share"), "share is required"),
-			)
-		}
-		if instPVType.Spec.NFS.MountPermissions != "" {
-			_, err := strconv.ParseUint(instPVType.Spec.NFS.MountPermissions, 8, 64)
-			if err != nil {
+		switch {
+		case instPVType.Spec.NFS != nil:
+			if instPVType.Spec.NFS.Server == "" {
+				errs = append(errs, field.Required(
+					field.NewPath("spec.nfs.server"), "server is required"),
+				)
+			}
+			if instPVType.Spec.NFS.Share == "" {
+				errs = append(errs, field.Required(
+					field.NewPath("spec.nfs.share"), "share is required"),
+				)
+			}
+			if instPVType.Spec.NFS.MountPermissions != "" {
+				_, err := strconv.ParseUint(instPVType.Spec.NFS.MountPermissions, 8, 64)
+				if err != nil {
+					errs = append(errs, field.Invalid(
+						field.NewPath("spec.nfs.mountPermissions"),
+						instPVType.Spec.NFS.MountPermissions, "mountPermissions must be an octal string"))
+				}
+			}
+		case instPVType.Spec.S3 != nil:
+			if instPVType.Spec.S3.Endpoint == "" {
+				errs = append(errs, field.Required(
+					field.NewPath("spec.s3.endpoint"), "endpoint is required"))
+			} else if uri, err := url.ParseRequestURI(instPVType.Spec.S3.Endpoint); err != nil {
 				errs = append(errs, field.Invalid(
-					field.NewPath("spec.nfs.mountPermissions"),
-					instPVType.Spec.NFS.MountPermissions, "mountPermissions must be an octal string"))
+					field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL"))
+			} else if uri.Scheme != "http" && uri.Scheme != "https" {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme"))
+			}
+			if instPVType.Spec.S3.Mounter != "" && !sets.New("geesefs", "rclone", "s3fs").Has(instPVType.Spec.S3.Mounter) {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec.s3.mounter"), instPVType.Spec.S3.Mounter, "unsupported mounter"))
 			}
 		}
 		if len(errs) > 0 {
 			return nil, kerrors.NewInvalid(worker.Kind(_InstancePersistentVolumeTypeKind), instPVType.Name, errs)
-		}
-	case instPVType.Spec.S3 != nil:
-		if instPVType.Spec.S3.Endpoint == "" {
-			return nil, field.Required(
-				field.NewPath("spec.s3.endpoint"), "endpoint is required")
-		}
-		if uri, err := url.ParseRequestURI(instPVType.Spec.S3.Endpoint); err != nil {
-			return nil, field.Invalid(
-				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must be a valid URL")
-		} else if uri.Scheme != "http" && uri.Scheme != "https" {
-			return nil, field.Invalid(
-				field.NewPath("spec.s3.endpoint"), instPVType.Spec.S3.Endpoint, "endpoint must have http or https scheme")
 		}
 	}
 
@@ -161,6 +167,9 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 			}
 		}
 	case instPVType.Spec.S3 != nil:
+		if instPVType.Spec.S3.Mounter == "" {
+			instPVType.Spec.S3.Mounter = "geesefs"
+		}
 		if len(instPVType.Spec.S3.MountOptions) == 0 {
 			instPVType.Spec.S3.MountOptions = []string{
 				"--no-checksum",
@@ -356,6 +365,14 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 			return nil, field.Forbidden(
 				field.NewPath("spec.s3.bucket"), "bucket is immutable")
 		}
+		if instPVType.Spec.S3.Prefix != instPVTypeOld.Spec.S3.Prefix {
+			return nil, field.Forbidden(
+				field.NewPath("spec.s3.prefix"), "prefix is immutable")
+		}
+		if instPVType.Spec.S3.Mounter != instPVTypeOld.Spec.S3.Mounter {
+			return nil, field.Forbidden(
+				field.NewPath("spec.s3.mounter"), "mounter is immutable")
+		}
 		if !kubemeta.DeepEqual(instPVType.Spec.S3.MountOptions, instPVTypeOld.Spec.S3.MountOptions) {
 			return nil, field.Forbidden(
 				field.NewPath("spec.s3.mountOptions"), "mountOptions is immutable")
@@ -439,7 +456,7 @@ func convertStorageClassFromInstancePersistentVolumeType(instPVType *worker.Inst
 
 	switch {
 	case instPVType.Spec.NFS != nil:
-		stgCls.Provisioner = "nfs.csi.k8s.io"
+		stgCls.Provisioner = kuberess.CSIProvisionerNFS
 
 		// Parameters.
 		stgCls.Parameters["server"] = instPVType.Spec.NFS.Server
@@ -460,13 +477,16 @@ func convertStorageClassFromInstancePersistentVolumeType(instPVType *worker.Inst
 		})
 
 	case instPVType.Spec.S3 != nil:
-		stgCls.Provisioner = "ru.yandex.s3.csi"
+		stgCls.Provisioner = kuberess.CSIProvisionerS3
 
 		// Parameters.
-		stgCls.Parameters["mounter"] = "geesefs"
+		stgCls.Parameters["mounter"] = instPVType.Spec.S3.Mounter
 		stgCls.Parameters["options"] = strings.Join(instPVType.Spec.S3.MountOptions, " ")
 		if instPVType.Spec.S3.Bucket != "" {
 			stgCls.Parameters["bucket"] = instPVType.Spec.S3.Bucket
+		}
+		if instPVType.Spec.S3.Prefix != "" {
+			stgCls.Parameters["prefix"] = instPVType.Spec.S3.Prefix
 		}
 		for _, s := range []string{
 			"csi.storage.k8s.io/provisioner-secret-name",
@@ -512,7 +532,7 @@ func convertInstancePersistentVolumeTypeFromStorageClass(stgCls *storage.Storage
 	switch stgCls.Provisioner {
 	default:
 		return nil
-	case "nfs.csi.k8s.io":
+	case kuberess.CSIProvisionerNFS:
 		volumeSource.NFS = &worker.NFSInstancePersistentVolumeSource{
 			Server:           stgCls.Parameters["server"],
 			Share:            stgCls.Parameters["share"],
@@ -520,13 +540,14 @@ func convertInstancePersistentVolumeTypeFromStorageClass(stgCls *storage.Storage
 			MountPermissions: stgCls.Parameters["mountPermissions"],
 			MountOptions:     stgCls.MountOptions,
 		}
-	case "ru.yandex.s3.csi":
+	case kuberess.CSIProvisionerS3:
 		volumeSource.S3 = &worker.S3InstancePersistentVolumeSource{
 			Endpoint:     notes["endpoint"],
 			Region:       notes["region"],
 			Insecure:     notes["insecure"] == "true",
 			AccessKey:    notes["accessKey"],
 			Bucket:       stgCls.Parameters["bucket"],
+			Prefix:       stgCls.Parameters["prefix"],
 			MountOptions: strings.Split(stgCls.Parameters["options"], " "),
 		}
 	}

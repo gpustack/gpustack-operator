@@ -17,6 +17,8 @@ on:
     branches:
       - "main"
       - "v*-dev"
+    tags:
+      - "v*"
     paths-ignore:
       - "!.github/workflows/ci.yml"
       - "deploy/**"

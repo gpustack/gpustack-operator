@@ -2349,6 +2349,21 @@ func schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref common.R
 							Format:      "",
 						},
 					},
+					"prefix": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Prefix is the prefix in the bucket for each InstancePersistentVolume. If it is blank, the prefix will be the same as the volume ID of the InstancePersistentVolume.\n\nIt supports a specific string or the following template variables: - `${pvc.metadata.name}`: the name the corresponding PersistentVolumeClaim. - `${pvc.metadata.namespace}`: the namespace of the corresponding PersistentVolumeClaim. - `${pv.metadata.name}`: the name of the corresponding Kubernetes PersistentVolume.\n\nFor example, specify `${pvc.metadata.namespace}/${pvc.metadata.name}` to create a prefix with the namespaced name of the corresponding PersistentVolumeClaim in the bucket for each InstancePersistentVolume.\n\nImmutable after creation.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"mounter": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Mounter is the mounter for the S3-compatible object storage service. It is used to specify the mounter for [GeeseFS](https://github.com/yandex-cloud/geesefs).\n\nImmutable after creation.",
+							Default:     "geesefs",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"mountOptions": {
 						SchemaProps: spec.SchemaProps{
 							Description: "MountOptions is the mount options for [GeeseFS](https://github.com/yandex-cloud/geesefs).\n\nImmutable after creation.\n\nIntensive writing for large files:\n  disable CPU overhead, reduce freshening frequency, maximize parallelism,\n  and reduce part sizes to improve writing performance for large files.\n  [\"--no-checksum\",\"--memory-limit=4000\",\"--max-flushers=32\",\"--max-parallel-parts=32\",\"--part-sizes=25\"]\n\nSequential reading for large files:\n  increase read-ahead size and parallelism,\n  and increase the memory cache limit to improve reading performance for large files.\n  [\"--read-ahead-large=200000\",\" --large-read-cutoff=10240\",\"--read-ahead-parallel=40000\",\"--memory-limit=8000\"]\n\nRandom reading for small files:\n  decrease read-ahead size, extend metadata cache TTL,\n  and increase the entry limit to improve reading performance for small files.\n  [\"--read-ahead-small=64\",\"--small-read-cutoff=64\",\"--read-ahead=1024\",\"--stat-cache-ttl=300s\",\"--entry-limit=200000\"]\n\nHigh availability for writing:\n  increase the number of retries and enable fsync on close to improve data durability for writing.\n  [\"--sdk-max-retries=10\",\"--read-retry-attempts=5\",\"--fsync-on-close\",\"--cache=/mnt/disk-cache]\n\nFor non-Yandex S3-compatible object storage service:\n  [\"--list-type=2\",\"--no-specials\"]",

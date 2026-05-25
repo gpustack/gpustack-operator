@@ -2013,9 +2013,19 @@ func (m *S3InstancePersistentVolumeSource) MarshalToSizedBuffer(dAtA []byte) (in
 			copy(dAtA[i:], m.MountOptions[iNdEx])
 			i = encodeVarintGenerated(dAtA, i, uint64(len(m.MountOptions[iNdEx])))
 			i--
-			dAtA[i] = 0x3a
+			dAtA[i] = 0x4a
 		}
 	}
+	i -= len(m.Mounter)
+	copy(dAtA[i:], m.Mounter)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Mounter)))
+	i--
+	dAtA[i] = 0x42
+	i -= len(m.Prefix)
+	copy(dAtA[i:], m.Prefix)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Prefix)))
+	i--
+	dAtA[i] = 0x3a
 	i -= len(m.Bucket)
 	copy(dAtA[i:], m.Bucket)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Bucket)))
@@ -2737,6 +2747,10 @@ func (m *S3InstancePersistentVolumeSource) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Bucket)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Prefix)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Mounter)
+	n += 1 + l + sovGenerated(uint64(l))
 	if len(m.MountOptions) > 0 {
 		for _, s := range m.MountOptions {
 			l = len(s)
@@ -3286,6 +3300,8 @@ func (this *S3InstancePersistentVolumeSource) String() string {
 		`AccessKey:` + fmt.Sprintf("%v", this.AccessKey) + `,`,
 		`SecretKey:` + fmt.Sprintf("%v", this.SecretKey) + `,`,
 		`Bucket:` + fmt.Sprintf("%v", this.Bucket) + `,`,
+		`Prefix:` + fmt.Sprintf("%v", this.Prefix) + `,`,
+		`Mounter:` + fmt.Sprintf("%v", this.Mounter) + `,`,
 		`MountOptions:` + fmt.Sprintf("%v", this.MountOptions) + `,`,
 		`}`,
 	}, "")
@@ -9190,6 +9206,70 @@ func (m *S3InstancePersistentVolumeSource) Unmarshal(dAtA []byte) error {
 			m.Bucket = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Prefix", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Prefix = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Mounter", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Mounter = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 9:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field MountOptions", wireType)
 			}

@@ -19,6 +19,7 @@ func Test_getCSIDriverS3ChartTemplateValues(t *testing.T) {
 		"Namespace":          "gpustack-system",
 		"Image":              "",
 		"ImagePullPolicy":    "IfNotPresent",
+		"DriverName":         CSIProvisionerS3,
 	}
 
 	values := getCSIDriverS3ChartTemplateValues("csi-driver-s3", data)

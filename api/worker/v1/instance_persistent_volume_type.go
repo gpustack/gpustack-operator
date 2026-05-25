@@ -125,6 +125,30 @@ type S3InstancePersistentVolumeSource struct {
 	// Immutable after creation.
 	Bucket string `json:"bucket,omitempty" protobuf:"bytes,6,opt,name=bucket"`
 
+	// Prefix is the prefix in the bucket for each InstancePersistentVolume.
+	// If it is blank, the prefix will be the same as the volume ID of the InstancePersistentVolume.
+	//
+	// It supports a specific string or the following template variables:
+	// - `${pvc.metadata.name}`: the name the corresponding PersistentVolumeClaim.
+	// - `${pvc.metadata.namespace}`: the namespace of the corresponding PersistentVolumeClaim.
+	// - `${pv.metadata.name}`: the name of the corresponding Kubernetes PersistentVolume.
+	//
+	// For example, specify `${pvc.metadata.namespace}/${pvc.metadata.name}` to create a prefix
+	// with the namespaced name of the corresponding PersistentVolumeClaim in the bucket
+	// for each InstancePersistentVolume.
+	//
+	// Immutable after creation.
+	Prefix string `json:"prefix,omitempty" protobuf:"bytes,7,opt,name=prefix"`
+
+	// Mounter is the mounter for the S3-compatible object storage service.
+	// It is used to specify the mounter for [GeeseFS](https://github.com/yandex-cloud/geesefs).
+	//
+	// Immutable after creation.
+	//
+	// +default="geesefs"
+	//
+	Mounter string `json:"mounter,omitempty" protobuf:"bytes,8,opt,name=mounter"`
+
 	// MountOptions is the mount options for [GeeseFS](https://github.com/yandex-cloud/geesefs).
 	//
 	// Immutable after creation.
@@ -152,7 +176,7 @@ type S3InstancePersistentVolumeSource struct {
 	//   ["--list-type=2","--no-specials"]
 	//
 	// +default=["--no-checksum","--memory-limit=4000","--max-flushers=32","--max-parallel-parts=32","--part-sizes=25","--list-type=2","--no-specials"]
-	MountOptions []string `json:"mountOptions,omitempty" protobuf:"bytes,7,name=mountOptions"`
+	MountOptions []string `json:"mountOptions,omitempty" protobuf:"bytes,9,name=mountOptions"`
 }
 
 // InstancePersistentVolumeTypeList holds the list of InstancePersistentVolumeType.
