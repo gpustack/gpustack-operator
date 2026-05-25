@@ -544,7 +544,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 		sshdC := core.Container{
 			Name: "sshd",
 			Image: func() string {
-				img := "ssh-server:v1.0.0"
+				img := "ssh-server:v1.1.0"
 				if cn := funcx.NoError(settings.ContainerNamespace.Value(ctx)); cn != "" {
 					img = cn + "/" + img
 				} else {
@@ -596,8 +596,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 				}
 				return []core.VolumeMount{{
 					Name:      "sshd-authorized-keys",
-					MountPath: "/root/.ssh/authorized_keys",
-					SubPath:   "authorized-keys",
+					MountPath: "/var/run/sshd-authorized-keys",
 					ReadOnly:  true,
 				}}
 			}(),
@@ -685,14 +684,8 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 						Name: "sshd-authorized-keys",
 						VolumeSource: core.VolumeSource{
 							Secret: &core.SecretVolumeSource{
-								SecretName: inst.Spec.SSHPublicKey.Name,
-								Items: []core.KeyToPath{
-									{
-										Key:  "authorized-keys",
-										Path: "authorized-keys",
-										Mode: ptr.To[int32](0o600),
-									},
-								},
+								SecretName:  inst.Spec.SSHPublicKey.Name,
+								DefaultMode: ptr.To[int32](0o600),
 							},
 						},
 					})

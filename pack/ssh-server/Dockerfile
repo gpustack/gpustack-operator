@@ -10,7 +10,7 @@ ARG TARGETARCH
 RUN <<EOF
     # OpenSSH Server
     set -exo pipefail
-    apk add --no-cache openssh util-linux linux-pam
+    apk add --no-cache openssh util-linux
 
     # Generate SSH host keys
     ssh-keygen -A
@@ -23,7 +23,6 @@ RUN <<EOF
     echo "ClientAliveInterval 60" >> /etc/ssh/sshd_config
     echo "ClientAliveCountMax 3" >> /etc/ssh/sshd_config
     echo "UseDNS no" >> /etc/ssh/sshd_config
-    echo "UsePAM yes" >> /etc/ssh/sshd_config
     echo "Banner no" >> /etc/ssh/sshd_config
     echo "ForceCommand /chroot.sh" >> /etc/ssh/sshd_config
 

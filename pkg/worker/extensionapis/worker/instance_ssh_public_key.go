@@ -253,7 +253,7 @@ func convertSecretListOptsFromInstanceSSHPublicKeyListOpts(in ctrlcli.ListOption
 func convertSecretFromInstanceSSHPublicKey(instSSHKey *worker.InstanceSSHPublicKey) *core.Secret {
 	sec := &core.Secret{
 		ObjectMeta: instSSHKey.ObjectMeta,
-		Data:       map[string][]byte{"authorized-keys": stringx.ToBytes(&instSSHKey.Spec.Data)},
+		Data:       map[string][]byte{"authorized_keys": stringx.ToBytes(&instSSHKey.Spec.Data)},
 	}
 
 	systemmeta.NoteResource(sec, _InstanceSSHPublicKeyResource, map[string]string{
@@ -275,7 +275,7 @@ func convertInstanceSSHPublicKeyFromSecret(sec *core.Secret) *worker.InstanceSSH
 	}
 
 	var secData string
-	if v, ok := sec.Data["authorized-keys"]; ok {
+	if v, ok := sec.Data["authorized_keys"]; ok {
 		secData = stringx.FromBytes(&v)
 	}
 
