@@ -32,8 +32,9 @@ type (
 	// WorkerInfo represents the information of a subscribed worker,
 	// including the cluster name and whether all informers are ready.
 	WorkerInfo struct {
-		Cluster  string `json:"cluster"`
-		AllReady bool   `json:"allReady"`
+		Cluster  string                    `json:"cluster"`
+		AllReady bool                      `json:"allReady"`
+		GVKs     []schema.GroupVersionKind `json:"gvks"`
 	}
 
 	// WorkerEventType defines the type of events observed by worker informers,
@@ -66,9 +67,10 @@ type (
 
 	// Manager defines the interface for managing workers across multiple clusters.
 	Manager interface {
-		// SubscribeWorker subscribes a worker for the given cluster.
+		// SubscribeWorker subscribes a worker for the given cluster and starts informers
+		// for the given GroupVersionKinds. If gvks is empty, all built-in GVKs are used.
 		// If force is true, it will unsubscribe the existing worker before subscribing a new one.
-		SubscribeWorker(ctx context.Context, cluster, token string, force bool) error
+		SubscribeWorker(ctx context.Context, cluster, token string, gvks []schema.GroupVersionKind, force bool) error
 		// UnsubscribeWorker unsubscribes the worker for the given cluster.
 		UnsubscribeWorker(ctx context.Context, cluster string)
 		// ListWorkers lists all subscribed workers with their status.
@@ -140,7 +142,7 @@ func New(ctx context.Context, config *Config) (Manager, error) {
 	}, nil
 }
 
-func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, force bool) error {
+func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, gvks []schema.GroupVersionKind, force bool) error {
 	logger := wm.Logger.WithValues("cluster", cluster)
 
 	if force {
@@ -148,6 +150,10 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 	} else if wm.hasWorker(cluster) {
 		logger.V(2).Info("worker already exists, skip")
 		return nil
+	}
+
+	if len(gvks) == 0 {
+		gvks = defaultGVKs()
 	}
 
 	cfg, err := wm.ConstructRestConfig(cluster, token)
@@ -184,12 +190,12 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 				logger.Info("worker already exists, skip")
 				return
 			}
-			wk := newWorker(wkCtx, wkCancel, cluster, cli, wm.ResyncPeriod)
+			wk := newWorker(wkCtx, wkCancel, cluster, cli, wm.ResyncPeriod, gvks)
 			wm.Clusters = append(wm.Clusters, cluster)
 			wm.Workers[cluster] = wk
 			wm.Unlock()
 
-			logger.Info("subscribing worker")
+			logger.Info("subscribing worker", "gvks", gvks)
 			if err := wk.Subscribe(); err != nil {
 				logger.Error(err, "subscribe worker")
 			}
@@ -239,9 +245,14 @@ func (wm *_Manager) ListWorkers(_ context.Context) []WorkerInfo {
 
 	infos := make([]WorkerInfo, 0, len(wm.Workers))
 	for cluster, wk := range wm.Workers {
+		gvks := make([]schema.GroupVersionKind, 0, len(wk.Informers))
+		for gvk := range wk.Informers {
+			gvks = append(gvks, gvk)
+		}
 		infos = append(infos, WorkerInfo{
 			Cluster:  cluster,
 			AllReady: wk.AllReady.Load(),
+			GVKs:     gvks,
 		})
 	}
 	return infos
@@ -337,9 +348,18 @@ func WorkerEventTopic(gvk schema.GroupVersionKind) topic.Topic {
 	return topic.Topic("workergateway/" + gvk.String())
 }
 
+// newWorker constructs a _Worker that starts a SharedIndexInformer for each given GVK.
+// GVKs without a registered informer factory are skipped with a log message.
 func newWorker(
-	ctx context.Context, cancel context.CancelFunc, cluster string, cli kubernetes.Interface, resyncPeriod time.Duration,
+	ctx context.Context,
+	cancel context.CancelFunc,
+	cluster string,
+	cli kubernetes.Interface,
+	resyncPeriod time.Duration,
+	gvks []schema.GroupVersionKind,
 ) *_Worker {
+	logger := klog.FromContext(ctx)
+
 	wk := &_Worker{
 		Context:   ctx,
 		Cancel:    cancel,
@@ -347,69 +367,22 @@ func newWorker(
 		Informers: make(map[schema.GroupVersionKind]cache.SharedIndexInformer),
 	}
 
-	// InstanceType.
-	instTypeGvk := worker.SchemeGroupVersionKind("InstanceType")
-	instTypeInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().InstanceTypes(),
-		&worker.InstanceType{},
-		resyncPeriod,
-	)
-	registerEventHandler(ctx, instTypeInformer, cluster, instTypeGvk)
-	wk.Informers[instTypeGvk] = instTypeInformer
+	seen := make(map[schema.GroupVersionKind]struct{}, len(gvks))
+	for _, gvk := range gvks {
+		if _, ok := seen[gvk]; ok {
+			continue
+		}
+		seen[gvk] = struct{}{}
 
-	// Instance.
-	instGvk := worker.SchemeGroupVersionKind("Instance")
-	instInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().Instances(core.NamespaceAll),
-		&worker.Instance{},
-		resyncPeriod,
-	)
-	registerEventHandler(ctx, instInformer, cluster, instGvk)
-	wk.Informers[instGvk] = instInformer
-
-	// InstancePersistentVolumeType.
-	volTypeGvk := worker.SchemeGroupVersionKind("InstancePersistentVolumeType")
-	volTypeInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().InstancePersistentVolumeTypes(),
-		&worker.InstancePersistentVolumeType{},
-		resyncPeriod,
-	)
-	registerEventHandler(ctx, volTypeInformer, cluster, volTypeGvk)
-	wk.Informers[volTypeGvk] = volTypeInformer
-
-	// InstancePersistentVolume.
-	volGvk := worker.SchemeGroupVersionKind("InstancePersistentVolume")
-	volInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().InstancePersistentVolumes(core.NamespaceAll),
-		&worker.InstancePersistentVolume{},
-		resyncPeriod,
-	)
-	registerEventHandler(ctx, volInformer, cluster, volGvk)
-	wk.Informers[volGvk] = volInformer
-
-	// InstanceImagePullSecret.
-	imgPullSecretGvk := worker.SchemeGroupVersionKind("InstanceImagePullSecret")
-	imgPullSecretInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().InstanceImagePullSecrets(core.NamespaceAll),
-		&worker.InstanceImagePullSecret{},
-		resyncPeriod,
-	)
-	registerEventHandler(ctx, imgPullSecretInformer, cluster, imgPullSecretGvk)
-	wk.Informers[imgPullSecretGvk] = imgPullSecretInformer
-
-	// InstanceSSHPublicKey.
-	sshPublicKeyGvk := worker.SchemeGroupVersionKind("InstanceSSHPublicKey")
-	sshPublicKeyInformer := NewSharedIndexInformerWithOptions(
-		cli.WorkerV1().InstanceSSHPublicKeys(core.NamespaceAll),
-		&worker.InstanceSSHPublicKey{},
-		resyncPeriod,
-	)
-	registerEventHandler(ctx, sshPublicKeyInformer, cluster, sshPublicKeyGvk)
-	wk.Informers[sshPublicKeyGvk] = sshPublicKeyInformer
-
-	// Add more informers here,
-	// add the GroupVersionKind to the IterateWorkers method,
-	// and add GroupVersionKind to the Unsubscribe method to publish a delete event when unsubscribing.
+		factory, ok := defaultInformerFactories[gvk]
+		if !ok {
+			logger.Info("no informer factory registered for gvk, skip", "gvk", gvk)
+			continue
+		}
+		inf := factory(cli, resyncPeriod)
+		registerEventHandler(ctx, inf, cluster, gvk)
+		wk.Informers[gvk] = inf
+	}
 
 	return wk
 }
@@ -489,21 +462,44 @@ func (w *_Worker) Subscribe() error {
 func (w *_Worker) Unsubscribe(ctx context.Context) {
 	w.Cancel()
 
-	gvks := []schema.GroupVersionKind{
-		worker.SchemeGroupVersionKind("InstanceType"),
-		worker.SchemeGroupVersionKind("Instance"),
-		worker.SchemeGroupVersionKind("InstancePersistentVolumeType"),
-		worker.SchemeGroupVersionKind("InstancePersistentVolume"),
-		worker.SchemeGroupVersionKind("InstanceImagePullSecret"),
-		worker.SchemeGroupVersionKind("InstanceSSHPublicKey"),
-		// Add more GroupVersionKind here if more informers are added.
-	}
-	for i := range gvks {
-		t := WorkerEventTopic(gvks[i])
+	for gvk := range w.Informers {
+		t := WorkerEventTopic(gvk)
 		_ = topic.Publish(ctx, t, &WorkerEvent{
 			Type:    WorkerEventDeleted,
 			Cluster: w.Cluster,
 			Object:  nil,
 		})
 	}
+}
+
+var defaultInformerFactories = map[schema.GroupVersionKind]func(kubernetes.Interface, time.Duration) cache.SharedIndexInformer{
+	worker.SchemeGroupVersionKind("Devices"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().Devices(), &worker.Devices{}, p)
+	},
+	worker.SchemeGroupVersionKind("InstanceType"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstanceTypes(), &worker.InstanceType{}, p)
+	},
+	worker.SchemeGroupVersionKind("Instance"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().Instances(core.NamespaceAll), &worker.Instance{}, p)
+	},
+	worker.SchemeGroupVersionKind("InstancePersistentVolumeType"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstancePersistentVolumeTypes(), &worker.InstancePersistentVolumeType{}, p)
+	},
+	worker.SchemeGroupVersionKind("InstancePersistentVolume"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstancePersistentVolumes(core.NamespaceAll), &worker.InstancePersistentVolume{}, p)
+	},
+	worker.SchemeGroupVersionKind("InstanceImagePullSecret"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstanceImagePullSecrets(core.NamespaceAll), &worker.InstanceImagePullSecret{}, p)
+	},
+	worker.SchemeGroupVersionKind("InstanceSSHPublicKey"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstanceSSHPublicKeys(core.NamespaceAll), &worker.InstanceSSHPublicKey{}, p)
+	},
+}
+
+func defaultGVKs() []schema.GroupVersionKind {
+	gvks := make([]schema.GroupVersionKind, 0, len(defaultInformerFactories))
+	for gvk := range defaultInformerFactories {
+		gvks = append(gvks, gvk)
+	}
+	return gvks
 }

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -59,17 +61,37 @@ func (s *Service) Index() http.Handler {
 	return r
 }
 
+// parseGVKString parses a GVK string in the form "group/version/kind".
+// A leading empty group (core group) is accepted, e.g. "/v1/Pod" or "v1/Pod".
+func parseGVKString(s string) (schema.GroupVersionKind, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return schema.GroupVersionKind{}, fmt.Errorf("empty gvk")
+	}
+	parts := strings.Split(s, "/")
+	switch len(parts) {
+	case 2:
+		return schema.GroupVersionKind{Version: parts[0], Kind: parts[1]}, nil
+	case 3:
+		return schema.GroupVersionKind{Group: parts[0], Version: parts[1], Kind: parts[2]}, nil
+	default:
+		return schema.GroupVersionKind{}, fmt.Errorf("invalid gvk format %q, expected group/version/kind", s)
+	}
+}
+
 // handleSubscribeWorker handles the worker subscribe request.
 //
-// POST /workers?cluster=cluster1&force=true
+// POST /workers?cluster=cluster1[&force=true&gvk=worker.gpustack.ai/v1/Devices&gvk=...]
+// Body (optional): {"token":"...","force":true,"clusters":"...","gvks":["worker.gpustack.ai/v1/Devices"]}
 func (s *Service) handleSubscribeWorker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Cluster string `query:"cluster" json:"cluster"`
-		Token   string `query:"token" json:"token"`
-		Force   bool   `query:"force,omitempty" json:"force,omitempty"`
+		Token   string   `query:"token" json:"token"`
+		Force   bool     `query:"force,omitempty" json:"force,omitempty"`
+		Cluster string   `query:"cluster" json:"clusters"`
+		GVKs    []string `query:"gvk,omitempty" json:"gvks,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery, httpx.BindJSON)
 
@@ -79,7 +101,18 @@ func (s *Service) handleSubscribeWorker(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	err := s.Manager.SubscribeWorker(ctx, req.Cluster, req.Token, req.Force)
+	gvks := make([]schema.GroupVersionKind, 0, len(req.GVKs))
+	for _, raw := range req.GVKs {
+		gvk, err := parseGVKString(raw)
+		if err != nil {
+			logger.Error(err, "parse gvk", "raw", raw)
+			httpx.Error(w, http.StatusBadRequest)
+			return
+		}
+		gvks = append(gvks, gvk)
+	}
+
+	err := s.Manager.SubscribeWorker(ctx, req.Cluster, req.Token, gvks, req.Force)
 	if err != nil {
 		logger.Error(err, "subscribe worker failed")
 		httpx.Error(w, http.StatusInternalServerError)
@@ -95,7 +128,7 @@ func (s *Service) handleUnsubscribeWorker(w http.ResponseWriter, r *http.Request
 	logger := klog.FromContext(ctx)
 
 	var req struct {
-		Cluster string `query:"cluster" json:"cluster"`
+		Cluster string `query:"cluster"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery, httpx.BindJSON)
 
