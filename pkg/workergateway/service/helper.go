@@ -77,7 +77,16 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 	return nil
 }
 
-func (in *ListAggregateInstanceTypes) Result() AggregatedInstanceTypeList {
+func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceTypeList {
+	if sorted {
+		sort.Slice(in.list.Items, func(i, j int) bool {
+			if in.list.Items[i].Spec.Acceleratable == in.list.Items[j].Spec.Acceleratable && in.list.Items[i].Spec.Acceleratable {
+				return in.list.Items[i].Name < in.list.Items[j].Name
+			}
+			return in.list.Items[i].Spec.Acceleratable
+		})
+	}
+
 	for i := range in.list.Items {
 		item := &in.list.Items[i]
 		sort.Slice(item.Status.AcceleratorTiers, func(i, j int) bool {

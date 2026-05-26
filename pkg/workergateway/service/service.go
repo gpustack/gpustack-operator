@@ -169,11 +169,11 @@ func (s *Service) handleListInstanceTypes(w http.ResponseWriter, r *http.Request
 		}
 
 		if !req.Watch {
-			httpx.JSON(w, http.StatusOK, listOp.Result())
+			httpx.JSON(w, http.StatusOK, listOp.Result(true))
 			return
 		}
 
-		watchOp := OpHandleAggregatedInstanceType(listOp.Result())
+		watchOp := OpHandleAggregatedInstanceType(listOp.Result(false))
 		s.streamResponse(w, r, req.Clusters, gvk, watchOp.Handle)
 
 		return
