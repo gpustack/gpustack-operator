@@ -27,4 +27,10 @@ var (
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
 	)
+	SSHServerImage = settings.NewEditable(
+		"ssh-server-image",
+		"Indicates the image of the SSH server.",
+		setting.InitializeFromEnv("gpustack/ssh-server:v1.1.0"),
+		setting.AllowContainerImageReference(),
+	)
 )

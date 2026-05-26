@@ -145,7 +145,7 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 		return fmt.Errorf("index pod '%s': %w", IndexingByNodeName, err)
 	}
 
-	r.NodeName = osx.Getenv("KUBERNETES_NODE_NAME", "default")
+	r.NodeName = osx.Getenv("KUBERNETES_NODE_NAME")
 	r.Client = opts.Manager.GetClient()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).

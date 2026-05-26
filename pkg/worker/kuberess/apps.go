@@ -5,7 +5,6 @@ import (
 
 	"gpustack.ai/gpustack/pkg/kubeapp"
 	"gpustack.ai/gpustack/pkg/system"
-	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -21,8 +20,8 @@ var installs = []kubeapp.Install{
 // InstallApplications installs applications.
 func InstallApplications(ctx context.Context, manufacturers []string) error {
 	gvc := map[string]any{
-		"ContainerRegistry":  funcx.NoError(settings.ContainerRegistry.ValueFromRemote(ctx)),
-		"ContainerNamespace": funcx.NoError(settings.ContainerNamespace.ValueFromRemote(ctx)),
+		"ContainerRegistry":  settings.ContainerRegistry.ShouldValueFromRemote(ctx),
+		"ContainerNamespace": settings.ContainerNamespace.ShouldValueFromRemote(ctx),
 		"ImagePullPolicy":    "IfNotPresent",
 		"Manufacturers":      manufacturers,
 	}

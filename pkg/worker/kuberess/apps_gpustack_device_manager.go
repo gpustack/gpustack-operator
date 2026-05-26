@@ -380,37 +380,28 @@ func extendDeviceManagerApplyYamlTemplateFuncMap() template.FuncMap {
 }
 
 func extractImageConfig(ctx context.Context, cli kubernetes.Interface) (img, imgPullPolicy string) {
-	img = osx.Getenv("GPUSTACK_IMAGE_DEBUGGING")
-	if img == "" {
-		podName := osx.Getenv("KUBERNETES_POD_NAME")
-		if podName != "" {
-			pod, err := cli.CoreV1().
-				Pods(kuberess.SystemNamespaceName).
-				Get(ctx, podName,
-					meta.GetOptions{
-						ResourceVersion: "0",
-					})
-			if err == nil {
-				for i := range pod.Spec.Containers {
-					ctr := &pod.Spec.Containers[i]
-					if ctr.Name == "main" {
-						img = ctr.Image
-						imgPullPolicy = string(ctr.ImagePullPolicy)
-						break
-					}
+	if v := osx.Getenv("KUBERNETES_POD_NAME"); v != "" {
+		pod, err := cli.CoreV1().
+			Pods(kuberess.SystemNamespaceName).
+			Get(ctx, v,
+				meta.GetOptions{
+					ResourceVersion: "0",
+				})
+		if err == nil {
+			for i := range pod.Spec.Containers {
+				ctr := &pod.Spec.Containers[i]
+				if ctr.Name == "main" {
+					img = ctr.Image
+					imgPullPolicy = string(ctr.ImagePullPolicy)
+					break
 				}
-				if img == "" {
-					img = pod.Spec.Containers[0].Image
-					imgPullPolicy = string(pod.Spec.Containers[0].ImagePullPolicy)
-				}
-				return img, imgPullPolicy
+			}
+			if img == "" {
+				img = pod.Spec.Containers[0].Image
+				imgPullPolicy = string(pod.Spec.Containers[0].ImagePullPolicy)
 			}
 		}
 	}
 
-	imgPullPolicy = osx.Getenv("GPUSTACK_IMAGE_PULL_POLICY_DEBUGGING")
-	if imgPullPolicy == "" {
-		imgPullPolicy = "IfNotPresent"
-	}
 	return img, imgPullPolicy
 }

@@ -164,15 +164,6 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 		return nil, field.Required(
 			field.NewPath("spec.type"), "type must be specified")
 	}
-	for i := range inst.Spec.Ports {
-		if inst.Spec.Ports[i].Port == 22 && inst.Spec.Ports[i].Protocol == core.ProtocolTCP {
-			if inst.Spec.SSHPublicKey == nil || inst.Spec.SSHPublicKey.Name == "" {
-				return nil, field.Required(
-					field.NewPath("spec.sshPublicKey"), "sshPublicKey must be specified if allowed tcp/22 accessible")
-			}
-			break
-		}
-	}
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
 			Name: inst.Spec.Type,
@@ -484,13 +475,7 @@ func convertPodListOptsFromInstanceListOpts(in ctrlcli.ListOptions) (out *ctrlcl
 }
 
 func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType *worker.InstanceType) *core.Pod {
-	var needSSHD bool
-	for i := range inst.Spec.Ports {
-		if inst.Spec.Ports[i].Port == 22 && inst.Spec.Ports[i].Protocol == core.ProtocolTCP {
-			needSSHD = true
-			break
-		}
-	}
+	needSSHD := inst.Spec.SSHPublicKey != nil && inst.Spec.SSHPublicKey.Name != ""
 
 	// Construct containers.
 	var containers []core.Container
@@ -544,13 +529,14 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 		sshdC := core.Container{
 			Name: "sshd",
 			Image: func() string {
-				img := "ssh-server:v1.1.0"
-				if cn := funcx.NoError(settings.ContainerNamespace.Value(ctx)); cn != "" {
-					img = cn + "/" + img
-				} else {
-					img = "gpustack/" + img
+				img := settings.SSHServerImage.ShouldValue(ctx)
+				if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
+					_, suffix, found := strings.Cut(img, "/")
+					if found {
+						img = cn + "/" + suffix
+					}
 				}
-				if rn := funcx.NoError(settings.ContainerRegistry.Value(ctx)); rn != "" {
+				if rn := settings.ContainerRegistry.ShouldValue(ctx); rn != "" {
 					img = rn + "/" + img
 				}
 				return img
@@ -568,7 +554,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			},
 			Resources: func() core.ResourceRequirements {
 				requests := core.ResourceList{}
-				if instType.Spec.Acceleratable {
+				if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
 					var resName core.ResourceName
 					resQuantity := *inst.Spec.Resources.Accelerator
 					if instType.Spec.Sliced > 0 {
@@ -624,7 +610,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 					core.ResourceMemory:           inst.Spec.Resources.RAM,
 					core.ResourceEphemeralStorage: inst.Spec.Resources.LocalStorage,
 				}
-				if instType.Spec.Acceleratable {
+				if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
 					var resName core.ResourceName
 					resQuantity := *inst.Spec.Resources.Accelerator
 					if instType.Spec.Sliced > 0 {
