@@ -79,7 +79,7 @@ func (ps paths[T]) GetSummary(st any) (phase, phaseMessage string) {
 
 	conditionsField := stValue.FieldByName("Conditions")
 	if !conditionsField.IsValid() || conditionsField.Kind() != reflect.Slice {
-		return phase, phaseMessage
+		return phase, formatMessage(phaseMessage)
 	}
 
 	var r *_ScoredStatusDescriptor
@@ -108,7 +108,7 @@ func (ps paths[T]) GetSummary(st any) (phase, phaseMessage string) {
 		phase, phaseMessage = r.Phase, r.PhaseMessage
 	}
 
-	return phase, phaseMessage
+	return phase, formatMessage(phaseMessage)
 }
 
 func (ps paths[T]) Summarize(st any) {
@@ -324,4 +324,23 @@ var replacements = map[string]struct {
 	"Canceled":    {"Canceling", "CancelFailed", "Canceled"},
 	"Planned":     {"Planning", "Failed", "Planned"},
 	"Applied":     {"Running", "Failed", "Succeeded"},
+}
+
+// formatMessage formats the message with some rules,
+// if the first character of the message is lower case, it will be capitalized,
+// if the message doesn't end with a punctuation, a dot will be added at the end.
+func formatMessage(str string) string {
+	if str == "" {
+		return str
+	}
+
+	runes := []rune(str)
+	if runes[0] >= 'a' && runes[0] <= 'z' {
+		runes[0] = runes[0] - 'a' + 'A'
+	}
+	if runes[len(runes)-1] != '.' && runes[len(runes)-1] != '!' && runes[len(runes)-1] != '?' {
+		runes = append(runes, '.')
+	}
+
+	return string(runes)
 }

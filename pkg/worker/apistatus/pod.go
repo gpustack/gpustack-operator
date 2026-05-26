@@ -17,7 +17,7 @@ import (
 //	| PodInitialized   | Unknown                 | Initializing          | Transitioning         |
 //	| PodInitialized   | False                   | InitializeFailed      | Interrupted           |
 //	| PodInitialized   | True                    | Initialized           | /                     |
-//	| PodReady         | Unknown                 | Preparing             | Transitioning         |
+//	| PodReady         | Unknown                 | Starting              | Transitioning         |
 //	| PodReady         | False                   | NotReady              | Interrupted           |
 //	| PodReady         | True                    | Ready                 | /                     |
 var podStatusPaths = kubeapistatus.NewSummarizer(
@@ -29,6 +29,22 @@ var podStatusPaths = kubeapistatus.NewSummarizer(
 		},
 	},
 	func(d kubeapistatus.Decision[core.PodConditionType]) {
+		d.Make(core.PodInitialized,
+			func(st meta.ConditionStatus, reason string) (string, string, kubeapistatus.StatusScore) {
+				switch st {
+				case meta.ConditionUnknown:
+					return "Initializing", "", kubeapistatus.StatusTransitioning
+				case meta.ConditionFalse:
+					if reason == "ContainersNotInitialized" {
+						message := "One or more init containers are not initialized, " +
+							"they may be pulling images or performing other startup operations, " +
+							"please check events for more details."
+						return "Initializing", message, kubeapistatus.StatusTransitioning
+					}
+					return "InitializeFailed", "", kubeapistatus.StatusInterrupted
+				}
+				return "Initialized", "", kubeapistatus.StatusDone
+			})
 		d.Make(core.PodScheduled,
 			func(st meta.ConditionStatus, reason string) (string, string, kubeapistatus.StatusScore) {
 				switch st {
@@ -38,6 +54,22 @@ var podStatusPaths = kubeapistatus.NewSummarizer(
 					return "Pending", "", kubeapistatus.StatusTransitioning
 				}
 				return "Scheduled", "", kubeapistatus.StatusDone
+			})
+		d.Make(core.PodReady,
+			func(st meta.ConditionStatus, reason string) (string, string, kubeapistatus.StatusScore) {
+				switch st {
+				case meta.ConditionUnknown:
+					return "Starting", "", kubeapistatus.StatusTransitioning
+				case meta.ConditionFalse:
+					if reason == "ContainersNotReady" {
+						message := "One or more containers are not ready, " +
+							"they may be pulling images or performing other startup operations, " +
+							"please check events for more details."
+						return "Starting", message, kubeapistatus.StatusTransitioning
+					}
+					return "NotReady", "", kubeapistatus.StatusInterrupted
+				}
+				return "Ready", "", kubeapistatus.StatusDone
 			})
 	},
 )
