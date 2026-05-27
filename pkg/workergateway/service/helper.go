@@ -11,6 +11,50 @@ import (
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
+func (in *AggregatedInstanceType) RecomputeOnceMaxRequest() {
+	var newOverview AggregatedInstanceTypeOverviewResource
+
+	for i := range in.Status.AcceleratorTiers {
+		tier := &in.Status.AcceleratorTiers[i]
+		if newOverview.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0 {
+			newOverview.Accelerator = tier.OnceMaxRequest.Accelerator
+		}
+		if newOverview.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0 {
+			newOverview.CPU = tier.OnceMaxRequest.CPU
+		}
+		if newOverview.RAM.Cmp(tier.OnceMaxRequest.RAM) < 0 {
+			newOverview.RAM = tier.OnceMaxRequest.RAM
+		}
+		if newOverview.LocalStorage.Cmp(tier.OnceMaxRequest.LocalStorage) < 0 {
+			newOverview.LocalStorage = tier.OnceMaxRequest.LocalStorage
+		}
+	}
+
+	in.Status.OnceMaxRequest = newOverview
+}
+
+func (in *AggregatedInstanceTypeOnceMaxRequestTier) RecomputeOnceMaxRequest() {
+	var newOverview AggregatedInstanceTypeOverviewResource
+
+	for i := range in.Candidates {
+		candidate := &in.Candidates[i]
+		if newOverview.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0 {
+			newOverview.Accelerator = candidate.Accelerator.OnceMaxRequest
+		}
+		if newOverview.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0 {
+			newOverview.CPU = candidate.CPU.OnceMaxRequest
+		}
+		if newOverview.RAM.Cmp(candidate.RAM.OnceMaxRequest) < 0 {
+			newOverview.RAM = candidate.RAM.OnceMaxRequest
+		}
+		if newOverview.LocalStorage.Cmp(candidate.LocalStorage.OnceMaxRequest) < 0 {
+			newOverview.LocalStorage = candidate.LocalStorage.OnceMaxRequest
+		}
+	}
+
+	in.OnceMaxRequest = newOverview
+}
+
 type ListAggregateInstanceTypes struct {
 	list            AggregatedInstanceTypeList
 	itemIndexer     map[AggregatedInstanceTypeSpec]int
@@ -47,18 +91,18 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 	item := &in.list.Items[itemIndex]
 	tierIndexer := in.itemTierIndexer[itemIndex]
 
-	item.Status.Remaining.Accelerator.Add(instType.Status.Accelerator.Remaining)
-	item.Status.Remaining.CPU.Add(instType.Status.CPU.Remaining)
-	item.Status.Remaining.RAM.Add(instType.Status.RAM.Remaining)
-	item.Status.Remaining.LocalStorage.Add(instType.Status.LocalStorage.Remaining)
-
 	tierIndexKey := instType.Status.Accelerator.OnceMaxRequest.String()
 	tierIndex, existed := tierIndexer[tierIndexKey]
 	if !existed {
 		tierIndex = len(item.Status.AcceleratorTiers)
 		tierIndexer[tierIndexKey] = tierIndex
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
-			OnceMaxRequest: instType.Status.Accelerator.OnceMaxRequest,
+			OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+				Accelerator:  instType.Status.Accelerator.OnceMaxRequest,
+				CPU:          instType.Status.CPU.OnceMaxRequest,
+				RAM:          instType.Status.RAM.OnceMaxRequest,
+				LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
+			},
 		}
 		item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers, tier)
 	}
@@ -79,6 +123,7 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 
 func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceTypeList {
 	if sorted {
+		// Sorted by acceleratable and name for better readability.
 		sort.Slice(in.list.Items, func(i, j int) bool {
 			if in.list.Items[i].Spec.Acceleratable == in.list.Items[j].Spec.Acceleratable && in.list.Items[i].Spec.Acceleratable {
 				return in.list.Items[i].Name < in.list.Items[j].Name
@@ -89,9 +134,20 @@ func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceType
 
 	for i := range in.list.Items {
 		item := &in.list.Items[i]
+
+		// Sorted by once max request of accelerator for better readability.
 		sort.Slice(item.Status.AcceleratorTiers, func(i, j int) bool {
-			return item.Status.AcceleratorTiers[i].OnceMaxRequest.Cmp(item.Status.AcceleratorTiers[j].OnceMaxRequest) < 0
+			return item.Status.AcceleratorTiers[i].OnceMaxRequest.Accelerator.Cmp(item.Status.AcceleratorTiers[j].OnceMaxRequest.Accelerator) < 0
 		})
+
+		// Calculate the once max request of each tier.
+		for j := range item.Status.AcceleratorTiers {
+			tier := &item.Status.AcceleratorTiers[j]
+			tier.RecomputeOnceMaxRequest()
+		}
+
+		// Calculate the once max request of the item.
+		item.RecomputeOnceMaxRequest()
 	}
 	return in.list
 }
@@ -116,6 +172,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			itemChanged := false
 			for j := 0; j < len(item.Status.AcceleratorTiers); j++ {
 				tier := &item.Status.AcceleratorTiers[j]
+				tierChanged := false
 				// Keep the candidates of other clusters and delete the candidates of the cluster.
 				newCandidates := make([]AggregatedInstanceTypeOnceMaxRequestCandidate, 0, len(tier.Candidates))
 				for k := range tier.Candidates {
@@ -124,39 +181,48 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 						newCandidates = append(newCandidates, tier.Candidates[k])
 						continue
 					}
-					// Subtract the resource of the deleted candidate from the item remaining resource.
-					item.Status.Remaining.Accelerator.Sub(candidate.Accelerator.Remaining)
-					item.Status.Remaining.CPU.Sub(candidate.CPU.Remaining)
-					item.Status.Remaining.RAM.Sub(candidate.RAM.Remaining)
-					item.Status.Remaining.LocalStorage.Sub(candidate.LocalStorage.Remaining)
-					itemChanged = true
+					tierChanged = true
 				}
+				if !tierChanged {
+					continue
+				}
+				itemChanged = true
 				if len(newCandidates) == 0 {
 					item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers[:j], item.Status.AcceleratorTiers[j+1:]...)
 					j--
 					continue
 				}
 				tier.Candidates = newCandidates
+
+				// Recompute the tier.
+				tier.RecomputeOnceMaxRequest()
 			}
 			if !itemChanged {
 				continue
 			}
 			if len(item.Status.AcceleratorTiers) == 0 {
+				itemName := item.Name
 				in.state.Items = append(in.state.Items[:i], in.state.Items[i+1:]...)
 				i--
+
+				// Report a deleted event.
 				evts = append(evts, &manager.WorkerEvent{
 					Type:   manager.WorkerEventDeleted,
-					Object: &AggregatedInstanceType{Name: item.Name},
+					Object: &AggregatedInstanceType{Name: itemName},
 				})
 				continue
 			}
+
+			// Recompute the item.
+			item.RecomputeOnceMaxRequest()
+
+			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
 				Type:   manager.WorkerEventModified,
 				Object: item,
 			})
 		}
 
-		// Return immediately since the deleted candidates will not be moved to another tier or item.
 		return evts
 	}
 
@@ -180,7 +246,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 		for j := 0; j < len(item.Status.AcceleratorTiers); j++ {
 			tier := &item.Status.AcceleratorTiers[j]
-			if tier.OnceMaxRequest.Equal(instType.Status.Accelerator.OnceMaxRequest) {
+			if tier.OnceMaxRequest.Accelerator.Equal(instType.Status.Accelerator.OnceMaxRequest) {
 				index[1] = j
 			}
 			for k := range tier.Candidates {
@@ -190,21 +256,14 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					break
 				}
 			}
+			if index[2] != -1 {
+				break
+			}
 		}
 
-		// Exist in the original state.
+		// Found the same candidate.
 		if index[2] != -1 {
 			tier := &item.Status.AcceleratorTiers[index[1]]
-
-			candidate := &tier.Candidates[index[2]]
-
-			// Subtract the resource of the original candidate from the original item remaining resource.
-			{
-				item.Status.Remaining.Accelerator.Sub(candidate.Accelerator.Remaining)
-				item.Status.Remaining.CPU.Sub(candidate.CPU.Remaining)
-				item.Status.Remaining.RAM.Sub(candidate.RAM.Remaining)
-				item.Status.Remaining.LocalStorage.Sub(candidate.LocalStorage.Remaining)
-			}
 
 			if evt.Type == manager.WorkerEventDeleted {
 				// Remove candidate from the original tier.
@@ -212,20 +271,27 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 				// Delete the original tier if no candidate.
 				if len(tier.Candidates) == 0 {
-					item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers[:index[1]], item.Status.AcceleratorTiers[index[0]+1:]...)
+					item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers[:index[1]], item.Status.AcceleratorTiers[index[1]+1:]...)
+				} else {
+					// Recompute the tier.
+					tier.RecomputeOnceMaxRequest()
 				}
 
 				// Delete the original item if no tier.
 				if len(item.Status.AcceleratorTiers) == 0 {
+					itemName := item.Name
 					in.state.Items = append(in.state.Items[:index[0]], in.state.Items[index[0]+1:]...)
 
 					//  Report a deleted event also.
 					evts = append(evts, &manager.WorkerEvent{
 						Type:   manager.WorkerEventDeleted,
-						Object: &AggregatedInstanceType{Name: item.Name},
+						Object: &AggregatedInstanceType{Name: itemName},
 					})
 				} else {
-					// Report a modified event if the item is not deleted.
+					// Recompute the item.
+					item.RecomputeOnceMaxRequest()
+
+					// Report a modified event.
 					evts = append(evts, &manager.WorkerEvent{
 						Type:   manager.WorkerEventModified,
 						Object: item,
@@ -236,7 +302,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				return evts
 			}
 
-			candidate = &AggregatedInstanceTypeOnceMaxRequestCandidate{
+			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
 				Cluster:      evt.Cluster,
 				Name:         instType.Name,
 				Accelerator:  instType.Status.Accelerator,
@@ -245,17 +311,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				LocalStorage: instType.Status.LocalStorage,
 			}
 
-			// Add the resource of the new candidate to the item remaining resource.
-			{
-				item.Status.Remaining.Accelerator.Add(candidate.Accelerator.Remaining)
-				item.Status.Remaining.CPU.Add(candidate.CPU.Remaining)
-				item.Status.Remaining.RAM.Add(candidate.RAM.Remaining)
-				item.Status.Remaining.LocalStorage.Add(candidate.LocalStorage.Remaining)
-			}
-
-			if tier.OnceMaxRequest.Equal(candidate.Accelerator.OnceMaxRequest) {
+			if tier.OnceMaxRequest.Accelerator.Equal(candidate.Accelerator.OnceMaxRequest) {
 				// If the once max request has not changed, update the candidate in place.
 				tier.Candidates[index[2]] = *candidate
+
+				// Recompute the tier.
+				tier.RecomputeOnceMaxRequest()
 			} else {
 				// Remove candidate from the original tier.
 				tier.Candidates = append(tier.Candidates[:index[2]], tier.Candidates[index[2]+1:]...)
@@ -263,12 +324,15 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				// Delete the original tier if no candidate.
 				if len(tier.Candidates) == 0 {
 					item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers[:index[1]], item.Status.AcceleratorTiers[index[1]+1:]...)
+				} else {
+					// Recompute the tier.
+					tier.RecomputeOnceMaxRequest()
 				}
 
 				// Find the new tier to move in.
 				newTierIndex := -1
 				for j := 0; j < len(item.Status.AcceleratorTiers); j++ {
-					if item.Status.AcceleratorTiers[j].OnceMaxRequest.Equal(instType.Status.Accelerator.OnceMaxRequest) {
+					if item.Status.AcceleratorTiers[j].OnceMaxRequest.Accelerator.Equal(instType.Status.Accelerator.OnceMaxRequest) {
 						newTierIndex = j
 						break
 					}
@@ -277,16 +341,33 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					// Move to the new tier.
 					tier = &item.Status.AcceleratorTiers[newTierIndex]
 					tier.Candidates = append(tier.Candidates, *candidate)
+
+					// Recompute the tier.
+					tier.RecomputeOnceMaxRequest()
 				} else {
 					// Append a new tier if not found.
-					tier = &AggregatedInstanceTypeOnceMaxRequestTier{
-						OnceMaxRequest: instType.Status.Accelerator.OnceMaxRequest,
-						Candidates:     []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
-					}
-					item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers, *tier)
+					item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers,
+						AggregatedInstanceTypeOnceMaxRequestTier{
+							OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+								Accelerator:  instType.Status.Accelerator.OnceMaxRequest,
+								CPU:          instType.Status.CPU.OnceMaxRequest,
+								RAM:          instType.Status.RAM.OnceMaxRequest,
+								LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
+							},
+							Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
+						})
+
+					// Sorted.
+					sort.Slice(item.Status.AcceleratorTiers, func(i, j int) bool {
+						return item.Status.AcceleratorTiers[i].OnceMaxRequest.Accelerator.Cmp(item.Status.AcceleratorTiers[j].OnceMaxRequest.Accelerator) < 0
+					})
 				}
 			}
 
+			// Recompute the item.
+			item.RecomputeOnceMaxRequest()
+
+			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
 				Type:   manager.WorkerEventModified,
 				Object: item,
@@ -295,8 +376,13 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			return evts
 		}
 
-		// Found the same tier.
+		// Found the same tier, but not in any candidate.
 		if index[1] != -1 {
+			if evt.Type == manager.WorkerEventDeleted {
+				// The candidate to delete does not exist; nothing to do.
+				return evts
+			}
+
 			tier := &item.Status.AcceleratorTiers[index[1]]
 
 			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
@@ -308,16 +394,15 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				LocalStorage: instType.Status.LocalStorage,
 			}
 
-			// Add the resource of the new candidate to the item remaining resource.
-			{
-				item.Status.Remaining.Accelerator.Add(candidate.Accelerator.Remaining)
-				item.Status.Remaining.CPU.Add(candidate.CPU.Remaining)
-				item.Status.Remaining.RAM.Add(candidate.RAM.Remaining)
-				item.Status.Remaining.LocalStorage.Add(candidate.LocalStorage.Remaining)
-			}
-
 			tier.Candidates = append(tier.Candidates, *candidate)
 
+			// Recompute the tier.
+			tier.RecomputeOnceMaxRequest()
+
+			// Recompute the item.
+			item.RecomputeOnceMaxRequest()
+
+			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
 				Type:   manager.WorkerEventModified,
 				Object: item,
@@ -325,42 +410,74 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 			return evts
 		}
+
+		// Found the same item, but not in any tier.
+		break
 	}
 
-	// Report an added event if not found in the original state and the event is not deleted.
-	if index[0] == -1 && evt.Type != manager.WorkerEventDeleted {
-		item := AggregatedInstanceType{
-			Name: stringx.TrimSuffix(instType.GenerateName, "-"),
-			Spec: instType.Spec,
-			Status: AggregatedInstanceTypeStatus{
-				Remaining: AggregatedInstanceTypeRemainingResource{
-					Accelerator:  instType.Status.Accelerator.Remaining,
-					CPU:          instType.Status.CPU.Remaining,
-					RAM:          instType.Status.RAM.Remaining,
-					LocalStorage: instType.Status.LocalStorage.Remaining,
-				},
-				AcceleratorTiers: []AggregatedInstanceTypeOnceMaxRequestTier{
-					{
-						OnceMaxRequest: instType.Status.Accelerator.OnceMaxRequest,
-						Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
-							{
-								Cluster:      evt.Cluster,
-								Name:         instType.Name,
-								Accelerator:  instType.Status.Accelerator,
-								CPU:          instType.Status.CPU,
-								RAM:          instType.Status.RAM,
-								LocalStorage: instType.Status.LocalStorage,
-							},
-						},
-					},
+	if evt.Type != manager.WorkerEventDeleted {
+		tier := AggregatedInstanceTypeOnceMaxRequestTier{
+			OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+				Accelerator:  instType.Status.Accelerator.OnceMaxRequest,
+				CPU:          instType.Status.CPU.OnceMaxRequest,
+				RAM:          instType.Status.RAM.OnceMaxRequest,
+				LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
+			},
+			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
+				{
+					Cluster:      evt.Cluster,
+					Name:         instType.Name,
+					Accelerator:  instType.Status.Accelerator,
+					CPU:          instType.Status.CPU,
+					RAM:          instType.Status.RAM,
+					LocalStorage: instType.Status.LocalStorage,
 				},
 			},
 		}
-		in.state.Items = append(in.state.Items, item)
+
+		// Found the same item but not in any tier.
+		if index[0] != -1 {
+			item := &in.state.Items[index[0]]
+			item.Status.AcceleratorTiers = append(item.Status.AcceleratorTiers, tier)
+
+			// Sorted.
+			sort.Slice(item.Status.AcceleratorTiers, func(i, j int) bool {
+				return item.Status.AcceleratorTiers[i].OnceMaxRequest.Accelerator.Cmp(item.Status.AcceleratorTiers[j].OnceMaxRequest.Accelerator) < 0
+			})
+
+			// Recompute the item.
+			item.RecomputeOnceMaxRequest()
+
+			// Report a modified event.
+			evts = append(evts, &manager.WorkerEvent{
+				Type:   manager.WorkerEventModified,
+				Object: item,
+			})
+
+			return evts
+		}
+
+		// Not found the same item, tier and candidate, create a new item with a new tier and candidate.
+		in.state.Items = append(in.state.Items, AggregatedInstanceType{
+			Name: stringx.TrimSuffix(instType.GenerateName, "-"),
+			Spec: instType.Spec,
+			Status: AggregatedInstanceTypeStatus{
+				OnceMaxRequest: tier.OnceMaxRequest,
+				AcceleratorTiers: []AggregatedInstanceTypeOnceMaxRequestTier{
+					tier,
+				},
+			},
+		})
+
+		item := &in.state.Items[len(in.state.Items)-1]
+
+		// Report an added event.
 		evts = append(evts, &manager.WorkerEvent{
 			Type:   manager.WorkerEventAdded,
-			Object: &item,
+			Object: item,
 		})
+
+		return evts
 	}
 
 	return evts

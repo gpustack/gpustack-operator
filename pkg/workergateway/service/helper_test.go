@@ -2,8 +2,15 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	worker "gpustack.ai/gpustack/api/worker/v1"
+	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
 func TestListAggregateInstanceTypes_Result(t *testing.T) {
@@ -103,4 +110,427 @@ func TestListAggregateInstanceTypes_Result(t *testing.T) {
 			assert.Equal(t, c.expected, actual)
 		})
 	}
+}
+
+func instTypeRes(once, remaining, capacity string) worker.InstanceTypeResource {
+	return worker.InstanceTypeResource{
+		OnceMaxRequest: resource.MustParse(once),
+		Remaining:      resource.MustParse(remaining),
+		Capacity:       resource.MustParse(capacity),
+	}
+}
+
+func instSpecCPUOnly() worker.InstanceTypeSpec {
+	return worker.InstanceTypeSpec{
+		Group:         "gpustack-cpu-only",
+		Acceleratable: false,
+	}
+}
+
+func instSpecA10G() worker.InstanceTypeSpec {
+	return worker.InstanceTypeSpec{
+		Group:             "gpustack-nvidia-a10g",
+		Acceleratable:     true,
+		Manufacturer:      "nvidia",
+		Product:           "NVIDIA-A10G",
+		Memory:            "23028Mi",
+		Family:            "Ampere",
+		ComputeCapability: "8.6",
+	}
+}
+
+func instSpecTeslaT4() worker.InstanceTypeSpec {
+	return worker.InstanceTypeSpec{
+		Group:             "gpustack-nvidia-tesla-t4",
+		Acceleratable:     true,
+		Manufacturer:      "nvidia",
+		Product:           "Tesla-T4",
+		Memory:            "15360Mi",
+		Family:            "Turing",
+		ComputeCapability: "7.5",
+	}
+}
+
+func instStatusCPU() worker.InstanceTypeStatus {
+	return worker.InstanceTypeStatus{
+		Phase:        "Active",
+		Accelerator:  instTypeRes("0", "0", "0"),
+		CPU:          instTypeRes("16", "16", "16"),
+		RAM:          instTypeRes("32135984Ki", "32135984Ki", "32135984Ki"),
+		LocalStorage: instTypeRes("104779756Ki", "104779756Ki", "104779756Ki"),
+	}
+}
+
+func instStatusGPU(acc string) worker.InstanceTypeStatus {
+	return worker.InstanceTypeStatus{
+		Phase:        "Active",
+		Accelerator:  instTypeRes(acc, acc, acc),
+		CPU:          instTypeRes("4", "4", "4"),
+		RAM:          instTypeRes("16164772Ki", "16164772Ki", "16164772Ki"),
+		LocalStorage: instTypeRes("104779756Ki", "104779756Ki", "104779756Ki"),
+	}
+}
+
+func newInstType(genName, name string, spec worker.InstanceTypeSpec, status worker.InstanceTypeStatus) *worker.InstanceType {
+	return &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:         name,
+			GenerateName: genName,
+		},
+		Spec:   spec,
+		Status: status,
+	}
+}
+
+func cpuOnlyInst(name string) *worker.InstanceType {
+	if name == "" {
+		name = "gpustack-cpu-only-h7vkb"
+	}
+	return newInstType("gpustack-cpu-only-", name, instSpecCPUOnly(), instStatusCPU())
+}
+
+func a10gInst(name, acc string) *worker.InstanceType {
+	if name == "" {
+		name = "gpustack-nvidia-a10g-hcjmv"
+	}
+	return newInstType("gpustack-nvidia-a10g-", name, instSpecA10G(), instStatusGPU(acc))
+}
+
+func teslaT4Inst(name, acc string) *worker.InstanceType {
+	if name == "" {
+		name = "gpustack-nvidia-tesla-t4-sh2zl"
+	}
+	return newInstType("gpustack-nvidia-tesla-t4-", name, instSpecTeslaT4(), instStatusGPU(acc))
+}
+
+type seed struct {
+	cluster string
+	obj     *worker.InstanceType
+}
+
+func buildState(t *testing.T, seeds ...seed) AggregatedInstanceTypeList {
+	t.Helper()
+	op := OpListAggregateInstanceTypes()
+	for _, s := range seeds {
+		require.NoError(t, op.Next(s.cluster, s.obj))
+	}
+	return op.Result(false)
+}
+
+func findItem(state AggregatedInstanceTypeList, name string) *AggregatedInstanceType {
+	for i := range state.Items {
+		if state.Items[i].Name == name {
+			return &state.Items[i]
+		}
+	}
+	return nil
+}
+
+func TestHandleAggregatedInstanceType(t *testing.T) {
+	t.Run("add brand-new item emits Added with Object as *AggregatedInstanceType", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-a",
+			Object:  a10gInst("", "1"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventAdded, evts[0].Type)
+
+		item, ok := evts[0].Object.(*AggregatedInstanceType)
+		require.True(t, ok, "Added event Object must be *AggregatedInstanceType, got %T", evts[0].Object)
+		assert.Equal(t, "gpustack-nvidia-a10g", item.Name)
+
+		require.Len(t, h.state.Items, 1)
+		require.Len(t, h.state.Items[0].Status.AcceleratorTiers, 1)
+		require.Len(t, h.state.Items[0].Status.AcceleratorTiers[0].Candidates, 1)
+	})
+
+	t.Run("add candidate to existing tier emits Modified", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-b",
+			Object:  a10gInst("inst-b", "1"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 1)
+		assert.Len(t, item.Status.AcceleratorTiers[0].Candidates, 2)
+	})
+
+	t.Run("add new tier to existing item keeps tiers sorted ascending", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-b",
+			Object:  a10gInst("inst-b", "4"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 2)
+		assert.True(t,
+			item.Status.AcceleratorTiers[0].OnceMaxRequest.Accelerator.Cmp(
+				item.Status.AcceleratorTiers[1].OnceMaxRequest.Accelerator) < 0,
+			"tiers must remain sorted ascending by accelerator after a new tier is appended")
+	})
+
+	t.Run("in-place update keeps candidate in same tier and recomputes overview", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+		))
+
+		updated := a10gInst("inst-a", "1")
+		updated.Status.CPU = instTypeRes("8", "8", "8")
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  updated,
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 1)
+		require.Len(t, item.Status.AcceleratorTiers[0].Candidates, 1)
+		assert.True(t, item.Status.AcceleratorTiers[0].Candidates[0].CPU.OnceMaxRequest.Equal(resource.MustParse("8")))
+		assert.True(t, item.Status.AcceleratorTiers[0].OnceMaxRequest.CPU.Equal(resource.MustParse("8")))
+		assert.True(t, item.Status.OnceMaxRequest.CPU.Equal(resource.MustParse("8")))
+	})
+
+	t.Run("cross-tier move into existing tier merges candidates correctly", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-b", obj: a10gInst("inst-b", "2")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  a10gInst("inst-a", "2"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 1, "tier Acc=1 should be removed when its only candidate moves out")
+		tier := &item.Status.AcceleratorTiers[0]
+		assert.True(t, tier.OnceMaxRequest.Accelerator.Equal(resource.MustParse("2")))
+		require.Len(t, tier.Candidates, 2)
+
+		got := map[string]string{}
+		for _, c := range tier.Candidates {
+			got[c.Cluster] = c.Name
+		}
+		assert.Equal(t, "inst-a", got["cluster-a"], "inst-a must end up in tier Acc=2 with original name")
+		assert.Equal(t, "inst-b", got["cluster-b"], "inst-b must still be there with original name")
+	})
+
+	t.Run("cross-tier move creates a new tier when no target tier exists", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-b", obj: a10gInst("inst-b", "8")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  a10gInst("inst-a", "4"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 2)
+		assert.True(t, item.Status.AcceleratorTiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")),
+			"new tier Acc=4 must be sorted before existing tier Acc=8")
+		assert.True(t, item.Status.AcceleratorTiers[1].OnceMaxRequest.Accelerator.Equal(resource.MustParse("8")))
+	})
+
+	t.Run("delete candidate but tier retains others", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-b", obj: a10gInst("inst-b", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  a10gInst("inst-a", "1"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 1)
+		require.Len(t, item.Status.AcceleratorTiers[0].Candidates, 1)
+		assert.Equal(t, "cluster-b", item.Status.AcceleratorTiers[0].Candidates[0].Cluster)
+	})
+
+	t.Run("delete candidate empties tier but item retains another tier", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-b", obj: a10gInst("inst-b", "2")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  a10gInst("inst-a", "1"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers, 1)
+		assert.True(t, item.Status.AcceleratorTiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("2")))
+	})
+
+	t.Run("delete last candidate of middle item emits Deleted with the correct name", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: cpuOnlyInst("")},
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-a", obj: teslaT4Inst("inst-t4", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  a10gInst("inst-a", "1"),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventDeleted, evts[0].Type)
+		deleted, ok := evts[0].Object.(*AggregatedInstanceType)
+		require.True(t, ok)
+		assert.Equal(t, "gpustack-nvidia-a10g", deleted.Name,
+			"Deleted event name must reflect the removed item, not the post-splice neighbor")
+
+		assert.NotNil(t, findItem(h.state, "gpustack-cpu-only"))
+		assert.NotNil(t, findItem(h.state, "gpustack-nvidia-tesla-t4"))
+		assert.Nil(t, findItem(h.state, "gpustack-nvidia-a10g"))
+	})
+
+	t.Run("delete-all-cluster emits Deleted with correct name for every removed item", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: cpuOnlyInst("")},
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-a", obj: teslaT4Inst("inst-t4", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  nil,
+		})
+
+		require.Len(t, evts, 3)
+		got := map[string]bool{}
+		for _, e := range evts {
+			assert.Equal(t, manager.WorkerEventDeleted, e.Type)
+			d, ok := e.Object.(*AggregatedInstanceType)
+			require.True(t, ok)
+			got[d.Name] = true
+		}
+		assert.True(t, got["gpustack-cpu-only"], "cpu-only Deleted event missing or wrong name; got names=%v", got)
+		assert.True(t, got["gpustack-nvidia-a10g"], "a10g Deleted event missing or wrong name; got names=%v", got)
+		assert.True(t, got["gpustack-nvidia-tesla-t4"], "tesla-t4 Deleted event missing or wrong name; got names=%v", got)
+		assert.Empty(t, h.state.Items)
+	})
+
+	t.Run("delete-all-cluster preserves candidates owned by other clusters", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: cpuOnlyInst("cpu-a")},
+			seed{cluster: "cluster-b", obj: cpuOnlyInst("cpu-b")},
+			seed{cluster: "cluster-b", obj: a10gInst("inst-b", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+		})
+
+		require.Len(t, evts, 1, "only cpu-only had a cluster-a candidate; expect exactly one Modified event")
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+		cpu := findItem(h.state, "gpustack-cpu-only")
+		require.NotNil(t, cpu)
+		require.Len(t, cpu.Status.AcceleratorTiers, 1)
+		require.Len(t, cpu.Status.AcceleratorTiers[0].Candidates, 1)
+		assert.Equal(t, "cluster-b", cpu.Status.AcceleratorTiers[0].Candidates[0].Cluster)
+
+		gpu := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, gpu, "a10g item must remain untouched")
+		require.Len(t, gpu.Status.AcceleratorTiers, 1)
+		require.Len(t, gpu.Status.AcceleratorTiers[0].Candidates, 1)
+	})
+
+	t.Run("deleting a non-existent candidate is a no-op", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-b",
+			Object:  a10gInst("inst-b", "1"),
+		})
+
+		assert.Empty(t, evts)
+		require.Len(t, h.state.Items, 1)
+		require.Len(t, h.state.Items[0].Status.AcceleratorTiers[0].Candidates, 1)
+	})
+
+	t.Run("Modified event with DeletionTimestamp is treated as delete", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t,
+			seed{cluster: "cluster-a", obj: a10gInst("inst-a", "1")},
+			seed{cluster: "cluster-b", obj: a10gInst("inst-b", "1")},
+		))
+
+		dying := a10gInst("inst-a", "1")
+		now := meta.NewTime(time.Now())
+		dying.DeletionTimestamp = &now
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  dying,
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type,
+			"item still has cluster-b's candidate, so we expect Modified, not Deleted")
+
+		item := findItem(h.state, "gpustack-nvidia-a10g")
+		require.NotNil(t, item)
+		require.Len(t, item.Status.AcceleratorTiers[0].Candidates, 1)
+		assert.Equal(t, "cluster-b", item.Status.AcceleratorTiers[0].Candidates[0].Cluster)
+	})
 }

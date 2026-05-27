@@ -19,8 +19,8 @@ type AggregatedInstanceType struct {
 }
 
 type AggregatedInstanceTypeStatus struct {
-	// Remaining is the remaining resource of the AggregatedInstanceType.
-	Remaining AggregatedInstanceTypeRemainingResource `json:"remaining"`
+	// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceType.
+	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
 	// AcceleratorTiers is the list of once max request tiers of the AggregatedInstanceType in accelerator dimension.
 	//
@@ -28,7 +28,7 @@ type AggregatedInstanceTypeStatus struct {
 	AcceleratorTiers []AggregatedInstanceTypeOnceMaxRequestTier `json:"acceleratorTiers"`
 }
 
-type AggregatedInstanceTypeRemainingResource struct {
+type AggregatedInstanceTypeOverviewResource struct {
 	// Accelerator is the accelerator remaining resource of the AggregatedInstanceType, e.g. "1", "4".
 	Accelerator resource.Quantity `json:"accelerator"`
 
@@ -43,8 +43,8 @@ type AggregatedInstanceTypeRemainingResource struct {
 }
 
 type AggregatedInstanceTypeOnceMaxRequestTier struct {
-	// OnceMaxRequest is the once max request accelerator of the tier, e.g. "4", "8".
-	OnceMaxRequest resource.Quantity `json:"onceMaxRequest"`
+	// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceTypeOnceMaxRequestTier.
+	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
 	// Candidates is the list of candidates of the tier.
 	//

@@ -173,6 +173,8 @@ func (s *Service) handleListInstanceTypes(w http.ResponseWriter, r *http.Request
 			return
 		}
 
+		// The result of listOp has transferred the ownership to watchOp,
+		// the result must not be retained or read after this point.
 		watchOp := OpHandleAggregatedInstanceType(listOp.Result(false))
 		s.streamResponse(w, r, req.Clusters, gvk, watchOp.Handle)
 
