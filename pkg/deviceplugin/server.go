@@ -63,16 +63,16 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 	ctx := srv.Context()
 
 	resp, err := s.getListAndWatchResponse(ctx)
-	if err != nil {
+	if err == nil {
 		s.Logger.Error(err, "get list and watch response")
-		return err
-	}
-	if err = srv.Send(resp); err != nil {
+		// Ignore the error and continue to retry in the loop,
+		// since ListAndWatch is expected to be long-running and resilient to transient errors.
+	} else if err = srv.Send(resp); err != nil {
 		s.Logger.Error(err, "send list and watch response")
 		return err
 	}
 
-	notifier := s.Reconciler.getReconcileNotifier()
+	notifier := s.Reconciler.getReconcileNotifier(s.Manufacturer, s.AllocationMode)
 	for {
 		select {
 		case <-ctx.Done():

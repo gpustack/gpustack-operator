@@ -33,16 +33,24 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-// DevicesReconciler reconciles the v1alpha1.Devices object on a Kubernetes Node
-// and watches the events of Pods scheduled to the Node, to manage the status of Devices.
-type DevicesReconciler struct {
-	NodeName  string
-	Client    ctrlcli.Client
-	APIReader ctrlcli.Reader
+type (
+	_DevicesNotifier struct {
+		Manufacturer   string
+		AllocationMode workercore.DeviceAllocationMode
+		Channel        chan struct{}
+	}
 
-	notifiersMutex sync.RWMutex
-	notifiers      []chan struct{}
-}
+	// DevicesReconciler reconciles the v1alpha1.Devices object on a Kubernetes Node
+	// and watches the events of Pods scheduled to the Node, to manage the status of Devices.
+	DevicesReconciler struct {
+		NodeName  string
+		Client    ctrlcli.Client
+		APIReader ctrlcli.Reader
+
+		notifiersMutex sync.RWMutex
+		notifiers      []_DevicesNotifier
+	}
+)
 
 func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	nodeName := req.Name
@@ -120,7 +128,16 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.notifiersMutex.RLock()
 	if len(r.notifiers) > 0 {
 		for i := range r.notifiers {
-			r.notifiers[i] <- struct{}{}
+			notifier := &r.notifiers[i]
+			select {
+			case notifier.Channel <- struct{}{}:
+			default:
+				logger.Error(nil,
+					"notifier channel is full, skipping notify",
+					"manufacturer", notifier.Manufacturer,
+					"mode", notifier.AllocationMode.String(),
+				)
+			}
 		}
 	}
 	r.notifiersMutex.RUnlock()
@@ -221,13 +238,17 @@ func (r *DevicesReconciler) findObjectWhenPodUpdating(_ context.Context, obj ctr
 	}
 }
 
-func (r *DevicesReconciler) getReconcileNotifier() <-chan struct{} {
+func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocationMode workercore.DeviceAllocationMode) <-chan struct{} {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
 
-	notifier := make(chan struct{}, 4)
-	r.notifiers = append(r.notifiers, notifier)
-	return notifier
+	channel := make(chan struct{}, 4)
+	r.notifiers = append(r.notifiers, _DevicesNotifier{
+		Manufacturer:   manufacturer,
+		AllocationMode: allocationMode,
+		Channel:        channel,
+	})
+	return channel
 }
 
 func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices, error) {
