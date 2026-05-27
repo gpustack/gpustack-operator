@@ -202,14 +202,14 @@ RUN <<EOF
     #  - shared libraries needed by skopeo (libgpgme/libassuan/libbtrfs/libdevmapper)
     #  - libdrm runtime for amdgpu binding dlopen
     apt-get install -y --no-install-recommends \
-        bash openssl curl \
+        bash openssl curl binutils \
         tzdata locales \
         iproute2 iputils-ping ifstat net-tools dnsutils pciutils ipmitool \
         procps sysstat glances htop numactl \
         vim jq bc tree gosu tini \
         logrotate cron netcat-openbsd \
         libgpgme11t64 libassuan0 libbtrfs0 libdevmapper1.02.1 \
-        libdrm2
+        libdrm2 libdrm-amdgpu1
 
     # Update locale
     localedef -i en_US -c -f UTF-8 -A /usr/share/locale/locale.alias en_US.UTF-8
