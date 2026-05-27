@@ -138,6 +138,10 @@ feature:
   enableInlineVolume: false
   propagateHostMountOptions: false
 
+nodeDriverRegistrar:
+  livenessProbe:
+    enabled: false
+
 node:
   name: csi-nfs
   priorityClassName: system-cluster-critical
