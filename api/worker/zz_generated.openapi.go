@@ -1738,6 +1738,33 @@ func schema_gpustack_api_worker_v1_InstanceStatus(ref common.ReferenceCallback) 
 							Format:      "",
 						},
 					},
+					"nodeName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeName is the name of the Kubernetes Node that the Instance is running on.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"accessAddresses": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AccessAddresses holds the accessible addresses allocated to the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
 					"hostIPs": {
 						VendorExtensible: spec.VendorExtensible{
 							Extensions: spec.Extensions{

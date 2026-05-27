@@ -94,10 +94,10 @@ func (h *InstanceHandler) SetupHandler(
 		},
 		extensionapi.JSONPathTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Host-IP",
+				Name: "Access",
 				Type: "string",
 			},
-			JSONPath: ".status.hostIPs[0].ip",
+			JSONPath: ".status.accessAddresses[0]",
 		},
 		extensionapi.JSONPathTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
@@ -243,7 +243,9 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 		return nil, err
 	}
 
-	inst = convertInstanceFromPod(pod)
+	staticAddress := settings.InstanceAccessStaticAddress.ShouldValue(ctx)
+	wildcardDNS := settings.InstanceAccessWildcardDNS.ShouldValue(ctx)
+	inst = convertInstanceFromPod(pod, staticAddress, wildcardDNS)
 	return inst, nil
 }
 
@@ -261,7 +263,7 @@ func (h *InstanceHandler) OnList(ctx context.Context, opts ctrlcli.ListOptions) 
 	}
 
 	// Convert.
-	instList := convertInstanceListFromPodList(podList, opts)
+	instList := convertInstanceListFromPodList(ctx, podList, opts)
 	return instList, nil
 }
 
@@ -272,6 +274,9 @@ func (h *InstanceHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions)
 	if err != nil {
 		return nil, err
 	}
+
+	staticAddress := settings.InstanceAccessStaticAddress.ShouldValue(ctx)
+	wildcardDNS := settings.InstanceAccessWildcardDNS.ShouldValue(ctx)
 
 	c := make(chan watch.Event)
 	dw := watch.NewProxyWatcher(c)
@@ -315,7 +320,7 @@ func (h *InstanceHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions)
 				}
 
 				// Convert.
-				inst := convertInstanceFromPod(pod)
+				inst := convertInstanceFromPod(pod, staticAddress, wildcardDNS)
 				if inst == nil {
 					// Ignore if the pod doesn't match the requested namespace.
 					continue
@@ -350,7 +355,9 @@ func (h *InstanceHandler) OnGet(ctx context.Context, key types.NamespacedName, o
 	}
 
 	// Convert.
-	inst := convertInstanceFromPod(pod)
+	staticAddress := settings.InstanceAccessStaticAddress.ShouldValue(ctx)
+	wildcardDNS := settings.InstanceAccessWildcardDNS.ShouldValue(ctx)
+	inst := convertInstanceFromPod(pod, staticAddress, wildcardDNS)
 	if inst == nil {
 		return nil, kerrors.NewNotFound(worker.Resource(_InstanceResource), key.Name)
 	}
@@ -450,7 +457,9 @@ func (h *InstanceHandler) OnUpdate(
 		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding pod: %w", err))
 	}
 
-	inst = convertInstanceFromPod(pod)
+	staticAddress := settings.InstanceAccessStaticAddress.ShouldValue(ctx)
+	wildcardDNS := settings.InstanceAccessWildcardDNS.ShouldValue(ctx)
+	inst = convertInstanceFromPod(pod, staticAddress, wildcardDNS)
 	return inst, nil
 }
 
@@ -529,7 +538,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 		sshdC := core.Container{
 			Name: "sshd",
 			Image: func() string {
-				img := settings.SSHServerImage.ShouldValue(ctx)
+				img := settings.InstanceSSHServerImage.ShouldValue(ctx)
 				if cn := settings.ContainerNamespace.ShouldValue(ctx); cn != "" {
 					_, suffix, found := strings.Cut(img, "/")
 					if found {
@@ -745,7 +754,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 	return pod
 }
 
-func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
+func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *worker.Instance {
 	if pod == nil {
 		return nil
 	}
@@ -855,10 +864,21 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 				}(),
 			},
 			Status: worker.InstanceStatus{
+				NodeName: pod.Spec.NodeName,
 				HostIPs: func() []core.HostIP {
 					var ret []core.HostIP
-					if notes["externalHostIP"] != "" {
+					switch {
+					case notes["externalHostIP"] != "":
 						ret = append(ret, core.HostIP{IP: notes["externalHostIP"]})
+					case notes["externalHostIPs"] != "":
+						hostIPs := slicex.FilterTransform(strings.Split(notes["externalHostIPs"], ","),
+							func(ip string) (core.HostIP, bool) {
+								if ip == "" {
+									return core.HostIP{}, false
+								}
+								return core.HostIP{IP: ip}, true
+							})
+						ret = hostIPs
 					}
 					if len(pod.Status.HostIPs) > 0 {
 						ret = append(ret, pod.Status.HostIPs...)
@@ -913,13 +933,33 @@ func convertInstanceFromPod(pod *core.Pod) *worker.Instance {
 		}
 	}
 
+	switch {
+	case staticAddress != "":
+		inst.Status.AccessAddresses = []string{
+			staticAddress,
+		}
+	case wildcardDNS != "" && len(inst.Status.HostIPs) > 0:
+		ip := string(slicex.Transform([]rune(inst.Status.HostIPs[0].IP), func(r rune) rune {
+			if r == '.' || r == ':' {
+				return '-'
+			}
+			return r
+		}))
+		inst.Status.AccessAddresses = []string{
+			fmt.Sprintf("%s.%s", ip, wildcardDNS),
+		}
+	}
+
 	return inst
 }
 
-func convertInstanceListFromPodList(podList *core.PodList, opts ctrlcli.ListOptions) *worker.InstanceList {
+func convertInstanceListFromPodList(ctx context.Context, podList *core.PodList, opts ctrlcli.ListOptions) *worker.InstanceList {
 	if podList == nil {
 		return &worker.InstanceList{}
 	}
+
+	staticAddress := settings.InstanceAccessStaticAddress.ShouldValue(ctx)
+	wildcardDNS := settings.InstanceAccessWildcardDNS.ShouldValue(ctx)
 
 	instList := &worker.InstanceList{
 		ListMeta: podList.ListMeta,
@@ -927,7 +967,7 @@ func convertInstanceListFromPodList(podList *core.PodList, opts ctrlcli.ListOpti
 	}
 
 	for i := range podList.Items {
-		inst := convertInstanceFromPod(&podList.Items[i])
+		inst := convertInstanceFromPod(&podList.Items[i], staticAddress, wildcardDNS)
 		if inst == nil {
 			continue
 		}

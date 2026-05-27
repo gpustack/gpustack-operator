@@ -1447,7 +1447,7 @@ func (m *InstanceStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 				i = encodeVarintGenerated(dAtA, i, uint64(size))
 			}
 			i--
-			dAtA[i] = 0x2a
+			dAtA[i] = 0x3a
 		}
 	}
 	if len(m.PodIPs) > 0 {
@@ -1461,7 +1461,7 @@ func (m *InstanceStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 				i = encodeVarintGenerated(dAtA, i, uint64(size))
 			}
 			i--
-			dAtA[i] = 0x22
+			dAtA[i] = 0x32
 		}
 	}
 	if len(m.HostIPs) > 0 {
@@ -1475,9 +1475,23 @@ func (m *InstanceStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 				i = encodeVarintGenerated(dAtA, i, uint64(size))
 			}
 			i--
-			dAtA[i] = 0x1a
+			dAtA[i] = 0x2a
 		}
 	}
+	if len(m.AccessAddresses) > 0 {
+		for iNdEx := len(m.AccessAddresses) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.AccessAddresses[iNdEx])
+			copy(dAtA[i:], m.AccessAddresses[iNdEx])
+			i = encodeVarintGenerated(dAtA, i, uint64(len(m.AccessAddresses[iNdEx])))
+			i--
+			dAtA[i] = 0x22
+		}
+	}
+	i -= len(m.NodeName)
+	copy(dAtA[i:], m.NodeName)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.NodeName)))
+	i--
+	dAtA[i] = 0x1a
 	i -= len(m.PhaseMessage)
 	copy(dAtA[i:], m.PhaseMessage)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.PhaseMessage)))
@@ -2536,6 +2550,14 @@ func (m *InstanceStatus) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.PhaseMessage)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.NodeName)
+	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.AccessAddresses) > 0 {
+		for _, s := range m.AccessAddresses {
+			l = len(s)
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
 	if len(m.HostIPs) > 0 {
 		for _, e := range m.HostIPs {
 			l = e.Size()
@@ -3157,6 +3179,8 @@ func (this *InstanceStatus) String() string {
 	s := strings.Join([]string{`&InstanceStatus{`,
 		`Phase:` + fmt.Sprintf("%v", this.Phase) + `,`,
 		`PhaseMessage:` + fmt.Sprintf("%v", this.PhaseMessage) + `,`,
+		`NodeName:` + fmt.Sprintf("%v", this.NodeName) + `,`,
+		`AccessAddresses:` + fmt.Sprintf("%v", this.AccessAddresses) + `,`,
 		`HostIPs:` + repeatedStringForHostIPs + `,`,
 		`PodIPs:` + repeatedStringForPodIPs + `,`,
 		`Ports:` + repeatedStringForPorts + `,`,
@@ -7263,6 +7287,70 @@ func (m *InstanceStatus) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NodeName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NodeName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AccessAddresses", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AccessAddresses = append(m.AccessAddresses, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field HostIPs", wireType)
 			}
 			var msglen int
@@ -7295,7 +7383,7 @@ func (m *InstanceStatus) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 4:
+		case 6:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field PodIPs", wireType)
 			}
@@ -7329,7 +7417,7 @@ func (m *InstanceStatus) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 5:
+		case 7:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Ports", wireType)
 			}

@@ -460,13 +460,21 @@ message InstanceStatus {
   // PhaseMessage is the message to describe the current phase of the Instance.
   optional string phaseMessage = 2;
 
+  // NodeName is the name of the Kubernetes Node that the Instance is running on.
+  optional string nodeName = 3;
+
+  // AccessAddresses holds the accessible addresses allocated to the Instance.
+  //
+  // +listType=atomic
+  repeated string accessAddresses = 4;
+
   // HostIPs holds the IP addresses allocated to the host.
   //
   // +patchStrategy=merge
   // +patchMergeKey=ip
   // +listType=map
   // +listMapKey=ip
-  repeated .k8s.io.api.core.v1.HostIP hostIPs = 3;
+  repeated .k8s.io.api.core.v1.HostIP hostIPs = 5;
 
   // PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.
   //
@@ -474,7 +482,7 @@ message InstanceStatus {
   // +patchMergeKey=ip
   // +listType=map
   // +listMapKey=ip
-  repeated .k8s.io.api.core.v1.PodIP podIPs = 4;
+  repeated .k8s.io.api.core.v1.PodIP podIPs = 6;
 
   // Ports is the list of ports to expose from the Instance.
   //
@@ -483,7 +491,7 @@ message InstanceStatus {
   // +listType=map
   // +listMapKey=port
   // +listMapKey=protocol
-  repeated InstanceServicePort ports = 5;
+  repeated InstanceServicePort ports = 7;
 }
 
 // InstanceTemplate defines the template for the Instance to run.

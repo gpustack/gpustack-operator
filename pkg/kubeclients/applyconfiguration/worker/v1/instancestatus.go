@@ -15,6 +15,10 @@ type InstanceStatusApplyConfiguration struct {
 	Phase *string `json:"phase,omitempty"`
 	// PhaseMessage is the message to describe the current phase of the Instance.
 	PhaseMessage *string `json:"phaseMessage,omitempty"`
+	// NodeName is the name of the Kubernetes Node that the Instance is running on.
+	NodeName *string `json:"nodeName,omitempty"`
+	// AccessAddresses holds the accessible addresses allocated to the Instance.
+	AccessAddresses []string `json:"accessAddresses,omitempty"`
 	// HostIPs holds the IP addresses allocated to the host.
 	HostIPs []corev1.HostIPApplyConfiguration `json:"hostIPs,omitempty"`
 	// PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.
@@ -42,6 +46,24 @@ func (b *InstanceStatusApplyConfiguration) WithPhase(value string) *InstanceStat
 // If called multiple times, the PhaseMessage field is set to the value of the last call.
 func (b *InstanceStatusApplyConfiguration) WithPhaseMessage(value string) *InstanceStatusApplyConfiguration {
 	b.PhaseMessage = &value
+	return b
+}
+
+// WithNodeName sets the NodeName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the NodeName field is set to the value of the last call.
+func (b *InstanceStatusApplyConfiguration) WithNodeName(value string) *InstanceStatusApplyConfiguration {
+	b.NodeName = &value
+	return b
+}
+
+// WithAccessAddresses adds the given value to the AccessAddresses field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AccessAddresses field.
+func (b *InstanceStatusApplyConfiguration) WithAccessAddresses(values ...string) *InstanceStatusApplyConfiguration {
+	for i := range values {
+		b.AccessAddresses = append(b.AccessAddresses, values[i])
+	}
 	return b
 }
 

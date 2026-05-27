@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"strconv"
+	"strings"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -88,11 +89,14 @@ func (r *PodReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	}
 	err = r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(eNode), eNode)
 	if err == nil {
+		var externalHostIPs []string
 		for i := range eNode.Status.Addresses {
 			if eNode.Status.Addresses[i].Type == core.NodeExternalIP {
-				notes["externalHostIP"] = eNode.Status.Addresses[i].Address
-				break
+				externalHostIPs = append(externalHostIPs, eNode.Status.Addresses[i].Address)
 			}
+		}
+		if len(externalHostIPs) > 0 {
+			notes["externalHostIPs"] = strings.Join(externalHostIPs, ",")
 		}
 	}
 

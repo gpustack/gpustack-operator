@@ -191,13 +191,21 @@ type InstanceStatus struct {
 	// PhaseMessage is the message to describe the current phase of the Instance.
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
 
+	// NodeName is the name of the Kubernetes Node that the Instance is running on.
+	NodeName string `json:"nodeName,omitempty" protobuf:"bytes,3,opt,name=nodeName"`
+
+	// AccessAddresses holds the accessible addresses allocated to the Instance.
+	//
+	// +listType=atomic
+	AccessAddresses []string `json:"accessAddresses,omitempty" protobuf:"bytes,4,rep,name=accessAddresses"`
+
 	// HostIPs holds the IP addresses allocated to the host.
 	//
 	// +patchStrategy=merge
 	// +patchMergeKey=ip
 	// +listType=map
 	// +listMapKey=ip
-	HostIPs []core.HostIP `json:"hostIPs,omitempty" patchStrategy:"merge" patchMergeKey:"ip" protobuf:"bytes,3,rep,name=hostIPs"`
+	HostIPs []core.HostIP `json:"hostIPs,omitempty" patchStrategy:"merge" patchMergeKey:"ip" protobuf:"bytes,5,rep,name=hostIPs"`
 
 	// PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.
 	//
@@ -205,7 +213,7 @@ type InstanceStatus struct {
 	// +patchMergeKey=ip
 	// +listType=map
 	// +listMapKey=ip
-	PodIPs []core.PodIP `json:"podIPs,omitempty" patchStrategy:"merge" patchMergeKey:"ip" protobuf:"bytes,4,rep,name=podIPs"`
+	PodIPs []core.PodIP `json:"podIPs,omitempty" patchStrategy:"merge" patchMergeKey:"ip" protobuf:"bytes,6,rep,name=podIPs"`
 
 	// Ports is the list of ports to expose from the Instance.
 	//
@@ -214,7 +222,7 @@ type InstanceStatus struct {
 	// +listType=map
 	// +listMapKey=port
 	// +listMapKey=protocol
-	Ports []InstanceServicePort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,5,rep,name=ports"`
+	Ports []InstanceServicePort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,7,rep,name=ports"`
 }
 
 // InstanceServicePort defines the port to expose from the container and the port to expose on the node.
