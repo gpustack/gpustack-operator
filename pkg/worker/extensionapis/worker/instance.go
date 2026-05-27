@@ -23,14 +23,17 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -774,6 +777,14 @@ func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *w
 		return nil
 	}
 
+	// Retrieve allocation info.
+	var allocation workercore.DevicesAllocationGroup
+	if pod.Annotations != nil && pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] != "" {
+		v := pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey]
+		json.ShouldUnmarshal(stringx.ToBytes(&v), &allocation)
+		delete(pod.Annotations, deviceplugin.AllocatedAcceleratorAnnoKey)
+	}
+
 	// Reflect instance.
 	var inst *worker.Instance
 	{
@@ -948,6 +959,10 @@ func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *w
 		inst.Status.AccessAddresses = []string{
 			fmt.Sprintf("%s.%s", ip, wildcardDNS),
 		}
+	}
+
+	if allocation.ID != "" {
+		inst.Status.Allocation = &allocation
 	}
 
 	return inst

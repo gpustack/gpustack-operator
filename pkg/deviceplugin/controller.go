@@ -183,9 +183,9 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldPod, newPod := e.ObjectOld, e.ObjectNew
 						if newPod.GetDeletionTimestamp() == nil {
-							return !mapx.EqualWithKeys(oldPod.GetAnnotations(), newPod.GetAnnotations(), _AllocatedAcceleratorAnnoKey)
+							return !mapx.EqualWithKeys(oldPod.GetAnnotations(), newPod.GetAnnotations(), AllocatedAcceleratorAnnoKey)
 						}
-						if kubemeta.HasAnnotation(oldPod, _AllocatedAcceleratorAnnoKey) {
+						if kubemeta.HasAnnotation(oldPod, AllocatedAcceleratorAnnoKey) {
 							if oldPod.GetDeletionTimestamp() == nil {
 								return true
 							}
@@ -246,7 +246,7 @@ func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices
 }
 
 const (
-	_AllocatedAcceleratorAnnoKey      = "device.gpustack.ai/accelerator.allocated"
+	AllocatedAcceleratorAnnoKey       = "device.gpustack.ai/accelerator.allocated"
 	_PreferredAcceleratorIDAnnoKey    = "device.gpustack.ai/accelerator.preferred-id"
 	_PreferredAcceleratorIndexAnnoKey = "device.gpustack.ai/accelerator.preferred-index"
 )
@@ -319,7 +319,7 @@ func (r *DevicesReconciler) patchAllocatingPod(ctx context.Context, pod *core.Po
 	obj := map[string]any{
 		"metadata": map[string]any{
 			"annotations": map[string]any{
-				_AllocatedAcceleratorAnnoKey: string(allocatedStatusBytes),
+				AllocatedAcceleratorAnnoKey: string(allocatedStatusBytes),
 			},
 		},
 	}
@@ -333,8 +333,8 @@ func (r *DevicesReconciler) patchAllocatingPod(ctx context.Context, pod *core.Po
 }
 
 func extractAllocatedStatusFromPod(pod *core.Pod) (allocatedStatus workercore.DevicesStatus, err error) {
-	if pod.Annotations != nil && pod.Annotations[_AllocatedAcceleratorAnnoKey] != "" {
-		str := pod.Annotations[_AllocatedAcceleratorAnnoKey]
+	if pod.Annotations != nil && pod.Annotations[AllocatedAcceleratorAnnoKey] != "" {
+		str := pod.Annotations[AllocatedAcceleratorAnnoKey]
 		err = json.Unmarshal(stringx.ToBytes(&str), &allocatedStatus)
 	}
 	return allocatedStatus, err

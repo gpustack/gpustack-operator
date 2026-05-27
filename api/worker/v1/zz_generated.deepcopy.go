@@ -11,6 +11,7 @@
 package v1
 
 import (
+	v1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -772,6 +773,11 @@ func (in *InstanceStatus) DeepCopyInto(out *InstanceStatus) {
 		in, out := &in.Ports, &out.Ports
 		*out = make([]InstanceServicePort, len(*in))
 		copy(*out, *in)
+	}
+	if in.Allocation != nil {
+		in, out := &in.Allocation, &out.Allocation
+		*out = new(v1alpha1.DevicesAllocationGroup)
+		(*in).DeepCopyInto(*out)
 	}
 	return
 }

@@ -4,6 +4,7 @@ package v1
 
 import (
 	corev1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/core/v1"
+	v1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1alpha1"
 )
 
 // InstanceStatusApplyConfiguration represents a declarative configuration of the InstanceStatus type for use
@@ -25,6 +26,10 @@ type InstanceStatusApplyConfiguration struct {
 	PodIPs []corev1.PodIPApplyConfiguration `json:"podIPs,omitempty"`
 	// Ports is the list of ports to expose from the Instance.
 	Ports []InstanceServicePortApplyConfiguration `json:"ports,omitempty"`
+	// Allocation is the devices allocation result for the Instance.
+	//
+	// Configured if the Instance is requested with accelerator resources and the allocation is successful.
+	Allocation *v1alpha1.DevicesAllocationGroupApplyConfiguration `json:"allocation,omitempty"`
 }
 
 // InstanceStatusApplyConfiguration constructs a declarative configuration of the InstanceStatus type for use with
@@ -103,5 +108,13 @@ func (b *InstanceStatusApplyConfiguration) WithPorts(values ...*InstanceServiceP
 		}
 		b.Ports = append(b.Ports, *values[i])
 	}
+	return b
+}
+
+// WithAllocation sets the Allocation field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Allocation field is set to the value of the last call.
+func (b *InstanceStatusApplyConfiguration) WithAllocation(value *v1alpha1.DevicesAllocationGroupApplyConfiguration) *InstanceStatusApplyConfiguration {
+	b.Allocation = value
 	return b
 }

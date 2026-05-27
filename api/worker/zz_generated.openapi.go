@@ -1838,11 +1838,17 @@ func schema_gpustack_api_worker_v1_InstanceStatus(ref common.ReferenceCallback) 
 							},
 						},
 					},
+					"allocation": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Allocation is the devices allocation result for the Instance.\n\nConfigured if the Instance is requested with accelerator resources and the allocation is successful.",
+							Ref:         ref(v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()),
+						},
+					},
 				},
 			},
 		},
 		Dependencies: []string{
-			v1.InstanceServicePort{}.OpenAPIModelName(), corev1.HostIP{}.OpenAPIModelName(), corev1.PodIP{}.OpenAPIModelName()},
+			v1.InstanceServicePort{}.OpenAPIModelName(), v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName(), corev1.HostIP{}.OpenAPIModelName(), corev1.PodIP{}.OpenAPIModelName()},
 	}
 }
 

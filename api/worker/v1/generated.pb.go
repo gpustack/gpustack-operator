@@ -16,6 +16,7 @@ import (
 
 	io "io"
 
+	v1alpha1 "gpustack.ai/gpustack/api/worker/v1alpha1"
 	k8s_io_api_core_v1 "k8s.io/api/core/v1"
 	v11 "k8s.io/api/core/v1"
 	resource "k8s.io/apimachinery/pkg/api/resource"
@@ -1436,6 +1437,18 @@ func (m *InstanceStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.Allocation != nil {
+		{
+			size, err := m.Allocation.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintGenerated(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x42
+	}
 	if len(m.Ports) > 0 {
 		for iNdEx := len(m.Ports) - 1; iNdEx >= 0; iNdEx-- {
 			{
@@ -2576,6 +2589,10 @@ func (m *InstanceStatus) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
+	if m.Allocation != nil {
+		l = m.Allocation.Size()
+		n += 1 + l + sovGenerated(uint64(l))
+	}
 	return n
 }
 
@@ -3184,6 +3201,7 @@ func (this *InstanceStatus) String() string {
 		`HostIPs:` + repeatedStringForHostIPs + `,`,
 		`PodIPs:` + repeatedStringForPodIPs + `,`,
 		`Ports:` + repeatedStringForPorts + `,`,
+		`Allocation:` + strings.Replace(fmt.Sprintf("%v", this.Allocation), "DevicesAllocationGroup", "v1alpha1.DevicesAllocationGroup", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -7448,6 +7466,42 @@ func (m *InstanceStatus) Unmarshal(dAtA []byte) error {
 			}
 			m.Ports = append(m.Ports, InstanceServicePort{})
 			if err := m.Ports[len(m.Ports)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Allocation", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Allocation == nil {
+				m.Allocation = &v1alpha1.DevicesAllocationGroup{}
+			}
+			if err := m.Allocation.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

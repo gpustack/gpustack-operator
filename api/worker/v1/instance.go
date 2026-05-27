@@ -5,6 +5,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 // Instance is the schema for worker.gpustack.ai.
@@ -223,6 +225,11 @@ type InstanceStatus struct {
 	// +listMapKey=port
 	// +listMapKey=protocol
 	Ports []InstanceServicePort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,7,rep,name=ports"`
+
+	// Allocation is the devices allocation result for the Instance.
+	//
+	// Configured if the Instance is requested with accelerator resources and the allocation is successful.
+	Allocation *workercore.DevicesAllocationGroup `json:"allocation,omitempty" protobuf:"bytes,8,name=allocation"`
 }
 
 // InstanceServicePort defines the port to expose from the container and the port to expose on the node.
