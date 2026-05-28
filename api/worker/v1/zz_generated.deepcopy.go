@@ -774,10 +774,12 @@ func (in *InstanceStatus) DeepCopyInto(out *InstanceStatus) {
 		*out = make([]InstanceServicePort, len(*in))
 		copy(*out, *in)
 	}
-	if in.Allocation != nil {
-		in, out := &in.Allocation, &out.Allocation
-		*out = new(v1alpha1.DevicesAllocationGroup)
-		(*in).DeepCopyInto(*out)
+	if in.Allocations != nil {
+		in, out := &in.Allocations, &out.Allocations
+		*out = make([]v1alpha1.DevicesAllocationGroup, len(*in))
+		for i := range *in {
+			(*in)[i].DeepCopyInto(&(*out)[i])
+		}
 	}
 	return
 }

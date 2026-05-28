@@ -486,17 +486,17 @@ message InstanceStatus {
 
   // Ports is the list of ports to expose from the Instance.
   //
-  // +patchMergeKey=port
-  // +patchStrategy=merge
   // +listType=map
   // +listMapKey=port
   // +listMapKey=protocol
   repeated InstanceServicePort ports = 7;
 
-  // Allocation is the devices allocation result for the Instance.
+  // Allocations is the list of devices allocated to the Instance.
   //
-  // Configured if the Instance is requested with accelerator resources and the allocation is successful.
-  optional .gpustack.ai.gpustack.api.worker.v1alpha1.DevicesAllocationGroup allocation = 8;
+  // +listType=map
+  // +listMapKey=id
+  // +listMapKey=manufacturer
+  repeated .gpustack.ai.gpustack.api.worker.v1alpha1.DevicesAllocationGroup allocations = 8;
 }
 
 // InstanceTemplate defines the template for the Instance to run.

@@ -1437,17 +1437,19 @@ func (m *InstanceStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.Allocation != nil {
-		{
-			size, err := m.Allocation.MarshalToSizedBuffer(dAtA[:i])
-			if err != nil {
-				return 0, err
+	if len(m.Allocations) > 0 {
+		for iNdEx := len(m.Allocations) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Allocations[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
 			}
-			i -= size
-			i = encodeVarintGenerated(dAtA, i, uint64(size))
+			i--
+			dAtA[i] = 0x42
 		}
-		i--
-		dAtA[i] = 0x42
 	}
 	if len(m.Ports) > 0 {
 		for iNdEx := len(m.Ports) - 1; iNdEx >= 0; iNdEx-- {
@@ -2589,9 +2591,11 @@ func (m *InstanceStatus) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
-	if m.Allocation != nil {
-		l = m.Allocation.Size()
-		n += 1 + l + sovGenerated(uint64(l))
+	if len(m.Allocations) > 0 {
+		for _, e := range m.Allocations {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
 	}
 	return n
 }
@@ -3193,6 +3197,11 @@ func (this *InstanceStatus) String() string {
 		repeatedStringForPorts += strings.Replace(strings.Replace(f.String(), "InstanceServicePort", "InstanceServicePort", 1), `&`, ``, 1) + ","
 	}
 	repeatedStringForPorts += "}"
+	repeatedStringForAllocations := "[]DevicesAllocationGroup{"
+	for _, f := range this.Allocations {
+		repeatedStringForAllocations += fmt.Sprintf("%v", f) + ","
+	}
+	repeatedStringForAllocations += "}"
 	s := strings.Join([]string{`&InstanceStatus{`,
 		`Phase:` + fmt.Sprintf("%v", this.Phase) + `,`,
 		`PhaseMessage:` + fmt.Sprintf("%v", this.PhaseMessage) + `,`,
@@ -3201,7 +3210,7 @@ func (this *InstanceStatus) String() string {
 		`HostIPs:` + repeatedStringForHostIPs + `,`,
 		`PodIPs:` + repeatedStringForPodIPs + `,`,
 		`Ports:` + repeatedStringForPorts + `,`,
-		`Allocation:` + strings.Replace(fmt.Sprintf("%v", this.Allocation), "DevicesAllocationGroup", "v1alpha1.DevicesAllocationGroup", 1) + `,`,
+		`Allocations:` + repeatedStringForAllocations + `,`,
 		`}`,
 	}, "")
 	return s
@@ -7471,7 +7480,7 @@ func (m *InstanceStatus) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 8:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Allocation", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Allocations", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -7498,10 +7507,8 @@ func (m *InstanceStatus) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.Allocation == nil {
-				m.Allocation = &v1alpha1.DevicesAllocationGroup{}
-			}
-			if err := m.Allocation.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+			m.Allocations = append(m.Allocations, v1alpha1.DevicesAllocationGroup{})
+			if err := m.Allocations[len(m.Allocations)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

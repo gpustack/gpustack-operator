@@ -778,7 +778,7 @@ func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *w
 	}
 
 	// Retrieve allocation info.
-	var allocation workercore.DevicesAllocationGroup
+	var allocation workercore.DevicesStatus
 	if pod.Annotations != nil && pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey] != "" {
 		v := pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey]
 		json.ShouldUnmarshal(stringx.ToBytes(&v), &allocation)
@@ -961,8 +961,8 @@ func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *w
 		}
 	}
 
-	if allocation.ID != "" {
-		inst.Status.Allocation = &allocation
+	if len(allocation.Groups) > 0 {
+		inst.Status.Allocations = allocation.Groups
 	}
 
 	return inst

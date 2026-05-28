@@ -1820,9 +1820,7 @@ func schema_gpustack_api_worker_v1_InstanceStatus(ref common.ReferenceCallback) 
 									"port",
 									"protocol",
 								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "port",
-								"x-kubernetes-patch-strategy":  "merge",
+								"x-kubernetes-list-type": "map",
 							},
 						},
 						SchemaProps: spec.SchemaProps{
@@ -1838,10 +1836,27 @@ func schema_gpustack_api_worker_v1_InstanceStatus(ref common.ReferenceCallback) 
 							},
 						},
 					},
-					"allocation": {
+					"allocations": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"id",
+									"manufacturer",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Allocation is the devices allocation result for the Instance.\n\nConfigured if the Instance is requested with accelerator resources and the allocation is successful.",
-							Ref:         ref(v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()),
+							Description: "Allocations is the list of devices allocated to the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()),
+									},
+								},
+							},
 						},
 					},
 				},

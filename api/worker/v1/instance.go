@@ -219,17 +219,17 @@ type InstanceStatus struct {
 
 	// Ports is the list of ports to expose from the Instance.
 	//
-	// +patchMergeKey=port
-	// +patchStrategy=merge
 	// +listType=map
 	// +listMapKey=port
 	// +listMapKey=protocol
-	Ports []InstanceServicePort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"port" protobuf:"bytes,7,rep,name=ports"`
+	Ports []InstanceServicePort `json:"ports,omitempty" protobuf:"bytes,7,rep,name=ports"`
 
-	// Allocation is the devices allocation result for the Instance.
+	// Allocations is the list of devices allocated to the Instance.
 	//
-	// Configured if the Instance is requested with accelerator resources and the allocation is successful.
-	Allocation *workercore.DevicesAllocationGroup `json:"allocation,omitempty" protobuf:"bytes,8,name=allocation"`
+	// +listType=map
+	// +listMapKey=id
+	// +listMapKey=manufacturer
+	Allocations []workercore.DevicesAllocationGroup `json:"allocations,omitempty" protobuf:"bytes,8,rep,name=allocations"`
 }
 
 // InstanceServicePort defines the port to expose from the container and the port to expose on the node.
