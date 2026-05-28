@@ -949,16 +949,18 @@ func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *w
 		inst.Status.AccessAddresses = []string{
 			staticAddress,
 		}
-	case wildcardDNS != "" && len(inst.Status.HostIPs) > 0:
-		ip := string(slicex.Transform([]rune(inst.Status.HostIPs[0].IP), func(r rune) rune {
-			if r == '.' || r == ':' {
-				return '-'
-			}
-			return r
-		}))
-		inst.Status.AccessAddresses = []string{
-			fmt.Sprintf("%s.%s", ip, wildcardDNS),
+	case len(inst.Status.HostIPs) > 0:
+		address := inst.Status.HostIPs[0].IP
+		if wildcardDNS != "" {
+			address = string(slicex.Transform([]rune(inst.Status.HostIPs[0].IP), func(r rune) rune {
+				if r == '.' || r == ':' {
+					return '-'
+				}
+				return r
+			}))
+			address = fmt.Sprintf("%s.%s", address, wildcardDNS)
 		}
+		inst.Status.AccessAddresses = []string{address}
 	}
 
 	if len(allocation.Groups) > 0 {
