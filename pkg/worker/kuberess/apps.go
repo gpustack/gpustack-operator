@@ -2,6 +2,7 @@ package kuberess
 
 import (
 	"context"
+	"strings"
 
 	"gpustack.ai/gpustack/pkg/kubeapp"
 	"gpustack.ai/gpustack/pkg/system"
@@ -22,8 +23,15 @@ func InstallApplications(ctx context.Context, manufacturers []string) error {
 	gvc := map[string]any{
 		"ContainerRegistry":  settings.ContainerRegistry.ShouldValueFromRemote(ctx),
 		"ContainerNamespace": settings.ContainerNamespace.ShouldValueFromRemote(ctx),
-		"ImagePullPolicy":    "IfNotPresent",
-		"Manufacturers":      manufacturers,
+		"ImagePullSecrets": func() []string {
+			v := settings.ImagePullSecrets.ShouldValueFromRemote(ctx)
+			if v == "" {
+				return nil
+			}
+			return strings.Split(v, ",")
+		}(),
+		"ImagePullPolicy": settings.ImagePullPolicy.ShouldValueFromRemote(ctx),
+		"Manufacturers":   manufacturers,
 	}
 
 	return kubeapp.ExecuteInstall(

@@ -31,6 +31,20 @@ var (
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
 	)
+	// ImagePullSecrets is the image pull secret for pulling images, which is used in all built-in applications' deployment.
+	ImagePullSecrets = settings.NewEditable(
+		"image-pull-secrets",
+		"Indicates the image pull secret for pulling images.",
+		setting.InitializeFromEnv(),
+		setting.AllowBlank(),
+	)
+	// ImagePullPolicy is the image pull policy for pulling images, which is used in all built-in applications' deployment.
+	ImagePullPolicy = settings.NewEditable(
+		"image-pull-policy",
+		"Indicates the image pull policy for pulling images.",
+		setting.InitializeFromEnv("IfNotPresent"),
+		setting.AllowBlank(),
+	)
 
 	// Instance.
 

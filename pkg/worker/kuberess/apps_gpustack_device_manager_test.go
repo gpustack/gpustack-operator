@@ -15,9 +15,9 @@ func Test_renderGPUStackDeviceManagerApplyYamlTemplate(t *testing.T) {
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
 		"Manufacturers":      devicefeature.GetKnownManufacturers(),
-		"Namespace":          "gpustack-system",
+		"Namespace":          SystemNamespaceName,
 		"Image":              "",
-		"ImagePullPolicy":    "IfNotPresent",
+		"ImagePullPolicy":    "Always",
 		"Version":            "dev",
 		"SecurePort":         devicemanager.NewOptions().ServerOptions.BindPort,
 	}

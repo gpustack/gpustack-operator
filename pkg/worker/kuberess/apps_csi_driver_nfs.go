@@ -104,8 +104,10 @@ image:
     pullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
 
 controller:
-  name: csi-nfs-provisioner
+  name: csi-nfs-controller
   priorityClassName: system-cluster-critical
+  livenessProbe:
+    healthPort: 29652
   tolerations:
     - key: "node-role.kubernetes.io/master"
       operator: "Exists"
@@ -122,8 +124,8 @@ controller:
 
 serviceAccount:
   create: true
-  controller: csi-nfs-provisioner-sa
-  node: csi-nfs-sa
+  controller: csi-nfs-controller-sa
+  node: csi-nfs-node-sa
 
 rbac:
   create: true
@@ -143,8 +145,10 @@ nodeDriverRegistrar:
     enabled: false
 
 node:
-  name: csi-nfs
+  name: csi-nfs-node
   priorityClassName: system-cluster-critical
+  livenessProbe:
+    healthPort: 29653
   tolerations:
     - operator: "Exists"
 

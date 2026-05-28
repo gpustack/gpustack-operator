@@ -82,7 +82,8 @@ controllerManager:
 {{- $namespace := default "gpustack" $.ContainerNamespace }}
 {{- $prefix := "mirrored" }}
 {{- $image := printf "%s/%s/%s-kueue" $registry $namespace $prefix }}
-      repository: "{{ $image }}" 
+      repository: "{{ $image }}"
+      pullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
     podAnnotations:
       {{ $.ManagedLabel }}: "true"
 {{- if $.ImagePullSecrets }}

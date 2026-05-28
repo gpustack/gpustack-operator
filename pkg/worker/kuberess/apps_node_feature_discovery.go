@@ -59,7 +59,7 @@ image:
 {{- $prefix := "mirrored" }}
 {{- $image := printf "%s/%s/%s-node-feature-discovery" $registry $namespace $prefix }}
   repository: "{{ $image }}"
-  pullPolicy: "IfNotPresent"
+  pullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
 {{- if $.ImagePullSecrets }}
 imagePullSecrets:
 {{- range $.ImagePullSecrets }}

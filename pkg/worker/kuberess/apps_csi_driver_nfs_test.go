@@ -16,9 +16,8 @@ func Test_getCSIDriverNFSChartTemplateValues(t *testing.T) {
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
 		"Manufacturers":      devicefeature.GetKnownManufacturers(),
-		"Namespace":          "gpustack-system",
-		"Image":              "",
-		"ImagePullPolicy":    "IfNotPresent",
+		"Namespace":          SystemNamespaceName,
+		"ImagePullPolicy":    "Always",
 		"DriverName":         CSIProvisionerNFS,
 	}
 

@@ -17,6 +17,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/version"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 func installGPUStackDeviceManager(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
@@ -401,7 +402,8 @@ func extractImageConfig(ctx context.Context, cli kubernetes.Interface) (img, img
 				imgPullPolicy = string(pod.Spec.Containers[0].ImagePullPolicy)
 			}
 		}
+		return img, imgPullPolicy
 	}
 
-	return img, imgPullPolicy
+	return "", settings.ImagePullPolicy.ShouldValueFromRemote(ctx)
 }

@@ -16,7 +16,8 @@ func Test_getKueueChartTemplateValues(t *testing.T) {
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
 		"Manufacturers":      devicefeature.GetKnownManufacturers(),
-		"Namespace":          "gpustack-toolkit-system",
+		"Namespace":          SystemNamespaceName,
+		"ImagePullPolicy":    "Always",
 	}
 	funcMap := extendKueueChartValuesTemplateFuncMap()
 

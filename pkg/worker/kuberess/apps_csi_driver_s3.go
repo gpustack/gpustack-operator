@@ -60,37 +60,79 @@ const csiDriverS3ChartTemplate = `
 {{- $prefix := "mirrored" }}
 images:
 
-  # Original: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
+  # Original: docker.io/thxcode/csi-s3/csi-s3-driver:0.43.7
   #
-  registrar: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-node-driver-registrar:v2.15.0
+  s3: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-s3-driver:v0.43.7
 
   # Original: registry.k8s.io/sig-storage/csi-provisioner:v6.1.0
   #
-  provisioner: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-provisioner:v6.1.0
+  csiProvisioner: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-provisioner:v6.1.0
 
-  # Original: docker.io/thxcode/csi-s3/csi-s3-driver:0.43.7
+  # Original: registry.k8s.io/sig-storage/livenessprobe:v2.17.0
   #
-  csi: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-s3-driver:v0.43.7
+  livenessProbe: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-livenessprobe:v2.17.0
 
-storageClass:
-  create: false
+  # Original: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
+  #
+  nodeDriverRegistrar: {{ $registry }}/{{ $namespace}}/{{ $prefix }}-csi-node-driver-registrar:v2.15.0
+
+imagePullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
+
+controller:
+  name: csi-s3-controller
+  priorityClassName: system-cluster-critical
+  livenessProbe:
+    healthPort: 29662
+  tolerations:
+    - key: "node-role.kubernetes.io/master"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/controlplane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
+      effect: "NoSchedule"
+
+serviceAccount:
+  create: true
+  controller: csi-s3-controller-sa
+  node: csi-s3-node-sa
+
+rbac:
+  create: true
+  name: csi-s3
+
+driver:
+  name: {{ $.DriverName }}
+
+nodeDriverRegistrar:
+  livenessProbe:
+    enabled: false
+
+node:
+  name: csi-s3-node
+  priorityClassName: system-cluster-critical
+  livenessProbe:
+    healthPort: 29663
+  tolerations:
+    - operator: "Exists"
+
+{{- if $.ImagePullSecrets }}
+imagePullSecrets:
+{{- range $.ImagePullSecrets }}
+  - name: {{ . }}
+{{- end }}
+{{- end }}
 
 secret:
   create: false
 
-tolerations:
-  all: true
-  node: []
-  controller:
-  - key: "node-role.kubernetes.io/controlplane"
-    operator: "Exists"
-    effect: "NoSchedule"
-  - key: "node-role.kubernetes.io/control-plane"
-    operator: "Exists"
-    effect: "NoSchedule"
-
-driver:
-  name: {{ $.DriverName }}
+storageClass:
+  create: false
 
 `
 
