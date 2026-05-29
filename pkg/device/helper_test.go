@@ -37,22 +37,21 @@ func Test_formatMemory(t *testing.T) {
 	cases := []struct {
 		name     string
 		mib      uint64
-		withBias bool
 		expected string
 	}{
-		{"0gb", 0, false, "0gb"},
-		{"1gb", 1, false, "1gb"},
-		{"1gb", 1024, false, "1gb"},
-		{"2gb", 1025, false, "2gb"},
-		{"44gb with bias", 44280, true, "44gb"},
-		{"43gb with bias", 43693, true, "44gb"},
-		{"15gb", 15360, false, "15gb"},
-		{"141gb", 143771, false, "141gb"},
+		{"0", 0, "0"},
+		{"1Mi", 1, "1mi"},
+		{"1024Mi", 1024, "1gi"},
+		{"1025Mi", 1025, "1gi"},
+		{"44280Mi", 44280, "43gi"},
+		{"43693Mi", 43693, "43gi"},
+		{"15360Mi", 15360, "15gi"},
+		{"143771Mi", 143771, "140gi"},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			result := formatMemory(c.mib, c.withBias)
+			result := formatMemory(c.mib)
 			assert.Equal(t, c.expected, result, "formatMemory(%d) should return %s, got %s", c.mib, c.expected, result)
 		})
 	}

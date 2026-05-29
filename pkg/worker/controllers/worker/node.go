@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"go.uber.org/multierr"
 	core "k8s.io/api/core/v1"
@@ -20,6 +22,7 @@ import (
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 )
 
@@ -61,7 +64,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	logger.V(2).Info("reconcile node", "keys", ndKeys)
 
 	// Fetch existing items.
-	aResFlvsIndex := map[string]*kueue.ResourceFlavor{}
+	aResFlvsIndex := map[string]*kueue.ResourceFlavor{} // resource flavor name -> resource flavor
 	{
 		aResFlvList := new(kueue.ResourceFlavorList)
 		err = r.Client.List(ctx, aResFlvList,
@@ -80,36 +83,46 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	// Prepare expected items and their names.
-	eResFlvsIndex := map[string]*kueue.ResourceFlavor{}
-	for _, ndKey := range ndKeys {
-		ndf := devicefeature.ExtractNodeFeatureByKey(nd, ndKey)
-		eResFlv := &kueue.ResourceFlavor{
-			ObjectMeta: meta.ObjectMeta{
-				Name: nd.Name + "-gpustack-" + ndKey,
-				Labels: map[string]string{
-					_ResourceFlavorNodeNameLabelKey:   nd.Name,
-					_ResourceFlavorCohortNameLabelKey: "gpustack-" + ndKey,
+	// Prepare expected items and their names,
+	// if the node is labeled with "gpustack.ai/managed: false", no resource flavor will be expected.
+	eResFlvsIndex := map[string]*kueue.ResourceFlavor{} // resource flavor name -> resource flavor
+	if !kubemeta.IsLabeled(nd, systemname.ManagedLabelKey, "false") {
+		for _, ndKey := range ndKeys {
+			ndf := devicefeature.ExtractNodeFeatureByKey(nd, ndKey)
+			// Make same device below in the same cohort,
+			// so that they can be scheduled together if needed.
+			cohortName := "gpustack-" + ndKey
+			eResFlv := &kueue.ResourceFlavor{
+				ObjectMeta: meta.ObjectMeta{
+					Name: nd.Name + "-gpustack-" + ndKey,
+					Labels: map[string]string{
+						_ResourceFlavorNodeNameLabelKey:   nd.Name,
+						_ResourceFlavorCohortNameLabelKey: cohortName,
+					},
 				},
-			},
-			Spec: kueue.ResourceFlavorSpec{
-				NodeLabels:  ndf.NodeLabels,
-				Tolerations: ndf.Tolerations,
-			},
-		}
-		kubemeta.ControlOnWithoutBlock(eResFlv, nd, core.SchemeGroupVersion.WithKind("Node"))
-		// NB(thxCode): use to trigger configuring ClusterQueue automatically.
-		systemmeta.NoteResource(eResFlv, "nodes", map[string]string{
-			"clusterqueue-generate-name": funcx.TernaryFunc(
-				func() bool { return ndf.Sliced == "" },
-				func() string { return "gpustack-" + ndKey + "-" },
-				func() string { return "gpustack-" + ndKey + "-sliced-" + ndf.Sliced + "-" },
-			),
-			"accelerators": ndf.Accelerator.String(),
-		})
-		eResFlvsIndex[eResFlv.Name] = eResFlv
-		if ndKey == devicefeature.DisfeaturedNodeKey {
-			break
+				Spec: kueue.ResourceFlavorSpec{
+					NodeLabels:  ndf.NodeLabels,
+					Tolerations: ndf.Tolerations,
+				},
+			}
+			kubemeta.ControlOnWithoutBlock(eResFlv, nd, core.SchemeGroupVersion.WithKind("Node"))
+			// NB(thxCode): Use to trigger configuring ClusterQueue automatically.
+			clusterQueueNamePrefix := cohortName
+			if ndKey != devicefeature.DisfeaturedNodeKey {
+				// For featured nodes, use resource flavor name to indicate the resource type and amount,
+				// so that the corresponding ClusterQueue can be easily identified and configured.
+				clusterQueueNamePrefix += fmt.Sprintf("-%sc-%s",
+					ndf.UnitResources.DisplayCPU, strings.ToLower(ndf.UnitResources.DisplayRAM))
+			}
+			systemmeta.NoteResource(eResFlv, "nodes", map[string]string{
+				"clusterqueue-generate-name": funcx.TernaryFunc(
+					func() bool { return ndf.Sliced == "" },
+					func() string { return clusterQueueNamePrefix + "-" },
+					func() string { return clusterQueueNamePrefix + "-sliced-" + ndf.Sliced + "-" },
+				),
+				"accelerators": ndf.Accelerator.String(),
+			})
+			eResFlvsIndex[eResFlv.Name] = eResFlv
 		}
 	}
 

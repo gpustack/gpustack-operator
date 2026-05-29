@@ -2,10 +2,13 @@ package device
 
 import (
 	"os"
-	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"gpustack.ai/gpustack/binding"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/typex"
 )
 
@@ -47,7 +50,7 @@ func ConstructGroupID(manufacturer, name string, memory uint64) string {
 	if !constructGroupIDWithMemory {
 		return n
 	}
-	m := formatMemory(memory, manufacturer == "ascend")
+	m := formatMemory(memory)
 	return n + "-" + m
 }
 
@@ -119,15 +122,7 @@ func formatName(name, manufacturer string) string {
 	return string(buf)
 }
 
-// formatMemory formats the given memory size in MiB to a string with the unit "Gi",
-// and returns the formatted string.
-func formatMemory(mb uint64, withBias bool) string {
-	if mb == 0 {
-		return "0gb"
-	}
-	gb := (mb + 1023) >> 10
-	if withBias && (gb&1 != 0) {
-		gb++
-	}
-	return strconv.FormatUint(gb, 10) + "gb"
+// formatMemory formats the given memory size in MiB to a string.
+func formatMemory(mib uint64) string {
+	return strings.ToLower(quantityx.Format(resource.MustParse(strconvx.Itoa(mib) + "Mi")))
 }

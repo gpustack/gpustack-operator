@@ -8,14 +8,16 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"gpustack.ai/gpustack/pkg/systemname"
 )
 
 const (
 	// ResourceTypeLabel is the label key to indicate the system type of delegated resource.
-	ResourceTypeLabel = "resource.gpustack.ai/type"
+	ResourceTypeLabel = "resource." + systemname.LabelPrefix + "type"
 
 	// ResourceNoteAnnoPrefix is the annotation prefix to indicate the note of resource.
-	ResourceNoteAnnoPrefix = "note.gpustack.ai/"
+	ResourceNoteAnnoPrefix = "note." + systemname.LabelPrefix
 )
 
 // NoteResource armors the resource by adding a label if Resource Type(resType) is not empty and setting an annotation if notes is not empty.

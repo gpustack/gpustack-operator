@@ -254,7 +254,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = devicefeature.ConstructNodeLabels(eGroups)
+			nfs.Labels = devicefeature.ConstructNodeLabels(node, eGroups)
 			return *nfs
 		}(),
 	}
