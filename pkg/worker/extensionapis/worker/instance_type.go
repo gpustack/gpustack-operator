@@ -373,6 +373,10 @@ func convertInstanceTypeFromClusterQueue(cq *kueue.ClusterQueue) *worker.Instanc
 			Family:            notes["family"],
 			ComputeCapability: notes["computeCapability"],
 			Sliced:            sliced,
+			UnitResources: worker.InstanceTypeUnitResources{
+				CPU: notes["unitResCPU"],
+				RAM: notes["unitResRAM"],
+			},
 		},
 		Status: worker.InstanceTypeStatus{
 			Accelerator: worker.InstanceTypeResource{

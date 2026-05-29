@@ -80,6 +80,8 @@ func (*InstanceTypeSpec) ProtoMessage() {}
 
 func (*InstanceTypeStatus) ProtoMessage() {}
 
+func (*InstanceTypeUnitResources) ProtoMessage() {}
+
 func (*InstanceVolume) ProtoMessage() {}
 
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}

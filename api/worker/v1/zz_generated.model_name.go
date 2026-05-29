@@ -181,6 +181,11 @@ func (in InstanceTypeStatus) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeUnitResources) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeUnitResources"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceVolume) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceVolume"
 }

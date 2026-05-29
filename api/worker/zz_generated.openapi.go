@@ -56,6 +56,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceTypeResource{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceTypeResource(ref),
 		v1.InstanceTypeSpec{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeSpec(ref),
 		v1.InstanceTypeStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceTypeStatus(ref),
+		v1.InstanceTypeUnitResources{}.OpenAPIModelName():             schema_gpustack_api_worker_v1_InstanceTypeUnitResources(ref),
 		v1.InstanceVolume{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceVolume(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():     schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
@@ -2192,10 +2193,19 @@ func schema_gpustack_api_worker_v1_InstanceTypeSpec(ref common.ReferenceCallback
 							Format:      "int64",
 						},
 					},
+					"unitResources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UnitResources describes the unit resources of the InstanceType.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1.InstanceTypeUnitResources{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"group", "acceleratable"},
 			},
 		},
+		Dependencies: []string{
+			v1.InstanceTypeUnitResources{}.OpenAPIModelName()},
 	}
 }
 
@@ -2255,6 +2265,33 @@ func schema_gpustack_api_worker_v1_InstanceTypeStatus(ref common.ReferenceCallba
 		},
 		Dependencies: []string{
 			v1.InstanceTypeResource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceTypeUnitResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeUnitResources describes the unit resources of the InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU is the unit CPU resource(milli-cores) of the InstanceType.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"ram": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RAM is the unit RAM resource(Mi) of the InstanceType.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 

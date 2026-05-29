@@ -16,7 +16,7 @@ const (
 //
 //	|  Condition Type  |     Condition Status    | Human Readable Status | Human Sensible Status |
 //	| ---------------- | ----------------------- | --------------------- | --------------------- |
-//	| Active           | Unknown                 | Preparing             | Transitioning         |
+//	| Active           | Unknown                 | Activating            | Transitioning         |
 //	| Active           | False                   | Inactive              | Interrupted           |
 //	| Active           | True                    | Active                | /                     |
 var clusterQueueStatusPaths = kubeapistatus.NewSummarizer(

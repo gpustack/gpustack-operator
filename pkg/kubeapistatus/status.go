@@ -319,11 +319,11 @@ var replacements = map[string]struct {
 	"Stopped":     {"Stopping", "StopFailed", "Stopped"},
 	"Synced":      {"Syncing", "SyncFailed", "Synced"},
 	"Available":   {"Preparing", "Unavailable", "Available"},
-	"Ready":       {"Preparing", "NotReady", "Ready"},
-	"Active":      {"Preparing", "Inactive", "Active"},
+	"Ready":       {"Starting", "NotReady", "Ready"},
+	"Active":      {"Activating", "Inactive", "Active"},
 	"Canceled":    {"Canceling", "CancelFailed", "Canceled"},
 	"Planned":     {"Planning", "Failed", "Planned"},
-	"Applied":     {"Running", "Failed", "Succeeded"},
+	"Applied":     {"Applying", "Failed", "Succeeded"},
 }
 
 // formatMessage formats the message with some rules,

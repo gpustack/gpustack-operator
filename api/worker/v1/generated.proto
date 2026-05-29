@@ -621,6 +621,9 @@ message InstanceTypeSpec {
   // Sliced indicates whether the InstanceType is sliced.
   // When Sliced is blank, that means the InstanceType is not sliced.
   optional int64 sliced = 8;
+
+  // UnitResources describes the unit resources of the InstanceType.
+  optional InstanceTypeUnitResources unitResources = 9;
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
@@ -642,6 +645,15 @@ message InstanceTypeStatus {
 
   // LocalStorage is the local storage resource of the InstanceType, e.g. "100G", "500G".
   optional InstanceTypeResource localStorage = 6;
+}
+
+// InstanceTypeUnitResources describes the unit resources of the InstanceType.
+message InstanceTypeUnitResources {
+  // CPU is the unit CPU resource(milli-cores) of the InstanceType.
+  optional string cpu = 1;
+
+  // RAM is the unit RAM resource(Mi) of the InstanceType.
+  optional string ram = 3;
 }
 
 // InstanceVolume defines the volume to mount in the Instance,

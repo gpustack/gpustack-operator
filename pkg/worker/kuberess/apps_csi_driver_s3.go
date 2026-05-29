@@ -81,8 +81,6 @@ imagePullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
 controller:
   name: csi-s3-controller
   priorityClassName: system-cluster-critical
-  livenessProbe:
-    healthPort: 29662
   tolerations:
     - key: "node-role.kubernetes.io/master"
       operator: "Exists"

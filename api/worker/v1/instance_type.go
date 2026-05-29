@@ -52,6 +52,9 @@ type InstanceTypeSpec struct {
 	// Sliced indicates whether the InstanceType is sliced.
 	// When Sliced is blank, that means the InstanceType is not sliced.
 	Sliced int64 `json:"sliced,omitempty" protobuf:"varint,8,opt,name=sliced"`
+
+	// UnitResources describes the unit resources of the InstanceType.
+	UnitResources InstanceTypeUnitResources `json:"unitResources,omitempty" protobuf:"bytes,9,opt,name=unitResources"`
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
@@ -87,6 +90,15 @@ type InstanceTypeResource struct {
 
 	// Capacity is the total value of the resource.
 	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,3,opt,name=capacity"`
+}
+
+// InstanceTypeUnitResources describes the unit resources of the InstanceType.
+type InstanceTypeUnitResources struct {
+	// CPU is the unit CPU resource(milli-cores) of the InstanceType.
+	CPU string `json:"cpu,omitempty" protobuf:"bytes,1,opt,name=cpu"`
+
+	// RAM is the unit RAM resource(Mi) of the InstanceType.
+	RAM string `json:"ram,omitempty" protobuf:"bytes,3,opt,name=ram"`
 }
 
 // InstanceTypeList holds the list of InstanceType.

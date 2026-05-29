@@ -53,8 +53,7 @@ function pack() {
     extra_args=()
     if [[ "${PACKAGE_WITH_CACHE}" == "true" ]]; then
       extra_args+=(
-        "--cache-from=type=registry,ref=gpustack/build-cache:${task}-dev"
-        "--cache-from=type=registry,ref=gpustack/${task}:build-cache"
+        "--cache-from=type=registry,ref=gpustack/build-cache:${task}-main-linux-${PACKAGE_ARCH}"
       )
     fi
     if [[ "${PACKAGE_PUSH}" == "true" ]]; then

@@ -94,7 +94,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			cohortName := "gpustack-" + ndKey
 			eResFlv := &kueue.ResourceFlavor{
 				ObjectMeta: meta.ObjectMeta{
-					Name: nd.Name + "-gpustack-" + ndKey,
+					Name: strings.ToLower(nd.Name + "-gpustack-" + ndKey),
 					Labels: map[string]string{
 						_ResourceFlavorNodeNameLabelKey:   nd.Name,
 						_ResourceFlavorCohortNameLabelKey: cohortName,
@@ -111,8 +111,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			if ndKey != devicefeature.DisfeaturedNodeKey {
 				// For featured nodes, use resource flavor name to indicate the resource type and amount,
 				// so that the corresponding ClusterQueue can be easily identified and configured.
-				clusterQueueNamePrefix += fmt.Sprintf("-%sc-%s",
-					ndf.UnitResources.DisplayCPU, strings.ToLower(ndf.UnitResources.DisplayRAM))
+				clusterQueueNamePrefix += strings.ToLower(fmt.Sprintf("-%sc-%s",
+					ndf.UnitResources.DisplayCPU, ndf.UnitResources.DisplayRAM))
 			}
 			systemmeta.NoteResource(eResFlv, "nodes", map[string]string{
 				"clusterqueue-generate-name": funcx.TernaryFunc(
