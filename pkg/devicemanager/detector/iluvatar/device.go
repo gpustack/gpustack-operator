@@ -283,10 +283,10 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 				gpmMetricsHandler := dev.GpmMetricsGetV()
 				gpmMetrics, ret := gpmMetricsHandler.V1(100*time.Millisecond, ixml.GPM_METRIC_SM_UTIL)
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device cores utilization with GPM, fallback")
+					logger.V(4).Error(ret, "failed to get device cores utilization with GPM, fallback")
 					utilInfo, ret := dev.GetUtilizationRates()
 					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device cores utilization")
+						logger.V(3).Error(ret, "failed to get device cores utilization")
 					} else {
 						coresUtilization = utilInfo.Gpu
 					}
@@ -297,7 +297,7 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 				logger.Info("cannot get device cores utilization with GPM, fallback")
 				utilInfo, ret := dev.GetUtilizationRates()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device cores utilization")
+					logger.V(3).Error(ret, "failed to get device cores utilization")
 				} else {
 					coresUtilization = utilInfo.Gpu
 				}
@@ -305,12 +305,12 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 			temperature, ret = dev.GetTemperature()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device temperature")
+				logger.V(3).Error(ret, "failed to get device temperature")
 			}
 
 			powerUsage, ret = dev.GetPowerUsage()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device power usage")
+				logger.V(3).Error(ret, "failed to get device power usage")
 			} else {
 				powerUsage /= 1_000 // Convert from milliwatt to watt.
 			}

@@ -277,14 +277,14 @@ func (in *cambricon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupL
 
 			tempInfo, ret := dev.GetTemperatureInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device temperature")
+				logger.V(3).Error(ret, "failed to get device temperature")
 			} else {
 				temperature = uint32(tempInfo.Chip)
 			}
 
 			powerInfo, ret := dev.GetPowerInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device power usage")
+				logger.V(3).Error(ret, "failed to get device power usage")
 			} else {
 				powerUsage = uint32(powerInfo.Usage)
 			}

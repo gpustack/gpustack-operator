@@ -296,7 +296,7 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 				memUsed, ret := memHandler.GetUsed()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device memory used")
+					logger.V(3).Error(ret, "failed to get device memory used")
 				} else {
 					memoryUsage = device.ConvertBytesToMiB(memUsed)
 				}
@@ -308,7 +308,9 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 					mtml.VOLATILE_ECC,
 					mtml.MEMORY_LOCATION_DRAM,
 				)
-				if ret.IsSuccess() && memEccDramUE > 0 {
+				if !ret.IsSuccess() {
+					logger.V(3).Error(ret, "failed to get device memory ECC error counter")
+				} else if memEccDramUE > 0 {
 					memoryUnhealthy = true
 				}
 			}
@@ -330,17 +332,17 @@ func (in *mthreads) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 
 				coresUtilization, ret = gpuHandler.GetUtilization()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device cores utilization")
+					logger.V(3).Error(ret, "failed to get device cores utilization")
 				}
 
 				temperature, ret = gpuHandler.GetTemperature()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device temperature")
+					logger.V(3).Error(ret, "failed to get device temperature")
 				}
 
 				powerUsage, ret = dev.GetPowerUsage()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device power usage")
+					logger.V(3).Error(ret, "failed to get device power usage")
 				}
 			}
 

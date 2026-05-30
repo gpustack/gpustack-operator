@@ -303,7 +303,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 		{
 			metricsInfo, ret := dev.GetGpuMetricsInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device cores utilization and temperature")
+				logger.V(3).Error(ret, "failed to get device cores utilization and temperature")
 			} else {
 				coresUtilization = uint32(metricsInfo.Average_gfx_activity)
 				temperature = uint32(metricsInfo.Temperature_hotspot)
@@ -311,7 +311,7 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 
 			powerInfo, ret := dev.GetPowerInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device power usage")
+				logger.V(3).Error(ret, "failed to get device power usage")
 			} else {
 				powerUsage = powerInfo.Current_socket_power
 				if powerUsage == 0xFFFF {

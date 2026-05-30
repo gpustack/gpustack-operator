@@ -374,7 +374,7 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 				if !ret.IsSuccess() {
 					utilInfo, ret = utilHandler.V1()
 					if !ret.IsSuccess() {
-						logger.Error(ret, "failed to get device cores utilization")
+						logger.V(3).Error(ret, "failed to get device cores utilization")
 					} else {
 						coresUtilization = utilInfo.Aicore_util
 					}
@@ -384,14 +384,14 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 
 				temp, ret := dev.GetTemperature()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device temperature")
+					logger.V(3).Error(ret, "failed to get device temperature")
 				} else if temp > 0 {
 					temperature = uint32(temp)
 				}
 
 				power, ret := dev.GetPowerInfo()
 				if !ret.IsSuccess() {
-					logger.Error(ret, "failed to get device power usage")
+					logger.V(3).Error(ret, "failed to get device power usage")
 				} else if power > 0 {
 					powerUsage = uint32(power) / 10 // Convert from deciwatts to watts.
 				}

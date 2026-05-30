@@ -249,21 +249,21 @@ func (in *metax) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		{
 			ipUsage, ret := dev.GetIpUsage(mxsml.Usage_Xcore)
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device core utilization")
+				logger.V(3).Error(ret, "failed to get device core utilization")
 			} else {
 				coresUtilization = uint32(ipUsage)
 			}
 
 			tempInfo, ret := dev.GetTemperatureInfo(mxsml.Temperature_Hotspot)
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device temperature")
+				logger.V(3).Error(ret, "failed to get device temperature")
 			} else {
 				temperature = uint32(tempInfo)
 			}
 
 			powerInfo, ret := dev.GetBoardPowerInfo()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device power usage")
+				logger.V(3).Error(ret, "failed to get device power usage")
 			} else {
 				powerUsage = slicex.Sum(powerInfo, func(info mxsml.BoardWayElectricInfo) uint32 {
 					return info.Power / 1_000 // Convert mW to W.

@@ -277,7 +277,7 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 
 			memUsage, ret := dev.GetMemoryUsage(rsmi.MEM_TYPE_VRAM)
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device memory usage")
+				logger.V(3).Error(ret, "failed to get device memory usage")
 			} else {
 				memoryUsage = device.ConvertBytesToMiB(memUsage)
 			}
@@ -298,19 +298,19 @@ func (in *hygon) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList,
 		{
 			coresUtilization, ret = dev.GetBusyPercent()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device cores utilization")
+				logger.V(3).Error(ret, "failed to get device cores utilization")
 			}
 
 			temp, ret := dev.GetTempMetric(rsmi.TEMP_CURRENT)
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device temperature")
+				logger.V(3).Error(ret, "failed to get device temperature")
 			} else if temp > 0 {
 				temperature = uint32(temp) / 1_000 // Convert from millidegree Celsius to degree Celsius.
 			}
 
 			power, ret := dev.GetPower()
 			if !ret.IsSuccess() {
-				logger.Error(ret, "failed to get device power usage")
+				logger.V(3).Error(ret, "failed to get device power usage")
 			} else if power > 0 {
 				powerUsage = uint32(power) / 1_000_000 // Convert from microwatt to watt.
 			}
