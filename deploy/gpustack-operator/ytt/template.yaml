@@ -142,8 +142,8 @@ spec:
               cpu: "4"
               memory: 8Gi
             requests:
-              cpu: 500m
-              memory: 512Mi
+              cpu: 100m
+              memory: 128Mi
           env:
             - name: KUBERNETES_POD_IP
               valueFrom:

@@ -86,6 +86,13 @@ controllerManager:
       pullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
     podAnnotations:
       {{ $.ManagedLabel }}: "true"
+    resources:
+      limits:
+        cpu: "2"
+        memory: 4Gi
+      requests:
+        cpu: 100m
+        memory: 128Mi
 {{- if $.ImagePullSecrets }}
   imagePullSecrets:
 {{- range $.ImagePullSecrets }}
