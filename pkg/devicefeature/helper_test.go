@@ -10,13 +10,14 @@ import (
 
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 )
 
 func TestConstructNodeLabels(t *testing.T) {
 	nodeName := "node1"
 	cpuCapacity := *resource.NewQuantity(4, resource.DecimalSI)
-	ramCapacity := *resource.NewQuantity(16*1024*1024*1024, resource.BinarySI)
-	localStorageCapacity := *resource.NewQuantity(100*1024*1024*1024, resource.BinarySI)
+	ramCapacity := *resource.NewQuantity(16*quantityx.Gi, resource.BinarySI)
+	localStorageCapacity := *resource.NewQuantity(100*quantityx.Gi, resource.BinarySI)
 
 	node := &core.Node{
 		ObjectMeta: meta.ObjectMeta{
@@ -102,8 +103,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
 				FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
 				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1000m",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "1024Mi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "1Gi",
 			},
 		},
 		{
@@ -128,8 +129,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
 			},
 		},
 		{
@@ -170,16 +171,16 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "0",
 				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "2000m",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "12288Mi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "2",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "12Gi",
 				FeatureLabelPrefix + "amd":                          "true",
 				FeatureLabelPrefix + "amd-mi300x":                   "true",
 				FeatureLabelPrefix + "amd-mi300x.product":           "MI300X",
 				FeatureLabelPrefix + "amd-mi300x.memory":            "192Gi",
 				FeatureLabelPrefix + "amd-mi300x.cores":             "0",
 				FeatureLabelPrefix + "amd-mi300x.accelerators":      "2",
-				FeatureLabelPrefix + "amd-mi300x.unit-cpu":          "1000m",
-				FeatureLabelPrefix + "amd-mi300x.unit-ram":          "6144Mi",
+				FeatureLabelPrefix + "amd-mi300x.unit-cpu":          "1",
+				FeatureLabelPrefix + "amd-mi300x.unit-ram":          "6Gi",
 			},
 		},
 		{
@@ -224,8 +225,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
 			},
 		},
 		{
@@ -271,8 +272,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
 			},
 		},
 		{
@@ -320,8 +321,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
 			},
 		},
 	}
@@ -398,8 +399,8 @@ func TestExtractNodeKeys(t *testing.T) {
 func TestExtractNodeFeatureByKey(t *testing.T) {
 	nodeName := "node1"
 	cpuCapacity := *resource.NewQuantity(4, resource.DecimalSI)
-	ramCapacity := *resource.NewQuantity(16*1024*1024*1024, resource.BinarySI)
-	localStorageCapacity := *resource.NewQuantity(100*1024*1024*1024, resource.BinarySI)
+	ramCapacity := *resource.NewQuantity(16*quantityx.Gi, resource.BinarySI)
+	localStorageCapacity := *resource.NewQuantity(100*quantityx.Gi, resource.BinarySI)
 
 	cases := []struct {
 		name     string
@@ -524,13 +525,13 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 				ComputeCapability: "7.5",
 				Family:            "Turing",
 				Accelerator:       *resource.NewQuantity(2, resource.DecimalSI),
-				// CPU/RAM = unit (1000m / 4096Mi) × Accelerator (2) = 2000m / 8Gi.
+				// CPU/RAM = unit (1 / 4Gi) × Accelerator (2) = 2000m / 8Gi.
 				CPU:          *resource.NewMilliQuantity(2000, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(8*1024*1024*1024, resource.BinarySI),
+				RAM:          *resource.NewQuantity(8*quantityx.Gi, resource.BinarySI),
 				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					CPU: "1000m",
-					RAM: "4096Mi",
+					CPU: resource.MustParse("1"),
+					RAM: resource.MustParse("4Gi"),
 				},
 			},
 		},
@@ -604,21 +605,21 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 				ComputeCapability: "7.5",
 				Family:            "Turing",
 				Accelerator:       *resource.NewQuantity(2, resource.DecimalSI),
-				// CPU/RAM = unit (1000m / 4096Mi) × Accelerator (2) = 2000m / 8Gi.
+				// CPU/RAM = unit (1 / 4Gi) × Accelerator (2) = 2000m / 8Gi.
 				CPU:          *resource.NewMilliQuantity(2000, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(8*1024*1024*1024, resource.BinarySI),
+				RAM:          *resource.NewQuantity(8*quantityx.Gi, resource.BinarySI),
 				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					CPU: "1000m",
-					RAM: "4096Mi",
+					CPU: resource.MustParse("1"),
+					RAM: resource.MustParse("4Gi"),
 				},
 			},
 		},
 		{
 			// Labels absent, four accelerators on a 4C/16Gi host: per-device
-			// share after the 2C/2Gi reservation is 500m / 3584Mi, below
-			// every table row's CPU floor — GetDeviceUnitResources falls back
-			// to the 1000m / 1024Mi default.
+			// share after the 1C/2Gi reservation is 750m / 3584Mi, which
+			// drives suggested CPU to 0 — GetDeviceUnitResources falls back
+			// to the 1C/1Gi default.
 			name: "four allocatable accelerators, labels absent — defaults",
 			node: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
@@ -661,13 +662,13 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 				Memory:       "15Gi",
 				Cores:        "2560",
 				Accelerator:  *resource.NewQuantity(4, resource.DecimalSI),
-				// CPU/RAM = unit (1000m / 1024Mi) × Accelerator (4) = 4000m / 4Gi.
+				// CPU/RAM = unit (1 / 1Gi) × Accelerator (4) = 4000m / 4Gi.
 				CPU:          *resource.NewMilliQuantity(4000, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(4*1024*1024*1024, resource.BinarySI),
+				RAM:          *resource.NewQuantity(4*quantityx.Gi, resource.BinarySI),
 				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					CPU: "1000m",
-					RAM: "1024Mi",
+					CPU: *resource.NewQuantity(1, resource.DecimalSI),
+					RAM: *resource.NewQuantity(quantityx.Gi, resource.BinarySI),
 				},
 			},
 		},
@@ -724,8 +725,8 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 				RAM:          *resource.NewQuantity(0, resource.BinarySI),
 				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					CPU: "2000m",
-					RAM: "12288Mi",
+					CPU: *resource.NewQuantity(2, resource.DecimalSI),
+					RAM: *resource.NewQuantity(12*quantityx.Gi, resource.BinarySI),
 				},
 			},
 		},
@@ -743,6 +744,16 @@ func TestGetDeviceUnitResources(t *testing.T) {
 	const nodeKey = "nvidia-tesla-t4"
 	selfLabelKey := FeatureLabelPrefix + nodeKey
 
+	// Match the function's compute-path construction so reflect.DeepEqual
+	// works against the Quantity's internal state (empty cache).
+	cores := func(n int64) resource.Quantity {
+		return *resource.NewQuantity(n, resource.DecimalSI)
+	}
+	gi := func(n int64) resource.Quantity {
+		return *resource.NewQuantity(n*quantityx.Gi, resource.BinarySI)
+	}
+	defaultUnits := DeviceUnitResources{CPU: cores(1), RAM: gi(1)}
+
 	cases := []struct {
 		name        string
 		labels      map[string]string
@@ -752,8 +763,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 		expected    DeviceUnitResources
 	}{
 		{
-			// Labels in canonical form are returned without further mutation
-			// (parsed-then-formatted, but the round-trip preserves them).
+			// Labels are returned as parsed Quantities, format preserved.
 			name: "labels present in canonical form",
 			labels: map[string]string{
 				selfLabelKey + ".unit-cpu": "2000m",
@@ -761,17 +771,24 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			},
 			// Allocatable and deviceCount are ignored on the read path.
 			deviceCount: 99,
-			expected:    DeviceUnitResources{CPU: "2000m", RAM: "8192Mi"},
+			expected: DeviceUnitResources{
+				CPU: resource.MustParse("2000m"),
+				RAM: resource.MustParse("8192Mi"),
+			},
 		},
 		{
-			// Labels in cores / Gi are re-formatted to milli / Mi.
-			name: "labels present in core/Gi form — reformatted",
+			// Operator-written cores / Gi form is preserved verbatim — the
+			// read path no longer reformats.
+			name: "labels present in core/Gi form — preserved",
 			labels: map[string]string{
 				selfLabelKey + ".unit-cpu": "4",
 				selfLabelKey + ".unit-ram": "16Gi",
 			},
 			deviceCount: 4,
-			expected:    DeviceUnitResources{CPU: "4000m", RAM: "16384Mi"},
+			expected: DeviceUnitResources{
+				CPU: resource.MustParse("4"),
+				RAM: resource.MustParse("16Gi"),
+			},
 		},
 		{
 			// Both labels must parse — if either is malformed, the function
@@ -786,8 +803,9 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			deviceCount: 1,
 			// per-device share 3000m / 14336Mi after the 1C/2Gi
 			// reservation. Suggested CPU = (3000-1)/1000 = 2; 2*8/2*7 Gi
-			// both meet or exceed 14336Mi, 2*6 Gi = 12288Mi fits strictly.
-			expected: DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
+			// both meet or exceed 14336Mi, 2*6 Gi = 12288Mi fits strictly
+			// — 2C/12Gi.
+			expected: DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
 		},
 		{
 			// Only one of the two labels set: the read path requires both to
@@ -799,7 +817,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("4"),
 			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
+			expected:    DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
 		},
 		{
 			// T4(x4) 48C/192Gi: per-device share 11750m / 48640Mi after
@@ -810,7 +828,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("48"),
 			allocRAM:    resource.MustParse("192Gi"),
 			deviceCount: 4,
-			expected:    DeviceUnitResources{CPU: "11000m", RAM: "45056Mi"},
+			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(44)},
 		},
 		{
 			// User-reported scenario: 47810m / 192757188Ki over 4 devices.
@@ -821,7 +839,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("47810m"),
 			allocRAM:    resource.MustParse("192757188Ki"),
 			deviceCount: 4,
-			expected:    DeviceUnitResources{CPU: "11000m", RAM: "45056Mi"},
+			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(44)},
 		},
 		{
 			// T4(x8) 96C/384Gi: per-device share 11875m / 48896Mi.
@@ -830,7 +848,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("96"),
 			allocRAM:    resource.MustParse("384Gi"),
 			deviceCount: 8,
-			expected:    DeviceUnitResources{CPU: "11000m", RAM: "45056Mi"},
+			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(44)},
 		},
 		{
 			// 64C/256Gi/8: per-device share 7875m / 32512Mi. Suggested CPU
@@ -840,7 +858,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("64"),
 			allocRAM:    resource.MustParse("256Gi"),
 			deviceCount: 8,
-			expected:    DeviceUnitResources{CPU: "7000m", RAM: "28672Mi"},
+			expected:    DeviceUnitResources{CPU: cores(7), RAM: gi(28)},
 		},
 		{
 			// 4C/16Gi/1: per-device share 3000m / 14336Mi. Suggested CPU =
@@ -850,7 +868,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("4"),
 			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
+			expected:    DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
 		},
 		{
 			// 4C/16Gi/4: per-device share 750m / 3584Mi — suggested CPU
@@ -859,7 +877,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("4"),
 			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 4,
-			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
+			expected:    defaultUnits,
 		},
 		{
 			// Reservation drains a tiny host completely; avail clamps to 0
@@ -868,7 +886,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("1"),
 			allocRAM:    resource.MustParse("1Gi"),
 			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
+			expected:    defaultUnits,
 		},
 		{
 			// deviceCount<=0 collapses to 1 so callers don't divide by zero.
@@ -876,14 +894,14 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("4"),
 			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 0,
-			expected:    DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
+			expected:    DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
 		},
 		{
 			// Zero allocatable: avail clamps to 0, no positive suggestion,
 			// default.
 			name:        "no labels — zero allocatable",
 			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
+			expected:    defaultUnits,
 		},
 		{
 			// CPU budget exactly on an integer-core boundary: the (x-1)/1000
@@ -895,7 +913,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("13"),
 			allocRAM:    resource.MustParse("64Gi"),
 			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: "11000m", RAM: "56320Mi"},
+			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(55)},
 		},
 		{
 			// CPU plentiful but RAM is tight relative to the smallest ratio:
@@ -905,7 +923,7 @@ func TestGetDeviceUnitResources(t *testing.T) {
 			allocCPU:    resource.MustParse("100"),
 			allocRAM:    resource.MustParse("10Gi"),
 			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
+			expected:    defaultUnits,
 		},
 	}
 

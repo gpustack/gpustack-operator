@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/multierr"
 	core "k8s.io/api/core/v1"
-	kresource "k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
@@ -112,10 +111,8 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			if ndKey != devicefeature.DisfeaturedNodeKey {
 				// For featured nodes, use resource flavor name to indicate the resource type and amount,
 				// so that the corresponding ClusterQueue can be easily identified and configured.
-				unitCPU := kresource.MustParse(ndf.UnitResources.CPU)
-				unitRAM := kresource.MustParse(ndf.UnitResources.RAM)
 				clusterQueueNamePrefix += strings.ToLower(fmt.Sprintf("-%sc-%s",
-					unitCPU.String(), unitRAM.String()))
+					ndf.UnitResources.CPU.String(), ndf.UnitResources.RAM.String()))
 			}
 			systemmeta.NoteResource(eResFlv, "nodes", map[string]string{
 				"clusterqueue-generate-name": funcx.TernaryFunc(

@@ -269,8 +269,8 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"family":            ndf.Family,
 		"computeCapability": ndf.ComputeCapability,
 		"sliced":            ndf.Sliced,
-		"unitResCPU":        ndf.UnitResources.CPU,
-		"unitResRAM":        ndf.UnitResources.RAM,
+		"unitResCPU":        ndf.UnitResources.CPU.String(),
+		"unitResRAM":        ndf.UnitResources.RAM.String(),
 	})
 	err = r.Client.Create(ctx, cq)
 	if err != nil {
