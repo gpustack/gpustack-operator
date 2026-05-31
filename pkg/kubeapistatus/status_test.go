@@ -48,7 +48,7 @@ func TestWalker_sxs(t *testing.T) {
 	//      | ReplicaFailure | Unknown                 | ReplicaDeploying      | PhaseIsTransitioning  |
 	//      | ReplicaFailure | False                   | ReplicaDeployed       | Done                  |
 	//      | ReplicaFailure | True                    | ReplicaDeployFailed   | Error                 |
-	//      | Available      | Unknown                 | Preparing             | PhaseIsTransitioning  |
+	//      | Available      | Unknown                 | Starting              | PhaseIsTransitioning  |
 	//      | Available      | False                   | Unavailable           | Error                 |
 	//      | Available      | True                    | Available             | Done                  |
 
@@ -136,10 +136,10 @@ func TestWalker_sxs(t *testing.T) {
 	f.Summarize(&r.Status)
 	p.Dump("Still Replica Deploy Failed [E]", r.Status)
 	// 4.8  until marked the "ReplicaFailure" status to False or remove "ReplicaFailure" condition,
-	//      we will get a transitioning preparing summary.
+	//      we will get a transitioning starting summary.
 	ExampleResourceStatusReplicaFailure.False(&r, "", "")
 	f.Summarize(&r.Status)
-	p.Dump("Preparing [T]", r.Status)
+	p.Dump("Starting [T]", r.Status)
 	// 4.9  marked the "Available" status to False, which means replica deploying failed,
 	//      we should get an error unavailable summary.
 	ExampleResourceStatusAvailable.False(&r, "", "")
@@ -237,7 +237,7 @@ func TestWalker_multiple(t *testing.T) {
 					},
 				},
 			},
-			expected: "Preparing",
+			expected: "Starting",
 		},
 		{
 			name: "redeploy",

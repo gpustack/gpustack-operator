@@ -62,18 +62,16 @@ func applyDeviceFeatureLabels(labels map[string]string, group device.DevicesGrou
 		labels[manuLabelKey+".compute-capability"] = v
 	}
 
-	// Per-device unit CPU/RAM derived from the host's allocatable budget.
-	// Kept as side labels rather than folded into selfLabelKey so small
-	// allocatable drift does not churn the node key. The display variants
-	// (whole cores / whole GiB, ceiled, 1C/1Gi minimum) are recorded here
-	// for user-facing metadata.
-	units := GetDeviceUnitResources(
-		node.Status.Allocatable[core.ResourceCPU],
-		node.Status.Allocatable[core.ResourceMemory],
-		int64(len(group.Accelerators)),
-	)
-
 	selfLabelKey := manuLabelKey + "-" + group.ID
+	nodeKey := group.Manufacturer + "-" + group.ID
+
+	// Per-device unit CPU/RAM derived from the host's allocatable budget
+	// minus a fixed system reservation. Kept as side labels rather than
+	// folded into selfLabelKey so small allocatable drift does not churn the
+	// node key. Once written, GetDeviceUnitResources re-reads these labels
+	// instead of recomputing — keeping the value stable across reconciles
+	// and letting operators override via direct label edits.
+	units := GetDeviceUnitResources(node, nodeKey, int64(len(group.Accelerators)))
 
 	// "${prefix}${manufacturer}-${id}=true"
 	labels[selfLabelKey] = "true"
@@ -89,10 +87,10 @@ func applyDeviceFeatureLabels(labels map[string]string, group device.DevicesGrou
 	}
 	// "${prefix}${manufacturer}-${id}.accelerators=${count}"
 	labels[selfLabelKey+".accelerators"] = strconv.Itoa(len(group.Accelerators))
-	// "${prefix}${manufacturer}-${id}.cpu=${displayCPU}"
-	labels[selfLabelKey+".cpu"] = units.DisplayCPU
-	// "${prefix}${manufacturer}-${id}.ram=${displayRAM}"
-	labels[selfLabelKey+".ram"] = units.DisplayRAM
+	// "${prefix}${manufacturer}-${id}.unit-cpu=${unitCPU}"
+	labels[selfLabelKey+".unit-cpu"] = units.CPU
+	// "${prefix}${manufacturer}-${id}.unit-ram=${unitRAM}"
+	labels[selfLabelKey+".unit-ram"] = units.RAM
 
 	// Match Kubernetes label values' requirements.
 	for k := range labels {
@@ -173,15 +171,18 @@ func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
 	}
 
 	manufacturer := p[0]
+	selfLabelKey := FeatureLabelPrefix + key
+	selfUnitCPUKey := selfLabelKey + ".unit-cpu"
+	selfUnitRAMKey := selfLabelKey + ".unit-ram"
 	// gpustack.ai/managed: "true"
 	// feature.gpustack.ai/${manufacturer}-${id}: "true"
-	// feature.gpustack.ai/${manufacturer}-${id}.cpu: ${displayCPU}
-	// feature.gpustack.ai/${manufacturer}-${id}.ram: ${displayRAM}
+	// feature.gpustack.ai/${manufacturer}-${id}.unit-cpu: ${unitCPU}
+	// feature.gpustack.ai/${manufacturer}-${id}.unit-ram: ${unitRAM}
 	ndf.NodeLabels = map[string]string{
-		systemname.ManagedLabelKey:        "true",
-		FeatureLabelPrefix + key:          "true",
-		FeatureLabelPrefix + key + ".cpu": node.Labels[FeatureLabelPrefix+key+".cpu"],
-		FeatureLabelPrefix + key + ".ram": node.Labels[FeatureLabelPrefix+key+".ram"],
+		systemname.ManagedLabelKey: "true",
+		selfLabelKey:               "true",
+		selfUnitCPUKey:             node.Labels[selfUnitCPUKey],
+		selfUnitRAMKey:             node.Labels[selfUnitRAMKey],
 	}
 	for i := range node.Spec.Taints {
 		taints := &node.Spec.Taints[i]
@@ -208,14 +209,18 @@ func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
 	ndf.ComputeCapability = node.Labels[FeatureLabelPrefix+manufacturer+".compute-capability"]
 	ndf.Family = node.Labels[FeatureLabelPrefix+key+".family"]
 	ndf.Accelerator = node.Status.Allocatable[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
-	ndf.CPU = node.Status.Allocatable[core.ResourceCPU]
-	ndf.RAM = node.Status.Allocatable[core.ResourceMemory]
 	ndf.LocalStorage = node.Status.Allocatable[core.ResourceEphemeralStorage]
-	ndf.UnitResources = GetDeviceUnitResources(
-		node.Status.Allocatable[core.ResourceCPU],
-		node.Status.Allocatable[core.ResourceMemory],
-		ndf.Accelerator.Value(),
-	)
+	ndf.UnitResources = GetDeviceUnitResources(node, key, ndf.Accelerator.Value())
+
+	// Scale the per-device units up by the allocatable accelerator count to
+	// get the node-level CPU/RAM the scheduler should book alongside these
+	// devices. With zero allocatable accelerators the product is zero,
+	// which correctly reports "no headroom" for new device-bound workloads.
+	accelCount := ndf.Accelerator.Value()
+	unitCPU := resource.MustParse(ndf.UnitResources.CPU)
+	unitRAM := resource.MustParse(ndf.UnitResources.RAM)
+	ndf.CPU = *resource.NewMilliQuantity(unitCPU.MilliValue()*accelCount, resource.DecimalSI)
+	ndf.RAM = *resource.NewQuantity(unitRAM.Value()*accelCount, resource.BinarySI)
 	return ndf
 }
 
@@ -236,51 +241,119 @@ func PowersOfTwoUpTo[I typex.Integer](n I) []I {
 	return result
 }
 
-// DeviceUnitResources bundles the per-device unit CPU and unit RAM in two
-// forms — actual (for scheduling) and display (for user-facing metadata).
+// DeviceUnitResources bundles the per-device unit CPU and unit RAM that a
+// single device on a node is expected to receive when it joins a pod.
 type DeviceUnitResources struct {
-	// ActualCPU is the per-device CPU as milli-cores, e.g. "2500m". Derived
-	// by flooring the host CPU total (in milli) divided by deviceCount, so
-	// the sum across all devices never exceeds the host's allocatable
-	// budget. No minimum is enforced.
-	ActualCPU string
-	// ActualRAM is the per-device RAM as MiB, e.g. "5888Mi". The host RAM
-	// is floored to whole MiB first to discard sub-MiB noise, then divided
-	// by deviceCount with the quotient floored. No minimum is enforced.
-	ActualRAM string
-	// DisplayCPU is the per-device CPU as whole cores, e.g. "3" — ceiled
-	// from ActualCPU and clamped to at least "1".
-	DisplayCPU string
-	// DisplayRAM is the per-device RAM as whole GiB, e.g. "6Gi" — ceiled
-	// from ActualRAM and clamped to at least "1Gi".
-	DisplayRAM string
+	// CPU is the per-device CPU in milli-cores, e.g. "2000m". Derived from
+	// the reservation-deducted per-device CPU budget rounded up to integer
+	// cores minus one for headroom. Defaults to "1000m" when no positive
+	// suggestion can be formed.
+	CPU string
+	// RAM is the per-device RAM in MiB, e.g. "8192Mi". Derived by walking
+	// descending CPU:RAM ratios (8, 7, ..., 2) and picking the largest
+	// ratio whose induced RAM (suggestedCPU * ratio Gi) stays strictly
+	// under the per-device RAM budget. Defaults to "1024Mi" when no ratio
+	// fits.
+	RAM string
 }
 
-// GetDeviceUnitResources computes the per-device unit CPU and unit RAM for the given
-// node allocatable totals, divided across deviceCount devices. See the
-// DeviceUnitResources field comments for the semantics of each value.
-func GetDeviceUnitResources(cpu, ram resource.Quantity, deviceCount int64) DeviceUnitResources {
+// _DeviceUnitResourceReservedCPUMilli and _DeviceUnitResourceReservedRAMMi
+// are the per-node system reservation subtracted from allocatable before
+// dividing the remainder across devices. They cover GPUStack agents,
+// kubelet, CRI, and other system pods that share the node with workloads —
+// allocating the raw allocatable across devices would leave nothing for
+// these and cause pods to fail scheduling.
+const (
+	_DeviceUnitResourceReservedCPUMilli int64 = 1000
+	_DeviceUnitResourceReservedRAMMi    int64 = 2 * 1024
+)
+
+// _DeviceUnitResourceDefault is the 1C/1Gi fallback returned when the
+// per-device budget cannot induce a positive (CPU, RAM) suggestion —
+// e.g. very small hosts or very high device counts.
+var _DeviceUnitResourceDefault = DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"}
+
+// _deviceUnitResourceCPUToRAMRatios is the descending list of integer
+// RAM:CPU ratios (Gi per core) tried when deriving a per-device unit. The
+// first ratio whose induced RAM stays strictly under the per-device RAM
+// budget wins, which biases toward giving each device as much RAM as the
+// budget can support while keeping CPU and RAM in an integer ratio.
+var _deviceUnitResourceCPUToRAMRatios = []int64{8, 7, 6, 5, 4, 3, 2}
+
+// GetDeviceUnitResources returns the per-device CPU and RAM units for a
+// device identified by nodeKey ("${manufacturer}-${id}") on node, split
+// deviceCount-ways.
+//
+// Resolution:
+//  1. If node already carries "${FeatureLabelPrefix}${nodeKey}.unit-cpu"
+//     and ".unit-ram" labels with non-empty values, parse and return them
+//     reformatted. This makes the value sticky across reconciles and lets
+//     operators override by directly editing the labels.
+//  2. Otherwise, subtract a fixed system reservation
+//     (_DeviceUnitResourceReservedCPUMilli / _DeviceUnitResourceReservedRAMMi)
+//     from the node's allocatable CPU/RAM, divide the remainder by
+//     deviceCount (clamped to >= 1) to get the raw per-device share. Take
+//     the per-device CPU rounded up to integer cores minus one — i.e.
+//     (unitCPUMilli - 1) / 1000 — as the suggested CPU, then walk
+//     descending CPU:RAM ratios (8, 7, ..., 2) and return the first ratio
+//     whose induced RAM (suggestedCPU * ratio Gi) is strictly less than
+//     the per-device RAM share.
+//  3. If suggested CPU is below 1 or no ratio fits, return
+//     _DeviceUnitResourceDefault ("1000m" / "1024Mi" = 1C/1Gi).
+func GetDeviceUnitResources(node *core.Node, nodeKey string, deviceCount int64) DeviceUnitResources {
+	selfLabelKey := FeatureLabelPrefix + nodeKey
+	if cpuLabel, ramLabel := node.Labels[selfLabelKey+".unit-cpu"], node.Labels[selfLabelKey+".unit-ram"]; cpuLabel != "" && ramLabel != "" {
+		cpuQ, errCPU := resource.ParseQuantity(cpuLabel)
+		ramQ, errRAM := resource.ParseQuantity(ramLabel)
+		if errCPU == nil && errRAM == nil {
+			return DeviceUnitResources{
+				CPU: strconv.FormatInt(cpuQ.MilliValue(), 10) + "m",
+				RAM: strconv.FormatInt(ramQ.Value()/int64(quantityx.Mi), 10) + "Mi",
+			}
+		}
+	}
+
 	n := deviceCount
 	if n <= 0 {
 		n = 1
 	}
 
-	actualCPUMilli := cpu.MilliValue() / n
-	actualRAMMi := (ram.Value() / int64(quantityx.Mi)) / n
+	allocCPU := node.Status.Allocatable[core.ResourceCPU]
+	allocRAM := node.Status.Allocatable[core.ResourceMemory]
 
-	displayCPUCores := (actualCPUMilli + 999) / 1000
-	if displayCPUCores < 1 {
-		displayCPUCores = 1
+	availCPUMilli := allocCPU.MilliValue() - _DeviceUnitResourceReservedCPUMilli
+	if availCPUMilli < 0 {
+		availCPUMilli = 0
 	}
-	displayRAMGi := (actualRAMMi + 1023) / 1024
-	if displayRAMGi < 1 {
-		displayRAMGi = 1
+	availRAMMi := (allocRAM.Value() / int64(quantityx.Mi)) - _DeviceUnitResourceReservedRAMMi
+	if availRAMMi < 0 {
+		availRAMMi = 0
 	}
 
-	return DeviceUnitResources{
-		ActualCPU:  strconv.FormatInt(actualCPUMilli, 10) + "m",
-		ActualRAM:  strconv.FormatInt(actualRAMMi, 10) + "Mi",
-		DisplayCPU: strconv.FormatInt(displayCPUCores, 10),
-		DisplayRAM: strconv.FormatInt(displayRAMGi, 10) + "Gi",
+	unitCPUMilli := availCPUMilli / n
+	unitRAMMi := availRAMMi / n
+
+	// ceil(unitCPUMilli / 1000) - 1 in integer form (for unitCPUMilli > 0).
+	// One core of headroom over the strict per-device CPU budget — also
+	// makes the exact-integer case (e.g. 12000m) yield 11 rather than 12.
+	if unitCPUMilli <= 0 {
+		return _DeviceUnitResourceDefault
 	}
+	suggestedCPUCores := (unitCPUMilli - 1) / 1000
+	if suggestedCPUCores < 1 {
+		return _DeviceUnitResourceDefault
+	}
+
+	// 1 Gi = 1024 Mi; the budget comparison stays entirely in MiB.
+	const miPerGi int64 = 1024
+	for _, ratio := range _deviceUnitResourceCPUToRAMRatios {
+		suggestedRAMMi := suggestedCPUCores * ratio * miPerGi
+		if suggestedRAMMi < unitRAMMi {
+			return DeviceUnitResources{
+				CPU: strconv.FormatInt(suggestedCPUCores*1000, 10) + "m",
+				RAM: strconv.FormatInt(suggestedRAMMi, 10) + "Mi",
+			}
+		}
+	}
+	return _DeviceUnitResourceDefault
 }

@@ -148,7 +148,7 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 				continue
 			}
 
-			if !strings.Contains(refCq.GenerateName, "-sliced-") {
+			if !strings.Contains(refCq.GenerateName, "-sliced-") && strings.Contains(cqGN, "-sliced-") {
 				err, cleared := r.clearResourceFlavorQuota(ctx, refCq, rgIndex, flvIndex)
 				if err != nil {
 					logger.Error(err, "clear resource flavor quota")
@@ -269,8 +269,8 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		"family":            ndf.Family,
 		"computeCapability": ndf.ComputeCapability,
 		"sliced":            ndf.Sliced,
-		"unitResCPU":        ndf.UnitResources.ActualCPU,
-		"unitResRAM":        ndf.UnitResources.ActualRAM,
+		"unitResCPU":        ndf.UnitResources.CPU,
+		"unitResRAM":        ndf.UnitResources.RAM,
 	})
 	err = r.Client.Create(ctx, cq)
 	if err != nil {

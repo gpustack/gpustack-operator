@@ -102,8 +102,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
 				FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
 				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "1",
-				FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "4Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1000m",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "1024Mi",
 			},
 		},
 		{
@@ -128,8 +128,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.cpu":          "4",
-				FeatureLabelPrefix + "nvidia-h100.ram":          "16Gi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
 			},
 		},
 		{
@@ -170,16 +170,16 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "0",
 				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "16Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "2000m",
+				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "12288Mi",
 				FeatureLabelPrefix + "amd":                          "true",
 				FeatureLabelPrefix + "amd-mi300x":                   "true",
 				FeatureLabelPrefix + "amd-mi300x.product":           "MI300X",
 				FeatureLabelPrefix + "amd-mi300x.memory":            "192Gi",
 				FeatureLabelPrefix + "amd-mi300x.cores":             "0",
 				FeatureLabelPrefix + "amd-mi300x.accelerators":      "2",
-				FeatureLabelPrefix + "amd-mi300x.cpu":               "2",
-				FeatureLabelPrefix + "amd-mi300x.ram":               "8Gi",
+				FeatureLabelPrefix + "amd-mi300x.unit-cpu":          "1000m",
+				FeatureLabelPrefix + "amd-mi300x.unit-ram":          "6144Mi",
 			},
 		},
 		{
@@ -224,8 +224,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.cpu":          "4",
-				FeatureLabelPrefix + "nvidia-h100.ram":          "16Gi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
 			},
 		},
 		{
@@ -271,8 +271,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.cpu":          "4",
-				FeatureLabelPrefix + "nvidia-h100.ram":          "16Gi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
 			},
 		},
 		{
@@ -320,8 +320,8 @@ func TestConstructNodeLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
 				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
 				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.cpu":          "4",
-				FeatureLabelPrefix + "nvidia-h100.ram":          "16Gi",
+				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2000m",
+				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12288Mi",
 			},
 		},
 	}
@@ -376,8 +376,8 @@ func TestExtractNodeKeys(t *testing.T) {
 						FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
 						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "4Gi",
+						FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
+						FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "4Gi",
 					},
 				},
 			},
@@ -489,8 +489,8 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 						FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
 						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "4Gi",
+						FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
+						FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "4Gi",
 					},
 				},
 				Status: core.NodeStatus{
@@ -511,10 +511,10 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 			key: "nvidia-tesla-t4",
 			expected: NodeFeature{
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                 "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":     "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.cpu": "1",
-					FeatureLabelPrefix + "nvidia-tesla-t4.ram": "4Gi",
+					systemname.ManagedLabelKey:                      "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "1",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "4Gi",
 				},
 				Sliced:            "",
 				Manufacturer:      "nvidia",
@@ -524,14 +524,13 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 				ComputeCapability: "7.5",
 				Family:            "Turing",
 				Accelerator:       *resource.NewQuantity(2, resource.DecimalSI),
-				CPU:               cpuCapacity,
-				RAM:               ramCapacity,
-				LocalStorage:      localStorageCapacity,
+				// CPU/RAM = unit (1000m / 4096Mi) × Accelerator (2) = 2000m / 8Gi.
+				CPU:          *resource.NewMilliQuantity(2000, resource.DecimalSI),
+				RAM:          *resource.NewQuantity(8*1024*1024*1024, resource.BinarySI),
+				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					ActualCPU:  "2000m",
-					ActualRAM:  "8192Mi",
-					DisplayCPU: "2",
-					DisplayRAM: "8Gi",
+					CPU: "1000m",
+					RAM: "4096Mi",
 				},
 			},
 		},
@@ -552,8 +551,8 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 						FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
 						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "4Gi",
+						FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
+						FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "4Gi",
 					},
 				},
 				Spec: core.NodeSpec{
@@ -584,10 +583,10 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 			key: "nvidia-tesla-t4",
 			expected: NodeFeature{
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                 "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":     "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.cpu": "1",
-					FeatureLabelPrefix + "nvidia-tesla-t4.ram": "4Gi",
+					systemname.ManagedLabelKey:                      "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "1",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "4Gi",
 				},
 				Tolerations: []core.Toleration{
 					{
@@ -605,21 +604,22 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 				ComputeCapability: "7.5",
 				Family:            "Turing",
 				Accelerator:       *resource.NewQuantity(2, resource.DecimalSI),
-				CPU:               cpuCapacity,
-				RAM:               ramCapacity,
-				LocalStorage:      localStorageCapacity,
+				// CPU/RAM = unit (1000m / 4096Mi) × Accelerator (2) = 2000m / 8Gi.
+				CPU:          *resource.NewMilliQuantity(2000, resource.DecimalSI),
+				RAM:          *resource.NewQuantity(8*1024*1024*1024, resource.BinarySI),
+				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					ActualCPU:  "2000m",
-					ActualRAM:  "8192Mi",
-					DisplayCPU: "2",
-					DisplayRAM: "8Gi",
+					CPU: "1000m",
+					RAM: "4096Mi",
 				},
 			},
 		},
 		{
-			// Four allocatable accelerators on the same 4C/16Gi host —
-			// per-device units should fall to 1000m / 4096Mi (1 / 4Gi display).
-			name: "four allocatable accelerators",
+			// Labels absent, four accelerators on a 4C/16Gi host: per-device
+			// share after the 2C/2Gi reservation is 500m / 3584Mi, below
+			// every table row's CPU floor — GetDeviceUnitResources falls back
+			// to the 1000m / 1024Mi default.
+			name: "four allocatable accelerators, labels absent — defaults",
 			node: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name: nodeName,
@@ -631,8 +631,6 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
 						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "4Gi",
 					},
 				},
 				Status: core.NodeStatus{
@@ -653,32 +651,32 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 			key: "nvidia-tesla-t4",
 			expected: NodeFeature{
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                 "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":     "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.cpu": "1",
-					FeatureLabelPrefix + "nvidia-tesla-t4.ram": "4Gi",
+					systemname.ManagedLabelKey:                      "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "",
 				},
 				Manufacturer: "nvidia",
 				Product:      "Tesla-T4",
 				Memory:       "15Gi",
 				Cores:        "2560",
 				Accelerator:  *resource.NewQuantity(4, resource.DecimalSI),
-				CPU:          cpuCapacity,
-				RAM:          ramCapacity,
+				// CPU/RAM = unit (1000m / 1024Mi) × Accelerator (4) = 4000m / 4Gi.
+				CPU:          *resource.NewMilliQuantity(4000, resource.DecimalSI),
+				RAM:          *resource.NewQuantity(4*1024*1024*1024, resource.BinarySI),
 				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					ActualCPU:  "1000m",
-					ActualRAM:  "4096Mi",
-					DisplayCPU: "1",
-					DisplayRAM: "4Gi",
+					CPU: "1000m",
+					RAM: "1024Mi",
 				},
 			},
 		},
 		{
-			// Zero allocatable accelerators (e.g. all pre-assigned): the
-			// GetDeviceUnitResources call falls back to n=1, so each "device" reports
-			// the whole host's per-device units.
-			name: "zero allocatable accelerators falls back to host budget",
+			// Labels absent, zero allocatable accelerators (e.g. all
+			// pre-assigned): GetDeviceUnitResources falls back to n=1 with
+			// per-device share 3000m / 14336Mi → suggested CPU=2, the 6:1
+			// ratio induces 12288Mi which fits strictly under 14336Mi.
+			name: "zero allocatable accelerators, labels absent — n=1 fallback",
 			node: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name: nodeName,
@@ -690,8 +688,6 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
 						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
 						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cpu":          "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.ram":          "4Gi",
 					},
 				},
 				Status: core.NodeStatus{
@@ -712,24 +708,24 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 			key: "nvidia-tesla-t4",
 			expected: NodeFeature{
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                 "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":     "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.cpu": "1",
-					FeatureLabelPrefix + "nvidia-tesla-t4.ram": "4Gi",
+					systemname.ManagedLabelKey:                      "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "",
+					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "",
 				},
 				Manufacturer: "nvidia",
 				Product:      "Tesla-T4",
 				Memory:       "15Gi",
 				Cores:        "2560",
 				Accelerator:  *resource.NewQuantity(0, resource.DecimalSI),
-				CPU:          cpuCapacity,
-				RAM:          ramCapacity,
+				// Accelerator=0 zeros the per-node CPU/RAM regardless of the
+				// per-device unit — no accelerator slots, no booked headroom.
+				CPU:          *resource.NewMilliQuantity(0, resource.DecimalSI),
+				RAM:          *resource.NewQuantity(0, resource.BinarySI),
 				LocalStorage: localStorageCapacity,
 				UnitResources: DeviceUnitResources{
-					ActualCPU:  "4000m",
-					ActualRAM:  "16384Mi",
-					DisplayCPU: "4",
-					DisplayRAM: "16Gi",
+					CPU: "2000m",
+					RAM: "12288Mi",
 				},
 			},
 		},
@@ -744,164 +740,187 @@ func TestExtractNodeFeatureByKey(t *testing.T) {
 }
 
 func TestGetDeviceUnitResources(t *testing.T) {
+	const nodeKey = "nvidia-tesla-t4"
+	selfLabelKey := FeatureLabelPrefix + nodeKey
+
 	cases := []struct {
 		name        string
-		cpu         resource.Quantity
-		ram         resource.Quantity
+		labels      map[string]string
+		allocCPU    resource.Quantity
+		allocRAM    resource.Quantity
 		deviceCount int64
 		expected    DeviceUnitResources
 	}{
 		{
-			name:        "even split: 4C / 16Gi / 4 devices",
-			cpu:         resource.MustParse("4"),
-			ram:         resource.MustParse("16Gi"),
-			deviceCount: 4,
-			expected: DeviceUnitResources{
-				ActualCPU:  "1000m",
-				ActualRAM:  "4096Mi",
-				DisplayCPU: "1",
-				DisplayRAM: "4Gi",
+			// Labels in canonical form are returned without further mutation
+			// (parsed-then-formatted, but the round-trip preserves them).
+			name: "labels present in canonical form",
+			labels: map[string]string{
+				selfLabelKey + ".unit-cpu": "2000m",
+				selfLabelKey + ".unit-ram": "8192Mi",
 			},
+			// Allocatable and deviceCount are ignored on the read path.
+			deviceCount: 99,
+			expected:    DeviceUnitResources{CPU: "2000m", RAM: "8192Mi"},
 		},
 		{
-			name:        "single device gets whole node: 4C / 16Gi / 1 device",
-			cpu:         resource.MustParse("4"),
-			ram:         resource.MustParse("16Gi"),
+			// Labels in cores / Gi are re-formatted to milli / Mi.
+			name: "labels present in core/Gi form — reformatted",
+			labels: map[string]string{
+				selfLabelKey + ".unit-cpu": "4",
+				selfLabelKey + ".unit-ram": "16Gi",
+			},
+			deviceCount: 4,
+			expected:    DeviceUnitResources{CPU: "4000m", RAM: "16384Mi"},
+		},
+		{
+			// Both labels must parse — if either is malformed, the function
+			// falls through to the compute path.
+			name: "labels malformed — falls through to compute path",
+			labels: map[string]string{
+				selfLabelKey + ".unit-cpu": "not-a-quantity",
+				selfLabelKey + ".unit-ram": "still-bad",
+			},
+			allocCPU:    resource.MustParse("4"),
+			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 1,
-			expected: DeviceUnitResources{
-				ActualCPU:  "4000m",
-				ActualRAM:  "16384Mi",
-				DisplayCPU: "4",
-				DisplayRAM: "16Gi",
-			},
+			// per-device share 3000m / 14336Mi after the 1C/2Gi
+			// reservation. Suggested CPU = (3000-1)/1000 = 2; 2*8/2*7 Gi
+			// both meet or exceed 14336Mi, 2*6 Gi = 12288Mi fits strictly.
+			expected: DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
 		},
 		{
-			// T4(x4): 48C / 192Gi / 4 devices.
-			name:        "T4(x4) 48C/192Gi over 4 devices",
-			cpu:         resource.MustParse("48"),
-			ram:         resource.MustParse("192Gi"),
+			// Only one of the two labels set: the read path requires both to
+			// be non-empty, so this falls through to compute.
+			name: "only cpu label set — falls through to compute path",
+			labels: map[string]string{
+				selfLabelKey + ".unit-cpu": "2000m",
+			},
+			allocCPU:    resource.MustParse("4"),
+			allocRAM:    resource.MustParse("16Gi"),
+			deviceCount: 1,
+			expected:    DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
+		},
+		{
+			// T4(x4) 48C/192Gi: per-device share 11750m / 48640Mi after
+			// the 1C/2Gi reservation. Suggested CPU = (11750-1)/1000 = 11;
+			// ratios 8..5 induce >55Gi which exceeds the budget, 11*4 Gi =
+			// 45056Mi fits strictly under 48640Mi.
+			name:        "no labels — T4(x4) 48C/192Gi over 4 devices",
+			allocCPU:    resource.MustParse("48"),
+			allocRAM:    resource.MustParse("192Gi"),
 			deviceCount: 4,
-			expected: DeviceUnitResources{
-				ActualCPU:  "12000m",
-				ActualRAM:  "49152Mi",
-				DisplayCPU: "12",
-				DisplayRAM: "48Gi",
-			},
+			expected:    DeviceUnitResources{CPU: "11000m", RAM: "45056Mi"},
 		},
 		{
-			// T4(x8): 96C / 384Gi / 8 devices — same per-device units as T4(x4).
-			name:        "T4(x8) 96C/384Gi over 8 devices",
-			cpu:         resource.MustParse("96"),
-			ram:         resource.MustParse("384Gi"),
+			// User-reported scenario: 47810m / 192757188Ki over 4 devices.
+			// availCPU=46810m, availRAM=186191Mi → per-device 11702m /
+			// 46547Mi. Suggested CPU = (11702-1)/1000 = 11; 11*5 Gi =
+			// 56320Mi exceeds 46547Mi, 11*4 Gi = 45056Mi fits — 11C/44Gi.
+			name:        "no labels — 47810m / 192757188Ki over 4 devices",
+			allocCPU:    resource.MustParse("47810m"),
+			allocRAM:    resource.MustParse("192757188Ki"),
+			deviceCount: 4,
+			expected:    DeviceUnitResources{CPU: "11000m", RAM: "45056Mi"},
+		},
+		{
+			// T4(x8) 96C/384Gi: per-device share 11875m / 48896Mi.
+			// Suggested CPU = 11; 11*4 Gi = 45056Mi fits.
+			name:        "no labels — T4(x8) 96C/384Gi over 8 devices",
+			allocCPU:    resource.MustParse("96"),
+			allocRAM:    resource.MustParse("384Gi"),
 			deviceCount: 8,
-			expected: DeviceUnitResources{
-				ActualCPU:  "12000m",
-				ActualRAM:  "49152Mi",
-				DisplayCPU: "12",
-				DisplayRAM: "48Gi",
-			},
+			expected:    DeviceUnitResources{CPU: "11000m", RAM: "45056Mi"},
 		},
 		{
-			// 24314504Ki = 23744.6 MiB -> floored to 23744 MiB; display ceils
-			// 23744 MiB to 24 GiB.
-			name:        "RAM floor: 24314504Ki -> 23744Mi actual / 24Gi display, single device",
-			cpu:         resource.MustParse("10"),
-			ram:         resource.MustParse("24314504Ki"),
+			// 64C/256Gi/8: per-device share 7875m / 32512Mi. Suggested CPU
+			// = (7875-1)/1000 = 7; 7*5 Gi = 35840Mi exceeds 32512Mi, 7*4
+			// Gi = 28672Mi fits — 7C/28Gi.
+			name:        "no labels — 64C/256Gi over 8 devices",
+			allocCPU:    resource.MustParse("64"),
+			allocRAM:    resource.MustParse("256Gi"),
+			deviceCount: 8,
+			expected:    DeviceUnitResources{CPU: "7000m", RAM: "28672Mi"},
+		},
+		{
+			// 4C/16Gi/1: per-device share 3000m / 14336Mi. Suggested CPU =
+			// 2; 2*8/2*7 Gi both meet or exceed 14336Mi, 2*6 Gi = 12288Mi
+			// fits strictly — 2C/12Gi.
+			name:        "no labels — 4C/16Gi over 1 device",
+			allocCPU:    resource.MustParse("4"),
+			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 1,
-			expected: DeviceUnitResources{
-				ActualCPU:  "10000m",
-				ActualRAM:  "23744Mi",
-				DisplayCPU: "10",
-				DisplayRAM: "24Gi",
-			},
+			expected:    DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
 		},
 		{
-			// Actual floor prevents overcommit: 4*2500m = 10000m <= 10C,
-			// 4*5888Mi = 23552Mi <= 23Gi. Display ceils both per device.
-			name:        "floor down: 10C / 23Gi over 4 devices",
-			cpu:         resource.MustParse("10"),
-			ram:         resource.MustParse("23Gi"),
+			// 4C/16Gi/4: per-device share 750m / 3584Mi — suggested CPU
+			// reaches 0, so the default is returned.
+			name:        "no labels — 4C/16Gi over 4 devices defaults",
+			allocCPU:    resource.MustParse("4"),
+			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 4,
-			expected: DeviceUnitResources{
-				ActualCPU:  "2500m",
-				ActualRAM:  "5888Mi",
-				DisplayCPU: "3",
-				DisplayRAM: "6Gi",
-			},
+			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
 		},
 		{
-			// Neighbor 8C host collapses to the same display 6Gi as the
-			// 10C/23Gi case above (5888 Mi -> ceil 6Gi); actual CPU differs.
-			name:        "neighbour host: 8C / 23Gi over 4 devices",
-			cpu:         resource.MustParse("8"),
-			ram:         resource.MustParse("23Gi"),
-			deviceCount: 4,
-			expected: DeviceUnitResources{
-				ActualCPU:  "2000m",
-				ActualRAM:  "5888Mi",
-				DisplayCPU: "2",
-				DisplayRAM: "6Gi",
-			},
-		},
-		{
-			// Sub-core actual stays in milli (10500m, no host-level rounding);
-			// display ceils to 11 cores.
-			name:        "fractional CPU: 10500m / 16Gi / 1 device",
-			cpu:         resource.MustParse("10500m"),
-			ram:         resource.MustParse("16Gi"),
+			// Reservation drains a tiny host completely; avail clamps to 0
+			// and the default is returned.
+			name:        "no labels — reservation exceeds allocatable",
+			allocCPU:    resource.MustParse("1"),
+			allocRAM:    resource.MustParse("1Gi"),
 			deviceCount: 1,
-			expected: DeviceUnitResources{
-				ActualCPU:  "10500m",
-				ActualRAM:  "16384Mi",
-				DisplayCPU: "11",
-				DisplayRAM: "16Gi",
-			},
+			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
 		},
 		{
-			// 2C/2Gi over 4 devices: actual is 500m/512Mi (no minimum); display
-			// clamps both up to the 1C / 1Gi floor.
-			name:        "minimum on display only: 2C / 2Gi over 4 devices",
-			cpu:         resource.MustParse("2"),
-			ram:         resource.MustParse("2Gi"),
-			deviceCount: 4,
-			expected: DeviceUnitResources{
-				ActualCPU:  "500m",
-				ActualRAM:  "512Mi",
-				DisplayCPU: "1",
-				DisplayRAM: "1Gi",
-			},
-		},
-		{
-			// Zero-quantity host: actual stays at 0, display clamps to 1/1Gi.
-			name:        "minimum on display only: zero quantities",
-			cpu:         resource.Quantity{},
-			ram:         resource.Quantity{},
-			deviceCount: 1,
-			expected: DeviceUnitResources{
-				ActualCPU:  "0m",
-				ActualRAM:  "0Mi",
-				DisplayCPU: "1",
-				DisplayRAM: "1Gi",
-			},
-		},
-		{
-			// deviceCount<=0 is treated as 1 so callers don't divide by zero.
-			name:        "deviceCount=0 treated as 1",
-			cpu:         resource.MustParse("4"),
-			ram:         resource.MustParse("16Gi"),
+			// deviceCount<=0 collapses to 1 so callers don't divide by zero.
+			name:        "no labels — deviceCount=0 treated as 1",
+			allocCPU:    resource.MustParse("4"),
+			allocRAM:    resource.MustParse("16Gi"),
 			deviceCount: 0,
-			expected: DeviceUnitResources{
-				ActualCPU:  "4000m",
-				ActualRAM:  "16384Mi",
-				DisplayCPU: "4",
-				DisplayRAM: "16Gi",
-			},
+			expected:    DeviceUnitResources{CPU: "2000m", RAM: "12288Mi"},
+		},
+		{
+			// Zero allocatable: avail clamps to 0, no positive suggestion,
+			// default.
+			name:        "no labels — zero allocatable",
+			deviceCount: 1,
+			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
+		},
+		{
+			// CPU budget exactly on an integer-core boundary: the (x-1)/1000
+			// form yields one core less than the strict floor, leaving
+			// headroom. 13C/64Gi/1 → per-device 12000m / 63488Mi → suggested
+			// CPU 11 → 11*6 Gi = 67584Mi exceeds 63488Mi, 11*5 Gi = 56320Mi
+			// fits.
+			name:        "no labels — exact-integer CPU yields headroom",
+			allocCPU:    resource.MustParse("13"),
+			allocRAM:    resource.MustParse("64Gi"),
+			deviceCount: 1,
+			expected:    DeviceUnitResources{CPU: "11000m", RAM: "56320Mi"},
+		},
+		{
+			// CPU plentiful but RAM is tight relative to the smallest ratio:
+			// 100C/10Gi/1 → per-device 99000m / 8192Mi → suggested CPU 98 →
+			// 98*2 Gi = 200704Mi exceeds 8192Mi, all ratios fail, default.
+			name:        "no labels — ram too tight for any ratio",
+			allocCPU:    resource.MustParse("100"),
+			allocRAM:    resource.MustParse("10Gi"),
+			deviceCount: 1,
+			expected:    DeviceUnitResources{CPU: "1000m", RAM: "1024Mi"},
 		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := GetDeviceUnitResources(cs.cpu, cs.ram, cs.deviceCount)
+			node := &core.Node{
+				ObjectMeta: meta.ObjectMeta{Labels: cs.labels},
+				Status: core.NodeStatus{
+					Allocatable: core.ResourceList{
+						core.ResourceCPU:    cs.allocCPU,
+						core.ResourceMemory: cs.allocRAM,
+					},
+				},
+			}
+			actual := GetDeviceUnitResources(node, nodeKey, cs.deviceCount)
 			assert.Equal(t, cs.expected, actual, "unexpected per-device units")
 		})
 	}

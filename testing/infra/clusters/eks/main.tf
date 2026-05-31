@@ -512,8 +512,8 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
               memory = "8Gi"
             }
             requests = {
-              cpu    = "500m"
-              memory = "512Mi"
+              cpu    = "100m"
+              memory = "128Mi"
             }
           }
           env {
