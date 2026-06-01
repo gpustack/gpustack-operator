@@ -21,8 +21,8 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
-// NamespaceReconciler reconciles the core.Namespace object,
-// and manages corresponding LocalQueue.
+// NamespaceReconciler reconciles all Kubernetes Namespace objects to finish the following tasks:
+// - When a Namespace is created, create corresponding LocalQueue for each ClusterQueue if not exists.
 type NamespaceReconciler struct {
 	Client ctrlcli.Client
 }
@@ -47,16 +47,29 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrlreconcile.R
 
 	// Skip if Namespace is system namespace.
 	if ns.Name == kuberess.SystemNamespaceName {
+		logger.V(2).Info("skip system namespace", "namespace", ns.Name)
 		return ctrl.Result{}, nil
 	}
 
+	// Create LocalQueue.
+	err = r.createLocalQueue(ctx, ns)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *NamespaceReconciler) createLocalQueue(ctx context.Context, ns *core.Namespace) error {
+	logger := ctrllog.FromContext(ctx)
+
 	cqList := new(kueue.ClusterQueueList)
-	err = r.Client.List(ctx, cqList,
+	err := r.Client.List(ctx, cqList,
 		kubeclientset.NonQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list cluster queues")
-		return ctrl.Result{}, err
+		return err
 	}
 
 	var errs []error
@@ -87,10 +100,7 @@ func (r *NamespaceReconciler) Reconcile(ctx context.Context, req ctrlreconcile.R
 		}
 	}
 
-	if len(errs) > 0 {
-		return ctrl.Result{}, multierr.Combine(errs...)
-	}
-	return ctrl.Result{}, nil
+	return multierr.Combine(errs...)
 }
 
 func (r *NamespaceReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
@@ -99,15 +109,21 @@ func (r *NamespaceReconciler) SetupController(ctx context.Context, opts controll
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("worker.manage.namesapces").
 		For(
-			// Focus on the Kubernetes Namespace,
-			// when the Namespace is created.
 			&core.Namespace{},
 			ctrlbuilder.WithPredicates(
-				ctrlpredicate.Not(ctrlpredicate.Funcs{
-					CreateFunc: func(e ctrlevent.CreateEvent) bool {
+				// Trigger reconciliation when Namespace is:
+				// - created.
+				ctrlpredicate.Funcs{
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
 					},
-				}),
+					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						return false
+					},
+					GenericFunc: func(e ctrlevent.GenericEvent) bool {
+						return false
+					},
+				},
 			),
 		).
 		Complete(r)

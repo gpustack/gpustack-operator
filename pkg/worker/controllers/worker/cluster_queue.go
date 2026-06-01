@@ -22,8 +22,8 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
-// ClusterQueueReconciler reconciles the kueue.ClusterQueue object,
-// and manages corresponding LocalQueue.
+// ClusterQueueReconciler reconciles all kueue.ClusterQueue objects to finish the following tasks:
+// - When a ClusterQueue is created, create corresponding LocalQueue in each Namespace if not exists.
 type ClusterQueueReconciler struct {
 	Client ctrlcli.Client
 }
@@ -46,14 +46,25 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 
-	// Create corresponding LocalQueue if not exists.
+	// Create LocalQueue.
+	err = r.createLocalQueue(ctx, cq)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *ClusterQueueReconciler) createLocalQueue(ctx context.Context, cq *kueue.ClusterQueue) error {
+	logger := ctrllog.FromContext(ctx)
+
 	nsList := new(core.NamespaceList)
-	err = r.Client.List(ctx, nsList,
+	err := r.Client.List(ctx, nsList,
 		kubeclientset.NonQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list namespaces")
-		return ctrl.Result{}, err
+		return err
 	}
 
 	var errs []error
@@ -69,6 +80,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		// Skip if Namespace is system toolkit namespace.
 		if ns.Name == kuberess.SystemNamespaceName {
+			logger.V(2).Info("skip system namespace", "namespace", ns.Name)
 			continue
 		}
 
@@ -89,10 +101,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	if len(errs) > 0 {
-		return ctrl.Result{}, multierr.Combine(errs...)
-	}
-	return ctrl.Result{}, nil
+	return multierr.Combine(errs...)
 }
 
 func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
@@ -101,18 +110,23 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("worker.manage.cluster_queues").
 		For(
-			// Focus on the Kueue ClusterQueue,
-			// when the ClusterQueue is created.
 			&kueue.ClusterQueue{},
 			ctrlbuilder.WithPredicates(
+				// Interested in relevant ClusterQueue objects.
 				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 					return systemmeta.MatchResource(obj, "instancetypes")
 				}),
-				ctrlpredicate.Not(ctrlpredicate.Funcs{
-					CreateFunc: func(e ctrlevent.CreateEvent) bool {
+				// Trigger reconciliation when a ClusterQueue is:
+				// - created.
+				ctrlpredicate.Funcs{
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
 					},
-				}),
+					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						return false
+					},
+					GenericFunc: func(e ctrlevent.GenericEvent) bool { return false },
+				},
 			),
 		).
 		Complete(r)

@@ -29,8 +29,10 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 )
 
-// ResourceFlavorReconciler reconciles the kueue.ResourceFlavor object,
-// and manages corresponding ClusterQueue.
+// ResourceFlavorReconciler reconciles all kueue.ResourceFlavor objects to finish the following tasks:
+//   - When a ResourceFlavor is created or updated,
+//     create/update corresponding ClusterQueue according to the ResourceFlavor's labels,
+//     annotations and the Node's allocatable resources.
 type ResourceFlavorReconciler struct {
 	Client ctrlcli.Client
 }
@@ -458,15 +460,16 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("worker.manage.resource_flavors").
 		For(
-			// Focus on the Kueue ResourceFlavor,
-			// when the ResourceFlavor is updated.
 			&kueue.ResourceFlavor{},
 			ctrlbuilder.WithPredicates(
-				// Only reconcile when the ResourceFlavor is related to the worker Node,
-				// which is identified by the "nodes" resource note.
+				// Interested in relevant ResourceFlavor objects.
 				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 					return systemmeta.MatchResource(obj, "nodes")
 				}),
+				// Trigger reconciliation when a ResourceFlavor is:
+				// - created.
+				// - deleted.
+				// - updated with labels or annotations changes.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldResFlv, newResFlv := e.ObjectOld.(*kueue.ResourceFlavor), e.ObjectNew.(*kueue.ResourceFlavor)

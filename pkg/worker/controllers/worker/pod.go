@@ -23,8 +23,9 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
-// PodReconciler reconciles the Kubernetes Pod object,
-// which is related to the v1.Instance.
+// PodReconciler reconciles all Kubernetes Pod objects to finish the following tasks:
+//   - When n v1.Instance-related Pod is running,
+//     create a corresponding Service to expose the Pod and annotate the Pod with the Service node port info.
 type PodReconciler struct {
 	Client ctrlcli.Client
 }
@@ -134,14 +135,15 @@ func (r *PodReconciler) SetupController(_ context.Context, opts controller.Setup
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("worker.manage.pods").
 		For(
-			// Focus on the Kubernetes Pod.
 			&core.Pod{},
 			ctrlbuilder.WithPredicates(
-				// Only reconcile when the Pod has the "instances" resource note,
-				// which means the Pod is related to the worker Instance.
+				// Interested in relevant Pod objects.
 				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 					return systemmeta.MatchResource(obj, "instances")
 				}),
+				// Trigger reconciliation when a Pod is:
+				// - created(for listed Pod at controller startup);
+				// - updated with phase changes to Running.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
@@ -152,6 +154,9 @@ func (r *PodReconciler) SetupController(_ context.Context, opts controller.Setup
 							return false
 						}
 						return oldPod.Status.Phase != newPod.Status.Phase && newPod.Status.Phase == core.PodRunning
+					},
+					GenericFunc: func(e ctrlevent.GenericEvent) bool {
+						return false
 					},
 				},
 			),

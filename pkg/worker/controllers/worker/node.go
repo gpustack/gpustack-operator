@@ -26,8 +26,9 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 )
 
-// NodeReconciler reconciles the Kubernetes Node object.
-// and manages corresponding ResourceFlavor.
+// NodeReconciler reconciles all Kubernetes Node objects to finish the following tasks:
+//   - When a Node is created or updated,
+//     create/update corresponding kueue.ResourceFlavor according to the Node's labels and allocatable resources.
 type NodeReconciler struct {
 	Client ctrlcli.Client
 }
@@ -168,7 +169,7 @@ func (r *NodeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			errs = append(errs, err)
 			continue
 		}
-		logger.V(2).Info("create resource flavor", "name", resFlvName)
+		logger.V(2).Info("created resource flavor", "name", resFlvName)
 	}
 
 	if len(errs) > 0 {
@@ -183,17 +184,24 @@ func (r *NodeReconciler) SetupController(_ context.Context, opts controller.Setu
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("worker.manage.nodes").
 		For(
-			// Focus on the Kubernetes Node,
-			// when the Node is updated with labels, taints or allocatable changes.
 			&core.Node{},
 			ctrlbuilder.WithPredicates(
+				// Trigger reconciliation when a Node is:
+				// - created.
+				// - updated with labels, taints or allocatable changes.
 				ctrlpredicate.Funcs{
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
+						return false
+					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.GetDeletionTimestamp() == nil {
-							// Check if labels or taints have changed.
-							if !kubemeta.DeepEqual(oldNd.Spec.Taints, newNd.Spec.Taints) ||
-								!kubemeta.DeepEqual(oldNd.Labels, newNd.Labels) {
+							// Check if labels have changed.
+							if !kubemeta.DeepEqual(oldNd.Labels, newNd.Labels) {
+								return true
+							}
+							// Check if taints have changed.
+							if !kubemeta.DeepEqual(oldNd.Spec.Taints, newNd.Spec.Taints) {
 								return true
 							}
 							// Check if extended resources have changed.
@@ -209,6 +217,9 @@ func (r *NodeReconciler) SetupController(_ context.Context, opts controller.Setu
 								}
 							}
 						}
+						return false
+					},
+					GenericFunc: func(e ctrlevent.GenericEvent) bool {
 						return false
 					},
 				},

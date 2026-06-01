@@ -248,9 +248,17 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	eNf := &nfd.NodeFeature{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "gpustack-labels-for-" + nodeName,
-			Labels: map[string]string{
-				nfd.NodeFeatureObjNodeNameLabel: nodeName,
-			},
+			// "nfd.node.kubernetes.io/node-name=${nodeName}"
+			// "feature.gpustack.ai/${ndKey}=true" for each device group key.
+			Labels: func() (lbs map[string]string) {
+				lbs = map[string]string{
+					nfd.NodeFeatureObjNodeNameLabel: nodeName,
+				}
+				for _, ndKey := range devicefeature.ConstructNodeKeys(eGroups) {
+					lbs[devicefeature.FeatureLabelPrefix+ndKey] = "true"
+				}
+				return lbs
+			}(),
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
@@ -262,15 +270,29 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	nfAlignFn := func(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, skip bool, err error) {
 		skip = true
 
+		if !mapx.Contains(aNf.Labels, eNf.Labels) {
+			skip = false
+
+			// Update labels.
+			for k, v := range eNf.Labels {
+				aNf.Labels[k] = v
+			}
+			for k := range aNf.Labels {
+				if _, ok := eNf.Labels[k]; !ok {
+					delete(aNf.Labels, k)
+				}
+			}
+		}
+
 		if !mapx.Contains(aNf.Spec.Labels, eNf.Spec.Labels) {
 			skip = false
 
-			// 1, construct manufacturer label keys of allowed manufacturers.
+			// Construct manufacturer label keys of allowed manufacturers.
 			manuLabelKeys := mapx.Slice(d.manufacturers, func(k string, v sets.Empty) string {
 				return devicefeature.FeatureLabelPrefix + k
 			})
 
-			// 2, iterate existing labels,
+			// Iterate existing labels,
 			// keep the labels whose don't start with the manufacturer label keys.
 			specLabels := maps.Clone(eNf.Spec.Labels)
 			for k := range aNf.Spec.Labels {
@@ -286,10 +308,10 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				}
 			}
 
-			// 3. update labels.
+			// Update labels.
 			aNf.Spec.Labels = specLabels
 
-			// 5, update owner references.
+			// Update owner references.
 			if !kubemeta.IsControlledBy(aNf, node) {
 				kubemeta.ControlOnWithoutBlock(aNf, node, core.SchemeGroupVersion.WithKind("Node"))
 				skip = false
@@ -321,7 +343,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		skip = true
 
 		if !kubemeta.DeepEqual(aDevs.Spec.Groups, eDevs.Spec.Groups) {
-			// 1, index the existing groups by multi-keys: manufacturer and id.
+			// Index the existing groups by multi-keys: manufacturer and id.
 			aGroups := aDevs.Spec.Groups
 			devGrpIndex := make(map[_DeviceGroupKey]*_DeviceGroupValue)
 			for i := range aGroups {
@@ -334,7 +356,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				devGrpIndex[k] = v
 			}
 
-			// 2, iterate the expected groups, if the group is in the index, update it, otherwise, add it.
+			// Iterate the expected groups, if the group is in the index, update it, otherwise, add it.
 			groups := make([]device.DevicesGroup, 0, len(eGroups))
 			for i := range eGroups {
 				k := _DeviceGroupKey{eGroups[i].Manufacturer, eGroups[i].ID}
@@ -352,7 +374,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				skip = false
 			}
 
-			// 3, iterate the index, if the group is marked to remove, remove it.
+			// Iterate the index, if the group is marked to remove, remove it.
 			for i := range aGroups {
 				k := _DeviceGroupKey{aGroups[i].Manufacturer, aGroups[i].ID}
 				if devGrpIndex[k].Remove {
@@ -362,12 +384,12 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				groups = append(groups, aGroups[i])
 			}
 
-			// 4, update groups.
+			// Update groups.
 			aDevs.Spec.Groups = groups
 		}
 
 		if !kubemeta.IsControlledBy(aDevs, aNf) {
-			// 5, update owner references.
+			// Update owner references.
 			kubemeta.ControlOnWithoutBlock(aDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
 			skip = false
 		}

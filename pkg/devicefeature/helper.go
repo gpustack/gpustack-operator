@@ -34,13 +34,13 @@ func ConstructNodeLabels(node *core.Node, groups device.DevicesGroupList) map[st
 		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
 	}
 	for i := range groups {
-		applyDeviceFeatureLabels(labels, groups[i], node)
+		applyDeviceFeatureLabels(labels, node, groups[i])
 	}
 	return labels
 }
 
 // applyDeviceFeatureLabels applies device feature labels of the given device group to the given labels map.
-func applyDeviceFeatureLabels(labels map[string]string, group device.DevicesGroup, node *core.Node) {
+func applyDeviceFeatureLabels(labels map[string]string, node *core.Node, group device.DevicesGroup) {
 	if len(group.Accelerators) == 0 {
 		return
 	}
@@ -96,6 +96,25 @@ func applyDeviceFeatureLabels(labels map[string]string, group device.DevicesGrou
 	for k := range labels {
 		labels[k] = kubemeta.SanitizeLabelValue(labels[k])
 	}
+}
+
+// ConstructNodeKeys constructs accelerated node keys from the given device group list.
+func ConstructNodeKeys(groups device.DevicesGroupList) []string {
+	keys := make([]string, 0, len(groups))
+
+	for i := range groups {
+		if len(groups[i].Accelerators) == 0 {
+			continue
+		}
+
+		keys = append(keys, groups[i].Manufacturer+"-"+groups[i].ID)
+	}
+
+	if len(keys) == 0 {
+		return []string{DisfeaturedNodeKey}
+	}
+
+	return keys
 }
 
 // ExtractNodeKeys returns accelerated node keys of the given Node.
