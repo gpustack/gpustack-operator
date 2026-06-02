@@ -21,8 +21,8 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
-	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 )
 
@@ -152,7 +152,7 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 	if ptr.Deref(instPV.Spec.Type, "") == "" {
 		stgClassList := new(storage.StorageClassList)
 		err := h.Client.List(ctx, stgClassList,
-			kubeclientset.NonQuorum)
+			ctrlclix.NonQuorum)
 		if err != nil {
 			return nil, field.InternalError(
 				field.NewPath("spec.type"), fmt.Errorf("list storage classes: %w", err))
@@ -347,7 +347,7 @@ func (h *InstancePersistentVolumeHandler) OnUpdate(
 	// Update.
 	oldPvc := new(core.PersistentVolumeClaim)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instPV), oldPvc,
-		kubeclientset.NonQuorum)
+		ctrlclix.NonQuorum)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +360,7 @@ func (h *InstancePersistentVolumeHandler) OnUpdate(
 	})
 
 	err = h.Client.Patch(ctx, pvc, ctrlcli.MergeFrom(oldPvc),
-		kubeclientset.ToPatchOptions(opts))
+		ctrlclix.ToPatchOptions(opts))
 	if err != nil {
 		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding persistent volume claim: %w", err))
 	}

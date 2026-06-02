@@ -65,6 +65,30 @@ func HasLabel(obj MetaObject, key string) bool {
 	return ok
 }
 
+// HasLabels returns true if the labels with the given keys exist.
+func HasLabels(obj MetaObject, key string, keys ...string) bool {
+	if obj == nil {
+		panic("object is nil")
+	}
+
+	ls := obj.GetLabels()
+	if ls == nil {
+		return false
+	}
+
+	if _, ok := ls[key]; !ok {
+		return false
+	}
+
+	for _, k := range keys {
+		if _, ok := ls[k]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 // DeleteLabel deletes the label with the given key.
 func DeleteLabel(obj MetaObject, key string) {
 	if obj == nil {
@@ -79,6 +103,24 @@ func DeleteLabel(obj MetaObject, key string) {
 	}
 
 	delete(ls, key)
+	obj.SetLabels(ls)
+}
+
+// DeleteLabels deletes the labels with the given keys.
+func DeleteLabels(obj MetaObject, key string, keys ...string) {
+	if obj == nil {
+		panic("object is nil")
+	}
+
+	ls := obj.GetLabels()
+	if ls == nil {
+		return
+	}
+
+	delete(ls, key)
+	for _, k := range keys {
+		delete(ls, k)
+	}
 	obj.SetLabels(ls)
 }
 

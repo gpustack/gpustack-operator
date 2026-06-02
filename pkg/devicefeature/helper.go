@@ -1,7 +1,7 @@
 package devicefeature
 
 import (
-	"strconv"
+	"fmt"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -11,6 +11,7 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -21,76 +22,54 @@ const (
 	FeatureLabelPrefix = "feature." + systemname.LabelPrefix
 	CreditsLabelPrefix = "credits." + systemname.LabelPrefix
 	DeviceLabelPrefix  = "device." + systemname.LabelPrefix
-
-	DisfeaturedNodeKey = "cpu-only"
 )
 
-// ConstructNodeLabels constructs node feature labels from the given device group list.
-func ConstructNodeLabels(node *core.Node, groups device.DevicesGroupList) map[string]string {
-	labels := map[string]string{
-		systemname.ManagedLabelKey: "true",
-	}
-	if node.Labels != nil && node.Labels[systemname.ManagedLabelKey] != "" {
-		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
-	}
+// ConstructNodeDeviceLabels constructs node feature labels from the given device group list.
+func ConstructNodeDeviceLabels(groups device.DevicesGroupList) map[string]string {
+	labels := map[string]string{}
 	for i := range groups {
-		applyDeviceFeatureLabels(labels, node, groups[i])
+		applyDeviceLabels(labels, groups[i])
 	}
 	return labels
 }
 
-// applyDeviceFeatureLabels applies device feature labels of the given device group to the given labels map.
-func applyDeviceFeatureLabels(labels map[string]string, node *core.Node, group device.DevicesGroup) {
+// applyDeviceLabels applies device feature labels of the given device group to the given labels map.
+func applyDeviceLabels(labels map[string]string, group device.DevicesGroup) {
 	if len(group.Accelerators) == 0 {
 		return
 	}
 
-	manuLabelKey := FeatureLabelPrefix + group.Manufacturer
+	manuKey := FeatureLabelPrefix + group.Manufacturer
 
 	// "${prefix}${manufacturer}=true"
-	labels[manuLabelKey] = "true"
+	labels[manuKey] = "true"
 	// "${prefix}${manufacturer}.driver-version=${driverVersion}"
 	if v := group.DriverVersion; v != "" {
-		labels[manuLabelKey+".driver-version"] = v
+		labels[manuKey+".driver-version"] = v
 	}
 	// "${prefix}${manufacturer}.runtime-version=${runtimeVersion}"
 	if v := group.RuntimeVersion; v != "" {
-		labels[manuLabelKey+".runtime-version"] = v
-	}
-	// "${prefix}${manufacturer}.compute-capability=${computeCapability}"
-	if v := group.ComputeCapability; v != "" {
-		labels[manuLabelKey+".compute-capability"] = v
+		labels[manuKey+".runtime-version"] = v
 	}
 
-	selfLabelKey := manuLabelKey + "-" + group.ID
-	nodeKey := group.Manufacturer + "-" + group.ID
-
-	// Per-device unit CPU/RAM derived from the host's allocatable budget
-	// minus a fixed system reservation. Kept as side labels rather than
-	// folded into selfLabelKey so small allocatable drift does not churn the
-	// node key. Once written, GetDeviceUnitResources re-reads these labels
-	// instead of recomputing — keeping the value stable across reconciles
-	// and letting operators override via direct label edits.
-	units := GetDeviceUnitResources(node, nodeKey, int64(len(group.Accelerators)))
+	nodeKey := manuKey + "-" + group.ID
 
 	// "${prefix}${manufacturer}-${id}=true"
-	labels[selfLabelKey] = "true"
+	labels[nodeKey] = "true"
 	// "${prefix}${manufacturer}-${id}.product=${name}"
-	labels[selfLabelKey+".product"] = group.Name
+	labels[nodeKey+".product"] = group.Name
 	// "${prefix}${manufacturer}-${id}.memory=${memory}"
-	labels[selfLabelKey+".memory"] = quantityx.Format(resource.MustParse(strconvx.Itoa(group.Memory) + "Mi"))
+	labels[nodeKey+".memory"] = quantityx.Format(resource.MustParse(strconvx.Itoa(group.Memory) + "Mi"))
 	// "${prefix}${manufacturer}-${id}.cores=${cores}"
-	labels[selfLabelKey+".cores"] = strconvx.Itoa(group.Cores)
+	labels[nodeKey+".cores"] = strconvx.Itoa(group.Cores)
 	// "${prefix}${manufacturer}-${id}.family=${family}"
 	if v := group.Family; v != "" {
-		labels[selfLabelKey+".family"] = v
+		labels[nodeKey+".family"] = v
 	}
-	// "${prefix}${manufacturer}-${id}.accelerators=${count}"
-	labels[selfLabelKey+".accelerators"] = strconv.Itoa(len(group.Accelerators))
-	// "${prefix}${manufacturer}-${id}.unit-cpu=${unitCPU}"
-	labels[selfLabelKey+".unit-cpu"] = units.CPU.String()
-	// "${prefix}${manufacturer}-${id}.unit-ram=${unitRAM}"
-	labels[selfLabelKey+".unit-ram"] = units.RAM.String()
+	// "${prefix}${manufacturer}-${id}.compute-capability=${computeCapability}"
+	if v := group.ComputeCapability; v != "" {
+		labels[nodeKey+".compute-capability"] = v
+	}
 
 	// Match Kubernetes label values' requirements.
 	for k := range labels {
@@ -98,28 +77,9 @@ func applyDeviceFeatureLabels(labels map[string]string, node *core.Node, group d
 	}
 }
 
-// ConstructNodeKeys constructs accelerated node keys from the given device group list.
-func ConstructNodeKeys(groups device.DevicesGroupList) []string {
-	keys := make([]string, 0, len(groups))
-
-	for i := range groups {
-		if len(groups[i].Accelerators) == 0 {
-			continue
-		}
-
-		keys = append(keys, groups[i].Manufacturer+"-"+groups[i].ID)
-	}
-
-	if len(keys) == 0 {
-		return []string{DisfeaturedNodeKey}
-	}
-
-	return keys
-}
-
 // ExtractNodeKeys returns accelerated node keys of the given Node.
 func ExtractNodeKeys(node *core.Node) []string {
-	ret := mapx.FilterSlice(node.Labels, func(k, v string) (string, bool) {
+	return mapx.FilterSlice(node.Labels, func(k, v string) (string, bool) {
 		if strings.HasPrefix(k, FeatureLabelPrefix) {
 			if v == "true" {
 				v = strings.TrimPrefix(k, FeatureLabelPrefix)
@@ -130,115 +90,524 @@ func ExtractNodeKeys(node *core.Node) []string {
 		}
 		return "", false
 	})
-	if len(ret) == 0 {
-		return []string{DisfeaturedNodeKey}
-	}
-	return ret
 }
 
-// NodeFeature represents the device feature of a node, which is used for scheduling.
-type NodeFeature struct {
+// ConstructNodeCapacityLabels constructs node capacity labels from the given node status and existing labels.
+func ConstructNodeCapacityLabels(node *core.Node) map[string]string {
+	labels := map[string]string{
+		systemname.ManagedLabelKey: "true",
+	}
+	if node.Labels != nil && node.Labels[systemname.ManagedLabelKey] != "" {
+		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
+	}
+
+	generalKey := FeatureLabelPrefix + "general"
+
+	var cpuC, ramC, stgC int64
+	{
+		// "${prefix}general.cpu=${cpu}"
+		cpuKey := generalKey + ".cpu"
+		var cpuQ resource.Quantity
+		if v := node.Labels[cpuKey]; v != "" {
+			cpuQ = funcx.NoError(resource.ParseQuantity(v))
+		}
+		if cpuQ.Value() <= 0 {
+			cpuQ = node.Status.Capacity[core.ResourceCPU]
+		}
+		cpuC = cpuQ.Value()
+		if cpuC <= 0 {
+			cpuC = 1
+		}
+		labels[cpuKey] = strconvx.Itoa(cpuC)
+
+		// "${prefix}general.ram=${ram}"
+		ramKey := generalKey + ".ram"
+		var ramQ resource.Quantity
+		if v := node.Labels[ramKey]; v != "" {
+			ramQ = funcx.NoError(resource.ParseQuantity(v))
+		}
+		if ramQ.Value() <= 0 {
+			ramQ = node.Status.Capacity[core.ResourceMemory]
+		}
+		ramC = ramQ.Value() / quantityx.Gi
+		if ramC&1 != 0 {
+			ramC += 1
+		}
+		if ramC <= cpuC {
+			ramC = cpuC
+		}
+		labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
+
+		// "${prefix}general.local-storage=${stg}"
+		stgKey := generalKey + ".local-storage"
+		var stgQ resource.Quantity
+		if v := node.Labels[stgKey]; v != "" {
+			stgQ = funcx.NoError(resource.ParseQuantity(v))
+		}
+		if stgQ.Value() <= 0 {
+			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
+		}
+		stgC = stgQ.Value() / quantityx.Gi
+		if stgC&1 != 0 {
+			stgC -= 1
+		}
+		if stgC <= 0 {
+			stgC = 15 * cpuC
+		}
+		labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
+
+		// General has no sliced concept, so profile-queue and profile-cohort
+		// always carry the same per-unit value.
+		//
+		// "${prefix}general.profile-flavor=${cpu}c-${ram}g-${stg}g"
+		labels[generalKey+".profile-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, ramC, stgC)
+
+		// "${prefix}general.profile-queue=1c-${ramUnit}g"
+		// "${prefix}general.profile-cohort=1c-${ramUnit}g"
+		ramUnit := ramC / cpuC
+		generalUnit := fmt.Sprintf("1c-%dg", ramUnit)
+		labels[generalKey+".profile-queue"] = generalUnit
+		labels[generalKey+".profile-cohort"] = generalUnit
+	}
+
+	for _, ndKey := range ExtractNodeKeys(node) {
+		nodeKey := FeatureLabelPrefix + ndKey
+
+		manufacturer, _, _ := strings.Cut(ndKey, "-")
+		accQ := node.Status.Capacity[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
+		if accQ.Value() <= 0 {
+			continue
+		}
+		accC := accQ.Value()
+
+		var (
+			cpuC = cpuC
+			ramC = ramC
+			stgC = stgC
+		)
+
+		// "${prefix}${manufacturer}-${id}.cpu=${cpu}"
+		cpuKey := nodeKey + ".cpu"
+		var cpuQ resource.Quantity
+		if v := node.Labels[cpuKey]; v != "" {
+			cpuQ = funcx.NoError(resource.ParseQuantity(v))
+		}
+		if cpuQ.Value() > 0 {
+			cpuC = cpuQ.Value()
+		}
+		if cpuC < accC {
+			cpuC = accC
+		}
+		labels[cpuKey] = strconvx.Itoa(cpuC)
+
+		// "${prefix}${manufacturer}-${id}.ram=${ram}"
+		ramKey := nodeKey + ".ram"
+		var ramQ resource.Quantity
+		if v := node.Labels[ramKey]; v != "" {
+			ramQ = funcx.NoError(resource.ParseQuantity(v))
+		}
+		if ramQ.Value() > 0 {
+			ramC = ramQ.Value() / quantityx.Gi
+			if ramC&1 != 0 {
+				ramC += 1
+			}
+		}
+		if ramC < accC {
+			ramC = accC
+		}
+		labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
+
+		// ${prefix}${manufacturer}-${id}.local-storage=${stg}
+		stgKey := nodeKey + ".local-storage"
+		var stgQ resource.Quantity
+		if v := node.Labels[stgKey]; v != "" {
+			stgQ = funcx.NoError(resource.ParseQuantity(v))
+		}
+		if stgQ.Value() > 0 {
+			stgC = stgQ.Value() / quantityx.Gi
+			if stgC&1 != 0 {
+				stgC -= 1
+			}
+		}
+		if stgC <= 0 {
+			stgC = 15 * accC
+		}
+		labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
+
+		// "${prefix}${manufacturer}-${id}.sliced.partitions=${slicedC}" is a
+		// user-supplied input: when present and positive it appends
+		// "-${slicedC}s" to profile-flavor and profile-queue. profile-cohort
+		// is the cohort-level per-unit view and never carries a sliced
+		// suffix — it is what cohort matching compares on.
+		var slicedC int64
+		if v := node.Labels[nodeKey+".sliced.partitions"]; v != "" {
+			if n, err := strconvx.Atoi[int64](v); err == nil && n > 0 {
+				slicedC = n
+			}
+		}
+
+		// "${prefix}${manufacturer}-${id}.profile-flavor=${cpu}c-${ram}g-${stg}g-${accC}d[-${slicedC}s]"
+		profFlavor := fmt.Sprintf("%dc-%dg-%dg-%dd", cpuC, ramC, stgC, accC)
+		if slicedC > 0 {
+			profFlavor = fmt.Sprintf("%s-%ds", profFlavor, slicedC)
+		}
+		labels[nodeKey+".profile-flavor"] = profFlavor
+
+		// "${prefix}${manufacturer}-${id}.profile-queue=${cpuUnit}c-${ramUnit}g-1d[-${slicedC}s]"
+		// "${prefix}${manufacturer}-${id}.profile-cohort=${cpuUnit}c-${ramUnit}g-1d"
+		cpuUnit := cpuC / accC
+		ramUnit := ramC / accC
+		profCohort := fmt.Sprintf("%dc-%dg-1d", cpuUnit, ramUnit)
+		profQueue := profCohort
+		if slicedC > 0 {
+			profQueue = fmt.Sprintf("%s-%ds", profCohort, slicedC)
+		}
+		labels[nodeKey+".profile-queue"] = profQueue
+		labels[nodeKey+".profile-cohort"] = profCohort
+	}
+
+	return labels
+}
+
+// NodeResourceFlavor represents the node resource flavor extracted from the node feature labels of a node.
+type NodeResourceFlavor struct {
+	// Key is the node feature key of the node resource flavor,
+	// which is in the format of "${manufacturer}-${id}" or "general".
+	Key string
+	// ProfileFlavorSpec is the per-node resource flavor spec used to name the
+	// ResourceFlavor object. Shape:
+	//   "${cpu}c-${ram}g-${stg}g[-${acc}d][-${sliced}s]"
+	ProfileFlavorSpec string
+	// ProfileQueueSpec is the per-unit profile spec used to name the
+	// ClusterQueue. Shape:
+	//   "${cpuUnit}c-${ramUnit}g[-${accUnit}d][-${sliced}s]"
+	// When sliced is unset, ProfileQueueSpec is identical to ProfileCohortSpec.
+	ProfileQueueSpec string
+	// ProfileCohortSpec is the per-unit profile spec used to name the Cohort.
+	// Shape:
+	//   "${cpuUnit}c-${ramUnit}g[-${accUnit}d]"
+	// ProfileCohortSpec never carries a sliced suffix — it is the matching
+	// key at the cohort level.
+	ProfileCohortSpec string
 	// NodeLabels is the node labels for scheduling.
 	NodeLabels map[string]string
 	// Tolerations is the tolerations for scheduling.
 	Tolerations []core.Toleration
-	// Sliced is the flag indicating whether the device is sliced.
-	Sliced string
-	// Manufacturer is the name of the device manufacturer.
+	// Manufacturer is  the device manufacturer of the node.
 	Manufacturer string
-	// Product is the name of the device product.
+	// Product is the device product of the node.
 	Product string
-	// Memory is the memory size of the device in MiB.
+	// Memory is the device memory size in MiB of the node.
 	Memory string
-	// Cores is the number of cores of the device.
+	// Cores is the devices cores of the node.
 	Cores string
-	// ComputeCapability is the compute capability of the device.
-	ComputeCapability string
-	// Family is the family of the device.
+	// Family is the device family of the node.
 	Family string
-	// Accelerator of the node that can be allocated for workloads.
-	Accelerator resource.Quantity
-	// CPU of the node.
-	CPU resource.Quantity
-	// RAM of the node.
-	RAM resource.Quantity
-	// LocalStorage of the node.
-	LocalStorage resource.Quantity
-	// Per-Device Units derived from the host's allocatable budget and device count.
-	UnitResources DeviceUnitResources
+	// ComputeCapability is the device compute capability of the node.
+	ComputeCapability string
+	// Accelerator is the accelerator quantity of the node.
+	Accelerator string
+	// CPU is the CPU quantity of the node.
+	CPU string
+	// RAM is the RAM quantity of the node.
+	RAM string
+	// LocalStorage is the local storage quantity of the node.
+	LocalStorage string
 }
 
-// ExtractNodeFeatureByKey extracts the NodeFeature from given node and key.
-//
-// The key is in the format of "${manufacturer}-${id}",
-// which is used to identify the device feature of the node.
-func ExtractNodeFeatureByKey(node *core.Node, key string) (ndf NodeFeature) {
-	p := strings.SplitN(key, "-", 2)
-	if len(p) != 2 || p[0] == "cpu" {
-		hostname := node.Labels[core.LabelHostname]
-		if hostname == "" {
-			hostname = node.Name
-		}
-		// kubernetes.io/hostname: ${hostname}
-		ndf.NodeLabels = map[string]string{
-			core.LabelHostname: hostname,
-		}
-		ndf.CPU = node.Status.Allocatable[core.ResourceCPU]
-		ndf.RAM = node.Status.Allocatable[core.ResourceMemory]
-		ndf.LocalStorage = node.Status.Allocatable[core.ResourceEphemeralStorage]
-		return ndf
+// ExtractNodeResourceFlavors extracts the NodeResourceFlavor from given node.
+func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
+	labels := node.Labels
+	if labels == nil {
+		return nil
 	}
 
-	manufacturer := p[0]
-	selfLabelKey := FeatureLabelPrefix + key
-	selfUnitCPUKey := selfLabelKey + ".unit-cpu"
-	selfUnitRAMKey := selfLabelKey + ".unit-ram"
-	// gpustack.ai/managed: "true"
-	// feature.gpustack.ai/${manufacturer}-${id}: "true"
-	// feature.gpustack.ai/${manufacturer}-${id}.unit-cpu: ${unitCPU}
-	// feature.gpustack.ai/${manufacturer}-${id}.unit-ram: ${unitRAM}
-	ndf.NodeLabels = map[string]string{
-		systemname.ManagedLabelKey: "true",
-		selfLabelKey:               "true",
-		selfUnitCPUKey:             node.Labels[selfUnitCPUKey],
-		selfUnitRAMKey:             node.Labels[selfUnitRAMKey],
+	generalKey := FeatureLabelPrefix + "general"
+
+	// Extract CPU node feature.
+	{
+		profFlavorKey := generalKey + ".profile-flavor"
+		profQueueKey := generalKey + ".profile-queue"
+		profCohortKey := generalKey + ".profile-cohort"
+		cpuKey := generalKey + ".cpu"
+		ramKey := generalKey + ".ram"
+		stgKey := generalKey + ".local-storage"
+
+		if kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, cpuKey, ramKey, stgKey) {
+			profFlavor := labels[profFlavorKey]
+			profQueue := labels[profQueueKey]
+			profCohort := labels[profCohortKey]
+			cpu := labels[cpuKey]
+			ram := labels[ramKey]
+			stg := labels[stgKey]
+
+			ndf := NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: profFlavor,
+				ProfileQueueSpec:  profQueue,
+				ProfileCohortSpec: profCohort,
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey: "true",
+					profQueueKey:               profQueue,
+				},
+				Tolerations: []core.Toleration{
+					{
+						Operator: core.TolerationOpExists,
+					},
+				},
+				CPU:          cpu,
+				RAM:          ram,
+				LocalStorage: stg,
+			}
+
+			ndfs = append(ndfs, ndf)
+		}
 	}
-	for i := range node.Spec.Taints {
-		taints := &node.Spec.Taints[i]
-		if taints.Key != DeviceLabelPrefix+"acclerator.sliced" {
+
+	for _, ndKey := range ExtractNodeKeys(node) {
+		nodeKey := FeatureLabelPrefix + ndKey
+
+		profFlavorKey := nodeKey + ".profile-flavor"
+		profQueueKey := nodeKey + ".profile-queue"
+		profCohortKey := nodeKey + ".profile-cohort"
+		cpuKey := nodeKey + ".cpu"
+		ramKey := nodeKey + ".ram"
+		stgKey := nodeKey + ".local-storage"
+
+		if !kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, cpuKey, ramKey, stgKey) {
 			continue
 		}
-		if _SlicedResourceOperatedSizesSet.Has(taints.Value) {
-			ndf.Tolerations = []core.Toleration{
-				{
-					Key:      taints.Key,
-					Operator: core.TolerationOpEqual,
-					Value:    taints.Value,
-					Effect:   taints.Effect,
-				},
-			}
-			ndf.Sliced = taints.Value
-		}
-		break
-	}
-	ndf.Manufacturer = manufacturer
-	ndf.Product = node.Labels[FeatureLabelPrefix+key+".product"]
-	ndf.Memory = node.Labels[FeatureLabelPrefix+key+".memory"]
-	ndf.Cores = node.Labels[FeatureLabelPrefix+key+".cores"]
-	ndf.ComputeCapability = node.Labels[FeatureLabelPrefix+manufacturer+".compute-capability"]
-	ndf.Family = node.Labels[FeatureLabelPrefix+key+".family"]
-	ndf.Accelerator = node.Status.Allocatable[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
-	ndf.LocalStorage = node.Status.Allocatable[core.ResourceEphemeralStorage]
-	ndf.UnitResources = GetDeviceUnitResources(node, key, ndf.Accelerator.Value())
 
-	// Scale the per-device units up by the allocatable accelerator count to
-	// get the node-level CPU/RAM the scheduler should book alongside these
-	// devices. With zero allocatable accelerators the product is zero,
-	// which correctly reports "no headroom" for new device-bound workloads.
-	accelCount := ndf.Accelerator.Value()
-	ndf.CPU = *resource.NewMilliQuantity(ndf.UnitResources.CPU.MilliValue()*accelCount, resource.DecimalSI)
-	ndf.RAM = *resource.NewQuantity(ndf.UnitResources.RAM.Value()*accelCount, resource.BinarySI)
-	return ndf
+		profFlavor := labels[profFlavorKey]
+		profQueue := labels[profQueueKey]
+		profCohort := labels[profCohortKey]
+		manufacturer, _, _ := strings.Cut(ndKey, "-")
+		product := labels[nodeKey+".product"]
+		memory := labels[nodeKey+".memory"]
+		cores := labels[nodeKey+".cores"]
+		family := labels[nodeKey+".family"]
+		computeCapability := labels[nodeKey+".compute-capability"]
+		var accelerator string
+		{
+			accQ := node.Status.Allocatable[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
+			if accQ.Value() > 0 {
+				accelerator = strconvx.Itoa(accQ.Value())
+			} else {
+				accelerator = "0"
+			}
+		}
+		cpu := labels[cpuKey]
+		ram := labels[ramKey]
+		stg := labels[stgKey]
+
+		ndf := NodeResourceFlavor{
+			Key:               ndKey,
+			ProfileFlavorSpec: profFlavor,
+			ProfileQueueSpec:  profQueue,
+			ProfileCohortSpec: profCohort,
+			NodeLabels: map[string]string{
+				systemname.ManagedLabelKey: "true",
+				profQueueKey:               profQueue,
+			},
+			Tolerations: []core.Toleration{
+				{
+					Operator: core.TolerationOpExists,
+				},
+			},
+			Manufacturer:      manufacturer,
+			Product:           product,
+			Memory:            memory,
+			Cores:             cores,
+			Family:            family,
+			ComputeCapability: computeCapability,
+			Accelerator:       accelerator,
+			CPU:               cpu,
+			RAM:               ram,
+			LocalStorage:      stg,
+		}
+
+		ndfs = append(ndfs, ndf)
+	}
+
+	return ndfs
+}
+
+// NodeProfile represents the node profile extracted from the node feature labels of a node.
+type NodeProfile struct {
+	// Flavor is the per-node profile used to name the Kueue ResourceFlavor.
+	// Shape: "gpustack-${key}-${cpu}c-${ram}g-${stg}g[-${acc}d][-${sliced}s]".
+	Flavor string
+	// Queue is the per-unit profile used to name the Kueue ClusterQueue.
+	// Shape: "gpustack-${key}-${cpuUnit}c-${ramUnit}g[-${accUnit}d][-${sliced}s]".
+	// Equals Cohort when sliced is unset.
+	Queue string
+	// Cohort is the per-unit profile used to name the Kueue Cohort.
+	// Shape: "gpustack-${key}-${cpuUnit}c-${ramUnit}g[-${accUnit}d]".
+	// Never carries a sliced suffix.
+	Cohort string
+}
+
+// ExtractNodeProfiles extracts the node profiles from the given node.
+func ExtractNodeProfiles(node *core.Node) (profiles []NodeProfile) {
+	labels := node.Labels
+	if len(labels) == 0 {
+		return profiles
+	}
+
+	emit := func(key string) {
+		nodeKey := FeatureLabelPrefix + key
+		flavor := labels[nodeKey+".profile-flavor"]
+		queue := labels[nodeKey+".profile-queue"]
+		cohort := labels[nodeKey+".profile-cohort"]
+		if flavor == "" || queue == "" || cohort == "" {
+			return
+		}
+		profiles = append(profiles, NodeProfile{
+			Flavor: FormatNodeProfile(key, flavor),
+			Queue:  FormatNodeProfile(key, queue),
+			Cohort: FormatNodeProfile(key, cohort),
+		})
+	}
+
+	emit("general")
+
+	for _, ndKey := range ExtractNodeKeys(node) {
+		emit(ndKey)
+	}
+
+	return profiles
+}
+
+// _NodeProfilePrefix is the required leading prefix on every node profile
+// emitted by FormatNodeProfile and consumed by ParseNodeProfile.
+const _NodeProfilePrefix = "gpustack-"
+
+// NodeProfileSpec holds the resource segments parsed out of a node profile.
+//
+// CPU and RAM are always populated when ParseNodeProfile reports ok; the
+// remaining fields are populated only when the corresponding segment is
+// present.
+type NodeProfileSpec struct {
+	// CPU is the cpu count (segment "<digits>c"). Required.
+	CPU string
+	// RAM is the ram size in Gi (segment "<digits>g"). Required.
+	RAM string
+	// LocalStorage is the local storage size in Gi (trailing "<digits>g"
+	// after RAM). Optional.
+	LocalStorage string
+	// Accelerator is the accelerator count (segment "<digits>d"). Optional.
+	Accelerator string
+	// SlicedAccelerator is the sliced count (segment "<digits>s"). Optional;
+	// only valid when Accelerator is also present.
+	SlicedAccelerator string
+}
+
+// FormatNodeProfile formats the profile string with the given key and spec in the format of "gpustack-${key}-${spec}".
+func FormatNodeProfile(key, spec string) string {
+	return _NodeProfilePrefix + key + "-" + spec
+}
+
+// ParseNodeProfile parses a node profile string into its key and spec.
+//
+// The expected format is:
+//
+//	"gpustack-${key}-${cpu}c-${ram}g[-${stg}g][-${acc}d][-${sliced}s]"
+//
+// where the leading "gpustack-${key}-" is required, ${key} may itself
+// contain dashes, ${cpu} and ${ram} are required, and ${stg}, ${acc},
+// ${sliced} are optional. ${sliced} is only valid when ${acc} is also
+// present. Each segment's numeric part must be a non-empty ASCII decimal.
+//
+// Examples:
+//
+//	"gpustack-general-16c-32g-88g"            -> key="general",    cpu=16, ram=32, stg=88
+//	"gpustack-nvidia-t4-4c-16g-88g-1d"        -> key="nvidia-t4",  cpu=4,  ram=16, stg=88, acc=1
+//	"gpustack-nvidia-t4-4c-16g-1d"            -> key="nvidia-t4",  cpu=4,  ram=16, acc=1
+//	"gpustack-general-4c-16g"                 -> key="general",    cpu=4,  ram=16
+//	"gpustack-nvidia-t4-4c-16g-88g-1d-8s"     -> key="nvidia-t4",  cpu=4,  ram=16, stg=88, acc=1, sliced=8
+//	"gpustack-nvidia-t4-4c-16g-1d-8s"         -> key="nvidia-t4",  cpu=4,  ram=16, acc=1, sliced=8
+//
+// Returns ok=false (and zero-valued key/spec) when the prefix is missing,
+// the key is empty, cpu or ram is missing or malformed, sliced is present
+// without accelerator, or any numeric segment is invalid.
+func ParseNodeProfile(profile string) (key string, spec NodeProfileSpec, ok bool) {
+	rest, found := strings.CutPrefix(profile, _NodeProfilePrefix)
+	if !found {
+		return "", NodeProfileSpec{}, false
+	}
+
+	parts := strings.Split(rest, "-")
+	idx := len(parts) - 1
+
+	// Optional trailing sliced: "<digits>s".
+	if idx >= 0 && strings.HasSuffix(parts[idx], "s") {
+		v := strings.TrimSuffix(parts[idx], "s")
+		if !isUnsignedDecimal(v) {
+			return "", NodeProfileSpec{}, false
+		}
+		spec.SlicedAccelerator = v
+		idx--
+	}
+
+	// Optional trailing accelerator: "<digits>d".
+	if idx >= 0 && strings.HasSuffix(parts[idx], "d") {
+		v := strings.TrimSuffix(parts[idx], "d")
+		if !isUnsignedDecimal(v) {
+			return "", NodeProfileSpec{}, false
+		}
+		spec.Accelerator = v
+		idx--
+	}
+
+	// Sliced requires accelerator.
+	if spec.SlicedAccelerator != "" && spec.Accelerator == "" {
+		return "", NodeProfileSpec{}, false
+	}
+
+	// Optional trailing localStorage: "<digits>g". Distinguished from ram
+	// only when the segment immediately before also ends with "g" (that
+	// being ram).
+	if idx >= 1 && strings.HasSuffix(parts[idx], "g") && strings.HasSuffix(parts[idx-1], "g") {
+		v := strings.TrimSuffix(parts[idx], "g")
+		if !isUnsignedDecimal(v) {
+			return "", NodeProfileSpec{}, false
+		}
+		spec.LocalStorage = v
+		idx--
+	}
+
+	// Required ram: "<digits>g".
+	if idx < 0 || !strings.HasSuffix(parts[idx], "g") {
+		return "", NodeProfileSpec{}, false
+	}
+	ramV := strings.TrimSuffix(parts[idx], "g")
+	if !isUnsignedDecimal(ramV) {
+		return "", NodeProfileSpec{}, false
+	}
+	spec.RAM = ramV
+	idx--
+
+	// Required cpu: "<digits>c".
+	if idx < 0 || !strings.HasSuffix(parts[idx], "c") {
+		return "", NodeProfileSpec{}, false
+	}
+	cpuV := strings.TrimSuffix(parts[idx], "c")
+	if !isUnsignedDecimal(cpuV) {
+		return "", NodeProfileSpec{}, false
+	}
+	spec.CPU = cpuV
+	idx--
+
+	// Required key: at least one leading segment, and not empty.
+	if idx < 0 {
+		return "", NodeProfileSpec{}, false
+	}
+	key = strings.Join(parts[:idx+1], "-")
+	if key == "" {
+		return "", NodeProfileSpec{}, false
+	}
+
+	return key, spec, true
 }
 
 // GetCreditsResourceName returns the resource name for the credits of the given manufacturer.
@@ -258,127 +627,15 @@ func PowersOfTwoUpTo[I typex.Integer](n I) []I {
 	return result
 }
 
-// DeviceUnitResources bundles the per-device unit CPU and unit RAM that a
-// single device on a node is expected to receive when it joins a pod.
-type DeviceUnitResources struct {
-	// CPU is the per-device CPU quantity, e.g. 11 (cores). Derived from
-	// the reservation-deducted per-device CPU budget rounded up to integer
-	// cores minus one for headroom. Defaults to 1 core when no positive
-	// suggestion can be formed.
-	CPU resource.Quantity
-	// RAM is the per-device RAM quantity, e.g. 44Gi. Derived by walking
-	// descending CPU:RAM ratios (8, 7, ..., 2) and picking the largest
-	// ratio whose induced RAM (suggestedCPU * ratio Gi) stays strictly
-	// under the per-device RAM budget. Defaults to 1Gi when no ratio fits.
-	RAM resource.Quantity
-}
-
-// _DeviceUnitResourceReservedCPUMilli and _DeviceUnitResourceReservedRAMMi
-// are the per-node system reservation subtracted from allocatable before
-// dividing the remainder across devices. They cover GPUStack component pods
-// that share the node with workloads —
-// allocating the raw allocatable across devices would leave nothing for
-// these and cause pods to fail scheduling.
-const (
-	_DeviceUnitResourceReservedCPUMilli int64 = 1000
-	_DeviceUnitResourceReservedRAMMi    int64 = 2 * 1024
-)
-
-// defaultDeviceUnitResources returns the 1C/1Gi fallback used when the
-// per-device budget cannot induce a positive (CPU, RAM) suggestion —
-// e.g. very small hosts or very high device counts. Returned by value so
-// each caller gets an independent Quantity whose internal cache is not
-// shared.
-func defaultDeviceUnitResources() DeviceUnitResources {
-	return DeviceUnitResources{
-		CPU: *resource.NewQuantity(1, resource.DecimalSI),
-		RAM: *resource.NewQuantity(int64(quantityx.Gi), resource.BinarySI),
+// isUnsignedDecimal reports whether s is a non-empty string of ASCII digits.
+func isUnsignedDecimal(s string) bool {
+	if s == "" {
+		return false
 	}
-}
-
-// _deviceUnitResourceCPUToRAMRatios is the descending list of integer
-// RAM:CPU ratios (Gi per core) tried when deriving a per-device unit. The
-// first ratio whose induced RAM stays strictly under the per-device RAM
-// budget wins, which biases toward giving each device as much RAM as the
-// budget can support while keeping CPU and RAM in an integer ratio.
-var _deviceUnitResourceCPUToRAMRatios = []int64{8, 7, 6, 5, 4, 3, 2}
-
-// GetDeviceUnitResources returns the per-device CPU and RAM units for a
-// device identified by nodeKey ("${manufacturer}-${id}") on node, split
-// deviceCount-ways.
-//
-// Resolution:
-//  1. If node already carries "${FeatureLabelPrefix}${nodeKey}.unit-cpu"
-//     and ".unit-ram" labels with non-empty values, parse and return them
-//     directly. This makes the value sticky across reconciles and lets
-//     operators override by editing the labels in whatever Quantity
-//     notation they prefer.
-//  2. Otherwise, subtract a fixed system reservation
-//     (_DeviceUnitResourceReservedCPUMilli / _DeviceUnitResourceReservedRAMMi)
-//     from the node's allocatable CPU/RAM, divide the remainder by
-//     deviceCount (clamped to >= 1) to get the raw per-device share. Take
-//     the per-device CPU rounded up to integer cores minus one — i.e.
-//     (unitCPUMilli - 1) / 1000 — as the suggested CPU, then walk
-//     descending CPU:RAM ratios (8, 7, ..., 2) and return the first ratio
-//     whose induced RAM (suggestedCPU * ratio Gi) is strictly less than
-//     the per-device RAM share.
-//  3. If suggested CPU is below 1 or no ratio fits, return the 1C/1Gi
-//     fallback.
-//
-// The returned Quantities are in canonical cores / Gi form for the
-// compute path (e.g. CPU="11", RAM="44Gi" when stringified), and in
-// whatever form the operator wrote when the label-read path hits.
-func GetDeviceUnitResources(node *core.Node, nodeKey string, deviceCount int64) DeviceUnitResources {
-	selfLabelKey := FeatureLabelPrefix + nodeKey
-	if cpuLabel, ramLabel := node.Labels[selfLabelKey+".unit-cpu"], node.Labels[selfLabelKey+".unit-ram"]; cpuLabel != "" && ramLabel != "" {
-		cpuQ, errCPU := resource.ParseQuantity(cpuLabel)
-		ramQ, errRAM := resource.ParseQuantity(ramLabel)
-		if errCPU == nil && errRAM == nil {
-			return DeviceUnitResources{CPU: cpuQ, RAM: ramQ}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
 		}
 	}
-
-	n := deviceCount
-	if n <= 0 {
-		n = 1
-	}
-
-	allocCPU := node.Status.Allocatable[core.ResourceCPU]
-	allocRAM := node.Status.Allocatable[core.ResourceMemory]
-
-	availCPUMilli := allocCPU.MilliValue() - _DeviceUnitResourceReservedCPUMilli
-	if availCPUMilli < 0 {
-		availCPUMilli = 0
-	}
-	availRAMMi := (allocRAM.Value() / int64(quantityx.Mi)) - _DeviceUnitResourceReservedRAMMi
-	if availRAMMi < 0 {
-		availRAMMi = 0
-	}
-
-	unitCPUMilli := availCPUMilli / n
-	unitRAMMi := availRAMMi / n
-
-	// ceil(unitCPUMilli / 1000) - 1 in integer form (for unitCPUMilli > 0).
-	// One core of headroom over the strict per-device CPU budget — also
-	// makes the exact-integer case (e.g. 12000m) yield 11 rather than 12.
-	if unitCPUMilli <= 0 {
-		return defaultDeviceUnitResources()
-	}
-	suggestedCPUCores := (unitCPUMilli - 1) / 1000
-	if suggestedCPUCores < 1 {
-		return defaultDeviceUnitResources()
-	}
-
-	// 1 Gi = 1024 Mi; the budget comparison stays entirely in MiB.
-	const miPerGi int64 = 1024
-	for _, ratio := range _deviceUnitResourceCPUToRAMRatios {
-		suggestedRAMGi := suggestedCPUCores * ratio
-		if suggestedRAMGi*miPerGi < unitRAMMi {
-			return DeviceUnitResources{
-				CPU: *resource.NewQuantity(suggestedCPUCores, resource.DecimalSI),
-				RAM: *resource.NewQuantity(suggestedRAMGi*int64(quantityx.Gi), resource.BinarySI),
-			}
-		}
-	}
-	return defaultDeviceUnitResources()
+	return true
 }

@@ -3,10 +3,8 @@ package detector
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"golang.org/x/exp/maps"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -21,7 +19,6 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/datax"
-	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
@@ -234,7 +231,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	}
 
 	lpCli := system.LoopbackKubeClient.Get()
-	node, err := lpCli.CoreV1().Nodes().Get(ctx, nodeName,
+	nd, err := lpCli.CoreV1().Nodes().Get(ctx, nodeName,
 		meta.GetOptions{
 			ResourceVersion: "0",
 		})
@@ -242,89 +239,58 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		return err
 	}
 
-	// NodeFeature.
+	// NodeResourceFlavor.
 
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
 	eNf := &nfd.NodeFeature{
 		ObjectMeta: meta.ObjectMeta{
-			Name: "gpustack-labels-for-" + nodeName,
-			// "nfd.node.kubernetes.io/node-name=${nodeName}"
-			// "feature.gpustack.ai/${ndKey}=true" for each device group key.
-			Labels: func() (lbs map[string]string) {
-				lbs = map[string]string{
-					nfd.NodeFeatureObjNodeNameLabel: nodeName,
-				}
-				for _, ndKey := range devicefeature.ConstructNodeKeys(eGroups) {
-					lbs[devicefeature.FeatureLabelPrefix+ndKey] = "true"
-				}
-				return lbs
-			}(),
+			Name:      nodeName + "-gpustack-devicemanager",
+			Namespace: kuberess.SystemNamespaceName,
+			Labels: map[string]string{
+				nfd.NodeFeatureObjNodeNameLabel: nodeName,
+			},
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = devicefeature.ConstructNodeLabels(node, eGroups)
+			nfs.Labels = devicefeature.ConstructNodeDeviceLabels(eGroups)
 			return *nfs
 		}(),
 	}
-	kubemeta.ControlOnWithoutBlock(eNf, node, core.SchemeGroupVersion.WithKind("Node"))
+	kubemeta.ControlOnWithoutBlock(eNf, nd, core.SchemeGroupVersion.WithKind("Node"))
 	nfAlignFn := func(aNf *nfd.NodeFeature) (_ *nfd.NodeFeature, skip bool, err error) {
 		skip = true
-
-		if !mapx.Contains(aNf.Labels, eNf.Labels) {
-			skip = false
-
-			// Update labels.
-			for k, v := range eNf.Labels {
-				aNf.Labels[k] = v
-			}
-			for k := range aNf.Labels {
-				if _, ok := eNf.Labels[k]; !ok {
-					delete(aNf.Labels, k)
-				}
-			}
+		if aNf.Labels == nil {
+			aNf.Labels = make(map[string]string)
 		}
-
-		if !mapx.Contains(aNf.Spec.Labels, eNf.Spec.Labels) {
-			skip = false
-
-			// Construct manufacturer label keys of allowed manufacturers.
-			manuLabelKeys := mapx.Slice(d.manufacturers, func(k string, v sets.Empty) string {
-				return devicefeature.FeatureLabelPrefix + k
-			})
-
-			// Iterate existing labels,
-			// keep the labels whose don't start with the manufacturer label keys.
-			specLabels := maps.Clone(eNf.Spec.Labels)
-			for k := range aNf.Spec.Labels {
-				keep := true
-				for i := range manuLabelKeys {
-					if strings.HasPrefix(k, manuLabelKeys[i]) {
-						keep = false
-						break
-					}
-				}
-				if keep {
-					specLabels[k] = aNf.Spec.Labels[k]
-				}
-			}
-
-			// Update labels.
-			aNf.Spec.Labels = specLabels
-
-			// Update owner references.
-			if !kubemeta.IsControlledBy(aNf, node) {
-				kubemeta.ControlOnWithoutBlock(aNf, node, core.SchemeGroupVersion.WithKind("Node"))
+		if aNf.Spec.Labels == nil {
+			aNf.Spec.Labels = make(map[string]string)
+		}
+		// Update labels if not contained.
+		for k, v := range eNf.Labels {
+			if aNf.Labels[k] != v {
+				aNf.Labels[k] = v
 				skip = false
 			}
 		}
-
+		// Update spec labels if not contained.
+		for k, v := range eNf.Spec.Labels {
+			if aNf.Spec.Labels[k] != v {
+				aNf.Spec.Labels[k] = v
+				skip = false
+			}
+		}
+		// Update owner reference.
+		if !kubemeta.IsControlledBy(aNf, nd) {
+			kubemeta.ControlOnWithoutBlock(aNf, nd, core.SchemeGroupVersion.WithKind("Node"))
+			skip = false
+		}
 		return aNf, skip, err
 	}
 
 	aNf, err := kubeclientset.Create(ctx, nfCli, eNf,
 		kubeclientset.WithUpdateIfExisted(nfAlignFn))
 	if err != nil {
-		return fmt.Errorf("failed to create or update NodeFeature object for node %s: %w", nodeName, err)
+		return fmt.Errorf("failed to create or update NodeResourceFlavor object for node %s: %w", nodeName, err)
 	}
 
 	// Devices.
@@ -338,10 +304,10 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 			Groups: eGroups,
 		},
 	}
-	kubemeta.ControlOnWithoutBlock(eDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
+	kubemeta.ControlOnWithoutBlock(eDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeResourceFlavor"))
 	devsAlginFn := func(aDevs *workercore.Devices) (_ *workercore.Devices, skip bool, err error) {
 		skip = true
-
+		// Update groups.
 		if !kubemeta.DeepEqual(aDevs.Spec.Groups, eDevs.Spec.Groups) {
 			// Index the existing groups by multi-keys: manufacturer and id.
 			aGroups := aDevs.Spec.Groups
@@ -355,7 +321,6 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				}
 				devGrpIndex[k] = v
 			}
-
 			// Iterate the expected groups, if the group is in the index, update it, otherwise, add it.
 			groups := make([]device.DevicesGroup, 0, len(eGroups))
 			for i := range eGroups {
@@ -373,7 +338,6 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				groups = append(groups, eGroups[i])
 				skip = false
 			}
-
 			// Iterate the index, if the group is marked to remove, remove it.
 			for i := range aGroups {
 				k := _DeviceGroupKey{aGroups[i].Manufacturer, aGroups[i].ID}
@@ -383,17 +347,14 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				}
 				groups = append(groups, aGroups[i])
 			}
-
 			// Update groups.
 			aDevs.Spec.Groups = groups
 		}
-
+		// Update owner reference.
 		if !kubemeta.IsControlledBy(aDevs, aNf) {
-			// Update owner references.
-			kubemeta.ControlOnWithoutBlock(aDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
+			kubemeta.ControlOnWithoutBlock(aDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeResourceFlavor"))
 			skip = false
 		}
-
 		return aDevs, skip, err
 	}
 

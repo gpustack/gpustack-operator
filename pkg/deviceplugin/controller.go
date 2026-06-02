@@ -66,7 +66,7 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	podList := new(core.PodList)
 	err = r.Client.List(ctx, podList,
-		ctrlcli.MatchingFields{IndexingByNodeName: nodeName},
+		ctrlcli.MatchingFields{IndexingPodsByNodeName: nodeName},
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list pods with node name")
@@ -145,12 +145,12 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-const IndexingByNodeName = "pods.nodeName"
+const IndexingPodsByNodeName = "pods.nodeName"
 
 func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	// Configure field indexer.
 	fi := opts.Manager.GetFieldIndexer()
-	err := fi.IndexField(ctx, &core.Pod{}, IndexingByNodeName,
+	err := fi.IndexField(ctx, &core.Pod{}, IndexingPodsByNodeName,
 		func(obj ctrlcli.Object) []string {
 			if obj == nil {
 				return nil
@@ -159,7 +159,7 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 			return []string{pod.Spec.NodeName}
 		})
 	if err != nil {
-		return fmt.Errorf("index pod '%s': %w", IndexingByNodeName, err)
+		return fmt.Errorf("index pod '%s': %w", IndexingPodsByNodeName, err)
 	}
 
 	r.NodeName = osx.Getenv("KUBERNETES_NODE_NAME")
@@ -168,28 +168,28 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("deviceplugin.manage.devices").
 		For(
-			// Focus on the Devices.
 			&workercore.Devices{},
 			ctrlbuilder.WithPredicates(
-				// The Devices with the same name as the current node.
+				// Interested in the Devices object corresponding to the current node.
 				ctrlpredicate.NewPredicateFuncs(func(object ctrlcli.Object) bool {
 					return object.GetName() == r.NodeName
 				}),
 			),
 		).
 		Watches(
-			// Enqueue the worker Pod when the corresponding Pod is deleted.
+			// Watch Kubernetes Pods and enqueue the corresponding v1.Devices.
 			&core.Pod{},
 			ctrlhandler.EnqueueRequestsFromMapFunc(
-				r.findObjectWhenPodUpdating,
+				r.enqueueDevicesWhenPodChanged,
 			),
 			ctrlbuilder.WithPredicates(
-				// Focus on the Pods scheduled to the current node,
-				// when the Pod is deleted or the annotations of Pod are updated.
+				// Interested in Pods scheduled to the current node.
 				ctrlpredicate.NewPredicateFuncs(func(object ctrlcli.Object) bool {
 					pod := object.(*core.Pod)
 					return pod.Spec.NodeName == r.NodeName
 				}),
+				// Interested in Pod updates with changes in accelerator allocation annotations,
+				// or deletion of Pods with allocated accelerators.
 				ctrlpredicate.Funcs{
 					CreateFunc: func(e ctrlevent.CreateEvent) bool {
 						return false
@@ -219,23 +219,29 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 		Complete(r)
 }
 
-func (r *DevicesReconciler) findObjectWhenPodUpdating(_ context.Context, obj ctrlcli.Object) []ctrlreconcile.Request {
-	if obj == nil {
-		return nil
-	}
+func (r *DevicesReconciler) enqueueDevicesWhenPodChanged(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	logger := ctrllog.FromContext(ctx).
+		WithValues("pod", ctrlcli.ObjectKeyFromObject(obj))
 
 	pod := obj.(*core.Pod)
+
+	// Ensure the Pod is scheduled to the current node, as a safety check.
 	if pod.Spec.NodeName != r.NodeName {
+		logger.Error(nil, "pod is not scheduled to the current node")
 		return nil
 	}
 
-	return []ctrlreconcile.Request{
+	reqs := []ctrlreconcile.Request{
 		{
 			NamespacedName: ctrlcli.ObjectKey{
 				Name: pod.Spec.NodeName,
 			},
 		},
 	}
+	logger.V(2).Info("enqueued devices for pod", "requests", reqs)
+	return reqs
 }
 
 func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocationMode workercore.DeviceAllocationMode) <-chan struct{} {
@@ -292,7 +298,7 @@ func (r *DevicesReconciler) getAllocatingPod(
 ) (*core.Pod, error) {
 	podList := new(core.PodList)
 	err := r.Client.List(ctx, podList,
-		ctrlcli.MatchingFields{IndexingByNodeName: r.NodeName},
+		ctrlcli.MatchingFields{IndexingPodsByNodeName: r.NodeName},
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		return nil, fmt.Errorf("list pods with node name: %w", err)

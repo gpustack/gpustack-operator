@@ -88,6 +88,7 @@ func InstallFakeSystemRoutingService(ctx context.Context, cli kubernetes.Interfa
 				},
 				Ports: []core.EndpointPort{
 					{
+						Name: "https",
 						Port: port,
 					},
 				},

@@ -12,7 +12,7 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
-	"gpustack.ai/gpustack/pkg/kubeclientset"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 )
 
 type InstanceEventsHandler struct {
@@ -67,7 +67,7 @@ func (h *InstanceEventsHandler) OnGet(ctx context.Context, key types.NamespacedN
 			"involvedObject.kind":      "Pod",
 			"involvedObject.uid":       string(podMeta.UID),
 		},
-		kubeclientset.NonQuorum,
+		ctrlclix.NonQuorum,
 		ctrlcli.UnsafeDisableDeepCopy,
 	)
 	if err != nil {

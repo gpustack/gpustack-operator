@@ -74,13 +74,13 @@ func NewRbacClusterRoleCompareFunc(eCr *rbac.ClusterRole) CompareWithFn[*rbac.Cl
 func NewRbacRoleAlignFunc(eR *rbac.Role) AlignWithFn[*rbac.Role] {
 	return func(aR *rbac.Role) (_ *rbac.Role, skip bool, _ error) {
 		skip = true
+		// Update rules.
 		for i := range eR.Rules {
 			if slices.ContainsFunc(aR.Rules, func(r rbac.PolicyRule) bool {
 				return kubemeta.DeepEqual(eR.Rules[i], r)
 			}) {
 				continue
 			}
-
 			aR.Rules = append(aR.Rules, eR.Rules[i])
 			skip = false
 		}
@@ -92,13 +92,13 @@ func NewRbacRoleAlignFunc(eR *rbac.Role) AlignWithFn[*rbac.Role] {
 func NewRbacClusterRoleAlignFunc(eCr *rbac.ClusterRole) AlignWithFn[*rbac.ClusterRole] {
 	return func(aCr *rbac.ClusterRole) (_ *rbac.ClusterRole, skip bool, _ error) {
 		skip = true
+		// Update rules.
 		for i := range eCr.Rules {
 			if slices.ContainsFunc(aCr.Rules, func(r rbac.PolicyRule) bool {
 				return kubemeta.DeepEqual(eCr.Rules[i], r)
 			}) {
 				continue
 			}
-
 			aCr.Rules = append(aCr.Rules, eCr.Rules[i])
 			skip = false
 		}

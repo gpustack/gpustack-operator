@@ -32,11 +32,6 @@ func Harness(c *cobra.Command) *cobra.Command {
 	pcl.AddGoFlag(gcl.Lookup("add_dir_header"))   // --add_dir_header
 	pcl.AddGoFlag(gcl.Lookup("logtostderr"))      // --logtostderr
 	pcl.AddGoFlag(gcl.Lookup("skip_headers"))     // --skip_headers
-	// Hide some flags.
-	{
-		_ = pcl.MarkHidden("logtostderr")
-		_ = pcl.MarkHidden("skip_headers")
-	}
 
 	// Support printing command line.
 	printCmdline := pcl.Bool("print-cmdline", false,

@@ -264,101 +264,166 @@ func convertInstanceTypeFromClusterQueue(cq *kueue.ClusterQueue) *worker.Instanc
 		return nil
 	}
 
+	_, profSpec, ok := devicefeature.ParseNodeProfile(cq.Name)
+	if !ok {
+		return nil
+	}
+	cpuUnit, ramUnit := profSpec.CPU, profSpec.RAM
+
 	sliced := funcx.NoError(strconvx.Atoi[int64](notes["sliced"]))
 	acceleratable := notes["acceleratable"] == "true"
 
 	var (
-		allAccelerator, remAccelerator, maxAccelerator    resource.Quantity
-		allCpu, remCpu, maxCpu                            resource.Quantity
-		allRam, remRam, maxRam                            resource.Quantity
-		allLocalStorage, remLocalStorage, maxLocalStorage resource.Quantity
+		capAcc, remAcc, ormAcc resource.Quantity
+		capCpu, remCpu, ormCpu resource.Quantity
+		capRam, remRam, ormRam resource.Quantity
+		capStg, remStg, ormStg resource.Quantity
 	)
 	{
 		resourceAccelerator := devicefeature.GetCreditsResourceName(notes["manufacturer"])
 
-		flvQuantitiesIndex := make(map[kueue.ResourceFlavorReference]map[core.ResourceName]resource.Quantity)
+		// Index quantities for later use.
+		ormRfIndexer := make(map[kueue.ResourceFlavorReference]map[core.ResourceName]resource.Quantity)
+		capRfIndexer := make(map[kueue.ResourceFlavorReference]map[core.ResourceName]resource.Quantity)
 		for i := range cq.Spec.ResourceGroups {
 			rg := &cq.Spec.ResourceGroups[i]
 			for j := range rg.Flavors {
 				flv := &rg.Flavors[j]
-				flvQuantitiesIndex[flv.Name] = make(map[core.ResourceName]resource.Quantity)
+
+				// Index the once max request for later use.
+				ormAccRf, ormCpuRf, ormRamRf, ormStgRf, ok := parseNodeResourceFlavorName(string(flv.Name))
+				if !ok {
+					continue
+				}
+				ormRfIndexer[flv.Name] = map[core.ResourceName]resource.Quantity{
+					resourceAccelerator:           ormAccRf,
+					core.ResourceCPU:              ormCpuRf,
+					core.ResourceMemory:           ormRamRf,
+					core.ResourceEphemeralStorage: ormStgRf,
+				}
+
+				// Calculate the once max request by comparing the once max request of each flavor if there is no reservation.
+				if len(cq.Status.FlavorsReservation) == 0 {
+					if !acceleratable {
+						if ormCpuRf.Cmp(ormCpu) > 0 {
+							ormCpu = ormCpuRf
+							ormRam = ormRamRf
+							ormStg = ormStgRf
+						}
+					} else if ormAccRf.Cmp(ormAcc) > 0 {
+						ormAcc = ormAccRf
+						ormCpu = ormCpuRf
+						ormRam = ormRamRf
+						ormStg = ormStgRf
+					}
+				}
+
+				// Index the capacity for later use,
+				// and meanwhile add up the nominal quota to get the total nominal quota for each resource.
+				capRfIndexer[flv.Name] = make(map[core.ResourceName]resource.Quantity)
 				for k := range flv.Resources {
 					res := &flv.Resources[k]
-					// Index nominal quota for each flavor for later use.
-					flvQuantitiesIndex[flv.Name][res.Name] = res.NominalQuota
-					// All quantities are added up.
+					capRfIndexer[flv.Name][res.Name] = res.NominalQuota
 					switch res.Name {
 					case resourceAccelerator:
-						allAccelerator.Add(res.NominalQuota)
+						capAcc.Add(res.NominalQuota)
 					case core.ResourceCPU:
-						allCpu.Add(res.NominalQuota)
+						capCpu.Add(res.NominalQuota)
 					case core.ResourceMemory:
-						allRam.Add(res.NominalQuota)
+						capRam.Add(res.NominalQuota)
 					case core.ResourceEphemeralStorage:
-						allLocalStorage.Add(res.NominalQuota)
+						capStg.Add(res.NominalQuota)
 					}
 				}
 			}
 		}
 
-		remCpu = allCpu.DeepCopy()
-		remRam = allRam.DeepCopy()
-		remLocalStorage = allLocalStorage.DeepCopy()
-		remAccelerator = allAccelerator.DeepCopy()
+		// Initialize the remaining with the capacity.
+		remAcc = capAcc.DeepCopy()
+		remCpu = capCpu.DeepCopy()
+		remRam = capRam.DeepCopy()
+		remStg = capStg.DeepCopy()
 
-		var maxCpuTmp, maxRamTmp, maxLocalStorageTmp, maxAcceleratorTmp resource.Quantity
+		// Calculate the remaining for each flavor by subtracting the reserved total quota from the capacity,
+		// and meanwhile adjust the once max request if necessary.
+		//
+		// If the reservation not exists,
+		// the once max request is determined by comparing the once max request of each flavor;
+		// otherwise, the once max request is determined by comparing the remaining of each flavor after reservation,
+		// because the reservation will reduce the remaining and thus may reduce the once max request.
 		for i := range cq.Status.FlavorsReservation {
 			flv := &cq.Status.FlavorsReservation[i]
-			flvQuantities := flvQuantitiesIndex[flv.Name]
-			maxCpuTmp = flvQuantities[core.ResourceCPU]
-			maxRamTmp = flvQuantities[core.ResourceMemory]
-			maxLocalStorageTmp = flvQuantities[core.ResourceEphemeralStorage]
-			maxAcceleratorTmp = flvQuantities[resourceAccelerator]
+
+			capRf := capRfIndexer[flv.Name]
+			remAccRf := capRf[resourceAccelerator]
+			remCpuRf := capRf[core.ResourceCPU]
+			remRamRf := capRf[core.ResourceMemory]
+			remStgRf := capRf[core.ResourceEphemeralStorage]
+
+			// Remaining are subtracted by the reserved total quota.
 			for j := range flv.Resources {
 				res := &flv.Resources[j]
-				// Remaining quantities are subtracted by the reserved total quota.
 				switch res.Name {
 				case resourceAccelerator:
-					remAccelerator.Sub(res.Total)
-					maxAcceleratorTmp.Sub(res.Total)
+					remAcc.Sub(res.Total)
+					remAccRf.Sub(res.Total)
 				case core.ResourceCPU:
 					remCpu.Sub(res.Total)
-					maxCpuTmp.Sub(res.Total)
+					remCpuRf.Sub(res.Total)
 				case core.ResourceMemory:
 					remRam.Sub(res.Total)
-					maxRamTmp.Sub(res.Total)
+					remRamRf.Sub(res.Total)
 				case core.ResourceEphemeralStorage:
-					remLocalStorage.Sub(res.Total)
-					maxLocalStorageTmp.Sub(res.Total)
+					remStg.Sub(res.Total)
+					remStgRf.Sub(res.Total)
 				}
 			}
 
+			ormRf := ormRfIndexer[flv.Name]
+			ormAccRf := ormRf[resourceAccelerator]
+			ormCpuRf := ormRf[core.ResourceCPU]
+			ormRamRf := ormRf[core.ResourceMemory]
+			ormStgRf := ormRf[core.ResourceEphemeralStorage]
+
+			// Adjust the remaining by comparing with the once max request.
+			if remAccRf.Cmp(ormAccRf) > 0 {
+				remAccRf = ormAccRf
+			}
+			if remCpuRf.Cmp(ormCpuRf) > 0 {
+				remCpuRf = ormCpuRf
+			}
+			if remRamRf.Cmp(ormRamRf) > 0 {
+				remRamRf = ormRamRf
+			}
+			if remStgRf.Cmp(ormStgRf) > 0 {
+				remStgRf = ormStgRf
+			}
+
+			// Adjust the display once max request.
 			if !acceleratable {
-				if maxRamTmp.Cmp(maxRam) > 0 &&
-					!maxCpuTmp.IsZero() && !maxLocalStorageTmp.IsZero() {
-					maxRam = maxRamTmp
-					maxCpu = maxCpuTmp
-					maxLocalStorage = maxLocalStorageTmp
+				if remCpuRf.Cmp(ormCpu) > 0 {
+					ormCpu = remCpuRf
+					ormRam = remRamRf
+					ormStg = remStgRf
 				}
-			} else if maxAcceleratorTmp.Cmp(maxAccelerator) > 0 &&
-				!maxCpuTmp.IsZero() && !maxRamTmp.IsZero() && !maxLocalStorageTmp.IsZero() {
-				maxAccelerator = maxAcceleratorTmp
-				maxCpu = maxCpuTmp
-				maxRam = maxRamTmp
-				maxLocalStorage = maxLocalStorageTmp
+			} else if remAccRf.Cmp(ormAcc) > 0 {
+				ormAcc = remAccRf
+				ormCpu = remCpuRf
+				ormRam = remRamRf
+				ormStg = remStgRf
 			}
 		}
 
 		if sliced > 0 {
 			// Only allow to request 1 slice at most.
-			if !maxAccelerator.IsZero() {
-				maxAccelerator.Set(1)
+			if !ormAcc.IsZero() {
+				ormAcc.Set(1)
 			}
 			// Align the accelerator resource with the slice.
-			remAccelerator = devicefeature.QuantityToSliceCount(remAccelerator, sliced)
-			allAccelerator = devicefeature.QuantityToSliceCount(allAccelerator, sliced)
+			remAcc = devicefeature.QuantityToSliceCount(remAcc, sliced)
+			capAcc = devicefeature.QuantityToSliceCount(capAcc, sliced)
 		} else {
-			maxAccelerator = devicefeature.QuantityToSliceCount(maxAccelerator, 1)
+			ormAcc = devicefeature.QuantityToSliceCount(ormAcc, 1)
 		}
 	}
 
@@ -374,30 +439,30 @@ func convertInstanceTypeFromClusterQueue(cq *kueue.ClusterQueue) *worker.Instanc
 			ComputeCapability: notes["computeCapability"],
 			Sliced:            sliced,
 			UnitResources: worker.InstanceTypeUnitResources{
-				CPU: notes["unitResCPU"],
-				RAM: notes["unitResRAM"],
+				CPU: cpuUnit,
+				RAM: ramUnit + "Gi",
 			},
 		},
 		Status: worker.InstanceTypeStatus{
 			Accelerator: worker.InstanceTypeResource{
-				OnceMaxRequest: maxAccelerator,
-				Remaining:      remAccelerator,
-				Capacity:       allAccelerator,
+				OnceMaxRequest: ormAcc,
+				Remaining:      remAcc,
+				Capacity:       capAcc,
 			},
 			CPU: worker.InstanceTypeResource{
-				OnceMaxRequest: maxCpu,
+				OnceMaxRequest: ormCpu,
 				Remaining:      remCpu,
-				Capacity:       allCpu,
+				Capacity:       capCpu,
 			},
 			RAM: worker.InstanceTypeResource{
-				OnceMaxRequest: maxRam,
+				OnceMaxRequest: ormRam,
 				Remaining:      remRam,
-				Capacity:       allRam,
+				Capacity:       capRam,
 			},
 			LocalStorage: worker.InstanceTypeResource{
-				OnceMaxRequest: maxLocalStorage,
-				Remaining:      remLocalStorage,
-				Capacity:       allLocalStorage,
+				OnceMaxRequest: ormStg,
+				Remaining:      remStg,
+				Capacity:       capStg,
 			},
 		},
 	}
@@ -441,4 +506,17 @@ func instanceTypeMatchFieldSelector(opts ctrlcli.ListOptions, insType *worker.In
 		return true
 	}
 	return fs.Matches(fields.Set{"metadata.name": insType.Name})
+}
+
+func parseNodeResourceFlavorName(name string) (ormAccRf, ormCpuRf, ormRamRf, ormStgRf resource.Quantity, ok bool) {
+	_, spec, ok := devicefeature.ParseNodeProfile(name)
+	if ok {
+		if spec.Accelerator != "" {
+			ormAccRf = funcx.NoError(resource.ParseQuantity(spec.Accelerator))
+		}
+		ormCpuRf = funcx.NoError(resource.ParseQuantity(spec.CPU))
+		ormRamRf = funcx.NoError(resource.ParseQuantity(spec.RAM + "Gi"))
+		ormStgRf = funcx.NoError(resource.ParseQuantity(spec.LocalStorage + "Gi"))
+	}
+	return ormAccRf, ormCpuRf, ormRamRf, ormStgRf, ok
 }

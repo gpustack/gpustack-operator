@@ -71,6 +71,30 @@ func HasAnnotation(obj MetaObject, key string) bool {
 	return ok
 }
 
+// HasAnnotations returns true if the annotations with the given keys exist.
+func HasAnnotations(obj MetaObject, key string, keys ...string) bool {
+	if obj == nil {
+		panic("object is nil")
+	}
+
+	as := obj.GetAnnotations()
+	if as == nil {
+		return false
+	}
+
+	if _, ok := as[key]; !ok {
+		return false
+	}
+
+	for _, k := range keys {
+		if _, ok := as[k]; !ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 // DeleteAnnotation deletes the annotation with the given key.
 func DeleteAnnotation(obj MetaObject, key string) {
 	if obj == nil {
@@ -85,6 +109,24 @@ func DeleteAnnotation(obj MetaObject, key string) {
 	}
 
 	delete(as, key)
+	obj.SetAnnotations(as)
+}
+
+// DeleteAnnotations deletes the annotations with the given keys.
+func DeleteAnnotations(obj MetaObject, key string, keys ...string) {
+	if obj == nil {
+		panic("object is nil")
+	}
+
+	as := obj.GetAnnotations()
+	if as == nil {
+		return
+	}
+
+	delete(as, key)
+	for _, k := range keys {
+		delete(as, k)
+	}
 	obj.SetAnnotations(as)
 }
 

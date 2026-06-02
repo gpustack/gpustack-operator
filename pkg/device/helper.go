@@ -124,5 +124,12 @@ func formatName(name, manufacturer string) string {
 
 // formatMemory formats the given memory size in MiB to a string.
 func formatMemory(mib uint64) string {
-	return strings.ToLower(quantityx.Format(resource.MustParse(strconvx.Itoa(mib) + "Mi")))
+	switch {
+	case mib == 0:
+		return "0g"
+	case mib < 1024:
+		return "1g"
+	}
+	r := strings.ToLower(quantityx.Format(resource.MustParse(strconvx.Itoa(mib) + "Mi")))
+	return r[:len(r)-1] // Remove the "i" in "gi".
 }

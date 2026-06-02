@@ -48,6 +48,15 @@ var (
 
 	// Instance.
 
+	// InstanceResourcesOvercommit indicates to overcommit instance resources or not,
+	// which is used when deploying Instances.
+	InstanceResourcesOvercommit = settings.NewEditable(
+		"instance-resources-overcommit",
+		"Indicates to overcommit instance resources or not.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
 	// InstanceSSHServerImage is the image of the SSH server,
 	// which is used when deploying Instances.
 	InstanceSSHServerImage = settings.NewEditable(

@@ -27,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
@@ -194,19 +195,22 @@ func (h *InstancePersistentVolumeTypeHandler) OnCreate(ctx context.Context, obj 
 	if instPVType.Spec.S3 != nil {
 		eSec := getInstancePersistentVolumeTypeSourceS3AccessData(instPVType)
 		kubemeta.ControlOnWithoutBlock(eSec, stgCls, worker.SchemeGroupVersionKind(_InstancePersistentVolumeTypeKind))
+		secAlignFn := func(aSec *core.Secret) (_ *core.Secret, skip bool, err error) {
+			skip = true
+			// Update data.
+			if !kubemeta.DeepEqual(aSec.Data, eSec.Data) {
+				aSec.Data = eSec.Data
+				skip = false
+			}
+			// Update owner reference.
+			if !kubemeta.IsControlledBy(aSec, stgCls) {
+				kubemeta.ControlOnWithoutBlock(aSec, stgCls, worker.SchemeGroupVersionKind(_InstancePersistentVolumeTypeKind))
+				skip = false
+			}
+			return aSec, skip, nil
+		}
 		_, err = kubeclientset.CreateWithCtrlClient(ctx, h.Client, eSec,
-			kubeclientset.WithUpdateIfExisted(func(aSec *core.Secret) (_ *core.Secret, skip bool, err error) {
-				skip = true
-				if !kubemeta.IsControlledBy(aSec, stgCls) {
-					aSec.OwnerReferences = eSec.OwnerReferences
-					skip = false
-				}
-				if !kubemeta.DeepEqual(aSec.Data, eSec.Data) {
-					aSec.Data = eSec.Data
-					skip = false
-				}
-				return aSec, skip, nil
-			}))
+			kubeclientset.WithUpdateIfExisted(secAlignFn))
 		if err != nil {
 			return nil, kerrors.NewInternalError(fmt.Errorf("create s3 access secret: %w", err))
 		}
@@ -382,7 +386,7 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 	// Update.
 	oldStgCls := new(storage.StorageClass)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instPVType), oldStgCls,
-		kubeclientset.NonQuorum)
+		ctrlclix.NonQuorum)
 	if err != nil {
 		return nil, err
 	}
@@ -417,7 +421,7 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 	}
 
 	err = h.Client.Patch(ctx, stgCls, ctrlcli.MergeFrom(oldStgCls),
-		kubeclientset.ToPatchOptions(opts))
+		ctrlclix.ToPatchOptions(opts))
 	if err != nil {
 		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding storageclass: %w", err))
 	}

@@ -3,6 +3,7 @@ package setting
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -167,6 +168,20 @@ func (s Setting) Value(ctx context.Context) (string, error) {
 // ShouldValue returns the value of the setting without error.
 func (s Setting) ShouldValue(ctx context.Context) string {
 	return funcx.NoError(s.Value(ctx))
+}
+
+// ValueBool returns the boolean value of the setting.
+func (s Setting) ValueBool(ctx context.Context) (bool, error) {
+	valStr, err := s.Value(ctx)
+	if err != nil {
+		return false, err
+	}
+	return strconv.ParseBool(valStr)
+}
+
+// ShouldValueBool returns the boolean value of the setting without error.
+func (s Setting) ShouldValueBool(ctx context.Context) bool {
+	return funcx.NoError(s.ValueBool(ctx))
 }
 
 type Settings map[string]Setting

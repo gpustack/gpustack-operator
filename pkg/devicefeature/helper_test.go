@@ -8,55 +8,24 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/systemname"
-	"gpustack.ai/gpustack/pkg/utils/quantityx"
 )
 
-func TestConstructNodeLabels(t *testing.T) {
-	nodeName := "node1"
-	cpuCapacity := *resource.NewQuantity(4, resource.DecimalSI)
-	ramCapacity := *resource.NewQuantity(16*quantityx.Gi, resource.BinarySI)
-	localStorageCapacity := *resource.NewQuantity(100*quantityx.Gi, resource.BinarySI)
-
-	node := &core.Node{
-		ObjectMeta: meta.ObjectMeta{
-			Name: nodeName,
-			Labels: map[string]string{
-				core.LabelHostname: nodeName,
-			},
-		},
-		Status: core.NodeStatus{
-			Capacity: core.ResourceList{
-				core.ResourceCPU:              cpuCapacity,
-				core.ResourceMemory:           ramCapacity,
-				core.ResourceEphemeralStorage: localStorageCapacity,
-			},
-			Allocatable: core.ResourceList{
-				core.ResourceCPU:              cpuCapacity,
-				core.ResourceMemory:           ramCapacity,
-				core.ResourceEphemeralStorage: localStorageCapacity,
-			},
-		},
-	}
-
+func TestConstructNodeDeviceLabels(t *testing.T) {
 	cases := []struct {
 		name     string
-		node     *core.Node
 		groups   device.DevicesGroupList
 		expected map[string]string
 	}{
 		{
-			name:   "no groups",
-			node:   node,
-			groups: nil,
-			expected: map[string]string{
-				systemname.ManagedLabelKey: "true",
-			},
+			name:     "no groups",
+			groups:   nil,
+			expected: map[string]string{},
 		},
 		{
 			name: "group without accelerators is skipped",
-			node: node,
 			groups: device.DevicesGroupList{
 				{
 					ID:           "tesla-t4",
@@ -65,13 +34,10 @@ func TestConstructNodeLabels(t *testing.T) {
 					Memory:       15360,
 				},
 			},
-			expected: map[string]string{
-				systemname.ManagedLabelKey: "true",
-			},
+			expected: map[string]string{},
 		},
 		{
 			name: "full group",
-			node: node,
 			groups: device.DevicesGroupList{
 				{
 					ID:                "tesla-t4",
@@ -92,24 +58,19 @@ func TestConstructNodeLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				systemname.ManagedLabelKey:                          "true",
-				FeatureLabelPrefix + "nvidia":                       "true",
-				FeatureLabelPrefix + "nvidia.driver-version":        "580.126.09",
-				FeatureLabelPrefix + "nvidia.runtime-version":       "13.0",
-				FeatureLabelPrefix + "nvidia.compute-capability":    "7.5",
-				FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-				FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
-				FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
-				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "1Gi",
+				FeatureLabelPrefix + "nvidia":                             "true",
+				FeatureLabelPrefix + "nvidia.driver-version":              "580.126.09",
+				FeatureLabelPrefix + "nvidia.runtime-version":             "13.0",
+				FeatureLabelPrefix + "nvidia-tesla-t4":                    "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":            "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":             "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":              "2560",
+				FeatureLabelPrefix + "nvidia-tesla-t4.family":             "Turing",
+				FeatureLabelPrefix + "nvidia-tesla-t4.compute-capability": "7.5",
 			},
 		},
 		{
 			name: "minimal group without optional fields",
-			node: node,
 			groups: device.DevicesGroupList{
 				{
 					ID:           "h100",
@@ -122,20 +83,15 @@ func TestConstructNodeLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				systemname.ManagedLabelKey:                      "true",
-				FeatureLabelPrefix + "nvidia":                   "true",
-				FeatureLabelPrefix + "nvidia-h100":              "true",
-				FeatureLabelPrefix + "nvidia-h100.product":      "H100",
-				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
-				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
-				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
+				FeatureLabelPrefix + "nvidia":              "true",
+				FeatureLabelPrefix + "nvidia-h100":         "true",
+				FeatureLabelPrefix + "nvidia-h100.product": "H100",
+				FeatureLabelPrefix + "nvidia-h100.memory":  "80Gi",
+				FeatureLabelPrefix + "nvidia-h100.cores":   "0",
 			},
 		},
 		{
 			name: "multiple groups, one skipped",
-			node: node,
 			groups: device.DevicesGroupList{
 				{
 					ID:           "tesla-t4",
@@ -164,172 +120,23 @@ func TestConstructNodeLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				systemname.ManagedLabelKey:                          "true",
-				FeatureLabelPrefix + "nvidia":                       "true",
-				FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-				FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "0",
-				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "2",
-				FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "12Gi",
-				FeatureLabelPrefix + "amd":                          "true",
-				FeatureLabelPrefix + "amd-mi300x":                   "true",
-				FeatureLabelPrefix + "amd-mi300x.product":           "MI300X",
-				FeatureLabelPrefix + "amd-mi300x.memory":            "192Gi",
-				FeatureLabelPrefix + "amd-mi300x.cores":             "0",
-				FeatureLabelPrefix + "amd-mi300x.accelerators":      "2",
-				FeatureLabelPrefix + "amd-mi300x.unit-cpu":          "1",
-				FeatureLabelPrefix + "amd-mi300x.unit-ram":          "6Gi",
-			},
-		},
-		{
-			// No managed label on the node — defaults to "true".
-			name: "managed label unset on node",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname: nodeName,
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-				},
-			},
-			groups: device.DevicesGroupList{
-				{
-					ID:           "h100",
-					Manufacturer: "nvidia",
-					Name:         "H100",
-					Memory:       81920,
-					Accelerators: []device.Accelerator{
-						{ID: "GPU-0", Index: 0},
-					},
-				},
-			},
-			expected: map[string]string{
-				systemname.ManagedLabelKey:                      "true",
-				FeatureLabelPrefix + "nvidia":                   "true",
-				FeatureLabelPrefix + "nvidia-h100":              "true",
-				FeatureLabelPrefix + "nvidia-h100.product":      "H100",
-				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
-				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
-				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
-			},
-		},
-		{
-			// Explicit managed=true on the node — preserved.
-			name: "managed label is true on node",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname:         nodeName,
-						systemname.ManagedLabelKey: "true",
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-				},
-			},
-			groups: device.DevicesGroupList{
-				{
-					ID:           "h100",
-					Manufacturer: "nvidia",
-					Name:         "H100",
-					Memory:       81920,
-					Accelerators: []device.Accelerator{
-						{ID: "GPU-0", Index: 0},
-					},
-				},
-			},
-			expected: map[string]string{
-				systemname.ManagedLabelKey:                      "true",
-				FeatureLabelPrefix + "nvidia":                   "true",
-				FeatureLabelPrefix + "nvidia-h100":              "true",
-				FeatureLabelPrefix + "nvidia-h100.product":      "H100",
-				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
-				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
-				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
-			},
-		},
-		{
-			// Explicit managed=false on the node — overrides the default
-			// "true", but device labels are still emitted because the
-			// processing loop continues regardless of the managed value.
-			name: "managed label is false on node",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname:         nodeName,
-						systemname.ManagedLabelKey: "false",
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-				},
-			},
-			groups: device.DevicesGroupList{
-				{
-					ID:           "h100",
-					Manufacturer: "nvidia",
-					Name:         "H100",
-					Memory:       81920,
-					Accelerators: []device.Accelerator{
-						{ID: "GPU-0", Index: 0},
-					},
-				},
-			},
-			expected: map[string]string{
-				systemname.ManagedLabelKey:                      "false",
-				FeatureLabelPrefix + "nvidia":                   "true",
-				FeatureLabelPrefix + "nvidia-h100":              "true",
-				FeatureLabelPrefix + "nvidia-h100.product":      "H100",
-				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
-				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
-				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
-				FeatureLabelPrefix + "nvidia-h100.unit-cpu":     "2",
-				FeatureLabelPrefix + "nvidia-h100.unit-ram":     "12Gi",
+				FeatureLabelPrefix + "nvidia":                  "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":         "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product": "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":  "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":   "0",
+				FeatureLabelPrefix + "amd":                     "true",
+				FeatureLabelPrefix + "amd-mi300x":              "true",
+				FeatureLabelPrefix + "amd-mi300x.product":      "MI300X",
+				FeatureLabelPrefix + "amd-mi300x.memory":       "192Gi",
+				FeatureLabelPrefix + "amd-mi300x.cores":        "0",
 			},
 		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := ConstructNodeLabels(cs.node, cs.groups)
+			actual := ConstructNodeDeviceLabels(cs.groups)
 			assert.Equal(t, cs.expected, actual, "unexpected node labels")
 		})
 	}
@@ -348,7 +155,7 @@ func TestExtractNodeKeys(t *testing.T) {
 					Labels: map[string]string{},
 				},
 			},
-			expected: []string{DisfeaturedNodeKey},
+			expected: nil,
 		},
 		{
 			name: "non-empty labels without feature label",
@@ -359,7 +166,7 @@ func TestExtractNodeKeys(t *testing.T) {
 					},
 				},
 			},
-			expected: []string{DisfeaturedNodeKey},
+			expected: nil,
 		},
 		{
 			name: "non-empty labels with feature label",
@@ -368,17 +175,15 @@ func TestExtractNodeKeys(t *testing.T) {
 					Labels: map[string]string{
 						"foo":                         "bar",
 						FeatureLabelPrefix + "nvidia": "true",
-						FeatureLabelPrefix + "nvidia.compute-capability":    "7.5",
-						FeatureLabelPrefix + "nvidia.driver-version":        "580.126.09",
-						FeatureLabelPrefix + "nvidia.runtime-version":       "13.0",
-						FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
-						FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
-						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "4Gi",
+						FeatureLabelPrefix + "nvidia.driver-version":              "580.126.09",
+						FeatureLabelPrefix + "nvidia.runtime-version":             "13.0",
+						FeatureLabelPrefix + "nvidia-tesla-t4":                    "true",
+						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators":       "4",
+						FeatureLabelPrefix + "nvidia-tesla-t4.compute-capability": "7.5",
+						FeatureLabelPrefix + "nvidia-tesla-t4.cores":              "2560",
+						FeatureLabelPrefix + "nvidia-tesla-t4.family":             "Turing",
+						FeatureLabelPrefix + "nvidia-tesla-t4.memory":             "15Gi",
+						FeatureLabelPrefix + "nvidia-tesla-t4.product":            "Tesla-T4",
 					},
 				},
 			},
@@ -396,550 +201,1171 @@ func TestExtractNodeKeys(t *testing.T) {
 	}
 }
 
-func TestExtractNodeFeatureByKey(t *testing.T) {
-	nodeName := "node1"
-	cpuCapacity := *resource.NewQuantity(4, resource.DecimalSI)
-	ramCapacity := *resource.NewQuantity(16*quantityx.Gi, resource.BinarySI)
-	localStorageCapacity := *resource.NewQuantity(100*quantityx.Gi, resource.BinarySI)
+func TestConstructNodeCapacityLabels(t *testing.T) {
+	// Cluster cluster-1 has 5 nodes. Their raw physical resources are:
+	//
+	//   node-1:           16C /  32G / 100G
+	//   node-2: T4   1D    4C /  16G / 100G
+	//   node-3: T4   1D    8C /  32G / 100G
+	//   node-4: T4   2D    8C /  32G / 100G
+	//   node-5: A10G 4D   48C / 192G / 200G
+	//
+	// kubelet's Node.Status.Capacity does not perfectly mirror physical
+	// resources — the kernel reserves some RAM, the filesystem reserves
+	// inodes/superblocks for the boot volume, etc. — so simulated capacity
+	// is intentionally slightly less than each node's advertised total.
+	// This exercises the odd-Gi rounding (RAM rounds up to the next even
+	// Gi; local-storage rounds down).
+
+	gpuResource := GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+
+	newNode := func(name, cpu, mem, storage string, gpu int64, labels map[string]string) *core.Node {
+		capacity := core.ResourceList{
+			core.ResourceCPU:              resource.MustParse(cpu),
+			core.ResourceMemory:           resource.MustParse(mem),
+			core.ResourceEphemeralStorage: resource.MustParse(storage),
+		}
+		if gpu > 0 {
+			capacity[gpuResource] = *resource.NewQuantity(gpu, resource.DecimalSI)
+		}
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels[core.LabelHostname] = name
+		return &core.Node{
+			ObjectMeta: meta.ObjectMeta{
+				Name:   name,
+				Labels: labels,
+			},
+			Status: core.NodeStatus{
+				Capacity:    capacity,
+				Allocatable: capacity,
+			},
+		}
+	}
+
+	// deviceLabels mirrors what ConstructNodeDeviceLabels would have put on
+	// the node before ConstructNodeCapacityLabels is invoked.
+	deviceLabels := func(id, product, memory, accelerators string) map[string]string {
+		ndKey := FeatureLabelPrefix + "nvidia-" + id
+		return map[string]string{
+			systemname.ManagedLabelKey:    "true",
+			FeatureLabelPrefix + "nvidia": "true",
+			ndKey:                         "true",
+			ndKey + ".product":            product,
+			ndKey + ".memory":             memory,
+			ndKey + ".cores":              "0",
+			ndKey + ".accelerators":       accelerators,
+		}
+	}
 
 	cases := []struct {
 		name     string
 		node     *core.Node
-		key      string
-		expected NodeFeature
+		expected map[string]string
 	}{
 		{
-			name: "empty labels",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname: nodeName,
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-				},
-			},
-			key: DisfeaturedNodeKey,
-			expected: NodeFeature{
-				NodeLabels: map[string]string{
-					core.LabelHostname: nodeName,
-				},
-				CPU:          cpuCapacity,
-				RAM:          ramCapacity,
-				LocalStorage: localStorageCapacity,
+			// 32G RAM is exposed by kubelet as 31Gi (kernel reservation),
+			// odd, rounds up to 32Gi. 100G disk is exposed as 97Gi, odd,
+			// rounds down to 96Gi.
+			name: "cluster-1/node-1 cpu-only 16C/32G/100G",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0, nil),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
 			},
 		},
 		{
-			name: "non-empty labels without feature label",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname: nodeName,
-						"foo":              "bar",
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-					},
-				},
-			},
-			key: DisfeaturedNodeKey,
-			expected: NodeFeature{
-				NodeLabels: map[string]string{
-					core.LabelHostname: nodeName,
-				},
-				CPU:          cpuCapacity,
-				RAM:          ramCapacity,
-				LocalStorage: localStorageCapacity,
+			// 1xT4 on a small 4C/16G box. Per-device cpu/ram equals the
+			// general values since there is exactly one accelerator.
+			name: "cluster-1/node-2 T4 1D 4C/16G/100G",
+			node: newNode(
+				"cluster-1-node-2", "4", "15Gi", "97Gi", 1,
+				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "1"),
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "general.cpu":                    "4",
+				FeatureLabelPrefix + "general.ram":                    "16Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "4c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "16Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "4c-16g-96g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
 			},
 		},
 		{
-			name: "non-empty labels with feature label",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname:                                  nodeName,
-						FeatureLabelPrefix + "nvidia":                       "true",
-						FeatureLabelPrefix + "nvidia.compute-capability":    "7.5",
-						FeatureLabelPrefix + "nvidia.driver-version":        "580.126.09",
-						FeatureLabelPrefix + "nvidia.runtime-version":       "13.0",
-						FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
-						FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
-						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "4Gi",
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(4, resource.DecimalSI),
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(2, resource.DecimalSI),
-					},
-				},
-			},
-			key: "nvidia-tesla-t4",
-			expected: NodeFeature{
-				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                      "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "1",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "4Gi",
-				},
-				Sliced:            "",
-				Manufacturer:      "nvidia",
-				Product:           "Tesla-T4",
-				Memory:            "15Gi",
-				Cores:             "2560",
-				ComputeCapability: "7.5",
-				Family:            "Turing",
-				Accelerator:       *resource.NewQuantity(2, resource.DecimalSI),
-				// CPU/RAM = unit (1 / 4Gi) × Accelerator (2) = 2000m / 8Gi.
-				CPU:          *resource.NewMilliQuantity(2000, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(8*quantityx.Gi, resource.BinarySI),
-				LocalStorage: localStorageCapacity,
-				UnitResources: DeviceUnitResources{
-					CPU: resource.MustParse("1"),
-					RAM: resource.MustParse("4Gi"),
-				},
+			// Same GPU model as node-2 but on a larger 8C/32G box.
+			name: "cluster-1/node-3 T4 1D 8C/32G/100G",
+			node: newNode(
+				"cluster-1-node-3", "8", "31Gi", "97Gi", 1,
+				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "1"),
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "general.cpu":                    "8",
+				FeatureLabelPrefix + "general.ram":                    "32Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "8c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "32Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-32g-96g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "8c-32g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "8c-32g-1d",
 			},
 		},
 		{
-			name: "with taints",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname:                                  nodeName,
-						FeatureLabelPrefix + "nvidia":                       "true",
-						FeatureLabelPrefix + "nvidia.compute-capability":    "7.5",
-						FeatureLabelPrefix + "nvidia.driver-version":        "580.126.09",
-						FeatureLabelPrefix + "nvidia.runtime-version":       "13.0",
-						FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
-						FeatureLabelPrefix + "nvidia-tesla-t4.family":       "Turing",
-						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu":     "1",
-						FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram":     "4Gi",
-					},
-				},
-				Spec: core.NodeSpec{
-					Taints: []core.Taint{
-						{
-							Key:       DeviceLabelPrefix + "acclerator.sliced",
-							Value:     "2",
-							Effect:    core.TaintEffectNoSchedule,
-							TimeAdded: &meta.Time{Time: meta.Now().Time},
-						},
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(4, resource.DecimalSI),
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(2, resource.DecimalSI),
-					},
-				},
-			},
-			key: "nvidia-tesla-t4",
-			expected: NodeFeature{
-				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                      "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "1",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "4Gi",
-				},
-				Tolerations: []core.Toleration{
-					{
-						Key:      DeviceLabelPrefix + "acclerator.sliced",
-						Operator: core.TolerationOpEqual,
-						Value:    "2",
-						Effect:   core.TaintEffectNoSchedule,
-					},
-				},
-				Sliced:            "2",
-				Manufacturer:      "nvidia",
-				Product:           "Tesla-T4",
-				Memory:            "15Gi",
-				Cores:             "2560",
-				ComputeCapability: "7.5",
-				Family:            "Turing",
-				Accelerator:       *resource.NewQuantity(2, resource.DecimalSI),
-				// CPU/RAM = unit (1 / 4Gi) × Accelerator (2) = 2000m / 8Gi.
-				CPU:          *resource.NewMilliQuantity(2000, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(8*quantityx.Gi, resource.BinarySI),
-				LocalStorage: localStorageCapacity,
-				UnitResources: DeviceUnitResources{
-					CPU: resource.MustParse("1"),
-					RAM: resource.MustParse("4Gi"),
-				},
+			// 2xT4 on the same box as node-3. Per-device cpu/ram is shared
+			// across both devices, so the per-device profile-cohort unit is
+			// halved by the device count.
+			name: "cluster-1/node-4 T4 2D 8C/32G/100G",
+			node: newNode(
+				"cluster-1-node-4", "8", "31Gi", "97Gi", 2,
+				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "general.cpu":                    "8",
+				FeatureLabelPrefix + "general.ram":                    "32Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "8c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "32Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-32g-96g-2d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
 			},
 		},
 		{
-			// Labels absent, four accelerators on a 4C/16Gi host: per-device
-			// share after the 1C/2Gi reservation is 750m / 3584Mi, which
-			// drives suggested CPU to 0 — GetDeviceUnitResources falls back
-			// to the 1C/1Gi default.
-			name: "four allocatable accelerators, labels absent — defaults",
-			node: &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname:                                  nodeName,
-						FeatureLabelPrefix + "nvidia":                       "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
-						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-					},
-				},
-				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(4, resource.DecimalSI),
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(4, resource.DecimalSI),
-					},
-				},
-			},
-			key: "nvidia-tesla-t4",
-			expected: NodeFeature{
-				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                      "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "",
-				},
-				Manufacturer: "nvidia",
-				Product:      "Tesla-T4",
-				Memory:       "15Gi",
-				Cores:        "2560",
-				Accelerator:  *resource.NewQuantity(4, resource.DecimalSI),
-				// CPU/RAM = unit (1 / 1Gi) × Accelerator (4) = 4000m / 4Gi.
-				CPU:          *resource.NewMilliQuantity(4000, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(4*quantityx.Gi, resource.BinarySI),
-				LocalStorage: localStorageCapacity,
-				UnitResources: DeviceUnitResources{
-					CPU: *resource.NewQuantity(1, resource.DecimalSI),
-					RAM: *resource.NewQuantity(quantityx.Gi, resource.BinarySI),
-				},
+			// 4xA10G on a large box. 192G → 188Gi (even, stays). ram-unit
+			// is integer-divided: 188/48 = 3. local-storage 196Gi is even,
+			// stays as-is. Per-device ram-unit: 188/4 = 47.
+			name: "cluster-1/node-5 A10G 4D 48C/192G/200G",
+			node: newNode(
+				"cluster-1-node-5", "48", "188Gi", "196Gi", 4,
+				deviceLabels("a10g", "A10G", "23Gi", "4"),
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                        "true",
+				FeatureLabelPrefix + "general.cpu":                "48",
+				FeatureLabelPrefix + "general.ram":                "188Gi",
+				FeatureLabelPrefix + "general.local-storage":      "196Gi",
+				FeatureLabelPrefix + "general.profile-flavor":     "48c-188g-196g",
+				FeatureLabelPrefix + "general.profile-queue":      "1c-3g",
+				FeatureLabelPrefix + "general.profile-cohort":     "1c-3g",
+				FeatureLabelPrefix + "nvidia-a10g.cpu":            "48",
+				FeatureLabelPrefix + "nvidia-a10g.ram":            "188Gi",
+				FeatureLabelPrefix + "nvidia-a10g.local-storage":  "196Gi",
+				FeatureLabelPrefix + "nvidia-a10g.profile-flavor": "48c-188g-196g-4d",
+				FeatureLabelPrefix + "nvidia-a10g.profile-queue":  "12c-47g-1d",
+				FeatureLabelPrefix + "nvidia-a10g.profile-cohort": "12c-47g-1d",
 			},
 		},
 		{
-			// Labels absent, zero allocatable accelerators (e.g. all
-			// pre-assigned): GetDeviceUnitResources falls back to n=1 with
-			// per-device share 3000m / 14336Mi → suggested CPU=2, the 6:1
-			// ratio induces 12288Mi which fits strictly under 14336Mi.
-			name: "zero allocatable accelerators, labels absent — n=1 fallback",
+			// User-supplied ${nodeKey}.sliced.partitions=8 appends "-8s"
+			// to profile-flavor and profile-queue. profile-cohort is the
+			// cohort-level per-unit view and is never sliced-suffixed —
+			// it is the matching key cross-flavor at the cohort level.
+			name: "cluster-1/node-5 A10G 4D 48C/192G/200G with sliced.partitions=8",
+			node: func() *core.Node {
+				lbs := deviceLabels("a10g", "A10G", "23Gi", "4")
+				lbs[FeatureLabelPrefix+"nvidia-a10g.sliced.partitions"] = "8"
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", 4, lbs)
+			}(),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                        "true",
+				FeatureLabelPrefix + "general.cpu":                "48",
+				FeatureLabelPrefix + "general.ram":                "188Gi",
+				FeatureLabelPrefix + "general.local-storage":      "196Gi",
+				FeatureLabelPrefix + "general.profile-flavor":     "48c-188g-196g",
+				FeatureLabelPrefix + "general.profile-queue":      "1c-3g",
+				FeatureLabelPrefix + "general.profile-cohort":     "1c-3g",
+				FeatureLabelPrefix + "nvidia-a10g.cpu":            "48",
+				FeatureLabelPrefix + "nvidia-a10g.ram":            "188Gi",
+				FeatureLabelPrefix + "nvidia-a10g.local-storage":  "196Gi",
+				FeatureLabelPrefix + "nvidia-a10g.profile-flavor": "48c-188g-196g-4d-8s",
+				FeatureLabelPrefix + "nvidia-a10g.profile-queue":  "12c-47g-1d-8s",
+				FeatureLabelPrefix + "nvidia-a10g.profile-cohort": "12c-47g-1d",
+			},
+		},
+		{
+			// Non-positive / unparsable sliced.partitions values are
+			// silently ignored — profile-flavor stays without the suffix.
+			name: "cluster-1/node-5 A10G with sliced.partitions=0 yields no suffix",
+			node: func() *core.Node {
+				lbs := deviceLabels("a10g", "A10G", "23Gi", "4")
+				lbs[FeatureLabelPrefix+"nvidia-a10g.sliced.partitions"] = "0"
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", 4, lbs)
+			}(),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                        "true",
+				FeatureLabelPrefix + "general.cpu":                "48",
+				FeatureLabelPrefix + "general.ram":                "188Gi",
+				FeatureLabelPrefix + "general.local-storage":      "196Gi",
+				FeatureLabelPrefix + "general.profile-flavor":     "48c-188g-196g",
+				FeatureLabelPrefix + "general.profile-queue":      "1c-3g",
+				FeatureLabelPrefix + "general.profile-cohort":     "1c-3g",
+				FeatureLabelPrefix + "nvidia-a10g.cpu":            "48",
+				FeatureLabelPrefix + "nvidia-a10g.ram":            "188Gi",
+				FeatureLabelPrefix + "nvidia-a10g.local-storage":  "196Gi",
+				FeatureLabelPrefix + "nvidia-a10g.profile-flavor": "48c-188g-196g-4d",
+				FeatureLabelPrefix + "nvidia-a10g.profile-queue":  "12c-47g-1d",
+				FeatureLabelPrefix + "nvidia-a10g.profile-cohort": "12c-47g-1d",
+			},
+		},
+		{
+			// Existing capacity labels take precedence over Status.Capacity
+			// — covers idempotent re-runs and operator overrides.
+			name: "existing capacity labels override Status.Capacity",
+			node: newNode(
+				"cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+				map[string]string{
+					FeatureLabelPrefix + "general.cpu":           "8",
+					FeatureLabelPrefix + "general.ram":           "16Gi",
+					FeatureLabelPrefix + "general.local-storage": "50Gi",
+				},
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "8",
+				FeatureLabelPrefix + "general.ram":            "16Gi",
+				FeatureLabelPrefix + "general.local-storage":  "50Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "8c-16g-50g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// No Status.Capacity — exercises fallback defaults: cpu→1,
+			// ram→cpu (so 1Gi), local-storage→15Gi when cpu==1.
+			name: "missing Status.Capacity falls back to defaults",
 			node: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
-					Name: nodeName,
-					Labels: map[string]string{
-						core.LabelHostname:                                  nodeName,
-						FeatureLabelPrefix + "nvidia":                       "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-						FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-						FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-						FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "2560",
-						FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "4",
-					},
+					Name:   "blank-node",
+					Labels: map[string]string{},
 				},
 				Status: core.NodeStatus{
-					Capacity: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(4, resource.DecimalSI),
-					},
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:              cpuCapacity,
-						core.ResourceMemory:           ramCapacity,
-						core.ResourceEphemeralStorage: localStorageCapacity,
-						"nvidia.com/gpu":              *resource.NewQuantity(0, resource.DecimalSI),
-					},
+					Capacity: core.ResourceList{},
 				},
 			},
-			key: "nvidia-tesla-t4",
-			expected: NodeFeature{
-				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                      "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4":          "true",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-cpu": "",
-					FeatureLabelPrefix + "nvidia-tesla-t4.unit-ram": "",
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "1",
+				FeatureLabelPrefix + "general.ram":            "1Gi",
+				FeatureLabelPrefix + "general.local-storage":  "15Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "1c-1g-15g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-1g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-1g",
+			},
+		},
+		{
+			// cpu present but ephemeral-storage absent → fallback is
+			// 15Gi * cpuC when cpuC > 1.
+			name: "missing local-storage falls back to 15Gi * cpuC",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "0", 0, nil),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "240Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-240g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// Accelerated feature label is set but Status.Capacity has no
+			// matching GPU resource — the per-device loop now skips the
+			// device entirely (no fallback to accC=1). Only the general
+			// capacity labels are emitted.
+			name: "accelerated feature label without Status.Capacity GPU is skipped",
+			node: newNode(
+				"cluster-1-node-2", "4", "15Gi", "97Gi", 0,
+				map[string]string{
+					systemname.ManagedLabelKey:             "true",
+					FeatureLabelPrefix + "nvidia":          "true",
+					FeatureLabelPrefix + "nvidia-tesla-t4": "true",
 				},
-				Manufacturer: "nvidia",
-				Product:      "Tesla-T4",
-				Memory:       "15Gi",
-				Cores:        "2560",
-				Accelerator:  *resource.NewQuantity(0, resource.DecimalSI),
-				// Accelerator=0 zeros the per-node CPU/RAM regardless of the
-				// per-device unit — no accelerator slots, no booked headroom.
-				CPU:          *resource.NewMilliQuantity(0, resource.DecimalSI),
-				RAM:          *resource.NewQuantity(0, resource.BinarySI),
-				LocalStorage: localStorageCapacity,
-				UnitResources: DeviceUnitResources{
-					CPU: *resource.NewQuantity(2, resource.DecimalSI),
-					RAM: *resource.NewQuantity(12*quantityx.Gi, resource.BinarySI),
-				},
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "4",
+				FeatureLabelPrefix + "general.ram":            "16Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "4c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-4g",
+			},
+		},
+		{
+			// Existing managed=true on the node is preserved verbatim.
+			name: "managed label is true on node",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+				map[string]string{
+					systemname.ManagedLabelKey: "true",
+				}),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// Existing managed=false on the node overrides the default "true"
+			// — capacity labels are still emitted regardless.
+			name: "managed label is false on node",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+				map[string]string{
+					systemname.ManagedLabelKey: "false",
+				}),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "false",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
 			},
 		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := ExtractNodeFeatureByKey(cs.node, cs.key)
-			assert.Equal(t, cs.expected, actual, "unexpected node feature")
+			actual := ConstructNodeCapacityLabels(cs.node)
+			assert.Equal(t, cs.expected, actual, "unexpected capacity labels")
 		})
 	}
 }
 
-func TestGetDeviceUnitResources(t *testing.T) {
-	const nodeKey = "nvidia-tesla-t4"
-	selfLabelKey := FeatureLabelPrefix + nodeKey
+func TestExtractNodeResourceFlavors(t *testing.T) {
+	// Output shape:
+	//   ndfs[0]  = the CPU/general flavor, emitted only when all five
+	//              general capacity labels (cpu, ram, local-storage,
+	//              profile-flavor, profile-cohort) are present. Otherwise the
+	//              function returns nil.
+	//   ndfs[1:] = one flavor per accelerated node key for which the same
+	//              five per-device labels are present.
+	//
+	// The accelerated-key loop iterates a Go map, so the device-flavor
+	// order is non-deterministic. We compare the head directly and the
+	// tail as a multiset via ElementsMatch.
 
-	// Match the function's compute-path construction so reflect.DeepEqual
-	// works against the Quantity's internal state (empty cache).
-	cores := func(n int64) resource.Quantity {
-		return *resource.NewQuantity(n, resource.DecimalSI)
+	expectedToleration := []core.Toleration{
+		{Operator: core.TolerationOpExists},
 	}
-	gi := func(n int64) resource.Quantity {
-		return *resource.NewQuantity(n*quantityx.Gi, resource.BinarySI)
-	}
-	defaultUnits := DeviceUnitResources{CPU: cores(1), RAM: gi(1)}
 
 	cases := []struct {
-		name        string
-		labels      map[string]string
-		allocCPU    resource.Quantity
-		allocRAM    resource.Quantity
-		deviceCount int64
-		expected    DeviceUnitResources
+		name string
+		// labels populates node.ObjectMeta.Labels.
+		labels map[string]string
+		// allocatable populates node.Status.Allocatable. The per-device
+		// Accelerator field sources from here — keys should be GPU
+		// resource names (e.g., GetResourceName("nvidia", Exclusive)).
+		allocatable map[core.ResourceName]int64
+		wantCPU     NodeResourceFlavor
+		wantDevices []NodeResourceFlavor
+		wantEmpty   bool
 	}{
 		{
-			// Labels are returned as parsed Quantities, format preserved.
-			name: "labels present in canonical form",
+			// CPU-only node — only the general flavor is emitted.
+			name: "cluster-1/node-1 cpu-only 16C/32Gi/96Gi",
 			labels: map[string]string{
-				selfLabelKey + ".unit-cpu": "2000m",
-				selfLabelKey + ".unit-ram": "8192Mi",
+				systemname.ManagedLabelKey:                    "true",
+				core.LabelHostname:                            "cluster-1-node-1",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
 			},
-			// Allocatable and deviceCount are ignored on the read path.
-			deviceCount: 99,
-			expected: DeviceUnitResources{
-				CPU: resource.MustParse("2000m"),
-				RAM: resource.MustParse("8192Mi"),
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "16c-32g-96g",
+				ProfileQueueSpec:  "1c-2g",
+				ProfileCohortSpec: "1c-2g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-2g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "16",
+				RAM:          "32Gi",
+				LocalStorage: "96Gi",
 			},
 		},
 		{
-			// Operator-written cores / Gi form is preserved verbatim — the
-			// read path no longer reformats.
-			name: "labels present in core/Gi form — preserved",
+			// 1xT4 — CPU/general + one nvidia-tesla-t4 device flavor.
+			name: "cluster-1/node-2 T4 1D 4C/16Gi/96Gi",
 			labels: map[string]string{
-				selfLabelKey + ".unit-cpu": "4",
-				selfLabelKey + ".unit-ram": "16Gi",
+				systemname.ManagedLabelKey:                            "true",
+				core.LabelHostname:                                    "cluster-1-node-2",
+				FeatureLabelPrefix + "nvidia":                         "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":                "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":        "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":         "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":          "0",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators":   "1",
+				FeatureLabelPrefix + "general.cpu":                    "4",
+				FeatureLabelPrefix + "general.ram":                    "16Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "4c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "16Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "4c-16g-96g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
 			},
-			deviceCount: 4,
-			expected: DeviceUnitResources{
-				CPU: resource.MustParse("4"),
-				RAM: resource.MustParse("16Gi"),
+			allocatable: map[core.ResourceName]int64{
+				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 1,
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "4c-16g-96g",
+				ProfileQueueSpec:  "1c-4g",
+				ProfileCohortSpec: "1c-4g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-4g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "4",
+				RAM:          "16Gi",
+				LocalStorage: "96Gi",
+			},
+			wantDevices: []NodeResourceFlavor{
+				{
+					Key:               "nvidia-tesla-t4",
+					ProfileFlavorSpec: "4c-16g-96g-1d",
+					ProfileQueueSpec:  "4c-16g-1d",
+					ProfileCohortSpec: "4c-16g-1d",
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey:                           "true",
+						FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue": "4c-16g-1d",
+					},
+					Tolerations:  expectedToleration,
+					Manufacturer: "nvidia",
+					Product:      "Tesla-T4",
+					Memory:       "15Gi",
+					Cores:        "0",
+					Accelerator:  "1",
+					CPU:          "4",
+					RAM:          "16Gi",
+					LocalStorage: "96Gi",
+				},
 			},
 		},
 		{
-			// Both labels must parse — if either is malformed, the function
-			// falls through to the compute path.
-			name: "labels malformed — falls through to compute path",
+			// 2xT4 — ProfileFlavorSpec differs from node-2 (absolute capacities)
+			// but ProfileCohortSpec matches node-2 (same per-device shape:
+			// 4 cpu / 16Gi ram per device), demonstrating the Kueue pooling
+			// invariant.
+			name: "cluster-1/node-4 T4 2D 8C/32Gi/96Gi",
 			labels: map[string]string{
-				selfLabelKey + ".unit-cpu": "not-a-quantity",
-				selfLabelKey + ".unit-ram": "still-bad",
+				systemname.ManagedLabelKey:                            "true",
+				core.LabelHostname:                                    "cluster-1-node-4",
+				FeatureLabelPrefix + "nvidia":                         "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":                "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":        "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":         "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":          "0",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators":   "2",
+				FeatureLabelPrefix + "general.cpu":                    "8",
+				FeatureLabelPrefix + "general.ram":                    "32Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "8c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "32Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-32g-96g-2d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
 			},
-			allocCPU:    resource.MustParse("4"),
-			allocRAM:    resource.MustParse("16Gi"),
-			deviceCount: 1,
-			// per-device share 3000m / 14336Mi after the 1C/2Gi
-			// reservation. Suggested CPU = (3000-1)/1000 = 2; 2*8/2*7 Gi
-			// both meet or exceed 14336Mi, 2*6 Gi = 12288Mi fits strictly
-			// — 2C/12Gi.
-			expected: DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
+			allocatable: map[core.ResourceName]int64{
+				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 2,
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "8c-32g-96g",
+				ProfileQueueSpec:  "1c-4g",
+				ProfileCohortSpec: "1c-4g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-4g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "8",
+				RAM:          "32Gi",
+				LocalStorage: "96Gi",
+			},
+			wantDevices: []NodeResourceFlavor{
+				{
+					Key:               "nvidia-tesla-t4",
+					ProfileFlavorSpec: "8c-32g-96g-2d",
+					ProfileQueueSpec:  "4c-16g-1d", // == node-2's device per-unit profile
+					ProfileCohortSpec: "4c-16g-1d",
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey:                           "true",
+						FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue": "4c-16g-1d",
+					},
+					Tolerations:  expectedToleration,
+					Manufacturer: "nvidia",
+					Product:      "Tesla-T4",
+					Memory:       "15Gi",
+					Cores:        "0",
+					Accelerator:  "2",
+					CPU:          "8",
+					RAM:          "32Gi",
+					LocalStorage: "96Gi",
+				},
+			},
 		},
 		{
-			// Only one of the two labels set: the read path requires both to
-			// be non-empty, so this falls through to compute.
-			name: "only cpu label set — falls through to compute path",
+			// 4xA10G — 48-cpu / 188Gi-ram totals, integer-divided per-device
+			// ram-unit = 188/4 = 47Gi.
+			name: "cluster-1/node-5 A10G 4D 48C/188Gi/196Gi",
 			labels: map[string]string{
-				selfLabelKey + ".unit-cpu": "2000m",
+				systemname.ManagedLabelKey:                        "true",
+				core.LabelHostname:                                "cluster-1-node-5",
+				FeatureLabelPrefix + "nvidia":                     "true",
+				FeatureLabelPrefix + "nvidia-a10g":                "true",
+				FeatureLabelPrefix + "nvidia-a10g.product":        "A10G",
+				FeatureLabelPrefix + "nvidia-a10g.memory":         "23Gi",
+				FeatureLabelPrefix + "nvidia-a10g.cores":          "0",
+				FeatureLabelPrefix + "nvidia-a10g.accelerators":   "4",
+				FeatureLabelPrefix + "general.cpu":                "48",
+				FeatureLabelPrefix + "general.ram":                "188Gi",
+				FeatureLabelPrefix + "general.local-storage":      "196Gi",
+				FeatureLabelPrefix + "general.profile-flavor":     "48c-188g-196g",
+				FeatureLabelPrefix + "general.profile-queue":      "1c-3g",
+				FeatureLabelPrefix + "general.profile-cohort":     "1c-3g",
+				FeatureLabelPrefix + "nvidia-a10g.cpu":            "48",
+				FeatureLabelPrefix + "nvidia-a10g.ram":            "188Gi",
+				FeatureLabelPrefix + "nvidia-a10g.local-storage":  "196Gi",
+				FeatureLabelPrefix + "nvidia-a10g.profile-flavor": "48c-188g-196g-4d",
+				FeatureLabelPrefix + "nvidia-a10g.profile-queue":  "12c-47g-1d",
+				FeatureLabelPrefix + "nvidia-a10g.profile-cohort": "12c-47g-1d",
 			},
-			allocCPU:    resource.MustParse("4"),
-			allocRAM:    resource.MustParse("16Gi"),
-			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
+			allocatable: map[core.ResourceName]int64{
+				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 4,
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "48c-188g-196g",
+				ProfileQueueSpec:  "1c-3g",
+				ProfileCohortSpec: "1c-3g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-3g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "48",
+				RAM:          "188Gi",
+				LocalStorage: "196Gi",
+			},
+			wantDevices: []NodeResourceFlavor{
+				{
+					Key:               "nvidia-a10g",
+					ProfileFlavorSpec: "48c-188g-196g-4d",
+					ProfileQueueSpec:  "12c-47g-1d",
+					ProfileCohortSpec: "12c-47g-1d",
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey:                       "true",
+						FeatureLabelPrefix + "nvidia-a10g.profile-queue": "12c-47g-1d",
+					},
+					Tolerations:  expectedToleration,
+					Manufacturer: "nvidia",
+					Product:      "A10G",
+					Memory:       "23Gi",
+					Cores:        "0",
+					Accelerator:  "4",
+					CPU:          "48",
+					RAM:          "188Gi",
+					LocalStorage: "196Gi",
+				},
+			},
 		},
 		{
-			// T4(x4) 48C/192Gi: per-device share 11750m / 48640Mi after
-			// the 1C/2Gi reservation. Suggested CPU = (11750-1)/1000 = 11;
-			// ratios 8..5 induce >55Gi which exceeds the budget, 11*4 Gi =
-			// 45056Mi fits strictly under 48640Mi.
-			name:        "no labels — T4(x4) 48C/192Gi over 4 devices",
-			allocCPU:    resource.MustParse("48"),
-			allocRAM:    resource.MustParse("192Gi"),
-			deviceCount: 4,
-			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(44)},
+			// Synthetic hybrid node (NVIDIA T4 + AMD MI300X) — exercises
+			// the device-key loop with multiple manufacturers. Loop
+			// iteration order is map-dependent, so we rely on
+			// ElementsMatch.
+			//
+			// Also covers the "full" device-label shape (driver-version,
+			// runtime-version, family, compute-capability) for the T4
+			// to exercise every NodeResourceFlavor field.
+			name: "hybrid NVIDIA T4 + AMD MI300X",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                                "true",
+				FeatureLabelPrefix + "nvidia":                             "true",
+				FeatureLabelPrefix + "nvidia.driver-version":              "580.126.09",
+				FeatureLabelPrefix + "nvidia.runtime-version":             "13.0",
+				FeatureLabelPrefix + "nvidia-tesla-t4":                    "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":            "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":             "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":              "2560",
+				FeatureLabelPrefix + "nvidia-tesla-t4.family":             "Turing",
+				FeatureLabelPrefix + "nvidia-tesla-t4.compute-capability": "7.5",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators":       "1",
+				FeatureLabelPrefix + "amd":                                "true",
+				FeatureLabelPrefix + "amd-mi300x":                         "true",
+				FeatureLabelPrefix + "amd-mi300x.product":                 "MI300X",
+				FeatureLabelPrefix + "amd-mi300x.memory":                  "192Gi",
+				FeatureLabelPrefix + "amd-mi300x.cores":                   "0",
+				FeatureLabelPrefix + "amd-mi300x.accelerators":            "2",
+				FeatureLabelPrefix + "general.cpu":                        "32",
+				FeatureLabelPrefix + "general.ram":                        "128Gi",
+				FeatureLabelPrefix + "general.local-storage":              "200Gi",
+				FeatureLabelPrefix + "general.profile-flavor":             "32c-128g-200g",
+				FeatureLabelPrefix + "general.profile-queue":              "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":             "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":                "32",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":                "128Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":      "200Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor":     "32c-128g-200g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":      "32c-128g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort":     "32c-128g-1d",
+				FeatureLabelPrefix + "amd-mi300x.cpu":                     "32",
+				FeatureLabelPrefix + "amd-mi300x.ram":                     "128Gi",
+				FeatureLabelPrefix + "amd-mi300x.local-storage":           "200Gi",
+				FeatureLabelPrefix + "amd-mi300x.profile-flavor":          "32c-128g-200g-2d",
+				FeatureLabelPrefix + "amd-mi300x.profile-queue":           "16c-64g-1d",
+				FeatureLabelPrefix + "amd-mi300x.profile-cohort":          "16c-64g-1d",
+			},
+			allocatable: map[core.ResourceName]int64{
+				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 1,
+				GetResourceName(ManufacturerAMD, workercore.DeviceAllocationModeExclusive):    2,
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "32c-128g-200g",
+				ProfileQueueSpec:  "1c-4g",
+				ProfileCohortSpec: "1c-4g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-4g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "32",
+				RAM:          "128Gi",
+				LocalStorage: "200Gi",
+			},
+			wantDevices: []NodeResourceFlavor{
+				{
+					Key:               "nvidia-tesla-t4",
+					ProfileFlavorSpec: "32c-128g-200g-1d",
+					ProfileQueueSpec:  "32c-128g-1d",
+					ProfileCohortSpec: "32c-128g-1d",
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey:                           "true",
+						FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue": "32c-128g-1d",
+					},
+					Tolerations:       expectedToleration,
+					Manufacturer:      "nvidia",
+					Product:           "Tesla-T4",
+					Memory:            "15Gi",
+					Cores:             "2560",
+					Family:            "Turing",
+					ComputeCapability: "7.5",
+					Accelerator:       "1",
+					CPU:               "32",
+					RAM:               "128Gi",
+					LocalStorage:      "200Gi",
+				},
+				{
+					Key:               "amd-mi300x",
+					ProfileFlavorSpec: "32c-128g-200g-2d",
+					ProfileQueueSpec:  "16c-64g-1d",
+					ProfileCohortSpec: "16c-64g-1d",
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey:                      "true",
+						FeatureLabelPrefix + "amd-mi300x.profile-queue": "16c-64g-1d",
+					},
+					Tolerations:  expectedToleration,
+					Manufacturer: "amd",
+					Product:      "MI300X",
+					Memory:       "192Gi",
+					Cores:        "0",
+					Accelerator:  "2",
+					CPU:          "32",
+					RAM:          "128Gi",
+					LocalStorage: "200Gi",
+				},
+			},
 		},
 		{
-			// User-reported scenario: 47810m / 192757188Ki over 4 devices.
-			// availCPU=46810m, availRAM=186191Mi → per-device 11702m /
-			// 46547Mi. Suggested CPU = (11702-1)/1000 = 11; 11*5 Gi =
-			// 56320Mi exceeds 46547Mi, 11*4 Gi = 45056Mi fits — 11C/44Gi.
-			name:        "no labels — 47810m / 192757188Ki over 4 devices",
-			allocCPU:    resource.MustParse("47810m"),
-			allocRAM:    resource.MustParse("192757188Ki"),
-			deviceCount: 4,
-			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(44)},
+			// Capacity-label gate: nil labels — nothing for the function
+			// to work with, returns nil.
+			name:      "nil labels return no flavors",
+			labels:    nil,
+			wantEmpty: true,
 		},
 		{
-			// T4(x8) 96C/384Gi: per-device share 11875m / 48896Mi.
-			// Suggested CPU = 11; 11*4 Gi = 45056Mi fits.
-			name:        "no labels — T4(x8) 96C/384Gi over 8 devices",
-			allocCPU:    resource.MustParse("96"),
-			allocRAM:    resource.MustParse("384Gi"),
-			deviceCount: 8,
-			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(44)},
+			// Capacity-label gate: only general.cpu is missing.
+			name: "missing general.cpu returns no flavors",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+			wantEmpty: true,
 		},
 		{
-			// 64C/256Gi/8: per-device share 7875m / 32512Mi. Suggested CPU
-			// = (7875-1)/1000 = 7; 7*5 Gi = 35840Mi exceeds 32512Mi, 7*4
-			// Gi = 28672Mi fits — 7C/28Gi.
-			name:        "no labels — 64C/256Gi over 8 devices",
-			allocCPU:    resource.MustParse("64"),
-			allocRAM:    resource.MustParse("256Gi"),
-			deviceCount: 8,
-			expected:    DeviceUnitResources{CPU: cores(7), RAM: gi(28)},
+			// Capacity-label gate: only general.ram is missing.
+			name: "missing general.ram returns no flavors",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+			wantEmpty: true,
 		},
 		{
-			// 4C/16Gi/1: per-device share 3000m / 14336Mi. Suggested CPU =
-			// 2; 2*8/2*7 Gi both meet or exceed 14336Mi, 2*6 Gi = 12288Mi
-			// fits strictly — 2C/12Gi.
-			name:        "no labels — 4C/16Gi over 1 device",
-			allocCPU:    resource.MustParse("4"),
-			allocRAM:    resource.MustParse("16Gi"),
-			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
+			// Capacity-label gate: only general.local-storage is missing.
+			name: "missing general.local-storage returns no flavors",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+			wantEmpty: true,
 		},
 		{
-			// 4C/16Gi/4: per-device share 750m / 3584Mi — suggested CPU
-			// reaches 0, so the default is returned.
-			name:        "no labels — 4C/16Gi over 4 devices defaults",
-			allocCPU:    resource.MustParse("4"),
-			allocRAM:    resource.MustParse("16Gi"),
-			deviceCount: 4,
-			expected:    defaultUnits,
+			// Capacity-label gate: only general.profile-flavor is missing.
+			name: "missing general.profile-flavor returns no flavors",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+			wantEmpty: true,
 		},
 		{
-			// Reservation drains a tiny host completely; avail clamps to 0
-			// and the default is returned.
-			name:        "no labels — reservation exceeds allocatable",
-			allocCPU:    resource.MustParse("1"),
-			allocRAM:    resource.MustParse("1Gi"),
-			deviceCount: 1,
-			expected:    defaultUnits,
+			// Capacity-label gate: only general.profile-cohort is missing.
+			name: "missing general.profile-cohort returns no flavors",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+			},
+			wantEmpty: true,
 		},
 		{
-			// deviceCount<=0 collapses to 1 so callers don't divide by zero.
-			name:        "no labels — deviceCount=0 treated as 1",
-			allocCPU:    resource.MustParse("4"),
-			allocRAM:    resource.MustParse("16Gi"),
-			deviceCount: 0,
-			expected:    DeviceUnitResources{CPU: cores(2), RAM: gi(12)},
+			// Capacity-label gate also suppresses device flavors: even
+			// when accelerated device keys are present, missing general
+			// capacity zeroes out the whole result.
+			name: "device labels without general capacity still returns no flavors",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                          "true",
+				FeatureLabelPrefix + "nvidia":                       "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
+			},
+			wantEmpty: true,
 		},
 		{
-			// Zero allocatable: avail clamps to 0, no positive suggestion,
-			// default.
-			name:        "no labels — zero allocatable",
-			deviceCount: 1,
-			expected:    defaultUnits,
+			// Per-device capacity gate: general capacity is complete so
+			// the CPU/general flavor is emitted, but the T4's per-device
+			// .cpu / .ram / .local-storage / .profile-flavor / .profile-cohort have
+			// not been computed yet — the device flavor is skipped rather
+			// than emitted with empty fields.
+			name: "device skipped when its per-device labels are missing",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                          "true",
+				FeatureLabelPrefix + "nvidia":                       "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "0",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
+				FeatureLabelPrefix + "general.cpu":                  "4",
+				FeatureLabelPrefix + "general.ram":                  "16Gi",
+				FeatureLabelPrefix + "general.local-storage":        "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":       "4c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":        "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":       "1c-4g",
+				// No nvidia-tesla-t4.cpu / .ram / .local-storage / .profile-flavor / .profile-cohort → device is skipped.
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "4c-16g-96g",
+				ProfileQueueSpec:  "1c-4g",
+				ProfileCohortSpec: "1c-4g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-4g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "4",
+				RAM:          "16Gi",
+				LocalStorage: "96Gi",
+			},
+			wantDevices: nil,
 		},
 		{
-			// CPU budget exactly on an integer-core boundary: the (x-1)/1000
-			// form yields one core less than the strict floor, leaving
-			// headroom. 13C/64Gi/1 → per-device 12000m / 63488Mi → suggested
-			// CPU 11 → 11*6 Gi = 67584Mi exceeds 63488Mi, 11*5 Gi = 56320Mi
-			// fits.
-			name:        "no labels — exact-integer CPU yields headroom",
-			allocCPU:    resource.MustParse("13"),
-			allocRAM:    resource.MustParse("64Gi"),
-			deviceCount: 1,
-			expected:    DeviceUnitResources{CPU: cores(11), RAM: gi(55)},
-		},
-		{
-			// CPU plentiful but RAM is tight relative to the smallest ratio:
-			// 100C/10Gi/1 → per-device 99000m / 8192Mi → suggested CPU 98 →
-			// 98*2 Gi = 200704Mi exceeds 8192Mi, all ratios fail, default.
-			name:        "no labels — ram too tight for any ratio",
-			allocCPU:    resource.MustParse("100"),
-			allocRAM:    resource.MustParse("10Gi"),
-			deviceCount: 1,
-			expected:    defaultUnits,
+			// Per-device gate is independent across devices: T4 has full
+			// per-device capacity → its flavor is emitted; MI300X has
+			// only a .cpu label, no .ram / .local-storage / .profile-flavor /
+			// .profile-cohort → it is skipped. Only CPU + T4 appear in the
+			// result.
+			name: "partial per-device capacity only emits the complete device",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "nvidia":                         "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":                "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":        "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":         "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":          "0",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators":   "1",
+				FeatureLabelPrefix + "amd":                            "true",
+				FeatureLabelPrefix + "amd-mi300x":                     "true",
+				FeatureLabelPrefix + "amd-mi300x.product":             "MI300X",
+				FeatureLabelPrefix + "amd-mi300x.memory":              "192Gi",
+				FeatureLabelPrefix + "amd-mi300x.cores":               "0",
+				FeatureLabelPrefix + "amd-mi300x.accelerators":        "2",
+				FeatureLabelPrefix + "general.cpu":                    "32",
+				FeatureLabelPrefix + "general.ram":                    "128Gi",
+				FeatureLabelPrefix + "general.local-storage":          "200Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "32c-128g-200g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "32",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "128Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "200Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "32c-128g-200g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "32c-128g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "32c-128g-1d",
+				FeatureLabelPrefix + "amd-mi300x.cpu":                 "32", // remaining per-device labels intentionally absent
+			},
+			allocatable: map[core.ResourceName]int64{
+				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 1,
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "32c-128g-200g",
+				ProfileQueueSpec:  "1c-4g",
+				ProfileCohortSpec: "1c-4g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-4g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "32",
+				RAM:          "128Gi",
+				LocalStorage: "200Gi",
+			},
+			wantDevices: []NodeResourceFlavor{
+				{
+					Key:               "nvidia-tesla-t4",
+					ProfileFlavorSpec: "32c-128g-200g-1d",
+					ProfileQueueSpec:  "32c-128g-1d",
+					ProfileCohortSpec: "32c-128g-1d",
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey:                           "true",
+						FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue": "32c-128g-1d",
+					},
+					Tolerations:  expectedToleration,
+					Manufacturer: "nvidia",
+					Product:      "Tesla-T4",
+					Memory:       "15Gi",
+					Cores:        "0",
+					Accelerator:  "1",
+					CPU:          "32",
+					RAM:          "128Gi",
+					LocalStorage: "200Gi",
+				},
+			},
 		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
 			node := &core.Node{
-				ObjectMeta: meta.ObjectMeta{Labels: cs.labels},
-				Status: core.NodeStatus{
-					Allocatable: core.ResourceList{
-						core.ResourceCPU:    cs.allocCPU,
-						core.ResourceMemory: cs.allocRAM,
-					},
+				ObjectMeta: meta.ObjectMeta{
+					Name:   "cluster-1-node",
+					Labels: cs.labels,
 				},
 			}
-			actual := GetDeviceUnitResources(node, nodeKey, cs.deviceCount)
-			assert.Equal(t, cs.expected, actual, "unexpected per-device units")
+			if len(cs.allocatable) > 0 {
+				alloc := core.ResourceList{}
+				for k, v := range cs.allocatable {
+					alloc[k] = *resource.NewQuantity(v, resource.DecimalSI)
+				}
+				node.Status.Allocatable = alloc
+			}
+			got := ExtractNodeResourceFlavors(node)
+			if cs.wantEmpty {
+				assert.Empty(t, got, "expected no flavors")
+				return
+			}
+			if len(got) == 0 {
+				t.Fatalf("ExtractNodeResourceFlavors returned no flavors but at least the CPU flavor was expected")
+			}
+			assert.Equal(t, cs.wantCPU, got[0], "unexpected CPU/general flavor")
+			assert.ElementsMatch(t, cs.wantDevices, got[1:], "unexpected device flavors")
+		})
+	}
+}
+
+func TestParseNodeProfile(t *testing.T) {
+	// ParseNodeProfile consumes the full profile string emitted by
+	// FormatNodeProfile:
+	//
+	//   "gpustack-${key}-${cpu}c-${ram}g[-${stg}g][-${acc}d][-${sliced}s]"
+	//
+	// The "gpustack-" prefix and a non-empty key are required. cpu and ram
+	// are required; localStorage, accelerator, and sliced are optional.
+	// Sliced is only valid when accelerator is also present.
+
+	cases := []struct {
+		name     string
+		profile  string
+		wantKey  string
+		wantSpec NodeProfileSpec
+		wantOK   bool
+	}{
+		// --- valid shapes ---
+		{
+			name:     "general profile with localStorage",
+			profile:  "gpustack-general-16c-32g-88g",
+			wantKey:  "general",
+			wantSpec: NodeProfileSpec{CPU: "16", RAM: "32", LocalStorage: "88"},
+			wantOK:   true,
+		},
+		{
+			name:     "general profile without localStorage",
+			profile:  "gpustack-general-1c-2g",
+			wantKey:  "general",
+			wantSpec: NodeProfileSpec{CPU: "1", RAM: "2"},
+			wantOK:   true,
+		},
+		{
+			name:     "single-digit values",
+			profile:  "gpustack-general-1c-1g-15g",
+			wantKey:  "general",
+			wantSpec: NodeProfileSpec{CPU: "1", RAM: "1", LocalStorage: "15"},
+			wantOK:   true,
+		},
+		{
+			name:     "per-device profile with localStorage and accelerator",
+			profile:  "gpustack-nvidia-tesla-t4-4c-16g-88g-1d",
+			wantKey:  "nvidia-tesla-t4",
+			wantSpec: NodeProfileSpec{CPU: "4", RAM: "16", LocalStorage: "88", Accelerator: "1"},
+			wantOK:   true,
+		},
+		{
+			name:     "per-device profile with accelerator (no localStorage)",
+			profile:  "gpustack-nvidia-tesla-t4-4c-16g-1d",
+			wantKey:  "nvidia-tesla-t4",
+			wantSpec: NodeProfileSpec{CPU: "4", RAM: "16", Accelerator: "1"},
+			wantOK:   true,
+		},
+		{
+			name:     "per-device profile with accelerator and sliced",
+			profile:  "gpustack-nvidia-a10g-12c-48g-1d-8s",
+			wantKey:  "nvidia-a10g",
+			wantSpec: NodeProfileSpec{CPU: "12", RAM: "48", Accelerator: "1", SlicedAccelerator: "8"},
+			wantOK:   true,
+		},
+		{
+			name:     "per-device profile with localStorage, accelerator, and sliced",
+			profile:  "gpustack-nvidia-a10g-48c-192g-88g-4d-8s",
+			wantKey:  "nvidia-a10g",
+			wantSpec: NodeProfileSpec{CPU: "48", RAM: "192", LocalStorage: "88", Accelerator: "4", SlicedAccelerator: "8"},
+			wantOK:   true,
+		},
+		{
+			name:     "large values",
+			profile:  "gpustack-nvidia-a10g-48c-188g-196g-4d",
+			wantKey:  "nvidia-a10g",
+			wantSpec: NodeProfileSpec{CPU: "48", RAM: "188", LocalStorage: "196", Accelerator: "4"},
+			wantOK:   true,
+		},
+		{
+			// Key may itself contain a segment that ends with "d" — the
+			// accelerator detector only inspects the final segment.
+			name:     "key segment ending in d is preserved",
+			profile:  "gpustack-amd-mi300x-4c-16g",
+			wantKey:  "amd-mi300x",
+			wantSpec: NodeProfileSpec{CPU: "4", RAM: "16"},
+			wantOK:   true,
+		},
+		{
+			// Key may contain a segment that ends with "g"; ram detection
+			// only inspects the trailing segments after sliced/acc are
+			// consumed.
+			name:     "key segment ending in g is preserved",
+			profile:  "gpustack-nvidia-a10g-4c-16g",
+			wantKey:  "nvidia-a10g",
+			wantSpec: NodeProfileSpec{CPU: "4", RAM: "16"},
+			wantOK:   true,
+		},
+		// --- prefix rejections ---
+		{
+			name:    "empty string is rejected",
+			profile: "",
+			wantOK:  false,
+		},
+		{
+			name:    "missing gpustack- prefix",
+			profile: "general-16c-32g-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "wrong leading prefix",
+			profile: "foo-bar-16c-32g-96g",
+			wantOK:  false,
+		},
+		// --- key rejections ---
+		{
+			name:    "missing key (cpu directly after prefix)",
+			profile: "gpustack-16c-32g",
+			wantOK:  false,
+		},
+		{
+			name:    "missing key with localStorage",
+			profile: "gpustack-16c-32g-96g",
+			wantOK:  false,
+		},
+		// --- cpu / ram rejections ---
+		{
+			name:    "only ram (cpu missing)",
+			profile: "gpustack-general-32g",
+			wantOK:  false,
+		},
+		{
+			name:    "cpu without c suffix",
+			profile: "gpustack-general-16-32g-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "ram without g suffix",
+			profile: "gpustack-general-16c-32-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "local-storage without g suffix",
+			profile: "gpustack-general-16c-32g-96",
+			wantOK:  false,
+		},
+		{
+			name:    "bare cpu (just c)",
+			profile: "gpustack-general-c-32g-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "bare ram (just g)",
+			profile: "gpustack-general-16c-g-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "bare local-storage (just g)",
+			profile: "gpustack-general-16c-32g-g",
+			wantOK:  false,
+		},
+		{
+			name:    "non-numeric cpu",
+			profile: "gpustack-general-xc-32g-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "non-numeric ram",
+			profile: "gpustack-general-16c-yg-96g",
+			wantOK:  false,
+		},
+		{
+			name:    "non-numeric local-storage",
+			profile: "gpustack-general-16c-32g-zg",
+			wantOK:  false,
+		},
+		// --- accelerator rejections ---
+		{
+			name:    "bare accelerator (just d)",
+			profile: "gpustack-nvidia-tesla-t4-4c-16g-d",
+			wantOK:  false,
+		},
+		{
+			name:    "non-numeric accelerator",
+			profile: "gpustack-nvidia-tesla-t4-4c-16g-xd",
+			wantOK:  false,
+		},
+		// --- sliced rejections ---
+		{
+			name:    "sliced without accelerator",
+			profile: "gpustack-general-4c-16g-8s",
+			wantOK:  false,
+		},
+		{
+			name:    "sliced without accelerator (with localStorage)",
+			profile: "gpustack-general-4c-16g-88g-8s",
+			wantOK:  false,
+		},
+		{
+			name:    "bare sliced (just s)",
+			profile: "gpustack-nvidia-tesla-t4-4c-16g-1d-s",
+			wantOK:  false,
+		},
+		{
+			name:    "non-numeric sliced",
+			profile: "gpustack-nvidia-tesla-t4-4c-16g-1d-xs",
+			wantOK:  false,
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			key, spec, ok := ParseNodeProfile(cs.profile)
+			assert.Equal(t, cs.wantOK, ok, "unexpected ok")
+			assert.Equal(t, cs.wantKey, key, "unexpected key")
+			assert.Equal(t, cs.wantSpec, spec, "unexpected spec")
 		})
 	}
 }

@@ -12,7 +12,7 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
-	"gpustack.ai/gpustack/pkg/kubeclientset"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 )
 
 type InstancePersistentVolumeEventsHandler struct {
@@ -69,7 +69,7 @@ func (h *InstancePersistentVolumeEventsHandler) OnGet(
 			"involvedObject.kind":      "PersistentVolumeClaim",
 			"involvedObject.uid":       string(pvcMeta.UID),
 		},
-		kubeclientset.NonQuorum,
+		ctrlclix.NonQuorum,
 		ctrlcli.UnsafeDisableDeepCopy,
 	)
 	if err != nil {

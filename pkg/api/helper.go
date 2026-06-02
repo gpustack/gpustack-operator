@@ -123,31 +123,26 @@ func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.S
 		eSvc := svcs[i]
 		svcAlignFn := func(aSvc *apireg.APIService) (_ *apireg.APIService, skip bool, err error) {
 			skip = true
-
 			// Nothing to update if the service reference is not the same.
 			if aSvc.Spec.Service.Namespace != eSvc.Spec.Service.Namespace ||
 				aSvc.Spec.Service.Name != eSvc.Spec.Service.Name {
 				return aSvc, skip, err
 			}
-
 			// Align service port.
 			if !ptr.Equal(aSvc.Spec.Service.Port, eSvc.Spec.Service.Port) {
 				aSvc.Spec.Service.Port = eSvc.Spec.Service.Port
 				skip = false
 			}
-
 			// Align CA bundle.
 			if !bytes.Equal(aSvc.Spec.CABundle, eSvc.Spec.CABundle) {
 				aSvc.Spec.CABundle = eSvc.Spec.CABundle
 				skip = false
 			}
-
 			// Align InsecureSkipTLSVerify.
 			if aSvc.Spec.InsecureSkipTLSVerify != eSvc.Spec.InsecureSkipTLSVerify {
 				aSvc.Spec.InsecureSkipTLSVerify = eSvc.Spec.InsecureSkipTLSVerify
 				skip = false
 			}
-
 			return aSvc, skip, err
 		}
 		_, err = kubeclientset.Create(ctx, svcCli, eSvc,

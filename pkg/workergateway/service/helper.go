@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
+	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
@@ -82,7 +83,7 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 		in.itemIndexer[instType.Spec] = itemIndex
 		in.itemTierIndexer = append(in.itemTierIndexer, make(map[string]int))
 		item := AggregatedInstanceType{
-			Name: stringx.TrimSuffix(instType.GenerateName, "-"),
+			Name: funcx.Ternary(instType.GenerateName != "", stringx.TrimSuffix(instType.GenerateName, "-"), instType.Spec.Group),
 			Spec: instType.Spec,
 		}
 		in.list.Items = append(in.list.Items, item)
@@ -459,7 +460,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 		// Not found the same item, tier and candidate, create a new item with a new tier and candidate.
 		in.state.Items = append(in.state.Items, AggregatedInstanceType{
-			Name: stringx.TrimSuffix(instType.GenerateName, "-"),
+			Name: funcx.Ternary(instType.GenerateName != "", stringx.TrimSuffix(instType.GenerateName, "-"), instType.Spec.Group),
 			Spec: instType.Spec,
 			Status: AggregatedInstanceTypeStatus{
 				OnceMaxRequest: tier.OnceMaxRequest,

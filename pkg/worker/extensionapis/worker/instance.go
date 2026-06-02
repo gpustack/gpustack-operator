@@ -25,9 +25,9 @@ import (
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/extensionapi"
-	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/json"
@@ -183,6 +183,13 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 	}
 	if inst.Spec.Resources != nil {
 		var errs field.ErrorList
+		if inst.Spec.Resources.Accelerator != nil &&
+			inst.Spec.Resources.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.resources.accelerator"), inst.Spec.Resources.Accelerator.String(),
+				fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)),
+			)
+		}
 		if inst.Spec.Resources.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.cpu"), inst.Spec.Resources.CPU.String(),
@@ -201,13 +208,6 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 				fmt.Sprintf("exceeds the maximum local storage request of instance type %s", instType.Name)),
 			)
 		}
-		if inst.Spec.Resources.Accelerator != nil &&
-			inst.Spec.Resources.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.accelerator"), inst.Spec.Resources.Accelerator.String(),
-				fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)),
-			)
-		}
 		if len(errs) > 0 {
 			return nil, kerrors.NewInvalid(worker.Kind(_InstanceKind), inst.Name, errs)
 		}
@@ -224,18 +224,44 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 	if inst.Spec.Resources == nil {
 		inst.Spec.Resources = &worker.InstanceResources{}
 	}
-	if inst.Spec.Resources.CPU.IsZero() {
-		inst.Spec.Resources.CPU = *resource.NewQuantity(1, resource.DecimalSI) // 1 core
-	}
-	if inst.Spec.Resources.RAM.IsZero() {
-		inst.Spec.Resources.RAM = *resource.NewQuantity(2<<30, resource.BinarySI) // 2Gi
-	}
-	if inst.Spec.Resources.LocalStorage.IsZero() {
-		inst.Spec.Resources.LocalStorage = *resource.NewQuantity(15<<30, resource.BinarySI) // 15Gi
-	}
-	if instType.Spec.Acceleratable {
-		if inst.Spec.Resources.Accelerator == nil || inst.Spec.Resources.Accelerator.IsZero() {
-			inst.Spec.Resources.Accelerator = resource.NewQuantity(1, resource.DecimalSI) // 1 accelerator
+	{
+		instRess := inst.Spec.Resources
+		// Default with 1 accelerator if the instance type is acceleratable and the accelerator is not specified.
+		if instType.Spec.Acceleratable && instRess.Accelerator == nil {
+			instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+		}
+		// Default CPU and RAM according to the unit resources of instance type if not specified,
+		// and multiply by accelerator if specified.
+		if instRess.CPU.IsZero() {
+			cpuQ, err := resource.ParseQuantity(instType.Spec.UnitResources.CPU)
+			if err != nil {
+				return nil, field.InternalError(
+					field.NewPath("spec.resources.cpu"), fmt.Errorf("parse CPU quantity of instance type: %w", err))
+			}
+			if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
+				cpuQ.Mul(instRess.Accelerator.Value())
+			}
+			instRess.CPU = cpuQ
+		}
+		if instRess.RAM.IsZero() {
+			ramQ, err := resource.ParseQuantity(instType.Spec.UnitResources.RAM)
+			if err != nil {
+				return nil, field.InternalError(
+					field.NewPath("spec.resources.ram"), fmt.Errorf("parse RAM quantity of instance type: %w", err))
+			}
+			if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
+				ramQ.Mul(instRess.Accelerator.Value())
+			}
+			instRess.RAM = ramQ
+		}
+		// Default local storage with 15Gi if not specified,
+		// or the maximum local storage request of instance type if it's less than 15Gi.
+		if instRess.LocalStorage.IsZero() {
+			stgQ := *resource.NewQuantity(15<<30, resource.BinarySI) // 15Gi
+			if stgQ.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
+				stgQ = instType.Status.LocalStorage.OnceMaxRequest.DeepCopy()
+			}
+			instRess.LocalStorage = stgQ
 		}
 	}
 
@@ -442,7 +468,7 @@ func (h *InstanceHandler) OnUpdate(
 	// Update.
 	oldPod := new(core.Pod)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), oldPod,
-		kubeclientset.NonQuorum)
+		ctrlclix.NonQuorum)
 	if err != nil {
 		return nil, err
 	}
@@ -455,7 +481,7 @@ func (h *InstanceHandler) OnUpdate(
 	})
 
 	err = h.Client.Patch(ctx, pod, ctrlcli.MergeFrom(oldPod),
-		kubeclientset.ToPatchOptions(opts))
+		ctrlclix.ToPatchOptions(opts))
 	if err != nil {
 		return nil, kerrors.NewInternalError(fmt.Errorf("update corresponding pod: %w", err))
 	}
@@ -489,6 +515,8 @@ func convertPodListOptsFromInstanceListOpts(in ctrlcli.ListOptions) (out *ctrlcl
 func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType *worker.InstanceType) *core.Pod {
 	needSSHD := inst.Spec.SSHPublicKey != nil && inst.Spec.SSHPublicKey.Name != ""
 
+	allowOvercommit := settings.InstanceResourcesOvercommit.ShouldValueBool(ctx)
+
 	// Construct containers.
 	var containers []core.Container
 	if needSSHD {
@@ -499,25 +527,15 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			ImagePullPolicy: inst.Spec.ImagePullPolicy,
 			Command:         inst.Spec.Command,
 			SecurityContext: func() *core.SecurityContext {
-				if !inst.Spec.Privileged {
-					return nil
+				sc := &core.SecurityContext{
+					RunAsUser: ptr.To[int64](0),
 				}
-				return &core.SecurityContext{
-					Privileged: ptr.To(true),
+				if inst.Spec.Privileged {
+					sc.Privileged = ptr.To(true)
 				}
+				return sc
 			}(),
-			Resources: func() core.ResourceRequirements {
-				requests := core.ResourceList{
-					core.ResourceCPU:              inst.Spec.Resources.CPU,
-					core.ResourceMemory:           inst.Spec.Resources.RAM,
-					core.ResourceEphemeralStorage: inst.Spec.Resources.LocalStorage,
-				}
-
-				return core.ResourceRequirements{
-					Requests: requests,
-					Limits:   requests,
-				}
-			}(),
+			Resources: getResourceRequirements(inst, instType, true, allowOvercommit, false),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p worker.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          strings.ToLower(fmt.Sprintf("%s%d", p.Protocol, p.Port)),
@@ -564,24 +582,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 					},
 				},
 			},
-			Resources: func() core.ResourceRequirements {
-				requests := core.ResourceList{}
-				if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
-					var resName core.ResourceName
-					resQuantity := *inst.Spec.Resources.Accelerator
-					if instType.Spec.Sliced > 0 {
-						resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-						resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
-					} else {
-						resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
-					}
-					requests[resName] = resQuantity
-				}
-				return core.ResourceRequirements{
-					Requests: requests,
-					Limits:   requests,
-				}
-			}(),
+			Resources: getResourceRequirements(inst, instType, false, false, true),
 			Env: []core.EnvVar{
 				{
 					Name:  "VOLUME_MOUNT_PATH",
@@ -609,35 +610,15 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 			ImagePullPolicy: inst.Spec.ImagePullPolicy,
 			Command:         inst.Spec.Command,
 			SecurityContext: func() *core.SecurityContext {
-				if !inst.Spec.Privileged {
-					return nil
+				sc := &core.SecurityContext{
+					RunAsUser: ptr.To[int64](0),
 				}
-				return &core.SecurityContext{
-					Privileged: ptr.To(true),
+				if inst.Spec.Privileged {
+					sc.Privileged = ptr.To(true)
 				}
+				return sc
 			}(),
-			Resources: func() core.ResourceRequirements {
-				requests := core.ResourceList{
-					core.ResourceCPU:              inst.Spec.Resources.CPU,
-					core.ResourceMemory:           inst.Spec.Resources.RAM,
-					core.ResourceEphemeralStorage: inst.Spec.Resources.LocalStorage,
-				}
-				if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
-					var resName core.ResourceName
-					resQuantity := *inst.Spec.Resources.Accelerator
-					if instType.Spec.Sliced > 0 {
-						resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-						resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
-					} else {
-						resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
-					}
-					requests[resName] = resQuantity
-				}
-				return core.ResourceRequirements{
-					Requests: requests,
-					Limits:   requests,
-				}
-			}(),
+			Resources: getResourceRequirements(inst, instType, true, allowOvercommit, true),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p worker.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          strings.ToLower(fmt.Sprintf("%s-%d", p.Protocol, p.Port)),
@@ -1006,4 +987,52 @@ func instanceMatchFieldSelector(opts ctrlcli.ListOptions, inst *worker.Instance)
 		return true
 	}
 	return fs.Matches(fields.Set{"metadata.namespace": inst.Namespace, "metadata.name": inst.Name})
+}
+
+// getResourceRequirements returns the resource requirements for the instance.
+//
+// If withGeneral is true, the returned resource requirements include the general resources (CPU, RAM, local storage).
+// If withAccelerator is true, the returned resource requirements include the accelerator resources.
+func getResourceRequirements(
+	inst *worker.Instance, instType *worker.InstanceType, withGeneral, allowOvercommit, withAccelerator bool,
+) core.ResourceRequirements {
+	rr := core.ResourceRequirements{
+		Limits:   core.ResourceList{},
+		Requests: core.ResourceList{},
+	}
+
+	if withGeneral {
+		for n, q := range map[core.ResourceName]resource.Quantity{
+			core.ResourceCPU:              inst.Spec.Resources.CPU,
+			core.ResourceMemory:           inst.Spec.Resources.RAM,
+			core.ResourceEphemeralStorage: inst.Spec.Resources.LocalStorage,
+		} {
+			rr.Limits[n] = q
+			rr.Requests[n] = q
+		}
+		if allowOvercommit {
+			rr.Requests[core.ResourceMemory] = resource.MustParse("128Mi")
+			rr.Requests[core.ResourceEphemeralStorage] = resource.MustParse("128Mi")
+		}
+	}
+
+	if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
+		if withGeneral && allowOvercommit {
+			rr.Requests[core.ResourceCPU] = resource.MustParse("100m")
+		}
+		if withAccelerator {
+			var resName core.ResourceName
+			resQuantity := *inst.Spec.Resources.Accelerator
+			if instType.Spec.Sliced > 0 {
+				resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
+				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+			} else {
+				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+			}
+			rr.Limits[resName] = resQuantity
+			rr.Requests[resName] = resQuantity
+		}
+	}
+
+	return rr
 }
