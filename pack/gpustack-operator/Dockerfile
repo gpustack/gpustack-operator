@@ -274,18 +274,16 @@ EOF
 
 ARG GPUSTACK_CHARTS_DIR
 
-## Kueue
-
 ## CSI Driver S3
 ADD https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-s3-0.43.7.tgz"
 
 ## CSI Driver NFS
 ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-nfs-4.13.2.tgz"
 
-ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.2/kueue-0.17.2.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.17.2.tgz"
+## Kueue
+ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.0/kueue-0.18.0.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.18.0.tgz"
 
 ## Node Features Discovery
-
 ADD https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.18.3/node-feature-discovery-chart-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
 
 # Runtime

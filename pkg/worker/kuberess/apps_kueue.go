@@ -8,7 +8,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/devicefeature"
@@ -22,7 +21,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 	// - pack/gpustack/image/Dockerfile.
 
 	name := "kueue"
-	version := "0.17.2"
+	version := "0.18.0"
 	if disable.Has(name) {
 		return nil
 	}
@@ -50,9 +49,6 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 		Path:        path,
 		DownloadURL: download,
 		Values:      values,
-		// Skip installation if "v1beta2.kueue.x-k8s.io" ApiService is ready,
-		// which means the cluster has already installed Kueue but not the same release.
-		SkippedInstallationIfApiServiceReady: fmt.Sprintf("%s.%s", kueue.SchemeGroupVersion.Version, kueue.SchemeGroupVersion.Group),
 	}
 	_, err := helmCli.Install(ctx, chart)
 	if err != nil {
