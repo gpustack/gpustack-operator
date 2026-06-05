@@ -804,7 +804,11 @@ func convertInstanceFromPod(pod *core.Pod, staticAddress, wildcardDNS string) *w
 	var instType string
 	if pod.Labels != nil {
 		instType = pod.Labels[kueuectrlconst.QueueLabel]
-		delete(pod.Labels, kueuectrlconst.QueueLabel)
+		for k := range pod.Labels {
+			if strings.HasPrefix(k, "kueue.x-k8s.io/") {
+				delete(pod.Labels, k)
+			}
+		}
 	}
 	if instType == "" {
 		return nil
@@ -1068,23 +1072,28 @@ func getResourceRequirements(
 			rr.Requests[n] = q
 		}
 		if withGeneralOvercommit {
-			rr.Requests[core.ResourceCPU] = resource.MustParse("100m")
+			rr.Requests[core.ResourceCPU] = resource.MustParse("800m")
 			rr.Requests[core.ResourceMemory] = resource.MustParse("128Mi")
 			rr.Requests[core.ResourceEphemeralStorage] = resource.MustParse("128Mi")
 		}
 	}
 
-	if withAccelerator && instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
-		var resName core.ResourceName
-		resQuantity := *inst.Spec.Resources.Accelerator
-		if instType.Spec.Sliced > 0 {
-			resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-			resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
-		} else {
-			resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+	if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
+		if withGeneral && withGeneralOvercommit {
+			rr.Requests[core.ResourceCPU] = resource.MustParse("100m")
 		}
-		rr.Limits[resName] = resQuantity
-		rr.Requests[resName] = resQuantity
+		if withAccelerator {
+			var resName core.ResourceName
+			resQuantity := *inst.Spec.Resources.Accelerator
+			if instType.Spec.Sliced > 0 {
+				resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
+				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+			} else {
+				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+			}
+			rr.Limits[resName] = resQuantity
+			rr.Requests[resName] = resQuantity
+		}
 	}
 
 	return rr
