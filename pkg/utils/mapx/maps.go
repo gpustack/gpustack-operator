@@ -12,19 +12,6 @@ func Contain[K, V comparable, M ~map[K]V](a, b M) bool {
 	return true
 }
 
-// ContainWithStringPrefix returns true if a contains all specified prefix keys in b with the same value.
-func ContainWithStringPrefix[V comparable, M ~map[string]V](a, b M, prefix string) bool {
-	for k, bv := range b {
-		if !strings.HasPrefix(k, prefix) {
-			continue
-		}
-		if av, found := a[k]; !found || av != bv {
-			return false
-		}
-	}
-	return true
-}
-
 // FilterTransform filters and maps the provided map s using the function f.
 // For each key-value pair in s, f is called with the key and value as arguments.
 // If f returns true, the returned key-value pair is included in the resulting map.
@@ -118,94 +105,56 @@ func Filter[K comparable, V any, M ~map[K]V](m M, f func(K, V) bool) M {
 	return ret
 }
 
-// EqualWithKeys reports whether two maps contain the same key/value pairs for the specified keys.
-func EqualWithKeys[K, V comparable, M ~map[K]V](a, b M, k K, ks ...K) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
+// EqualWithKey reports whether two maps contain the same value for each specified key.
+// Returns true when neither map contains a given key (treated as equal absence).
+func EqualWithKey[K, V comparable, M ~map[K]V](a, b M, k K, ks ...K) bool {
+	check := func(k K) bool {
+		av, aok := a[k]
+		bv, bok := b[k]
+		if aok != bok {
+			return false
+		}
+		return !aok || av == bv
 	}
-	av, aok := a[k]
-	bv, bok := b[k]
-	if !aok || !bok || av != bv {
+	if !check(k) {
 		return false
 	}
 	for i := range ks {
-		av, aok = a[ks[i]]
-		bv, bok = b[ks[i]]
-		if !aok || !bok || av != bv {
+		if !check(ks[i]) {
 			return false
 		}
 	}
 	return true
 }
 
-// EqualWithStringPrefix reports whether two maps contain the same key/value pairs for keys with the specified prefix.
-func EqualWithStringPrefix[V comparable, M ~map[string]V](a, b M, prefix string) bool {
-	if len(a) == 0 || len(b) == 0 {
+// EqualWithStringPrefix reports whether two maps
+// contain the same key/value pairs for keys matching the specified prefix or any of the specified prefixes.
+// Returns true when neither map contains any key matching any prefix.
+func EqualWithStringPrefix[V comparable, M ~map[string]V](a, b M, prefix string, prefixes ...string) bool {
+	match := func(k string) bool {
+		if strings.HasPrefix(k, prefix) {
+			return true
+		}
+		for i := range prefixes {
+			if strings.HasPrefix(k, prefixes[i]) {
+				return true
+			}
+		}
 		return false
 	}
-	visited := make(map[string]struct{})
-	for k := range a {
-		if !strings.HasPrefix(k, prefix) {
+	for k, av := range a {
+		if !match(k) {
 			continue
 		}
-		visited[k] = struct{}{}
-		bv, bok := b[k]
-		if !bok || a[k] != bv {
+		if bv, ok := b[k]; !ok || av != bv {
 			return false
 		}
 	}
 	for k := range b {
-		if !strings.HasPrefix(k, prefix) {
+		if !match(k) {
 			continue
 		}
-		if _, ok := visited[k]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-// EqualWithStringPrefixes reports whether two maps
-// contain the same key/value pairs for keys with the specified prefix or any of the specified prefixes.
-func EqualWithStringPrefixes[V comparable, M ~map[string]V](a, b M, prefix string, prefixes ...string) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
-	}
-
-	visited := make(map[string]struct{})
-	for k := range a {
-		if !strings.HasPrefix(k, prefix) {
-			skip := true
-			for i := range prefixes {
-				if strings.HasPrefix(k, prefixes[i]) {
-					skip = false
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-		}
-		visited[k] = struct{}{}
-		bv, bok := b[k]
-		if !bok || a[k] != bv {
-			return false
-		}
-	}
-	for k := range b {
-		if !strings.HasPrefix(k, prefix) {
-			skip := true
-			for i := range prefixes {
-				if strings.HasPrefix(k, prefixes[i]) {
-					skip = false
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-		}
-		if _, ok := visited[k]; !ok {
+		if _, ok := a[k]; !ok {
 			return false
 		}
 	}

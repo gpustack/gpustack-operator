@@ -200,7 +200,7 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldPod, newPod := e.ObjectOld, e.ObjectNew
 						if newPod.GetDeletionTimestamp() == nil {
-							return !mapx.EqualWithKeys(oldPod.GetAnnotations(), newPod.GetAnnotations(), AllocatedAcceleratorAnnoKey)
+							return !mapx.EqualWithKey(oldPod.GetAnnotations(), newPod.GetAnnotations(), AllocatedAcceleratorAnnoKey)
 						}
 						if kubemeta.HasAnnotation(oldPod, AllocatedAcceleratorAnnoKey) {
 							if oldPod.GetDeletionTimestamp() == nil {

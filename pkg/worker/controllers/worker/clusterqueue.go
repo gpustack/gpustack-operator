@@ -429,7 +429,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							return !mapx.EqualWithStringPrefixes(oldNd.Labels, newNd.Labels,
+							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.LabelPrefix,
 								devicefeature.FeatureLabelPrefix)
 						}
