@@ -48,11 +48,24 @@ var (
 
 	// Instance.
 
-	// InstanceResourcesOvercommit indicates to overcommit instance resources or not,
+	// InstanceGeneralResourcesOvercommit indicates to overcommit instance general resources or not,
 	// which is used when deploying Instances.
-	InstanceResourcesOvercommit = settings.NewEditable(
-		"instance-resources-overcommit",
-		"Indicates to overcommit instance resources or not.",
+	InstanceGeneralResourcesOvercommit = settings.NewEditable(
+		"instance-general-resources-overcommit",
+		"Indicates to overcommit instance general resources(CPU/RAM) or not.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
+	// InstanceGeneralResourcesRequestByUnit indicates to request instance general resources by unit or not,
+	// which is used when deploying Instances.
+	//
+	// If true, the requested CPU/RAM will be formatted by the profile dimension.
+	// For example, if the profile is acceleratable, the relevant dimension is "accelerator",
+	// then the requested CPU/RAM will be formatted with the count of "accelerator".
+	InstanceGeneralResourcesRequestByUnit = settings.NewEditable(
+		"instance-general-resources-request-by-unit",
+		"Indicates to request instance general resources(CPU/RAM) by unit or not.",
 		setting.InitializeFromEnv("true"),
 		setting.AllowBool(),
 	)

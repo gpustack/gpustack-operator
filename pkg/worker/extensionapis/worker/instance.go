@@ -181,40 +181,75 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 		return nil, field.NotFound(
 			field.NewPath("spec.type"), inst.Spec.Type)
 	}
-	if inst.Spec.Resources != nil {
-		var errs field.ErrorList
-		if inst.Spec.Resources.Accelerator != nil &&
-			inst.Spec.Resources.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+	var errs field.ErrorList
+	if instRess := inst.Spec.Resources; instRess != nil {
+		// Validate accelerator request first since it may determine the validation of other resource requests.
+		if instType.Spec.Acceleratable {
+			if instRess.Accelerator != nil {
+				if instRess.Accelerator.Sign() < 0 {
+					errs = append(errs, field.Invalid(
+						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+						"accelerator request cannot be negative"))
+				} else if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+					errs = append(errs, field.Invalid(
+						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
+				}
+			}
+		} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
 			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.accelerator"), inst.Spec.Resources.Accelerator.String(),
-				fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)),
-			)
+				field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+				"accelerator request must not specified for non-acceleratable instance type"))
 		}
-		if inst.Spec.Resources.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
+		if instRess.CPU.Sign() < 0 {
 			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.cpu"), inst.Spec.Resources.CPU.String(),
-				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)),
-			)
-		}
-		if inst.Spec.Resources.RAM.Cmp(instType.Status.RAM.OnceMaxRequest) > 0 {
+				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
+				"CPU request cannot be negative"))
+		} else if instRess.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
 			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.ram"), inst.Spec.Resources.RAM.String(),
-				fmt.Sprintf("exceeds the maximum RAM request of instance type %s", instType.Name)),
-			)
+				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
+				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)))
 		}
-		if inst.Spec.Resources.LocalStorage.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
+		if instRess.RAM.Sign() < 0 {
 			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.localStorage"), inst.Spec.Resources.LocalStorage.String(),
-				fmt.Sprintf("exceeds the maximum local storage request of instance type %s", instType.Name)),
-			)
+				field.NewPath("spec.resources.ram"), instRess.RAM.String(),
+				"RAM request cannot be negative"))
+		} else if instRess.RAM.Cmp(instType.Status.RAM.OnceMaxRequest) > 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.resources.ram"), instRess.RAM.String(),
+				fmt.Sprintf("exceeds the maximum RAM request of instance type %s", instType.Name)))
 		}
-		if len(errs) > 0 {
-			return nil, kerrors.NewInvalid(worker.Kind(_InstanceKind), inst.Name, errs)
+		if instRess.LocalStorage.Sign() < 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
+				"local storage request cannot be negative"))
+		} else if instRess.LocalStorage.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
+				fmt.Sprintf("exceeds the maximum local storage request of instance type %s", instType.Name)))
 		}
 	}
-	if inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil {
-		return nil, field.Required(
-			field.NewPath("spec.volume"), "exactly one of ephemeral and persistent of volume should be specified")
+	switch {
+	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
+		errs = append(errs, field.Forbidden(
+			field.NewPath("spec.volume"), "cannot specify both ephemeral and persistent of volume"))
+	case inst.Spec.Volume.Ephemeral == nil && inst.Spec.Volume.Persistent == nil:
+		errs = append(errs, field.Required(
+			field.NewPath("spec.volume"), "either ephemeral or persistent of volume should be specified"))
+	case inst.Spec.Volume.Ephemeral != nil:
+		if inst.Spec.Volume.Ephemeral.Capacity.Sign() <= 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.volume.ephemeral.capacity"), inst.Spec.Volume.Ephemeral.Capacity.String(),
+				"capacity of ephemeral volume must be positive"))
+		}
+	case inst.Spec.Volume.Persistent != nil:
+		if inst.Spec.Volume.Persistent.Name == "" {
+			errs = append(errs, field.Required(
+				field.NewPath("spec.volume.persistent.name"), "name of the persistent volume must be specified"))
+		}
+	}
+	if len(errs) > 0 {
+		return nil, kerrors.NewInvalid(worker.Kind(_InstanceKind), inst.Name, errs)
 	}
 
 	// Default.
@@ -225,37 +260,54 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 		inst.Spec.Resources = &worker.InstanceResources{}
 	}
 	{
+		reqByUnit := settings.InstanceGeneralResourcesRequestByUnit.ShouldValueBool(ctx)
 		instRess := inst.Spec.Resources
-		// Default with 1 accelerator if the instance type is acceleratable and the accelerator is not specified.
-		if instType.Spec.Acceleratable && instRess.Accelerator == nil {
-			instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+		if instType.Spec.Acceleratable {
+			if instRess.Accelerator == nil {
+				// Default a request here,
+				// and let later scheduling to block if it exceeds the instance type's CPU capacity.
+				instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+			}
+			// Allow zero accelerator request for acceleratable instance type,
+			// but treat it as 1 when calculating other resource requests by unit.
+			accC := instRess.Accelerator.Value()
+			if accC == 0 {
+				accC = 1
+			}
+			if reqByUnit || instRess.CPU.IsZero() {
+				instRess.CPU, err = multiplyQuantity(instType.Spec.UnitResources.CPU, accC)
+				if err != nil {
+					return nil, field.InternalError(
+						field.NewPath("spec.resources.cpu"),
+						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+				}
+			}
+			if reqByUnit || instRess.RAM.IsZero() {
+				instRess.RAM, err = multiplyQuantity(instType.Spec.UnitResources.RAM, accC)
+				if err != nil {
+					return nil, field.InternalError(
+						field.NewPath("spec.resources.ram"),
+						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+				}
+			}
+		} else {
+			cpuC := int64(1)
+			if instRess.CPU.IsZero() {
+				// Default a request here,
+				// and let later scheduling to block if it exceeds the instance type's CPU capacity.
+				instRess.CPU = *resource.NewQuantity(1, resource.DecimalSI)
+			} else {
+				cpuC = instRess.CPU.Value()
+			}
+			if reqByUnit || instRess.RAM.IsZero() {
+				instRess.RAM, err = multiplyQuantity(instType.Spec.UnitResources.RAM, cpuC)
+				if err != nil {
+					return nil, field.InternalError(
+						field.NewPath("spec.resources.ram"),
+						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+				}
+			}
 		}
-		// Default CPU and RAM according to the unit resources of instance type if not specified,
-		// and multiply by accelerator if specified.
-		if instRess.CPU.IsZero() {
-			cpuQ, err := resource.ParseQuantity(instType.Spec.UnitResources.CPU)
-			if err != nil {
-				return nil, field.InternalError(
-					field.NewPath("spec.resources.cpu"), fmt.Errorf("parse CPU quantity of instance type: %w", err))
-			}
-			if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
-				cpuQ.Mul(instRess.Accelerator.Value())
-			}
-			instRess.CPU = cpuQ
-		}
-		if instRess.RAM.IsZero() {
-			ramQ, err := resource.ParseQuantity(instType.Spec.UnitResources.RAM)
-			if err != nil {
-				return nil, field.InternalError(
-					field.NewPath("spec.resources.ram"), fmt.Errorf("parse RAM quantity of instance type: %w", err))
-			}
-			if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
-				ramQ.Mul(instRess.Accelerator.Value())
-			}
-			instRess.RAM = ramQ
-		}
-		// Default local storage with 15Gi if not specified,
-		// or the maximum local storage request of instance type if it's less than 15Gi.
 		if instRess.LocalStorage.IsZero() {
 			stgQ := *resource.NewQuantity(15<<30, resource.BinarySI) // 15Gi
 			if stgQ.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
@@ -515,7 +567,7 @@ func convertPodListOptsFromInstanceListOpts(in ctrlcli.ListOptions) (out *ctrlcl
 func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType *worker.InstanceType) *core.Pod {
 	needSSHD := inst.Spec.SSHPublicKey != nil && inst.Spec.SSHPublicKey.Name != ""
 
-	allowOvercommit := settings.InstanceResourcesOvercommit.ShouldValueBool(ctx)
+	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
 	// Construct containers.
 	var containers []core.Container
@@ -535,7 +587,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 				}
 				return sc
 			}(),
-			Resources: getResourceRequirements(inst, instType, true, allowOvercommit, false),
+			Resources: getResourceRequirements(inst, instType, true, overcommit, false),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p worker.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          strings.ToLower(fmt.Sprintf("%s%d", p.Protocol, p.Port)),
@@ -618,7 +670,7 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 				}
 				return sc
 			}(),
-			Resources: getResourceRequirements(inst, instType, true, allowOvercommit, true),
+			Resources: getResourceRequirements(inst, instType, true, overcommit, true),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p worker.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          strings.ToLower(fmt.Sprintf("%s-%d", p.Protocol, p.Port)),
@@ -991,10 +1043,15 @@ func instanceMatchFieldSelector(opts ctrlcli.ListOptions, inst *worker.Instance)
 
 // getResourceRequirements returns the resource requirements for the instance.
 //
-// If withGeneral is true, the returned resource requirements include the general resources (CPU, RAM, local storage).
-// If withAccelerator is true, the returned resource requirements include the accelerator resources.
+// If `withGeneral` is true, returns resource requirements include the general resources (CPU, RAM, local storage).
+// If `withGeneralOvercommit` is true, returns overcommitted resource requirements of the general resources,
+// which means the requests are less than limits.
+// If `withAccelerator` is true, returns resource requirements include the accelerator resources.
 func getResourceRequirements(
-	inst *worker.Instance, instType *worker.InstanceType, withGeneral, allowOvercommit, withAccelerator bool,
+	inst *worker.Instance,
+	instType *worker.InstanceType,
+	withGeneral, withGeneralOvercommit bool,
+	withAccelerator bool,
 ) core.ResourceRequirements {
 	rr := core.ResourceRequirements{
 		Limits:   core.ResourceList{},
@@ -1010,29 +1067,35 @@ func getResourceRequirements(
 			rr.Limits[n] = q
 			rr.Requests[n] = q
 		}
-		if allowOvercommit {
+		if withGeneralOvercommit {
+			rr.Requests[core.ResourceCPU] = resource.MustParse("100m")
 			rr.Requests[core.ResourceMemory] = resource.MustParse("128Mi")
 			rr.Requests[core.ResourceEphemeralStorage] = resource.MustParse("128Mi")
 		}
 	}
 
-	if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
-		if withGeneral && allowOvercommit {
-			rr.Requests[core.ResourceCPU] = resource.MustParse("100m")
+	if withAccelerator && instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
+		var resName core.ResourceName
+		resQuantity := *inst.Spec.Resources.Accelerator
+		if instType.Spec.Sliced > 0 {
+			resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
+			resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+		} else {
+			resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
 		}
-		if withAccelerator {
-			var resName core.ResourceName
-			resQuantity := *inst.Spec.Resources.Accelerator
-			if instType.Spec.Sliced > 0 {
-				resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
-			} else {
-				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
-			}
-			rr.Limits[resName] = resQuantity
-			rr.Requests[resName] = resQuantity
-		}
+		rr.Limits[resName] = resQuantity
+		rr.Requests[resName] = resQuantity
 	}
 
 	return rr
+}
+
+// multiplyQuantity multiplies the quantity represented by the string `qs` with the multiplier `mult`.
+func multiplyQuantity(qs string, m int64) (resource.Quantity, error) {
+	q, err := resource.ParseQuantity(qs)
+	if err != nil {
+		return resource.Quantity{}, err
+	}
+	q.Mul(m)
+	return q, nil
 }
