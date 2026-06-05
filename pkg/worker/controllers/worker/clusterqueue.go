@@ -372,14 +372,16 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 	}
 
 	r.Client = opts.Manager.GetClient()
+	dedupWindow := ctrlhandlerx.NewDedupWindow[ctrlreconcile.Request]()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("clusterqueue").
 		Watches(
 			// Watch kueue.ResourceFlavors and enqueue the corresponding Cohort/ClusterQueue.
 			&kueue.ResourceFlavor{},
-			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
-				3*time.Second,
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+				5*time.Second,
+				dedupWindow,
 				r.enqueueCohortWhenResourceFlavorChanged,
 			),
 			ctrlbuilder.WithPredicates(
@@ -413,8 +415,9 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 		Watches(
 			// Watch Nodes and enqueue the corresponding Cohort/ClusterQueue.
 			&core.Node{},
-			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
-				3*time.Second,
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+				5*time.Second,
+				dedupWindow,
 				r.enqueueCohortWhenNodeChanged,
 			),
 			ctrlbuilder.WithPredicates(

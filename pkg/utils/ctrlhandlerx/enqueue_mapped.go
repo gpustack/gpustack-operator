@@ -22,8 +22,22 @@ import (
 // same request are coalesced into a single deferred enqueue scheduled at the
 // end of the window via q.AddAfter — so the latest event is always covered,
 // never silently dropped.
-func DedupEnqueueRequestsFromMapFunc(ttl time.Duration, fn ctrlhandler.MapFunc) ctrlhandler.EventHandler {
+func DedupEnqueueRequestsFromMapFunc(
+	ttl time.Duration,
+	fn ctrlhandler.MapFunc,
+) ctrlhandler.EventHandler {
 	return TypedDedupEnqueueRequestsFromMapFunc(ttl, fn)
+}
+
+// DedupEnqueueRequestsFromMapFuncWithWindow is the same as
+// DedupEnqueueRequestsFromMapFunc, but allows handlers from different watches
+// to share one dedup window and coalesce duplicate requests together.
+func DedupEnqueueRequestsFromMapFuncWithWindow(
+	ttl time.Duration,
+	window *DedupWindow[ctrlreconcile.Request],
+	fn ctrlhandler.MapFunc,
+) ctrlhandler.EventHandler {
+	return TypedDedupEnqueueRequestsFromMapFuncWithWindow(ttl, window, fn)
 }
 
 // TypedDedupEnqueueRequestsFromMapFunc copies from the controller-runtime TypedEnqueueRequestsFromMapFunc,
@@ -37,21 +51,48 @@ func TypedDedupEnqueueRequestsFromMapFunc[object any, request comparable](
 	ttl time.Duration,
 	fn ctrlhandler.TypedMapFunc[object, request],
 ) ctrlhandler.TypedEventHandler[object, request] {
+	return TypedDedupEnqueueRequestsFromMapFuncWithWindow(ttl, nil, fn)
+}
+
+// TypedDedupEnqueueRequestsFromMapFuncWithWindow is the same as
+// TypedDedupEnqueueRequestsFromMapFunc, but allows sharing a dedup window
+// between handlers, which enables cross-watch deduplication.
+func TypedDedupEnqueueRequestsFromMapFuncWithWindow[object any, request comparable](
+	ttl time.Duration,
+	window *DedupWindow[request],
+	fn ctrlhandler.TypedMapFunc[object, request],
+) ctrlhandler.TypedEventHandler[object, request] {
+	if window == nil {
+		window = NewDedupWindow[request]()
+	}
 	return &dedupEnqueueRequestsFromMapFunc[object, request]{
 		ttl:                          ttl,
-		until:                        make(map[request]time.Time),
+		window:                       window,
 		toRequests:                   fn,
 		objectImplementsClientObject: implementsClientObject[object](),
+	}
+}
+
+// DedupWindow tracks the last enqueue/scheduled time per request.
+// Reuse one DedupWindow across handlers to dedup duplicate requests globally.
+type DedupWindow[request comparable] struct {
+	m     sync.RWMutex
+	until map[request]time.Time
+}
+
+// NewDedupWindow creates a new DedupWindow,
+// which tracks the last enqueue/scheduled time per request for deduplication.
+func NewDedupWindow[request comparable]() *DedupWindow[request] {
+	return &DedupWindow[request]{
+		until: make(map[request]time.Time),
 	}
 }
 
 var _ ctrlhandler.EventHandler = &dedupEnqueueRequestsFromMapFunc[ctrlcli.Object, ctrlreconcile.Request]{}
 
 type dedupEnqueueRequestsFromMapFunc[object any, request comparable] struct {
-	sync.RWMutex
-
 	ttl                          time.Duration
-	until                        map[request]time.Time
+	window                       *DedupWindow[request]
 	toRequests                   ctrlhandler.TypedMapFunc[object, request]
 	objectImplementsClientObject bool
 }
@@ -128,7 +169,7 @@ func (e *dedupEnqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(
 	}
 	pendings := make([]pending, 0, len(requests))
 
-	e.Lock()
+	e.window.m.Lock()
 	for _, req := range requests {
 		if _, dup := reqs[req]; dup {
 			continue
@@ -137,12 +178,12 @@ func (e *dedupEnqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(
 
 		// e.until[req] is the timestamp of the last (or scheduled future)
 		// enqueue for req. The active TTL window is [t, t+ttl).
-		t, exists := e.until[req]
+		t, exists := e.window.until[req]
 		switch {
 		case !exists || !now.Before(t.Add(e.ttl)):
 			// No prior fire or the TTL window has expired — enqueue
 			// immediately and open a new window starting at now.
-			e.until[req] = now
+			e.window.until[req] = now
 			pendings = append(pendings, pending{req: req})
 		case now.Before(t):
 			// A deferred enqueue is already scheduled at t in the future —
@@ -155,7 +196,7 @@ func (e *dedupEnqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(
 			// so further events in the same window fall into the
 			// "now.Before(t)" branch above and are coalesced.
 			delay := t.Add(e.ttl).Sub(now)
-			e.until[req] = now.Add(delay)
+			e.window.until[req] = now.Add(delay)
 			pendings = append(pendings, pending{req: req, delay: delay})
 		}
 	}
@@ -164,12 +205,12 @@ func (e *dedupEnqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(
 	// TTL ago — the next event for them would fire immediately anyway, so
 	// keeping the entry serves no purpose. Skips future-scheduled entries
 	// (now.Sub(t) < 0).
-	for req, t := range e.until {
+	for req, t := range e.window.until {
 		if now.Sub(t) >= 2*e.ttl {
-			delete(e.until, req)
+			delete(e.window.until, req)
 		}
 	}
-	e.Unlock()
+	e.window.m.Unlock()
 
 	for _, p := range pendings {
 		e.enqueue(q, p.req, p.delay, lowPriority)
