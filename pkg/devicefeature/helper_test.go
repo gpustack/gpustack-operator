@@ -491,6 +491,33 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			},
 		},
 		{
+			// Per-device storage now scales with accC, not cpuC. With
+			// ephemeral-storage absent and accC=2, device storage falls
+			// back to 15Gi * accC = 30Gi — independent of general's
+			// 15Gi * cpuC = 120Gi. Confirms the device loop no longer
+			// inherits stgC from the general view.
+			name: "missing local-storage on accelerated node uses 15Gi * accC for device",
+			node: newNode(
+				"cluster-1-node-4", "8", "31Gi", "0", 2,
+				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
+			),
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "general.cpu":                    "8",
+				FeatureLabelPrefix + "general.ram":                    "32Gi",
+				FeatureLabelPrefix + "general.local-storage":          "120Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "8c-32g-120g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "32Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "30Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-32g-30g-2d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
+			},
+		},
+		{
 			// Accelerated feature label is set but Status.Capacity has no
 			// matching GPU resource — the per-device loop now skips the
 			// device entirely (no fallback to accC=1). Only the general
@@ -659,9 +686,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		{
 			// Override is scoped to general only. With cpuC=8 and 2
 			// accelerators, the general view shows generalRamC=16
-			// (=2*8), but per-device labels still derive from the real
-			// ramC=8 (floored to cpuC since Memory=0): device .ram=8Gi,
-			// profile-queue cpuUnit=8/2=4 and ramUnit=8/2=4 → 4c-4g-1d.
+			// (=2*8). Per-device labels derive independently: with
+			// Memory=0 the device ramC falls back to accC=2, so
+			// device .ram=2Gi, profile-queue cpuUnit=8/2=4 and
+			// ramUnit=2/2=1 → 4c-1g-1d. The general view's 16Gi is
+			// not leaking into the device view.
 			name: "override RAM-Gi-per-CPU does not affect per-device labels",
 			node: newNode(
 				"cluster-1-node-4", "8", "0", "97Gi", 2,
@@ -677,11 +706,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 				FeatureLabelPrefix + "general.profile-queue":          "1c-2g",
 				FeatureLabelPrefix + "general.profile-cohort":         "1c-2g",
 				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
-				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "8Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "2Gi",
 				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
-				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-8g-96g-2d",
-				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-4g-1d",
-				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-4g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-2g-96g-2d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-1g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-1g-1d",
 			},
 		},
 		{

@@ -126,7 +126,6 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 
 	generalKey := FeatureLabelPrefix + "general"
 
-	var cpuC, ramC, stgC int64
 	{
 		// "${prefix}general.cpu=${cpu}"
 		cpuKey := generalKey + ".cpu"
@@ -137,7 +136,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if cpuQ.Value() <= 0 {
 			cpuQ = node.Status.Capacity[core.ResourceCPU]
 		}
-		cpuC = cpuQ.Value()
+		cpuC := cpuQ.Value()
 		if cpuC <= 0 {
 			cpuC = 1
 		}
@@ -152,7 +151,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if ramQ.Value() <= 0 {
 			ramQ = node.Status.Capacity[core.ResourceMemory]
 		}
-		ramC = ramQ.Value() / quantityx.Gi
+		ramC := ramQ.Value() / quantityx.Gi
 		if ramC&1 != 0 {
 			ramC += 1
 		}
@@ -174,7 +173,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if stgQ.Value() <= 0 {
 			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
 		}
-		stgC = stgQ.Value() / quantityx.Gi
+		stgC := stgQ.Value() / quantityx.Gi
 		if stgC&1 != 0 {
 			stgC -= 1
 		}
@@ -207,21 +206,16 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		}
 		accC := accQ.Value()
 
-		var (
-			cpuC = cpuC
-			ramC = ramC
-			stgC = stgC
-		)
-
 		// "${prefix}${manufacturer}-${id}.cpu=${cpu}"
 		cpuKey := nodeKey + ".cpu"
 		var cpuQ resource.Quantity
 		if v := node.Labels[cpuKey]; v != "" {
 			cpuQ = funcx.NoError(resource.ParseQuantity(v))
 		}
-		if cpuQ.Value() > 0 {
-			cpuC = cpuQ.Value()
+		if cpuQ.Value() <= 0 {
+			cpuQ = node.Status.Capacity[core.ResourceCPU]
 		}
+		cpuC := cpuQ.Value()
 		if cpuC < accC {
 			cpuC = accC
 		}
@@ -233,11 +227,12 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if v := node.Labels[ramKey]; v != "" {
 			ramQ = funcx.NoError(resource.ParseQuantity(v))
 		}
-		if ramQ.Value() > 0 {
-			ramC = ramQ.Value() / quantityx.Gi
-			if ramC&1 != 0 {
-				ramC += 1
-			}
+		if ramQ.Value() <= 0 {
+			ramQ = node.Status.Capacity[core.ResourceMemory]
+		}
+		ramC := ramQ.Value() / quantityx.Gi
+		if ramC&1 != 0 {
+			ramC += 1
 		}
 		if ramC < accC {
 			ramC = accC
@@ -250,11 +245,12 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if v := node.Labels[stgKey]; v != "" {
 			stgQ = funcx.NoError(resource.ParseQuantity(v))
 		}
-		if stgQ.Value() > 0 {
-			stgC = stgQ.Value() / quantityx.Gi
-			if stgC&1 != 0 {
-				stgC -= 1
-			}
+		if stgQ.Value() <= 0 {
+			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
+		}
+		stgC := stgQ.Value() / quantityx.Gi
+		if stgC&1 != 0 {
+			stgC -= 1
 		}
 		if stgC <= 0 {
 			stgC = 15 * accC
