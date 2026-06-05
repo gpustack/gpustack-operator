@@ -22,10 +22,13 @@ type AggregatedInstanceTypeStatus struct {
 	// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceType.
 	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
-	// AcceleratorTiers is the list of once max request tiers of the AggregatedInstanceType in accelerator dimension.
+	// Tiers is the list of once max request tiers of the AggregatedInstanceType in one dimension.
+	//
+	// If the Spec.Acceleratable is true, the dimension is accelerator, and the once max request tiers are grouped by accelerator resource.
+	// If the Spec.Acceleratable is false, the dimension is cpu, and the once max request tiers are grouped by cpu resource.
 	//
 	// Each tier represents a combination of the AggregatedInstanceTypeOnceMaxRequestCandidate those satisfy the once max request of the tier.
-	AcceleratorTiers []AggregatedInstanceTypeOnceMaxRequestTier `json:"acceleratorTiers"`
+	Tiers []AggregatedInstanceTypeOnceMaxRequestTier `json:"tiers"`
 }
 
 type AggregatedInstanceTypeOverviewResource struct {

@@ -244,8 +244,8 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		assert.Equal(t, "gpustack-nvidia-a10g", item.Name)
 
 		require.Len(t, h.state.Items, 1)
-		require.Len(t, h.state.Items[0].Status.AcceleratorTiers, 1)
-		require.Len(t, h.state.Items[0].Status.AcceleratorTiers[0].Candidates, 1)
+		require.Len(t, h.state.Items[0].Status.Tiers, 1)
+		require.Len(t, h.state.Items[0].Status.Tiers[0].Candidates, 1)
 	})
 
 	t.Run("add candidate to existing tier emits Modified", func(t *testing.T) {
@@ -264,8 +264,8 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 1)
-		assert.Len(t, item.Status.AcceleratorTiers[0].Candidates, 2)
+		require.Len(t, item.Status.Tiers, 1)
+		assert.Len(t, item.Status.Tiers[0].Candidates, 2)
 	})
 
 	t.Run("add new tier to existing item keeps tiers sorted ascending", func(t *testing.T) {
@@ -284,10 +284,10 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 2)
+		require.Len(t, item.Status.Tiers, 2)
 		assert.True(t,
-			item.Status.AcceleratorTiers[0].OnceMaxRequest.Accelerator.Cmp(
-				item.Status.AcceleratorTiers[1].OnceMaxRequest.Accelerator) < 0,
+			item.Status.Tiers[0].OnceMaxRequest.Accelerator.Cmp(
+				item.Status.Tiers[1].OnceMaxRequest.Accelerator) < 0,
 			"tiers must remain sorted ascending by accelerator after a new tier is appended")
 	})
 
@@ -310,10 +310,10 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 1)
-		require.Len(t, item.Status.AcceleratorTiers[0].Candidates, 1)
-		assert.True(t, item.Status.AcceleratorTiers[0].Candidates[0].CPU.OnceMaxRequest.Equal(resource.MustParse("8")))
-		assert.True(t, item.Status.AcceleratorTiers[0].OnceMaxRequest.CPU.Equal(resource.MustParse("8")))
+		require.Len(t, item.Status.Tiers, 1)
+		require.Len(t, item.Status.Tiers[0].Candidates, 1)
+		assert.True(t, item.Status.Tiers[0].Candidates[0].CPU.OnceMaxRequest.Equal(resource.MustParse("8")))
+		assert.True(t, item.Status.Tiers[0].OnceMaxRequest.CPU.Equal(resource.MustParse("8")))
 		assert.True(t, item.Status.OnceMaxRequest.CPU.Equal(resource.MustParse("8")))
 	})
 
@@ -334,8 +334,8 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 1, "tier Acc=1 should be removed when its only candidate moves out")
-		tier := &item.Status.AcceleratorTiers[0]
+		require.Len(t, item.Status.Tiers, 1, "tier Acc=1 should be removed when its only candidate moves out")
+		tier := &item.Status.Tiers[0]
 		assert.True(t, tier.OnceMaxRequest.Accelerator.Equal(resource.MustParse("2")))
 		require.Len(t, tier.Candidates, 2)
 
@@ -364,10 +364,10 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 2)
-		assert.True(t, item.Status.AcceleratorTiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")),
+		require.Len(t, item.Status.Tiers, 2)
+		assert.True(t, item.Status.Tiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")),
 			"new tier Acc=4 must be sorted before existing tier Acc=8")
-		assert.True(t, item.Status.AcceleratorTiers[1].OnceMaxRequest.Accelerator.Equal(resource.MustParse("8")))
+		assert.True(t, item.Status.Tiers[1].OnceMaxRequest.Accelerator.Equal(resource.MustParse("8")))
 	})
 
 	t.Run("delete candidate but tier retains others", func(t *testing.T) {
@@ -387,9 +387,9 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 1)
-		require.Len(t, item.Status.AcceleratorTiers[0].Candidates, 1)
-		assert.Equal(t, "cluster-b", item.Status.AcceleratorTiers[0].Candidates[0].Cluster)
+		require.Len(t, item.Status.Tiers, 1)
+		require.Len(t, item.Status.Tiers[0].Candidates, 1)
+		assert.Equal(t, "cluster-b", item.Status.Tiers[0].Candidates[0].Cluster)
 	})
 
 	t.Run("delete candidate empties tier but item retains another tier", func(t *testing.T) {
@@ -409,8 +409,8 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers, 1)
-		assert.True(t, item.Status.AcceleratorTiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("2")))
+		require.Len(t, item.Status.Tiers, 1)
+		assert.True(t, item.Status.Tiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("2")))
 	})
 
 	t.Run("delete last candidate of middle item emits Deleted with the correct name", func(t *testing.T) {
@@ -482,14 +482,14 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		cpu := findItem(h.state, "gpustack-cpu-only")
 		require.NotNil(t, cpu)
-		require.Len(t, cpu.Status.AcceleratorTiers, 1)
-		require.Len(t, cpu.Status.AcceleratorTiers[0].Candidates, 1)
-		assert.Equal(t, "cluster-b", cpu.Status.AcceleratorTiers[0].Candidates[0].Cluster)
+		require.Len(t, cpu.Status.Tiers, 1)
+		require.Len(t, cpu.Status.Tiers[0].Candidates, 1)
+		assert.Equal(t, "cluster-b", cpu.Status.Tiers[0].Candidates[0].Cluster)
 
 		gpu := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, gpu, "a10g item must remain untouched")
-		require.Len(t, gpu.Status.AcceleratorTiers, 1)
-		require.Len(t, gpu.Status.AcceleratorTiers[0].Candidates, 1)
+		require.Len(t, gpu.Status.Tiers, 1)
+		require.Len(t, gpu.Status.Tiers[0].Candidates, 1)
 	})
 
 	t.Run("deleting a non-existent candidate is a no-op", func(t *testing.T) {
@@ -505,7 +505,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		assert.Empty(t, evts)
 		require.Len(t, h.state.Items, 1)
-		require.Len(t, h.state.Items[0].Status.AcceleratorTiers[0].Candidates, 1)
+		require.Len(t, h.state.Items[0].Status.Tiers[0].Candidates, 1)
 	})
 
 	t.Run("Modified event with DeletionTimestamp is treated as delete", func(t *testing.T) {
@@ -530,7 +530,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item := findItem(h.state, "gpustack-nvidia-a10g")
 		require.NotNil(t, item)
-		require.Len(t, item.Status.AcceleratorTiers[0].Candidates, 1)
-		assert.Equal(t, "cluster-b", item.Status.AcceleratorTiers[0].Candidates[0].Cluster)
+		require.Len(t, item.Status.Tiers[0].Candidates, 1)
+		assert.Equal(t, "cluster-b", item.Status.Tiers[0].Candidates[0].Cluster)
 	})
 }
