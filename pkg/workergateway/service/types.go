@@ -28,6 +28,14 @@ type AggregatedInstanceTypeStatus struct {
 	// not a per-dimension maximum across tiers.
 	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
+	// Remaining is the total remaining requestable resources of the AggregatedInstanceType.
+	//
+	// Each dimension is the sum of the corresponding dimension across all tiers (i.e. all
+	// candidates), giving a fleet-wide view of how much capacity is still requestable.
+	// Unlike OnceMaxRequest, which is a single-allocation bundle, Remaining is an aggregate
+	// total and may not be achievable in one allocation.
+	Remaining AggregatedInstanceTypeOverviewResource `json:"remaining"`
+
 	// Tiers is the list of once max request tiers of the AggregatedInstanceType, grouped by accelerator OnceMaxRequest.
 	//
 	// When Spec.Acceleratable is true, each tier holds candidates sharing the same accelerator OnceMaxRequest value.
@@ -59,6 +67,13 @@ type AggregatedInstanceTypeOnceMaxRequestTier struct {
 	// All four fields are taken from the same winning candidate so the bundle is achievable, not synthesized
 	// from per-dimension maxes across candidates.
 	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
+
+	// Remaining is the total remaining requestable resources of the tier.
+	//
+	// Each dimension is the sum of the corresponding dimension across all candidates in the tier.
+	// Unlike OnceMaxRequest, which is a single-allocation bundle, Remaining is an aggregate total
+	// and may not be achievable in one allocation.
+	Remaining AggregatedInstanceTypeOverviewResource `json:"remaining"`
 
 	// Candidates is the list of candidates of the tier.
 	//

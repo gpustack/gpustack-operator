@@ -22,59 +22,81 @@ func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
 	return in.Status.Tiers[i].OnceMaxRequest.CPU.Cmp(in.Status.Tiers[j].OnceMaxRequest.CPU) < 0
 }
 
-// RecomputeOnceMaxRequest rebuilds the item-level OnceMaxRequest as the resource bundle
-// of the tier whose primary dimension is the largest.
+// Recompute rebuilds the item-level OnceMaxRequest and Remaining overviews from the tiers.
 //
+// OnceMaxRequest is the resource bundle of the tier whose primary dimension is the largest.
 // The primary dimension is Accelerator when Spec.Acceleratable is true, otherwise CPU.
 // The whole bundle (Accelerator/CPU/RAM/LocalStorage) is copied from the winning tier
 // so the result corresponds to a real, achievable single allocation rather than a
 // per-dimension maximum across tiers.
-func (in *AggregatedInstanceType) RecomputeOnceMaxRequest() {
-	var newOverview AggregatedInstanceTypeOverviewResource
+//
+// Remaining is the per-dimension sum across all tiers, representing the total requestable
+// resources of the AggregatedInstanceType. It is an aggregate and may not be achievable
+// in a single allocation.
+func (in *AggregatedInstanceType) Recompute() {
+	var newOnceMaxRequest, newRemaining AggregatedInstanceTypeOverviewResource
 
 	for i := range in.Status.Tiers {
 		tier := &in.Status.Tiers[i]
+
 		if in.Spec.Acceleratable {
-			if newOverview.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0 {
-				newOverview = tier.OnceMaxRequest
+			if newOnceMaxRequest.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0 {
+				newOnceMaxRequest = tier.OnceMaxRequest
 			}
-		} else if newOverview.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0 {
-			newOverview = tier.OnceMaxRequest
+		} else if newOnceMaxRequest.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0 {
+			newOnceMaxRequest = tier.OnceMaxRequest
 		}
+
+		newRemaining.Accelerator.Add(tier.Remaining.Accelerator)
+		newRemaining.CPU.Add(tier.Remaining.CPU)
+		newRemaining.RAM.Add(tier.Remaining.RAM)
+		newRemaining.LocalStorage.Add(tier.Remaining.LocalStorage)
 	}
 
-	in.Status.OnceMaxRequest = newOverview
+	in.Status.OnceMaxRequest = newOnceMaxRequest
+	in.Status.Remaining = newRemaining
 }
 
-// RecomputeOnceMaxRequest rebuilds the tier-level OnceMaxRequest as the resource bundle
-// of the candidate whose primary dimension is the largest.
+// Recompute rebuilds the tier-level OnceMaxRequest and Remaining overviews from the candidates.
 //
+// OnceMaxRequest is the resource bundle of the candidate whose primary dimension is the largest.
 // The primary dimension is Accelerator when acceleratable is true, otherwise CPU.
 // All candidates in one tier share the same accelerator OnceMaxRequest, so the
 // acceleratable branch effectively picks the first candidate; the CPU branch is the
 // one that does real work for CPU-only items where the per-candidate CPU may vary.
-func (in *AggregatedInstanceTypeOnceMaxRequestTier) RecomputeOnceMaxRequest(acceleratable bool) {
-	var newOverview AggregatedInstanceTypeOverviewResource
+//
+// Remaining is the per-dimension sum across all candidates, representing the total
+// requestable resources of the tier. It is an aggregate and may not be achievable in
+// a single allocation.
+func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool) {
+	var newOnceMaxRequest, newRemaining AggregatedInstanceTypeOverviewResource
 
 	for i := range in.Candidates {
 		candidate := &in.Candidates[i]
+
 		var wins bool
 		if acceleratable {
-			wins = newOverview.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0
+			wins = newOnceMaxRequest.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0
 		} else {
-			wins = newOverview.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0
+			wins = newOnceMaxRequest.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0
 		}
 		if wins {
-			newOverview = AggregatedInstanceTypeOverviewResource{
+			newOnceMaxRequest = AggregatedInstanceTypeOverviewResource{
 				Accelerator:  candidate.Accelerator.OnceMaxRequest,
 				CPU:          candidate.CPU.OnceMaxRequest,
 				RAM:          candidate.RAM.OnceMaxRequest,
 				LocalStorage: candidate.LocalStorage.OnceMaxRequest,
 			}
 		}
+
+		newRemaining.Accelerator.Add(candidate.Accelerator.Remaining)
+		newRemaining.CPU.Add(candidate.CPU.Remaining)
+		newRemaining.RAM.Add(candidate.RAM.Remaining)
+		newRemaining.LocalStorage.Add(candidate.LocalStorage.Remaining)
 	}
 
-	in.OnceMaxRequest = newOverview
+	in.OnceMaxRequest = newOnceMaxRequest
+	in.Remaining = newRemaining
 }
 
 type ListAggregateInstanceTypes struct {
@@ -125,6 +147,12 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 				RAM:          instType.Status.RAM.OnceMaxRequest,
 				LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
 			},
+			Remaining: AggregatedInstanceTypeOverviewResource{
+				Accelerator:  instType.Status.Accelerator.Remaining,
+				CPU:          instType.Status.CPU.Remaining,
+				RAM:          instType.Status.RAM.Remaining,
+				LocalStorage: instType.Status.LocalStorage.Remaining,
+			},
 		}
 		item.Status.Tiers = append(item.Status.Tiers, tier)
 	}
@@ -163,11 +191,11 @@ func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceType
 		// Calculate the once max request of each tier.
 		for j := range item.Status.Tiers {
 			tier := &item.Status.Tiers[j]
-			tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+			tier.Recompute(item.Spec.Acceleratable)
 		}
 
 		// Calculate the once max request of the item.
-		item.RecomputeOnceMaxRequest()
+		item.Recompute()
 	}
 	return in.list
 }
@@ -215,7 +243,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				tier.Candidates = newCandidates
 
 				// Recompute the tier.
-				tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+				tier.Recompute(item.Spec.Acceleratable)
 			}
 			if !itemChanged {
 				continue
@@ -234,7 +262,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			}
 
 			// Recompute the item.
-			item.RecomputeOnceMaxRequest()
+			item.Recompute()
 
 			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
@@ -294,7 +322,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers = append(item.Status.Tiers[:index[1]], item.Status.Tiers[index[1]+1:]...)
 				} else {
 					// Recompute the tier.
-					tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+					tier.Recompute(item.Spec.Acceleratable)
 				}
 
 				// Delete the original item if no tier.
@@ -309,7 +337,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					})
 				} else {
 					// Recompute the item.
-					item.RecomputeOnceMaxRequest()
+					item.Recompute()
 
 					// Report a modified event.
 					evts = append(evts, &manager.WorkerEvent{
@@ -336,7 +364,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				tier.Candidates[index[2]] = *candidate
 
 				// Recompute the tier.
-				tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+				tier.Recompute(item.Spec.Acceleratable)
 			} else {
 				// Remove candidate from the original tier.
 				tier.Candidates = append(tier.Candidates[:index[2]], tier.Candidates[index[2]+1:]...)
@@ -346,7 +374,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers = append(item.Status.Tiers[:index[1]], item.Status.Tiers[index[1]+1:]...)
 				} else {
 					// Recompute the tier.
-					tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+					tier.Recompute(item.Spec.Acceleratable)
 				}
 
 				// Find the new tier to move in.
@@ -363,7 +391,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					tier.Candidates = append(tier.Candidates, *candidate)
 
 					// Recompute the tier.
-					tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+					tier.Recompute(item.Spec.Acceleratable)
 				} else {
 					// Append a new tier if not found.
 					item.Status.Tiers = append(item.Status.Tiers,
@@ -374,6 +402,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 								RAM:          instType.Status.RAM.OnceMaxRequest,
 								LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
 							},
+							Remaining: AggregatedInstanceTypeOverviewResource{
+								Accelerator:  instType.Status.Accelerator.Remaining,
+								CPU:          instType.Status.CPU.Remaining,
+								RAM:          instType.Status.RAM.Remaining,
+								LocalStorage: instType.Status.LocalStorage.Remaining,
+							},
 							Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
 						})
 
@@ -383,7 +417,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			}
 
 			// Recompute the item.
-			item.RecomputeOnceMaxRequest()
+			item.Recompute()
 
 			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
@@ -415,10 +449,10 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			tier.Candidates = append(tier.Candidates, *candidate)
 
 			// Recompute the tier.
-			tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
+			tier.Recompute(item.Spec.Acceleratable)
 
 			// Recompute the item.
-			item.RecomputeOnceMaxRequest()
+			item.Recompute()
 
 			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
@@ -441,6 +475,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				RAM:          instType.Status.RAM.OnceMaxRequest,
 				LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
 			},
+			Remaining: AggregatedInstanceTypeOverviewResource{
+				Accelerator:  instType.Status.Accelerator.Remaining,
+				CPU:          instType.Status.CPU.Remaining,
+				RAM:          instType.Status.RAM.Remaining,
+				LocalStorage: instType.Status.LocalStorage.Remaining,
+			},
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
 					Cluster:      evt.Cluster,
@@ -462,7 +502,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
 
 			// Recompute the item.
-			item.RecomputeOnceMaxRequest()
+			item.Recompute()
 
 			// Report a modified event.
 			evts = append(evts, &manager.WorkerEvent{
@@ -479,6 +519,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			Spec: instType.Spec,
 			Status: AggregatedInstanceTypeStatus{
 				OnceMaxRequest: tier.OnceMaxRequest,
+				Remaining:      tier.Remaining,
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
 					tier,
 				},

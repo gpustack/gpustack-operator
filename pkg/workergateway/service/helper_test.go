@@ -566,10 +566,10 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 	})
 }
 
-// TestAggregatedInstanceType_RecomputeOnceMaxRequest_BundleSemantics covers the rule
-// that the item-level OnceMaxRequest is a coherent bundle from the tier with the
-// largest primary dimension, not a per-dimension max across tiers.
-func TestAggregatedInstanceType_RecomputeOnceMaxRequest_BundleSemantics(t *testing.T) {
+// TestAggregatedInstanceType_Recompute_BundleSemantics covers the rule that the
+// item-level OnceMaxRequest is a coherent bundle from the tier with the largest
+// primary dimension, not a per-dimension max across tiers.
+func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 	t.Run("acceleratable: high-Acc tier wins even when another tier has higher CPU", func(t *testing.T) {
 		// Tier Acc=1 has the higher CPU/RAM, but tier Acc=4 wins on the primary dimension.
 		item := AggregatedInstanceType{
@@ -592,7 +592,7 @@ func TestAggregatedInstanceType_RecomputeOnceMaxRequest_BundleSemantics(t *testi
 			},
 		}
 
-		item.RecomputeOnceMaxRequest()
+		item.Recompute()
 
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.Accelerator.Equal(resource.MustParse("4")), "Accelerator must be the max")
@@ -625,7 +625,7 @@ func TestAggregatedInstanceType_RecomputeOnceMaxRequest_BundleSemantics(t *testi
 			},
 		}
 
-		item.RecomputeOnceMaxRequest()
+		item.Recompute()
 
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.CPU.Equal(resource.MustParse("32")), "CPU must be the max")
@@ -640,7 +640,7 @@ func TestAggregatedInstanceType_RecomputeOnceMaxRequest_BundleSemantics(t *testi
 			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
 		}
 
-		item.RecomputeOnceMaxRequest()
+		item.Recompute()
 
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.Accelerator.IsZero())
@@ -650,10 +650,10 @@ func TestAggregatedInstanceType_RecomputeOnceMaxRequest_BundleSemantics(t *testi
 	})
 }
 
-// TestAggregatedInstanceTypeOnceMaxRequestTier_RecomputeOnceMaxRequest_BundleSemantics
-// covers the rule that the tier-level OnceMaxRequest is the bundle of the candidate
-// with the largest primary dimension (Accelerator if acceleratable, otherwise CPU).
-func TestAggregatedInstanceTypeOnceMaxRequestTier_RecomputeOnceMaxRequest_BundleSemantics(t *testing.T) {
+// TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics covers the
+// rule that the tier-level OnceMaxRequest is the bundle of the candidate with the
+// largest primary dimension (Accelerator if acceleratable, otherwise CPU).
+func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *testing.T) {
 	t.Run("cpu-only: high-CPU candidate wins bundle even when another candidate has higher RAM", func(t *testing.T) {
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
@@ -674,7 +674,7 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_RecomputeOnceMaxRequest_Bundle
 			},
 		}
 
-		tier.RecomputeOnceMaxRequest(false)
+		tier.Recompute(false)
 
 		o := tier.OnceMaxRequest
 		assert.True(t, o.CPU.Equal(resource.MustParse("64")), "CPU must be max")
@@ -707,13 +707,131 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_RecomputeOnceMaxRequest_Bundle
 			},
 		}
 
-		tier.RecomputeOnceMaxRequest(true)
+		tier.Recompute(true)
 
 		o := tier.OnceMaxRequest
 		assert.True(t, o.Accelerator.Equal(resource.MustParse("2")))
 		assert.True(t, o.CPU.Equal(resource.MustParse("8")), "ties keep first-seen candidate's CPU")
 		assert.True(t, o.RAM.Equal(resource.MustParse("32Gi")), "ties keep first-seen candidate's RAM")
 		assert.True(t, o.LocalStorage.Equal(resource.MustParse("500Gi")), "ties keep first-seen candidate's storage")
+	})
+}
+
+// TestAggregatedInstanceType_Recompute_RemainingSum covers the rule that the
+// item-level Remaining is the per-dimension sum across all tiers, independent of
+// which tier wins the OnceMaxRequest bundle.
+func TestAggregatedInstanceType_Recompute_RemainingSum(t *testing.T) {
+	t.Run("sums Remaining across tiers regardless of primary dimension", func(t *testing.T) {
+		item := AggregatedInstanceType{
+			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
+			Status: AggregatedInstanceTypeStatus{
+				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
+					{Remaining: AggregatedInstanceTypeOverviewResource{
+						Accelerator:  resource.MustParse("2"),
+						CPU:          resource.MustParse("16"),
+						RAM:          resource.MustParse("32Gi"),
+						LocalStorage: resource.MustParse("500Gi"),
+					}},
+					{Remaining: AggregatedInstanceTypeOverviewResource{
+						Accelerator:  resource.MustParse("4"),
+						CPU:          resource.MustParse("48"),
+						RAM:          resource.MustParse("128Gi"),
+						LocalStorage: resource.MustParse("1Ti"),
+					}},
+				},
+			},
+		}
+
+		item.Recompute()
+
+		r := item.Status.Remaining
+		assert.True(t, r.Accelerator.Equal(resource.MustParse("6")), "Accelerator must be sum (2+4)")
+		assert.True(t, r.CPU.Equal(resource.MustParse("64")), "CPU must be sum (16+48)")
+		assert.True(t, r.RAM.Equal(resource.MustParse("160Gi")), "RAM must be sum (32Gi+128Gi)")
+		assert.True(t, r.LocalStorage.Equal(resource.MustParse("1524Gi")), "LocalStorage must be sum (500Gi+1Ti=500Gi+1024Gi)")
+	})
+
+	t.Run("empty tiers leaves Remaining zeroed", func(t *testing.T) {
+		item := AggregatedInstanceType{
+			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
+		}
+
+		item.Recompute()
+
+		r := item.Status.Remaining
+		assert.True(t, r.Accelerator.IsZero())
+		assert.True(t, r.CPU.IsZero())
+		assert.True(t, r.RAM.IsZero())
+		assert.True(t, r.LocalStorage.IsZero())
+	})
+}
+
+// TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum covers the
+// rule that the tier-level Remaining is the per-dimension sum across all candidates
+// in the tier, independent of which candidate wins the OnceMaxRequest bundle.
+func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *testing.T) {
+	t.Run("sums Remaining across candidates", func(t *testing.T) {
+		tier := AggregatedInstanceTypeOnceMaxRequestTier{
+			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
+				{
+					Cluster: "cluster-a", Name: "small",
+					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("1")},
+					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("4")},
+					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16Gi"), Remaining: resource.MustParse("16Gi")},
+					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("200Gi")},
+				},
+				{
+					Cluster: "cluster-b", Name: "big",
+					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("3")},
+					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8"), Remaining: resource.MustParse("12")},
+					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi"), Remaining: resource.MustParse("48Gi")},
+					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("500Gi"), Remaining: resource.MustParse("800Gi")},
+				},
+			},
+		}
+
+		tier.Recompute(true)
+
+		r := tier.Remaining
+		assert.True(t, r.Accelerator.Equal(resource.MustParse("4")), "Accelerator must be sum (1+3)")
+		assert.True(t, r.CPU.Equal(resource.MustParse("16")), "CPU must be sum (4+12)")
+		assert.True(t, r.RAM.Equal(resource.MustParse("64Gi")), "RAM must be sum (16Gi+48Gi)")
+		assert.True(t, r.LocalStorage.Equal(resource.MustParse("1000Gi")), "LocalStorage must be sum (200Gi+800Gi)")
+	})
+
+	t.Run("Remaining is independent of OnceMaxRequest winner", func(t *testing.T) {
+		// Candidate 'fat-cpu' wins OnceMaxRequest (CPU is the primary), but Remaining
+		// must still aggregate both candidates.
+		tier := AggregatedInstanceTypeOnceMaxRequestTier{
+			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
+				{
+					Cluster: "cluster-a", Name: "fat-ram",
+					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
+					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("10")},
+					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi"), Remaining: resource.MustParse("1Ti")},
+					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti"), Remaining: resource.MustParse("2Ti")},
+				},
+				{
+					Cluster: "cluster-b", Name: "fat-cpu",
+					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
+					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64"), Remaining: resource.MustParse("128")},
+					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi"), Remaining: resource.MustParse("256Gi")},
+					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("400Gi")},
+				},
+			},
+		}
+
+		tier.Recompute(false)
+
+		// OnceMaxRequest still picks fat-cpu's bundle (CPU is the primary dimension).
+		assert.True(t, tier.OnceMaxRequest.CPU.Equal(resource.MustParse("64")))
+		assert.True(t, tier.OnceMaxRequest.RAM.Equal(resource.MustParse("64Gi")))
+
+		// Remaining aggregates both candidates regardless of who won.
+		r := tier.Remaining
+		assert.True(t, r.CPU.Equal(resource.MustParse("138")), "CPU must be sum (10+128)")
+		assert.True(t, r.RAM.Equal(resource.MustParse("1280Gi")), "RAM must be sum (1Ti+256Gi)")
+		assert.True(t, r.LocalStorage.Equal(resource.MustParse("2448Gi")), "LocalStorage must be sum (2Ti+400Gi)")
 	})
 }
 
@@ -823,5 +941,67 @@ func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 
 		require.Len(t, result.Items, 1)
 		require.Len(t, result.Items[0].Status.Tiers, 1)
+	})
+}
+
+// TestListAggregateInstanceTypes_Result_RemainingAggregation drives the full Next/Result
+// path and asserts that tier-level and item-level Remaining are per-dimension sums across
+// all candidates — independent of the bundle-from-winner OnceMaxRequest.
+func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
+	t.Run("acceleratable: item Remaining sums across tiers and candidates", func(t *testing.T) {
+		// Tier Acc=1 has one candidate; tier Acc=4 has two candidates with identical Acc.
+		op := OpListAggregateInstanceTypes()
+		require.NoError(t, op.Next("cluster-a", a10gInstCustom("a10g-1a", "1", "8", "32Gi", "500Gi")))
+		require.NoError(t, op.Next("cluster-b", a10gInstCustom("a10g-4b", "4", "16", "64Gi", "1Ti")))
+		require.NoError(t, op.Next("cluster-c", a10gInstCustom("a10g-4c", "4", "32", "128Gi", "2Ti")))
+
+		result := op.Result(false)
+
+		require.Len(t, result.Items, 1)
+		item := result.Items[0]
+		require.Len(t, item.Status.Tiers, 2)
+
+		// Tier Acc=1 sits before tier Acc=4 (ascending by primary).
+		tier1 := item.Status.Tiers[0]
+		tier4 := item.Status.Tiers[1]
+		assert.True(t, tier1.OnceMaxRequest.Accelerator.Equal(resource.MustParse("1")))
+		assert.True(t, tier4.OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")))
+
+		// Tier-level Remaining sums each tier's candidates.
+		assert.True(t, tier1.Remaining.Accelerator.Equal(resource.MustParse("1")), "tier Acc=1 has one candidate with Acc.Remaining=1")
+		assert.True(t, tier1.Remaining.CPU.Equal(resource.MustParse("8")))
+		assert.True(t, tier4.Remaining.Accelerator.Equal(resource.MustParse("8")), "tier Acc=4 has two candidates with Acc.Remaining=4 each")
+		assert.True(t, tier4.Remaining.CPU.Equal(resource.MustParse("48")), "16+32")
+		assert.True(t, tier4.Remaining.RAM.Equal(resource.MustParse("192Gi")), "64Gi+128Gi")
+		assert.True(t, tier4.Remaining.LocalStorage.Equal(resource.MustParse("3Ti")), "1Ti+2Ti")
+
+		// Item-level Remaining sums across both tiers.
+		r := item.Status.Remaining
+		assert.True(t, r.Accelerator.Equal(resource.MustParse("9")), "1 + (4+4)")
+		assert.True(t, r.CPU.Equal(resource.MustParse("56")), "8 + (16+32)")
+		assert.True(t, r.RAM.Equal(resource.MustParse("224Gi")), "32Gi + (64Gi+128Gi)")
+	})
+
+	t.Run("cpu-only: item Remaining sums across candidates in single tier", func(t *testing.T) {
+		op := OpListAggregateInstanceTypes()
+		require.NoError(t, op.Next("cluster-a", cpuOnlyInstCustom("cpu-a", "4", "16Gi", "200Gi")))
+		require.NoError(t, op.Next("cluster-b", cpuOnlyInstCustom("cpu-b", "64", "256Gi", "1Ti")))
+
+		result := op.Result(false)
+
+		require.Len(t, result.Items, 1)
+		item := result.Items[0]
+		require.Len(t, item.Status.Tiers, 1)
+
+		r := item.Status.Remaining
+		assert.True(t, r.Accelerator.IsZero(), "CPU-only items have no accelerator")
+		assert.True(t, r.CPU.Equal(resource.MustParse("68")), "4+64")
+		assert.True(t, r.RAM.Equal(resource.MustParse("272Gi")), "16Gi+256Gi")
+		assert.True(t, r.LocalStorage.Equal(resource.MustParse("1224Gi")), "200Gi+1Ti")
+
+		// Tier-level Remaining matches item-level for the single tier.
+		assert.True(t, item.Status.Tiers[0].Remaining.CPU.Equal(r.CPU))
+		assert.True(t, item.Status.Tiers[0].Remaining.RAM.Equal(r.RAM))
+		assert.True(t, item.Status.Tiers[0].Remaining.LocalStorage.Equal(r.LocalStorage))
 	})
 }
