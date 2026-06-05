@@ -12,44 +12,65 @@ import (
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
+// lessTierByPrimary returns whether tier i should come before tier j when sorting
+// ascending by the primary dimension: Accelerator if Spec.Acceleratable, otherwise CPU.
+// Bind as item.lessTierByPrimary and pass to sort.Slice for consistent ordering.
+func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
+	if in.Spec.Acceleratable {
+		return in.Status.Tiers[i].OnceMaxRequest.Accelerator.Cmp(in.Status.Tiers[j].OnceMaxRequest.Accelerator) < 0
+	}
+	return in.Status.Tiers[i].OnceMaxRequest.CPU.Cmp(in.Status.Tiers[j].OnceMaxRequest.CPU) < 0
+}
+
+// RecomputeOnceMaxRequest rebuilds the item-level OnceMaxRequest as the resource bundle
+// of the tier whose primary dimension is the largest.
+//
+// The primary dimension is Accelerator when Spec.Acceleratable is true, otherwise CPU.
+// The whole bundle (Accelerator/CPU/RAM/LocalStorage) is copied from the winning tier
+// so the result corresponds to a real, achievable single allocation rather than a
+// per-dimension maximum across tiers.
 func (in *AggregatedInstanceType) RecomputeOnceMaxRequest() {
 	var newOverview AggregatedInstanceTypeOverviewResource
 
 	for i := range in.Status.Tiers {
 		tier := &in.Status.Tiers[i]
-		if newOverview.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0 {
-			newOverview.Accelerator = tier.OnceMaxRequest.Accelerator
-		}
-		if newOverview.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0 {
-			newOverview.CPU = tier.OnceMaxRequest.CPU
-		}
-		if newOverview.RAM.Cmp(tier.OnceMaxRequest.RAM) < 0 {
-			newOverview.RAM = tier.OnceMaxRequest.RAM
-		}
-		if newOverview.LocalStorage.Cmp(tier.OnceMaxRequest.LocalStorage) < 0 {
-			newOverview.LocalStorage = tier.OnceMaxRequest.LocalStorage
+		if in.Spec.Acceleratable {
+			if newOverview.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0 {
+				newOverview = tier.OnceMaxRequest
+			}
+		} else if newOverview.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0 {
+			newOverview = tier.OnceMaxRequest
 		}
 	}
 
 	in.Status.OnceMaxRequest = newOverview
 }
 
-func (in *AggregatedInstanceTypeOnceMaxRequestTier) RecomputeOnceMaxRequest() {
+// RecomputeOnceMaxRequest rebuilds the tier-level OnceMaxRequest as the resource bundle
+// of the candidate whose primary dimension is the largest.
+//
+// The primary dimension is Accelerator when acceleratable is true, otherwise CPU.
+// All candidates in one tier share the same accelerator OnceMaxRequest, so the
+// acceleratable branch effectively picks the first candidate; the CPU branch is the
+// one that does real work for CPU-only items where the per-candidate CPU may vary.
+func (in *AggregatedInstanceTypeOnceMaxRequestTier) RecomputeOnceMaxRequest(acceleratable bool) {
 	var newOverview AggregatedInstanceTypeOverviewResource
 
 	for i := range in.Candidates {
 		candidate := &in.Candidates[i]
-		if newOverview.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0 {
-			newOverview.Accelerator = candidate.Accelerator.OnceMaxRequest
+		var wins bool
+		if acceleratable {
+			wins = newOverview.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0
+		} else {
+			wins = newOverview.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0
 		}
-		if newOverview.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0 {
-			newOverview.CPU = candidate.CPU.OnceMaxRequest
-		}
-		if newOverview.RAM.Cmp(candidate.RAM.OnceMaxRequest) < 0 {
-			newOverview.RAM = candidate.RAM.OnceMaxRequest
-		}
-		if newOverview.LocalStorage.Cmp(candidate.LocalStorage.OnceMaxRequest) < 0 {
-			newOverview.LocalStorage = candidate.LocalStorage.OnceMaxRequest
+		if wins {
+			newOverview = AggregatedInstanceTypeOverviewResource{
+				Accelerator:  candidate.Accelerator.OnceMaxRequest,
+				CPU:          candidate.CPU.OnceMaxRequest,
+				RAM:          candidate.RAM.OnceMaxRequest,
+				LocalStorage: candidate.LocalStorage.OnceMaxRequest,
+			}
 		}
 	}
 
@@ -136,15 +157,13 @@ func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceType
 	for i := range in.list.Items {
 		item := &in.list.Items[i]
 
-		// Sorted by once max request of accelerator for better readability.
-		sort.Slice(item.Status.Tiers, func(i, j int) bool {
-			return item.Status.Tiers[i].OnceMaxRequest.Accelerator.Cmp(item.Status.Tiers[j].OnceMaxRequest.Accelerator) < 0
-		})
+		// Sorted ascending by the primary dimension for better readability.
+		sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
 
 		// Calculate the once max request of each tier.
 		for j := range item.Status.Tiers {
 			tier := &item.Status.Tiers[j]
-			tier.RecomputeOnceMaxRequest()
+			tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 		}
 
 		// Calculate the once max request of the item.
@@ -196,7 +215,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				tier.Candidates = newCandidates
 
 				// Recompute the tier.
-				tier.RecomputeOnceMaxRequest()
+				tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 			}
 			if !itemChanged {
 				continue
@@ -275,7 +294,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers = append(item.Status.Tiers[:index[1]], item.Status.Tiers[index[1]+1:]...)
 				} else {
 					// Recompute the tier.
-					tier.RecomputeOnceMaxRequest()
+					tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 				}
 
 				// Delete the original item if no tier.
@@ -317,7 +336,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				tier.Candidates[index[2]] = *candidate
 
 				// Recompute the tier.
-				tier.RecomputeOnceMaxRequest()
+				tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 			} else {
 				// Remove candidate from the original tier.
 				tier.Candidates = append(tier.Candidates[:index[2]], tier.Candidates[index[2]+1:]...)
@@ -327,7 +346,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers = append(item.Status.Tiers[:index[1]], item.Status.Tiers[index[1]+1:]...)
 				} else {
 					// Recompute the tier.
-					tier.RecomputeOnceMaxRequest()
+					tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 				}
 
 				// Find the new tier to move in.
@@ -344,7 +363,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					tier.Candidates = append(tier.Candidates, *candidate)
 
 					// Recompute the tier.
-					tier.RecomputeOnceMaxRequest()
+					tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 				} else {
 					// Append a new tier if not found.
 					item.Status.Tiers = append(item.Status.Tiers,
@@ -358,10 +377,8 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 							Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
 						})
 
-					// Sorted.
-					sort.Slice(item.Status.Tiers, func(i, j int) bool {
-						return item.Status.Tiers[i].OnceMaxRequest.Accelerator.Cmp(item.Status.Tiers[j].OnceMaxRequest.Accelerator) < 0
-					})
+					// Sorted ascending by the primary dimension.
+					sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
 				}
 			}
 
@@ -398,7 +415,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			tier.Candidates = append(tier.Candidates, *candidate)
 
 			// Recompute the tier.
-			tier.RecomputeOnceMaxRequest()
+			tier.RecomputeOnceMaxRequest(item.Spec.Acceleratable)
 
 			// Recompute the item.
 			item.RecomputeOnceMaxRequest()
@@ -441,10 +458,8 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			item := &in.state.Items[index[0]]
 			item.Status.Tiers = append(item.Status.Tiers, tier)
 
-			// Sorted.
-			sort.Slice(item.Status.Tiers, func(i, j int) bool {
-				return item.Status.Tiers[i].OnceMaxRequest.Accelerator.Cmp(item.Status.Tiers[j].OnceMaxRequest.Accelerator) < 0
-			})
+			// Sorted ascending by the primary dimension.
+			sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
 
 			// Recompute the item.
 			item.RecomputeOnceMaxRequest()

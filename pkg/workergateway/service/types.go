@@ -20,14 +20,21 @@ type AggregatedInstanceType struct {
 
 type AggregatedInstanceTypeStatus struct {
 	// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceType.
+	//
+	// It is the resource bundle of the tier that wins on the primary dimension:
+	// Accelerator when Spec.Acceleratable is true, otherwise CPU.
+	// All four fields (Accelerator/CPU/RAM/LocalStorage) are taken from the same winning tier,
+	// so the overview always represents a bundle achievable by some real candidate,
+	// not a per-dimension maximum across tiers.
 	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
-	// Tiers is the list of once max request tiers of the AggregatedInstanceType in one dimension.
+	// Tiers is the list of once max request tiers of the AggregatedInstanceType, grouped by accelerator OnceMaxRequest.
 	//
-	// If the Spec.Acceleratable is true, the dimension is accelerator, and the once max request tiers are grouped by accelerator resource.
-	// If the Spec.Acceleratable is false, the dimension is cpu, and the once max request tiers are grouped by cpu resource.
+	// When Spec.Acceleratable is true, each tier holds candidates sharing the same accelerator OnceMaxRequest value.
+	// When Spec.Acceleratable is false, all candidates collapse into a single tier (accelerator is always zero);
+	// in that case, the per-candidate CPU OnceMaxRequest is the primary dimension within the tier.
 	//
-	// Each tier represents a combination of the AggregatedInstanceTypeOnceMaxRequestCandidate those satisfy the once max request of the tier.
+	// Each tier represents a combination of AggregatedInstanceTypeOnceMaxRequestCandidate that satisfy the once max request of the tier.
 	Tiers []AggregatedInstanceTypeOnceMaxRequestTier `json:"tiers"`
 }
 
@@ -46,13 +53,17 @@ type AggregatedInstanceTypeOverviewResource struct {
 }
 
 type AggregatedInstanceTypeOnceMaxRequestTier struct {
-	// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceTypeOnceMaxRequestTier.
+	// OnceMaxRequest is the resource bundle of the candidate that wins on the primary dimension within this tier.
+	//
+	// The primary dimension is Accelerator when the owning AggregatedInstanceType is acceleratable, otherwise CPU.
+	// All four fields are taken from the same winning candidate so the bundle is achievable, not synthesized
+	// from per-dimension maxes across candidates.
 	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
 	// Candidates is the list of candidates of the tier.
 	//
-	// All candidates in the same tier must satisfy the max request of the tier,
-	// but may have different resource values.
+	// All candidates in the same tier share the same accelerator OnceMaxRequest,
+	// but may differ on CPU/RAM/LocalStorage.
 	Candidates []AggregatedInstanceTypeOnceMaxRequestCandidate `json:"candidates"`
 }
 
