@@ -58,7 +58,7 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = devicefeature.ConstructNodeCapacityLabels(nd)
+			nfs.Labels = devicefeature.ConstructNodeCapacityLabels(nd, devicefeature.OverrideGeneralRAMGiPerCPU(2))
 			return *nfs
 		}(),
 	}

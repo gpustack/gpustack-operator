@@ -92,8 +92,31 @@ func ExtractNodeKeys(node *core.Node) []string {
 	})
 }
 
+type (
+	ConstructNodeCapacityLabelsOptions struct {
+		// GeneralRAMGiPerCPU overrides the default RAM Gi per CPU used in the general view when constructing node capacity labels.
+		GeneralRAMGiPerCPU int64
+	}
+
+	ConstructNodeCapacityLabelsOption func(*ConstructNodeCapacityLabelsOptions)
+)
+
+// OverrideGeneralRAMGiPerCPU overrides the default RAM Gi per CPU used in the general view when constructing node capacity labels.
+// By default, RAM Gi per CPU is discovered from node capacity and may be overridden by user-supplied labels;
+// this option allows an additional override that takes precedence at first discovery.
+func OverrideGeneralRAMGiPerCPU(v int64) ConstructNodeCapacityLabelsOption {
+	return func(opts *ConstructNodeCapacityLabelsOptions) {
+		opts.GeneralRAMGiPerCPU = v
+	}
+}
+
 // ConstructNodeCapacityLabels constructs node capacity labels from the given node status and existing labels.
-func ConstructNodeCapacityLabels(node *core.Node) map[string]string {
+func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLabelsOption) map[string]string {
+	var opts ConstructNodeCapacityLabelsOptions
+	for i := range opt {
+		opt[i](&opts)
+	}
+
 	labels := map[string]string{
 		systemname.ManagedLabelKey: "true",
 	}
@@ -136,7 +159,11 @@ func ConstructNodeCapacityLabels(node *core.Node) map[string]string {
 		if ramC <= cpuC {
 			ramC = cpuC
 		}
-		labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
+		generalRamC := ramC
+		if node.Labels[ramKey] == "" && opts.GeneralRAMGiPerCPU > 0 {
+			generalRamC = opts.GeneralRAMGiPerCPU * cpuC
+		}
+		labels[ramKey] = strconvx.Itoa(generalRamC) + "Gi"
 
 		// "${prefix}general.local-storage=${stg}"
 		stgKey := generalKey + ".local-storage"
@@ -160,11 +187,11 @@ func ConstructNodeCapacityLabels(node *core.Node) map[string]string {
 		// always carry the same per-unit value.
 		//
 		// "${prefix}general.profile-flavor=${cpu}c-${ram}g-${stg}g"
-		labels[generalKey+".profile-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, ramC, stgC)
+		labels[generalKey+".profile-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, generalRamC, stgC)
 
 		// "${prefix}general.profile-queue=1c-${ramUnit}g"
 		// "${prefix}general.profile-cohort=1c-${ramUnit}g"
-		ramUnit := ramC / cpuC
+		ramUnit := generalRamC / cpuC
 		generalUnit := fmt.Sprintf("1c-%dg", ramUnit)
 		labels[generalKey+".profile-queue"] = generalUnit
 		labels[generalKey+".profile-cohort"] = generalUnit

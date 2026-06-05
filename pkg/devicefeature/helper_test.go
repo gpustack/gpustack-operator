@@ -262,6 +262,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	cases := []struct {
 		name     string
 		node     *core.Node
+		opts     []ConstructNodeCapacityLabelsOption
 		expected map[string]string
 	}{
 		{
@@ -548,11 +549,174 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
 			},
 		},
+		{
+			// OverrideGeneralRAMGiPerCPU(2) replaces the whole general view —
+			// general.ram, general.profile-flavor, general.profile-queue
+			// and general.profile-cohort all reflect generalRamC = 2*cpuC =
+			// 32Gi, regardless of the underlying ramC (here floored to
+			// cpuC=16 because Memory=0).
+			name: "override RAM-Gi-per-CPU rewrites the whole general view",
+			node: newNode("cluster-1-node-1", "16", "0", "97Gi", 0, nil),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// Status.Capacity Memory=64Gi → real ramC=64, but the override
+			// supersedes it across the entire general view: ram=32Gi,
+			// profile-flavor=16c-32g-96g, profile-queue=1c-2g. Demonstrates
+			// that the override pre-empts Status.Capacity for general.
+			name: "override RAM-Gi-per-CPU pre-empts Status.Capacity for general view",
+			node: newNode("cluster-1-node-1", "16", "64Gi", "97Gi", 0, nil),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// An explicit operator general.ram label wins over the override:
+			// the override is only consulted at first discovery when no prior
+			// label has been written. Here ramC=48 from the label drives the
+			// whole general view; the override is bypassed.
+			name: "explicit general.ram label wins over override",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+				map[string]string{
+					FeatureLabelPrefix + "general.ram": "48Gi",
+				}),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "48Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-48g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-3g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-3g",
+			},
+		},
+		{
+			// 0 is the unset sentinel — the override branch is skipped and
+			// the general labels fall back to the real ramC.
+			name: "zero override RAM-Gi-per-CPU is treated as unset",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0, nil),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(0)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// Negative override is also treated as unset (the branch guard
+			// is `> 0`), guarding against accidental negative inputs.
+			name: "negative override RAM-Gi-per-CPU is treated as unset",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0, nil),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(-4)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "16",
+				FeatureLabelPrefix + "general.ram":            "32Gi",
+				FeatureLabelPrefix + "general.local-storage":  "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "16c-32g-96g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// 1-cpu node, override=2 → generalRamC = 2*1 = 2.
+			// Confirms the override scales by the resolved cpuC and applies
+			// uniformly across the general view.
+			name: "override RAM-Gi-per-CPU=2 on 1C node yields 2Gi general view",
+			node: newNode("blank-node", "1", "0", "0", 0, nil),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                    "true",
+				FeatureLabelPrefix + "general.cpu":            "1",
+				FeatureLabelPrefix + "general.ram":            "2Gi",
+				FeatureLabelPrefix + "general.local-storage":  "15Gi",
+				FeatureLabelPrefix + "general.profile-flavor": "1c-2g-15g",
+				FeatureLabelPrefix + "general.profile-queue":  "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort": "1c-2g",
+			},
+		},
+		{
+			// Override is scoped to general only. With cpuC=8 and 2
+			// accelerators, the general view shows generalRamC=16
+			// (=2*8), but per-device labels still derive from the real
+			// ramC=8 (floored to cpuC since Memory=0): device .ram=8Gi,
+			// profile-queue cpuUnit=8/2=4 and ramUnit=8/2=4 → 4c-4g-1d.
+			name: "override RAM-Gi-per-CPU does not affect per-device labels",
+			node: newNode(
+				"cluster-1-node-4", "8", "0", "97Gi", 2,
+				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
+			),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "general.cpu":                    "8",
+				FeatureLabelPrefix + "general.ram":                    "16Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "8c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-2g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "8Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-8g-96g-2d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-4g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-4g-1d",
+			},
+		},
+		{
+			// Even when Status.Capacity reports a real Memory value, the
+			// override leaves per-device labels untouched. cpuC=8, real
+			// ramC=64 from Memory=64Gi, override=2 → general view shows
+			// 16Gi (=2*8) but the device labels reflect real ramC=64:
+			// device .ram=64Gi, profile-queue cpuUnit=8/2=4 / ramUnit=64/2=32.
+			name: "override RAM-Gi-per-CPU leaves per-device labels at real capacity",
+			node: newNode(
+				"cluster-1-node-4", "8", "64Gi", "97Gi", 2,
+				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
+			),
+			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
+			expected: map[string]string{
+				systemname.ManagedLabelKey:                            "true",
+				FeatureLabelPrefix + "general.cpu":                    "8",
+				FeatureLabelPrefix + "general.ram":                    "16Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "8c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-2g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-2g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "8",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "64Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "8c-64g-96g-2d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-32g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-32g-1d",
+			},
+		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := ConstructNodeCapacityLabels(cs.node)
+			actual := ConstructNodeCapacityLabels(cs.node, cs.opts...)
 			assert.Equal(t, cs.expected, actual, "unexpected capacity labels")
 		})
 	}
