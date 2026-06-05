@@ -117,7 +117,8 @@ func (r *ResourceFlavorCleanupReconciler) SetupController(ctx context.Context, o
 func (r *ResourceFlavorCleanupReconciler) enqueueResourceFlavorWhenNodeChanged(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
-	logger := ctrllog.FromContext(ctx)
+	logger := ctrllog.FromContext(ctx).
+		WithValues("node", ctrlcli.ObjectKeyFromObject(obj))
 
 	nd := obj.(*core.Node)
 
@@ -129,12 +130,19 @@ func (r *ResourceFlavorCleanupReconciler) enqueueResourceFlavorWhenNodeChanged(
 
 	reqs := make([]ctrlreconcile.Request, 0, len(profiles))
 	for i := range profiles {
+		if profiles[i].Flavor == "" {
+			continue
+		}
 		reqs = append(reqs, ctrlreconcile.Request{
 			NamespacedName: ctrlcli.ObjectKey{
 				Name: profiles[i].Flavor,
 			},
 		})
 	}
-	logger.V(2).Info("enqueue resource flavor for node", "requests", reqs)
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue resource flavor from node", "requests", reqs)
 	return reqs
 }

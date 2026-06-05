@@ -181,6 +181,10 @@ func (r *LocalQueueReconciler) enqueueClusterQueueWhenNamespaceCreated(
 			},
 		})
 	}
-	logger.V(2).Info("enqueue cluster queue for namespace", "requests", reqs)
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue cluster queue from namespace", "requests", reqs)
 	return reqs
 }

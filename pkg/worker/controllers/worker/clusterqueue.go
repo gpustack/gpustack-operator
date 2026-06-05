@@ -116,7 +116,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "fetch cohort")
-		return ctrlreconcile.Result{}, err
+		return ctrlreconcile.Result{RequeueAfter: 5 * time.Second}, err
 	}
 
 	// Skip if Cohort is being deleted.
@@ -416,7 +416,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 			// Watch Nodes and enqueue the corresponding Cohort/ClusterQueue.
 			&core.Node{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
-				5*time.Second,
+				3*time.Second,
 				dedupWindow,
 				r.enqueueCohortWhenNodeChanged,
 			),
@@ -468,15 +468,26 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
 
 	rf := obj.(*kueue.ResourceFlavor)
 
-	reqs := []ctrlreconcile.Request{
-		{
-			NamespacedName: ctrlcli.ObjectKey{
-				Name:      rf.Labels[_ResourceFlavorQueueNameLabelKey],
-				Namespace: rf.Labels[_ResourceFlavorCohortNameLabelKey],
-			},
-		},
+	var reqs []ctrlreconcile.Request
+	{
+		cohortName := rf.Labels[_ResourceFlavorCohortNameLabelKey]
+		queueName := rf.Labels[_ResourceFlavorQueueNameLabelKey]
+		if cohortName != "" && queueName != "" {
+			reqs = []ctrlreconcile.Request{
+				{
+					NamespacedName: ctrlcli.ObjectKey{
+						Name:      queueName,
+						Namespace: cohortName,
+					},
+				},
+			}
+		}
 	}
-	logger.V(2).Info("enqueue cohort and queue for resource flavor", "requests", reqs)
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue cohort and queue from resource flavor", "requests", reqs)
 	return reqs
 }
 
@@ -496,6 +507,9 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
 
 	reqs := make([]ctrlreconcile.Request, 0, len(profiles))
 	for i := range profiles {
+		if profiles[i].Queue == "" || profiles[i].Cohort == "" {
+			continue
+		}
 		reqs = append(reqs, ctrlreconcile.Request{
 			NamespacedName: ctrlcli.ObjectKey{
 				Name:      profiles[i].Queue,
@@ -503,7 +517,11 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
 			},
 		})
 	}
-	logger.V(2).Info("enqueue cohort and queue for node", "requests", reqs)
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue cohort and queue from node", "requests", reqs)
 	return reqs
 }
 

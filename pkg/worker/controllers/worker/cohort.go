@@ -185,12 +185,19 @@ func (r *CohortReconciler) enqueueCohortWhenNodeChanged(
 
 	reqs := make([]ctrlreconcile.Request, 0, len(profiles))
 	for i := range profiles {
+		if profiles[i].Cohort == "" {
+			continue
+		}
 		reqs = append(reqs, ctrlreconcile.Request{
 			NamespacedName: ctrlcli.ObjectKey{
 				Name: profiles[i].Cohort,
 			},
 		})
 	}
-	logger.V(2).Info("enqueue cohort for node", "requests", reqs)
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue cohort from node", "requests", reqs)
 	return reqs
 }
