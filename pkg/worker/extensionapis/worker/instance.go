@@ -31,6 +31,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
@@ -260,7 +261,7 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 		inst.Spec.Resources = &worker.InstanceResources{}
 	}
 	{
-		reqByUnit := settings.InstanceGeneralResourcesRequestByUnit.ShouldValueBool(ctx)
+		overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 		instRess := inst.Spec.Resources
 		if instType.Spec.Acceleratable {
 			if instRess.Accelerator == nil {
@@ -274,16 +275,16 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 			if accC == 0 {
 				accC = 1
 			}
-			if reqByUnit || instRess.CPU.IsZero() {
-				instRess.CPU, err = multiplyQuantity(instType.Spec.UnitResources.CPU, accC)
+			if overcommit || instRess.CPU.IsZero() {
+				instRess.CPU, err = quantityx.StringMultiply(instType.Spec.UnitResources.CPU, accC)
 				if err != nil {
 					return nil, field.InternalError(
 						field.NewPath("spec.resources.cpu"),
 						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
 				}
 			}
-			if reqByUnit || instRess.RAM.IsZero() {
-				instRess.RAM, err = multiplyQuantity(instType.Spec.UnitResources.RAM, accC)
+			if overcommit || instRess.RAM.IsZero() {
+				instRess.RAM, err = quantityx.StringMultiply(instType.Spec.UnitResources.RAM, accC)
 				if err != nil {
 					return nil, field.InternalError(
 						field.NewPath("spec.resources.ram"),
@@ -299,8 +300,8 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 			} else {
 				cpuC = instRess.CPU.Value()
 			}
-			if reqByUnit || instRess.RAM.IsZero() {
-				instRess.RAM, err = multiplyQuantity(instType.Spec.UnitResources.RAM, cpuC)
+			if overcommit || instRess.RAM.IsZero() {
+				instRess.RAM, err = quantityx.StringMultiply(instType.Spec.UnitResources.RAM, cpuC)
 				if err != nil {
 					return nil, field.InternalError(
 						field.NewPath("spec.resources.ram"),
@@ -1045,6 +1046,14 @@ func instanceMatchFieldSelector(opts ctrlcli.ListOptions, inst *worker.Instance)
 	return fs.Matches(fields.Set{"metadata.namespace": inst.Namespace, "metadata.name": inst.Name})
 }
 
+var (
+	_CPUOvercommitBaseQuantity          = resource.MustParse("800m")
+	_RAMOvercommitBaseQuantity          = resource.MustParse("128Mi")
+	_LocalStorageOvercommitBaseQuantity = resource.MustParse("128Mi")
+
+	_CPUOvercommitBaseQuantityForAcceleratable = resource.MustParse("100m")
+)
+
 // getResourceRequirements returns the resource requirements for the instance.
 //
 // If `withGeneral` is true, returns resource requirements include the general resources (CPU, RAM, local storage).
@@ -1072,20 +1081,33 @@ func getResourceRequirements(
 			rr.Requests[n] = q
 		}
 		if withGeneralOvercommit {
-			cpuQ := resource.MustParse("800m")
-			cpuQ.Mul(inst.Spec.Resources.CPU.Value())
+			var cpuQ, ramQ, stgQ resource.Quantity
+			{
+				if instType.Spec.Acceleratable {
+					multiplier := inst.Spec.Resources.CPU.Value()
+					if inst.Spec.Resources.Accelerator != nil && inst.Spec.Resources.Accelerator.Sign() > 0 {
+						multiplier = inst.Spec.Resources.Accelerator.Value()
+					}
+					cpuQ = quantityx.SafeMultiply(_CPUOvercommitBaseQuantityForAcceleratable, multiplier)
+				} else {
+					multiplier := inst.Spec.Resources.CPU.Value()
+					cpuQ = quantityx.SafeMultiply(_CPUOvercommitBaseQuantity, multiplier)
+				}
+				ramQ = quantityx.SafeMultiply(_RAMOvercommitBaseQuantity,
+					inst.Spec.Resources.RAM.Value()/quantityx.Gi)
+				stgQ = quantityx.SafeMultiply(_LocalStorageOvercommitBaseQuantity,
+					inst.Spec.Resources.LocalStorage.Value()/quantityx.Gi)
+			}
 			rr.Requests[core.ResourceCPU] = cpuQ
-			rr.Requests[core.ResourceMemory] = resource.MustParse("128Mi")
-			rr.Requests[core.ResourceEphemeralStorage] = resource.MustParse("128Mi")
+			rr.Requests[core.ResourceMemory] = ramQ
+			rr.Requests[core.ResourceEphemeralStorage] = stgQ
 		}
 	}
 
-	if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
-		if withGeneral && withGeneralOvercommit {
-			cpuQ := resource.MustParse("100m")
-			cpuQ.Mul(inst.Spec.Resources.Accelerator.Value())
-			rr.Requests[core.ResourceCPU] = cpuQ
-		}
+	requestAccelerator := instType.Spec.Acceleratable &&
+		inst.Spec.Resources.Accelerator != nil &&
+		inst.Spec.Resources.Accelerator.Sign() > 0
+	if requestAccelerator {
 		if withAccelerator {
 			var resName core.ResourceName
 			resQuantity := *inst.Spec.Resources.Accelerator
@@ -1103,12 +1125,50 @@ func getResourceRequirements(
 	return rr
 }
 
-// multiplyQuantity multiplies the quantity represented by the string `qs` with the multiplier `mult`.
-func multiplyQuantity(qs string, m int64) (resource.Quantity, error) {
-	q, err := resource.ParseQuantity(qs)
-	if err != nil {
-		return resource.Quantity{}, err
+// scaleBackOvercommitRequest returns the limits-equivalent quantity for an
+// overcommit-shaped requests value produced by getResourceRequirements. It
+// inverts the formulas above:
+//
+//	non-acc CPU: req = 800m × CPU.Value()            → limit = multiplier × 1 core
+//	acc CPU:     req = 100m × multiplier             → limit = multiplier × 1 core
+//	RAM:         req = 128Mi × (RAM.Value()/Gi)      → limit = multiplier × 1 Gi
+//	Storage:     req = 128Mi × (Storage.Value()/Gi)  → limit = multiplier × 1 Gi
+//
+// Other resource names (e.g., accelerator credits, which are not overcommitted)
+// pass through unchanged.
+//
+// For acceleratable types where a pod requested Accelerator>0, the producer
+// used Accelerator.Value() as the CPU multiplier rather than CPU.Value();
+// this inversion therefore under-counts CPU consumption for such pods.
+// This is an inherent information loss in aggregated reservations and is
+// accepted as an approximation.
+func scaleBackOvercommitRequest(
+	resName core.ResourceName,
+	val resource.Quantity,
+	acceleratable bool,
+) resource.Quantity {
+	switch resName {
+	case core.ResourceCPU:
+		baseMilli := _CPUOvercommitBaseQuantity.MilliValue()
+		if acceleratable {
+			baseMilli = _CPUOvercommitBaseQuantityForAcceleratable.MilliValue()
+		}
+		if baseMilli == 0 {
+			return val
+		}
+		return *resource.NewMilliQuantity((val.MilliValue()/baseMilli)*1000, resource.DecimalSI)
+	case core.ResourceMemory:
+		base := _RAMOvercommitBaseQuantity.Value()
+		if base == 0 {
+			return val
+		}
+		return *resource.NewQuantity((val.Value()/base)*quantityx.Gi, resource.BinarySI)
+	case core.ResourceEphemeralStorage:
+		base := _LocalStorageOvercommitBaseQuantity.Value()
+		if base == 0 {
+			return val
+		}
+		return *resource.NewQuantity((val.Value()/base)*quantityx.Gi, resource.BinarySI)
 	}
-	q.Mul(m)
-	return q, nil
+	return val
 }

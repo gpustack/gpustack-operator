@@ -52,20 +52,12 @@ var (
 	// which is used when deploying Instances.
 	InstanceGeneralResourcesOvercommit = settings.NewEditable(
 		"instance-general-resources-overcommit",
-		"Indicates to overcommit instance general resources(CPU/RAM) or not.",
-		setting.InitializeFromEnv("true"),
-		setting.AllowBool(),
-	)
-
-	// InstanceGeneralResourcesRequestByUnit indicates to request instance general resources by unit or not,
-	// which is used when deploying Instances.
-	//
-	// If true, the requested CPU/RAM will be formatted by the profile dimension.
-	// For example, if the profile is acceleratable, the relevant dimension is "accelerator",
-	// then the requested CPU/RAM will be formatted with the count of "accelerator".
-	InstanceGeneralResourcesRequestByUnit = settings.NewEditable(
-		"instance-general-resources-request-by-unit",
-		"Indicates to request instance general resources(CPU/RAM) by unit or not.",
+		"Indicates to overcommit instance general resources or not. "+
+			"With this enabled, normal instance types will request 800m(CPU)/128Mi(RAM) per unit and one-eight local storage, "+
+			"acceleratable instances type will request 100m(CPU)/128Mi(RAM) per unit and one-eight local storage. "+
+			"For example, an acceleratable instance type defines 1C/4Gi unit resources and 128Gi local storage,"+
+			"when requesting 2 accelerators and 64Gi local storage of this type, "+
+			"then resulting resource request will be 200m(CPU)/256Mi(RAM) and 8Gi local storage.",
 		setting.InitializeFromEnv("true"),
 		setting.AllowBool(),
 	)

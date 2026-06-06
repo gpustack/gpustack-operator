@@ -30,6 +30,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 )
 
 // ClusterQueueReconciler reconciles watches kueue.ResourceFlavor and Node objects to finish the following tasks:
@@ -308,17 +309,17 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			Resources: []kueue.ResourceQuota{
 				{
 					Name:           core.ResourceCPU,
-					NominalQuota:   multiplyQuantity(cpuQ, nodeCount),
+					NominalQuota:   quantityx.Multiply(cpuQ, nodeCount),
 					BorrowingLimit: borLimit,
 				},
 				{
 					Name:           core.ResourceMemory,
-					NominalQuota:   multiplyQuantity(ramQ, nodeCount),
+					NominalQuota:   quantityx.Multiply(ramQ, nodeCount),
 					BorrowingLimit: borLimit,
 				},
 				{
 					Name:           core.ResourceEphemeralStorage,
-					NominalQuota:   multiplyQuantity(lsQ, nodeCount),
+					NominalQuota:   quantityx.Multiply(lsQ, nodeCount),
 					BorrowingLimit: borLimit,
 				},
 			},
@@ -327,7 +328,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
 					Name:           devicefeature.GetCreditsResourceName(manu),
-					NominalQuota:   multiplyQuantity(accQ, nodeCount),
+					NominalQuota:   quantityx.Multiply(accQ, nodeCount),
 					BorrowingLimit: borLimit,
 				},
 			)
@@ -523,12 +524,4 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
 
 	logger.V(2).Info("enqueue cohort and queue from node", "requests", reqs)
 	return reqs
-}
-
-func multiplyQuantity(q resource.Quantity, factor int64) resource.Quantity {
-	if factor == 1 {
-		return q
-	}
-	q.Mul(factor)
-	return q
 }

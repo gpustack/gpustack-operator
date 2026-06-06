@@ -24,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 const _InstanceTypeResource = "instancetypes"
@@ -146,8 +147,10 @@ func (h *InstanceTypeHandler) OnList(ctx context.Context, opts ctrlcli.ListOptio
 		return nil, err
 	}
 
+	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
+
 	// Convert.
-	itList := convertInstanceTypeListFromClusterQueueList(cqList, opts)
+	itList := convertInstanceTypeListFromClusterQueueList(cqList, opts, overcommit)
 	return itList, nil
 }
 
@@ -158,6 +161,8 @@ func (h *InstanceTypeHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOpti
 	if err != nil {
 		return nil, err
 	}
+
+	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
 	c := make(chan watch.Event)
 	dw := watch.NewProxyWatcher(c)
@@ -201,7 +206,7 @@ func (h *InstanceTypeHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOpti
 				}
 
 				// Convert.
-				insType := convertInstanceTypeFromClusterQueue(cq)
+				insType := convertInstanceTypeFromClusterQueue(cq, overcommit)
 				if insType == nil {
 					continue
 				}
@@ -233,8 +238,10 @@ func (h *InstanceTypeHandler) OnGet(ctx context.Context, key types.NamespacedNam
 		return nil, err
 	}
 
+	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
+
 	// Convert.
-	insType := convertInstanceTypeFromClusterQueue(cq)
+	insType := convertInstanceTypeFromClusterQueue(cq, overcommit)
 	if insType == nil {
 		return nil, kerrors.NewNotFound(worker.Resource(_InstanceTypeResource), key.Name)
 	}
@@ -254,7 +261,10 @@ func convertClusterQueueListOptsFromInstanceTypeListOpts(in ctrlcli.ListOptions)
 	return &in
 }
 
-func convertInstanceTypeFromClusterQueue(cq *kueue.ClusterQueue) *worker.InstanceType {
+func convertInstanceTypeFromClusterQueue(
+	cq *kueue.ClusterQueue,
+	overcommit bool,
+) *worker.InstanceType {
 	if cq == nil {
 		return nil
 	}
@@ -361,21 +371,29 @@ func convertInstanceTypeFromClusterQueue(cq *kueue.ClusterQueue) *worker.Instanc
 			remStgRf := capRf[core.ResourceEphemeralStorage]
 
 			// Remaining are subtracted by the reserved total quota.
+			//
+			// When overcommit is enabled, res.Total is in overcommit-requests units
+			// while capacity is in limits units; scale it back before subtracting so
+			// that capacity, remaining, and once-max-request all share limits units.
 			for j := range flv.Resources {
 				res := &flv.Resources[j]
+				total := res.Total
+				if overcommit {
+					total = scaleBackOvercommitRequest(res.Name, total, acceleratable)
+				}
 				switch res.Name {
 				case resourceAccelerator:
-					remAcc.Sub(res.Total)
-					remAccRf.Sub(res.Total)
+					remAcc.Sub(total)
+					remAccRf.Sub(total)
 				case core.ResourceCPU:
-					remCpu.Sub(res.Total)
-					remCpuRf.Sub(res.Total)
+					remCpu.Sub(total)
+					remCpuRf.Sub(total)
 				case core.ResourceMemory:
-					remRam.Sub(res.Total)
-					remRamRf.Sub(res.Total)
+					remRam.Sub(total)
+					remRamRf.Sub(total)
 				case core.ResourceEphemeralStorage:
-					remStg.Sub(res.Total)
-					remStgRf.Sub(res.Total)
+					remStg.Sub(total)
+					remStgRf.Sub(total)
 				}
 			}
 
@@ -472,7 +490,9 @@ func convertInstanceTypeFromClusterQueue(cq *kueue.ClusterQueue) *worker.Instanc
 }
 
 func convertInstanceTypeListFromClusterQueueList(
-	cqList *kueue.ClusterQueueList, opts ctrlcli.ListOptions,
+	cqList *kueue.ClusterQueueList,
+	opts ctrlcli.ListOptions,
+	overcommit bool,
 ) *worker.InstanceTypeList {
 	if cqList == nil {
 		return &worker.InstanceTypeList{}
@@ -484,7 +504,7 @@ func convertInstanceTypeListFromClusterQueueList(
 	}
 
 	for i := range cqList.Items {
-		insType := convertInstanceTypeFromClusterQueue(&cqList.Items[i])
+		insType := convertInstanceTypeFromClusterQueue(&cqList.Items[i], overcommit)
 		if insType == nil {
 			continue
 		}

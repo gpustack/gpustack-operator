@@ -113,3 +113,30 @@ func formatScaled(q resource.Quantity, units []struct {
 	}
 	return sign + strconv.FormatInt(v, 10)
 }
+
+// Multiply multiplies q by multiplier and returns the result,
+// modifying the input quantity in-place.
+// If multiplier is 1, q is returned unmodified.
+func Multiply(quantity resource.Quantity, multiplier int64) resource.Quantity {
+	if multiplier == 1 {
+		return quantity
+	}
+	quantity.Mul(multiplier)
+	return quantity
+}
+
+// SafeMultiply is like Multiply but does not modify the input quantity.
+func SafeMultiply(quantity resource.Quantity, multiplier int64) resource.Quantity {
+	q := quantity.DeepCopy()
+	return Multiply(q, multiplier)
+}
+
+// StringMultiply multiplies q by multiplier and returns the result.
+// The input q is a string, which will be parsed into a resource.Quantity.
+func StringMultiply(quantityStr string, multiplier int64) (resource.Quantity, error) {
+	q, err := resource.ParseQuantity(quantityStr)
+	if err != nil {
+		return resource.Quantity{}, err
+	}
+	return Multiply(q, multiplier), nil
+}
