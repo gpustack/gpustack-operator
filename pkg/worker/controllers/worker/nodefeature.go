@@ -54,6 +54,7 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			Namespace: kuberess.SystemNamespaceName,
 			Labels: map[string]string{
 				nfd.NodeFeatureObjNodeNameLabel: nd.Name,
+				"app.kubernetes.io/part-of":     "gpustack-operator-worker",
 			},
 		},
 		Spec: func() nfd.NodeFeatureSpec {

@@ -2,6 +2,7 @@ package detector
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/datax"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
@@ -225,13 +227,13 @@ type (
 )
 
 func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGroupList) error {
-	nodeName := osx.Getenv("KUBERNETES_NODE_NAME")
-	if nodeName == "" {
+	ndName := osx.Getenv("KUBERNETES_NODE_NAME")
+	if ndName == "" {
 		return nil
 	}
 
 	lpCli := system.LoopbackKubeClient.Get()
-	nd, err := lpCli.CoreV1().Nodes().Get(ctx, nodeName,
+	nd, err := lpCli.CoreV1().Nodes().Get(ctx, ndName,
 		meta.GetOptions{
 			ResourceVersion: "0",
 		})
@@ -239,15 +241,29 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		return err
 	}
 
+	// Skip if deleted.
+	if nd.DeletionTimestamp != nil {
+		return errors.New("skip deleted node")
+	}
+
+	// Skip nodes that are not managed by gpustack.
+	// The `gpustack.ai/managed=true` label is added to nodes managed by gpustack.
+	// Users can set it to `gpustack.ai/managed=false` to opt out.
+	// If the label is absent, the node is considered unmanaged and skipped.
+	if !kubemeta.HasLabel(nd, systemname.ManagedLabelKey) {
+		return errors.New("skip unmanaged node")
+	}
+
 	// NodeResourceFlavor.
 
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
 	eNf := &nfd.NodeFeature{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      nodeName + "-gpustack-devicemanager",
+			Name:      ndName + "-gpustack-devicemanager",
 			Namespace: kuberess.SystemNamespaceName,
 			Labels: map[string]string{
-				nfd.NodeFeatureObjNodeNameLabel: nodeName,
+				nfd.NodeFeatureObjNodeNameLabel: ndName,
+				"app.kubernetes.io/part-of":     "gpustack-operator-device-manager",
 			},
 		},
 		Spec: func() nfd.NodeFeatureSpec {
@@ -290,7 +306,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	aNf, err := kubeclientset.Create(ctx, nfCli, eNf,
 		kubeclientset.WithUpdateIfExisted(nfAlignFn))
 	if err != nil {
-		return fmt.Errorf("failed to create or update NodeResourceFlavor object for node %s: %w", nodeName, err)
+		return fmt.Errorf("failed to create or update NodeResourceFlavor object for node %s: %w", ndName, err)
 	}
 
 	// Devices.
@@ -298,7 +314,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	devsCli := lpCli.WorkerV1alpha1().Devices()
 	eDevs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{
-			Name: nodeName,
+			Name: ndName,
 		},
 		Spec: workercore.DevicesSpec{
 			Groups: eGroups,
@@ -361,7 +377,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	_, err = kubeclientset.Create(ctx, devsCli, eDevs,
 		kubeclientset.WithUpdateIfExisted(devsAlginFn))
 	if err != nil {
-		return fmt.Errorf("failed to create or update Devices object for node %s: %w", nodeName, err)
+		return fmt.Errorf("failed to create or update Devices object for node %s: %w", ndName, err)
 	}
 
 	return nil
