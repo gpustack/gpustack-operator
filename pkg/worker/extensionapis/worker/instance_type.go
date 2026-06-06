@@ -62,48 +62,48 @@ func (h *InstanceTypeHandler) SetupHandler(
 	gvr = worker.SchemeGroupVersionResource(_InstanceTypeResource)
 
 	// Create table converter to pretty the kubectl's output.
-	tc, err := extensionapi.NewJSONPathTableConvertor(
-		extensionapi.JSONPathTableColumnDefinition{
+	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Group",
 				Type: "string",
 			},
-			JSONPath: ".spec.group",
+			Template: "{.spec.group}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Accelerator",
 				Type: "string",
 			},
-			JSONPath: ".status.accelerator.remaining",
+			Template: "{.status.accelerator.onceMaxRequest}/{.status.accelerator.remaining}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "CPU",
 				Type: "string",
 			},
-			JSONPath: ".status.cpu.remaining",
+			Template: "{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "RAM",
 				Type: "string",
 			},
-			JSONPath: ".status.ram.remaining",
+			Template: "{.status.ram.onceMaxRequest}/{.status.ram.remaining}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Local-Storage",
 				Type: "string",
 			},
-			JSONPath: ".status.localStorage.remaining",
+			Template: "{.status.localStorage.onceMaxRequest}/{.status.localStorage.remaining}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Phase",
 				Type: "string",
 			},
-			JSONPath: ".status.phase",
+			Template: "{.status.phase}",
 		})
 	if err != nil {
 		return gvr, srs, err

@@ -70,7 +70,57 @@ func (h *InstancePersistentVolumeTypeHandler) SetupHandler(
 	gvr = worker.SchemeGroupVersionResource(_InstancePersistentVolumeTypeResource)
 
 	// Create table convertor to pretty the kubectl's output.
-	tc := extensionapi.NewDefaultTableConvertor()
+	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
+		extensionapi.JSONPathTemplateTableColumnDefinition{
+			TableColumnDefinition: meta.TableColumnDefinition{
+				Name: "Type",
+				Type: "string",
+			},
+			Render: func(obj runtime.Object) string {
+				t := obj.(*worker.InstancePersistentVolumeType)
+				switch {
+				case t.Spec.NFS != nil:
+					return "NFS"
+				case t.Spec.S3 != nil:
+					return "S3"
+				}
+				return ""
+			},
+		},
+		extensionapi.JSONPathTemplateTableColumnDefinition{
+			TableColumnDefinition: meta.TableColumnDefinition{
+				Name: "Endpoint",
+				Type: "string",
+			},
+			Render: func(obj runtime.Object) string {
+				t := obj.(*worker.InstancePersistentVolumeType)
+				switch {
+				case t.Spec.NFS != nil:
+					return fmt.Sprintf("%s (%s[%s])",
+						t.Spec.NFS.Server, t.Spec.NFS.Share, t.Spec.NFS.SubDirectory)
+				case t.Spec.S3 != nil:
+					return fmt.Sprintf("%s (%s[%s])",
+						t.Spec.S3.Endpoint, t.Spec.S3.Region, t.Spec.S3.Bucket)
+				}
+				return ""
+			},
+		},
+		extensionapi.JSONPathTemplateTableColumnDefinition{
+			TableColumnDefinition: meta.TableColumnDefinition{
+				Name: "Account",
+				Type: "string",
+			},
+			Render: func(obj runtime.Object) string {
+				t := obj.(*worker.InstancePersistentVolumeType)
+				if t.Spec.S3 != nil {
+					return t.Spec.S3.AccessKey
+				}
+				return ""
+			},
+		})
+	if err != nil {
+		return gvr, srs, err
+	}
 
 	// As storage.
 	h.ObjectInfo = &worker.InstancePersistentVolumeType{}

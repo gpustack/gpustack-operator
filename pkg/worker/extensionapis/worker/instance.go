@@ -88,34 +88,42 @@ func (h *InstanceHandler) SetupHandler(
 	gvr = worker.SchemeGroupVersionResource(_InstanceResource)
 
 	// Create table converter to pretty the kubectl's output.
-	tc, err := extensionapi.NewJSONPathTableConvertor(
-		extensionapi.JSONPathTableColumnDefinition{
+	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Type",
 				Type: "string",
 			},
-			JSONPath: ".spec.type",
+			Template: "{.spec.type}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Access",
 				Type: "string",
 			},
-			JSONPath: ".status.accessAddresses[0]",
+			Template: "{.status.accessAddresses[0]}",
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "SSH-Port",
+				Name: "Port(s)",
 				Type: "string",
 			},
-			JSONPath: ".status.ports[?(@.port==22)].nodePort",
+			Render: func(obj runtime.Object) string {
+				ports := obj.(*worker.Instance).Status.Ports
+				parts := make([]string, 0, len(ports))
+				for i := range ports {
+					p := &ports[i]
+					parts = append(parts, fmt.Sprintf("%d:%d/%s", p.Port, p.NodePort, p.Protocol))
+				}
+				return strings.Join(parts, ",")
+			},
 		},
-		extensionapi.JSONPathTableColumnDefinition{
+		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Phase",
 				Type: "string",
 			},
-			JSONPath: ".status.phase",
+			Template: "{.status.phase}",
 		})
 	if err != nil {
 		return gvr, srs, err

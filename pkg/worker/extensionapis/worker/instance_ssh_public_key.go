@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"strings"
+	"unicode"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -56,7 +58,24 @@ func (h *InstanceSSHPublicKeyHandler) SetupHandler(
 	gvr = worker.SchemeGroupVersionResource(_InstanceSSHPublicKeyResource)
 
 	// Create table convertor to pretty the kubectl's output.
-	tc := extensionapi.NewDefaultTableConvertor()
+	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
+		extensionapi.JSONPathTemplateTableColumnDefinition{
+			TableColumnDefinition: meta.TableColumnDefinition{
+				Name: "Data",
+				Type: "string",
+			},
+			Render: func(obj runtime.Object) string {
+				const tailLen = 27
+				data := obj.(*worker.InstanceSSHPublicKey).Spec.Data
+				if len(data) > tailLen {
+					data = "..." + data[len(data)-tailLen:]
+				}
+				return strings.TrimRightFunc(data, unicode.IsSpace)
+			},
+		})
+	if err != nil {
+		return gvr, srs, err
+	}
 
 	// As storage.
 	h.ObjectInfo = &worker.InstanceSSHPublicKey{}

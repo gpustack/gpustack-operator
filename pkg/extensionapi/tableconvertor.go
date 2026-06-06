@@ -1,9 +1,12 @@
 package extensionapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -13,8 +16,10 @@ import (
 	kmeta "k8s.io/apimachinery/pkg/api/meta"
 	metatable "k8s.io/apimachinery/pkg/api/meta/table"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apiserver/pkg/registry/rest"
+	"k8s.io/client-go/util/jsonpath"
 )
 
 var swaggerMetadataDescriptions = meta.ObjectMeta{}.SwaggerDoc()
@@ -92,6 +97,279 @@ func NewJSONPathTableConvertor(definitions ...JSONPathTableColumnDefinition) (re
 	})
 
 	return apiexttableconvertor.New(defs)
+}
+
+type (
+	// JSONPathTemplateTableColumnDefinition is a definition of a column in a table that is populated.
+	//
+	// Unlike JSONPathTableColumnDefinition, the Template MAY contain multiple `{...}`
+	// expressions interleaved with literal text, allowing combined fields like
+	// `"{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}"`.
+	//
+	// Combined fields are only honored for string-typed columns. For non-string columns
+	// (integer/number/boolean/date) only the first expression's first match is used.
+	//
+	// Missing values within a string template are rendered as `-`.
+	//
+	// Exactly one of Template or Render must be set. Render is the escape hatch for
+	// display logic that jsonpath cannot express (e.g. conditional rendering based on
+	// which sub-struct of a discriminated union is populated). When Render is set, the
+	// returned string is used verbatim as the cell value; the column's Type is ignored
+	// (the cell is treated as a string).
+	JSONPathTemplateTableColumnDefinition struct {
+		meta.TableColumnDefinition
+
+		// Template is a jsonpath template (kubectl `-o jsonpath` syntax) evaluated
+		// against each object to produce the value for this column.
+		Template string
+
+		// Render is a callback that produces the cell value directly from the typed
+		// object. It receives the same runtime.Object that OnList / OnGet returned.
+		// An empty return string yields an empty cell.
+		Render func(obj runtime.Object) string
+	}
+	_JSONPathTemplateTableColumn struct {
+		// path is non-nil for Template-based columns.
+		path *jsonpath.JSONPath
+		// isAction[i] is true if the i-th top-level node of the parsed template is an
+		// action (`{...}`); false if it is literal text. Aligned with the slices returned
+		// by jsonpath.JSONPath.FindResults. Only meaningful when path is non-nil.
+		isAction []bool
+		// render is non-nil for Render-based columns. Mutually exclusive with path.
+		render func(obj runtime.Object) string
+	}
+	_JSONPathTemplateTableConvertor struct {
+		headers []meta.TableColumnDefinition
+		columns []_JSONPathTemplateTableColumn
+		// needsUnstructured is true when at least one column is Template-based and
+		// therefore needs the object converted to unstructured for jsonpath.
+		needsUnstructured bool
+	}
+)
+
+// NewJSONPathTemplateTableConvertor creates a new table convertor that renders each column
+// from a jsonpath template (kubectl `-o jsonpath` syntax).
+//
+// It supports multi-expression templates like `"{.a}/{.b}"` for string-typed columns,
+// substituting `-` for any expression that resolves to a missing key.
+func NewJSONPathTemplateTableConvertor(definitions ...JSONPathTemplateTableColumnDefinition) (rest.TableConvertor, error) {
+	c := &_JSONPathTemplateTableConvertor{
+		headers: []meta.TableColumnDefinition{
+			{Name: "Name", Type: "string", Format: "name", Description: swaggerMetadataDescriptions["name"]},
+		},
+	}
+
+	agePriority := int32(0)
+	seen := make(map[string]struct{}, len(definitions))
+	for i := range definitions {
+		def := &definitions[i]
+		hasTemplate := def.Template != ""
+		hasRender := def.Render != nil
+		switch {
+		case def.Name == "":
+			return nil, fmt.Errorf("column definition must have a non-empty name")
+		case hasTemplate == hasRender:
+			return nil, fmt.Errorf("column definition %q must set exactly one of Template or Render", def.Name)
+		case def.Priority < 0:
+			return nil, fmt.Errorf("column definition %q must have a non-negative priority", def.Name)
+		}
+		if _, dup := seen[def.Name]; dup {
+			continue
+		}
+		seen[def.Name] = struct{}{}
+
+		col := _JSONPathTemplateTableColumn{}
+		if hasTemplate {
+			// Parse twice: once to inspect the AST for text-vs-action slot classification,
+			// once into a JSONPath instance for execution. Parser is exported but the
+			// JSONPath.parser field is not, so we cannot share the AST between the two.
+			parser := jsonpath.NewParser(def.Name)
+			if err := parser.Parse(def.Template); err != nil {
+				return nil, fmt.Errorf("invalid template %q for column %q: %w", def.Template, def.Name, err)
+			}
+			col.isAction = make([]bool, len(parser.Root.Nodes))
+			for j, n := range parser.Root.Nodes {
+				_, isText := n.(*jsonpath.TextNode)
+				col.isAction[j] = !isText
+			}
+			col.path = jsonpath.New(def.Name).AllowMissingKeys(true)
+			if err := col.path.Parse(def.Template); err != nil {
+				return nil, fmt.Errorf("invalid template %q for column %q: %w", def.Template, def.Name, err)
+			}
+			c.needsUnstructured = true
+		} else {
+			col.render = def.Render
+		}
+
+		desc := def.Description
+		if desc == "" {
+			desc = "Description to " + def.Name
+		}
+
+		c.headers = append(c.headers, meta.TableColumnDefinition{
+			Name:        def.Name,
+			Description: desc,
+			Type:        def.Type,
+			Format:      def.Format,
+			Priority:    def.Priority,
+		})
+		c.columns = append(c.columns, col)
+		if def.Priority > agePriority {
+			agePriority = def.Priority
+		}
+	}
+
+	c.headers = append(c.headers, meta.TableColumnDefinition{
+		Name:        "Age",
+		Description: swaggerMetadataDescriptions["creationTimestamp"],
+		Type:        "date",
+		Priority:    agePriority + 1,
+	})
+
+	return c, nil
+}
+
+func (c *_JSONPathTemplateTableConvertor) ConvertToTable(_ context.Context, obj, tableOptions runtime.Object) (*meta.Table, error) {
+	table := &meta.Table{}
+	if opt, ok := tableOptions.(*meta.TableOptions); !ok || !opt.NoHeaders {
+		table.ColumnDefinitions = c.headers
+	}
+
+	if m, err := kmeta.ListAccessor(obj); err == nil {
+		table.ResourceVersion = m.GetResourceVersion()
+		table.Continue = m.GetContinue()
+		table.RemainingItemCount = m.GetRemainingItemCount()
+	} else if m, err := kmeta.CommonAccessor(obj); err == nil {
+		table.ResourceVersion = m.GetResourceVersion()
+	}
+
+	// headers[0] is Name, headers[len-1] is Age, in between are the user-defined columns
+	// in the same order as c.columns.
+	customHeaders := c.headers[1 : len(c.headers)-1]
+	buf := &bytes.Buffer{}
+	var err error
+	table.Rows, err = metatable.MetaToTableRow(obj, func(obj runtime.Object, m meta.Object, name, age string) ([]any, error) {
+		cells := make([]any, 0, 2+len(c.columns))
+		cells = append(cells, name)
+
+		// Convert to unstructured only if any column needs jsonpath.
+		var data any
+		if c.needsUnstructured {
+			us, ok := obj.(runtime.Unstructured)
+			if !ok {
+				mm, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+				if err != nil {
+					return nil, err
+				}
+				us = &unstructured.Unstructured{Object: mm}
+			}
+			data = us.UnstructuredContent()
+		}
+
+		for i := range c.columns {
+			col := &c.columns[i]
+			header := &customHeaders[i]
+
+			if col.render != nil {
+				cells = append(cells, col.render(obj))
+				continue
+			}
+
+			results, ferr := col.path.FindResults(data)
+			if ferr != nil {
+				cells = append(cells, nil)
+				continue
+			}
+
+			if header.Type == "string" {
+				buf.Reset()
+				if err := renderCustomFieldString(buf, col.path, col.isAction, results); err != nil {
+					cells = append(cells, nil)
+					continue
+				}
+				cells = append(cells, buf.String())
+				continue
+			}
+
+			// Typed cell: pick the first match of the first action slot.
+			if len(results) == 0 || len(results[0]) == 0 {
+				cells = append(cells, nil)
+				continue
+			}
+			cells = append(cells, cellForJSONValue(header.Type, results[0][0].Interface()))
+		}
+
+		cells = append(cells, age)
+		return cells, nil
+	})
+	return table, err
+}
+
+// renderCustomFieldString interleaves text-node and action-node results from
+// jsonpath.FindResults, substituting `-` whenever an action slot produced no match.
+func renderCustomFieldString(buf *bytes.Buffer, path *jsonpath.JSONPath, isAction []bool, results [][]reflect.Value) error {
+	// In normal cases len(results) == len(isAction). If a range/end pair shifts the
+	// counts, fall back to the default Execute-style behavior for the trailing slots.
+	for i, slot := range results {
+		switch {
+		case i < len(isAction) && isAction[i] && len(slot) == 0:
+			buf.WriteByte('-')
+		default:
+			if err := path.PrintResults(buf, slot); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// cellForJSONValue mirrors the unexported helper in
+// k8s.io/apiextensions-apiserver/pkg/registry/customresource/tableconvertor.
+func cellForJSONValue(headerType string, value any) any {
+	if value == nil {
+		return nil
+	}
+	switch headerType {
+	case "integer":
+		switch typed := value.(type) {
+		case int64:
+			return typed
+		case float64:
+			return int64(typed)
+		case json.Number:
+			if i64, err := typed.Int64(); err == nil {
+				return i64
+			}
+		}
+	case "number":
+		switch typed := value.(type) {
+		case int64:
+			return float64(typed)
+		case float64:
+			return typed
+		case json.Number:
+			if f, err := typed.Float64(); err == nil {
+				return f
+			}
+		}
+	case "boolean":
+		if b, ok := value.(bool); ok {
+			return b
+		}
+	case "string":
+		if s, ok := value.(string); ok {
+			return s
+		}
+	case "date":
+		if typed, ok := value.(string); ok {
+			var timestamp meta.Time
+			if err := timestamp.UnmarshalQueryParameter(typed); err != nil {
+				return "<invalid>"
+			}
+			return metatable.ConvertToHumanReadableDateType(timestamp)
+		}
+	}
+	return nil
 }
 
 type _DefaultTableColumnDefinition struct{}
