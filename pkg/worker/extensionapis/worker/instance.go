@@ -1072,7 +1072,9 @@ func getResourceRequirements(
 			rr.Requests[n] = q
 		}
 		if withGeneralOvercommit {
-			rr.Requests[core.ResourceCPU] = resource.MustParse("800m")
+			cpuQ := resource.MustParse("800m")
+			cpuQ.Mul(inst.Spec.Resources.CPU.Value())
+			rr.Requests[core.ResourceCPU] = cpuQ
 			rr.Requests[core.ResourceMemory] = resource.MustParse("128Mi")
 			rr.Requests[core.ResourceEphemeralStorage] = resource.MustParse("128Mi")
 		}
@@ -1080,7 +1082,9 @@ func getResourceRequirements(
 
 	if instType.Spec.Acceleratable && inst.Spec.Resources.Accelerator != nil {
 		if withGeneral && withGeneralOvercommit {
-			rr.Requests[core.ResourceCPU] = resource.MustParse("100m")
+			cpuQ := resource.MustParse("100m")
+			cpuQ.Mul(inst.Spec.Resources.Accelerator.Value())
+			rr.Requests[core.ResourceCPU] = cpuQ
 		}
 		if withAccelerator {
 			var resName core.ResourceName
