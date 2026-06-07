@@ -36,12 +36,12 @@ type ResourceFlavorReconciler struct {
 var _ ctrlreconcile.Reconciler = (*ResourceFlavorReconciler)(nil)
 
 const (
-	// The label key for the cohort name of a resource flavor,
-	// whose value is the same as the external profile of the NodeResourceFlavor.
-	_ResourceFlavorCohortNameLabelKey = devicefeature.DeviceLabelPrefix + "cohort"
 	// The label key for the queue name of a resource flavor,
 	// whose value represents the queue that the resource flavor belongs to.
 	_ResourceFlavorQueueNameLabelKey = devicefeature.DeviceLabelPrefix + "queue"
+	// The label key for the cohort name of a resource flavor,
+	// whose value represents the cohort that the resource flavor's queue longs to.
+	_ResourceFlavorCohortNameLabelKey = devicefeature.DeviceLabelPrefix + "cohort"
 )
 
 func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

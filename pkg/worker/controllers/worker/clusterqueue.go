@@ -70,7 +70,6 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 				logger.Error(err, "fetch cluster queue")
 				return ctrlreconcile.Result{}, err
 			}
-			logger.V(2).Info("cluster queue already deleted, skip")
 			return ctrlreconcile.Result{}, nil
 		}
 		var reserved bool
@@ -381,7 +380,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 			// Watch kueue.ResourceFlavors and enqueue the corresponding Cohort/ClusterQueue.
 			&kueue.ResourceFlavor{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
-				5*time.Second,
+				3*time.Second,
 				dedupWindow,
 				r.enqueueCohortWhenResourceFlavorChanged,
 			),

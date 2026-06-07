@@ -65,15 +65,14 @@ func (r *ResourceFlavorCleanupReconciler) Reconcile(ctx context.Context, req ctr
 		err = r.Client.Delete(ctx, rf)
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
-				logger.Error(err, "delete resource flavor")
+				logger.Error(err, "delete orphaned resource flavor")
 				return ctrl.Result{}, err
 			}
 		}
-		logger.V(2).Info("orphaned resource flavor deleted")
+		logger.V(2).Info("deleted orphaned resource flavor")
 		return ctrl.Result{}, nil
 	}
 
-	logger.V(2).Info("resource flavor referenced by nodes, skip", "count", len(ndList.Items))
 	return ctrl.Result{}, nil
 }
 

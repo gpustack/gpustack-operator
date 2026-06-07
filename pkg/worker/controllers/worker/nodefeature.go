@@ -24,7 +24,7 @@ import (
 
 // NodeFeatureReconciler reconciles all Kubernetes Node objects to finish the following tasks:
 //   - When the labels or capacities of a Node are updated,
-//     create/update corresponding nfd.NodeResourceFlavor.
+//     create/update corresponding nfd.NodeFeature.
 type NodeFeatureReconciler struct {
 	Client ctrlcli.Client
 }
@@ -83,6 +83,9 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if !kubemeta.DeepEqual(aNf.Spec, eNf.Spec) {
 			aNf.Spec = eNf.Spec
 			skip = false
+			logger.V(2).Info("node feature spec changed, need update",
+				"old", aNf.Spec.Labels,
+				"new", eNf.Spec.Labels)
 		}
 		// Update owner reference.
 		if !kubemeta.IsControlledBy(aNf, nd) {
@@ -95,8 +98,10 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		kubeclientset.WithUpdateIfExisted(nfAlignFn))
 	if err != nil {
 		logger.Error(err, "sync node feature")
+		return ctrl.Result{}, err
 	}
-	return ctrl.Result{}, err
+	logger.V(2).Info("synced node feature")
+	return ctrl.Result{}, nil
 }
 
 func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {

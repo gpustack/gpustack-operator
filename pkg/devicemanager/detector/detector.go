@@ -19,9 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/system"
-	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/datax"
-	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
@@ -247,14 +245,6 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		return errors.New("skip deleted node")
 	}
 
-	// Skip nodes that are not managed by gpustack.
-	// The `gpustack.ai/managed=true` label is added to nodes managed by gpustack.
-	// Users can set it to `gpustack.ai/managed=false` to opt out.
-	// If the label is absent, the node is considered unmanaged and skipped.
-	if !kubemeta.HasLabel(nd, systemname.ManagedLabelKey) {
-		return errors.New("skip unmanaged node")
-	}
-
 	// NodeFeature.
 
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
@@ -310,29 +300,6 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		return fmt.Errorf("failed to sync NodeFeature object for node %s: %w", ndName, err)
 	}
 
-	// Check if the NodeFeature is ready before reporting devices,
-	// to avoid failed to report devices due to the NodeFeature is not ready.
-	// NB(thxCode): Not sure why NodeFeatureDiscovery cannot handle this immediately,
-	// so wait for the NodeFeature to be applied to the node before reporting devices,
-	// otherwise, delete the NodeFeature and trigger applying in next loop.
-	err = waitx.PollUntilContextTimeout(ctx, 3*time.Second, 30*time.Second, true, func(ctx context.Context) error {
-		nd, err := lpCli.CoreV1().Nodes().
-			Get(ctx, ndName, meta.GetOptions{
-				ResourceVersion: "0",
-			})
-		if err != nil {
-			return err
-		}
-		if !mapx.Contain(nd.Labels, aNf.Spec.Labels) {
-			return errors.New("NodeFeature has not applied to node yet")
-		}
-		return nil
-	})
-	if err != nil {
-		_ = kubeclientset.Delete(ctx, nfCli, aNf)
-		return fmt.Errorf("NodeFeature hasn't applied to node %s: %w", ndName, err)
-	}
-
 	// Devices.
 
 	devsCli := lpCli.WorkerV1alpha1().Devices()
@@ -344,7 +311,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 			Groups: eGroups,
 		},
 	}
-	kubemeta.ControlOnWithoutBlock(eDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeResourceFlavor"))
+	kubemeta.ControlOnWithoutBlock(eDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
 	devsAlginFn := func(aDevs *workercore.Devices) (_ *workercore.Devices, skip bool, err error) {
 		skip = true
 		// Update groups.
@@ -392,7 +359,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		}
 		// Update owner reference.
 		if !kubemeta.IsControlledBy(aDevs, aNf) {
-			kubemeta.ControlOnWithoutBlock(aDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeResourceFlavor"))
+			kubemeta.ControlOnWithoutBlock(aDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
 			skip = false
 		}
 		return aDevs, skip, err

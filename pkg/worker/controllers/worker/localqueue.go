@@ -89,8 +89,9 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		_, err = kubeclientset.UpdateWithCtrlClient(ctx, r.Client, lq,
 			kubeclientset.WithCreateIfNotExisted[*kueue.LocalQueue]())
 		if err != nil {
-			logger.Error(err, "sync local queue", "namespace", ns.Name)
+			logger.Error(err, "sync local queue", "namespace", ns.Name, "cluster queue", lq.Name)
 			errs = append(errs, err)
+			continue
 		}
 	}
 

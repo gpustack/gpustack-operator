@@ -98,7 +98,7 @@ func (r *CohortReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		logger.Error(err, "create cohort")
 		return ctrl.Result{}, err
 	}
-	logger.V(2).Info("cohort created")
+	logger.V(2).Info("created cohort")
 	return ctrl.Result{}, nil
 }
 
