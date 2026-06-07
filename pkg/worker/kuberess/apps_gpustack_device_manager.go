@@ -88,10 +88,19 @@ spec:
     - name: https
       port: 443
       targetPort: https
+{{- $image := "" }}
+{{- if $.Image -}}
+  {{- $image = $.Image -}}
+{{- else -}}
+  {{- $registry := default "docker.io" $.ContainerRegistry -}}
+  {{- $namespace := default "gpustack" $.ContainerNamespace -}}
+  {{- $image = printf "%s/%s/gpustack-operator:%s" $registry $namespace $.Version -}}
+{{- end }}
 {{- range $.Manufacturers }}
 {{- $manu := . }}
 {{- $manuPciID := getPciID $manu }}
-{{- if not (lookup "apps/v1" "DaemonSet" $.Namespace (printf "gpustack-operator-device-manager-%s" $manu)) }}
+{{- $daemonSet := lookup "apps/v1" "DaemonSet" $.Namespace (printf "gpustack-operator-device-manager-%s" $manu) }}
+{{- if or (not $daemonSet) (ne $image ($daemonSet | dig "spec" "template" "spec" "containers" (list (dict)) | first | dig "image" "")) }}
 {{- if has $manu (list "nvidia" "mthreads") }}
 {{- if not (lookup "node.k8s.io/v1" "RuntimeClass" "" $manu) }}
 ---
@@ -150,14 +159,6 @@ spec:
         - operator: "Exists"
       containers:
         - name: main
-{{- $image := "" }}
-{{- if $.Image -}}
-  {{- $image = $.Image -}}
-{{- else -}}
-  {{- $registry := default "docker.io" $.ContainerRegistry -}}
-  {{- $namespace := default "gpustack" $.ContainerNamespace -}}
-  {{- $image = printf "%s/%s/gpustack-operator:%s" $registry $namespace $.Version -}}
-{{- end }}
           image: "{{ $image }}"
           imagePullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
           args:
