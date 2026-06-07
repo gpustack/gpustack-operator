@@ -21,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/datax"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
@@ -229,7 +230,7 @@ type (
 func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGroupList) error {
 	ndName := osx.Getenv("KUBERNETES_NODE_NAME")
 	if ndName == "" {
-		return nil
+		return errors.New("environment variable KUBERNETES_NODE_NAME is not set")
 	}
 
 	lpCli := system.LoopbackKubeClient.Get()
@@ -254,12 +255,12 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		return errors.New("skip unmanaged node")
 	}
 
-	// NodeResourceFlavor.
+	// NodeFeature.
 
 	nfCli := lpCli.NfdV1alpha1().NodeFeatures(kuberess.SystemNamespaceName)
 	eNf := &nfd.NodeFeature{
 		ObjectMeta: meta.ObjectMeta{
-			Name:      ndName + "-gpustack-devicemanager",
+			Name:      ndName + "-gpustack-device-manager",
 			Namespace: kuberess.SystemNamespaceName,
 			Labels: map[string]string{
 				nfd.NodeFeatureObjNodeNameLabel: ndName,
@@ -306,7 +307,30 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	aNf, err := kubeclientset.Create(ctx, nfCli, eNf,
 		kubeclientset.WithUpdateIfExisted(nfAlignFn))
 	if err != nil {
-		return fmt.Errorf("failed to create or update NodeResourceFlavor object for node %s: %w", ndName, err)
+		return fmt.Errorf("failed to sync NodeFeature object for node %s: %w", ndName, err)
+	}
+
+	// Check if the NodeFeature is ready before reporting devices,
+	// to avoid failed to report devices due to the NodeFeature is not ready.
+	// NB(thxCode): Not sure why NodeFeatureDiscovery cannot handle this immediately,
+	// so wait for the NodeFeature to be applied to the node before reporting devices,
+	// otherwise, delete the NodeFeature and trigger applying in next loop.
+	err = waitx.PollUntilContextTimeout(ctx, 3*time.Second, 30*time.Second, true, func(ctx context.Context) error {
+		nd, err := lpCli.CoreV1().Nodes().
+			Get(ctx, ndName, meta.GetOptions{
+				ResourceVersion: "0",
+			})
+		if err != nil {
+			return err
+		}
+		if !mapx.Contain(nd.Labels, aNf.Spec.Labels) {
+			return errors.New("NodeFeature has not applied to node yet")
+		}
+		return nil
+	})
+	if err != nil {
+		_ = kubeclientset.Delete(ctx, nfCli, aNf)
+		return fmt.Errorf("NodeFeature hasn't applied to node %s: %w", ndName, err)
 	}
 
 	// Devices.
@@ -377,7 +401,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	_, err = kubeclientset.Create(ctx, devsCli, eDevs,
 		kubeclientset.WithUpdateIfExisted(devsAlginFn))
 	if err != nil {
-		return fmt.Errorf("failed to create or update Devices object for node %s: %w", ndName, err)
+		return fmt.Errorf("failed to sync Devices object for node %s: %w", ndName, err)
 	}
 
 	return nil

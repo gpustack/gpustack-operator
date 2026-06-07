@@ -126,7 +126,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 		return ctrlreconcile.Result{}, nil
 	}
 
-	// Create or update ClusterQueue.
+	// Sync ClusterQueue.
 	eResGroups, eNotes := r.constructResourceGroups(ctx, rfList)
 	if len(eResGroups) == 0 {
 		logger.Error(nil, "no valid resource flavors, skip")
