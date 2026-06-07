@@ -25,7 +25,6 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
-	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
@@ -372,16 +371,14 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 	}
 
 	r.Client = opts.Manager.GetClient()
-	dedupWindow := ctrlhandlerx.NewDedupWindow[ctrlreconcile.Request]()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("clusterqueue").
 		Watches(
 			// Watch kueue.ResourceFlavors and enqueue the corresponding Cohort/ClusterQueue.
 			&kueue.ResourceFlavor{},
-			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
 				3*time.Second,
-				dedupWindow,
 				r.enqueueCohortWhenResourceFlavorChanged,
 			),
 			ctrlbuilder.WithPredicates(
@@ -415,23 +412,20 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 		Watches(
 			// Watch Nodes and enqueue the corresponding Cohort/ClusterQueue.
 			&core.Node{},
-			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
 				3*time.Second,
-				dedupWindow,
 				r.enqueueCohortWhenNodeChanged,
 			),
 			ctrlbuilder.WithPredicates(
 				// Interested in Node objects:
 				// - created.
 				// - deleted.
-				// - updated if labels have changed.
+				// - updated.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								systemname.LabelPrefix,
-								devicefeature.FeatureLabelPrefix)
+							return true
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true

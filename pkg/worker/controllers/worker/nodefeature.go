@@ -18,7 +18,6 @@ import (
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
-	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
@@ -114,34 +113,13 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 			ctrlbuilder.WithPredicates(
 				// Trigger reconciliation when a Node is:
 				// - created.
-				// - updated if labels or external capacities have changed.
+				// - updated.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
-						if newNd.DeletionTimestamp == nil {
-							// Check if labels have changed.
-							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								devicefeature.FeatureLabelPrefix) {
-								return true
-							}
-							// Check if capacities have changed.
-							for cn := range newNd.Status.Capacity {
-								switch cn {
-								default:
-									continue
-								case core.ResourceCPU:
-								case core.ResourceMemory:
-								case core.ResourceEphemeralStorage:
-									if !oldNd.Status.Capacity[cn].Equal(newNd.Status.Capacity[cn]) {
-										return true
-									}
-								}
-							}
-						}
-						return false
+						return e.ObjectNew.GetDeletionTimestamp() == nil
 					},
 					GenericFunc: func(e ctrlevent.GenericEvent) bool {
 						return false
