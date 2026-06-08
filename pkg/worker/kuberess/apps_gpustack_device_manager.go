@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"text/template"
 
+	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -16,17 +17,26 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/utils/osx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/version"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 func installGPUStackDeviceManager(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
-	specImg, specImgPullPolicy := extractImageConfig(ctx, helmCli.KubeClientSet())
+	name := "device-manager"
+	if disable.Has(name) {
+		return nil
+	}
+
+	ctrCfg := extractContainerConfig(ctx, helmCli.KubeClientSet())
 
 	valuesContext := globalValuesContext
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
-	valuesContext["Image"] = specImg
-	valuesContext["ImagePullPolicy"] = specImgPullPolicy
+	valuesContext["Image"] = ctrCfg.Image
+	valuesContext["ImagePullPolicy"] = ctrCfg.ImagePullPolicy
+	if len(ctrCfg.Env) > 0 {
+		valuesContext["Env"] = ctrCfg.Env
+	}
 	valuesContext["Version"] = version.Version
 	valuesContext["SecurePort"] = devicemanager.NewOptions().ServerOptions.BindPort
 
@@ -202,6 +212,9 @@ spec:
                   fieldPath: spec.nodeName
             - name: KUBERNTES_SERVICE_NAME
               value: "gpustack-operator-device-manager"
+{{- if $.Env }}
+{{- toYaml $.Env | nindent 12 }}
+{{- end }}
           ports:
             - name: https
               containerPort: {{ $.SecurePort }}
@@ -381,7 +394,13 @@ func extendDeviceManagerApplyYamlTemplateFuncMap() template.FuncMap {
 	}
 }
 
-func extractImageConfig(ctx context.Context, cli kubernetes.Interface) (img, imgPullPolicy string) {
+type _ContainerConfig struct {
+	Image           string
+	ImagePullPolicy string
+	Env             []core.EnvVar
+}
+
+func extractContainerConfig(ctx context.Context, cli kubernetes.Interface) (ctrCfg _ContainerConfig) {
 	if v := osx.Getenv("KUBERNETES_POD_NAME"); v != "" {
 		pod, err := cli.CoreV1().
 			Pods(kuberess.SystemNamespaceName).
@@ -390,21 +409,29 @@ func extractImageConfig(ctx context.Context, cli kubernetes.Interface) (img, img
 					ResourceVersion: "0",
 				})
 		if err == nil {
+			var ctr *core.Container
 			for i := range pod.Spec.Containers {
-				ctr := &pod.Spec.Containers[i]
-				if ctr.Name == "main" {
-					img = ctr.Image
-					imgPullPolicy = string(ctr.ImagePullPolicy)
+				if pod.Spec.Containers[i].Name == "main" {
+					ctr = &pod.Spec.Containers[i]
 					break
 				}
 			}
-			if img == "" {
-				img = pod.Spec.Containers[0].Image
-				imgPullPolicy = string(pod.Spec.Containers[0].ImagePullPolicy)
+			if ctr == nil {
+				ctr = &pod.Spec.Containers[0]
 			}
+			ctrCfg.Image = ctr.Image
+			ctrCfg.ImagePullPolicy = string(ctr.ImagePullPolicy)
+			ctrCfg.Env = make([]core.EnvVar, 0, len(ctr.Env))
+			for i := range ctr.Env {
+				if !stringx.HasPrefix(ctr.Env[i].Name, "GPUSTACK_") {
+					continue
+				}
+				ctrCfg.Env = append(ctrCfg.Env, ctr.Env[i])
+			}
+			return ctrCfg
 		}
-		return img, imgPullPolicy
 	}
 
-	return "", settings.ImagePullPolicy.ShouldValueFromRemote(ctx)
+	ctrCfg.ImagePullPolicy = settings.ImagePullPolicy.ShouldValueFromRemote(ctx)
+	return ctrCfg
 }
