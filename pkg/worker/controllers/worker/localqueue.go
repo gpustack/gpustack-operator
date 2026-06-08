@@ -74,9 +74,9 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			continue
 		}
 
-		// Skip if system namespace.
-		if ns.Name == kuberess.SystemNamespaceName {
-			logger.V(3).Info("skip system namespace")
+		// Skip if reserved namespace.
+		if kuberess.IsReservedNamespace(ns.Name) {
+			logger.V(3).Info("skip reserved namespace")
 			continue
 		}
 
@@ -156,9 +156,9 @@ func (r *LocalQueueReconciler) enqueueClusterQueueWhenNamespaceCreated(
 		return nil
 	}
 
-	// Skip if system namespace.
-	if ns.Name == kuberess.SystemNamespaceName {
-		logger.V(3).Info("skip system namespace")
+	// Skip if reserved namespace.
+	if kuberess.IsReservedNamespace(ns.Name) {
+		logger.V(3).Info("skip reserved namespace")
 		return nil
 	}
 
