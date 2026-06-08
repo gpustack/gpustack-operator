@@ -21,16 +21,6 @@ func (in Instance) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceEnvVar) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceEnvVar"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceEphemeralVolume) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceEphemeralVolume"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceEvents) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceEvents"
 }
@@ -111,16 +101,6 @@ func (in InstancePersistentVolumeTypeSpec) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstancePort) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstancePort"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceResources) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceResources"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceSSHPublicKey) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceSSHPublicKey"
 }
@@ -133,26 +113,6 @@ func (in InstanceSSHPublicKeyList) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceSSHPublicKeySpec) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceSSHPublicKeySpec"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceServicePort) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceServicePort"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceSpec) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceSpec"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceStatus) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceStatus"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceTemplate) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceTemplate"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
@@ -183,11 +143,6 @@ func (in InstanceTypeStatus) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceTypeUnitResources) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceTypeUnitResources"
-}
-
-// OpenAPIModelName returns the OpenAPI model name for this type.
-func (in InstanceVolume) OpenAPIModelName() string {
-	return "ai.gpustack.worker.v1.InstanceVolume"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

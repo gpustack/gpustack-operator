@@ -306,14 +306,14 @@ func (c *_JSONPathTemplateTableConvertor) ConvertToTable(_ context.Context, obj,
 }
 
 // renderCustomFieldString interleaves text-node and action-node results from
-// jsonpath.FindResults, substituting `-` whenever an action slot produced no match.
+// jsonpath.FindResults.
 func renderCustomFieldString(buf *bytes.Buffer, path *jsonpath.JSONPath, isAction []bool, results [][]reflect.Value) error {
 	// In normal cases len(results) == len(isAction). If a range/end pair shifts the
 	// counts, fall back to the default Execute-style behavior for the trailing slots.
 	for i, slot := range results {
 		switch {
 		case i < len(isAction) && isAction[i] && len(slot) == 0:
-			buf.WriteByte('-')
+			// Nothing to do.
 		default:
 			if err := path.PrintResults(buf, slot); err != nil {
 				return err

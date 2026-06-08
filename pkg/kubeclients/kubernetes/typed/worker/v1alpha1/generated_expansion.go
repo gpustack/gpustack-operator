@@ -8,3 +8,5 @@
 package v1alpha1
 
 type DevicesExpansion interface{}
+
+type InstanceExpansion interface{}

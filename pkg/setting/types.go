@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
+	cache "github.com/patrickmn/go-cache"
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -105,6 +107,10 @@ func (s Setting) Configure(ctx context.Context, newVal string) error {
 	return nil
 }
 
+// _Cache is a cache for the values of settings,
+// which is used to reduce the number of API calls to the Kubernetes API server.
+var _Cache = cache.New(30*time.Second, cache.NoExpiration)
+
 // ValueFromRemote returns the value of the setting by directly accessing the delegated secret in Kubernetes API server,
 // which is used for remote access and does not involve the controller-runtime client cache.
 //
@@ -114,6 +120,10 @@ func (s Setting) Configure(ctx context.Context, newVal string) error {
 //
 // If the value is not found in the delegated secret, it returns the default value of the setting.
 func (s Setting) ValueFromRemote(ctx context.Context) (string, error) {
+	if val, found := _Cache.Get(s.name); found {
+		return val.(string), nil
+	}
+
 	lpCli := system.LoopbackKubeClient.Get()
 
 	sec, err := lpCli.CoreV1().
@@ -128,7 +138,9 @@ func (s Setting) ValueFromRemote(ctx context.Context) (string, error) {
 		return s.defVal, fmt.Errorf("get value of setting %s: not found", s.name)
 	}
 
-	return string(sec.Data[s.name]), nil
+	ret := string(sec.Data[s.name])
+	_Cache.Set(s.name, ret, cache.DefaultExpiration)
+	return ret, nil
 }
 
 // ShouldValueFromRemote returns the value of the setting from remote without error.
@@ -140,6 +152,10 @@ func (s Setting) ShouldValueFromRemote(ctx context.Context) string {
 //
 // If the value is not found in the delegated secret, it returns the default value of the setting.
 func (s Setting) Value(ctx context.Context) (string, error) {
+	if val, found := _Cache.Get(s.name); found {
+		return val.(string), nil
+	}
+
 	lpCli := system.LoopbackCtrlClient.Get()
 
 	sec := &core.Secret{
@@ -162,7 +178,9 @@ func (s Setting) Value(ctx context.Context) (string, error) {
 		return s.defVal, fmt.Errorf("get value of setting %s: not found", s.name)
 	}
 
-	return string(sec.Data[s.name]), nil
+	ret := string(sec.Data[s.name])
+	_Cache.Set(s.name, ret, cache.DefaultExpiration)
+	return ret, nil
 }
 
 // ShouldValue returns the value of the setting without error.

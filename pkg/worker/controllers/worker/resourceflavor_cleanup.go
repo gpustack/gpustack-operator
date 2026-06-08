@@ -105,9 +105,6 @@ func (r *ResourceFlavorCleanupReconciler) SetupController(ctx context.Context, o
 						}
 						return !oldNd.DeletionTimestamp.Equal(newNd.DeletionTimestamp)
 					},
-					GenericFunc: func(e ctrlevent.GenericEvent) bool {
-						return false
-					},
 				},
 			),
 		).
@@ -115,7 +112,8 @@ func (r *ResourceFlavorCleanupReconciler) SetupController(ctx context.Context, o
 }
 
 func (r *ResourceFlavorCleanupReconciler) enqueueResourceFlavorWhenNodeChanged(
-	ctx context.Context, obj ctrlcli.Object,
+	ctx context.Context,
+	obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("node", ctrlcli.ObjectKeyFromObject(obj))

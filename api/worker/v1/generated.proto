@@ -47,36 +47,15 @@ message DevicesList {
 
 // Instance is the schema for worker.gpustack.ai.
 //
-// Underhood, an Instance is mapping to a Kubernetes Pod,
-// and the Instance's name is the same as the Kubernetes Pod's name.
-//
 // +genclient
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["inst"]
+// +k8s:apireg-gen:resource:scope="Namespaced",categories=["gpustack"],shortName=["inst"],subResources=["status"]
 message Instance {
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
 
-  optional InstanceSpec spec = 2;
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.InstanceSpec spec = 2;
 
-  optional InstanceStatus status = 3;
-}
-
-// InstanceEnvVar defines the environment variable to set in the Instance.
-message InstanceEnvVar {
-  // Name is the name of the environment variable,
-  // each name in one Instance must be unique.
-  optional string name = 1;
-
-  // Value is the value of the environment variable.
-  optional string value = 2;
-}
-
-// InstanceEphemeralVolume defines the ephemeral volume to mount in the Instance.
-message InstanceEphemeralVolume {
-  // Capacity is the size limit of the volume.
-  //
-  // +required
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity capacity = 1;
+  optional .gpustack.ai.gpustack.api.worker.v1alpha1.InstanceStatus status = 3;
 }
 
 // InstanceEvents is the events of an Instance subresource,
@@ -331,44 +310,6 @@ message InstancePersistentVolumeTypeSpec {
   optional InstancePersistentVolumeSource instancePersistentVolumeSource = 3;
 }
 
-// InstancePort defines the port to expose from the Instance.
-message InstancePort {
-  // Port is the port number to expose on the Instance.
-  optional int32 port = 1;
-
-  // Protocol is the protocol to use for the port.
-  //
-  // +k8s:validation:enum=["TCP","UDP","SCTP"]
-  // +k8s:validation:default="TCP"
-  optional string protocol = 2;
-
-  // Name is the name of the port.
-  //
-  // +k8s:validation:maxLength=16
-  optional string name = 3;
-}
-
-// InstanceResources defines the resource requirements for the Instance.
-message InstanceResources {
-  // CPU is the CPU resource requirement for the Instance, e.g. "4", "8".
-  //
-  // +required
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity cpu = 1;
-
-  // RAM is the RAM resource requirement for the Instance, e.g. "40G", "16G".
-  //
-  // +required
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity ram = 2;
-
-  // LocalStorage is the local storage resource requirement for the Instance, e.g. "100G", "500G".
-  //
-  // +required
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity localStorage = 3;
-
-  // Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
-  optional .k8s.io.apimachinery.pkg.api.resource.Quantity accelerator = 4;
-}
-
 // InstanceSSHPublicKey is the schema for worker.gpustack.ai.
 //
 // Underhood, an InstanceSSHPublicKey is mapping to a Kubernetes Secret,
@@ -405,153 +346,6 @@ message InstanceSSHPublicKeySpec {
 
   // Data is the SSH public key data.
   optional string data = 3;
-}
-
-// InstanceServicePort defines the port to expose from the container and the port to expose on the node.
-message InstanceServicePort {
-  optional InstancePort instancePort = 1;
-
-  // NodePort is the port number to expose on the Kubernetes Node.
-  optional int32 nodePort = 2;
-}
-
-// InstanceSpec defines the desired state of Instance.
-message InstanceSpec {
-  // DisplayName is the display name of the Instance.
-  //
-  // +k8s:validation:maxLength=64
-  optional string displayName = 1;
-
-  // Description is the description of the Instance.
-  //
-  // +k8s:validation:maxLength=1024
-  optional string description = 2;
-
-  // Type is the name of InstanceType that provisions corresponding resources.
-  //
-  // Immutable after creation.
-  //
-  // +required
-  optional string type = 3;
-
-  // InstanceTemplate is the template for the Instance to run.
-  //
-  // Immutable after creation.
-  optional InstanceTemplate instanceTemplate = 4;
-
-  // Volume is the volume to mount in the Instance.
-  //
-  // Immutable after creation.
-  //
-  // +required
-  optional InstanceVolume volume = 5;
-
-  // SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.
-  //
-  // Immutable after creation.
-  optional .k8s.io.api.core.v1.LocalObjectReference sshPublicKey = 6;
-}
-
-// InstanceStatus defines the observed state of Instance.
-message InstanceStatus {
-  // Phase is the current phase of the Instance.
-  optional string phase = 1;
-
-  // PhaseMessage is the message to describe the current phase of the Instance.
-  optional string phaseMessage = 2;
-
-  // NodeName is the name of the Kubernetes Node that the Instance is running on.
-  optional string nodeName = 3;
-
-  // AccessAddresses holds the accessible addresses allocated to the Instance.
-  //
-  // +listType=atomic
-  repeated string accessAddresses = 4;
-
-  // HostIPs holds the IP addresses allocated to the host.
-  //
-  // +patchStrategy=merge
-  // +patchMergeKey=ip
-  // +listType=map
-  // +listMapKey=ip
-  repeated .k8s.io.api.core.v1.HostIP hostIPs = 5;
-
-  // PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.
-  //
-  // +patchStrategy=merge
-  // +patchMergeKey=ip
-  // +listType=map
-  // +listMapKey=ip
-  repeated .k8s.io.api.core.v1.PodIP podIPs = 6;
-
-  // Ports is the list of ports to expose from the Instance.
-  //
-  // +listType=map
-  // +listMapKey=port
-  // +listMapKey=protocol
-  repeated InstanceServicePort ports = 7;
-
-  // Allocations is the list of devices allocated to the Instance.
-  //
-  // +listType=map
-  // +listMapKey=id
-  // +listMapKey=manufacturer
-  repeated .gpustack.ai.gpustack.api.worker.v1alpha1.DevicesAllocationGroup allocations = 8;
-}
-
-// InstanceTemplate defines the template for the Instance to run.
-message InstanceTemplate {
-  // Image is the container image to run.
-  //
-  // +required
-  optional string image = 1;
-
-  // ImagePullPolicy is the image pull policy to use.
-  //
-  // +default="IfNotPresent"
-  // +k8s:validation:enum=["Always","IfNotPresent","Never"]
-  optional string imagePullPolicy = 2;
-
-  // Command is the command to run in the Instance,
-  // which should overwrite the default command in the container image CMD.
-  //
-  // +listType=atomic
-  repeated string command = 3;
-
-  // Privileged indicates whether the container should run in privileged mode.
-  //
-  // +k8s:validation:default=false
-  optional bool privileged = 4;
-
-  // Ports is the list of ports to expose from the Instance.
-  //
-  // +patchMergeKey=port
-  // +patchStrategy=merge
-  // +listType=map
-  // +listMapKey=port
-  // +listMapKey=protocol
-  repeated InstancePort ports = 5;
-
-  // Env is the list of environment variables to set in the Instance.
-  //
-  // +patchMergeKey=name
-  // +patchStrategy=merge
-  // +listType=map
-  // +listMapKey=name
-  repeated InstanceEnvVar env = 6;
-
-  // Resources is the resource requirements for the Instance.
-  optional InstanceResources resources = 7;
-
-  // VolumeMount is a path to mount the volume in the Instance.
-  //
-  // +default="/workspace"
-  // +k8s:validation:pattern="^(/[^/]+)+$"
-  // +k8s:validation:maxLength=1024
-  optional string volumeMount = 8;
-
-  // ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
-  optional .k8s.io.api.core.v1.LocalObjectReference imagePullSecret = 9;
 }
 
 // InstanceType is the schema for worker.gpustack.ai.
@@ -654,16 +448,6 @@ message InstanceTypeUnitResources {
 
   // RAM is the unit RAM resource(Mi) of the InstanceType.
   optional string ram = 3;
-}
-
-// InstanceVolume defines the volume to mount in the Instance,
-// which can be either ephemeral or persistent.
-message InstanceVolume {
-  // Ephemeral is the ephemeral volume to mount in the Instance.
-  optional InstanceEphemeralVolume ephemeral = 1;
-
-  // Persistent is the reference to the InstancePersistentVolume to mount in the Instance.
-  optional .k8s.io.api.core.v1.LocalObjectReference persistent = 2;
 }
 
 // NFSInstancePersistentVolumeSource defines the source of NFS.

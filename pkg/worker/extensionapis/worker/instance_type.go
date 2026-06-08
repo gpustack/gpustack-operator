@@ -24,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
+	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -263,7 +264,7 @@ func convertClusterQueueListOptsFromInstanceTypeListOpts(in ctrlcli.ListOptions)
 
 func convertInstanceTypeFromClusterQueue(
 	cq *kueue.ClusterQueue,
-	overcommit bool,
+	withOvercommit bool,
 ) *worker.InstanceType {
 	if cq == nil {
 		return nil
@@ -378,8 +379,8 @@ func convertInstanceTypeFromClusterQueue(
 			for j := range flv.Resources {
 				res := &flv.Resources[j]
 				total := res.Total
-				if overcommit {
-					total = scaleBackOvercommitRequest(res.Name, total, acceleratable)
+				if withOvercommit {
+					total = kuberequest.ScaleBackOvercommit(res.Name, total, acceleratable)
 				}
 				switch res.Name {
 				case resourceAccelerator:

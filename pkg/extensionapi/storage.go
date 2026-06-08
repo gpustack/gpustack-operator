@@ -958,7 +958,7 @@ type (
 		//
 		// It is usually recommended to perform type conversion in this method,
 		// for example, `return DO(uo)`.
-		CastObjectFrom(uo UO) DO
+		CastObjectFrom(ctx context.Context, uo UO) DO
 	}
 
 	// CurdProxyOnCreateBeforeAdvice is an interface for intercepting before OnCreate.
@@ -1058,8 +1058,8 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) CastObjectTo(do DO) UO {
 	return uo
 }
 
-func (h _CurdProxyHandler[DO, DOL, UO, UOL]) CastObjectFrom(uo UO) DO {
-	do := h.CurdProxyHandler.CastObjectFrom(uo)
+func (h _CurdProxyHandler[DO, DOL, UO, UOL]) CastObjectFrom(ctx context.Context, uo UO) DO {
+	do := h.CurdProxyHandler.CastObjectFrom(ctx, uo)
 	dot, err := kmeta.TypeAccessor(do)
 	if err == nil {
 		dot.SetAPIVersion(h.DOAPIVersion)
@@ -1098,7 +1098,7 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnCreate(
 	if err != nil {
 		return nil, err
 	}
-	return h.CastObjectFrom(uo), nil
+	return h.CastObjectFrom(ctx, uo), nil
 }
 
 func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnList(
@@ -1131,7 +1131,7 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnList(
 	}
 	dos := make([]runtime.Object, 0, len(uos))
 	for i := range uos {
-		dos = append(dos, h.CastObjectFrom(uos[i].(UO)))
+		dos = append(dos, h.CastObjectFrom(ctx, uos[i].(UO)))
 	}
 
 	dol := h.NewList()
@@ -1221,7 +1221,7 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnWatch(
 				}
 
 				// Cast.
-				do := h.CastObjectFrom(uo)
+				do := h.CastObjectFrom(ctx, uo)
 
 				// During advice.
 				if da, ok := h.CurdProxyHandler.(CurdProxyOnWatchDuringAdvice[DO]); ok {
@@ -1278,7 +1278,7 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnGet(
 	if err != nil {
 		return nil, err
 	}
-	return h.CastObjectFrom(uo), nil
+	return h.CastObjectFrom(ctx, uo), nil
 }
 
 // _UpdateHandlerWithoutNew is an interface for an updating handler without New function.
@@ -1316,7 +1316,7 @@ func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnUpdate(
 	if err != nil {
 		return nil, err
 	}
-	return h.CastObjectFrom(uo), nil
+	return h.CastObjectFrom(ctx, uo), nil
 }
 
 func (h _CurdProxyHandler[DO, DOL, UO, UOL]) OnDelete(

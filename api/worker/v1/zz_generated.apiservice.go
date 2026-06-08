@@ -128,6 +128,12 @@ func (*Instance) Categories() []string {
 	}
 }
 
+var _ WithStatusSubResource = (*Instance)(nil)
+
+func (in *Instance) CopyStatusTo(out runtime.Object) {
+	out.(*Instance).Status = in.Status
+}
+
 var _ rest.Scoper = (*InstanceImagePullSecret)(nil)
 
 func (*InstanceImagePullSecret) NamespaceScoped() bool {

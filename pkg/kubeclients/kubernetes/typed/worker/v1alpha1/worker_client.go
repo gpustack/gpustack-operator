@@ -18,6 +18,7 @@ import (
 type WorkerV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	DevicesGetter
+	InstancesGetter
 }
 
 // WorkerV1alpha1Client is used to interact with features provided by the worker.gpustack.ai group.
@@ -27,6 +28,10 @@ type WorkerV1alpha1Client struct {
 
 func (c *WorkerV1alpha1Client) Devices() DevicesInterface {
 	return newDevices(c)
+}
+
+func (c *WorkerV1alpha1Client) Instances(namespace string) InstanceInterface {
+	return newInstances(c, namespace)
 }
 
 // NewForConfig creates a new WorkerV1alpha1Client for the given config.

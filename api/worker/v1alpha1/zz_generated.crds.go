@@ -16,7 +16,8 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
-		"Devices": crd_gpustack_api_worker_v1alpha1_Devices(),
+		"Devices":  crd_gpustack_api_worker_v1alpha1_Devices(),
+		"Instance": crd_gpustack_api_worker_v1alpha1_Instance(),
 	}
 }
 
@@ -341,6 +342,525 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 												"manufacturer",
 											},
 											XListType: ptr.To[string]("map"),
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "instances.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "instances",
+				Singular: "instance",
+				Kind:     "Instance",
+				ListKind: "InstanceList",
+			},
+			Scope: "Namespaced",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "Instance is the schema for worker.gpustack.ai.",
+							Type:        "object",
+							Required: []string{
+								"spec",
+							},
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"type",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"command": {
+											Description: "Command is the command to run in the Instance,\nwhich should overwrite the default command in the container image CMD.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
+										"description": {
+											Description: "Description is the description of the Instance.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](1024),
+										},
+										"displayName": {
+											Description: "DisplayName is the display name of the Instance.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](64),
+										},
+										"env": {
+											Description: "Env is the list of environment variables to set in the Instance.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"name",
+														"value",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name is the name of the environment variable,\neach name in one Instance must be unique.",
+															Type:        "string",
+														},
+														"value": {
+															Description: "Value is the value of the environment variable.",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"name",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"image": {
+											Description: "Image is the container image to run.",
+											Type:        "string",
+										},
+										"imagePullPolicy": {
+											Description: "ImagePullPolicy is the image pull policy to use.",
+											Type:        "string",
+											Default: &v1.JSON{
+												Raw: []byte(`"IfNotPresent"`),
+											},
+											Enum: []v1.JSON{
+												{
+													Raw: []byte(`"Always"`),
+												},
+												{
+													Raw: []byte(`"IfNotPresent"`),
+												},
+												{
+													Raw: []byte(`"Never"`),
+												},
+											},
+										},
+										"imagePullSecret": {
+											Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+													Type:        "string",
+													Default: &v1.JSON{
+														Raw: []byte(`""`),
+													},
+												},
+											},
+											Nullable: true,
+										},
+										"ports": {
+											Description: "Ports is the list of ports to expose from the Instance.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"port",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name is the name of the port.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](16),
+														},
+														"port": {
+															Description: "Port is the port number to expose on the Instance.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"protocol": {
+															Description: "Protocol is the protocol to use for the port.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`"TCP"`),
+															},
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"TCP"`),
+																},
+																{
+																	Raw: []byte(`"UDP"`),
+																},
+																{
+																	Raw: []byte(`"SCTP"`),
+																},
+															},
+														},
+													},
+												},
+											},
+											Nullable: true,
+											XListMapKeys: []string{
+												"port",
+												"protocol",
+											},
+											XListType: ptr.To[string]("map"),
+										},
+										"privileged": {
+											Description: "Privileged indicates whether the container should run in privileged mode.",
+											Type:        "boolean",
+											Default: &v1.JSON{
+												Raw: []byte(`false`),
+											},
+										},
+										"resources": {
+											Description: "Resources is the resource requirements for the Instance.",
+											Type:        "object",
+											Required: []string{
+												"cpu",
+												"ram",
+												"localStorage",
+											},
+											Properties: map[string]v1.JSONSchemaProps{
+												"accelerator": {
+													Description: "Accelerator is the accelerator resource requirement for the Instance, e.g. \"1\", \"2\".",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													Nullable:     true,
+													XIntOrString: true,
+												},
+												"cpu": {
+													Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"localStorage": {
+													Description: "LocalStorage is the local storage resource requirement for the Instance, e.g. \"100G\", \"500G\".",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"ram": {
+													Description: "RAM is the RAM resource requirement for the Instance, e.g. \"40G\", \"16G\".",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+											Nullable: true,
+										},
+										"sshPublicKey": {
+											Description: "SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.\nImmutable after creation.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"name": {
+													Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+													Type:        "string",
+													Default: &v1.JSON{
+														Raw: []byte(`""`),
+													},
+												},
+											},
+											Nullable: true,
+										},
+										"stop": {
+											Description: "Stop indicates whether to stop the Instance after it is created.",
+											Type:        "boolean",
+											Nullable:    true,
+										},
+										"type": {
+											Description: "Type is the name of InstanceType that provisions corresponding resources.\nImmutable after creation.",
+											Type:        "string",
+										},
+										"volume": {
+											Description: "Volume is the volume to mount in the Instance.\nImmutable after creation.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"ephemeral": {
+													Description: "Ephemeral is the ephemeral volume to mount in the Instance.",
+													Type:        "object",
+													Required: []string{
+														"capacity",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"capacity": {
+															Description: "Capacity is the size limit of the volume.",
+															Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+															AnyOf: []v1.JSONSchemaProps{
+																{
+																	Type: "integer",
+																},
+																{
+																	Type: "string",
+																},
+															},
+															XIntOrString: true,
+														},
+													},
+													Nullable: true,
+												},
+												"persistent": {
+													Description: "Persistent is the reference to the InstancePersistentVolume to mount in the Instance.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`""`),
+															},
+														},
+													},
+													Nullable: true,
+												},
+											},
+										},
+										"volumeMount": {
+											Description: "VolumeMount is a path to mount the volume in the Instance.",
+											Type:        "string",
+											Default: &v1.JSON{
+												Raw: []byte(`"/workspace"`),
+											},
+											MaxLength: ptr.To[int64](1024),
+											Pattern:   `^(/[^/]+)+$`,
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Properties: map[string]v1.JSONSchemaProps{
+										"accessAddresses": {
+											Description: "AccessAddresses holds the accessible addresses allocated to the Instance.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "string",
+												},
+											},
+											Nullable: true,
+										},
+										"allocations": {
+											Description: "Allocations is the list of devices allocated to the Instance.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"id",
+														"manufacturer",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"accelerators": {
+															Description: "Accelerators is the list of the allocated accelerator devices in this group.",
+															Type:        "array",
+															Items: &v1.JSONSchemaPropsOrArray{
+																Schema: &v1.JSONSchemaProps{
+																	Type: "object",
+																	Required: []string{
+																		"id",
+																		"index",
+																		"mode",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"allocated": {
+																			Description: "Allocated is the allocated units of the device.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"id": {
+																			Description: "ID is the universally unique identifier for this device.",
+																			Type:        "string",
+																		},
+																		"index": {
+																			Description: "Index is the logic number of the device, starting from 0.",
+																			Type:        "integer",
+																			Format:      "int64",
+																		},
+																		"mode": {
+																			Description: "Mode is the allocation mode of the device.",
+																			Type:        "integer",
+																			Format:      "int64",
+																		},
+																		"remaining": {
+																			Description: "Remaining is the remaining allocatable units of the device.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																	},
+																},
+															},
+															Nullable: true,
+															XListMapKeys: []string{
+																"id",
+															},
+															XListType: ptr.To[string]("map"),
+														},
+														"id": {
+															Description: "ID is the universally unique identifier for this device group.",
+															Type:        "string",
+														},
+														"manufacturer": {
+															Description: "Manufacturer is the name of the device manufacturer.",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+										},
+										"hostIPs": {
+											Description: "HostIPs holds the IP addresses allocated to the host.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"ip",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"ip": {
+															Description: "IP is the IP address assigned to the host",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+										},
+										"nodeName": {
+											Description: "NodeName is the name of the Kubernetes Node that the Instance is running on.",
+											Type:        "string",
+										},
+										"phase": {
+											Description: "Phase is the current phase of the Instance.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage is the message to describe the current phase of the Instance.",
+											Type:        "string",
+										},
+										"podIPs": {
+											Description: "PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"ip",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"ip": {
+															Description: "IP is the IP address assigned to the pod",
+															Type:        "string",
+														},
+													},
+												},
+											},
+											Nullable: true,
+										},
+										"ports": {
+											Description: "Ports is the list of ports to expose from the Instance.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"name": {
+															Description: "Name is the name of the port.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](16),
+														},
+														"nodePort": {
+															Description: "NodePort is the port number to expose on the Kubernetes Node.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"port": {
+															Description: "Port is the port number to expose on the Instance.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"protocol": {
+															Description: "Protocol is the protocol to use for the port.",
+															Type:        "string",
+															Default: &v1.JSON{
+																Raw: []byte(`"TCP"`),
+															},
+															Enum: []v1.JSON{
+																{
+																	Raw: []byte(`"TCP"`),
+																},
+																{
+																	Raw: []byte(`"UDP"`),
+																},
+																{
+																	Raw: []byte(`"SCTP"`),
+																},
+															},
+														},
+													},
+												},
+											},
+											Nullable: true,
 										},
 									},
 								},

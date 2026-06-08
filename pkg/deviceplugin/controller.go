@@ -40,7 +40,7 @@ type (
 		Channel        chan struct{}
 	}
 
-	// DevicesReconciler reconciles the v1alpha1.Devices object on a Kubernetes Node
+	// DevicesReconciler reconciles v1alpha1.Devices objects on a Kubernetes Node
 	// and watches the events of Pods scheduled to the Node, to manage the status of Devices.
 	DevicesReconciler struct {
 		NodeName  string

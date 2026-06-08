@@ -12,7 +12,7 @@ import (
 var setups = []controller.Setup{
 	new(worker.ClusterQueueReconciler),
 	new(worker.CohortReconciler),
-	new(worker.InstanceEntranceReconciler),
+	new(worker.InstanceReconciler),
 	new(worker.LocalQueueReconciler),
 	new(worker.NodeFeatureReconciler),
 	new(worker.ResourceFlavorReconciler),

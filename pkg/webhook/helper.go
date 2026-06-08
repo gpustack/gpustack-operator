@@ -66,7 +66,13 @@ func ExecuteSetup(ctx context.Context, mgr ctrl.Manager, mux HTTPServeMux, setup
 }
 
 // InstallConfigurations installs the webhook configurations.
-func InstallConfigurations(ctx context.Context, cli kubernetes.Interface, cc admreg.WebhookClientConfig, getters []ConfigurationsGetter) error {
+func InstallConfigurations(
+	ctx context.Context,
+	prefix string,
+	cli kubernetes.Interface,
+	cc admreg.WebhookClientConfig,
+	getters []ConfigurationsGetter,
+) error {
 	err := review.CanDoUpdate(ctx,
 		cli.AuthorizationV1().SelfSubjectAccessReviews(),
 		review.Simples{
@@ -90,7 +96,7 @@ func InstallConfigurations(ctx context.Context, cli kubernetes.Interface, cc adm
 	vwCli := cli.AdmissionregistrationV1().ValidatingWebhookConfigurations()
 	mwCli := cli.AdmissionregistrationV1().MutatingWebhookConfigurations()
 
-	vwc, mwc := MergeConfigurations(cc, getters)
+	vwc, mwc := MergeConfigurations(cc, prefix, getters)
 	if vwc != nil {
 		_, err := kubeclientset.Update(ctx, vwCli, vwc,
 			kubeclientset.WithCreateIfNotExisted[*admreg.ValidatingWebhookConfiguration]())
@@ -114,6 +120,7 @@ func InstallConfigurations(ctx context.Context, cli kubernetes.Interface, cc adm
 // MergeConfigurations merges the webhook configurations from the getters and returns the validating and mutating webhook configurations.
 func MergeConfigurations(
 	cc admreg.WebhookClientConfig,
+	prefix string,
 	getters []ConfigurationsGetter,
 ) (
 	*admreg.ValidatingWebhookConfiguration,
@@ -128,7 +135,7 @@ func MergeConfigurations(
 		mwsc int
 	)
 	for i := range getters {
-		vwc, mwc := getters[i]("gpustack-webhook", cc)
+		vwc, mwc := getters[i](prefix, cc)
 		if vwc != nil {
 			vret[i] = vwc
 			vwsc += len(vwc.Webhooks)
@@ -146,7 +153,7 @@ func MergeConfigurations(
 	if vwsc != 0 {
 		vwc = &admreg.ValidatingWebhookConfiguration{
 			ObjectMeta: meta.ObjectMeta{
-				Name: "gpustack-webhook-validation",
+				Name: prefix + "-validation",
 			},
 		}
 		for i := range vret {
@@ -159,7 +166,7 @@ func MergeConfigurations(
 	if mwsc != 0 {
 		mwc = &admreg.MutatingWebhookConfiguration{
 			ObjectMeta: meta.ObjectMeta{
-				Name: "gpustack-webhook-mutation",
+				Name: prefix + "-mutation",
 			},
 		}
 		for i := range mret {

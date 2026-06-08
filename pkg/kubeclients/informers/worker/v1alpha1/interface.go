@@ -15,6 +15,8 @@ import (
 type Interface interface {
 	// Devices returns a DevicesInformer.
 	Devices() DevicesInformer
+	// Instances returns a InstanceInformer.
+	Instances() InstanceInformer
 }
 
 type version struct {
@@ -31,4 +33,9 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // Devices returns a DevicesInformer.
 func (v *version) Devices() DevicesInformer {
 	return &devicesInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// Instances returns a InstanceInformer.
+func (v *version) Instances() InstanceInformer {
+	return &instanceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

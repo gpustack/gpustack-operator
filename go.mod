@@ -36,6 +36,7 @@ require (
 	github.com/henvic/httpretty v0.1.4
 	github.com/jonboulle/clockwork v0.5.0
 	github.com/mattn/go-runewidth v0.0.19
+	github.com/patrickmn/go-cache v2.1.1-0.20191004192108-46f407853014+incompatible
 	github.com/prometheus/client_golang v1.23.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.10.2

@@ -16,10 +16,6 @@ func (*DevicesList) ProtoMessage() {}
 
 func (*Instance) ProtoMessage() {}
 
-func (*InstanceEnvVar) ProtoMessage() {}
-
-func (*InstanceEphemeralVolume) ProtoMessage() {}
-
 func (*InstanceEvents) ProtoMessage() {}
 
 func (*InstanceImagePullSecret) ProtoMessage() {}
@@ -52,23 +48,11 @@ func (*InstancePersistentVolumeTypeList) ProtoMessage() {}
 
 func (*InstancePersistentVolumeTypeSpec) ProtoMessage() {}
 
-func (*InstancePort) ProtoMessage() {}
-
-func (*InstanceResources) ProtoMessage() {}
-
 func (*InstanceSSHPublicKey) ProtoMessage() {}
 
 func (*InstanceSSHPublicKeyList) ProtoMessage() {}
 
 func (*InstanceSSHPublicKeySpec) ProtoMessage() {}
-
-func (*InstanceServicePort) ProtoMessage() {}
-
-func (*InstanceSpec) ProtoMessage() {}
-
-func (*InstanceStatus) ProtoMessage() {}
-
-func (*InstanceTemplate) ProtoMessage() {}
 
 func (*InstanceType) ProtoMessage() {}
 
@@ -81,8 +65,6 @@ func (*InstanceTypeSpec) ProtoMessage() {}
 func (*InstanceTypeStatus) ProtoMessage() {}
 
 func (*InstanceTypeUnitResources) ProtoMessage() {}
-
-func (*InstanceVolume) ProtoMessage() {}
 
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}
 

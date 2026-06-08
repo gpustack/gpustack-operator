@@ -103,3 +103,23 @@ func Sum[T any, S ~[]T, I typex.Integer](s S, f func(T) I) I {
 	}
 	return sum
 }
+
+// All checks if all elements in the slice s satisfy the condition defined by the function f.
+func All[T any, S ~[]T](s S, f func(T) bool) bool {
+	for i := range s {
+		if !f(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// Any checks if any element in the slice s satisfies the condition defined by the function f.
+func Any[T any, S ~[]T](s S, f func(T) bool) bool {
+	for i := range s {
+		if f(s[i]) {
+			return true
+		}
+	}
+	return false
+}

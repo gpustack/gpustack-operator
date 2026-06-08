@@ -64,3 +64,58 @@ func (in DevicesSpec) OpenAPIModelName() string {
 func (in DevicesStatus) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.DevicesStatus"
 }
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in Instance) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.Instance"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceEnvVar) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceEnvVar"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceEphemeralVolume) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceEphemeralVolume"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstancePort) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstancePort"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceResources) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceResources"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceServicePort) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceServicePort"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceStatus) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceStatus"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTemplate) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceTemplate"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceVolume) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceVolume"
+}

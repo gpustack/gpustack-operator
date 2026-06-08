@@ -79,7 +79,7 @@ func (r *CohortReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: req.Name}, co)
 	if err == nil {
 		if co.DeletionTimestamp != nil {
-			logger.V(3).Info("cohort is being deleted, retry in 15s")
+			logger.V(3).Info("cohort is being deleted, retry later")
 			return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 		}
 		logger.V(3).Info("cohort already exists")
@@ -167,9 +167,6 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 						}
 						return !oldNd.DeletionTimestamp.Equal(newNd.DeletionTimestamp)
 					},
-					GenericFunc: func(e ctrlevent.GenericEvent) bool {
-						return false
-					},
 				},
 			),
 		).
@@ -177,7 +174,8 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 }
 
 func (r *CohortReconciler) enqueueCohortWhenNodeChanged(
-	ctx context.Context, obj ctrlcli.Object,
+	ctx context.Context,
+	obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("node", ctrlcli.ObjectKeyFromObject(obj))

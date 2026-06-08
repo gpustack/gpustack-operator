@@ -105,7 +105,9 @@ func generate() error {
 		/*
 			Specify the package paths of the Admission webhooks.
 		*/
-		Webhooks: []string{},
+		Webhooks: []string{
+			"gpustack.ai/gpustack/pkg/worker/webhooks/worker",
+		},
 		/*
 			Specify the exceptions to the plural form.
 		*/

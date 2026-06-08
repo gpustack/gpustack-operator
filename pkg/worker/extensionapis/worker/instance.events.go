@@ -71,7 +71,7 @@ func (h *InstanceEventsHandler) OnGet(ctx context.Context, key types.NamespacedN
 			"involvedObject.kind":      "Pod",
 			"involvedObject.uid":       string(podMeta.UID),
 		},
-		ctrlclix.NonQuorum,
+		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy,
 	)
 	if err != nil {

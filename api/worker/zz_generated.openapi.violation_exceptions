@@ -3,6 +3,11 @@ API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,Instanc
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,NFSInstancePersistentVolumeSource,MountOptions
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,S3InstancePersistentVolumeSource,MountOptions
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,Accelerator,PhysicalIndexes
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,AccessAddresses
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,Allocations
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,HostIPs
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,PodIPs
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,Ports
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorFeatures,RoCE
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,DeviceTopology,PciBusID
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,DeviceTopology,PciRootID

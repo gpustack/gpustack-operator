@@ -3,6 +3,7 @@
 package v1
 
 import (
+	v1alpha1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1alpha1"
 	apismetav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	metav1 "k8s.io/client-go/applyconfigurations/meta/v1"
@@ -12,14 +13,11 @@ import (
 // with apply.
 //
 // Instance is the schema for worker.gpustack.ai.
-//
-// Underhood, an Instance is mapping to a Kubernetes Pod,
-// and the Instance's name is the same as the Kubernetes Pod's name.
 type InstanceApplyConfiguration struct {
 	metav1.TypeMetaApplyConfiguration    `json:",inline"`
 	*metav1.ObjectMetaApplyConfiguration `json:"metadata,omitempty"`
-	Spec                                 *InstanceSpecApplyConfiguration   `json:"spec,omitempty"`
-	Status                               *InstanceStatusApplyConfiguration `json:"status,omitempty"`
+	Spec                                 *v1alpha1.InstanceSpecApplyConfiguration   `json:"spec,omitempty"`
+	Status                               *v1alpha1.InstanceStatusApplyConfiguration `json:"status,omitempty"`
 }
 
 // Instance constructs a declarative configuration of the Instance type for use with
@@ -196,7 +194,7 @@ func (b *InstanceApplyConfiguration) ensureObjectMetaApplyConfigurationExists() 
 // WithSpec sets the Spec field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Spec field is set to the value of the last call.
-func (b *InstanceApplyConfiguration) WithSpec(value *InstanceSpecApplyConfiguration) *InstanceApplyConfiguration {
+func (b *InstanceApplyConfiguration) WithSpec(value *v1alpha1.InstanceSpecApplyConfiguration) *InstanceApplyConfiguration {
 	b.Spec = value
 	return b
 }
@@ -204,7 +202,7 @@ func (b *InstanceApplyConfiguration) WithSpec(value *InstanceSpecApplyConfigurat
 // WithStatus sets the Status field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Status field is set to the value of the last call.
-func (b *InstanceApplyConfiguration) WithStatus(value *InstanceStatusApplyConfiguration) *InstanceApplyConfiguration {
+func (b *InstanceApplyConfiguration) WithStatus(value *v1alpha1.InstanceStatusApplyConfiguration) *InstanceApplyConfiguration {
 	b.Status = value
 	return b
 }

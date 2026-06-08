@@ -24,8 +24,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.Devices{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_Devices(ref),
 		v1.DevicesList{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_DevicesList(ref),
 		v1.Instance{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_Instance(ref),
-		v1.InstanceEnvVar{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceEnvVar(ref),
-		v1.InstanceEphemeralVolume{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceEphemeralVolume(ref),
 		v1.InstanceEvents{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceEvents(ref),
 		v1.InstanceImagePullSecret{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref),
 		v1.InstanceImagePullSecretList{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref),
@@ -42,22 +40,15 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstancePersistentVolumeType{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeType(ref),
 		v1.InstancePersistentVolumeTypeList{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeList(ref),
 		v1.InstancePersistentVolumeTypeSpec{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeSpec(ref),
-		v1.InstancePort{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstancePort(ref),
-		v1.InstanceResources{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstanceResources(ref),
 		v1.InstanceSSHPublicKey{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref),
 		v1.InstanceSSHPublicKeyList{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref),
 		v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref),
-		v1.InstanceServicePort{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1_InstanceServicePort(ref),
-		v1.InstanceSpec{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceSpec(ref),
-		v1.InstanceStatus{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceStatus(ref),
-		v1.InstanceTemplate{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTemplate(ref),
 		v1.InstanceType{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceType(ref),
 		v1.InstanceTypeList{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeList(ref),
 		v1.InstanceTypeResource{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceTypeResource(ref),
 		v1.InstanceTypeSpec{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeSpec(ref),
 		v1.InstanceTypeStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceTypeStatus(ref),
 		v1.InstanceTypeUnitResources{}.OpenAPIModelName():             schema_gpustack_api_worker_v1_InstanceTypeUnitResources(ref),
-		v1.InstanceVolume{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceVolume(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():     schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
@@ -72,6 +63,17 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.DevicesList{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_DevicesList(ref),
 		v1alpha1.DevicesSpec{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_DevicesSpec(ref),
 		v1alpha1.DevicesStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref),
+		v1alpha1.Instance{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_Instance(ref),
+		v1alpha1.InstanceEnvVar{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref),
+		v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_InstanceEphemeralVolume(ref),
+		v1alpha1.InstanceList{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceList(ref),
+		v1alpha1.InstancePort{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstancePort(ref),
+		v1alpha1.InstanceResources{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_InstanceResources(ref),
+		v1alpha1.InstanceServicePort{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_InstanceServicePort(ref),
+		v1alpha1.InstanceSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref),
+		v1alpha1.InstanceStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceStatus(ref),
+		v1alpha1.InstanceTemplate{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref),
+		v1alpha1.InstanceVolume{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceVolume(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():  schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_Affinity(ref),
 		corev1.AppArmorProfile{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_AppArmorProfile(ref),
@@ -468,7 +470,7 @@ func schema_gpustack_api_worker_v1_Instance(ref common.ReferenceCallback) common
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "Instance is the schema for worker.gpustack.ai.\n\nUnderhood, an Instance is mapping to a Kubernetes Pod, and the Instance's name is the same as the Kubernetes Pod's name.",
+				Description: "Instance is the schema for worker.gpustack.ai.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {
@@ -494,13 +496,13 @@ func schema_gpustack_api_worker_v1_Instance(ref common.ReferenceCallback) common
 					"spec": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
-							Ref:     ref(v1.InstanceSpec{}.OpenAPIModelName()),
+							Ref:     ref(v1alpha1.InstanceSpec{}.OpenAPIModelName()),
 						},
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
-							Ref:     ref(v1.InstanceStatus{}.OpenAPIModelName()),
+							Ref:     ref(v1alpha1.InstanceStatus{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -508,59 +510,7 @@ func schema_gpustack_api_worker_v1_Instance(ref common.ReferenceCallback) common
 			},
 		},
 		Dependencies: []string{
-			v1.InstanceSpec{}.OpenAPIModelName(), v1.InstanceStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceEnvVar(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceEnvVar defines the environment variable to set in the Instance.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Name is the name of the environment variable, each name in one Instance must be unique.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"value": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Value is the value of the environment variable.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-				},
-				Required: []string{"name", "value"},
-			},
-		},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceEphemeralVolume(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceEphemeralVolume defines the ephemeral volume to mount in the Instance.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"capacity": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Capacity is the size limit of the volume.",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-				},
-				Required: []string{"capacity"},
-			},
-		},
-		Dependencies: []string{
-			resource.Quantity{}.OpenAPIModelName()},
+			v1alpha1.InstanceSpec{}.OpenAPIModelName(), v1alpha1.InstanceStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -1302,84 +1252,6 @@ func schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeSpec(ref common.R
 	}
 }
 
-func schema_gpustack_api_worker_v1_InstancePort(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstancePort defines the port to expose from the Instance.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"port": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Port is the port number to expose on the Instance.",
-							Default:     0,
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-					"protocol": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Protocol is the protocol to use for the port.\n\n\nPossible enum values:\n - `\"SCTP\"` is the SCTP protocol.\n - `\"TCP\"` is the TCP protocol.\n - `\"UDP\"` is the UDP protocol.",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
-						},
-					},
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Name is the name of the port.",
-							MaxLength:   ptr.To[int64](16),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-				},
-				Required: []string{"port"},
-			},
-		},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceResources defines the resource requirements for the Instance.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-					"ram": {
-						SchemaProps: spec.SchemaProps{
-							Description: "RAM is the RAM resource requirement for the Instance, e.g. \"40G\", \"16G\".",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-					"localStorage": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LocalStorage is the local storage resource requirement for the Instance, e.g. \"100G\", \"500G\".",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-					"accelerator": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Accelerator is the accelerator resource requirement for the Instance, e.g. \"1\", \"2\".",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-				},
-				Required: []string{"cpu", "ram", "localStorage"},
-			},
-		},
-		Dependencies: []string{
-			resource.Quantity{}.OpenAPIModelName()},
-	}
-}
-
 func schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -1502,500 +1374,6 @@ func schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref common.Reference
 				},
 			},
 		},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceServicePort(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceServicePort defines the port to expose from the container and the port to expose on the node.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"port": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Port is the port number to expose on the Instance.",
-							Default:     0,
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-					"protocol": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Protocol is the protocol to use for the port.\n\n\nPossible enum values:\n - `\"SCTP\"` is the SCTP protocol.\n - `\"TCP\"` is the TCP protocol.\n - `\"UDP\"` is the UDP protocol.",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
-						},
-					},
-					"name": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Name is the name of the port.",
-							MaxLength:   ptr.To[int64](16),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"nodePort": {
-						SchemaProps: spec.SchemaProps{
-							Description: "NodePort is the port number to expose on the Kubernetes Node.",
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-				},
-				Required: []string{"port"},
-			},
-		},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceSpec defines the desired state of Instance.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"displayName": {
-						SchemaProps: spec.SchemaProps{
-							Description: "DisplayName is the display name of the Instance.",
-							MaxLength:   ptr.To[int64](64),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"description": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Description is the description of the Instance.",
-							MaxLength:   ptr.To[int64](1024),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"type": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Type is the name of InstanceType that provisions corresponding resources.\n\nImmutable after creation.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"image": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Image is the container image to run.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"imagePullPolicy": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ImagePullPolicy is the image pull policy to use.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
-							Default:     "IfNotPresent",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
-						},
-					},
-					"command": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Command is the command to run in the Instance, which should overwrite the default command in the container image CMD.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: "",
-										Type:    []string{"string"},
-										Format:  "",
-									},
-								},
-							},
-						},
-					},
-					"privileged": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Privileged indicates whether the container should run in privileged mode.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"ports": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"port",
-									"protocol",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "port",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Ports is the list of ports to expose from the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1.InstancePort{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"env": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"name",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "name",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Env is the list of environment variables to set in the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1.InstanceEnvVar{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"resources": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Resources is the resource requirements for the Instance.",
-							Ref:         ref(v1.InstanceResources{}.OpenAPIModelName()),
-						},
-					},
-					"volumeMount": {
-						SchemaProps: spec.SchemaProps{
-							Description: "VolumeMount is a path to mount the volume in the Instance.",
-							Default:     "/workspace",
-							MaxLength:   ptr.To[int64](1024),
-							Pattern:     "^(/[^/]+)+$",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"imagePullSecret": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
-							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-					"volume": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Volume is the volume to mount in the Instance.\n\nImmutable after creation.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceVolume{}.OpenAPIModelName()),
-						},
-					},
-					"sshPublicKey": {
-						SchemaProps: spec.SchemaProps{
-							Description: "SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.\n\nImmutable after creation.",
-							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-				},
-				Required: []string{"type", "image", "volume"},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceEnvVar{}.OpenAPIModelName(), v1.InstancePort{}.OpenAPIModelName(), v1.InstanceResources{}.OpenAPIModelName(), v1.InstanceVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceStatus defines the observed state of Instance.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"phase": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Phase is the current phase of the Instance.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"phaseMessage": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhaseMessage is the message to describe the current phase of the Instance.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"nodeName": {
-						SchemaProps: spec.SchemaProps{
-							Description: "NodeName is the name of the Kubernetes Node that the Instance is running on.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"accessAddresses": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "AccessAddresses holds the accessible addresses allocated to the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: "",
-										Type:    []string{"string"},
-										Format:  "",
-									},
-								},
-							},
-						},
-					},
-					"hostIPs": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"ip",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "ip",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "HostIPs holds the IP addresses allocated to the host.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(corev1.HostIP{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"podIPs": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"ip",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "ip",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(corev1.PodIP{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"ports": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"port",
-									"protocol",
-								},
-								"x-kubernetes-list-type": "map",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Ports is the list of ports to expose from the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1.InstanceServicePort{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"allocations": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"id",
-									"manufacturer",
-								},
-								"x-kubernetes-list-type": "map",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Allocations is the list of devices allocated to the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceServicePort{}.OpenAPIModelName(), v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName(), corev1.HostIP{}.OpenAPIModelName(), corev1.PodIP{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTemplate(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTemplate defines the template for the Instance to run.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"image": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Image is the container image to run.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"imagePullPolicy": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ImagePullPolicy is the image pull policy to use.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
-							Default:     "IfNotPresent",
-							Type:        []string{"string"},
-							Format:      "",
-							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
-						},
-					},
-					"command": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-type": "atomic",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Command is the command to run in the Instance, which should overwrite the default command in the container image CMD.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: "",
-										Type:    []string{"string"},
-										Format:  "",
-									},
-								},
-							},
-						},
-					},
-					"privileged": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Privileged indicates whether the container should run in privileged mode.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"ports": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"port",
-									"protocol",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "port",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Ports is the list of ports to expose from the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1.InstancePort{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"env": {
-						VendorExtensible: spec.VendorExtensible{
-							Extensions: spec.Extensions{
-								"x-kubernetes-list-map-keys": []interface{}{
-									"name",
-								},
-								"x-kubernetes-list-type":       "map",
-								"x-kubernetes-patch-merge-key": "name",
-								"x-kubernetes-patch-strategy":  "merge",
-							},
-						},
-						SchemaProps: spec.SchemaProps{
-							Description: "Env is the list of environment variables to set in the Instance.",
-							Type:        []string{"array"},
-							Items: &spec.SchemaOrArray{
-								Schema: &spec.Schema{
-									SchemaProps: spec.SchemaProps{
-										Default: map[string]interface{}{},
-										Ref:     ref(v1.InstanceEnvVar{}.OpenAPIModelName()),
-									},
-								},
-							},
-						},
-					},
-					"resources": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Resources is the resource requirements for the Instance.",
-							Ref:         ref(v1.InstanceResources{}.OpenAPIModelName()),
-						},
-					},
-					"volumeMount": {
-						SchemaProps: spec.SchemaProps{
-							Description: "VolumeMount is a path to mount the volume in the Instance.",
-							Default:     "/workspace",
-							MaxLength:   ptr.To[int64](1024),
-							Pattern:     "^(/[^/]+)+$",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"imagePullSecret": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
-							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-				},
-				Required: []string{"image"},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceEnvVar{}.OpenAPIModelName(), v1.InstancePort{}.OpenAPIModelName(), v1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -2292,33 +1670,6 @@ func schema_gpustack_api_worker_v1_InstanceTypeUnitResources(ref common.Referenc
 				},
 			},
 		},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceVolume(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceVolume defines the volume to mount in the Instance, which can be either ephemeral or persistent.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"ephemeral": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Ephemeral is the ephemeral volume to mount in the Instance.",
-							Ref:         ref(v1.InstanceEphemeralVolume{}.OpenAPIModelName()),
-						},
-					},
-					"persistent": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Persistent is the reference to the InstancePersistentVolume to mount in the Instance.",
-							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceEphemeralVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -3085,6 +2436,718 @@ func schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref common.ReferenceCallb
 		},
 		Dependencies: []string{
 			v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_Instance(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "Instance is the schema for worker.gpustack.ai.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.InstanceSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.InstanceStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"spec"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceSpec{}.OpenAPIModelName(), v1alpha1.InstanceStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceEnvVar defines the environment variable to set in the Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the environment variable, each name in one Instance must be unique.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"value": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Value is the value of the environment variable.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"name", "value"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceEphemeralVolume(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceEphemeralVolume defines the ephemeral volume to mount in the Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity is the size limit of the volume.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"capacity"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceList holds the list of Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.Instance{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.Instance{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstancePort(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstancePort defines the port to expose from the Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"port": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Port is the port number to expose on the Instance.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the protocol to use for the port.\n\n\nPossible enum values:\n - `\"SCTP\"` is the SCTP protocol.\n - `\"TCP\"` is the TCP protocol.\n - `\"UDP\"` is the UDP protocol.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the port.",
+							MaxLength:   ptr.To[int64](16),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"port"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceResources defines the resource requirements for the Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"ram": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RAM is the RAM resource requirement for the Instance, e.g. \"40G\", \"16G\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"localStorage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalStorage is the local storage resource requirement for the Instance, e.g. \"100G\", \"500G\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"accelerator": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Accelerator is the accelerator resource requirement for the Instance, e.g. \"1\", \"2\".",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"cpu", "ram", "localStorage"},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceServicePort(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceServicePort defines the port to expose from the container and the port to expose on the node.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"port": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Port is the port number to expose on the Instance.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"protocol": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Protocol is the protocol to use for the port.\n\n\nPossible enum values:\n - `\"SCTP\"` is the SCTP protocol.\n - `\"TCP\"` is the TCP protocol.\n - `\"UDP\"` is the UDP protocol.",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"SCTP", "TCP", "UDP"},
+						},
+					},
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the name of the port.",
+							MaxLength:   ptr.To[int64](16),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"nodePort": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodePort is the port number to expose on the Kubernetes Node.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"port"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceSpec defines the desired state of Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is the display name of the Instance.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is the description of the Instance.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Type is the name of InstanceType that provisions corresponding resources.\n\nImmutable after creation.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image to run.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy is the image pull policy to use.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Default:     "IfNotPresent",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"command": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Command is the command to run in the Instance, which should overwrite the default command in the container image CMD.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"privileged": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Privileged indicates whether the container should run in privileged mode.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"ports": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"port",
+									"protocol",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "port",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ports is the list of ports to expose from the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstancePort{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env is the list of environment variables to set in the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is the resource requirements for the Instance.",
+							Ref:         ref(v1alpha1.InstanceResources{}.OpenAPIModelName()),
+						},
+					},
+					"volumeMount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "VolumeMount is a path to mount the volume in the Instance.",
+							Default:     "/workspace",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullSecret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"volume": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Volume is the volume to mount in the Instance.\n\nImmutable after creation.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceVolume{}.OpenAPIModelName()),
+						},
+					},
+					"sshPublicKey": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SSHPublicKey is the reference to the InstanceSSHPublicKey that contains the SSH public key to access the Instance.\n\nImmutable after creation.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"stop": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Stop indicates whether to stop the Instance after it is created.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"type", "image", "volume"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), v1alpha1.InstanceVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceStatus defines the observed state of Instance.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase is the current phase of the Instance.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage is the message to describe the current phase of the Instance.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"nodeName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeName is the name of the Kubernetes Node that the Instance is running on.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"accessAddresses": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AccessAddresses holds the accessible addresses allocated to the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"hostIPs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostIPs holds the IP addresses allocated to the host.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(corev1.HostIP{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"podIPs": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PodIPs holds the IP addresses allocated to the Kubernetes Pod that related to the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(corev1.PodIP{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"ports": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ports is the list of ports to expose from the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceServicePort{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"allocations": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Allocations is the list of devices allocated to the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName(), v1alpha1.InstanceServicePort{}.OpenAPIModelName(), corev1.HostIP{}.OpenAPIModelName(), corev1.PodIP{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTemplate defines the template for the Instance to run.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"image": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Image is the container image to run.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullPolicy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullPolicy is the image pull policy to use.\n\n\nPossible enum values:\n - `\"Always\"` means that kubelet always attempts to pull the latest image. Container will fail If the pull fails.\n - `\"IfNotPresent\"` means that kubelet pulls if the image isn't present on disk. Container will fail if the image isn't present and the pull fails.\n - `\"Never\"` means that kubelet never pulls an image, but only uses a local image. Container will fail if the image isn't present",
+							Default:     "IfNotPresent",
+							Type:        []string{"string"},
+							Format:      "",
+							Enum:        []interface{}{"Always", "IfNotPresent", "Never"},
+						},
+					},
+					"command": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Command is the command to run in the Instance, which should overwrite the default command in the container image CMD.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: "",
+										Type:    []string{"string"},
+										Format:  "",
+									},
+								},
+							},
+						},
+					},
+					"privileged": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Privileged indicates whether the container should run in privileged mode.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"ports": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"port",
+									"protocol",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "port",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Ports is the list of ports to expose from the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstancePort{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"env": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "name",
+								"x-kubernetes-patch-strategy":  "merge",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Env is the list of environment variables to set in the Instance.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceEnvVar{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"resources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Resources is the resource requirements for the Instance.",
+							Ref:         ref(v1alpha1.InstanceResources{}.OpenAPIModelName()),
+						},
+					},
+					"volumeMount": {
+						SchemaProps: spec.SchemaProps{
+							Description: "VolumeMount is a path to mount the volume in the Instance.",
+							Default:     "/workspace",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"imagePullSecret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"image"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceVolume(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceVolume defines the volume to mount in the Instance, which can be either ephemeral or persistent.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"ephemeral": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Ephemeral is the ephemeral volume to mount in the Instance.",
+							Ref:         ref(v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName()),
+						},
+					},
+					"persistent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Persistent is the reference to the InstancePersistentVolume to mount in the Instance.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 

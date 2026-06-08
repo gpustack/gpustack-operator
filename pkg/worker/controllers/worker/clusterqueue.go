@@ -114,7 +114,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 	// Fetch Cohort.
 	co := new(kueue.Cohort)
 	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: cohortName}, co,
-		ctrlclix.NonQuorum,
+		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "fetch cohort")
@@ -130,7 +130,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 	// Sync ClusterQueue.
 	eResGroups, eNotes := r.constructResourceGroups(ctx, rfList)
 	if len(eResGroups) == 0 {
-		logger.Error(nil, "no valid resource flavors, retry in 5s")
+		logger.Error(nil, "no valid resource flavors, retry later")
 		return ctrlreconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
@@ -447,9 +447,6 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 						}
 						return !oldNd.DeletionTimestamp.Equal(newNd.DeletionTimestamp)
 					},
-					GenericFunc: func(e ctrlevent.GenericEvent) bool {
-						return false
-					},
 				},
 			),
 		).
@@ -457,7 +454,8 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 }
 
 func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
-	ctx context.Context, obj ctrlcli.Object,
+	ctx context.Context,
+	obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("resource flavor", ctrlcli.ObjectKeyFromObject(obj))
@@ -501,7 +499,8 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
 }
 
 func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
-	ctx context.Context, obj ctrlcli.Object,
+	ctx context.Context,
+	obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("node", ctrlcli.ObjectKeyFromObject(obj))

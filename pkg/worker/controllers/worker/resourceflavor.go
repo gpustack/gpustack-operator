@@ -193,9 +193,6 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 						}
 						return false
 					},
-					GenericFunc: func(e ctrlevent.GenericEvent) bool {
-						return false
-					},
 				},
 			),
 		).

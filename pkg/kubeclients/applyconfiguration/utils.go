@@ -1252,10 +1252,6 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.DevicesApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("Instance"):
 		return &applyconfigurationworkerv1.InstanceApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceEnvVar"):
-		return &applyconfigurationworkerv1.InstanceEnvVarApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceEphemeralVolume"):
-		return &applyconfigurationworkerv1.InstanceEphemeralVolumeApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceImagePullSecret"):
 		return &applyconfigurationworkerv1.InstanceImagePullSecretApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceImagePullSecretSpec"):
@@ -1272,24 +1268,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstancePersistentVolumeTypeApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstancePersistentVolumeTypeSpec"):
 		return &applyconfigurationworkerv1.InstancePersistentVolumeTypeSpecApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstancePort"):
-		return &applyconfigurationworkerv1.InstancePortApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceResources"):
-		return &applyconfigurationworkerv1.InstanceResourcesApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceServicePort"):
-		return &applyconfigurationworkerv1.InstanceServicePortApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceSpec"):
-		return &applyconfigurationworkerv1.InstanceSpecApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceSSHPublicKey"):
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeyApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceSSHPublicKeySpec"):
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeySpecApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceStatus"):
-		return &applyconfigurationworkerv1.InstanceStatusApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceTemplate"):
-		return &applyconfigurationworkerv1.InstanceTemplateApplyConfiguration{}
-	case workerv1.SchemeGroupVersion.WithKind("InstanceVolume"):
-		return &applyconfigurationworkerv1.InstanceVolumeApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
 		return &applyconfigurationworkerv1.NFSInstancePersistentVolumeSourceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("S3InstancePersistentVolumeSource"):
@@ -1318,6 +1300,26 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.DevicesStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceTopology"):
 		return &applyconfigurationworkerv1alpha1.DeviceTopologyApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("Instance"):
+		return &applyconfigurationworkerv1alpha1.InstanceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceEnvVar"):
+		return &applyconfigurationworkerv1alpha1.InstanceEnvVarApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceEphemeralVolume"):
+		return &applyconfigurationworkerv1alpha1.InstanceEphemeralVolumeApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstancePort"):
+		return &applyconfigurationworkerv1alpha1.InstancePortApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceResources"):
+		return &applyconfigurationworkerv1alpha1.InstanceResourcesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceServicePort"):
+		return &applyconfigurationworkerv1alpha1.InstanceServicePortApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceSpec"):
+		return &applyconfigurationworkerv1alpha1.InstanceSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceStatus"):
+		return &applyconfigurationworkerv1alpha1.InstanceStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTemplate"):
+		return &applyconfigurationworkerv1alpha1.InstanceTemplateApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceVolume"):
+		return &applyconfigurationworkerv1alpha1.InstanceVolumeApplyConfiguration{}
 
 	}
 	return nil

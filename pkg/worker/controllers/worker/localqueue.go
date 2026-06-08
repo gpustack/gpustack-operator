@@ -55,7 +55,7 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// List Namespaces.
 	nsList := new(core.NamespaceList)
 	err = r.Client.List(ctx, nsList,
-		ctrlclix.NonQuorum,
+		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list namespaces")
@@ -144,7 +144,8 @@ func (r *LocalQueueReconciler) SetupController(ctx context.Context, opts control
 }
 
 func (r *LocalQueueReconciler) enqueueClusterQueueWhenNamespaceCreated(
-	ctx context.Context, obj ctrlcli.Object,
+	ctx context.Context,
+	obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx)
 
@@ -164,7 +165,7 @@ func (r *LocalQueueReconciler) enqueueClusterQueueWhenNamespaceCreated(
 
 	cqList := new(kueue.ClusterQueueList)
 	err := r.Client.List(ctx, cqList,
-		ctrlclix.NonQuorum,
+		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "list cluster queues")

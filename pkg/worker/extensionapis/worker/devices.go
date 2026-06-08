@@ -89,6 +89,6 @@ func (h *DevicesHandler) CastObjectTo(do *worker.Devices) (uo *workercore.Device
 	return (*workercore.Devices)(do)
 }
 
-func (h *DevicesHandler) CastObjectFrom(uo *workercore.Devices) (do *worker.Devices) {
+func (h *DevicesHandler) CastObjectFrom(_ context.Context, uo *workercore.Devices) (do *worker.Devices) {
 	return (*worker.Devices)(uo)
 }

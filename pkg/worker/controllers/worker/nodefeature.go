@@ -154,9 +154,6 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 						}
 						return false
 					},
-					GenericFunc: func(e ctrlevent.GenericEvent) bool {
-						return false
-					},
 				},
 			),
 		).

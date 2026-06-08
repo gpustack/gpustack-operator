@@ -13,13 +13,19 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
-// mkClusterQueue assembles a kueue.ClusterQueue noted as an InstanceType,
-// with one flavor sharing the given name and the supplied capacity / reservation.
-//
-// Capacity and reservation entries are passed as ResourceName→Quantity maps;
-// the accelerator resource (when present) uses the credits name derived from
-// `notes["manufacturer"]`. Reservation is nil to test the no-reservation
-// branch.
+// qty parses a quantity for terse fixture construction.
+func qty(s string) resource.Quantity { return resource.MustParse(s) }
+
+// qtyEqual compares quantities by value (Cmp) so the assertion does not depend
+// on the SI format (BinarySI vs DecimalSI) of the operands.
+func qtyEqual(t *testing.T, want, got resource.Quantity, msg string) {
+	t.Helper()
+	assert.Zerof(t, want.Cmp(got), "%s: want %s, got %s", msg, want.String(), got.String())
+}
+
+// mkClusterQueue assembles a kueue.ClusterQueue noted as an InstanceType with
+// one flavor sharing the queue's name and the supplied capacity / reservation.
+// Reservation may be nil to exercise the no-reservation branch.
 func mkClusterQueue(
 	name string,
 	notes map[string]string,
@@ -69,113 +75,23 @@ func mkClusterQueue(
 	return cq
 }
 
-func TestConvertInstanceTypeFromClusterQueue_NonAcceleratable(t *testing.T) {
-	// Profile: 16 CPU, 32 Gi RAM, 100 Gi storage; one node.
-	const cqName = "gpustack-general-16c-32g-100g"
-	notes := map[string]string{
-		"acceleratable": "false",
-	}
-	capacity := core.ResourceList{
-		core.ResourceCPU:              qty("16"),
-		core.ResourceMemory:           qty("32Gi"),
-		core.ResourceEphemeralStorage: qty("100Gi"),
-	}
+func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
+	const nonAccName = "gpustack-general-16c-32g-100g"
+	const accName = "gpustack-nvidia-t4-4c-16g-100g-1d"
 
-	cases := []struct {
-		name        string
-		overcommit  bool
-		reservation core.ResourceList
-		wantCapCPU  resource.Quantity
-		wantRemCPU  resource.Quantity
-		wantRemRAM  resource.Quantity
-		wantRemStg  resource.Quantity
-	}{
-		{
-			name:        "no reservation: Remaining == Capacity",
-			overcommit:  false,
-			reservation: nil,
-			wantCapCPU:  qty("16"),
-			wantRemCPU:  qty("16"),
-			wantRemRAM:  qty("32Gi"),
-			wantRemStg:  qty("100Gi"),
-		},
-		{
-			name:       "no overcommit: reservation in limits-units, direct subtract",
-			overcommit: false,
-			reservation: core.ResourceList{
-				// One pod with 4C/8Gi/15Gi limits → requests == limits.
-				core.ResourceCPU:              qty("4"),
-				core.ResourceMemory:           qty("8Gi"),
-				core.ResourceEphemeralStorage: qty("15Gi"),
-			},
-			wantCapCPU: qty("16"),
-			wantRemCPU: qty("12"),   // 16 - 4
-			wantRemRAM: qty("24Gi"), // 32Gi - 8Gi
-			wantRemStg: qty("85Gi"), // 100Gi - 15Gi
-		},
-		{
-			name:       "overcommit: reservation in requests-units, scaled back before subtract",
-			overcommit: true,
-			reservation: core.ResourceList{
-				// Same pod (4C/8Gi/15Gi limits) but recorded as overcommit requests:
-				// 800m × 4 = 3200m, 128Mi × 8 = 1Gi, 128Mi × 15 = 1920Mi.
-				core.ResourceCPU:              qty("3200m"),
-				core.ResourceMemory:           qty("1Gi"),
-				core.ResourceEphemeralStorage: qty("1920Mi"),
-			},
-			wantCapCPU: qty("16"),
-			wantRemCPU: qty("12"),   // 16 - reverse(3200m, non-acc) = 16 - 4
-			wantRemRAM: qty("24Gi"), // 32Gi - reverse(1Gi, RAM) = 32Gi - 8Gi
-			wantRemStg: qty("85Gi"), // 100Gi - reverse(1920Mi, storage) = 100Gi - 15Gi
-		},
-		{
-			name:       "overcommit symmetric with non-overcommit yields identical Remaining",
-			overcommit: true,
-			reservation: core.ResourceList{
-				// Two pods aggregated: 2C/4Gi/10Gi + 2C/4Gi/5Gi
-				// → 800m×(2+2)=3200m, 128Mi×(4+4)=1Gi, 128Mi×(10+5)=1920Mi.
-				core.ResourceCPU:              qty("3200m"),
-				core.ResourceMemory:           qty("1Gi"),
-				core.ResourceEphemeralStorage: qty("1920Mi"),
-			},
-			wantCapCPU: qty("16"),
-			wantRemCPU: qty("12"),
-			wantRemRAM: qty("24Gi"),
-			wantRemStg: qty("85Gi"),
-		},
-	}
-
-	for _, cs := range cases {
-		cs := cs
-		t.Run(cs.name, func(t *testing.T) {
-			cq := mkClusterQueue(cqName, notes, capacity, cs.reservation)
-			it := convertInstanceTypeFromClusterQueue(cq, cs.overcommit)
-
-			if !assert.NotNil(t, it, "expected InstanceType") {
-				return
-			}
-			assert.False(t, it.Spec.Acceleratable, "non-accel type")
-			assert.Truef(t, cs.wantCapCPU.Equal(it.Status.CPU.Capacity),
-				"capacity CPU: want %s, got %s", cs.wantCapCPU.String(), it.Status.CPU.Capacity.String())
-			assert.Truef(t, cs.wantRemCPU.Equal(it.Status.CPU.Remaining),
-				"remaining CPU: want %s, got %s", cs.wantRemCPU.String(), it.Status.CPU.Remaining.String())
-			assert.Truef(t, cs.wantRemRAM.Equal(it.Status.RAM.Remaining),
-				"remaining RAM: want %s, got %s", cs.wantRemRAM.String(), it.Status.RAM.Remaining.String())
-			assert.Truef(t, cs.wantRemStg.Equal(it.Status.LocalStorage.Remaining),
-				"remaining Stg: want %s, got %s", cs.wantRemStg.String(), it.Status.LocalStorage.Remaining.String())
-		})
-	}
-}
-
-func TestConvertInstanceTypeFromClusterQueue_Acceleratable(t *testing.T) {
-	// Profile: 4 CPU, 16 Gi RAM, 100 Gi storage, 1 accelerator; one node.
-	const cqName = "gpustack-nvidia-t4-4c-16g-100g-1d"
-	notes := map[string]string{
+	nonAccNotes := map[string]string{"acceleratable": "false"}
+	accNotes := map[string]string{
 		"acceleratable": "true",
 		"manufacturer":  devicefeature.ManufacturerNVIDIA,
 	}
 	credits := devicefeature.GetCreditsResourceName(devicefeature.ManufacturerNVIDIA)
-	capacity := core.ResourceList{
+
+	nonAccCapacity := core.ResourceList{
+		core.ResourceCPU:              qty("16"),
+		core.ResourceMemory:           qty("32Gi"),
+		core.ResourceEphemeralStorage: qty("100Gi"),
+	}
+	accCapacity := core.ResourceList{
 		core.ResourceCPU:              qty("4"),
 		core.ResourceMemory:           qty("16Gi"),
 		core.ResourceEphemeralStorage: qty("100Gi"),
@@ -183,94 +99,219 @@ func TestConvertInstanceTypeFromClusterQueue_Acceleratable(t *testing.T) {
 	}
 
 	cases := []struct {
-		name        string
-		overcommit  bool
+		name string
+
+		cqName      string
+		notes       map[string]string
+		capacity    core.ResourceList
 		reservation core.ResourceList
-		wantRemCPU  resource.Quantity
-		wantRemRAM  resource.Quantity
-		wantRemStg  resource.Quantity
-		wantRemAcc  resource.Quantity
+		overcommit  bool
+
+		wantAcceleratable bool
+		wantCapAcc        resource.Quantity
+		wantRemCPU        resource.Quantity
+		wantRemRAM        resource.Quantity
+		wantRemStg        resource.Quantity
+		wantRemAcc        resource.Quantity
+		// OnceMaxRequest is the largest single-pod ask the InstanceType can
+		// admit. Without reservation it equals the flavor's profile maxima.
+		// With reservation it tracks the post-reservation remaining (clamped
+		// to the flavor's own ORM ceiling). For acceleratable types, the
+		// display ORM is gated by remaining accelerator > 0 — fully reserving
+		// the accelerator collapses the whole display ORM to zero, because
+		// no new acc-needing pod can be admitted.
+		wantOrmCPU resource.Quantity
+		wantOrmRAM resource.Quantity
+		wantOrmStg resource.Quantity
+		wantOrmAcc resource.Quantity
 	}{
+		// --- non-acceleratable ---
 		{
-			name:        "no reservation",
-			overcommit:  true,
+			name:        "non-acc, no reservation: Remaining == Capacity",
+			cqName:      nonAccName,
+			notes:       nonAccNotes,
+			capacity:    nonAccCapacity,
 			reservation: nil,
-			wantRemCPU:  qty("4"),
-			wantRemRAM:  qty("16Gi"),
-			wantRemStg:  qty("100Gi"),
-			wantRemAcc:  qty("1"),
+			overcommit:  false,
+
+			wantAcceleratable: false,
+			wantCapAcc:        qty("0"),
+			wantRemCPU:        qty("16"),
+			wantRemRAM:        qty("32Gi"),
+			wantRemStg:        qty("100Gi"),
+			wantRemAcc:        qty("0"),
+			// ORM == flavor profile (parsed from cq name).
+			wantOrmCPU: qty("16"),
+			wantOrmRAM: qty("32Gi"),
+			wantOrmStg: qty("100Gi"),
+			wantOrmAcc: qty("0"),
 		},
 		{
-			name:       "no overcommit: direct subtract",
+			name:     "non-acc, overcommit off: reservation in limits-units, direct subtract",
+			cqName:   nonAccName,
+			notes:    nonAccNotes,
+			capacity: nonAccCapacity,
+			reservation: core.ResourceList{
+				// Single pod with limits 4C/8Gi/15Gi; overcommit off ⇒ requests == limits.
+				core.ResourceCPU:              qty("4"),
+				core.ResourceMemory:           qty("8Gi"),
+				core.ResourceEphemeralStorage: qty("15Gi"),
+			},
 			overcommit: false,
+
+			wantAcceleratable: false,
+			wantCapAcc:        qty("0"),
+			wantRemCPU:        qty("12"),   // 16 - 4
+			wantRemRAM:        qty("24Gi"), // 32Gi - 8Gi
+			wantRemStg:        qty("85Gi"), // 100Gi - 15Gi
+			wantRemAcc:        qty("0"),
+			// With reservation, ORM tracks the post-subtract remaining
+			// (clamp to flavor ORM ceiling is a no-op here: 12 <= 16).
+			wantOrmCPU: qty("12"),
+			wantOrmRAM: qty("24Gi"),
+			wantOrmStg: qty("85Gi"),
+			wantOrmAcc: qty("0"),
+		},
+		{
+			name:     "non-acc, overcommit on: reservation in requests-units, scaled back before subtract",
+			cqName:   nonAccName,
+			notes:    nonAccNotes,
+			capacity: nonAccCapacity,
+			reservation: core.ResourceList{
+				// Same pod (4C/8Gi/15Gi) recorded as overcommit requests:
+				// CPU = 800m × 4 = 3200m, RAM = 128Mi × 8 = 1Gi, Stg = 128Mi × 15 = 1920Mi.
+				core.ResourceCPU:              qty("3200m"),
+				core.ResourceMemory:           qty("1Gi"),
+				core.ResourceEphemeralStorage: qty("1920Mi"),
+			},
+			overcommit: true,
+
+			wantAcceleratable: false,
+			wantCapAcc:        qty("0"),
+			wantRemCPU:        qty("12"),   // 16 - ScaleBack(3200m, non-acc) = 16 - 4
+			wantRemRAM:        qty("24Gi"), // 32Gi - ScaleBack(1Gi, RAM) = 32Gi - 8Gi
+			wantRemStg:        qty("85Gi"), // 100Gi - ScaleBack(1920Mi, Stg) = 100Gi - 15Gi
+			wantRemAcc:        qty("0"),
+			// ORM identical to the non-overcommit case — semantic
+			// equivalence is the whole point of ScaleBack.
+			wantOrmCPU: qty("12"),
+			wantOrmRAM: qty("24Gi"),
+			wantOrmStg: qty("85Gi"),
+			wantOrmAcc: qty("0"),
+		},
+
+		// --- acceleratable ---
+		{
+			name:        "acc, no reservation: Remaining == Capacity",
+			cqName:      accName,
+			notes:       accNotes,
+			capacity:    accCapacity,
+			reservation: nil,
+			overcommit:  true,
+
+			wantAcceleratable: true,
+			wantCapAcc:        qty("1"),
+			wantRemCPU:        qty("4"),
+			wantRemRAM:        qty("16Gi"),
+			wantRemStg:        qty("100Gi"),
+			wantRemAcc:        qty("1"),
+			// ORM == flavor profile parsed from cq name.
+			wantOrmCPU: qty("4"),
+			wantOrmRAM: qty("16Gi"),
+			wantOrmStg: qty("100Gi"),
+			wantOrmAcc: qty("1"),
+		},
+		{
+			name:     "acc, overcommit off: reservation in limits-units, accelerator counted as-is",
+			cqName:   accName,
+			notes:    accNotes,
+			capacity: accCapacity,
 			reservation: core.ResourceList{
 				core.ResourceCPU:              qty("2"),
 				core.ResourceMemory:           qty("8Gi"),
 				core.ResourceEphemeralStorage: qty("15Gi"),
 				credits:                       qty("1"),
 			},
-			wantRemCPU: qty("2"),
-			wantRemRAM: qty("8Gi"),
-			wantRemStg: qty("85Gi"),
-			wantRemAcc: qty("0"),
+			overcommit: false,
+
+			wantAcceleratable: true,
+			wantCapAcc:        qty("1"),
+			wantRemCPU:        qty("2"),    // 4 - 2
+			wantRemRAM:        qty("8Gi"),  // 16Gi - 8Gi
+			wantRemStg:        qty("85Gi"), // 100Gi - 15Gi
+			wantRemAcc:        qty("0"),    // 1 - 1
+			// Accelerator fully reserved (remAccRf=0). The acceleratable
+			// branch only updates display ORM when remAccRf > 0, so the
+			// whole ORM block collapses to zero — no new acc-needing pod
+			// can fit.
+			wantOrmCPU: qty("0"),
+			wantOrmRAM: qty("0"),
+			wantOrmStg: qty("0"),
+			wantOrmAcc: qty("0"),
 		},
 		{
-			name:       "overcommit acc accel>0: CPU=100m×accel.Value(); credits untouched",
-			overcommit: true,
+			name:     "acc, overcommit on: CPU uses 100m base, credits are NOT scaled back",
+			cqName:   accName,
+			notes:    accNotes,
+			capacity: accCapacity,
 			reservation: core.ResourceList{
-				// One pod with limits 2C/8Gi/15Gi/1acc → requests:
-				// CPU = 100m × 1 (accel.Value()) = 100m
-				// RAM = 128Mi × 8 = 1Gi
+				// Pod with limits 2C/8Gi/15Gi/1acc, recorded as overcommit requests:
+				// CPU = 100m × CPU.Value() = 100m × 2 = 200m  (acceleratable base)
+				// RAM = 128Mi × 8  = 1Gi
 				// Stg = 128Mi × 15 = 1920Mi
-				// Acc = 1 (not overcommitted)
-				core.ResourceCPU:              qty("100m"),
+				// credits = 1  (accelerator is not overcommitted; reservation stored as-is)
+				core.ResourceCPU:              qty("200m"),
 				core.ResourceMemory:           qty("1Gi"),
 				core.ResourceEphemeralStorage: qty("1920Mi"),
 				credits:                       qty("1"),
 			},
-			wantRemCPU: qty("3"),    // 4 - reverse(100m, acc) = 4 - 1 (info-loss: actual was 2)
-			wantRemRAM: qty("8Gi"),  // 16Gi - 8Gi
-			wantRemStg: qty("85Gi"), // 100Gi - 15Gi
-			wantRemAcc: qty("0"),    // 1 - 1
-		},
-		{
-			name:       "overcommit acc no-accel pod: CPU multiplier = CPU.Value()",
 			overcommit: true,
-			reservation: core.ResourceList{
-				// One pod with limits 2C/8Gi/15Gi and accel=0 → requests:
-				// CPU = 100m × 2 (CPU.Value()) = 200m
-				// RAM = 128Mi × 8 = 1Gi
-				// Stg = 128Mi × 15 = 1920Mi
-				// No credits reservation (accel = 0).
-				core.ResourceCPU:              qty("200m"),
-				core.ResourceMemory:           qty("1Gi"),
-				core.ResourceEphemeralStorage: qty("1920Mi"),
-			},
-			wantRemCPU: qty("2"),    // 4 - reverse(200m, acc) = 4 - 2 (exact)
-			wantRemRAM: qty("8Gi"),  // 16Gi - 8Gi
-			wantRemStg: qty("85Gi"), // 100Gi - 15Gi
-			wantRemAcc: qty("1"),    // untouched
+
+			wantAcceleratable: true,
+			wantCapAcc:        qty("1"),
+			wantRemCPU:        qty("2"),    // 4 - ScaleBack(200m, acc) = 4 - 2
+			wantRemRAM:        qty("8Gi"),  // 16Gi - ScaleBack(1Gi, RAM) = 16Gi - 8Gi
+			wantRemStg:        qty("85Gi"), // 100Gi - ScaleBack(1920Mi, Stg) = 100Gi - 15Gi
+			// Key invariant: ScaleBack is a pass-through for the credits
+			// resource name, so 1 reserved credit subtracts 1 directly.
+			wantRemAcc: qty("0"),
+			// Same "fully reserved → ORM zero" outcome as the off case.
+			wantOrmCPU: qty("0"),
+			wantOrmRAM: qty("0"),
+			wantOrmStg: qty("0"),
+			wantOrmAcc: qty("0"),
 		},
 	}
 
-	for _, cs := range cases {
-		cs := cs
-		t.Run(cs.name, func(t *testing.T) {
-			cq := mkClusterQueue(cqName, notes, capacity, cs.reservation)
-			it := convertInstanceTypeFromClusterQueue(cq, cs.overcommit)
-
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			cq := mkClusterQueue(c.cqName, c.notes, c.capacity, c.reservation)
+			it := convertInstanceTypeFromClusterQueue(cq, c.overcommit)
 			if !assert.NotNil(t, it, "expected InstanceType") {
 				return
 			}
-			assert.True(t, it.Spec.Acceleratable, "accel type")
-			assert.Truef(t, cs.wantRemCPU.Equal(it.Status.CPU.Remaining),
-				"remaining CPU: want %s, got %s", cs.wantRemCPU.String(), it.Status.CPU.Remaining.String())
-			assert.Truef(t, cs.wantRemRAM.Equal(it.Status.RAM.Remaining),
-				"remaining RAM: want %s, got %s", cs.wantRemRAM.String(), it.Status.RAM.Remaining.String())
-			assert.Truef(t, cs.wantRemStg.Equal(it.Status.LocalStorage.Remaining),
-				"remaining Stg: want %s, got %s", cs.wantRemStg.String(), it.Status.LocalStorage.Remaining.String())
-			assert.Truef(t, cs.wantRemAcc.Equal(it.Status.Accelerator.Remaining),
-				"remaining Acc: want %s, got %s", cs.wantRemAcc.String(), it.Status.Accelerator.Remaining.String())
+
+			// Spec.
+			assert.Equal(t, c.wantAcceleratable, it.Spec.Acceleratable, "Spec.Acceleratable")
+
+			// Capacity comes straight from the ClusterQueue input.
+			qtyEqual(t, c.capacity[core.ResourceCPU], it.Status.CPU.Capacity, "Capacity.CPU")
+			qtyEqual(t, c.capacity[core.ResourceMemory], it.Status.RAM.Capacity, "Capacity.RAM")
+			qtyEqual(t, c.capacity[core.ResourceEphemeralStorage], it.Status.LocalStorage.Capacity, "Capacity.Storage")
+			qtyEqual(t, c.wantCapAcc, it.Status.Accelerator.Capacity, "Capacity.Accelerator")
+
+			// Remaining.
+			qtyEqual(t, c.wantRemCPU, it.Status.CPU.Remaining, "Remaining.CPU")
+			qtyEqual(t, c.wantRemRAM, it.Status.RAM.Remaining, "Remaining.RAM")
+			qtyEqual(t, c.wantRemStg, it.Status.LocalStorage.Remaining, "Remaining.Storage")
+			qtyEqual(t, c.wantRemAcc, it.Status.Accelerator.Remaining, "Remaining.Accelerator")
+
+			// OnceMaxRequest.
+			qtyEqual(t, c.wantOrmCPU, it.Status.CPU.OnceMaxRequest, "OnceMaxRequest.CPU")
+			qtyEqual(t, c.wantOrmRAM, it.Status.RAM.OnceMaxRequest, "OnceMaxRequest.RAM")
+			qtyEqual(t, c.wantOrmStg, it.Status.LocalStorage.OnceMaxRequest, "OnceMaxRequest.Storage")
+			qtyEqual(t, c.wantOrmAcc, it.Status.Accelerator.OnceMaxRequest, "OnceMaxRequest.Accelerator")
 		})
 	}
 }

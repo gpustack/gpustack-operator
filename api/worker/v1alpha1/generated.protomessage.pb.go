@@ -33,3 +33,25 @@ func (*DevicesList) ProtoMessage() {}
 func (*DevicesSpec) ProtoMessage() {}
 
 func (*DevicesStatus) ProtoMessage() {}
+
+func (*Instance) ProtoMessage() {}
+
+func (*InstanceEnvVar) ProtoMessage() {}
+
+func (*InstanceEphemeralVolume) ProtoMessage() {}
+
+func (*InstanceList) ProtoMessage() {}
+
+func (*InstancePort) ProtoMessage() {}
+
+func (*InstanceResources) ProtoMessage() {}
+
+func (*InstanceServicePort) ProtoMessage() {}
+
+func (*InstanceSpec) ProtoMessage() {}
+
+func (*InstanceStatus) ProtoMessage() {}
+
+func (*InstanceTemplate) ProtoMessage() {}
+
+func (*InstanceVolume) ProtoMessage() {}

@@ -436,7 +436,7 @@ func (h *InstancePersistentVolumeTypeHandler) OnUpdate(
 	// Update.
 	oldStgCls := new(storage.StorageClass)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instPVType), oldStgCls,
-		ctrlclix.NonQuorum)
+		ctrlclix.WithoutQuorum)
 	if err != nil {
 		return nil, err
 	}

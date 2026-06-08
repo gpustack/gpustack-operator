@@ -73,7 +73,7 @@ func (h *InstancePersistentVolumeEventsHandler) OnGet(
 			"involvedObject.kind":      "PersistentVolumeClaim",
 			"involvedObject.uid":       string(pvcMeta.UID),
 		},
-		ctrlclix.NonQuorum,
+		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy,
 	)
 	if err != nil {

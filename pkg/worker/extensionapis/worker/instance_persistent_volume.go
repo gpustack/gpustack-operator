@@ -152,7 +152,7 @@ func (h *InstancePersistentVolumeHandler) OnCreate(ctx context.Context, obj runt
 	if ptr.Deref(instPV.Spec.Type, "") == "" {
 		stgClassList := new(storage.StorageClassList)
 		err := h.Client.List(ctx, stgClassList,
-			ctrlclix.NonQuorum)
+			ctrlclix.WithoutQuorum)
 		if err != nil {
 			return nil, field.InternalError(
 				field.NewPath("spec.type"), fmt.Errorf("list storage classes: %w", err))
@@ -347,7 +347,7 @@ func (h *InstancePersistentVolumeHandler) OnUpdate(
 	// Update.
 	oldPvc := new(core.PersistentVolumeClaim)
 	err := h.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instPV), oldPvc,
-		ctrlclix.NonQuorum)
+		ctrlclix.WithoutQuorum)
 	if err != nil {
 		return nil, err
 	}
