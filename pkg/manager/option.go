@@ -27,6 +27,7 @@ type Options struct {
 	// Control.
 	GopoolWorkerFactor        int
 	InformerCacheResyncPeriod time.Duration
+	AggressiveEventFiltering  bool
 
 	// Connect Kubernetes.
 	KubeConnTimeout        time.Duration
@@ -82,6 +83,8 @@ func (o *Options) AddFlags(fs *pflag.FlagSet, opts ...FlagOption) {
 			"it is calculated by the number of CPU cores multiplied by this factor.")
 	fs.DurationVar(&o.InformerCacheResyncPeriod, "informer-cache-resync-period", o.InformerCacheResyncPeriod,
 		"the period at which the informer's cache is resynced.")
+	fs.BoolVar(&o.AggressiveEventFiltering, "aggressive-event-filtering", o.AggressiveEventFiltering,
+		"indicates to reduce event filtering threshold to make the controllers more aggressive to react to the changes of the cluster.")
 
 	// Connect Kubernetes.
 	fs.DurationVar(&o.KubeConnTimeout, "kube-conn-timeout", o.KubeConnTimeout,
@@ -217,6 +220,7 @@ func (o *Options) Complete(ctx context.Context) (*Config, error) {
 
 	return &Config{
 		InformerCacheResyncPeriod: o.InformerCacheResyncPeriod,
+		AggressiveEventFiltering:  o.AggressiveEventFiltering,
 		LoopbackKubeConfigPath:    lpCfgPath,
 		LoopbackKubeRestConfig:    *lpRestCfg,
 		LoopbackKubeHTTPClient:    lpHttpCli,

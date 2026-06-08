@@ -110,6 +110,7 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 	r.Client = opts.Manager.GetClient()
 	r.APIReader = opts.Manager.GetAPIReader()
 
+	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("nodefeature").
 		For(
@@ -123,6 +124,10 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						if aggressive {
+							return e.ObjectNew.GetDeletionTimestamp() == nil
+						}
+
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,

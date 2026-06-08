@@ -136,6 +136,7 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 
 	r.Client = opts.Manager.GetClient()
 
+	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("cohort").
 		Watches(
@@ -152,6 +153,10 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 				// - updated if labels have changed.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						if aggressive {
+							return true
+						}
+
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
