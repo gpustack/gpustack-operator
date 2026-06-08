@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	core "k8s.io/api/core/v1"
+	node "k8s.io/api/node/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -327,7 +328,7 @@ func (h *InstanceHandler) OnCreate(ctx context.Context, obj runtime.Object, opts
 	}
 
 	// Create.
-	pod := convertPodFromInstance(ctx, inst, instType)
+	pod := h.convertPodFromInstance(ctx, inst, instType)
 	err = h.Client.Create(ctx, pod, &opts)
 	if err != nil {
 		return nil, err
@@ -573,7 +574,7 @@ func convertPodListOptsFromInstanceListOpts(in ctrlcli.ListOptions) (out *ctrlcl
 	return &in
 }
 
-func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType *worker.InstanceType) *core.Pod {
+func (h *InstanceHandler) convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType *worker.InstanceType) *core.Pod {
 	needSSHD := inst.Spec.SSHPublicKey != nil && inst.Spec.SSHPublicKey.Name != ""
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
@@ -759,6 +760,19 @@ func convertPodFromInstance(ctx context.Context, inst *worker.Instance, instType
 	}
 	pod.Labels[kueuectrlconst.QueueLabel] = inst.Spec.Type // Scheduling.
 	pod.Labels["app.kubernetes.io/part-of"] = inst.Name    // Accessing.
+
+	// Ensure runtime class.
+	if instType.Spec.Acceleratable {
+		rn := devicefeature.GetRuntimeName(instType.Spec.Manufacturer)
+		if rn != "" {
+			rc := new(node.RuntimeClass)
+			err := h.Client.Get(ctx, ctrlcli.ObjectKey{Name: rn}, rc,
+				ctrlclix.NonQuorum)
+			if err == nil {
+				pod.Spec.RuntimeClassName = ptr.To(rn)
+			}
+		}
+	}
 
 	notes := map[string]string{
 		"displayName": inst.Spec.DisplayName,

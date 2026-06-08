@@ -39,6 +39,7 @@ const (
 )
 
 var (
+	_ManufacturerRuntimeNameMap     map[string]string
 	_ManufacturerResourceNameMap    map[string]core.ResourceName
 	_ManufacturerPciIDMap           map[string]string
 	_ResourceNameSet                sets.Set[core.ResourceName]
@@ -48,6 +49,27 @@ var (
 )
 
 func init() {
+	// Map manufacturer to runtime name.
+	_ManufacturerRuntimeNameMap = map[string]string{
+		ManufacturerAMD:       "amd",
+		ManufacturerAscend:    "ascend",
+		ManufacturerCambricon: "cambricon",
+		ManufacturerHygon:     "hygon",
+		ManufacturerIluvatar:  "iluvatar",
+		ManufacturerMetaX:     "metax",
+		ManufacturerMThreads:  "mthreads",
+		ManufacturerNVIDIA:    "nvidia",
+	}
+	for _, manufacturer := range maps.Keys(_ManufacturerResourceNameMap) {
+		// Extract runtime name from environment variable if exists,
+		// and override the default value in the map.
+		//
+		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_RUNTIME_NAME".
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_RUNTIME_NAME"); v != "" {
+			_ManufacturerRuntimeNameMap[manufacturer] = v
+		}
+	}
+
 	// Map manufacturer to resource name.
 	_ManufacturerResourceNameMap = map[string]core.ResourceName{
 		ManufacturerAMD:       "amd.com/gpu",
@@ -64,8 +86,8 @@ func init() {
 		// Extract resource name from environment variable if exists,
 		// and override the default value in the map.
 		//
-		// E.g. for AMD, the environment variable is "GPUSTACK_ALLOCATOR_AMD_RESOURCE_NAME".
-		if v := osx.Getenv("GPUSTACK_ALLOCATOR_" + strings.ToUpper(manufacturer) + "_RESOURCE_NAME"); v != "" {
+		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_RESOURCE_NAME".
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_RESOURCE_NAME"); v != "" {
 			_ManufacturerResourceNameMap[manufacturer] = core.ResourceName(v)
 		}
 	}
@@ -86,10 +108,10 @@ func init() {
 		// Extract PCI vendor ID from environment variable if exists,
 		// and override the default value in the map.
 		//
-		// E.g. for AMD, the environment variable is "GPUSTACK_ALLOCATOR_AMD_PCI_VENDOR".
+		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_PCI_VENDOR".
 		//
 		// Allow pattern like ${class}_${vendor} or ${vendor} only.
-		if v := osx.Getenv("GPUSTACK_ALLOCATOR_" + strings.ToUpper(manufacturer) + "_PCI_ID"); v != "" {
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_PCI_ID"); v != "" {
 			_ManufacturerPciIDMap[manufacturer] = v
 		}
 	}
@@ -123,6 +145,11 @@ func GetKnownManufacturers() []string {
 	manus := maps.Keys(_ManufacturerResourceNameMap)
 	sort.Strings(manus)
 	return manus
+}
+
+// GetRuntimeName returns the runtime name for the given manufacturer.
+func GetRuntimeName(manufacturer string) string {
+	return _ManufacturerRuntimeNameMap[manufacturer]
 }
 
 // GetResourceName returns the resource name for the given manufacturer.
