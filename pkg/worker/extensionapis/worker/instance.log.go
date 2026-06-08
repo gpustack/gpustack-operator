@@ -20,9 +20,9 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 )
 
-// InstanceLogHandler handles log request for an instance.
+// InstanceLogHandler handles the "log" subresource of v1.Instance objects.
 //
-// InstanceLogHandler proxies the corresponding Kubernetes Pod resource,
+// InstanceLogHandler streams logs from the v1.Instance's backing Kubernetes Pod,
 // which is named as the Instance's name.
 type InstanceLogHandler struct {
 	ClientCfg restcli.Config

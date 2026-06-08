@@ -15,6 +15,10 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 )
 
+// InstancePersistentVolumeEventsHandler handles the "events" subresource of v1.InstancePersistentVolume objects.
+//
+// InstancePersistentVolumeEventsHandler lists Kubernetes Events that involve the v1.InstancePersistentVolume's backing PersistentVolumeClaim,
+// which is named as the InstancePersistentVolume's name.
 type InstancePersistentVolumeEventsHandler struct {
 	extensionapi.GetOperation
 

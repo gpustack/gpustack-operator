@@ -23,9 +23,9 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
-// NodeFeatureReconciler reconciles all Kubernetes Node objects to finish the following tasks:
-//   - When the labels or capacities of a Node are updated,
-//     create/update corresponding nfd.NodeFeature.
+// NodeFeatureReconciler reconciles nfd.NodeFeature objects driven by Kubernetes Node changes to finish the following tasks:
+//   - When a Node's labels or capacities are updated,
+//     create/update the corresponding nfd.NodeFeature.
 type NodeFeatureReconciler struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader

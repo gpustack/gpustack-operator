@@ -15,6 +15,10 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 )
 
+// InstanceEventsHandler handles the "events" subresource of v1.Instance objects.
+//
+// InstanceEventsHandler lists Kubernetes Events that involve the v1.Instance's backing Pod,
+// which is named as the Instance's name.
 type InstanceEventsHandler struct {
 	extensionapi.GetOperation
 

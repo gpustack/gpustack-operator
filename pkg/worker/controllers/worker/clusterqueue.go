@@ -33,13 +33,11 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 )
 
-// ClusterQueueReconciler reconciles watches kueue.ResourceFlavor and Node objects to finish the following tasks:
-//   - When a ResourceFlavor is created/deleted,
-//     enqueue the Cohort that the ResourceFlavor references (via label)
-//     to trigger the reconciliation of the ClusterQueue.
-//   - When a Node is created/deleted or its labels are updated,
-//     enqueue the Cohort that the Node references (via label)
-//     to trigger the reconciliation of the ClusterQueue.
+// ClusterQueueReconciler reconciles kueue.ClusterQueue objects driven by kueue.ResourceFlavor
+// and Kubernetes Node changes to finish the following tasks:
+//   - When a ResourceFlavor is created/deleted, or a Node is created/deleted or its feature labels are updated,
+//     construct the kueue.ClusterQueue by aggregating all ResourceFlavors that share the same queue name,
+//     or delete the kueue.ClusterQueue when no ResourceFlavor references the queue.
 type ClusterQueueReconciler struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader

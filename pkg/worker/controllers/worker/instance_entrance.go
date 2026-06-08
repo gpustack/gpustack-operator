@@ -23,9 +23,9 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
-// InstanceEntranceReconciler reconciles all Kubernetes Pod objects to finish the following tasks:
-//   - When n v1.Instance-related Pod is running,
-//     create a corresponding Service to expose the Pod and annotate the Pod with the Service node port info.
+// InstanceEntranceReconciler reconciles Kubernetes Service objects driven by Kubernetes Pod changes to finish the following tasks:
+//   - When a v1.Instance-related Pod becomes Running,
+//     create a Kubernetes Service to expose the Pod and annotate the Pod with the assigned node port info.
 type InstanceEntranceReconciler struct {
 	Client ctrlcli.Client
 }

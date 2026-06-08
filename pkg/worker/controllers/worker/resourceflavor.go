@@ -26,9 +26,9 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 )
 
-// ResourceFlavorReconciler reconciles all Kubernetes Node objects to finish the following tasks:
-//   - When the labels or taints of a Node are updated,
-//     create/update corresponding kueue.ResourceFlavor.
+// ResourceFlavorReconciler reconciles kueue.ResourceFlavor objects driven by Kubernetes Node changes to finish the following tasks:
+//   - When a Node's labels or taints are updated,
+//     create/update the kueue.ResourceFlavor derived from the Node's device profile.
 type ResourceFlavorReconciler struct {
 	Client ctrlcli.Client
 }

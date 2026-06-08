@@ -26,8 +26,10 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 )
 
-// CohortReconciler watches Kubernetes Node objects to manage the lifecycle of kueue.Cohort objects,
-// which are used to group nodes with the same cohort profile together.
+// CohortReconciler reconciles kueue.Cohort objects driven by Kubernetes Node changes to finish the following tasks:
+//   - When a Node is created/deleted or its feature labels are updated,
+//     create the kueue.Cohort matching the Node's cohort profile,
+//     or delete an orphaned kueue.Cohort when no Node references it.
 type CohortReconciler struct {
 	Client ctrlcli.Client
 }

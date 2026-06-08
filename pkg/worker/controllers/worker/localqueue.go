@@ -25,6 +25,10 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
+// LocalQueueReconciler reconciles kueue.LocalQueue objects driven by kueue.ClusterQueue
+// and Kubernetes Namespace changes to finish the following tasks:
+//   - When a ClusterQueue is created, or a Namespace is created,
+//     create a kueue.LocalQueue pointing to the ClusterQueue in every non-system Namespace.
 type LocalQueueReconciler struct {
 	Client ctrlcli.Client
 }

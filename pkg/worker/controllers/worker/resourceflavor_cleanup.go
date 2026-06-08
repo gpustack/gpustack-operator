@@ -21,9 +21,9 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 )
 
-// ResourceFlavorCleanupReconciler watches Kubernetes Node objects to finish the following tasks:
-//   - When a Node is updated/deleted,
-//     check if the corresponding kueue.ResourceFlavor is orphaned and delete it if so.
+// ResourceFlavorCleanupReconciler reconciles kueue.ResourceFlavor objects driven by Kubernetes Node changes to finish the following tasks:
+//   - When a Node is created/deleted or its feature labels are updated,
+//     delete the corresponding kueue.ResourceFlavor when no Node references it.
 type ResourceFlavorCleanupReconciler struct {
 	Client ctrlcli.Client
 }
@@ -90,6 +90,7 @@ func (r *ResourceFlavorCleanupReconciler) SetupController(ctx context.Context, o
 			),
 			ctrlbuilder.WithPredicates(
 				// Interested in Node objects:
+				// - created.
 				// - deleted.
 				// - updated if labels have changed.
 				ctrlpredicate.Funcs{
