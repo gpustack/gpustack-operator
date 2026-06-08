@@ -18,6 +18,8 @@ import (
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
@@ -25,7 +27,8 @@ import (
 //   - When the labels or capacities of a Node are updated,
 //     create/update corresponding nfd.NodeFeature.
 type NodeFeatureReconciler struct {
-	Client ctrlcli.Client
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
 }
 
 var _ ctrlreconcile.Reconciler = (*NodeFeatureReconciler)(nil)
@@ -35,7 +38,7 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Fetch.
 	nd := new(core.Node)
-	err := r.Client.Get(ctx, req.NamespacedName, nd)
+	err := r.APIReader.Get(ctx, req.NamespacedName, nd)
 	if err != nil {
 		logger.Error(err, "fetch node")
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
@@ -105,6 +108,7 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("nodefeature").
@@ -113,13 +117,37 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 			ctrlbuilder.WithPredicates(
 				// Trigger reconciliation when a Node is:
 				// - created.
-				// - updated.
+				// - updated if labels or capacities have changed.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						return e.ObjectNew.GetDeletionTimestamp() == nil
+						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
+						if newNd.DeletionTimestamp == nil {
+							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+								systemname.ManagedLabelKey,
+								devicefeature.FeatureLabelPrefix) {
+								return true
+							}
+							for cn := range newNd.Status.Capacity {
+								switch {
+								default:
+									continue
+								case devicefeature.IsKnownResourceName(cn):
+								case cn == core.ResourceCPU:
+								case cn == core.ResourceMemory:
+								case cn == core.ResourceEphemeralStorage:
+									if !oldNd.Status.Allocatable[cn].Equal(newNd.Status.Allocatable[cn]) {
+										return true
+									}
+									if !oldNd.Status.Capacity[cn].Equal(newNd.Status.Capacity[cn]) {
+										return true
+									}
+								}
+							}
+						}
+						return false
 					},
 					GenericFunc: func(e ctrlevent.GenericEvent) bool {
 						return false

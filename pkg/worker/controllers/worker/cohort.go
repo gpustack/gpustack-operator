@@ -69,7 +69,7 @@ func (r *CohortReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 				return ctrl.Result{}, err
 			}
 		}
-		logger.V(2).Info("orphaned cohort deleted")
+		logger.V(2).Info("deleted orphaned cohort")
 		return ctrl.Result{}, nil
 	}
 

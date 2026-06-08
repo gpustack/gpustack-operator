@@ -25,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
@@ -35,9 +36,13 @@ import (
 // ClusterQueueReconciler reconciles watches kueue.ResourceFlavor and Node objects to finish the following tasks:
 //   - When a ResourceFlavor is created/deleted,
 //     enqueue the Cohort that the ResourceFlavor references (via label)
-//     to trigger the reconciliation of the ClusterQueue corresponding to the Cohort.
+//     to trigger the reconciliation of the ClusterQueue.
+//   - When a Node is created/deleted or its labels are updated,
+//     enqueue the Cohort that the Node references (via label)
+//     to trigger the reconciliation of the ClusterQueue.
 type ClusterQueueReconciler struct {
-	Client ctrlcli.Client
+	Client    ctrlcli.Client
+	APIReader ctrlcli.Reader
 }
 
 var _ ctrlreconcile.Reconciler = (*ClusterQueueReconciler)(nil)
@@ -63,7 +68,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 				Name: queueName,
 			},
 		}
-		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: queueName}, cq)
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: queueName}, cq)
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
 				logger.Error(err, "fetch cluster queue")
@@ -115,7 +120,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
 		logger.Error(err, "fetch cohort")
-		return ctrlreconcile.Result{RequeueAfter: 5 * time.Second}, err
+		return ctrlreconcile.Result{}, err
 	}
 
 	// Skip if Cohort is being deleted.
@@ -127,8 +132,8 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 	// Sync ClusterQueue.
 	eResGroups, eNotes := r.constructResourceGroups(ctx, rfList)
 	if len(eResGroups) == 0 {
-		logger.Error(nil, "no valid resource flavors, skip")
-		return ctrlreconcile.Result{}, nil
+		logger.Error(nil, "no valid resource flavors, retry in 5s")
+		return ctrlreconcile.Result{RequeueAfter: 5 * time.Second}, nil
 	}
 
 	eCq := &kueue.ClusterQueue{
@@ -261,7 +266,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			}
 			if manu != "" {
 				accQ = funcx.NoError(resource.ParseQuantity(rfNotes["accelerator"]))
-				if accQ.Sign() <= 0 {
+				if accQ.Sign() < 0 {
 					logger.V(2).Info("skip resource flavor with non-positive accelerator",
 						"accelerator", rfNotes["accelerator"])
 					continue
@@ -371,14 +376,17 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 	}
 
 	r.Client = opts.Manager.GetClient()
+	r.APIReader = opts.Manager.GetAPIReader()
+	dedupWindow := ctrlhandlerx.NewDedupWindow[ctrlreconcile.Request]()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("clusterqueue").
 		Watches(
 			// Watch kueue.ResourceFlavors and enqueue the corresponding Cohort/ClusterQueue.
 			&kueue.ResourceFlavor{},
-			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
 				3*time.Second,
+				dedupWindow,
 				r.enqueueCohortWhenResourceFlavorChanged,
 			),
 			ctrlbuilder.WithPredicates(
@@ -412,20 +420,23 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 		Watches(
 			// Watch Nodes and enqueue the corresponding Cohort/ClusterQueue.
 			&core.Node{},
-			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
 				3*time.Second,
+				dedupWindow,
 				r.enqueueCohortWhenNodeChanged,
 			),
 			ctrlbuilder.WithPredicates(
 				// Interested in Node objects:
 				// - created.
 				// - deleted.
-				// - updated.
+				// - updated if labels have changed.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							return true
+							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+								systemname.LabelPrefix,
+								devicefeature.FeatureLabelPrefix)
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true
