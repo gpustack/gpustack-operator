@@ -10,6 +10,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -18,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
@@ -152,6 +154,8 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 	instOld, inst := oldObj.(*workercore.Instance), newObj.(*workercore.Instance)
 
 	var errs field.ErrorList
+
+	// Immutable fields validation.
 	if inst.Spec.Type != instOld.Spec.Type {
 		errs = append(errs, field.Forbidden(
 			field.NewPath("spec.type"), "type is immutable"),
@@ -212,6 +216,21 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 			field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable"),
 		)
 	}
+
+	// Phase transition validation.
+	if !ptr.Deref(instOld.Spec.Stop, false) && ptr.Deref(inst.Spec.Stop, false) {
+		if instOld.Status.Phase == workerctrl.PhaseStarting {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.stop"), "cannot stop starting instance"))
+		}
+	}
+	if ptr.Deref(instOld.Spec.Stop, false) && !ptr.Deref(inst.Spec.Stop, false) {
+		if instOld.Status.Phase != workerctrl.PhaseStopped {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.stop"), "can only start stopped instance"))
+		}
+	}
+
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(worker.Kind("Instance"), inst.Name, errs)
 	}

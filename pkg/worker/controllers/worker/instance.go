@@ -38,6 +38,13 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
+const (
+	PhaseStarting = "Starting"
+	PhaseStopping = "Stopping"
+	PhaseStopped  = "Stopped"
+	PhaseReady    = "Ready"
+)
+
 // InstanceReconciler reconciles v1alpha1.Instance objects to finish the following tasks:
 //   - Create/Update/Delete a Kubernetes Pod as the backing resource of the Instance based on the Instance spec.
 //   - Create a Kubernetes Service to expose the ports of the backing Pod if specified in the Instance spec.
@@ -86,13 +93,13 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if ptr.Deref(inst.Spec.Stop, false) {
 		// Pod already deleted, mark the Instance as stopped.
 		if pod == nil {
-			if inst.Status.Phase == "Stopped" {
+			if inst.Status.Phase == PhaseStopped {
 				logger.V(3).Info("instance already stopped")
 				return ctrl.Result{}, nil
 			}
 
 			inst.Status = workercore.InstanceStatus{
-				Phase: "Stopped",
+				Phase: PhaseStopped,
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
@@ -105,9 +112,9 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		// If instance is not marked as stopping,
 		// mark it as stopping first to avoid racing with other controllers or users to update the instance status.
-		if inst.Status.Phase != "Stopping" {
+		if inst.Status.Phase != PhaseStopping {
 			inst.Status = workercore.InstanceStatus{
-				Phase: "Stopping",
+				Phase: PhaseStopping,
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
@@ -149,9 +156,9 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if pod == nil {
 		// If the instance is marked as stopping or stopped,
 		// mark it as starting first to avoid racing with other controllers or users to update the instance status.
-		if inst.Status.Phase == "Stopping" || inst.Status.Phase == "Stopped" {
+		if inst.Status.Phase == PhaseStopping || inst.Status.Phase == PhaseStopped {
 			inst.Status = workercore.InstanceStatus{
-				Phase: "Starting",
+				Phase: PhaseStarting,
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
@@ -308,7 +315,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	if currentPhase != lastPhase && lastPhase == "Ready" {
+	if currentPhase != lastPhase && lastPhase == PhaseReady {
 		logger.Info("instance started")
 	} else {
 		logger.V(2).Info("updated instance status")
