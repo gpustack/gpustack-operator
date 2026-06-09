@@ -43,6 +43,7 @@ const (
 	PhaseStopping = "Stopping"
 	PhaseStopped  = "Stopped"
 	PhaseReady    = "Ready"
+	PhaseDeleting = "Deleting"
 )
 
 // InstanceReconciler reconciles v1alpha1.Instance objects to finish the following tasks:
@@ -70,10 +71,66 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, nil
 	}
 
-	// Skip if deleted.
+	// Clean up if the Instance is marked as deleted.
 	if inst.DeletionTimestamp != nil {
-		logger.V(3).Info("skip deleted instance")
-		return ctrl.Result{}, nil
+		if systemmeta.Unlock(inst) {
+			logger.V(3).Info("skip deleted instance")
+			return ctrl.Result{}, nil
+		}
+
+		// Ensure the backing Pod is deleted before unlocking and let other controllers or users to clean up the Instance.
+		pod := new(core.Pod)
+		err = r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(inst), pod,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				logger.Error(err, "fetch pod")
+				return ctrl.Result{}, err
+			}
+			pod = nil
+		}
+
+		if pod == nil {
+			err = r.Client.Update(ctx, inst)
+			if err != nil {
+				logger.Error(err, "unlock instance")
+			}
+			return ctrl.Result{}, err
+		}
+
+		if inst.Status.Phase != PhaseDeleting {
+			logger.Info("instance deleting")
+
+			inst.Status.Phase = PhaseDeleting
+			err = r.Client.Status().Update(ctx, inst)
+			if err != nil {
+				logger.Error(err, "update instance status to deleting")
+				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			}
+		}
+
+		if pod.DeletionTimestamp == nil {
+			err = r.Client.Delete(ctx, pod,
+				ctrlclix.Terminated)
+			if err != nil {
+				if !kerrors.IsNotFound(err) {
+					logger.Error(err, "delete pod")
+					return ctrl.Result{}, err
+				}
+			}
+		}
+
+		logger.V(3).Info("pod deletion in progress, retry later")
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	// Lock.
+	if !systemmeta.Lock(inst) {
+		err = r.Client.Update(ctx, inst)
+		if err != nil {
+			logger.Error(err, "lock instance")
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Fetch the backing Pod.
@@ -103,7 +160,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status")
+				logger.Error(err, "update instance status to stopped")
 				return ctrl.Result{}, err
 			}
 			logger.Info("instance stopped")
@@ -113,12 +170,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		// If instance is not marked as stopping,
 		// mark it as stopping first to avoid racing with other controllers or users to update the instance status.
 		if inst.Status.Phase != PhaseStopping {
-			inst.Status = workercore.InstanceStatus{
-				Phase: PhaseStopping,
-			}
+			inst.Status.Phase = PhaseStopping
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status")
+				logger.Error(err, "update instance status to stopping")
 				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 			}
 		}
@@ -132,24 +187,12 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					logger.Error(err, "delete pod")
 					return ctrl.Result{}, err
 				}
-
-				logger.V(3).Info("pod already deleted")
-				inst.Status = workercore.InstanceStatus{
-					Phase: "Stopped",
-				}
-				err = r.Client.Status().Update(ctx, inst)
-				if err != nil {
-					logger.Error(err, "update instance status")
-					return ctrl.Result{}, err
-				}
-				logger.Info("instance stopped")
-				return ctrl.Result{}, nil
 			}
 		}
 
 		// Pod deletion in progress, requeue and wait for it to be deleted.
 		logger.V(2).Info("pod deletion in progress, retry later")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	// Create the Pod if not exists.
@@ -162,7 +205,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
-				logger.Error(err, "update instance status")
+				logger.Error(err, "update instance status to starting")
 				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 			}
 
@@ -194,7 +237,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	} else if pod.DeletionTimestamp != nil {
 		logger.V(3).Info("previous pod deletion in progress, retry later")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	// Fetch the backing Service.
@@ -219,7 +262,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	} else if svc.DeletionTimestamp != nil {
 		logger.V(3).Info("previous service deletion in progress, retry later")
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
 	instStatus := inst.Status.DeepCopy()
@@ -250,7 +293,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				}
 			} else {
 				logger.V(2).Info("instance ports not ready, retry later")
-				return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
 		}
 
@@ -302,7 +345,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if kubemeta.DeepEqual(&inst.Status, instStatus) {
-		logger.V(2).Info("instance status up to date")
+		logger.V(3).Info("instance status up to date")
 		return ctrl.Result{}, nil
 	}
 
@@ -311,14 +354,14 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	inst.Status = *instStatus
 	err = r.Client.Status().Update(ctx, inst)
 	if err != nil {
-		logger.Error(err, "update instance status")
+		logger.Error(err, "update instance status to ready")
 		return ctrl.Result{}, err
 	}
 
 	if currentPhase != lastPhase && lastPhase == PhaseReady {
 		logger.Info("instance started")
 	} else {
-		logger.V(2).Info("updated instance status")
+		logger.V(3).Info("updated instance status")
 	}
 	return ctrl.Result{}, nil
 }
