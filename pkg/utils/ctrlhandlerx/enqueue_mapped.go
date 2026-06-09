@@ -217,29 +217,38 @@ func (e *dedupEnqueueRequestsFromMapFunc[object, request]) mapAndEnqueue(
 	}
 }
 
-// enqueue adds req to q. When delay > 0 the add is deferred via AddAfter (or
-// the priorityqueue's After option). The underlying queue further coalesces
-// duplicate items by min-duration / max-priority, providing a second line of
-// defense against amplification.
+// enqueue adds req to q. When delay > 0 the deferred add is driven by
+// time.AfterFunc rather than the queue's own After option.
+//
+// We must not feed delay to controller-runtime's priorityqueue.PriorityQueue:
+// it merges concurrent adds for the same key by keeping the earliest ReadyAt,
+// so when the same req is already queued with ReadyAt==nil — e.g. a prior
+// immediate add is sitting in w.ready waiting on a busy worker — a follow-up
+// AddWithOpts({After: X}) silently collapses to immediate and the dedup
+// window's deferred enqueue is lost forever. priorityqueue.AddAfter shares
+// the same code path, so it has the same problem.
 func (e *dedupEnqueueRequestsFromMapFunc[object, request]) enqueue(
 	q workqueue.TypedRateLimitingInterface[request],
 	req request,
 	delay time.Duration,
 	lowPriority bool,
 ) {
-	if pq, ok := q.(priorityqueue.PriorityQueue[request]); ok {
-		opts := priorityqueue.AddOpts{After: delay}
-		if lowPriority {
-			opts.Priority = ptr.To(-100)
+	add := func() {
+		if pq, ok := q.(priorityqueue.PriorityQueue[request]); ok {
+			var opts priorityqueue.AddOpts
+			if lowPriority {
+				opts.Priority = ptr.To(-100)
+			}
+			pq.AddWithOpts(opts, req)
+			return
 		}
-		pq.AddWithOpts(opts, req)
-		return
+		q.Add(req)
 	}
 	if delay > 0 {
-		q.AddAfter(req, delay)
+		time.AfterFunc(delay, add)
 		return
 	}
-	q.Add(req)
+	add()
 }
 
 var typeForClientObject = reflect.TypeFor[ctrlcli.Object]()

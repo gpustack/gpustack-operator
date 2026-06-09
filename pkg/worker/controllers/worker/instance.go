@@ -305,6 +305,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	err = r.Client.Status().Update(ctx, inst)
 	if err != nil {
 		logger.Error(err, "update instance status")
+		return ctrl.Result{}, err
 	}
 
 	if currentPhase != lastPhase && lastPhase == "Ready" {
@@ -312,7 +313,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	} else {
 		logger.V(2).Info("updated instance status")
 	}
-	return ctrl.Result{}, err
+	return ctrl.Result{}, nil
 }
 
 func (r *InstanceReconciler) convertPodFromInstance(
