@@ -8,7 +8,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/systemname"
 )
@@ -67,6 +66,7 @@ func TestConstructNodeDeviceLabels(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.cores":              "2560",
 				FeatureLabelPrefix + "nvidia-tesla-t4.family":             "Turing",
 				FeatureLabelPrefix + "nvidia-tesla-t4.compute-capability": "7.5",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators":       "4",
 			},
 		},
 		{
@@ -83,11 +83,12 @@ func TestConstructNodeDeviceLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				FeatureLabelPrefix + "nvidia":              "true",
-				FeatureLabelPrefix + "nvidia-h100":         "true",
-				FeatureLabelPrefix + "nvidia-h100.product": "H100",
-				FeatureLabelPrefix + "nvidia-h100.memory":  "80Gi",
-				FeatureLabelPrefix + "nvidia-h100.cores":   "0",
+				FeatureLabelPrefix + "nvidia":                   "true",
+				FeatureLabelPrefix + "nvidia-h100":              "true",
+				FeatureLabelPrefix + "nvidia-h100.product":      "H100",
+				FeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
+				FeatureLabelPrefix + "nvidia-h100.cores":        "0",
+				FeatureLabelPrefix + "nvidia-h100.accelerators": "1",
 			},
 		},
 		{
@@ -120,16 +121,18 @@ func TestConstructNodeDeviceLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				FeatureLabelPrefix + "nvidia":                  "true",
-				FeatureLabelPrefix + "nvidia-tesla-t4":         "true",
-				FeatureLabelPrefix + "nvidia-tesla-t4.product": "Tesla-T4",
-				FeatureLabelPrefix + "nvidia-tesla-t4.memory":  "15Gi",
-				FeatureLabelPrefix + "nvidia-tesla-t4.cores":   "0",
-				FeatureLabelPrefix + "amd":                     "true",
-				FeatureLabelPrefix + "amd-mi300x":              "true",
-				FeatureLabelPrefix + "amd-mi300x.product":      "MI300X",
-				FeatureLabelPrefix + "amd-mi300x.memory":       "192Gi",
-				FeatureLabelPrefix + "amd-mi300x.cores":        "0",
+				FeatureLabelPrefix + "nvidia":                       "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":              "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":        "0",
+				FeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
+				FeatureLabelPrefix + "amd":                          "true",
+				FeatureLabelPrefix + "amd-mi300x":                   "true",
+				FeatureLabelPrefix + "amd-mi300x.product":           "MI300X",
+				FeatureLabelPrefix + "amd-mi300x.memory":            "192Gi",
+				FeatureLabelPrefix + "amd-mi300x.cores":             "0",
+				FeatureLabelPrefix + "amd-mi300x.accelerators":      "2",
 			},
 		},
 	}
@@ -217,16 +220,16 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// This exercises the odd-Gi rounding (RAM rounds up to the next even
 	// Gi; local-storage rounds down).
 
-	gpuResource := GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-
-	newNode := func(name, cpu, mem, storage string, gpu int64, labels map[string]string) *core.Node {
+	// ConstructNodeCapacityLabels reads accelerator count from the
+	// ${nodeKey}.accelerators label (emitted by applyDeviceLabels), not from
+	// Node.Status.Capacity[<gpu resource>]. The capacity passed to newNode
+	// only carries CPU / RAM / ephemeral-storage; device count is steered
+	// entirely through deviceLabels(..., accelerators).
+	newNode := func(name, cpu, mem, storage string, labels map[string]string) *core.Node {
 		capacity := core.ResourceList{
 			core.ResourceCPU:              resource.MustParse(cpu),
 			core.ResourceMemory:           resource.MustParse(mem),
 			core.ResourceEphemeralStorage: resource.MustParse(storage),
-		}
-		if gpu > 0 {
-			capacity[gpuResource] = *resource.NewQuantity(gpu, resource.DecimalSI)
 		}
 		if labels == nil {
 			labels = map[string]string{}
@@ -270,7 +273,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// odd, rounds up to 32Gi. 100G disk is exposed as 97Gi, odd,
 			// rounds down to 96Gi.
 			name: "cluster-1/node-1 cpu-only 16C/32G/100G",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0, nil),
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", nil),
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
 				FeatureLabelPrefix + "general.cpu":            "16",
@@ -286,7 +289,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// general values since there is exactly one accelerator.
 			name: "cluster-1/node-2 T4 1D 4C/16G/100G",
 			node: newNode(
-				"cluster-1-node-2", "4", "15Gi", "97Gi", 1,
+				"cluster-1-node-2", "4", "15Gi", "97Gi",
 				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "1"),
 			),
 			expected: map[string]string{
@@ -309,7 +312,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// Same GPU model as node-2 but on a larger 8C/32G box.
 			name: "cluster-1/node-3 T4 1D 8C/32G/100G",
 			node: newNode(
-				"cluster-1-node-3", "8", "31Gi", "97Gi", 1,
+				"cluster-1-node-3", "8", "31Gi", "97Gi",
 				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "1"),
 			),
 			expected: map[string]string{
@@ -334,7 +337,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// halved by the device count.
 			name: "cluster-1/node-4 T4 2D 8C/32G/100G",
 			node: newNode(
-				"cluster-1-node-4", "8", "31Gi", "97Gi", 2,
+				"cluster-1-node-4", "8", "31Gi", "97Gi",
 				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
 			),
 			expected: map[string]string{
@@ -359,7 +362,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// stays as-is. Per-device ram-unit: 188/4 = 47.
 			name: "cluster-1/node-5 A10G 4D 48C/192G/200G",
 			node: newNode(
-				"cluster-1-node-5", "48", "188Gi", "196Gi", 4,
+				"cluster-1-node-5", "48", "188Gi", "196Gi",
 				deviceLabels("a10g", "A10G", "23Gi", "4"),
 			),
 			expected: map[string]string{
@@ -387,7 +390,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			node: func() *core.Node {
 				lbs := deviceLabels("a10g", "A10G", "23Gi", "4")
 				lbs[FeatureLabelPrefix+"nvidia-a10g.sliced.partitions"] = "8"
-				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", 4, lbs)
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", lbs)
 			}(),
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                        "true",
@@ -412,7 +415,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			node: func() *core.Node {
 				lbs := deviceLabels("a10g", "A10G", "23Gi", "4")
 				lbs[FeatureLabelPrefix+"nvidia-a10g.sliced.partitions"] = "0"
-				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", 4, lbs)
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", lbs)
 			}(),
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                        "true",
@@ -435,7 +438,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// — covers idempotent re-runs and operator overrides.
 			name: "existing capacity labels override Status.Capacity",
 			node: newNode(
-				"cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+				"cluster-1-node-1", "16", "31Gi", "97Gi",
 				map[string]string{
 					FeatureLabelPrefix + "general.cpu":           "8",
 					FeatureLabelPrefix + "general.ram":           "16Gi",
@@ -479,7 +482,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// cpu present but ephemeral-storage absent → fallback is
 			// 15Gi * cpuC when cpuC > 1.
 			name: "missing local-storage falls back to 15Gi * cpuC",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "0", 0, nil),
+			node: newNode("cluster-1-node-1", "16", "31Gi", "0", nil),
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
 				FeatureLabelPrefix + "general.cpu":            "16",
@@ -498,7 +501,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// inherits stgC from the general view.
 			name: "missing local-storage on accelerated node uses 15Gi * accC for device",
 			node: newNode(
-				"cluster-1-node-4", "8", "31Gi", "0", 2,
+				"cluster-1-node-4", "8", "31Gi", "0",
 				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
 			),
 			expected: map[string]string{
@@ -518,13 +521,13 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			},
 		},
 		{
-			// Accelerated feature label is set but Status.Capacity has no
-			// matching GPU resource — the per-device loop now skips the
-			// device entirely (no fallback to accC=1). Only the general
-			// capacity labels are emitted.
-			name: "accelerated feature label without Status.Capacity GPU is skipped",
+			// Accelerated feature label is set but the ${nodeKey}.accelerators
+			// label is absent — the per-device loop reads accelerator count
+			// strictly from that label, so the device is skipped entirely
+			// (no fallback). Only the general capacity labels are emitted.
+			name: "accelerated feature label without .accelerators is skipped",
 			node: newNode(
-				"cluster-1-node-2", "4", "15Gi", "97Gi", 0,
+				"cluster-1-node-2", "4", "15Gi", "97Gi",
 				map[string]string{
 					systemname.ManagedLabelKey:             "true",
 					FeatureLabelPrefix + "nvidia":          "true",
@@ -544,7 +547,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		{
 			// Existing managed=true on the node is preserved verbatim.
 			name: "managed label is true on node",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
 				map[string]string{
 					systemname.ManagedLabelKey: "true",
 				}),
@@ -562,7 +565,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// Existing managed=false on the node overrides the default "true"
 			// — capacity labels are still emitted regardless.
 			name: "managed label is false on node",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
 				map[string]string{
 					systemname.ManagedLabelKey: "false",
 				}),
@@ -583,7 +586,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// 32Gi, regardless of the underlying ramC (here floored to
 			// cpuC=16 because Memory=0).
 			name: "override RAM-Gi-per-CPU rewrites the whole general view",
-			node: newNode("cluster-1-node-1", "16", "0", "97Gi", 0, nil),
+			node: newNode("cluster-1-node-1", "16", "0", "97Gi", nil),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
@@ -601,7 +604,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// profile-flavor=16c-32g-96g, profile-queue=1c-2g. Demonstrates
 			// that the override pre-empts Status.Capacity for general.
 			name: "override RAM-Gi-per-CPU pre-empts Status.Capacity for general view",
-			node: newNode("cluster-1-node-1", "16", "64Gi", "97Gi", 0, nil),
+			node: newNode("cluster-1-node-1", "16", "64Gi", "97Gi", nil),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
@@ -619,7 +622,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// label has been written. Here ramC=48 from the label drives the
 			// whole general view; the override is bypassed.
 			name: "explicit general.ram label wins over override",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0,
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
 				map[string]string{
 					FeatureLabelPrefix + "general.ram": "48Gi",
 				}),
@@ -638,7 +641,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// 0 is the unset sentinel — the override branch is skipped and
 			// the general labels fall back to the real ramC.
 			name: "zero override RAM-Gi-per-CPU is treated as unset",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0, nil),
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", nil),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(0)},
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
@@ -654,7 +657,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// Negative override is also treated as unset (the branch guard
 			// is `> 0`), guarding against accidental negative inputs.
 			name: "negative override RAM-Gi-per-CPU is treated as unset",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", 0, nil),
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", nil),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(-4)},
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
@@ -671,7 +674,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// Confirms the override scales by the resolved cpuC and applies
 			// uniformly across the general view.
 			name: "override RAM-Gi-per-CPU=2 on 1C node yields 2Gi general view",
-			node: newNode("blank-node", "1", "0", "0", 0, nil),
+			node: newNode("blank-node", "1", "0", "0", nil),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                    "true",
@@ -693,7 +696,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// not leaking into the device view.
 			name: "override RAM-Gi-per-CPU does not affect per-device labels",
 			node: newNode(
-				"cluster-1-node-4", "8", "0", "97Gi", 2,
+				"cluster-1-node-4", "8", "0", "97Gi",
 				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
 			),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
@@ -721,7 +724,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			// device .ram=64Gi, profile-queue cpuUnit=8/2=4 / ramUnit=64/2=32.
 			name: "override RAM-Gi-per-CPU leaves per-device labels at real capacity",
 			node: newNode(
-				"cluster-1-node-4", "8", "64Gi", "97Gi", 2,
+				"cluster-1-node-4", "8", "64Gi", "97Gi",
 				deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "2"),
 			),
 			opts: []ConstructNodeCapacityLabelsOption{OverrideGeneralRAMGiPerCPU(2)},
@@ -753,12 +756,15 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 
 func TestExtractNodeResourceFlavors(t *testing.T) {
 	// Output shape:
-	//   ndfs[0]  = the CPU/general flavor, emitted only when all five
+	//   ndfs[0]  = the CPU/general flavor, emitted only when all six
 	//              general capacity labels (cpu, ram, local-storage,
-	//              profile-flavor, profile-cohort) are present. Otherwise the
-	//              function returns nil.
-	//   ndfs[1:] = one flavor per accelerated node key for which the same
-	//              five per-device labels are present.
+	//              profile-flavor, profile-queue, profile-cohort) are
+	//              present. Otherwise the function returns nil.
+	//   ndfs[1:] = one flavor per accelerated node key for which the
+	//              per-device .accelerators, .cpu, .ram, .local-storage,
+	//              .profile-flavor, .profile-queue, and .profile-cohort
+	//              labels are all present. The Accelerator field is read
+	//              directly from the .accelerators label.
 	//
 	// The accelerated-key loop iterates a Go map, so the device-flavor
 	// order is non-deterministic. We compare the head directly and the
@@ -770,12 +776,10 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 
 	cases := []struct {
 		name string
-		// labels populates node.ObjectMeta.Labels.
-		labels map[string]string
-		// allocatable populates node.Status.Allocatable. The per-device
-		// Accelerator field sources from here — keys should be GPU
-		// resource names (e.g., GetResourceName("nvidia", Exclusive)).
-		allocatable map[core.ResourceName]int64
+		// labels populates node.ObjectMeta.Labels. The per-device
+		// Accelerator field sources from the ${nodeKey}.accelerators
+		// label written by applyDeviceLabels.
+		labels      map[string]string
 		wantCPU     NodeResourceFlavor
 		wantDevices []NodeResourceFlavor
 		wantEmpty   bool
@@ -833,9 +837,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "4c-16g-96g-1d",
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
-			},
-			allocatable: map[core.ResourceName]int64{
-				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 1,
 			},
 			wantCPU: NodeResourceFlavor{
 				Key:               "general",
@@ -902,9 +903,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
 			},
-			allocatable: map[core.ResourceName]int64{
-				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 2,
-			},
 			wantCPU: NodeResourceFlavor{
 				Key:               "general",
 				ProfileFlavorSpec: "8c-32g-96g",
@@ -967,9 +965,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-a10g.profile-flavor": "48c-188g-196g-4d",
 				FeatureLabelPrefix + "nvidia-a10g.profile-queue":  "12c-47g-1d",
 				FeatureLabelPrefix + "nvidia-a10g.profile-cohort": "12c-47g-1d",
-			},
-			allocatable: map[core.ResourceName]int64{
-				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 4,
 			},
 			wantCPU: NodeResourceFlavor{
 				Key:               "general",
@@ -1054,10 +1049,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				FeatureLabelPrefix + "amd-mi300x.profile-flavor":          "32c-128g-200g-2d",
 				FeatureLabelPrefix + "amd-mi300x.profile-queue":           "16c-64g-1d",
 				FeatureLabelPrefix + "amd-mi300x.profile-cohort":          "16c-64g-1d",
-			},
-			allocatable: map[core.ResourceName]int64{
-				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 1,
-				GetResourceName(ManufacturerAMD, workercore.DeviceAllocationModeExclusive):    2,
 			},
 			wantCPU: NodeResourceFlavor{
 				Key:               "general",
@@ -1243,6 +1234,51 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantDevices: nil,
 		},
 		{
+			// Per-device gate requires the .accelerators label: even when
+			// the rest of the per-device capacity labels are present, a
+			// missing .accelerators causes the device to be skipped.
+			// Accelerator count is no longer fetched from
+			// Status.Allocatable — the label is the sole source.
+			name: "device skipped when its .accelerators label is missing",
+			labels: map[string]string{
+				systemname.ManagedLabelKey:                     "true",
+				FeatureLabelPrefix + "nvidia":                  "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4":         "true",
+				FeatureLabelPrefix + "nvidia-tesla-t4.product": "Tesla-T4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.memory":  "15Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cores":   "0",
+				// No nvidia-tesla-t4.accelerators → device is skipped.
+				FeatureLabelPrefix + "general.cpu":                    "4",
+				FeatureLabelPrefix + "general.ram":                    "16Gi",
+				FeatureLabelPrefix + "general.local-storage":          "96Gi",
+				FeatureLabelPrefix + "general.profile-flavor":         "4c-16g-96g",
+				FeatureLabelPrefix + "general.profile-queue":          "1c-4g",
+				FeatureLabelPrefix + "general.profile-cohort":         "1c-4g",
+				FeatureLabelPrefix + "nvidia-tesla-t4.cpu":            "4",
+				FeatureLabelPrefix + "nvidia-tesla-t4.ram":            "16Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.local-storage":  "96Gi",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "4c-16g-96g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "4c-16g-1d",
+				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "4c-16g-1d",
+			},
+			wantCPU: NodeResourceFlavor{
+				Key:               "general",
+				ProfileFlavorSpec: "4c-16g-96g",
+				ProfileQueueSpec:  "1c-4g",
+				ProfileCohortSpec: "1c-4g",
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey:                   "true",
+					FeatureLabelPrefix + "general.profile-queue": "1c-4g",
+				},
+				Tolerations:  expectedToleration,
+				Accelerator:  "",
+				CPU:          "4",
+				RAM:          "16Gi",
+				LocalStorage: "96Gi",
+			},
+			wantDevices: nil,
+		},
+		{
 			// Per-device gate is independent across devices: T4 has full
 			// per-device capacity → its flavor is emitted; MI300X has
 			// only a .cpu label, no .ram / .local-storage / .profile-flavor /
@@ -1276,9 +1312,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-queue":  "32c-128g-1d",
 				FeatureLabelPrefix + "nvidia-tesla-t4.profile-cohort": "32c-128g-1d",
 				FeatureLabelPrefix + "amd-mi300x.cpu":                 "32", // remaining per-device labels intentionally absent
-			},
-			allocatable: map[core.ResourceName]int64{
-				GetResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive): 1,
 			},
 			wantCPU: NodeResourceFlavor{
 				Key:               "general",
@@ -1326,13 +1359,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					Name:   "cluster-1-node",
 					Labels: cs.labels,
 				},
-			}
-			if len(cs.allocatable) > 0 {
-				alloc := core.ResourceList{}
-				for k, v := range cs.allocatable {
-					alloc[k] = *resource.NewQuantity(v, resource.DecimalSI)
-				}
-				node.Status.Allocatable = alloc
 			}
 			got := ExtractNodeResourceFlavors(node)
 			if cs.wantEmpty {

@@ -66,13 +66,19 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 				Name: queueName,
 			},
 		}
-		err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: queueName}, cq)
+		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: queueName}, cq,
+			ctrlclix.WithoutQuorum)
 		if err != nil {
-			if !kerrors.IsNotFound(err) {
-				logger.Error(err, "fetch cluster queue")
-				return ctrlreconcile.Result{}, err
+			// Maybe the ClusterQueue is not cached yet,
+			// try to fetch directly from API server to avoid the cache staleness.
+			if kerrors.IsNotFound(err) {
+				err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: queueName}, cq,
+					ctrlclix.WithoutQuorum)
 			}
-			return ctrlreconcile.Result{}, nil
+			if err != nil {
+				logger.Error(err, "fetch cluster queue")
+				return ctrlreconcile.Result{}, ctrlcli.IgnoreNotFound(err)
+			}
 		}
 		var reserved bool
 		for i := range cq.Status.FlavorsReservation {
@@ -494,7 +500,7 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
 		return nil
 	}
 
-	logger.V(2).Info("enqueue cohort and queue from resource flavor", "requests", reqs)
+	logger.V(2).Info("enqueue queue from resource flavor", "requests", reqs)
 	return reqs
 }
 
@@ -529,6 +535,6 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
 		return nil
 	}
 
-	logger.V(2).Info("enqueue cohort and queue from node", "requests", reqs)
+	logger.V(2).Info("enqueue queue from node", "requests", reqs)
 	return reqs
 }

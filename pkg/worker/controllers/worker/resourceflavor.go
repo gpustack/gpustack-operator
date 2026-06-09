@@ -166,6 +166,7 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 
 	r.Client = opts.Manager.GetClient()
 
+	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("resourceflavor").
 		For(
@@ -179,6 +180,10 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						if aggressive {
+							return e.ObjectNew.GetDeletionTimestamp() == nil
+						}
+
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							// Check if labels have changed.

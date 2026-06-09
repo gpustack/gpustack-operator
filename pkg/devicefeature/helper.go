@@ -7,7 +7,6 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemname"
@@ -62,6 +61,8 @@ func applyDeviceLabels(labels map[string]string, group device.DevicesGroup) {
 	labels[nodeKey+".memory"] = quantityx.Format(resource.MustParse(strconvx.Itoa(group.Memory) + "Mi"))
 	// "${prefix}${manufacturer}-${id}.cores=${cores}"
 	labels[nodeKey+".cores"] = strconvx.Itoa(group.Cores)
+	// "${prefix}${manufacturer}-${id}.accelerators=${accelerator}"
+	labels[nodeKey+".accelerators"] = strconvx.Itoa(len(group.Accelerators))
 	// "${prefix}${manufacturer}-${id}.family=${family}"
 	if v := group.Family; v != "" {
 		labels[nodeKey+".family"] = v
@@ -199,8 +200,12 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 	for _, ndKey := range ExtractNodeKeys(node) {
 		nodeKey := FeatureLabelPrefix + ndKey
 
-		manufacturer, _, _ := strings.Cut(ndKey, "-")
-		accQ := node.Status.Capacity[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
+		// "${prefix}${manufacturer}-${id}.accelerators=${accelerator}".
+		accKey := nodeKey + ".accelerators"
+		var accQ resource.Quantity
+		if v := node.Labels[accKey]; v != "" {
+			accQ = funcx.NoError(resource.ParseQuantity(v))
+		}
 		if accQ.Value() <= 0 {
 			continue
 		}
@@ -393,11 +398,12 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		profFlavorKey := nodeKey + ".profile-flavor"
 		profQueueKey := nodeKey + ".profile-queue"
 		profCohortKey := nodeKey + ".profile-cohort"
+		accKey := nodeKey + ".accelerators"
 		cpuKey := nodeKey + ".cpu"
 		ramKey := nodeKey + ".ram"
 		stgKey := nodeKey + ".local-storage"
 
-		if !kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, cpuKey, ramKey, stgKey) {
+		if !kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, accKey, cpuKey, ramKey, stgKey) {
 			continue
 		}
 
@@ -410,15 +416,8 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		cores := labels[nodeKey+".cores"]
 		family := labels[nodeKey+".family"]
 		computeCapability := labels[nodeKey+".compute-capability"]
-		var accelerator string
-		{
-			accQ := node.Status.Allocatable[GetResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)]
-			if accQ.Value() > 0 {
-				accelerator = strconvx.Itoa(accQ.Value())
-			} else {
-				accelerator = "0"
-			}
-		}
+
+		acc := labels[accKey]
 		cpu := labels[cpuKey]
 		ram := labels[ramKey]
 		stg := labels[stgKey]
@@ -443,7 +442,7 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 			Cores:             cores,
 			Family:            family,
 			ComputeCapability: computeCapability,
-			Accelerator:       accelerator,
+			Accelerator:       acc,
 			CPU:               cpu,
 			RAM:               ram,
 			LocalStorage:      stg,

@@ -24,11 +24,10 @@ import (
 )
 
 // NodeFeatureReconciler reconciles nfd.NodeFeature objects driven by Kubernetes Node changes to finish the following tasks:
-//   - When a Node's labels or capacities are updated,
+//   - When a Node's labels are updated,
 //     create/update the corresponding nfd.NodeFeature.
 type NodeFeatureReconciler struct {
-	Client    ctrlcli.Client
-	APIReader ctrlcli.Reader
+	Client ctrlcli.Client
 }
 
 var _ ctrlreconcile.Reconciler = (*NodeFeatureReconciler)(nil)
@@ -38,7 +37,7 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Fetch.
 	nd := new(core.Node)
-	err := r.APIReader.Get(ctx, req.NamespacedName, nd)
+	err := r.Client.Get(ctx, req.NamespacedName, nd)
 	if err != nil {
 		logger.Error(err, "fetch node")
 		return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
@@ -108,7 +107,6 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
-	r.APIReader = opts.Manager.GetAPIReader()
 
 	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 	return ctrl.NewControllerManagedBy(opts.Manager).
@@ -118,7 +116,7 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 			ctrlbuilder.WithPredicates(
 				// Trigger reconciliation when a Node is:
 				// - created.
-				// - updated if labels or capacities have changed.
+				// - updated if labels have changed.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
@@ -134,22 +132,6 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 								systemname.ManagedLabelKey,
 								devicefeature.FeatureLabelPrefix) {
 								return true
-							}
-							for cn := range newNd.Status.Capacity {
-								switch {
-								default:
-									continue
-								case devicefeature.IsKnownResourceName(cn):
-								case cn == core.ResourceCPU:
-								case cn == core.ResourceMemory:
-								case cn == core.ResourceEphemeralStorage:
-									if !oldNd.Status.Allocatable[cn].Equal(newNd.Status.Allocatable[cn]) {
-										return true
-									}
-									if !oldNd.Status.Capacity[cn].Equal(newNd.Status.Capacity[cn]) {
-										return true
-									}
-								}
 							}
 						}
 						return false
