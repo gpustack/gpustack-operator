@@ -394,6 +394,10 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 
 	for _, ndKey := range ExtractNodeKeys(node) {
 		nodeKey := FeatureLabelPrefix + ndKey
+		manufacturer, _, _ := strings.Cut(ndKey, "-")
+		if !IsKnownManufacturer(manufacturer) {
+			continue
+		}
 
 		profFlavorKey := nodeKey + ".profile-flavor"
 		profQueueKey := nodeKey + ".profile-queue"
@@ -410,7 +414,6 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		profFlavor := labels[profFlavorKey]
 		profQueue := labels[profQueueKey]
 		profCohort := labels[profCohortKey]
-		manufacturer, _, _ := strings.Cut(ndKey, "-")
 		product := labels[nodeKey+".product"]
 		memory := labels[nodeKey+".memory"]
 		cores := labels[nodeKey+".cores"]

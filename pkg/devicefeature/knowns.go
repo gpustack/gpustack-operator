@@ -147,6 +147,11 @@ func GetKnownManufacturers() []string {
 	return manus
 }
 
+// IsKnownManufacturer checks if the given manufacturer is a well-known manufacturer.
+func IsKnownManufacturer(manufacturer string) bool {
+	return _ManufacturerResourceNameMap[manufacturer] != ""
+}
+
 // GetRuntimeName returns the runtime name for the given manufacturer.
 func GetRuntimeName(manufacturer string) string {
 	return _ManufacturerRuntimeNameMap[manufacturer]

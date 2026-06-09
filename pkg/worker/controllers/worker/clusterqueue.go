@@ -20,6 +20,7 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
@@ -224,61 +225,61 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 	for i := range rfList.Items {
 		rf := &rfList.Items[i]
 
-		logger := logger.WithValues("resource flavor", ctrlcli.ObjectKeyFromObject(rf))
-
 		resType, rfNotes := systemmeta.DescribeResource(rf)
 		if resType != "nodes" {
 			logger.V(2).Info("skip resource flavor with mismatched resource type",
-				"resource type", resType)
+				"resource flavor", rf.Name, "resource type", resType)
 			continue
 		}
 
-		var nodeCount int64
+		manu := rfNotes["manufacturer"]
+
+		var cpuQ, ramQ, stgQ, accQ resource.Quantity
 		{
 			ndList := new(core.NodeList)
 			err := r.Client.List(ctx, ndList,
 				ctrlcli.MatchingFields{IndexingNodeByFlavorProfile: rf.Name},
 				ctrlcli.UnsafeDisableDeepCopy)
 			if err != nil {
-				logger.Error(err, "fetch nodes by flavor profile")
+				logger.Error(err, "fetch nodes by flavor profile",
+					"flavor profile", rf.Name)
 				continue
 			}
-			nodeCount = int64(len(ndList.Items))
-		}
 
-		manu := rfNotes["manufacturer"]
-
-		var cpuQ, ramQ, lsQ, accQ resource.Quantity
-		{
-			cpuQ = funcx.NoError(resource.ParseQuantity(rfNotes["cpu"]))
-			if cpuQ.Sign() <= 0 {
-				logger.V(2).Info("skip resource flavor with non-positive cpu",
-					"cpu", rfNotes["cpu"])
-				continue
-			}
-			ramQ = funcx.NoError(resource.ParseQuantity(rfNotes["ram"]))
-			if ramQ.Sign() <= 0 {
-				logger.V(2).Info("skip resource flavor with non-positive ram",
-					"ram", rfNotes["ram"])
-				continue
-			}
-			lsQ = funcx.NoError(resource.ParseQuantity(rfNotes["localStorage"]))
-			if lsQ.Sign() <= 0 {
-				logger.V(2).Info("skip resource flavor with non-positive local storage",
-					"localStorage", rfNotes["localStorage"])
-				continue
-			}
-			if manu != "" {
-				accQ = funcx.NoError(resource.ParseQuantity(rfNotes["accelerator"]))
-				if accQ.Sign() < 0 {
-					logger.V(2).Info("skip resource flavor with non-positive accelerator",
-						"accelerator", rfNotes["accelerator"])
+			ndCount := int64(len(ndList.Items))
+			if ndCount != 0 {
+				cpuQ = funcx.NoError(resource.ParseQuantity(rfNotes["cpu"]))
+				if cpuQ.Sign() <= 0 {
+					logger.V(2).Info("skip resource flavor with non-positive cpu",
+						"cpu", rfNotes["cpu"])
 					continue
+				}
+				ramQ = funcx.NoError(resource.ParseQuantity(rfNotes["ram"]))
+				if ramQ.Sign() <= 0 {
+					logger.V(2).Info("skip resource flavor with non-positive ram",
+						"ram", rfNotes["ram"])
+					continue
+				}
+				stgQ = funcx.NoError(resource.ParseQuantity(rfNotes["localStorage"]))
+				if stgQ.Sign() <= 0 {
+					logger.V(2).Info("skip resource flavor with non-positive local storage",
+						"localStorage", rfNotes["localStorage"])
+					continue
+				}
+
+				cpuQ = quantityx.Multiply(cpuQ, ndCount)
+				ramQ = quantityx.Multiply(ramQ, ndCount)
+				stgQ = quantityx.Multiply(stgQ, ndCount)
+				if manu != "" {
+					accResName := devicefeature.GetResourceName(manu, workercore.DeviceAllocationModeExclusive)
+					for j := range ndList.Items {
+						accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
+					}
 				}
 			}
 		}
 
-		// Construct notes.
+		// Construct notes from the first-wins item.
 		if len(notes) == 0 {
 			notes = map[string]string{
 				"acceleratable": strconv.FormatBool(manu != ""),
@@ -290,6 +291,8 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			borLimit = funcx.Ternary(notes["sliced"] != "", resource.NewQuantity(0, resource.DecimalSI), nil)
 		}
 
+		// Extend resource group if the last one has 16 flavors already,
+		// which is the maximum number of flavors in a resource group.
 		if len(groups) == 0 {
 			groups = []kueue.ResourceGroup{{}}
 		}
@@ -316,17 +319,17 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			Resources: []kueue.ResourceQuota{
 				{
 					Name:           core.ResourceCPU,
-					NominalQuota:   quantityx.Multiply(cpuQ, nodeCount),
+					NominalQuota:   cpuQ,
 					BorrowingLimit: borLimit,
 				},
 				{
 					Name:           core.ResourceMemory,
-					NominalQuota:   quantityx.Multiply(ramQ, nodeCount),
+					NominalQuota:   ramQ,
 					BorrowingLimit: borLimit,
 				},
 				{
 					Name:           core.ResourceEphemeralStorage,
-					NominalQuota:   quantityx.Multiply(lsQ, nodeCount),
+					NominalQuota:   stgQ,
 					BorrowingLimit: borLimit,
 				},
 			},
@@ -335,7 +338,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
 					Name:           devicefeature.GetCreditsResourceName(manu),
-					NominalQuota:   quantityx.Multiply(accQ, nodeCount),
+					NominalQuota:   accQ,
 					BorrowingLimit: borLimit,
 				},
 			)
@@ -435,7 +438,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 				// Interested in Node objects:
 				// - created.
 				// - deleted.
-				// - updated if labels have changed.
+				// - updated if labels or allocatable resources have changed.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						if aggressive {
@@ -444,9 +447,26 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+							// Check if labels have changed.
+							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.LabelPrefix,
-								devicefeature.FeatureLabelPrefix)
+								devicefeature.FeatureLabelPrefix) {
+								return true
+							}
+							// Check if the allocatable resources have changed.
+							for cn := range newNd.Status.Allocatable {
+								switch {
+								default:
+									continue
+								case devicefeature.IsKnownResourceName(cn):
+								case cn == core.ResourceCPU:
+								case cn == core.ResourceMemory:
+								case cn == core.ResourceEphemeralStorage:
+								}
+								if !oldNd.Status.Allocatable[cn].Equal(newNd.Status.Allocatable[cn]) {
+									return true
+								}
+							}
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true

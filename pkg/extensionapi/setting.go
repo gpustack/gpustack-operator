@@ -368,7 +368,7 @@ func convertSettingFromSecret(sec *core.Secret, reqName string, index setting.In
 }
 
 func convertSettingListFromSecret(sec *core.Secret, opts ctrlcli.ListOptions, index setting.IndexFunc) *gpustack.SettingList {
-	resType, notes := systemmeta.DescribeResource(sec)
+	resType, secNotes := systemmeta.DescribeResource(sec)
 	if resType != _SettingResource {
 		return &gpustack.SettingList{}
 	}
@@ -394,7 +394,7 @@ func convertSettingListFromSecret(sec *core.Secret, opts ctrlcli.ListOptions, in
 		}
 
 		uid := sec.UID
-		if uidS := notes[name+"-uid"]; len(uidS) != 0 {
+		if uidS := secNotes[name+"-uid"]; len(uidS) != 0 {
 			uid = types.UID(uidS)
 		}
 		var (
