@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
+	"text/template"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 func installNodeFeatureDiscovery(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
@@ -29,17 +33,18 @@ func installNodeFeatureDiscovery(ctx context.Context, helmCli *helm.Client, glob
 	valuesContext["Release"] = release
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
 
-	values := getNfdChartTemplateValues(name, valuesContext)
+	funcMap := extendNfdChartValuesTemplateFuncMap()
+
+	values := getNfdChartTemplateValues(name, valuesContext, funcMap)
 
 	chart := &helm.Chart{
-		Name:        name,
-		Version:     version,
-		Release:     release,
-		Path:        path,
-		DownloadURL: download,
-		Values:      values,
-		// Skip installation the CRDs of the chart.
-		SkippedCRDsInstallation: true,
+		Name:                    name,
+		Version:                 version,
+		Release:                 release,
+		Path:                    path,
+		DownloadURL:             download,
+		Values:                  values,
+		SkippedCRDsInstallation: true, // Skip installation the CRDs of the chart.
 	}
 	_, err := helmCli.Install(ctx, chart)
 	if err != nil {
@@ -97,16 +102,39 @@ worker:
     create: true
     annotations:
       {{ $.ManagedLabel }}: "true"
+{{- $pciClassPrefixes := getPciClassPrefixes }}
+{{- $pciVendorIDs := getPciIDs }}
   config:
+    core:
+      labelSources:
+        - "cpu"
+        - "pci"
+        - "custom"
+      labelWhiteList: '^(pci-|cpu-model\.|acceleratable)'
     sources:
       pci:
         deviceClassWhitelist:
-          - "02"
-          - "03"
-          - "0b"
-          - "12"
+{{- range $pciClassPrefixes }}
+          - {{ . | quote }}
+{{- end }}
         deviceLabelFields:
           - vendor
+      custom:
+        - name: "has acceleratable devices"
+          vars:
+            has-acceleratable-devices: "true"
+          matchFeatures:
+            - feature: pci.device
+              matchExpressions:
+                class: {op: InRegexp, value: [{{ range $i, $c := $pciClassPrefixes }}{{ if $i }}, {{ end }}{{ printf "^%s" $c | quote }}{{ end }}]}
+                vendor: {op: In, value: {{ toJson $pciVendorIDs }}}
+        - name: "hasn't acceleratable devices"
+          labels:
+            "feature.gpustack.ai/acceleratable": "false"
+          matchFeatures:
+            - feature: rule.matched
+              matchExpressions:
+                has-acceleratable-devices: {op: DoesNotExist}
 
 topologyUpdater:
   enable: false
@@ -128,10 +156,31 @@ prometheus:
   enable: false
 `
 
-func getNfdChartTemplateValues(name string, data map[string]any) helm.TemplateValues {
+func getNfdChartTemplateValues(name string, data map[string]any, extendFuncMap template.FuncMap) helm.TemplateValues {
 	return helm.TemplateValues{
-		Application: name,
-		Template:    nfdChartValuesTemplate,
-		Context:     data,
+		Application:   name,
+		Template:      nfdChartValuesTemplate,
+		ExtendFuncMap: extendFuncMap,
+		Context:       data,
+	}
+}
+
+func extendNfdChartValuesTemplateFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"getPciIDs": devicefeature.GetPciIDs,
+		"getPciClassPrefixes": func() []string {
+			var r []string
+			for _, p := range strings.Split(osx.Getenv("GPUSTACK_PCI_CLASS_PREFIXES"), ",") {
+				if p = strings.TrimSpace(p); p != "" {
+					r = append(r, p)
+				}
+			}
+			if len(r) == 0 {
+				// Default to the PCI device classes of display/accelerator related devices,
+				// see https://admin.pci-ids.ucw.cz/read/PD.
+				r = []string{"02", "03", "06", "0b", "12"}
+			}
+			return r
+		},
 	}
 }

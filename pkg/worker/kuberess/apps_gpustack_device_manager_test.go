@@ -12,20 +12,13 @@ import (
 
 func Test_renderGPUStackDeviceManagerApplyYamlTemplate(t *testing.T) {
 	data := map[string]any{
-		"ContainerRegistry":  "",
-		"ContainerNamespace": "",
-		"ImagePullSecrets":   []string{"abc", "def"},
-		"Manufacturers":      devicefeature.GetKnownManufacturers(),
-		"Namespace":          SystemNamespaceName,
-		"Image":              "",
-		"ImagePullPolicy":    "Always",
 		"Env": []core.EnvVar{
 			{
-				Name:  "ENV1",
-				Value: "VALUE1",
+				Name:  "NO_PROXY",
+				Value: "127.0.0.1",
 			},
 			{
-				Name: "ENV2",
+				Name: "SECRET_KEY",
 				ValueFrom: &core.EnvVarSource{
 					SecretKeyRef: &core.SecretKeySelector{
 						LocalObjectReference: core.LocalObjectReference{Name: "secret-name"},
@@ -34,8 +27,16 @@ func Test_renderGPUStackDeviceManagerApplyYamlTemplate(t *testing.T) {
 				},
 			},
 		},
-		"Version":    "dev",
-		"SecurePort": devicemanager.NewOptions().ServerOptions.BindPort,
+		"ManagedLabel":       "gpustack.ai/managed",
+		"ContainerRegistry":  "",
+		"ContainerNamespace": "",
+		"ImagePullSecrets":   []string{"abc", "def"},
+		"Manufacturers":      devicefeature.GetKnownManufacturers(),
+		"Namespace":          SystemNamespaceName,
+		"Image":              "",
+		"ImagePullPolicy":    "Always",
+		"Version":            "dev",
+		"SecurePort":         devicemanager.NewOptions().ServerOptions.BindPort,
 	}
 	funcMap := extendDeviceManagerApplyYamlTemplateFuncMap()
 

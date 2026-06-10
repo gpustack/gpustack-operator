@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	yaml "gopkg.in/yaml.v3"
+	core "k8s.io/api/core/v1"
 
 	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
@@ -12,6 +13,13 @@ import (
 
 func Test_getCSIDriverS3ChartTemplateValues(t *testing.T) {
 	data := map[string]any{
+		"Env": []core.EnvVar{
+			{
+				Name:  "NO_PROXY",
+				Value: "127.0.0.1",
+			},
+		},
+		"ManagedLabel":       "gpustack.ai/managed",
 		"ContainerRegistry":  "",
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},

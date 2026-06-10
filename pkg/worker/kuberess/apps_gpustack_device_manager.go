@@ -35,7 +35,18 @@ func installGPUStackDeviceManager(ctx context.Context, helmCli *helm.Client, glo
 	valuesContext["Image"] = ctrCfg.Image
 	valuesContext["ImagePullPolicy"] = ctrCfg.ImagePullPolicy
 	if len(ctrCfg.Env) > 0 {
-		valuesContext["Env"] = ctrCfg.Env
+		envV := valuesContext["Env"]
+		if envV != nil {
+			if envList, ok := envV.([]core.EnvVar); ok {
+				valuesContext["Env"] = append(envList, ctrCfg.Env...)
+			} else {
+				// This should not happen, but in case it does,
+				// fallback to using ctrCfg.Env directly to avoid installation failure.
+				valuesContext["Env"] = ctrCfg.Env
+			}
+		} else {
+			valuesContext["Env"] = ctrCfg.Env
+		}
 	}
 	valuesContext["Version"] = version.Version
 	valuesContext["SecurePort"] = devicemanager.NewOptions().ServerOptions.BindPort

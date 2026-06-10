@@ -186,6 +186,13 @@ func GetPciID(manufacturer string) string {
 	return _ManufacturerPciIDMap[manufacturer]
 }
 
+// GetPciIDs returns the list of PCI vendor IDs for all known manufacturers.
+func GetPciIDs() []string {
+	ids := maps.Values(_ManufacturerPciIDMap)
+	sort.Strings(ids)
+	return ids
+}
+
 // QuantityToSliceCount converts the given quantity to the count of slices for sliced resources based on the sliced size.
 func QuantityToSliceCount(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
