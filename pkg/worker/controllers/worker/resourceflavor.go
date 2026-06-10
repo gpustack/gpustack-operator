@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"go.uber.org/multierr"
 	core "k8s.io/api/core/v1"
@@ -85,6 +86,7 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			},
 		}
 		eNotes := map[string]string{
+			"acceleratable":     strconv.FormatBool(ndf.Acceleratable),
 			"manufacturer":      ndf.Manufacturer,
 			"product":           ndf.Product,
 			"memory":            ndf.Memory,

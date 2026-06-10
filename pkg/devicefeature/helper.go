@@ -38,6 +38,9 @@ func applyDeviceLabels(labels map[string]string, group device.DevicesGroup) {
 		return
 	}
 
+	// "${prefix}acceleratable=true"
+	labels[FeatureLabelPrefix+"acceleratable"] = "true"
+
 	manuKey := FeatureLabelPrefix + group.Manufacturer
 
 	// "${prefix}${manufacturer}=true"
@@ -321,7 +324,9 @@ type NodeResourceFlavor struct {
 	NodeLabels map[string]string
 	// Tolerations is the tolerations for scheduling.
 	Tolerations []core.Toleration
-	// Manufacturer is  the device manufacturer of the node.
+	// Acceleratable reports whether the flavor represents accelerated resources.
+	Acceleratable bool
+	// Manufacturer is the device manufacturer of the node.
 	Manufacturer string
 	// Product is the device product of the node.
 	Product string
@@ -439,6 +444,7 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 					Operator: core.TolerationOpExists,
 				},
 			},
+			Acceleratable:     true,
 			Manufacturer:      manufacturer,
 			Product:           product,
 			Memory:            memory,

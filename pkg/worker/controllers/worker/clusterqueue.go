@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -206,6 +205,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 }
 
 var commonResourceGroupNotesKeys = []string{
+	"acceleratable",
 	"sliced",
 	"manufacturer",
 	"product",
@@ -233,6 +233,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 		}
 
 		manu := rfNotes["manufacturer"]
+		acceleratable := rfNotes["acceleratable"] == "true"
 
 		var cpuQ, ramQ, stgQ, accQ resource.Quantity
 		{
@@ -270,7 +271,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				cpuQ = quantityx.Multiply(cpuQ, ndCount)
 				ramQ = quantityx.Multiply(ramQ, ndCount)
 				stgQ = quantityx.Multiply(stgQ, ndCount)
-				if manu != "" {
+				if acceleratable {
 					accResName := devicefeature.GetResourceName(manu, workercore.DeviceAllocationModeExclusive)
 					for j := range ndList.Items {
 						accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
@@ -281,9 +282,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 
 		// Construct notes from the first-wins item.
 		if len(notes) == 0 {
-			notes = map[string]string{
-				"acceleratable": strconv.FormatBool(manu != ""),
-			}
+			notes = make(map[string]string, len(commonResourceGroupNotesKeys))
 			for _, k := range commonResourceGroupNotesKeys {
 				notes[k] = rfNotes[k]
 			}
@@ -308,7 +307,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				core.ResourceMemory,
 				core.ResourceEphemeralStorage,
 			}
-			if manu != "" {
+			if acceleratable {
 				rg.CoveredResources = append(rg.CoveredResources,
 					devicefeature.GetCreditsResourceName(manu),
 				)
@@ -334,7 +333,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				},
 			},
 		})
-		if manu != "" {
+		if acceleratable {
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
 					Name:           devicefeature.GetCreditsResourceName(manu),
