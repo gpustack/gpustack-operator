@@ -160,7 +160,9 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								nodefeature.FeatureLabelPrefix)
+								nodefeature.FeatureLabelPrefix,
+								nodefeature.GeneralFeatureLabelPrefix,
+								nodefeature.AcceleratableFeatureLabelPrefix)
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true

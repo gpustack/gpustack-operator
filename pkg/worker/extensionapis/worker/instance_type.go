@@ -275,11 +275,11 @@ func convertInstanceTypeFromClusterQueue(
 		return nil
 	}
 
-	_, profSpec, ok := nodefeature.ParseNodeProfile(cq.Name)
+	_, _, spec, ok := nodefeature.ParseNodeProfile(cq.Name)
 	if !ok {
 		return nil
 	}
-	cpuUnit, ramUnit := profSpec.CPU, profSpec.RAM
+	cpuUnit, ramUnit := spec.CPU, spec.RAM
 
 	sliced := funcx.NoError(strconvx.Atoi[int64](notes["sliced"]))
 	acceleratable := notes["acceleratable"] == "true"
@@ -530,7 +530,7 @@ func instanceTypeMatchFieldSelector(opts ctrlcli.ListOptions, insType *worker.In
 }
 
 func parseNodeResourceFlavorName(name string) (ormAccRf, ormCpuRf, ormRamRf, ormStgRf resource.Quantity, ok bool) {
-	_, spec, ok := nodefeature.ParseNodeProfile(name)
+	_, _, spec, ok := nodefeature.ParseNodeProfile(name)
 	if ok {
 		if spec.Accelerator != "" {
 			ormAccRf = funcx.NoError(resource.ParseQuantity(spec.Accelerator))

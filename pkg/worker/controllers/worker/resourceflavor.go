@@ -37,12 +37,16 @@ type ResourceFlavorReconciler struct {
 var _ ctrlreconcile.Reconciler = (*ResourceFlavorReconciler)(nil)
 
 const (
-	// The label key for the queue name of a resource flavor,
+	// _ResourceFlavorQueueNameAnnoKey is for the queue name of a resource flavor,
 	// whose value represents the queue that the resource flavor belongs to.
-	_ResourceFlavorQueueNameLabelKey = nodefeature.DeviceLabelPrefix + "queue"
-	// The label key for the cohort name of a resource flavor,
+	//
+	// NB: annotations rather than labels, because the queue/cohort names
+	// carry the general(CPU) and acceleratable(device) keys and may exceed
+	// the 63-character label value limit.
+	_ResourceFlavorQueueNameAnnoKey = nodefeature.ScheduleLabelPrefix + "queue"
+	// _ResourceFlavorCohortNameAnnoKey is for the cohort name of a resource flavor,
 	// whose value represents the cohort that the resource flavor's queue longs to.
-	_ResourceFlavorCohortNameLabelKey = nodefeature.DeviceLabelPrefix + "cohort"
+	_ResourceFlavorCohortNameAnnoKey = nodefeature.ScheduleLabelPrefix + "cohort"
 )
 
 func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -66,18 +70,18 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	ndfs := nodefeature.ExtractNodeResourceFlavors(nd)
 	for _, ndf := range ndfs {
-		// "gpustack-${key}-${profile-flavor}"
-		flavorProfile := nodefeature.FormatNodeProfile(ndf.Key, ndf.ProfileFlavorSpec)
-		// "gpustack-${key}-${profile-queue}"
-		queueProfile := nodefeature.FormatNodeProfile(ndf.Key, ndf.ProfileQueueSpec)
-		// "gpustack-${key}-${profile-cohort}"
-		cohortProfile := nodefeature.FormatNodeProfile(ndf.Key, ndf.ProfileCohortSpec)
+		// "gpustack--${general-key}-${profile-flavor}[--${acc-key}-...]"
+		flavorProfile := nodefeature.FormatNodeProfile(ndf.GeneralKey, ndf.Key, ndf.ProfileFlavorSpec)
+		// "gpustack--${general-key}-${profile-queue}[--${acc-key}-...]"
+		queueProfile := nodefeature.FormatNodeProfile(ndf.GeneralKey, ndf.Key, ndf.ProfileQueueSpec)
+		// "gpustack--${general-key}-${profile-cohort}[--${acc-key}-...]"
+		cohortProfile := nodefeature.FormatNodeProfile(ndf.GeneralKey, ndf.Key, ndf.ProfileCohortSpec)
 		eRf := &kueue.ResourceFlavor{
 			ObjectMeta: meta.ObjectMeta{
 				Name: flavorProfile,
-				Labels: map[string]string{
-					_ResourceFlavorQueueNameLabelKey:  queueProfile,
-					_ResourceFlavorCohortNameLabelKey: cohortProfile,
+				Annotations: map[string]string{
+					_ResourceFlavorQueueNameAnnoKey:  queueProfile,
+					_ResourceFlavorCohortNameAnnoKey: cohortProfile,
 				},
 			},
 			Spec: kueue.ResourceFlavorSpec{
@@ -87,6 +91,9 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 		eNotes := map[string]string{
 			"acceleratable":     strconv.FormatBool(ndf.Acceleratable),
+			"cpuManufacturer":   ndf.CPUManufacturer,
+			"cpuFamily":         ndf.CPUFamily,
+			"cpuID":             ndf.CPUID,
 			"manufacturer":      ndf.Manufacturer,
 			"product":           ndf.Product,
 			"memory":            ndf.Memory,
@@ -101,13 +108,13 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		systemmeta.NoteResource(eRf, "nodes", eNotes)
 		rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {
 			skip = true
-			// Update labels.
-			if !mapx.Contain(aRf.Labels, eRf.Labels) {
-				if aRf.Labels == nil {
-					aRf.Labels = make(map[string]string)
+			// Update annotations.
+			if !mapx.Contain(aRf.Annotations, eRf.Annotations) {
+				if aRf.Annotations == nil {
+					aRf.Annotations = make(map[string]string)
 				}
-				for k, v := range eRf.Labels {
-					aRf.Labels[k] = v
+				for k, v := range eRf.Annotations {
+					aRf.Annotations[k] = v
 				}
 				skip = false
 			}
@@ -190,7 +197,9 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 						if newNd.DeletionTimestamp == nil {
 							// Check if labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								nodefeature.FeatureLabelPrefix) {
+								nodefeature.FeatureLabelPrefix,
+								nodefeature.GeneralFeatureLabelPrefix,
+								nodefeature.AcceleratableFeatureLabelPrefix) {
 								return true
 							}
 							// Check if taints have changed.

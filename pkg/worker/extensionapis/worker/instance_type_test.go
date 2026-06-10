@@ -76,8 +76,8 @@ func mkClusterQueue(
 }
 
 func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
-	const nonAccName = "gpustack-general-16c-32g-100g"
-	const accName = "gpustack-nvidia-t4-4c-16g-100g-1d"
+	const nonAccName = "gpustack--amd-25-1-16c-32g-100g"
+	const accName = "gpustack--amd-25-1-4c-16g-100g--nvidia-t4-1d"
 
 	nonAccNotes := map[string]string{"acceleratable": "false"}
 	accNotes := map[string]string{

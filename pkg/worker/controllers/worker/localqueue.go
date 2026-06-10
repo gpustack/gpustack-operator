@@ -19,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
@@ -29,11 +30,22 @@ import (
 // and Kubernetes Namespace changes to finish the following tasks:
 //   - When a ClusterQueue is created, or a Namespace is created,
 //     create a kueue.LocalQueue pointing to the ClusterQueue in every non-system Namespace.
+//
+// The LocalQueue is named by the FNV-64a hash of the ClusterQueue name,
+// see nodefeature.FormatLocalQueueName, because the ClusterQueue name may
+// exceed the 63-character label value limit that the
+// "kueue.x-k8s.io/queue-name" label is subject to.
 type LocalQueueReconciler struct {
 	Client ctrlcli.Client
 }
 
 var _ ctrlreconcile.Reconciler = (*LocalQueueReconciler)(nil)
+
+const (
+	// _LocalQueueClusterQueueNameAnnoKey is for the cluster queue name of a local queue,
+	// whose value records the full ClusterQueue name behind the hash-named LocalQueue.
+	_LocalQueueClusterQueueNameAnnoKey = nodefeature.ScheduleLabelPrefix + "cluster-queue"
+)
 
 func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
@@ -82,8 +94,11 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		lq := &kueue.LocalQueue{
 			ObjectMeta: meta.ObjectMeta{
-				Name:      cq.Name,
+				Name:      nodefeature.FormatLocalQueueName(cq.Name),
 				Namespace: ns.Name,
+				Annotations: map[string]string{
+					_LocalQueueClusterQueueNameAnnoKey: cq.Name,
+				},
 			},
 			Spec: kueue.LocalQueueSpec{
 				ClusterQueue: kueue.ClusterQueueReference(cq.Name),

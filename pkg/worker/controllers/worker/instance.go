@@ -505,8 +505,10 @@ func (r *InstanceReconciler) convertPodFromInstance(
 			Name:      inst.Name,
 			Namespace: inst.Namespace,
 			Labels: map[string]string{
-				kueuectrlconst.QueueLabel:   inst.Spec.Type,   // Scheduling.
-				"app.kubernetes.io/part-of": string(inst.UID), // Accessing.
+				// The queue-name label references the LocalQueue, which is
+				// named by the hash of the ClusterQueue(InstanceType) name.
+				kueuectrlconst.QueueLabel:   nodefeature.FormatLocalQueueName(inst.Spec.Type), // Scheduling.
+				"app.kubernetes.io/part-of": string(inst.UID),                                 // Accessing.
 			},
 		},
 		Spec: core.PodSpec{

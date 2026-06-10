@@ -130,7 +130,12 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 						if newNd.DeletionTimestamp == nil {
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.ManagedLabelKey,
-								nodefeature.FeatureLabelPrefix) {
+								nodefeature.FeatureLabelPrefix,
+								nodefeature.GeneralFeatureLabelPrefix,
+								nodefeature.AcceleratableFeatureLabelPrefix,
+								// The general(CPU) key is derived from the NFD
+								// cpu-model labels, re-reconcile when they change.
+								nodefeature.NFDCPUModelLabelPrefix) {
 								return true
 							}
 						}

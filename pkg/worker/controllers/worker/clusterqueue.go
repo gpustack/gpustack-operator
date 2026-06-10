@@ -207,6 +207,9 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 var commonResourceGroupNotesKeys = []string{
 	"acceleratable",
 	"sliced",
+	"cpuManufacturer",
+	"cpuFamily",
+	"cpuID",
 	"manufacturer",
 	"product",
 	"memory",
@@ -348,7 +351,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 }
 
 const (
-	IndexingResourceFlavorsByQueueName = "resourceflavors.labels['device.gpustack.ai/queue']"
+	IndexingResourceFlavorsByQueueName = "resourceflavors.annotations['device.gpustack.ai/queue']"
 )
 
 func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
@@ -367,14 +370,14 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 			if !systemmeta.MatchResource(rf, "nodes") {
 				return nil
 			}
-			if !kubemeta.HasLabels(rf,
-				_ResourceFlavorQueueNameLabelKey,
-				_ResourceFlavorCohortNameLabelKey) {
+			if !kubemeta.HasAnnotations(rf,
+				_ResourceFlavorQueueNameAnnoKey,
+				_ResourceFlavorCohortNameAnnoKey) {
 				return nil
 			}
 
 			return []string{
-				rf.Labels[_ResourceFlavorQueueNameLabelKey],
+				rf.Annotations[_ResourceFlavorQueueNameAnnoKey],
 			}
 		})
 	if err != nil {
@@ -449,7 +452,9 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 							// Check if labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.LabelPrefix,
-								nodefeature.FeatureLabelPrefix) {
+								nodefeature.FeatureLabelPrefix,
+								nodefeature.GeneralFeatureLabelPrefix,
+								nodefeature.AcceleratableFeatureLabelPrefix) {
 								return true
 							}
 							// Check if the allocatable resources have changed.
@@ -490,11 +495,11 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
 		return nil
 	}
 
-	// Ensure the ResourceFlavor has cohort and queue labels.
-	if !kubemeta.HasLabels(obj,
-		_ResourceFlavorCohortNameLabelKey,
-		_ResourceFlavorQueueNameLabelKey) {
-		logger.V(2).Info("missing cohort or queue label")
+	// Ensure the ResourceFlavor has cohort and queue annotations.
+	if !kubemeta.HasAnnotations(obj,
+		_ResourceFlavorCohortNameAnnoKey,
+		_ResourceFlavorQueueNameAnnoKey) {
+		logger.V(2).Info("missing cohort or queue annotation")
 		return nil
 	}
 
@@ -502,8 +507,8 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
 
 	var reqs []ctrlreconcile.Request
 	{
-		cohortName := rf.Labels[_ResourceFlavorCohortNameLabelKey]
-		queueName := rf.Labels[_ResourceFlavorQueueNameLabelKey]
+		cohortName := rf.Annotations[_ResourceFlavorCohortNameAnnoKey]
+		queueName := rf.Annotations[_ResourceFlavorQueueNameAnnoKey]
 		if cohortName != "" && queueName != "" {
 			reqs = []ctrlreconcile.Request{
 				{

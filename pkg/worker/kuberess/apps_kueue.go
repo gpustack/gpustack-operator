@@ -105,6 +105,9 @@ managerConfig:
     kind: Configuration
     featureGates:
       TASBalancedPlacement: true
+      # Never label pods with the cluster/local queue names:
+      # the ClusterQueue name may exceed the 63-character label value limit.
+      AssignQueueLabelsForPods: false
     health:
       healthProbeBindAddress: :8081
     metrics:
