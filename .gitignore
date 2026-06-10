@@ -21,6 +21,8 @@ go.work.*
 *.tfvars
 *.tfvars.*
 *.local.json
+!AGENTS.md
+!CLAUDE.md
 
 # Dirs
 /.idea
@@ -36,3 +38,5 @@ go.work.*
 /log
 /certs
 .terraform
+!.claude
+.claude/skills/generated

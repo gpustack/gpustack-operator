@@ -4,7 +4,7 @@ GPUStack Operator provides a fantastic way to manage accelerator resources in Ku
 
 ## License
 
-Copyright (c) 2026 The GPUStack authors
+Copyright (c) 2026 The GPUStack Authors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
