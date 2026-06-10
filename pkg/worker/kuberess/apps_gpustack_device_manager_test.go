@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	core "k8s.io/api/core/v1"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/devicemanager"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 func Test_renderGPUStackDeviceManagerApplyYamlTemplate(t *testing.T) {
@@ -31,7 +31,7 @@ func Test_renderGPUStackDeviceManagerApplyYamlTemplate(t *testing.T) {
 		"ContainerRegistry":  "",
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
-		"Manufacturers":      devicefeature.GetKnownManufacturers(),
+		"Manufacturers":      nodefeature.GetKnownManufacturers(),
 		"Namespace":          SystemNamespaceName,
 		"Image":              "",
 		"ImagePullPolicy":    "Always",

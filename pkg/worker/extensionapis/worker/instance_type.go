@@ -17,8 +17,8 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/extensionapi"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
@@ -275,7 +275,7 @@ func convertInstanceTypeFromClusterQueue(
 		return nil
 	}
 
-	_, profSpec, ok := devicefeature.ParseNodeProfile(cq.Name)
+	_, profSpec, ok := nodefeature.ParseNodeProfile(cq.Name)
 	if !ok {
 		return nil
 	}
@@ -291,7 +291,7 @@ func convertInstanceTypeFromClusterQueue(
 		capStg, remStg, ormStg resource.Quantity
 	)
 	{
-		resourceAccelerator := devicefeature.GetCreditsResourceName(notes["manufacturer"])
+		resourceAccelerator := nodefeature.GetCreditsResourceName(notes["manufacturer"])
 
 		// Index quantities for later use.
 		ormRfIndexer := make(map[kueue.ResourceFlavorReference]map[core.ResourceName]resource.Quantity)
@@ -439,10 +439,10 @@ func convertInstanceTypeFromClusterQueue(
 				ormAcc.Set(1)
 			}
 			// Align the accelerator resource with the slice.
-			remAcc = devicefeature.QuantityToSliceCount(remAcc, sliced)
-			capAcc = devicefeature.QuantityToSliceCount(capAcc, sliced)
+			remAcc = nodefeature.QuantityToSliceCount(remAcc, sliced)
+			capAcc = nodefeature.QuantityToSliceCount(capAcc, sliced)
 		} else {
-			ormAcc = devicefeature.QuantityToSliceCount(ormAcc, 1)
+			ormAcc = nodefeature.QuantityToSliceCount(ormAcc, 1)
 		}
 	}
 
@@ -530,7 +530,7 @@ func instanceTypeMatchFieldSelector(opts ctrlcli.ListOptions, insType *worker.In
 }
 
 func parseNodeResourceFlavorName(name string) (ormAccRf, ormCpuRf, ormRamRf, ormStgRf resource.Quantity, ok bool) {
-	_, spec, ok := devicefeature.ParseNodeProfile(name)
+	_, spec, ok := nodefeature.ParseNodeProfile(name)
 	if ok {
 		if spec.Accelerator != "" {
 			ormAccRf = funcx.NoError(resource.ParseQuantity(spec.Accelerator))

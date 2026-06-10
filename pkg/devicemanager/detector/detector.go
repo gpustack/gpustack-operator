@@ -14,10 +14,10 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/datax"
 	"gpustack.ai/gpustack/pkg/utils/osx"
@@ -259,7 +259,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = devicefeature.ConstructNodeDeviceLabels(eGroups)
+			nfs.Labels = nodefeature.ConstructNodeDeviceLabels(eGroups)
 			return *nfs
 		}(),
 	}

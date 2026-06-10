@@ -10,9 +10,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 )
 
@@ -220,28 +220,28 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(devicefeature.GetResourceName(s, workercore.DeviceAllocationModeExclusive))
+			return string(nodefeature.GetResourceName(s, workercore.DeviceAllocationModeExclusive))
 		},
 		"getSharedResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(devicefeature.GetResourceName(s, workercore.DeviceAllocationModeShared))
+			return string(nodefeature.GetResourceName(s, workercore.DeviceAllocationModeShared))
 		},
 		"getSlicedResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(devicefeature.GetResourceName(s, workercore.DeviceAllocationModeSliced))
+			return string(nodefeature.GetResourceName(s, workercore.DeviceAllocationModeSliced))
 		},
 		"getCreditsResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(devicefeature.GetCreditsResourceName(s))
+			return string(nodefeature.GetCreditsResourceName(s))
 		},
 		"hasAPIResource": func(apiversion, kind string) bool {
 			return false

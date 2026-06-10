@@ -9,7 +9,7 @@ import (
 	"github.com/spf13/pflag"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 type Options struct {
@@ -27,7 +27,7 @@ func NewOptions() *Options {
 	return &Options{
 		// Control.
 		NoPCICheck:     false,
-		Manufacturers:  devicefeature.GetKnownManufacturers(),
+		Manufacturers:  nodefeature.GetKnownManufacturers(),
 		NoFastFailed:   false,
 		MonitorPeriod:  5 * time.Second,
 		MonitorHistory: 5 * time.Minute,
@@ -72,7 +72,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet, opts ...FlagOption) {
 func (o *Options) Validate(_ context.Context) error {
 	// Control.
 	if len(o.Manufacturers) != 0 {
-		knownManufacturers := devicefeature.GetKnownManufacturers()
+		knownManufacturers := nodefeature.GetKnownManufacturers()
 		if !sets.New[string](knownManufacturers...).HasAll(o.Manufacturers...) {
 			return errors.New("--manufacturer: should be a comma separated list of valid manufacturers, " +
 				"valid manufacturers: " + strings.Join(knownManufacturers, ","))

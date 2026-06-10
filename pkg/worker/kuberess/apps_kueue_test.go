@@ -7,7 +7,7 @@ import (
 	yaml "gopkg.in/yaml.v3"
 	core "k8s.io/api/core/v1"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 )
 
@@ -23,7 +23,7 @@ func Test_getKueueChartTemplateValues(t *testing.T) {
 		"ContainerRegistry":  "",
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
-		"Manufacturers":      devicefeature.GetKnownManufacturers(),
+		"Manufacturers":      nodefeature.GetKnownManufacturers(),
 		"Namespace":          SystemNamespaceName,
 		"ImagePullPolicy":    "Always",
 	}

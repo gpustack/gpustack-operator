@@ -15,17 +15,17 @@ import (
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/mxsml"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 )
 
-const Manufacturer = devicefeature.ManufacturerMetaX
+const Manufacturer = nodefeature.ManufacturerMetaX
 
 var _PciVendor string
 
 func init() {
-	pciID := devicefeature.GetPciID(Manufacturer)
+	pciID := nodefeature.GetPciID(Manufacturer)
 	p := strings.Split(pciID, "_")
 	_PciVendor = p[len(p)-1]
 }

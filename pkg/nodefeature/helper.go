@@ -1,4 +1,4 @@
-package devicefeature
+package nodefeature
 
 import (
 	"fmt"
@@ -277,14 +277,14 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 			}
 		}
 
-		// "${prefix}${manufacturer}-${id}.profile-flavor=${cpu}c-${ram}g-${stg}g-${accC}d[-${slicedC}s]"
+		// "${prefix}${manufacturer}-${id}.profile-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]"
 		profFlavor := fmt.Sprintf("%dc-%dg-%dg-%dd", cpuC, ramC, stgC, accC)
 		if slicedC > 0 {
 			profFlavor = fmt.Sprintf("%s-%ds", profFlavor, slicedC)
 		}
 		labels[nodeKey+".profile-flavor"] = profFlavor
 
-		// "${prefix}${manufacturer}-${id}.profile-queue=${cpuUnit}c-${ramUnit}g-1d[-${slicedC}s]"
+		// "${prefix}${manufacturer}-${id}.profile-queue=${cpuUnit}c-${ramUnit}g-1d[-${sliced}s]"
 		// "${prefix}${manufacturer}-${id}.profile-cohort=${cpuUnit}c-${ramUnit}g-1d"
 		cpuUnit := cpuC / accC
 		ramUnit := ramC / accC
@@ -466,14 +466,14 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 // NodeProfile represents the node profile extracted from the node feature labels of a node.
 type NodeProfile struct {
 	// Flavor is the per-node profile used to name the Kueue ResourceFlavor.
-	// Shape: "gpustack-${key}-${cpu}c-${ram}g-${stg}g[-${acc}d][-${sliced}s]".
+	// Shape: "gpustack-${node-key}-${cpu}c-${ram}g-${stg}g[-${acc}d][-${sliced}s]".
 	Flavor string
 	// Queue is the per-unit profile used to name the Kueue ClusterQueue.
-	// Shape: "gpustack-${key}-${cpuUnit}c-${ramUnit}g[-${accUnit}d][-${sliced}s]".
+	// Shape: "gpustack-${node-key}-${cpuUnit}c-${ramUnit}g[-${accUnit}d][-${sliced}s]".
 	// Equals Cohort when sliced is unset.
 	Queue string
 	// Cohort is the per-unit profile used to name the Kueue Cohort.
-	// Shape: "gpustack-${key}-${cpuUnit}c-${ramUnit}g[-${accUnit}d]".
+	// Shape: "gpustack-${node-key}-${cpuUnit}c-${ramUnit}g[-${accUnit}d]".
 	// Never carries a sliced suffix.
 	Cohort string
 }

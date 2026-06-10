@@ -21,9 +21,9 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
@@ -272,7 +272,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				ramQ = quantityx.Multiply(ramQ, ndCount)
 				stgQ = quantityx.Multiply(stgQ, ndCount)
 				if acceleratable {
-					accResName := devicefeature.GetResourceName(manu, workercore.DeviceAllocationModeExclusive)
+					accResName := nodefeature.GetResourceName(manu, workercore.DeviceAllocationModeExclusive)
 					for j := range ndList.Items {
 						accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
 					}
@@ -309,7 +309,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			}
 			if acceleratable {
 				rg.CoveredResources = append(rg.CoveredResources,
-					devicefeature.GetCreditsResourceName(manu),
+					nodefeature.GetCreditsResourceName(manu),
 				)
 			}
 		}
@@ -336,7 +336,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 		if acceleratable {
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
-					Name:           devicefeature.GetCreditsResourceName(manu),
+					Name:           nodefeature.GetCreditsResourceName(manu),
 					NominalQuota:   accQ,
 					BorrowingLimit: borLimit,
 				},
@@ -449,7 +449,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 							// Check if labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.LabelPrefix,
-								devicefeature.FeatureLabelPrefix) {
+								nodefeature.FeatureLabelPrefix) {
 								return true
 							}
 							// Check if the allocatable resources have changed.
@@ -457,7 +457,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 								switch {
 								default:
 									continue
-								case devicefeature.IsKnownResourceName(cn):
+								case nodefeature.IsKnownResourceName(cn):
 								case cn == core.ResourceCPU:
 								case cn == core.ResourceMemory:
 								case cn == core.ResourceEphemeralStorage:
@@ -532,7 +532,7 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
 
 	nd := obj.(*core.Node)
 
-	profiles := devicefeature.ExtractNodeProfiles(nd)
+	profiles := nodefeature.ExtractNodeProfiles(nd)
 	if len(profiles) == 0 {
 		logger.V(2).Info("node has no profile")
 		return nil

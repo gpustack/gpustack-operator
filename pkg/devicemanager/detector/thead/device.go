@@ -13,16 +13,16 @@ import (
 	"gpustack.ai/gpustack/binding"
 	"gpustack.ai/gpustack/binding/hgml"
 	"gpustack.ai/gpustack/pkg/device"
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
 )
 
-const Manufacturer = devicefeature.ManufacturerTHead
+const Manufacturer = nodefeature.ManufacturerTHead
 
 var _PciVendor string
 
 func init() {
-	pciID := devicefeature.GetPciID(Manufacturer)
+	pciID := nodefeature.GetPciID(Manufacturer)
 	p := strings.Split(pciID, "_")
 	_PciVendor = p[len(p)-1]
 }

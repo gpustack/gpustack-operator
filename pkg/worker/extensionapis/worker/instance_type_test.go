@@ -9,7 +9,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
@@ -82,9 +82,9 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 	nonAccNotes := map[string]string{"acceleratable": "false"}
 	accNotes := map[string]string{
 		"acceleratable": "true",
-		"manufacturer":  devicefeature.ManufacturerNVIDIA,
+		"manufacturer":  nodefeature.ManufacturerNVIDIA,
 	}
-	credits := devicefeature.GetCreditsResourceName(devicefeature.ManufacturerNVIDIA)
+	credits := nodefeature.GetCreditsResourceName(nodefeature.ManufacturerNVIDIA)
 
 	nonAccCapacity := core.ResourceList{
 		core.ResourceCPU:              qty("16"),

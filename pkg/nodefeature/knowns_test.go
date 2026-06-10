@@ -1,4 +1,4 @@
-package devicefeature
+package nodefeature
 
 import (
 	"testing"

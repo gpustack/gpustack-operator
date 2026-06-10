@@ -16,7 +16,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	"gpustack.ai/gpustack/pkg/controller"
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 )
@@ -98,7 +98,7 @@ func (r *ResourceFlavorCleanupReconciler) SetupController(ctx context.Context, o
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								devicefeature.FeatureLabelPrefix)
+								nodefeature.FeatureLabelPrefix)
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true
@@ -120,7 +120,7 @@ func (r *ResourceFlavorCleanupReconciler) enqueueResourceFlavorWhenNodeChanged(
 
 	nd := obj.(*core.Node)
 
-	profiles := devicefeature.ExtractNodeProfiles(nd)
+	profiles := nodefeature.ExtractNodeProfiles(nd)
 	if len(profiles) == 0 {
 		logger.V(2).Info("node has no profile")
 		return nil

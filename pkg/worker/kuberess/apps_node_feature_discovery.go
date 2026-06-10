@@ -9,8 +9,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
@@ -167,7 +167,7 @@ func getNfdChartTemplateValues(name string, data map[string]any, extendFuncMap t
 
 func extendNfdChartValuesTemplateFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"getPciIDs": devicefeature.GetPciIDs,
+		"getPciIDs": nodefeature.GetPciIDs,
 		"getPciClassPrefixes": func() []string {
 			var r []string
 			for _, p := range strings.Split(osx.Getenv("GPUSTACK_PCI_CLASS_PREFIXES"), ",") {

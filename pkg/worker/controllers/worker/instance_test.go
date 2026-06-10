@@ -10,7 +10,7 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
 // qty parses a quantity for terse fixture construction.
@@ -47,7 +47,7 @@ func assertResourceList(t *testing.T, want, got core.ResourceList, label string)
 }
 
 func TestGetResourceRequirements(t *testing.T) {
-	accNVIDIA := devicefeature.GetResourceName(devicefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	accNVIDIA := nodefeature.GetResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
 
 	cases := []struct {
 		name string
@@ -99,7 +99,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "general only, overcommit on, acceleratable — CPU uses 100m base",
 			cpu:  "16", ram: "64Gi", storage: "128Gi", acc: ptr.To("2"),
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			withGeneral: true, withGeneralOvercommit: true,
 			wantLimits: core.ResourceList{
 				core.ResourceCPU:              qty("16"),
@@ -115,7 +115,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "accelerator only — exclusive, Limits == Requests",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"),
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			withAccelerator: true,
 			wantLimits:      core.ResourceList{accNVIDIA: qty("2")},
 			wantRequests:    core.ResourceList{accNVIDIA: qty("2")},
@@ -123,7 +123,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "combined — general + accelerator",
 			cpu:  "8", ram: "32Gi", storage: "64Gi", acc: ptr.To("4"),
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			withGeneral: true, withGeneralOvercommit: true, withAccelerator: true,
 			wantLimits: core.ResourceList{
 				core.ResourceCPU:              qty("8"),
@@ -141,7 +141,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "accelerator requested but withAccelerator=false — no accelerator entry",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"),
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			withGeneral: true,
 			wantLimits: core.ResourceList{
 				core.ResourceCPU:              qty("4"),
@@ -157,7 +157,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "acceleratable InstanceType but pod did not request accelerator (nil)",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: nil,
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			withAccelerator: true,
 			wantLimits:      core.ResourceList{},
 			wantRequests:    core.ResourceList{},
@@ -165,7 +165,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "acceleratable InstanceType but pod requested zero accelerator",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("0"),
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			withAccelerator: true,
 			wantLimits:      core.ResourceList{},
 			wantRequests:    core.ResourceList{},
@@ -188,7 +188,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		{
 			name: "all flags off — empty but initialized maps",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"),
-			acceleratable: true, manufacturer: devicefeature.ManufacturerNVIDIA,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
 			wantLimits:   core.ResourceList{},
 			wantRequests: core.ResourceList{},
 		},

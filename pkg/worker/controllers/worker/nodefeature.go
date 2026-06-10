@@ -15,9 +15,9 @@ import (
 	nfd "sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1"
 
 	"gpustack.ai/gpustack/pkg/controller"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
@@ -60,7 +60,7 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = devicefeature.ConstructNodeCapacityLabels(nd, devicefeature.OverrideGeneralRAMGiPerCPU(2))
+			nfs.Labels = nodefeature.ConstructNodeCapacityLabels(nd, nodefeature.OverrideGeneralRAMGiPerCPU(2))
 			return *nfs
 		}(),
 	}
@@ -130,7 +130,7 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 						if newNd.DeletionTimestamp == nil {
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.ManagedLabelKey,
-								devicefeature.FeatureLabelPrefix) {
+								nodefeature.FeatureLabelPrefix) {
 								return true
 							}
 						}

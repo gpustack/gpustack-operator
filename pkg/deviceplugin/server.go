@@ -23,8 +23,8 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/binding"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
@@ -46,7 +46,7 @@ type ResourceServer struct {
 
 // GetResourceName returns the resource name to be registered to the Device Manager based on the kind and name.
 func (s *ResourceServer) GetResourceName() core.ResourceName {
-	return devicefeature.GetResourceName(s.Manufacturer, s.AllocationMode)
+	return nodefeature.GetResourceName(s.Manufacturer, s.AllocationMode)
 }
 
 // GetDevicePluginOptions returns options to be communicated with the Device Manager.

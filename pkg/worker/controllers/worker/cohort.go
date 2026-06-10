@@ -18,8 +18,8 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	"gpustack.ai/gpustack/pkg/controller"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
@@ -125,8 +125,8 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 				return nil
 			}
 
-			profiles := devicefeature.ExtractNodeProfiles(nd)
-			return slicex.Transform(profiles, func(p devicefeature.NodeProfile) string {
+			profiles := nodefeature.ExtractNodeProfiles(nd)
+			return slicex.Transform(profiles, func(p nodefeature.NodeProfile) string {
 				return p.Cohort
 			})
 		})
@@ -160,7 +160,7 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								devicefeature.FeatureLabelPrefix)
+								nodefeature.FeatureLabelPrefix)
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true
@@ -182,7 +182,7 @@ func (r *CohortReconciler) enqueueCohortWhenNodeChanged(
 
 	nd := obj.(*core.Node)
 
-	profiles := devicefeature.ExtractNodeProfiles(nd)
+	profiles := nodefeature.ExtractNodeProfiles(nd)
 	if len(profiles) == 0 {
 		logger.V(2).Info("node has no profile")
 		return nil

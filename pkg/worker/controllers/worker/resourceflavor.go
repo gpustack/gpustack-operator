@@ -18,9 +18,9 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	"gpustack.ai/gpustack/pkg/controller"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
@@ -39,10 +39,10 @@ var _ ctrlreconcile.Reconciler = (*ResourceFlavorReconciler)(nil)
 const (
 	// The label key for the queue name of a resource flavor,
 	// whose value represents the queue that the resource flavor belongs to.
-	_ResourceFlavorQueueNameLabelKey = devicefeature.DeviceLabelPrefix + "queue"
+	_ResourceFlavorQueueNameLabelKey = nodefeature.DeviceLabelPrefix + "queue"
 	// The label key for the cohort name of a resource flavor,
 	// whose value represents the cohort that the resource flavor's queue longs to.
-	_ResourceFlavorCohortNameLabelKey = devicefeature.DeviceLabelPrefix + "cohort"
+	_ResourceFlavorCohortNameLabelKey = nodefeature.DeviceLabelPrefix + "cohort"
 )
 
 func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -64,14 +64,14 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	var errs []error
 
-	ndfs := devicefeature.ExtractNodeResourceFlavors(nd)
+	ndfs := nodefeature.ExtractNodeResourceFlavors(nd)
 	for _, ndf := range ndfs {
 		// "gpustack-${key}-${profile-flavor}"
-		flavorProfile := devicefeature.FormatNodeProfile(ndf.Key, ndf.ProfileFlavorSpec)
+		flavorProfile := nodefeature.FormatNodeProfile(ndf.Key, ndf.ProfileFlavorSpec)
 		// "gpustack-${key}-${profile-queue}"
-		queueProfile := devicefeature.FormatNodeProfile(ndf.Key, ndf.ProfileQueueSpec)
+		queueProfile := nodefeature.FormatNodeProfile(ndf.Key, ndf.ProfileQueueSpec)
 		// "gpustack-${key}-${profile-cohort}"
-		cohortProfile := devicefeature.FormatNodeProfile(ndf.Key, ndf.ProfileCohortSpec)
+		cohortProfile := nodefeature.FormatNodeProfile(ndf.Key, ndf.ProfileCohortSpec)
 		eRf := &kueue.ResourceFlavor{
 			ObjectMeta: meta.ObjectMeta{
 				Name: flavorProfile,
@@ -157,8 +157,8 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 				return nil
 			}
 
-			profiles := devicefeature.ExtractNodeProfiles(nd)
-			return slicex.Transform(profiles, func(p devicefeature.NodeProfile) string {
+			profiles := nodefeature.ExtractNodeProfiles(nd)
+			return slicex.Transform(profiles, func(p nodefeature.NodeProfile) string {
 				return p.Flavor
 			})
 		})
@@ -190,7 +190,7 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 						if newNd.DeletionTimestamp == nil {
 							// Check if labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								devicefeature.FeatureLabelPrefix) {
+								nodefeature.FeatureLabelPrefix) {
 								return true
 							}
 							// Check if taints have changed.

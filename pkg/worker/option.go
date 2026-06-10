@@ -23,8 +23,8 @@ import (
 	"k8s.io/component-base/compatibility"
 	klog "k8s.io/klog/v2"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/manager"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
 	certcache "gpustack.ai/gpustack/pkg/utils/certs/cache"
 	"gpustack.ai/gpustack/pkg/utils/certs/kubecert"
@@ -93,7 +93,7 @@ func NewOptions() *Options {
 		AuditWebhookConfigFile: "",
 
 		// Device Manager.
-		Manufacturers: devicefeature.GetKnownManufacturers(),
+		Manufacturers: nodefeature.GetKnownManufacturers(),
 	}
 	opts.ManagerOptions.KubeLeaderElectionID = "worker.gpustack.ai"
 
@@ -207,7 +207,7 @@ func (o *Options) Validate(ctx context.Context) error {
 
 	// Device Manager.
 	if len(o.Manufacturers) != 0 {
-		knownManufacturers := devicefeature.GetKnownManufacturers()
+		knownManufacturers := nodefeature.GetKnownManufacturers()
 		if !sets.New[string](knownManufacturers...).HasAll(o.Manufacturers...) {
 			return errors.New("--manufacturer: should be a comma separated list of valid manufacturers, " +
 				"valid manufacturers: " + strings.Join(knownManufacturers, ","))

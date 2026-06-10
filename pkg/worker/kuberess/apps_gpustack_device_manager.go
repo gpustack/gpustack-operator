@@ -9,13 +9,13 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/devicemanager"
 	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
 	"gpustack.ai/gpustack/pkg/kubeappyaml"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/version"
@@ -397,7 +397,7 @@ func extendDeviceManagerApplyYamlTemplateFuncMap() template.FuncMap {
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return devicefeature.GetPciID(s)
+			return nodefeature.GetPciID(s)
 		},
 		"lookup": func(apiversion, kind, namespace, name string) (map[string]any, error) {
 			return map[string]any{}, nil

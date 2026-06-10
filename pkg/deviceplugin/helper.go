@@ -9,20 +9,20 @@ import (
 	"strings"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
-	"gpustack.ai/gpustack/pkg/devicefeature"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 const (
-	MaxUnits = devicefeature.ResourceMaxUnits
+	MaxUnits = nodefeature.ResourceMaxUnits
 
 	_MaxSizeInExclusive = 1
 	_StepInExclusive    = MaxUnits / _MaxSizeInExclusive
 
-	_MaxSizeInShared = devicefeature.SharedResourceMaxSize
+	_MaxSizeInShared = nodefeature.SharedResourceMaxSize
 	_StepInShared    = MaxUnits / _MaxSizeInShared
 
-	_MaxSizeInPartitioned  = devicefeature.SlicedResourceMaxSize
+	_MaxSizeInPartitioned  = nodefeature.SlicedResourceMaxSize
 	_MinUnitsInPartitioned = MaxUnits / _MaxSizeInPartitioned
 	_StepInPartitioned     = 1
 )
@@ -172,7 +172,7 @@ func ConvertResourceUnitFromDeviceIds(id string) (ResourceUnit, error) {
 
 // PadPartitionedAllocationSize pads the allocation size to the nearest power of two up to max partitions.
 func PadPartitionedAllocationSize(allocationSize, maxPartitions int32) int32 {
-	powers := devicefeature.PowersOfTwoUpTo(maxPartitions)
+	powers := nodefeature.PowersOfTwoUpTo(maxPartitions)
 	if powers[len(powers)-1] == maxPartitions {
 		powers = powers[:len(powers)-1]
 	}

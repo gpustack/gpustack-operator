@@ -24,9 +24,9 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
-	"gpustack.ai/gpustack/pkg/devicefeature"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
@@ -561,7 +561,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	// Ensure runtime class.
 	if instType.Spec.Acceleratable {
-		rn := devicefeature.GetRuntimeName(instType.Spec.Manufacturer)
+		rn := nodefeature.GetRuntimeName(instType.Spec.Manufacturer)
 		if rn != "" {
 			rc := new(node.RuntimeClass)
 			err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: rn}, rc,
@@ -767,10 +767,10 @@ func getResourceRequirements(
 			var resName core.ResourceName
 			resQuantity := *inst.Spec.Resources.Accelerator
 			if instType.Spec.Sliced > 0 {
-				resQuantity = devicefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+				resQuantity = nodefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
+				resName = nodefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
 			} else {
-				resName = devicefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+				resName = nodefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
 			}
 			rr.Limits[resName] = resQuantity
 			rr.Requests[resName] = resQuantity
