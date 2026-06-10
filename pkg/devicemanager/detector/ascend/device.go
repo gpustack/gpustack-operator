@@ -35,7 +35,7 @@ func init() {
 		}
 	}
 
-	pciID := nodefeature.GetPciID(Manufacturer)
+	pciID := nodefeature.GetPciVendorID(Manufacturer)
 	p := strings.Split(pciID, "_")
 	_PciVendor = p[len(p)-1]
 }

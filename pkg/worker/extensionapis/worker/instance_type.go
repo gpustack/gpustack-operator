@@ -291,7 +291,7 @@ func convertInstanceTypeFromClusterQueue(
 		capStg, remStg, ormStg resource.Quantity
 	)
 	{
-		resourceAccelerator := nodefeature.GetCreditsResourceName(notes["manufacturer"])
+		resourceAccelerator := nodefeature.GetAcceleratableCreditsResourceName(notes["manufacturer"])
 
 		// Index quantities for later use.
 		ormRfIndexer := make(map[kueue.ResourceFlavorReference]map[core.ResourceName]resource.Quantity)

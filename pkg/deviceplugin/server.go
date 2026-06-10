@@ -46,7 +46,7 @@ type ResourceServer struct {
 
 // GetResourceName returns the resource name to be registered to the Device Manager based on the kind and name.
 func (s *ResourceServer) GetResourceName() core.ResourceName {
-	return nodefeature.GetResourceName(s.Manufacturer, s.AllocationMode)
+	return nodefeature.GetAcceleratableResourceName(s.Manufacturer, s.AllocationMode)
 }
 
 // GetDevicePluginOptions returns options to be communicated with the Device Manager.

@@ -39,61 +39,18 @@ const (
 )
 
 var (
-	_ManufacturerRuntimeNameMap     map[string]string
-	_ManufacturerResourceNameMap    map[string]core.ResourceName
-	_ManufacturerPciIDMap           map[string]string
-	_ResourceNameSet                sets.Set[core.ResourceName]
-	_SlicedResourceSizes            []int64
-	_SlicedResourceOperatedSizesSet sets.Set[string]
-	_SlicedResourceMicroScaledBase  map[int64]int64
+	_ManufacturerPciVendorIDMap               map[string]string
+	_ManufacturerAcceleratableResourceNameMap map[string]core.ResourceName
+	_ManufacturerAcceleratableRuntimeNameMap  map[string]string
+	_AcceleratableResourceNameSet             sets.Set[core.ResourceName]
+	_SlicedResourceSizes                      []int64
+	_SlicedResourceOperatedSizesSet           sets.Set[string]
+	_SlicedResourceMicroScaledBase            map[int64]int64
 )
 
 func init() {
-	// Map manufacturer to runtime name.
-	_ManufacturerRuntimeNameMap = map[string]string{
-		ManufacturerAMD:       "amd",
-		ManufacturerAscend:    "ascend",
-		ManufacturerCambricon: "cambricon",
-		ManufacturerHygon:     "hygon",
-		ManufacturerIluvatar:  "iluvatar",
-		ManufacturerMetaX:     "metax",
-		ManufacturerMThreads:  "mthreads",
-		ManufacturerNVIDIA:    "nvidia",
-	}
-	for _, manufacturer := range maps.Keys(_ManufacturerResourceNameMap) {
-		// Extract runtime name from environment variable if exists,
-		// and override the default value in the map.
-		//
-		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_RUNTIME_NAME".
-		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_RUNTIME_NAME"); v != "" {
-			_ManufacturerRuntimeNameMap[manufacturer] = v
-		}
-	}
-
-	// Map manufacturer to resource name.
-	_ManufacturerResourceNameMap = map[string]core.ResourceName{
-		ManufacturerAMD:       "amd.com/gpu",
-		ManufacturerAscend:    "huawei.com/npu",
-		ManufacturerCambricon: "cambricon.com/mlu",
-		ManufacturerHygon:     "hygon.com/dcu",
-		ManufacturerIluvatar:  "iluvatar.com/gpu",
-		ManufacturerMetaX:     "metax-tech.com/gpu",
-		ManufacturerMThreads:  "mthreads.com/gpu",
-		ManufacturerNVIDIA:    "nvidia.com/gpu",
-		ManufacturerTHead:     "alibabacloud.com/ppu",
-	}
-	for _, manufacturer := range maps.Keys(_ManufacturerResourceNameMap) {
-		// Extract resource name from environment variable if exists,
-		// and override the default value in the map.
-		//
-		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_RESOURCE_NAME".
-		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_RESOURCE_NAME"); v != "" {
-			_ManufacturerResourceNameMap[manufacturer] = core.ResourceName(v)
-		}
-	}
-
 	// Map manufacturer to PCI vendor ID.
-	_ManufacturerPciIDMap = map[string]string{
+	_ManufacturerPciVendorIDMap = map[string]string{
 		ManufacturerAMD:       "1002",
 		ManufacturerAscend:    "19e5",
 		ManufacturerCambricon: "cabc",
@@ -104,20 +61,65 @@ func init() {
 		ManufacturerNVIDIA:    "10de",
 		ManufacturerTHead:     "1ded",
 	}
-	for _, manufacturer := range maps.Keys(_ManufacturerPciIDMap) {
+	for _, manufacturer := range maps.Keys(_ManufacturerPciVendorIDMap) {
 		// Extract PCI vendor ID from environment variable if exists,
 		// and override the default value in the map.
 		//
-		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_PCI_VENDOR".
+		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_PCI_VENDOR_ID".
 		//
 		// Allow pattern like ${class}_${vendor} or ${vendor} only.
-		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_PCI_ID"); v != "" {
-			_ManufacturerPciIDMap[manufacturer] = v
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_PCI_VENDOR_ID"); v != "" {
+			_ManufacturerPciVendorIDMap[manufacturer] = v
+		}
+	}
+
+	// Map manufacturer to resource name,
+	// the resource name is usually used as the prefix of the accelerator resource name in Kubernetes.
+	_ManufacturerAcceleratableResourceNameMap = map[string]core.ResourceName{
+		ManufacturerAMD:       "amd.com/gpu",
+		ManufacturerAscend:    "huawei.com/npu",
+		ManufacturerCambricon: "cambricon.com/mlu",
+		ManufacturerHygon:     "hygon.com/dcu",
+		ManufacturerIluvatar:  "iluvatar.com/gpu",
+		ManufacturerMetaX:     "metax-tech.com/gpu",
+		ManufacturerMThreads:  "mthreads.com/gpu",
+		ManufacturerNVIDIA:    "nvidia.com/gpu",
+		ManufacturerTHead:     "alibabacloud.com/ppu",
+	}
+	for _, manufacturer := range maps.Keys(_ManufacturerAcceleratableResourceNameMap) {
+		// Extract resource name from environment variable if exists,
+		// and override the default value in the map.
+		//
+		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_ACCELERATABLE_RESOURCE_NAME".
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_ACCELERATABLE_RESOURCE_NAME"); v != "" {
+			_ManufacturerAcceleratableResourceNameMap[manufacturer] = core.ResourceName(v)
+		}
+	}
+
+	// Map manufacturer to runtime name,
+	// the runtime name is usually used as the container runtime class name for the accelerator resource.
+	_ManufacturerAcceleratableRuntimeNameMap = map[string]string{
+		ManufacturerAMD:       "amd",
+		ManufacturerAscend:    "ascend",
+		ManufacturerCambricon: "cambricon",
+		ManufacturerHygon:     "hygon",
+		ManufacturerIluvatar:  "iluvatar",
+		ManufacturerMetaX:     "metax",
+		ManufacturerMThreads:  "mthreads",
+		ManufacturerNVIDIA:    "nvidia",
+	}
+	for _, manufacturer := range maps.Keys(_ManufacturerAcceleratableResourceNameMap) {
+		// Extract runtime name from environment variable if exists,
+		// and override the default value in the map.
+		//
+		// E.g. for AMD, the environment variable is "GPUSTACK_AMD_ACCELERATABLE_RUNTIME_NAME".
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_ACCELERATABLE_RUNTIME_NAME"); v != "" {
+			_ManufacturerAcceleratableRuntimeNameMap[manufacturer] = v
 		}
 	}
 
 	// Make a set of all known resource names for quick lookup.
-	_ResourceNameSet = sets.New[core.ResourceName](maps.Values(_ManufacturerResourceNameMap)...)
+	_AcceleratableResourceNameSet = sets.New[core.ResourceName](maps.Values(_ManufacturerAcceleratableResourceNameMap)...)
 
 	// Define the available sizes for sliced resources.
 	for val := int64(1); val <= SlicedResourceMaxSize; val <<= 1 {
@@ -140,26 +142,36 @@ func init() {
 	}
 }
 
-// GetKnownManufacturers returns the list of known manufacturers.
-func GetKnownManufacturers() []string {
-	manus := maps.Keys(_ManufacturerResourceNameMap)
+// GetPciVendorID returns the PCI vendor ID for the given manufacturer.
+func GetPciVendorID(manufacturer string) string {
+	return _ManufacturerPciVendorIDMap[manufacturer]
+}
+
+// GetKnownAcceleratableManufacturers returns the list of known accelerator manufacturers.
+func GetKnownAcceleratableManufacturers() []string {
+	manus := maps.Keys(_ManufacturerAcceleratableResourceNameMap)
 	sort.Strings(manus)
 	return manus
 }
 
-// IsKnownManufacturer checks if the given manufacturer is a well-known manufacturer.
-func IsKnownManufacturer(manufacturer string) bool {
-	return _ManufacturerResourceNameMap[manufacturer] != ""
+// IsKnownAcceleratableManufacturer reports whether the given manufacturer is a well-known accelerator manufacturer.
+func IsKnownAcceleratableManufacturer(manufacturer string) bool {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] != ""
 }
 
-// GetRuntimeName returns the runtime name for the given manufacturer.
-func GetRuntimeName(manufacturer string) string {
-	return _ManufacturerRuntimeNameMap[manufacturer]
+// GetAcceleratablePciVendorIDs returns the list of PCI vendor IDs for all known accelerator manufacturers.
+func GetAcceleratablePciVendorIDs() []string {
+	ids := make([]string, 0, len(_ManufacturerPciVendorIDMap))
+	for manu := range _ManufacturerAcceleratableResourceNameMap {
+		ids = append(ids, _ManufacturerPciVendorIDMap[manu])
+	}
+	sort.Strings(ids)
+	return ids
 }
 
-// GetResourceName returns the resource name for the given manufacturer.
-func GetResourceName(manufacturer string, mode workercore.DeviceAllocationMode) core.ResourceName {
-	resName := _ManufacturerResourceNameMap[manufacturer]
+// GetAcceleratableResourceName returns the accelerator resource name for the given manufacturer and allocation mode.
+func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAllocationMode) core.ResourceName {
+	resName := _ManufacturerAcceleratableResourceNameMap[manufacturer]
 	switch mode {
 	default:
 		return resName
@@ -170,27 +182,21 @@ func GetResourceName(manufacturer string, mode workercore.DeviceAllocationMode) 
 	}
 }
 
-// IsKnownResourceName checks if the given resource name is a well-known resource name.
-func IsKnownResourceName(name core.ResourceName) bool {
+// IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
+func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	switch {
 	case stringx.HasSuffix(name, SharedResourceNameSuffix):
 		name = name[:len(name)-len(SharedResourceNameSuffix)]
 	case stringx.HasSuffix(name, SlicedResourceNameSuffix):
 		name = name[:len(name)-len(SlicedResourceNameSuffix)]
 	}
-	return _ResourceNameSet.Has(name)
+	return _AcceleratableResourceNameSet.Has(name)
 }
 
-// GetPciID returns the PCI vendor for the given manufacturer.
-func GetPciID(manufacturer string) string {
-	return _ManufacturerPciIDMap[manufacturer]
-}
-
-// GetPciIDs returns the list of PCI vendor IDs for all known manufacturers.
-func GetPciIDs() []string {
-	ids := maps.Values(_ManufacturerPciIDMap)
-	sort.Strings(ids)
-	return ids
+// GetAcceleratableRuntimeName returns the accelerator runtime name for the given manufacturer,
+// usually, it's used as the container runtime class name for the accelerator resource.
+func GetAcceleratableRuntimeName(manufacturer string) string {
+	return _ManufacturerAcceleratableRuntimeNameMap[manufacturer]
 }
 
 // QuantityToSliceCount converts the given quantity to the count of slices for sliced resources based on the sliced size.

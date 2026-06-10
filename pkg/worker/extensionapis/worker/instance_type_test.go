@@ -84,7 +84,7 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 		"acceleratable": "true",
 		"manufacturer":  nodefeature.ManufacturerNVIDIA,
 	}
-	credits := nodefeature.GetCreditsResourceName(nodefeature.ManufacturerNVIDIA)
+	credits := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
 
 	nonAccCapacity := core.ResourceList{
 		core.ResourceCPU:              qty("16"),

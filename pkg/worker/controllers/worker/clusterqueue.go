@@ -272,7 +272,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				ramQ = quantityx.Multiply(ramQ, ndCount)
 				stgQ = quantityx.Multiply(stgQ, ndCount)
 				if acceleratable {
-					accResName := nodefeature.GetResourceName(manu, workercore.DeviceAllocationModeExclusive)
+					accResName := nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive)
 					for j := range ndList.Items {
 						accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
 					}
@@ -309,7 +309,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			}
 			if acceleratable {
 				rg.CoveredResources = append(rg.CoveredResources,
-					nodefeature.GetCreditsResourceName(manu),
+					nodefeature.GetAcceleratableCreditsResourceName(manu),
 				)
 			}
 		}
@@ -336,7 +336,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 		if acceleratable {
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
-					Name:           nodefeature.GetCreditsResourceName(manu),
+					Name:           nodefeature.GetAcceleratableCreditsResourceName(manu),
 					NominalQuota:   accQ,
 					BorrowingLimit: borLimit,
 				},
@@ -457,7 +457,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 								switch {
 								default:
 									continue
-								case nodefeature.IsKnownResourceName(cn):
+								case nodefeature.IsKnownAcceleratableResourceName(cn):
 								case cn == core.ResourceCPU:
 								case cn == core.ResourceMemory:
 								case cn == core.ResourceEphemeralStorage:

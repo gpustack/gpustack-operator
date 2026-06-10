@@ -23,7 +23,7 @@ func Test_getKueueChartTemplateValues(t *testing.T) {
 		"ContainerRegistry":  "",
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
-		"Manufacturers":      nodefeature.GetKnownManufacturers(),
+		"Manufacturers":      nodefeature.GetKnownAcceleratableManufacturers(),
 		"Namespace":          SystemNamespaceName,
 		"ImagePullPolicy":    "Always",
 	}

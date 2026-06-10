@@ -119,7 +119,7 @@ spec:
 {{- end }}
 {{- range $.Manufacturers }}
 {{- $manu := . }}
-{{- $manuPciID := getPciID $manu }}
+{{- $manuPciVendorID := getPciVendorID $manu }}
 {{- $daemonSet := lookup "apps/v1" "DaemonSet" $.Namespace (printf "gpustack-operator-device-manager-%s" $manu) }}
 {{- if or (not $daemonSet) (ne $image ($daemonSet | dig "spec" "template" "spec" "containers" (list (dict)) | first | dig "image" "")) }}
 {{- if has $manu (list "nvidia" "mthreads") }}
@@ -173,7 +173,7 @@ spec:
       nodeSelector:
         # Rely on NFD.
         #
-        feature.node.kubernetes.io/pci-{{ $manuPciID }}.present: "true"
+        feature.node.kubernetes.io/pci-{{ $manuPciVendorID }}.present: "true"
       serviceAccountName: gpustack-operator-device-manager
       priorityClassName: system-cluster-critical
       tolerations:
@@ -221,7 +221,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: KUBERNTES_SERVICE_NAME
+            - name: KUBERNETES_SERVICE_NAME
               value: "gpustack-operator-device-manager"
 {{- if $.Env }}
 {{- toYaml $.Env | nindent 12 }}
@@ -392,12 +392,12 @@ func renderDeviceManagerApplyYamlTemplate(data map[string]any, extendFuncMap tem
 
 func extendDeviceManagerApplyYamlTemplateFuncMap() template.FuncMap {
 	return map[string]any{
-		"getPciID": func(v any) string {
+		"getPciVendorID": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return nodefeature.GetPciID(s)
+			return nodefeature.GetPciVendorID(s)
 		},
 		"lookup": func(apiversion, kind, namespace, name string) (map[string]any, error) {
 			return map[string]any{}, nil

@@ -27,7 +27,7 @@ func NewOptions() *Options {
 	return &Options{
 		// Control.
 		NoPCICheck:     false,
-		Manufacturers:  nodefeature.GetKnownManufacturers(),
+		Manufacturers:  nodefeature.GetKnownAcceleratableManufacturers(),
 		NoFastFailed:   false,
 		MonitorPeriod:  5 * time.Second,
 		MonitorHistory: 5 * time.Minute,
@@ -72,7 +72,7 @@ func (o *Options) AddFlags(fs *pflag.FlagSet, opts ...FlagOption) {
 func (o *Options) Validate(_ context.Context) error {
 	// Control.
 	if len(o.Manufacturers) != 0 {
-		knownManufacturers := nodefeature.GetKnownManufacturers()
+		knownManufacturers := nodefeature.GetKnownAcceleratableManufacturers()
 		if !sets.New[string](knownManufacturers...).HasAll(o.Manufacturers...) {
 			return errors.New("--manufacturer: should be a comma separated list of valid manufacturers, " +
 				"valid manufacturers: " + strings.Join(knownManufacturers, ","))

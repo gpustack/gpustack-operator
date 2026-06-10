@@ -259,7 +259,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		},
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
-			nfs.Labels = nodefeature.ConstructNodeDeviceLabels(eGroups)
+			nfs.Labels = nodefeature.ConstructAcceleratableNodeLabels(eGroups)
 			return *nfs
 		}(),
 	}
@@ -324,7 +324,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 				v := &_DeviceGroupValue{
 					Group: aGroups[i],
 					// If the manufacturer is not in the allowed list, keep it.
-					Remove: d.manufacturers.Has(aGroups[i].Name),
+					Remove: d.manufacturers.Has(aGroups[i].Manufacturer),
 				}
 				devGrpIndex[k] = v
 			}

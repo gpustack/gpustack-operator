@@ -14,7 +14,6 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
-	"gpustack.ai/gpustack/pkg/utils/typex"
 )
 
 const (
@@ -23,17 +22,17 @@ const (
 	DeviceLabelPrefix  = "device." + systemname.LabelPrefix
 )
 
-// ConstructNodeDeviceLabels constructs node feature labels from the given device group list.
-func ConstructNodeDeviceLabels(groups device.DevicesGroupList) map[string]string {
+// ConstructAcceleratableNodeLabels constructs accelerator feature labels from the given device group list.
+func ConstructAcceleratableNodeLabels(groups device.DevicesGroupList) map[string]string {
 	labels := map[string]string{}
 	for i := range groups {
-		applyDeviceLabels(labels, groups[i])
+		applyAcceleratorLabels(labels, groups[i])
 	}
 	return labels
 }
 
-// applyDeviceLabels applies device feature labels of the given device group to the given labels map.
-func applyDeviceLabels(labels map[string]string, group device.DevicesGroup) {
+// applyAcceleratorLabels adds the accelerator feature labels of the given device group into labels.
+func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup) {
 	if len(group.Accelerators) == 0 {
 		return
 	}
@@ -81,13 +80,15 @@ func applyDeviceLabels(labels map[string]string, group device.DevicesGroup) {
 	}
 }
 
-// ExtractNodeKeys returns accelerated node keys of the given Node.
-func ExtractNodeKeys(node *core.Node) []string {
+// ExtractAcceleratableNodeKeys returns the acceleratable node keys of the given Node,
+// each in the format "${manufacturer}-${id}".
+func ExtractAcceleratableNodeKeys(node *core.Node) []string {
 	return mapx.FilterSlice(node.Labels, func(k, v string) (string, bool) {
 		if strings.HasPrefix(k, FeatureLabelPrefix) {
 			if v == "true" {
 				v = strings.TrimPrefix(k, FeatureLabelPrefix)
-				if strings.Contains(v, "-") {
+				manufacturer, _, found := strings.Cut(v, "-")
+				if found && IsKnownAcceleratableManufacturer(manufacturer) {
 					return v, true
 				}
 			}
@@ -200,7 +201,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		labels[generalKey+".profile-cohort"] = generalUnit
 	}
 
-	for _, ndKey := range ExtractNodeKeys(node) {
+	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
 		nodeKey := FeatureLabelPrefix + ndKey
 
 		// "${prefix}${manufacturer}-${id}.accelerators=${accelerator}".
@@ -397,12 +398,8 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		}
 	}
 
-	for _, ndKey := range ExtractNodeKeys(node) {
+	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
 		nodeKey := FeatureLabelPrefix + ndKey
-		manufacturer, _, _ := strings.Cut(ndKey, "-")
-		if !IsKnownManufacturer(manufacturer) {
-			continue
-		}
 
 		profFlavorKey := nodeKey + ".profile-flavor"
 		profQueueKey := nodeKey + ".profile-queue"
@@ -424,6 +421,7 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		cores := labels[nodeKey+".cores"]
 		family := labels[nodeKey+".family"]
 		computeCapability := labels[nodeKey+".compute-capability"]
+		manufacturer, _, _ := strings.Cut(ndKey, "-")
 
 		acc := labels[accKey]
 		cpu := labels[cpuKey]
@@ -502,7 +500,7 @@ func ExtractNodeProfiles(node *core.Node) (profiles []NodeProfile) {
 
 	emit("general")
 
-	for _, ndKey := range ExtractNodeKeys(node) {
+	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
 		emit(ndKey)
 	}
 
@@ -641,21 +639,9 @@ func ParseNodeProfile(profile string) (key string, spec NodeProfileSpec, ok bool
 	return key, spec, true
 }
 
-// GetCreditsResourceName returns the resource name for the credits of the given manufacturer.
-func GetCreditsResourceName(manufacturer string) core.ResourceName {
+// GetAcceleratableCreditsResourceName returns the accelerator credits resource name for the given manufacturer.
+func GetAcceleratableCreditsResourceName(manufacturer string) core.ResourceName {
 	return core.ResourceName(CreditsLabelPrefix + manufacturer)
-}
-
-// PowersOfTwoUpTo returns a slice of powers of two up to the given number n (inclusive).
-func PowersOfTwoUpTo[I typex.Integer](n I) []I {
-	if n < 1 {
-		return []I{}
-	}
-	var result []I
-	for val := I(1); val <= n; val <<= 1 {
-		result = append(result, val)
-	}
-	return result
 }
 
 // isUnsignedDecimal reports whether s is a non-empty string of ASCII digits.

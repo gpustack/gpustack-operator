@@ -220,28 +220,28 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(nodefeature.GetResourceName(s, workercore.DeviceAllocationModeExclusive))
+			return string(nodefeature.GetAcceleratableResourceName(s, workercore.DeviceAllocationModeExclusive))
 		},
 		"getSharedResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(nodefeature.GetResourceName(s, workercore.DeviceAllocationModeShared))
+			return string(nodefeature.GetAcceleratableResourceName(s, workercore.DeviceAllocationModeShared))
 		},
 		"getSlicedResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(nodefeature.GetResourceName(s, workercore.DeviceAllocationModeSliced))
+			return string(nodefeature.GetAcceleratableResourceName(s, workercore.DeviceAllocationModeSliced))
 		},
 		"getCreditsResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(nodefeature.GetCreditsResourceName(s))
+			return string(nodefeature.GetAcceleratableCreditsResourceName(s))
 		},
 		"hasAPIResource": func(apiversion, kind string) bool {
 			return false

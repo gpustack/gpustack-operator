@@ -103,7 +103,7 @@ worker:
     annotations:
       {{ $.ManagedLabel }}: "true"
 {{- $pciClassPrefixes := getPciClassPrefixes }}
-{{- $pciVendorIDs := getPciIDs }}
+{{- $pciVendorIDs := getPciVendorIDs }}
   config:
     core:
       labelSources:
@@ -167,7 +167,7 @@ func getNfdChartTemplateValues(name string, data map[string]any, extendFuncMap t
 
 func extendNfdChartValuesTemplateFuncMap() template.FuncMap {
 	return template.FuncMap{
-		"getPciIDs": nodefeature.GetPciIDs,
+		"getPciVendorIDs": nodefeature.GetAcceleratablePciVendorIDs,
 		"getPciClassPrefixes": func() []string {
 			var r []string
 			for _, p := range strings.Split(osx.Getenv("GPUSTACK_PCI_CLASS_PREFIXES"), ",") {

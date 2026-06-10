@@ -47,7 +47,7 @@ func assertResourceList(t *testing.T, want, got core.ResourceList, label string)
 }
 
 func TestGetResourceRequirements(t *testing.T) {
-	accNVIDIA := nodefeature.GetResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	accNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
 
 	cases := []struct {
 		name string

@@ -12,7 +12,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemname"
 )
 
-func TestConstructNodeDeviceLabels(t *testing.T) {
+func TestConstructAcceleratableNodeLabels(t *testing.T) {
 	cases := []struct {
 		name     string
 		groups   device.DevicesGroupList
@@ -142,13 +142,13 @@ func TestConstructNodeDeviceLabels(t *testing.T) {
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := ConstructNodeDeviceLabels(cs.groups)
+			actual := ConstructAcceleratableNodeLabels(cs.groups)
 			assert.Equal(t, cs.expected, actual, "unexpected node labels")
 		})
 	}
 }
 
-func TestExtractNodeKeys(t *testing.T) {
+func TestExtractAcceleratableNodeKeys(t *testing.T) {
 	cases := []struct {
 		name     string
 		node     *core.Node
@@ -197,11 +197,32 @@ func TestExtractNodeKeys(t *testing.T) {
 				"nvidia-tesla-t4",
 			},
 		},
+		{
+			name: "non-empty labels with unknown manufacturer",
+			node: &core.Node{
+				ObjectMeta: meta.ObjectMeta{
+					Labels: map[string]string{
+						"foo":                          "bar",
+						FeatureLabelPrefix + "unknown": "true",
+						FeatureLabelPrefix + "unknown.driver-version":              "580.126.09",
+						FeatureLabelPrefix + "unknown.runtime-version":             "13.0",
+						FeatureLabelPrefix + "unknown-tesla-t4":                    "true",
+						FeatureLabelPrefix + "unknown-tesla-t4.accelerators":       "4",
+						FeatureLabelPrefix + "unknown-tesla-t4.compute-capability": "7.5",
+						FeatureLabelPrefix + "unknown-tesla-t4.cores":              "2560",
+						FeatureLabelPrefix + "unknown-tesla-t4.family":             "Turing",
+						FeatureLabelPrefix + "unknown-tesla-t4.memory":             "15Gi",
+						FeatureLabelPrefix + "unknown-tesla-t4.product":            "Tesla-T4",
+					},
+				},
+			},
+			expected: nil,
+		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := ExtractNodeKeys(cs.node)
+			actual := ExtractAcceleratableNodeKeys(cs.node)
 			assert.Equal(t, cs.expected, actual, "unexpected node keys")
 		})
 	}
@@ -224,7 +245,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// Gi; local-storage rounds down).
 
 	// ConstructNodeCapacityLabels reads accelerator count from the
-	// ${nodeKey}.accelerators label (emitted by applyDeviceLabels), not from
+	// ${nodeKey}.accelerators label (emitted by applyAcceleratorLabels), not from
 	// Node.Status.Capacity[<gpu resource>]. The capacity passed to newNode
 	// only carries CPU / RAM / ephemeral-storage; device count is steered
 	// entirely through deviceLabels(..., accelerators).
@@ -250,7 +271,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		}
 	}
 
-	// deviceLabels mirrors what ConstructNodeDeviceLabels would have put on
+	// deviceLabels mirrors what ConstructAcceleratableNodeLabels would have put on
 	// the node before ConstructNodeCapacityLabels is invoked.
 	deviceLabels := func(id, product, memory, accelerators string) map[string]string {
 		ndKey := FeatureLabelPrefix + "nvidia-" + id
@@ -781,7 +802,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 		name string
 		// labels populates node.ObjectMeta.Labels. The per-device
 		// Accelerator field sources from the ${nodeKey}.accelerators
-		// label written by applyDeviceLabels.
+		// label written by applyAcceleratorLabels.
 		labels      map[string]string
 		wantCPU     NodeResourceFlavor
 		wantDevices []NodeResourceFlavor

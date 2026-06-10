@@ -561,7 +561,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	// Ensure runtime class.
 	if instType.Spec.Acceleratable {
-		rn := nodefeature.GetRuntimeName(instType.Spec.Manufacturer)
+		rn := nodefeature.GetAcceleratableRuntimeName(instType.Spec.Manufacturer)
 		if rn != "" {
 			rc := new(node.RuntimeClass)
 			err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: rn}, rc,
@@ -768,9 +768,9 @@ func getResourceRequirements(
 			resQuantity := *inst.Spec.Resources.Accelerator
 			if instType.Spec.Sliced > 0 {
 				resQuantity = nodefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-				resName = nodefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+				resName = nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
 			} else {
-				resName = nodefeature.GetResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+				resName = nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
 			}
 			rr.Limits[resName] = resQuantity
 			rr.Requests[resName] = resQuantity

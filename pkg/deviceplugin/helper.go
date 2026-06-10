@@ -10,6 +10,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/mathx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
@@ -172,7 +173,7 @@ func ConvertResourceUnitFromDeviceIds(id string) (ResourceUnit, error) {
 
 // PadPartitionedAllocationSize pads the allocation size to the nearest power of two up to max partitions.
 func PadPartitionedAllocationSize(allocationSize, maxPartitions int32) int32 {
-	powers := nodefeature.PowersOfTwoUpTo(maxPartitions)
+	powers := mathx.PowersOfTwoUpTo(maxPartitions)
 	if powers[len(powers)-1] == maxPartitions {
 		powers = powers[:len(powers)-1]
 	}

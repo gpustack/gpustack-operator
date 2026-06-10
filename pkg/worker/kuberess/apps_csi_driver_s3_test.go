@@ -23,7 +23,7 @@ func Test_getCSIDriverS3ChartTemplateValues(t *testing.T) {
 		"ContainerRegistry":  "",
 		"ContainerNamespace": "",
 		"ImagePullSecrets":   []string{"abc", "def"},
-		"Manufacturers":      nodefeature.GetKnownManufacturers(),
+		"Manufacturers":      nodefeature.GetKnownAcceleratableManufacturers(),
 		"Namespace":          SystemNamespaceName,
 		"ImagePullPolicy":    "Always",
 		"DriverName":         CSIProvisionerS3,

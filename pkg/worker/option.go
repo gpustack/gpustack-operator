@@ -93,7 +93,7 @@ func NewOptions() *Options {
 		AuditWebhookConfigFile: "",
 
 		// Device Manager.
-		Manufacturers: nodefeature.GetKnownManufacturers(),
+		Manufacturers: nodefeature.GetKnownAcceleratableManufacturers(),
 	}
 	opts.ManagerOptions.KubeLeaderElectionID = "worker.gpustack.ai"
 
@@ -207,7 +207,7 @@ func (o *Options) Validate(ctx context.Context) error {
 
 	// Device Manager.
 	if len(o.Manufacturers) != 0 {
-		knownManufacturers := nodefeature.GetKnownManufacturers()
+		knownManufacturers := nodefeature.GetKnownAcceleratableManufacturers()
 		if !sets.New[string](knownManufacturers...).HasAll(o.Manufacturers...) {
 			return errors.New("--manufacturer: should be a comma separated list of valid manufacturers, " +
 				"valid manufacturers: " + strings.Join(knownManufacturers, ","))
