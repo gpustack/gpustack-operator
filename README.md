@@ -2,6 +2,12 @@
 
 GPUStack Operator provides a fantastic way to manage accelerator resources in Kubernetes.
 
+Built on top of [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) and [Kueue](https://github.com/kubernetes-sigs/kueue), it discovers accelerators (GPU/NPU/TPU) on every node, profiles node capacity into normalized per-device units, and materializes the results into a Kueue-based scheduling chain (`ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue`).
+
+## Documentation
+
+- [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
+
 ## License
 
 Copyright (c) 2026 The GPUStack Authors
