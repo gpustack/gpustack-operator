@@ -68,13 +68,6 @@ func (h *InstanceTypeHandler) SetupHandler(
 	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
 		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Group",
-				Type: "string",
-			},
-			Template: "{.spec.group}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
 				Name: "Accelerator",
 				Type: "string",
 			},

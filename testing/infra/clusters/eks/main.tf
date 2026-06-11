@@ -367,7 +367,7 @@ resource "kubernetes_service_v1" "gpustack_worker" {
   spec {
     selector = {
       "app.kubernetes.io/part-of"   = "gpustack-operator"
-      "app.kubernetes.io/component" = "worker"
+      "app.kubernetes.io/component" = "operator-worker"
       "app.kubernetes.io/name"      = "gpustack-operator-worker"
     }
     session_affinity = "ClientIP"
@@ -445,7 +445,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
     namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
     labels = {
       "app.kubernetes.io/part-of"   = "gpustack-operator"
-      "app.kubernetes.io/component" = "worker"
+      "app.kubernetes.io/component" = "operator-worker"
       "app.kubernetes.io/name"      = "gpustack-operator-worker"
     }
   }
@@ -454,7 +454,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
     selector {
       match_labels = {
         "app.kubernetes.io/part-of"   = "gpustack-operator"
-        "app.kubernetes.io/component" = "worker"
+        "app.kubernetes.io/component" = "operator-worker"
         "app.kubernetes.io/name"      = "gpustack-operator-worker"
       }
     }
@@ -462,7 +462,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
       metadata {
         labels = {
           "app.kubernetes.io/part-of"   = "gpustack-operator"
-          "app.kubernetes.io/component" = "worker"
+          "app.kubernetes.io/component" = "operator-worker"
           "app.kubernetes.io/name"      = "gpustack-operator-worker"
         }
       }
@@ -482,7 +482,7 @@ resource "kubernetes_deployment_v1" "gpustack_worker" {
                   match_expressions {
                     key      = "app.kubernetes.io/component"
                     operator = "In"
-                    values   = ["worker"]
+                    values   = ["operator-worker"]
                   }
                   match_expressions {
                     key      = "app.kubernetes.io/name"
