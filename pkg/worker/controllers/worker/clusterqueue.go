@@ -494,6 +494,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 									return true
 								}
 							}
+							return false
 						}
 						if oldNd.DeletionTimestamp == nil {
 							return true
