@@ -60,28 +60,38 @@ func (s *ResourceServer) GetDevicePluginOptions(context.Context, *Empty) (*Optio
 // ListAndWatch returns a stream of List of Devices.
 // Whenever a Device state change or a Device disappears, ListAndWatch returns the new list.
 func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[ListAndWatchResponse]) error {
+	// Get notifier at the beginning of ListAndWatch to avoid missing any update during the initial ListAndWatch.
+	notifier := s.Reconciler.getReconcileNotifier(s.Manufacturer, s.AllocationMode)
+
 	ctx := srv.Context()
 
-	resp, err := s.getListAndWatchResponse(ctx)
-	if err == nil {
-		s.Logger.Error(err, "get list and watch response")
-		// Ignore the error and continue to retry in the loop,
-		// since ListAndWatch is expected to be long-running and resilient to transient errors.
-	} else if err = srv.Send(resp); err != nil {
-		s.Logger.Error(err, "send list and watch response")
+	// Send the initial ListAndWatch response.
+	err := waitx.PollUntilContextCancel(ctx, 2*time.Second, true, func(ctx context.Context) error {
+		resp, err := s.getListAndWatchResponse(ctx)
+		if err != nil {
+			// Nothing to do, keep looping until success or context cancellation.
+			s.Logger.Error(err, "get initial list and watch response, retry later")
+		} else if err = srv.Send(resp); err != nil {
+			// Return error to restart Device Plugin Server.
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		s.Logger.Error(err, "initial list and watch")
 		return err
 	}
 
-	notifier := s.Reconciler.getReconcileNotifier(s.Manufacturer, s.AllocationMode)
+	// Watch for updates and send ListAndWatch response whenever there's a change.
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-notifier:
-			resp, err = s.getListAndWatchResponse(ctx)
+			resp, err := s.getListAndWatchResponse(ctx)
 			if err != nil {
 				s.Logger.Error(err, "get list and watch response")
-				continue
+				return err
 			}
 			if err = srv.Send(resp); err != nil {
 				s.Logger.Error(err, "send list and watch response")
