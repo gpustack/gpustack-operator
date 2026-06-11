@@ -284,7 +284,7 @@ ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/m
 ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.0/kueue-0.18.0.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.18.0.tgz"
 
 ## Node Features Discovery
-ADD https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.18.3/node-feature-discovery-chart-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
+ADD https://thxcode.github.io/node-feature-discovery/charts/node-feature-discovery-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
 
 # Runtime
 
