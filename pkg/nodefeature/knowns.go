@@ -153,18 +153,6 @@ func GetPciVendorID(manufacturer string) string {
 	return _ManufacturerPciVendorIDMap[manufacturer]
 }
 
-// NormalizeGeneralManufacturer normalizes an NFD-reported CPU vendor ID,
-// which is report by https://github.com/klauspost/cpuid,
-// it always to be a meaningful string if the CPU information is properly collected.
-// Otherwise, falling back to GeneralManufacturerGeneric when received an empty string or VendorUnknown.
-func NormalizeGeneralManufacturer(vendorID string) string {
-	v := strings.ToLower(vendorID)
-	if v == "vendorunknown" || v == "" {
-		return GeneralManufacturerGeneric
-	}
-	return v
-}
-
 // GetKnownAcceleratableManufacturers returns the list of known accelerator manufacturers.
 func GetKnownAcceleratableManufacturers() []string {
 	manus := maps.Keys(_ManufacturerAcceleratableResourceNameMap)

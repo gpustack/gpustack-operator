@@ -8,6 +8,8 @@ API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,I
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,HostIPs
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,PodIPs
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,Ports
+API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1,InstanceTypeCPUCache,L1D
+API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1,InstanceTypeCPUCache,L1I
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorFeatures,RoCE
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,DeviceTopology,PciBusID
 API rule violation: names_match,gpustack.ai/gpustack/api/worker/v1alpha1,DeviceTopology,PciRootID

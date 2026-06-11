@@ -27,9 +27,9 @@ func mergeLabels(ms ...map[string]string) map[string]string {
 // general(CPU) node key, here an AMD family 25 model 1 (-> "amd-25-1").
 func cpuModelLabels() map[string]string {
 	return map[string]string{
-		NFDCPUModelLabelPrefix + "vendor_id": "AMD",
-		NFDCPUModelLabelPrefix + "family":    "25",
-		NFDCPUModelLabelPrefix + "id":        "1",
+		_NFDCPUModelVendorIDLabelKey: "AMD",
+		_NFDCPUModelFamilyLabelKey:   "25",
+		_NFDCPUModelIDLabelKey:       "1",
 	}
 }
 
@@ -88,7 +88,7 @@ func TestConstructAcceleratableNodeLabels(t *testing.T) {
 				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.cores":              "2560",
 				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.family":             "Turing",
 				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.compute-capability": "7.5",
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.accelerators":       "4",
+				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.count":              "4",
 			},
 		},
 		{
@@ -105,13 +105,13 @@ func TestConstructAcceleratableNodeLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				FeatureLabelPrefix + "acceleratable":                         "true",
-				AcceleratableFeatureLabelPrefix + "nvidia":                   "true",
-				AcceleratableFeatureLabelPrefix + "nvidia-h100":              "true",
-				AcceleratableFeatureLabelPrefix + "nvidia-h100.product":      "H100",
-				AcceleratableFeatureLabelPrefix + "nvidia-h100.memory":       "80Gi",
-				AcceleratableFeatureLabelPrefix + "nvidia-h100.cores":        "0",
-				AcceleratableFeatureLabelPrefix + "nvidia-h100.accelerators": "1",
+				FeatureLabelPrefix + "acceleratable":                    "true",
+				AcceleratableFeatureLabelPrefix + "nvidia":              "true",
+				AcceleratableFeatureLabelPrefix + "nvidia-h100":         "true",
+				AcceleratableFeatureLabelPrefix + "nvidia-h100.product": "H100",
+				AcceleratableFeatureLabelPrefix + "nvidia-h100.memory":  "80Gi",
+				AcceleratableFeatureLabelPrefix + "nvidia-h100.cores":   "0",
+				AcceleratableFeatureLabelPrefix + "nvidia-h100.count":   "1",
 			},
 		},
 		{
@@ -144,19 +144,19 @@ func TestConstructAcceleratableNodeLabels(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				FeatureLabelPrefix + "acceleratable":                             "true",
-				AcceleratableFeatureLabelPrefix + "nvidia":                       "true",
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4":              "true",
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.product":      "Tesla-T4",
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.memory":       "15Gi",
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.cores":        "0",
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.accelerators": "1",
-				AcceleratableFeatureLabelPrefix + "amd":                          "true",
-				AcceleratableFeatureLabelPrefix + "amd-mi300x":                   "true",
-				AcceleratableFeatureLabelPrefix + "amd-mi300x.product":           "MI300X",
-				AcceleratableFeatureLabelPrefix + "amd-mi300x.memory":            "192Gi",
-				AcceleratableFeatureLabelPrefix + "amd-mi300x.cores":             "0",
-				AcceleratableFeatureLabelPrefix + "amd-mi300x.accelerators":      "2",
+				FeatureLabelPrefix + "acceleratable":                        "true",
+				AcceleratableFeatureLabelPrefix + "nvidia":                  "true",
+				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4":         "true",
+				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.product": "Tesla-T4",
+				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.memory":  "15Gi",
+				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.cores":   "0",
+				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.count":   "1",
+				AcceleratableFeatureLabelPrefix + "amd":                     "true",
+				AcceleratableFeatureLabelPrefix + "amd-mi300x":              "true",
+				AcceleratableFeatureLabelPrefix + "amd-mi300x.product":      "MI300X",
+				AcceleratableFeatureLabelPrefix + "amd-mi300x.memory":       "192Gi",
+				AcceleratableFeatureLabelPrefix + "amd-mi300x.cores":        "0",
+				AcceleratableFeatureLabelPrefix + "amd-mi300x.count":        "2",
 			},
 		},
 	}
@@ -205,7 +205,7 @@ func TestExtractAcceleratableNodeKeys(t *testing.T) {
 						AcceleratableFeatureLabelPrefix + "nvidia.driver-version":              "580.126.09",
 						AcceleratableFeatureLabelPrefix + "nvidia.runtime-version":             "13.0",
 						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4":                    "true",
-						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.accelerators":       "4",
+						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.count":              "4",
 						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.compute-capability": "7.5",
 						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.cores":              "2560",
 						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.family":             "Turing",
@@ -228,7 +228,7 @@ func TestExtractAcceleratableNodeKeys(t *testing.T) {
 						AcceleratableFeatureLabelPrefix + "unknown.driver-version":              "580.126.09",
 						AcceleratableFeatureLabelPrefix + "unknown.runtime-version":             "13.0",
 						AcceleratableFeatureLabelPrefix + "unknown-tesla-t4":                    "true",
-						AcceleratableFeatureLabelPrefix + "unknown-tesla-t4.accelerators":       "4",
+						AcceleratableFeatureLabelPrefix + "unknown-tesla-t4.count":              "4",
 						AcceleratableFeatureLabelPrefix + "unknown-tesla-t4.compute-capability": "7.5",
 						AcceleratableFeatureLabelPrefix + "unknown-tesla-t4.cores":              "2560",
 						AcceleratableFeatureLabelPrefix + "unknown-tesla-t4.family":             "Turing",
@@ -262,12 +262,18 @@ func TestExtractAcceleratableNodeKeys(t *testing.T) {
 }
 
 func TestExtractGeneralNodeKey(t *testing.T) {
-	newNode := func(labels map[string]string) *core.Node {
+	newNode := func(labels, annotations map[string]string) *core.Node {
 		return &core.Node{
 			ObjectMeta: meta.ObjectMeta{
-				Labels: labels,
+				Labels:      labels,
+				Annotations: annotations,
 			},
 		}
+	}
+
+	osArchLabels := map[string]string{
+		core.LabelOSStable:   "linux",
+		core.LabelArchStable: "amd64",
 	}
 
 	cases := []struct {
@@ -276,106 +282,114 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "no cpu-model labels falls back to generic",
-			node:     newNode(map[string]string{}),
-			expected: "generic",
+			name:     "no cpu information yields empty key",
+			node:     newNode(map[string]string{}, nil),
+			expected: "",
 		},
 		{
-			name:     "AMD family 25 model 1",
-			node:     newNode(cpuModelLabels()),
+			name:     "cpu-model labels without os/arch labels",
+			node:     newNode(cpuModelLabels(), nil),
 			expected: "amd-25-1",
 		},
 		{
-			name: "GenuineIntel normalizes to intel",
-			node: newNode(map[string]string{
-				NFDCPUModelLabelPrefix + "vendor_id": "GenuineIntel",
-				NFDCPUModelLabelPrefix + "family":    "6",
-				NFDCPUModelLabelPrefix + "id":        "143",
-			}),
-			expected: "intel-6-143",
+			name:     "os/arch labels trail the id",
+			node:     newNode(mergeLabels(cpuModelLabels(), osArchLabels), nil),
+			expected: "amd-25-1-ln-x64",
 		},
 		{
-			name: "vendor without family falls back to generic",
-			node: newNode(map[string]string{
-				NFDCPUModelLabelPrefix + "vendor_id": "AMD",
-				NFDCPUModelLabelPrefix + "id":        "1",
-			}),
-			expected: "generic",
+			name: "arm64 arch abbreviates to a64",
+			node: newNode(mergeLabels(cpuModelLabels(), map[string]string{
+				core.LabelOSStable:   "linux",
+				core.LabelArchStable: "arm64",
+			}), nil),
+			expected: "amd-25-1-ln-a64",
 		},
 		{
-			name: "vendor without id falls back to generic",
-			node: newNode(map[string]string{
-				NFDCPUModelLabelPrefix + "vendor_id": "AMD",
-				NFDCPUModelLabelPrefix + "family":    "25",
-			}),
-			expected: "generic",
+			name: "unmapped os/arch pass through unchanged",
+			node: newNode(mergeLabels(cpuModelLabels(), map[string]string{
+				core.LabelOSStable:   "js",
+				core.LabelArchStable: "386",
+			}), nil),
+			expected: "amd-25-1-js-386",
 		},
 		{
-			name: "unrecognized characters are stripped",
-			node: newNode(map[string]string{
-				NFDCPUModelLabelPrefix + "vendor_id": " Foo Bar! ",
-				NFDCPUModelLabelPrefix + "family":    "25",
-				NFDCPUModelLabelPrefix + "id":        "1",
-			}),
-			expected: "foobar-25-1",
-		},
-	}
-
-	for _, cs := range cases {
-		t.Run(cs.name, func(t *testing.T) {
-			assert.Equal(t, cs.expected, ExtractGeneralNodeKey(cs.node), "unexpected general node key")
-		})
-	}
-}
-
-func TestExtractGeneralNodeKeys(t *testing.T) {
-	cases := []struct {
-		name     string
-		labels   map[string]string
-		expected []string
-	}{
-		{
-			name:     "no labels",
-			labels:   nil,
-			expected: nil,
-		},
-		{
-			name: "single general key",
-			labels: map[string]string{
-				GeneralFeatureLabelPrefix + "amd":                     "true",
-				GeneralFeatureLabelPrefix + "amd-25-1":                "true",
-				GeneralFeatureLabelPrefix + "amd-25-1.cpu":            "16",
-				GeneralFeatureLabelPrefix + "amd-25-1.profile-flavor": "16c-32g-96g",
-				GeneralFeatureLabelPrefix + "amd-25-1.profile-queue":  "1c-2g",
-			},
-			expected: []string{"amd-25-1"},
-		},
-		{
-			name: "multiple general keys are sorted",
-			labels: map[string]string{
-				GeneralFeatureLabelPrefix + "intel-6-143.profile-flavor": "8c-16g-96g",
-				GeneralFeatureLabelPrefix + "amd-25-1.profile-flavor":    "16c-32g-96g",
-			},
-			expected: []string{"amd-25-1", "intel-6-143"},
-		},
-		{
-			name: "acceleratable and old-prefix labels are ignored",
-			labels: map[string]string{
-				AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4.profile-flavor": "4c-16g-96g-1d",
-				FeatureLabelPrefix + "general.profile-flavor":                      "16c-32g-96g",
-			},
-			expected: nil,
-		},
-	}
-
-	for _, cs := range cases {
-		t.Run(cs.name, func(t *testing.T) {
-			node := &core.Node{
-				ObjectMeta: meta.ObjectMeta{
-					Labels: cs.labels,
+			name: "cpu-name annotation leads the id",
+			node: newNode(
+				mergeLabels(cpuModelLabels(), osArchLabels),
+				map[string]string{
+					FeatureLabelPrefix + "cpu-name": "AMD EPYC 7763 64-Core Processor",
 				},
-			}
-			assert.Equal(t, cs.expected, ExtractGeneralNodeKeys(node), "unexpected general node keys")
+			),
+			expected: "amd-epyc-7763-64-core-processor-ln-x64",
+		},
+		{
+			name: "unresolved cpu-name annotation falls back to cpu-model labels",
+			node: newNode(
+				mergeLabels(cpuModelLabels(), osArchLabels),
+				map[string]string{
+					FeatureLabelPrefix + "cpu-name": "@cpu.model.name",
+				},
+			),
+			expected: "amd-25-1-ln-x64",
+		},
+		{
+			name: "trademark markers and frequency are stripped from the cpu-name",
+			node: newNode(
+				map[string]string{
+					_NFDCPUModelVendorIDLabelKey: "Intel",
+				},
+				map[string]string{
+					FeatureLabelPrefix + "cpu-name": "Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz",
+				},
+			),
+			expected: "intel-xeon-platinum-8358",
+		},
+		{
+			name: "unknown vendor keys off generic",
+			node: newNode(
+				mergeLabels(osArchLabels, map[string]string{
+					_NFDCPUModelVendorIDLabelKey: "VendorUnknown",
+				}),
+				map[string]string{
+					FeatureLabelPrefix + "cpu-name": "Kunpeng 920",
+				},
+			),
+			expected: "generic-kunpeng-920-ln-x64",
+		},
+		{
+			name: "vendor without family yields empty key",
+			node: newNode(map[string]string{
+				_NFDCPUModelVendorIDLabelKey: "AMD",
+				_NFDCPUModelIDLabelKey:       "1",
+			}, nil),
+			expected: "",
+		},
+		{
+			name: "vendor without id yields empty key",
+			node: newNode(map[string]string{
+				_NFDCPUModelVendorIDLabelKey: "AMD",
+				_NFDCPUModelFamilyLabelKey:   "25",
+			}, nil),
+			expected: "",
+		},
+		{
+			name: "cpu-name sanitized to empty yields empty key",
+			node: newNode(
+				mergeLabels(osArchLabels, map[string]string{
+					_NFDCPUModelVendorIDLabelKey: "AMD",
+				}),
+				map[string]string{
+					FeatureLabelPrefix + "cpu-name": "(TM)",
+				},
+			),
+			expected: "",
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			actual := ExtractGeneralNodeKey(cs.node)
+			assert.Equal(t, cs.expected, actual, "unexpected general node key")
 		})
 	}
 }
@@ -437,11 +451,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		return map[string]string{
 			systemname.ManagedLabelKey:                 "true",
 			AcceleratableFeatureLabelPrefix + "nvidia": "true",
-			ndKey:                   "true",
-			ndKey + ".product":      product,
-			ndKey + ".memory":       memory,
-			ndKey + ".cores":        "0",
-			ndKey + ".accelerators": accelerators,
+			ndKey:              "true",
+			ndKey + ".product": product,
+			ndKey + ".memory":  memory,
+			ndKey + ".cores":   "0",
+			ndKey + ".count":   accelerators,
 		}
 	}
 
@@ -451,7 +465,6 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			systemname.ManagedLabelKey:        "true",
 			GeneralFeatureLabelPrefix + "amd": "true",
 			gPfx:                              "true",
-			gPfx + ".family":                  "25",
 			gPfx + ".cpu":                     cpu,
 			gPfx + ".ram":                     ram,
 			gPfx + ".local-storage":           stg,
@@ -488,34 +501,25 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			expected: generalExpected("16", "32Gi", "96Gi", "16c-32g-96g", "1c-2g"),
 		},
 		{
-			// No NFD cpu-model labels — the general key falls back to
-			// "generic": single marker label, no .family label.
-			name: "cpu-only node without cpu-model labels uses generic key",
+			// No NFD cpu information at all — the general key is empty and
+			// the whole general view is skipped.
+			name: "cpu-only node without cpu information yields no general view",
 			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", nil),
 			expected: map[string]string{
-				systemname.ManagedLabelKey:                           "true",
-				GeneralFeatureLabelPrefix + "generic":                "true",
-				GeneralFeatureLabelPrefix + "generic.cpu":            "16",
-				GeneralFeatureLabelPrefix + "generic.ram":            "32Gi",
-				GeneralFeatureLabelPrefix + "generic.local-storage":  "96Gi",
-				GeneralFeatureLabelPrefix + "generic.profile-flavor": "16c-32g-96g",
-				GeneralFeatureLabelPrefix + "generic.profile-queue":  "1c-2g",
-				GeneralFeatureLabelPrefix + "generic.profile-cohort": "1c-2g",
+				systemname.ManagedLabelKey: "true",
 			},
 		},
 		{
-			// GenuineIntel vendor string is normalized to "intel".
-			name: "cpu-only node with GenuineIntel cpu-model labels",
+			name: "cpu-only node with Intel cpu-model labels",
 			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", map[string]string{
-				NFDCPUModelLabelPrefix + "vendor_id": "GenuineIntel",
-				NFDCPUModelLabelPrefix + "family":    "6",
-				NFDCPUModelLabelPrefix + "id":        "143",
+				_NFDCPUModelVendorIDLabelKey: "Intel",
+				_NFDCPUModelFamilyLabelKey:   "6",
+				_NFDCPUModelIDLabelKey:       "143",
 			}),
 			expected: map[string]string{
 				systemname.ManagedLabelKey:                               "true",
 				GeneralFeatureLabelPrefix + "intel":                      "true",
 				GeneralFeatureLabelPrefix + "intel-6-143":                "true",
-				GeneralFeatureLabelPrefix + "intel-6-143.family":         "6",
 				GeneralFeatureLabelPrefix + "intel-6-143.cpu":            "16",
 				GeneralFeatureLabelPrefix + "intel-6-143.ram":            "32Gi",
 				GeneralFeatureLabelPrefix + "intel-6-143.local-storage":  "96Gi",
@@ -523,6 +527,36 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 				GeneralFeatureLabelPrefix + "intel-6-143.profile-queue":  "1c-2g",
 				GeneralFeatureLabelPrefix + "intel-6-143.profile-cohort": "1c-2g",
 			},
+		},
+		{
+			// The cpu-name annotation and the os/arch labels reshape the
+			// general key, all general labels move under the new key.
+			name: "cpu-name annotation and os/arch labels lead the general key",
+			node: func() *core.Node {
+				nd := newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
+					mergeLabels(cpuModelLabels(), map[string]string{
+						core.LabelOSStable:   "linux",
+						core.LabelArchStable: "amd64",
+					}))
+				nd.Annotations = map[string]string{
+					FeatureLabelPrefix + "cpu-name": "AMD EPYC 7763 64-Core Processor",
+				}
+				return nd
+			}(),
+			expected: func() map[string]string {
+				pfx := GeneralFeatureLabelPrefix + "amd-epyc-7763-64-core-processor-ln-x64"
+				return map[string]string{
+					systemname.ManagedLabelKey:        "true",
+					GeneralFeatureLabelPrefix + "amd": "true",
+					pfx:                               "true",
+					pfx + ".cpu":                      "16",
+					pfx + ".ram":                      "32Gi",
+					pfx + ".local-storage":            "96Gi",
+					pfx + ".profile-flavor":           "16c-32g-96g",
+					pfx + ".profile-queue":            "1c-2g",
+					pfx + ".profile-cohort":           "1c-2g",
+				}
+			}(),
 		},
 		{
 			// 1xT4 on a small 4C/16G box. Per-device cpu/ram equals the
@@ -804,11 +838,10 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 
 func TestExtractNodeResourceFlavors(t *testing.T) {
 	// Output shape:
-	//   ndfs[0]  = the CPU/general flavor, emitted only when all six
-	//              general capacity labels (cpu, ram, local-storage,
-	//              profile-flavor, profile-queue, profile-cohort) are
-	//              present under the general(CPU) node key recorded by
-	//              ConstructNodeCapacityLabels.
+	//   ndfs[0]  = the CPU/general flavor, emitted only when the general(CPU)
+	//              node key is derivable and all six general capacity labels
+	//              (cpu, ram, local-storage, profile-flavor, profile-queue,
+	//              profile-cohort) are present under it.
 	//   ndfs[1:] = one flavor per accelerated node key for which the
 	//              per-device .accelerators, .cpu, .ram, .local-storage,
 	//              .profile-flavor, .profile-queue, and .profile-cohort
@@ -833,36 +866,34 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 		{Operator: core.TolerationOpExists},
 	}
 
-	// generalLabels is the post-ConstructNodeCapacityLabels general view.
+	// generalLabels is the post-ConstructNodeCapacityLabels general view,
+	// together with the NFD cpu-model labels that derive the "amd-25-1" key.
 	generalLabels := func(cpu, ram, stg, flavor, unit string) map[string]string {
-		return map[string]string{
+		return mergeLabels(cpuModelLabels(), map[string]string{
 			gPfx + ".cpu":            cpu,
 			gPfx + ".ram":            ram,
 			gPfx + ".local-storage":  stg,
 			gPfx + ".profile-flavor": flavor,
 			gPfx + ".profile-queue":  unit,
 			gPfx + ".profile-cohort": unit,
-		}
+		})
 	}
 
 	// cpuFlavor is the expected general(CPU) flavor of an amd-25-1 node.
 	cpuFlavor := func(flavor, unit, cpu, ram, stg string) NodeResourceFlavor {
 		return NodeResourceFlavor{
-			GeneralKey:        gKey,
-			ProfileFlavorSpec: flavor,
-			ProfileQueueSpec:  unit,
-			ProfileCohortSpec: unit,
+			ProfileCohort: "gpustack--" + gKey + "-" + unit,
+			ProfileQueue:  "gpustack--" + gKey + "-" + unit,
+			ProfileFlavor: "gpustack--" + gKey + "-" + flavor,
+			Manufacturer:  "amd",
 			NodeLabels: map[string]string{
 				systemname.ManagedLabelKey: "true",
 				gPfx + ".profile-queue":    unit,
 			},
-			Tolerations:     expectedToleration,
-			CPUManufacturer: "amd",
-			CPUFamily:       "25",
-			CPUID:           "1",
-			CPU:             cpu,
-			RAM:             ram,
-			LocalStorage:    stg,
+			Tolerations:  expectedToleration,
+			CPU:          cpu,
+			RAM:          ram,
+			LocalStorage: stg,
 		}
 	}
 
@@ -871,10 +902,11 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 		// labels populates node.ObjectMeta.Labels. The per-device
 		// Accelerator field sources from the ${nodeKey}.accelerators
 		// label written by applyAcceleratorLabels.
-		labels      map[string]string
-		wantCPU     NodeResourceFlavor
-		wantDevices []NodeResourceFlavor
-		wantEmpty   bool
+		labels          map[string]string
+		wantCPU         NodeResourceFlavor
+		wantDevices     []NodeResourceFlavor
+		wantEmpty       bool
+		wantDevicesOnly bool
 	}{
 		{
 			// CPU-only node — only the general flavor is emitted.
@@ -900,7 +932,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					t4Pfx + ".product":         "Tesla-T4",
 					t4Pfx + ".memory":          "15Gi",
 					t4Pfx + ".cores":           "0",
-					t4Pfx + ".accelerators":    "1",
+					t4Pfx + ".count":           "1",
 					t4Pfx + ".cpu":             "4",
 					t4Pfx + ".ram":             "16Gi",
 					t4Pfx + ".local-storage":   "96Gi",
@@ -913,35 +945,27 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("4c-16g-96g", "1c-4g", "4", "16Gi", "96Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					GeneralKey:        gKey,
-					Key:               "nvidia-tesla-t4",
-					ProfileFlavorSpec: "4c-16g-96g-1d",
-					ProfileQueueSpec:  "4c-16g-1d",
-					ProfileCohortSpec: "4c-16g-1d",
+					ProfileCohort: "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-4c-16g-96g--nvidia-tesla-t4-1d",
+					Manufacturer:  "nvidia",
+					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey: "true",
 						gPfx:                       "true",
 						t4Pfx + ".profile-queue":   "4c-16g-1d",
 					},
-					Tolerations:     expectedToleration,
-					Acceleratable:   true,
-					CPUManufacturer: "amd",
-					CPUFamily:       "25",
-					CPUID:           "1",
-					Manufacturer:    "nvidia",
-					Product:         "Tesla-T4",
-					Memory:          "15Gi",
-					Cores:           "0",
-					Accelerator:     "1",
-					CPU:             "4",
-					RAM:             "16Gi",
-					LocalStorage:    "96Gi",
+					Tolerations:  expectedToleration,
+					Accelerator:  "1",
+					CPU:          "4",
+					RAM:          "16Gi",
+					LocalStorage: "96Gi",
 				},
 			},
 		},
 		{
-			// 2xT4 — ProfileFlavorSpec differs from node-2 (absolute capacities)
-			// but ProfileCohortSpec matches node-2 (same per-device shape:
+			// 2xT4 — ProfileFlavor differs from node-2 (absolute capacities)
+			// but ProfileCohort matches node-2 (same per-device shape:
 			// 4 cpu / 16Gi ram per device), demonstrating the Kueue pooling
 			// invariant.
 			name: "cluster-1/node-4 T4 2D 8C/32Gi/96Gi",
@@ -954,7 +978,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					t4Pfx + ".product":         "Tesla-T4",
 					t4Pfx + ".memory":          "15Gi",
 					t4Pfx + ".cores":           "0",
-					t4Pfx + ".accelerators":    "2",
+					t4Pfx + ".count":           "2",
 					t4Pfx + ".cpu":             "8",
 					t4Pfx + ".ram":             "32Gi",
 					t4Pfx + ".local-storage":   "96Gi",
@@ -967,29 +991,21 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("8c-32g-96g", "1c-4g", "8", "32Gi", "96Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					GeneralKey:        gKey,
-					Key:               "nvidia-tesla-t4",
-					ProfileFlavorSpec: "8c-32g-96g-2d",
-					ProfileQueueSpec:  "4c-16g-1d", // == node-2's device per-unit profile
-					ProfileCohortSpec: "4c-16g-1d",
+					ProfileCohort: "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d", // == node-2's device queue
+					ProfileQueue:  "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-8c-32g-96g--nvidia-tesla-t4-2d",
+					Manufacturer:  "nvidia",
+					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey: "true",
 						gPfx:                       "true",
 						t4Pfx + ".profile-queue":   "4c-16g-1d",
 					},
-					Tolerations:     expectedToleration,
-					Acceleratable:   true,
-					CPUManufacturer: "amd",
-					CPUFamily:       "25",
-					CPUID:           "1",
-					Manufacturer:    "nvidia",
-					Product:         "Tesla-T4",
-					Memory:          "15Gi",
-					Cores:           "0",
-					Accelerator:     "2",
-					CPU:             "8",
-					RAM:             "32Gi",
-					LocalStorage:    "96Gi",
+					Tolerations:  expectedToleration,
+					Accelerator:  "2",
+					CPU:          "8",
+					RAM:          "32Gi",
+					LocalStorage: "96Gi",
 				},
 			},
 		},
@@ -1006,7 +1022,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					a10gPfx + ".product":        "A10G",
 					a10gPfx + ".memory":         "23Gi",
 					a10gPfx + ".cores":          "0",
-					a10gPfx + ".accelerators":   "4",
+					a10gPfx + ".count":          "4",
 					a10gPfx + ".cpu":            "48",
 					a10gPfx + ".ram":            "188Gi",
 					a10gPfx + ".local-storage":  "196Gi",
@@ -1019,29 +1035,21 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("48c-188g-196g", "1c-3g", "48", "188Gi", "196Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					GeneralKey:        gKey,
-					Key:               "nvidia-a10g",
-					ProfileFlavorSpec: "48c-188g-196g-4d",
-					ProfileQueueSpec:  "12c-47g-1d",
-					ProfileCohortSpec: "12c-47g-1d",
+					ProfileCohort: "gpustack--amd-25-1-12c-47g--nvidia-a10g-1d",
+					ProfileQueue:  "gpustack--amd-25-1-12c-47g--nvidia-a10g-1d",
+					ProfileFlavor: "gpustack--amd-25-1-48c-188g-196g--nvidia-a10g-4d",
+					Manufacturer:  "nvidia",
+					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey: "true",
 						gPfx:                       "true",
 						a10gPfx + ".profile-queue": "12c-47g-1d",
 					},
-					Tolerations:     expectedToleration,
-					Acceleratable:   true,
-					CPUManufacturer: "amd",
-					CPUFamily:       "25",
-					CPUID:           "1",
-					Manufacturer:    "nvidia",
-					Product:         "A10G",
-					Memory:          "23Gi",
-					Cores:           "0",
-					Accelerator:     "4",
-					CPU:             "48",
-					RAM:             "188Gi",
-					LocalStorage:    "196Gi",
+					Tolerations:  expectedToleration,
+					Accelerator:  "4",
+					CPU:          "48",
+					RAM:          "188Gi",
+					LocalStorage: "196Gi",
 				},
 			},
 		},
@@ -1050,10 +1058,6 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			// the device-key loop with multiple manufacturers. Loop
 			// iteration order is map-dependent, so we rely on
 			// ElementsMatch.
-			//
-			// Also covers the "full" device-label shape (driver-version,
-			// runtime-version, family, compute-capability) for the T4
-			// to exercise every NodeResourceFlavor field.
 			name: "hybrid NVIDIA T4 + AMD MI300X",
 			labels: mergeLabels(
 				map[string]string{
@@ -1067,13 +1071,13 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					t4Pfx + ".cores":              "2560",
 					t4Pfx + ".family":             "Turing",
 					t4Pfx + ".compute-capability": "7.5",
-					t4Pfx + ".accelerators":       "1",
+					t4Pfx + ".count":              "1",
 					amdPfx:                        "true",
 					mi300xPfx:                     "true",
 					mi300xPfx + ".product":        "MI300X",
 					mi300xPfx + ".memory":         "192Gi",
 					mi300xPfx + ".cores":          "0",
-					mi300xPfx + ".accelerators":   "2",
+					mi300xPfx + ".count":          "2",
 					t4Pfx + ".cpu":                "32",
 					t4Pfx + ".ram":                "128Gi",
 					t4Pfx + ".local-storage":      "200Gi",
@@ -1092,56 +1096,38 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("32c-128g-200g", "1c-4g", "32", "128Gi", "200Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					GeneralKey:        gKey,
-					Key:               "nvidia-tesla-t4",
-					ProfileFlavorSpec: "32c-128g-200g-1d",
-					ProfileQueueSpec:  "32c-128g-1d",
-					ProfileCohortSpec: "32c-128g-1d",
+					ProfileCohort: "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-32c-128g-200g--nvidia-tesla-t4-1d",
+					Manufacturer:  "nvidia",
+					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey: "true",
 						gPfx:                       "true",
 						t4Pfx + ".profile-queue":   "32c-128g-1d",
 					},
-					Tolerations:       expectedToleration,
-					Acceleratable:     true,
-					CPUManufacturer:   "amd",
-					CPUFamily:         "25",
-					CPUID:             "1",
-					Manufacturer:      "nvidia",
-					Product:           "Tesla-T4",
-					Memory:            "15Gi",
-					Cores:             "2560",
-					Family:            "Turing",
-					ComputeCapability: "7.5",
-					Accelerator:       "1",
-					CPU:               "32",
-					RAM:               "128Gi",
-					LocalStorage:      "200Gi",
+					Tolerations:  expectedToleration,
+					Accelerator:  "1",
+					CPU:          "32",
+					RAM:          "128Gi",
+					LocalStorage: "200Gi",
 				},
 				{
-					GeneralKey:        gKey,
-					Key:               "amd-mi300x",
-					ProfileFlavorSpec: "32c-128g-200g-2d",
-					ProfileQueueSpec:  "16c-64g-1d",
-					ProfileCohortSpec: "16c-64g-1d",
+					ProfileCohort: "gpustack--amd-25-1-16c-64g--amd-mi300x-1d",
+					ProfileQueue:  "gpustack--amd-25-1-16c-64g--amd-mi300x-1d",
+					ProfileFlavor: "gpustack--amd-25-1-32c-128g-200g--amd-mi300x-2d",
+					Manufacturer:  "amd",
+					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey:   "true",
 						gPfx:                         "true",
 						mi300xPfx + ".profile-queue": "16c-64g-1d",
 					},
-					Tolerations:     expectedToleration,
-					Acceleratable:   true,
-					CPUManufacturer: "amd",
-					CPUFamily:       "25",
-					CPUID:           "1",
-					Manufacturer:    "amd",
-					Product:         "MI300X",
-					Memory:          "192Gi",
-					Cores:           "0",
-					Accelerator:     "2",
-					CPU:             "32",
-					RAM:             "128Gi",
-					LocalStorage:    "200Gi",
+					Tolerations:  expectedToleration,
+					Accelerator:  "2",
+					CPU:          "32",
+					RAM:          "128Gi",
+					LocalStorage: "200Gi",
 				},
 			},
 		},
@@ -1192,9 +1178,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantEmpty: true,
 		},
 		{
-			// The general key is discovered through the .profile-flavor
-			// label — without it the general flavor is not recognized at
-			// all.
+			// Capacity-label gate: only the general .profile-flavor is missing.
 			name: "missing general .profile-flavor returns no flavors",
 			labels: func() map[string]string {
 				lbs := mergeLabels(
@@ -1228,7 +1212,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				nvPfx:                      "true",
 				t4Pfx:                      "true",
 				t4Pfx + ".product":         "Tesla-T4",
-				t4Pfx + ".accelerators":    "1",
+				t4Pfx + ".count":           "1",
 			},
 			wantEmpty: true,
 		},
@@ -1247,7 +1231,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					t4Pfx + ".product":         "Tesla-T4",
 					t4Pfx + ".memory":          "15Gi",
 					t4Pfx + ".cores":           "0",
-					t4Pfx + ".accelerators":    "1",
+					t4Pfx + ".count":           "1",
 					// No per-device .cpu / .ram / .local-storage / .profile-* → device is skipped.
 				},
 				generalLabels("4", "16Gi", "96Gi", "4c-16g-96g", "1c-4g"),
@@ -1292,55 +1276,87 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			name: "partial per-device capacity only emits the complete device",
 			labels: mergeLabels(
 				map[string]string{
-					systemname.ManagedLabelKey:  "true",
-					nvPfx:                       "true",
-					t4Pfx:                       "true",
-					t4Pfx + ".product":          "Tesla-T4",
-					t4Pfx + ".memory":           "15Gi",
-					t4Pfx + ".cores":            "0",
-					t4Pfx + ".accelerators":     "1",
-					amdPfx:                      "true",
-					mi300xPfx:                   "true",
-					mi300xPfx + ".product":      "MI300X",
-					mi300xPfx + ".memory":       "192Gi",
-					mi300xPfx + ".cores":        "0",
-					mi300xPfx + ".accelerators": "2",
-					t4Pfx + ".cpu":              "32",
-					t4Pfx + ".ram":              "128Gi",
-					t4Pfx + ".local-storage":    "200Gi",
-					t4Pfx + ".profile-flavor":   "32c-128g-200g-1d",
-					t4Pfx + ".profile-queue":    "32c-128g-1d",
-					t4Pfx + ".profile-cohort":   "32c-128g-1d",
-					mi300xPfx + ".cpu":          "32", // remaining per-device labels intentionally absent
+					systemname.ManagedLabelKey: "true",
+					nvPfx:                      "true",
+					t4Pfx:                      "true",
+					t4Pfx + ".product":         "Tesla-T4",
+					t4Pfx + ".memory":          "15Gi",
+					t4Pfx + ".cores":           "0",
+					t4Pfx + ".count":           "1",
+					amdPfx:                     "true",
+					mi300xPfx:                  "true",
+					mi300xPfx + ".product":     "MI300X",
+					mi300xPfx + ".memory":      "192Gi",
+					mi300xPfx + ".cores":       "0",
+					mi300xPfx + ".count":       "2",
+					t4Pfx + ".cpu":             "32",
+					t4Pfx + ".ram":             "128Gi",
+					t4Pfx + ".local-storage":   "200Gi",
+					t4Pfx + ".profile-flavor":  "32c-128g-200g-1d",
+					t4Pfx + ".profile-queue":   "32c-128g-1d",
+					t4Pfx + ".profile-cohort":  "32c-128g-1d",
+					mi300xPfx + ".cpu":         "32", // remaining per-device labels intentionally absent
 				},
 				generalLabels("32", "128Gi", "200Gi", "32c-128g-200g", "1c-4g"),
 			),
 			wantCPU: cpuFlavor("32c-128g-200g", "1c-4g", "32", "128Gi", "200Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					GeneralKey:        gKey,
-					Key:               "nvidia-tesla-t4",
-					ProfileFlavorSpec: "32c-128g-200g-1d",
-					ProfileQueueSpec:  "32c-128g-1d",
-					ProfileCohortSpec: "32c-128g-1d",
+					ProfileCohort: "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-32c-128g-200g--nvidia-tesla-t4-1d",
+					Manufacturer:  "nvidia",
+					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey: "true",
 						gPfx:                       "true",
 						t4Pfx + ".profile-queue":   "32c-128g-1d",
 					},
-					Tolerations:     expectedToleration,
-					Acceleratable:   true,
-					CPUManufacturer: "amd",
-					CPUFamily:       "25",
-					CPUID:           "1",
-					Manufacturer:    "nvidia",
-					Product:         "Tesla-T4",
-					Memory:          "15Gi",
-					Cores:           "0",
-					Accelerator:     "1",
-					CPU:             "32",
-					RAM:             "128Gi",
-					LocalStorage:    "200Gi",
+					Tolerations:  expectedToleration,
+					Accelerator:  "1",
+					CPU:          "32",
+					RAM:          "128Gi",
+					LocalStorage: "200Gi",
+				},
+			},
+		},
+		{
+			// Without any NFD cpu information the general key is empty: the
+			// general flavor is skipped and the device flavor pairs with the
+			// "generic" segment without pinning a general(CPU) identity.
+			name: "device pairs with generic when cpu information is missing",
+			labels: map[string]string{
+				systemname.ManagedLabelKey: "true",
+				nvPfx:                      "true",
+				t4Pfx:                      "true",
+				t4Pfx + ".product":         "Tesla-T4",
+				t4Pfx + ".memory":          "15Gi",
+				t4Pfx + ".cores":           "0",
+				t4Pfx + ".count":           "1",
+				t4Pfx + ".cpu":             "4",
+				t4Pfx + ".ram":             "16Gi",
+				t4Pfx + ".local-storage":   "96Gi",
+				t4Pfx + ".profile-flavor":  "4c-16g-96g-1d",
+				t4Pfx + ".profile-queue":   "4c-16g-1d",
+				t4Pfx + ".profile-cohort":  "4c-16g-1d",
+			},
+			wantDevicesOnly: true,
+			wantDevices: []NodeResourceFlavor{
+				{
+					ProfileCohort: "gpustack--generic-4c-16g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--generic-4c-16g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--generic-4c-16g-96g--nvidia-tesla-t4-1d",
+					Manufacturer:  "nvidia",
+					Acceleratable: true,
+					NodeLabels: map[string]string{
+						systemname.ManagedLabelKey: "true",
+						t4Pfx + ".profile-queue":   "4c-16g-1d",
+					},
+					Tolerations:  expectedToleration,
+					Accelerator:  "1",
+					CPU:          "4",
+					RAM:          "16Gi",
+					LocalStorage: "96Gi",
 				},
 			},
 		},
@@ -1359,11 +1375,154 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				assert.Empty(t, got, "expected no flavors")
 				return
 			}
+			if cs.wantDevicesOnly {
+				assert.ElementsMatch(t, cs.wantDevices, got, "unexpected device flavors")
+				return
+			}
 			if len(got) == 0 {
 				t.Fatalf("ExtractNodeResourceFlavors returned no flavors but at least the CPU flavor was expected")
 			}
 			assert.Equal(t, cs.wantCPU, got[0], "unexpected CPU/general flavor")
 			assert.ElementsMatch(t, cs.wantDevices, got[1:], "unexpected device flavors")
+		})
+	}
+}
+
+func TestExtractNodeQueue(t *testing.T) {
+	t4Pfx := AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
+
+	cpuAnnotations := map[string]string{
+		FeatureLabelPrefix + "cpu-name":             "AMD EPYC 7763 64-Core Processor",
+		FeatureLabelPrefix + "cpu-family":           "25",
+		FeatureLabelPrefix + "cpu-physical-cores":   "64",
+		FeatureLabelPrefix + "cpu-threads-per-core": "2",
+		FeatureLabelPrefix + "cpu-logical-cores":    "128",
+		FeatureLabelPrefix + "cpu-stepping":         "1",
+		FeatureLabelPrefix + "cpu-cache-line":       "64",
+		FeatureLabelPrefix + "cpu-hz":               "2450000000",
+		FeatureLabelPrefix + "cpu-boost-freq":       "3500000000",
+		FeatureLabelPrefix + "cpu-cache-l1i":        "32768",
+		FeatureLabelPrefix + "cpu-cache-l1d":        "32768",
+		FeatureLabelPrefix + "cpu-cache-l2":         "524288",
+		FeatureLabelPrefix + "cpu-cache-l3":         "33554432",
+	}
+
+	fullGeneralDetail := NodeResourceFlavorCPU{
+		PhysicalCores:          "64",
+		ThreadsPerPhysicalCore: "2",
+		LogicalCores:           "128",
+		Stepping:               "1",
+		CacheLine:              "64",
+		ClockSpeed:             "2450000000",
+		MaxClockSpeed:          "3500000000",
+		Cache: NodeResourceFlavorCPUCache{
+			L1I: "32768",
+			L1D: "32768",
+			L2:  "524288",
+			L3:  "33554432",
+		},
+	}
+
+	newNode := func(labels, annotations map[string]string) *core.Node {
+		return &core.Node{
+			ObjectMeta: meta.ObjectMeta{
+				Labels:      labels,
+				Annotations: annotations,
+			},
+		}
+	}
+
+	cases := []struct {
+		name     string
+		node     *core.Node
+		accKey   string
+		expected NodeQueue
+		wantOK   bool
+	}{
+		{
+			name: "general(CPU) queue",
+			node: newNode(
+				map[string]string{
+					core.LabelOSStable:           "linux",
+					core.LabelArchStable:         "amd64",
+					_NFDCPUModelVendorIDLabelKey: "AMD",
+				},
+				cpuAnnotations,
+			),
+			wantOK: true,
+			expected: NodeQueue{
+				Product:               "AMD EPYC 7763 64-Core Processor",
+				Family:                "25",
+				OS:                    "linux",
+				Arch:                  "amd64",
+				NodeResourceFlavorCPU: fullGeneralDetail,
+			},
+		},
+		{
+			name: "acceleratable queue",
+			node: newNode(
+				map[string]string{
+					core.LabelOSStable:            "linux",
+					core.LabelArchStable:          "amd64",
+					_NFDCPUModelVendorIDLabelKey:  "AMD",
+					t4Pfx:                         "true",
+					t4Pfx + ".product":            "Tesla-T4",
+					t4Pfx + ".family":             "Turing",
+					t4Pfx + ".memory":             "15Gi",
+					t4Pfx + ".cores":              "2560",
+					t4Pfx + ".compute-capability": "7.5",
+				},
+				cpuAnnotations,
+			),
+			accKey: "nvidia-tesla-t4",
+			wantOK: true,
+			expected: NodeQueue{
+				Product: "Tesla-T4",
+				Family:  "Turing",
+				OS:      "linux",
+				Arch:    "amd64",
+				NodeResourceFlavorAccelerator: NodeResourceFlavorAccelerator{
+					Memory:            "15Gi",
+					Cores:             "2560",
+					ComputeCapability: "7.5",
+					CPU: NodeResourceFlavorAcceleratorCPU{
+						Manufacturer:          "amd",
+						NodeResourceFlavorCPU: fullGeneralDetail,
+						Product:               "AMD EPYC 7763 64-Core Processor",
+						Family:                "25",
+					},
+				},
+			},
+		},
+		{
+			name: "unresolved cpu annotations are treated as empty",
+			node: newNode(
+				nil,
+				map[string]string{
+					FeatureLabelPrefix + "cpu-name":           "@cpu.model.name",
+					FeatureLabelPrefix + "cpu-family":         "@cpu.model.family",
+					FeatureLabelPrefix + "cpu-physical-cores": "@cpu.model.physical_cores",
+				},
+			),
+			wantOK:   true,
+			expected: NodeQueue{},
+		},
+		{
+			name:   "unlabeled acceleratable node key",
+			node:   newNode(nil, cpuAnnotations),
+			accKey: "nvidia-tesla-t4",
+			wantOK: false,
+		},
+	}
+
+	for _, cs := range cases {
+		t.Run(cs.name, func(t *testing.T) {
+			actual, ok := ExtractNodeQueue(cs.node, cs.accKey)
+			assert.Equal(t, cs.wantOK, ok, "unexpected ok")
+			if !ok {
+				return
+			}
+			assert.Equal(t, cs.expected, actual, "unexpected node queue")
 		})
 	}
 }

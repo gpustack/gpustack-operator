@@ -56,6 +56,14 @@ func (*InstanceSSHPublicKeySpec) ProtoMessage() {}
 
 func (*InstanceType) ProtoMessage() {}
 
+func (*InstanceTypeAccelerator) ProtoMessage() {}
+
+func (*InstanceTypeAcceleratorCPU) ProtoMessage() {}
+
+func (*InstanceTypeCPU) ProtoMessage() {}
+
+func (*InstanceTypeCPUCache) ProtoMessage() {}
+
 func (*InstanceTypeList) ProtoMessage() {}
 
 func (*InstanceTypeResource) ProtoMessage() {}

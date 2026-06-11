@@ -366,6 +366,82 @@ message InstanceType {
   optional InstanceTypeStatus status = 3;
 }
 
+// InstanceTypeAccelerator describes the information of the accelerator.
+message InstanceTypeAccelerator {
+  // Memory is the VRAM size of the accelerator, e.g. "65535Mi".
+  optional string memory = 1;
+
+  // Cores is the number of cores of the accelerator, e.g. "128", "256".
+  optional string cores = 2;
+
+  // ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
+  optional string computeCapability = 3;
+
+  // Sliced indicates whether the accelerator is sliced.
+  // When Sliced is blank, that means the InstanceType is not sliced.
+  optional int64 sliced = 4;
+
+  // CPU describes the CPU information of the accelerator.
+  optional InstanceTypeAcceleratorCPU cpu = 5;
+}
+
+// InstanceTypeAcceleratorCPU describes the CPU information of the accelerator.
+message InstanceTypeAcceleratorCPU {
+  // Manufacturer is the name of the CPU manufacturer, e.g. "amd", "intel".
+  optional string manufacturer = 1;
+
+  // Product is the name of the CPU product.
+  optional string product = 2;
+
+  // Family is the family of the CPU.
+  optional string family = 3;
+
+  // Detail inlines the CPU details of the CPU.
+  optional InstanceTypeCPU cpu = 4;
+}
+
+// InstanceTypeCPU describes the information of the CPU.
+message InstanceTypeCPU {
+  // PhysicalCores is the number of physical cores of the CPU, e.g. "4", "8".
+  optional string physicalCores = 1;
+
+  // ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. "2", "4".
+  optional string threadsPerPhysicalCore = 2;
+
+  // LogicalCores is the number of logical cores of the CPU, e.g. "8", "16".
+  optional string logicalCores = 3;
+
+  // Stepping is the stepping of the CPU, e.g. "0", "1".
+  optional string stepping = 4;
+
+  // ClockSpeed is the speed in Hz of the CPU, e.g. "2000"
+  optional string clockSpeed = 5;
+
+  // MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. "3000"
+  optional string maxClockSpeed = 6;
+
+  // CacheLine is the cache line size in bytes of the CPU, e.g. "64", "128".
+  optional string cacheLine = 7;
+
+  // Cache describes the cache information of the CPU.
+  optional InstanceTypeCPUCache cache = 8;
+}
+
+// InstanceTypeCPUCache describes the cache information of the CPU.
+message InstanceTypeCPUCache {
+  // L1I is the L1 instruction cache size in bytes of the CPU.
+  optional string l1i = 1;
+
+  // L1D is the L1 data cache size in bytes of the CPU.
+  optional string l1d = 2;
+
+  // L2 is the L2 cache size in bytes of the CPU.
+  optional string l2 = 3;
+
+  // L3 is the L3 cache size in bytes of the CPU.
+  optional string l3 = 4;
+}
+
 // InstanceTypeList holds the list of InstanceType.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -397,27 +473,29 @@ message InstanceTypeSpec {
   // Acceleratable indicates whether the InstanceType is acceleratable.
   optional bool acceleratable = 2;
 
-  // Manufacturer is the name of the InstanceType manufacturer, e.g. "amd", "nvidia", "intel".
+  // Manufacturer is the name of the InstanceType manufacturer.
   optional string manufacturer = 3;
 
-  // Product is the name of the InstanceType product, e.g. "A100", "V100", "T4".
+  // Product is the name of the InstanceType product.
   optional string product = 4;
 
-  // Memory is the VRAM size of the InstanceType, e.g. "65535Mi".
-  optional string memory = 5;
+  // Family is the family of the InstanceType.
+  optional string family = 5;
 
-  // Family is the family of the InstanceType, e.g. "ampere", "volta", "turing".
-  optional string family = 6;
+  // OS is the operating system of the InstanceType, e.g. "linux", "windows".
+  optional string os = 6;
 
-  // ComputeCapability is the compute capability of the InstanceType, e.g. "8.0", "7.0".
-  optional string computeCapability = 7;
+  // Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
+  optional string arch = 7;
 
-  // Sliced indicates whether the InstanceType is sliced.
-  // When Sliced is blank, that means the InstanceType is not sliced.
-  optional int64 sliced = 8;
+  // CPU describes the CPU information of the InstanceType.
+  optional InstanceTypeCPU cpu = 8;
+
+  // Accelerator describes the accelerator information of the InstanceType.
+  optional InstanceTypeAccelerator accelerator = 9;
 
   // UnitResources describes the unit resources of the InstanceType.
-  optional InstanceTypeUnitResources unitResources = 9;
+  optional InstanceTypeUnitResources unitResources = 10;
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.

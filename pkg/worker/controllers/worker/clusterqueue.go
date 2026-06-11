@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -29,8 +31,10 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 // ClusterQueueReconciler reconciles kueue.ClusterQueue objects driven by kueue.ResourceFlavor
@@ -134,12 +138,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 	}
 
 	// Sync ClusterQueue.
-	eResGroups, eNotes := r.constructResourceGroups(ctx, rfList)
-	if len(eResGroups) == 0 {
-		logger.Error(nil, "no valid resource flavors, retry later")
-		return ctrlreconcile.Result{RequeueAfter: 5 * time.Second}, nil
-	}
-
+	eResGroups, eNotes := r.constructResourceGroups(ctx, queueName, rfList)
 	eCq := &kueue.ClusterQueue{
 		ObjectMeta: meta.ObjectMeta{
 			Name: queueName,
@@ -204,26 +203,35 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 	return ctrlreconcile.Result{}, nil
 }
 
-var commonResourceGroupNotesKeys = []string{
-	"acceleratable",
-	"sliced",
-	"cpuManufacturer",
-	"cpuFamily",
-	"cpuID",
-	"manufacturer",
-	"product",
-	"memory",
-	"cores",
-	"family",
-	"computeCapability",
-}
-
 func (r *ClusterQueueReconciler) constructResourceGroups(
-	ctx context.Context, rfList *kueue.ResourceFlavorList,
+	ctx context.Context,
+	queueName string,
+	rfList *kueue.ResourceFlavorList,
 ) (groups []kueue.ResourceGroup, notes map[string]string) {
+	generalKey, accKey, spec, ok := nodefeature.ParseNodeProfile(queueName)
+	if !ok {
+		return groups, notes
+	}
+
 	logger := ctrllog.FromContext(ctx)
 
-	var borLimit *resource.Quantity
+	// Sliced queues never borrow.
+	var (
+		acceleratable bool
+		manufacturer  string
+		borLimit      *resource.Quantity
+	)
+	{
+		acceleratable = accKey != "" && spec.Accelerator != ""
+		if acceleratable {
+			manufacturer, _, _ = strings.Cut(accKey, "-")
+			if spec.SlicedAccelerator != "" {
+				borLimit = resource.NewQuantity(0, resource.DecimalSI)
+			}
+		} else {
+			manufacturer, _, _ = strings.Cut(generalKey, "-")
+		}
+	}
 
 	for i := range rfList.Items {
 		rf := &rfList.Items[i]
@@ -234,9 +242,6 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				"resource flavor", rf.Name, "resource type", resType)
 			continue
 		}
-
-		manu := rfNotes["manufacturer"]
-		acceleratable := rfNotes["acceleratable"] == "true"
 
 		var cpuQ, ramQ, stgQ, accQ resource.Quantity
 		{
@@ -252,6 +257,34 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 
 			ndCount := int64(len(ndList.Items))
 			if ndCount != 0 {
+				// Construct notes from the first matched Node of the first-wins ResourceFlavor.
+				if len(notes) == 0 {
+					nq, ok := nodefeature.ExtractNodeQueue(&ndList.Items[0], accKey)
+					if !ok {
+						continue
+					}
+					notes = map[string]string{
+						"acceleratable": strconv.FormatBool(acceleratable),
+						"manufacturer":  manufacturer,
+						"product":       nq.Product,
+						"family":        nq.Family,
+						"os":            nq.OS,
+						"arch":          nq.Arch,
+						"unitCPU":       spec.CPU,
+						"unitRAM":       spec.RAM,
+					}
+					var detailBs []byte
+					if acceleratable {
+						detailBs = json.ShouldMarshal(nq.NodeResourceFlavorAccelerator)
+						if spec.SlicedAccelerator != "" {
+							notes["slicedAccelerator"] = spec.SlicedAccelerator
+						}
+					} else {
+						detailBs = json.ShouldMarshal(nq.NodeResourceFlavorCPU)
+					}
+					notes["detail"] = stringx.FromBytes(&detailBs)
+				}
+
 				cpuQ = funcx.NoError(resource.ParseQuantity(rfNotes["cpu"]))
 				if cpuQ.Sign() <= 0 {
 					logger.V(2).Info("skip resource flavor with non-positive cpu",
@@ -275,22 +308,12 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				ramQ = quantityx.Multiply(ramQ, ndCount)
 				stgQ = quantityx.Multiply(stgQ, ndCount)
 				if acceleratable {
-					accResName := nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive)
+					accResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)
 					for j := range ndList.Items {
 						accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
 					}
 				}
 			}
-		}
-
-		// Construct notes from the first-wins item.
-		if len(notes) == 0 {
-			notes = make(map[string]string, len(commonResourceGroupNotesKeys))
-			for _, k := range commonResourceGroupNotesKeys {
-				notes[k] = rfNotes[k]
-			}
-
-			borLimit = funcx.Ternary(notes["sliced"] != "", resource.NewQuantity(0, resource.DecimalSI), nil)
 		}
 
 		// Extend resource group if the last one has 16 flavors already,
@@ -312,7 +335,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			}
 			if acceleratable {
 				rg.CoveredResources = append(rg.CoveredResources,
-					nodefeature.GetAcceleratableCreditsResourceName(manu),
+					nodefeature.GetAcceleratableCreditsResourceName(manufacturer),
 				)
 			}
 		}
@@ -339,7 +362,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 		if acceleratable {
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
-					Name:           nodefeature.GetAcceleratableCreditsResourceName(manu),
+					Name:           nodefeature.GetAcceleratableCreditsResourceName(manufacturer),
 					NominalQuota:   accQ,
 					BorrowingLimit: borLimit,
 				},

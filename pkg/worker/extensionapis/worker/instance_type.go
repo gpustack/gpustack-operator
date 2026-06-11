@@ -22,7 +22,9 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -275,13 +277,7 @@ func convertInstanceTypeFromClusterQueue(
 		return nil
 	}
 
-	_, _, spec, ok := nodefeature.ParseNodeProfile(cq.Name)
-	if !ok {
-		return nil
-	}
-	cpuUnit, ramUnit := spec.CPU, spec.RAM
-
-	sliced := funcx.NoError(strconvx.Atoi[int64](notes["sliced"]))
+	slicedAccelerator := funcx.NoError(strconvx.Atoi[int64](notes["slicedAccelerator"]))
 	acceleratable := notes["acceleratable"] == "true"
 
 	var (
@@ -433,57 +429,67 @@ func convertInstanceTypeFromClusterQueue(
 			}
 		}
 
-		if sliced > 0 {
+		if slicedAccelerator > 0 {
 			// Only allow to request 1 slice at most.
 			if !ormAcc.IsZero() {
 				ormAcc.Set(1)
 			}
 			// Align the accelerator resource with the slice.
-			remAcc = nodefeature.QuantityToSliceCount(remAcc, sliced)
-			capAcc = nodefeature.QuantityToSliceCount(capAcc, sliced)
+			remAcc = nodefeature.QuantityToSliceCount(remAcc, slicedAccelerator)
+			capAcc = nodefeature.QuantityToSliceCount(capAcc, slicedAccelerator)
 		} else {
 			ormAcc = nodefeature.QuantityToSliceCount(ormAcc, 1)
 		}
 	}
 
+	instTypeSpec := worker.InstanceTypeSpec{
+		Group:         string(cq.Spec.CohortName),
+		Acceleratable: acceleratable,
+		Manufacturer:  notes["manufacturer"],
+		Product:       notes["product"],
+		Family:        notes["family"],
+		OS:            notes["os"],
+		Arch:          notes["arch"],
+		UnitResources: worker.InstanceTypeUnitResources{
+			CPU: notes["unitCPU"],
+			RAM: notes["unitRAM"] + "Gi",
+		},
+	}
+	detail := notes["detail"]
+	if acceleratable {
+		json.ShouldUnmarshal(stringx.ToBytes(&detail), &instTypeSpec.InstanceTypeAccelerator)
+		instTypeSpec.Sliced = slicedAccelerator
+	} else {
+		json.ShouldUnmarshal(stringx.ToBytes(&detail), &instTypeSpec.InstanceTypeCPU)
+	}
+
+	instTypeStatus := worker.InstanceTypeStatus{
+		Accelerator: worker.InstanceTypeResource{
+			OnceMaxRequest: ormAcc,
+			Remaining:      remAcc,
+			Capacity:       capAcc,
+		},
+		CPU: worker.InstanceTypeResource{
+			OnceMaxRequest: ormCpu,
+			Remaining:      remCpu,
+			Capacity:       capCpu,
+		},
+		RAM: worker.InstanceTypeResource{
+			OnceMaxRequest: ormRam,
+			Remaining:      remRam,
+			Capacity:       capRam,
+		},
+		LocalStorage: worker.InstanceTypeResource{
+			OnceMaxRequest: ormStg,
+			Remaining:      remStg,
+			Capacity:       capStg,
+		},
+	}
+
 	insType := &worker.InstanceType{
 		ObjectMeta: cq.ObjectMeta,
-		Spec: worker.InstanceTypeSpec{
-			Group:             string(cq.Spec.CohortName),
-			Acceleratable:     acceleratable,
-			Manufacturer:      notes["manufacturer"],
-			Product:           notes["product"],
-			Memory:            notes["memory"],
-			Family:            notes["family"],
-			ComputeCapability: notes["computeCapability"],
-			Sliced:            sliced,
-			UnitResources: worker.InstanceTypeUnitResources{
-				CPU: cpuUnit,
-				RAM: ramUnit + "Gi",
-			},
-		},
-		Status: worker.InstanceTypeStatus{
-			Accelerator: worker.InstanceTypeResource{
-				OnceMaxRequest: ormAcc,
-				Remaining:      remAcc,
-				Capacity:       capAcc,
-			},
-			CPU: worker.InstanceTypeResource{
-				OnceMaxRequest: ormCpu,
-				Remaining:      remCpu,
-				Capacity:       capCpu,
-			},
-			RAM: worker.InstanceTypeResource{
-				OnceMaxRequest: ormRam,
-				Remaining:      remRam,
-				Capacity:       capRam,
-			},
-			LocalStorage: worker.InstanceTypeResource{
-				OnceMaxRequest: ormStg,
-				Remaining:      remStg,
-				Capacity:       capStg,
-			},
-		},
+		Spec:       instTypeSpec,
+		Status:     instTypeStatus,
 	}
 	insType.Status.Phase, insType.Status.PhaseMessage = apistatus.GetSummaryOfClusterQueue(&cq.Status)
 

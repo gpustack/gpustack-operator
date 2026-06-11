@@ -70,18 +70,12 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	ndfs := nodefeature.ExtractNodeResourceFlavors(nd)
 	for _, ndf := range ndfs {
-		// "gpustack--${general-key}-${profile-flavor}[--${acc-key}-...]"
-		flavorProfile := nodefeature.FormatNodeProfile(ndf.GeneralKey, ndf.Key, ndf.ProfileFlavorSpec)
-		// "gpustack--${general-key}-${profile-queue}[--${acc-key}-...]"
-		queueProfile := nodefeature.FormatNodeProfile(ndf.GeneralKey, ndf.Key, ndf.ProfileQueueSpec)
-		// "gpustack--${general-key}-${profile-cohort}[--${acc-key}-...]"
-		cohortProfile := nodefeature.FormatNodeProfile(ndf.GeneralKey, ndf.Key, ndf.ProfileCohortSpec)
 		eRf := &kueue.ResourceFlavor{
 			ObjectMeta: meta.ObjectMeta{
-				Name: flavorProfile,
+				Name: ndf.ProfileFlavor,
 				Annotations: map[string]string{
-					_ResourceFlavorQueueNameAnnoKey:  queueProfile,
-					_ResourceFlavorCohortNameAnnoKey: cohortProfile,
+					_ResourceFlavorQueueNameAnnoKey:  ndf.ProfileQueue,
+					_ResourceFlavorCohortNameAnnoKey: ndf.ProfileCohort,
 				},
 			},
 			Spec: kueue.ResourceFlavorSpec{
@@ -90,20 +84,12 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			},
 		}
 		eNotes := map[string]string{
-			"acceleratable":     strconv.FormatBool(ndf.Acceleratable),
-			"cpuManufacturer":   ndf.CPUManufacturer,
-			"cpuFamily":         ndf.CPUFamily,
-			"cpuID":             ndf.CPUID,
-			"manufacturer":      ndf.Manufacturer,
-			"product":           ndf.Product,
-			"memory":            ndf.Memory,
-			"cores":             ndf.Cores,
-			"family":            ndf.Family,
-			"computeCapability": ndf.ComputeCapability,
-			"accelerator":       ndf.Accelerator,
-			"cpu":               ndf.CPU,
-			"ram":               ndf.RAM,
-			"localStorage":      ndf.LocalStorage,
+			"acceleratable": strconv.FormatBool(ndf.Acceleratable),
+			"manufacturer":  ndf.Manufacturer,
+			"accelerator":   ndf.Accelerator,
+			"cpu":           ndf.CPU,
+			"ram":           ndf.RAM,
+			"localStorage":  ndf.LocalStorage,
 		}
 		systemmeta.NoteResource(eRf, "nodes", eNotes)
 		rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {

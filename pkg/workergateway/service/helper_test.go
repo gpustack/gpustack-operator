@@ -129,25 +129,29 @@ func instSpecCPUOnly() worker.InstanceTypeSpec {
 
 func instSpecA10G() worker.InstanceTypeSpec {
 	return worker.InstanceTypeSpec{
-		Group:             "gpustack-nvidia-a10g",
-		Acceleratable:     true,
-		Manufacturer:      "nvidia",
-		Product:           "NVIDIA-A10G",
-		Memory:            "23028Mi",
-		Family:            "Ampere",
-		ComputeCapability: "8.6",
+		Group:         "gpustack-nvidia-a10g",
+		Acceleratable: true,
+		Manufacturer:  "nvidia",
+		Product:       "NVIDIA-A10G",
+		Family:        "Ampere",
+		InstanceTypeAccelerator: worker.InstanceTypeAccelerator{
+			Memory:            "23028Mi",
+			ComputeCapability: "8.6",
+		},
 	}
 }
 
 func instSpecTeslaT4() worker.InstanceTypeSpec {
 	return worker.InstanceTypeSpec{
-		Group:             "gpustack-nvidia-tesla-t4",
-		Acceleratable:     true,
-		Manufacturer:      "nvidia",
-		Product:           "Tesla-T4",
-		Memory:            "15360Mi",
-		Family:            "Turing",
-		ComputeCapability: "7.5",
+		Group:         "gpustack-nvidia-tesla-t4",
+		Acceleratable: true,
+		Manufacturer:  "nvidia",
+		Product:       "Tesla-T4",
+		Family:        "Turing",
+		InstanceTypeAccelerator: worker.InstanceTypeAccelerator{
+			Memory:            "15360Mi",
+			ComputeCapability: "7.5",
+		},
 	}
 }
 

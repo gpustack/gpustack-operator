@@ -34,27 +34,105 @@ type InstanceTypeSpec struct {
 	// Acceleratable indicates whether the InstanceType is acceleratable.
 	Acceleratable bool `json:"acceleratable" protobuf:"bytes,2,name=acceleratable"`
 
-	// Manufacturer is the name of the InstanceType manufacturer, e.g. "amd", "nvidia", "intel".
+	// Manufacturer is the name of the InstanceType manufacturer.
 	Manufacturer string `json:"manufacturer,omitempty" protobuf:"bytes,3,opt,name=manufacturer"`
 
-	// Product is the name of the InstanceType product, e.g. "A100", "V100", "T4".
+	// Product is the name of the InstanceType product.
 	Product string `json:"product,omitempty" protobuf:"bytes,4,opt,name=product"`
 
-	// Memory is the VRAM size of the InstanceType, e.g. "65535Mi".
-	Memory string `json:"memory,omitempty" protobuf:"bytes,5,opt,name=memory"`
+	// Family is the family of the InstanceType.
+	Family string `json:"family,omitempty" protobuf:"bytes,5,opt,name=family"`
 
-	// Family is the family of the InstanceType, e.g. "ampere", "volta", "turing".
-	Family string `json:"family,omitempty" protobuf:"bytes,6,opt,name=family"`
+	// OS is the operating system of the InstanceType, e.g. "linux", "windows".
+	OS string `json:"os,omitempty" protobuf:"bytes,6,opt,name=os"`
 
-	// ComputeCapability is the compute capability of the InstanceType, e.g. "8.0", "7.0".
-	ComputeCapability string `json:"computeCapability,omitempty" protobuf:"bytes,7,opt,name=computeCapability"`
+	// Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
+	Arch string `json:"arch,omitempty" protobuf:"bytes,7,opt,name=arch"`
 
-	// Sliced indicates whether the InstanceType is sliced.
-	// When Sliced is blank, that means the InstanceType is not sliced.
-	Sliced int64 `json:"sliced,omitempty" protobuf:"varint,8,opt,name=sliced"`
+	// CPU describes the CPU information of the InstanceType.
+	InstanceTypeCPU `json:",inline" protobuf:"bytes,8,opt,name=cpu"`
+
+	// Accelerator describes the accelerator information of the InstanceType.
+	InstanceTypeAccelerator `json:",inline" protobuf:"bytes,9,opt,name=accelerator"`
 
 	// UnitResources describes the unit resources of the InstanceType.
-	UnitResources InstanceTypeUnitResources `json:"unitResources,omitempty" protobuf:"bytes,9,opt,name=unitResources"`
+	UnitResources InstanceTypeUnitResources `json:"unitResources,omitempty" protobuf:"bytes,10,opt,name=unitResources"`
+}
+
+// InstanceTypeCPU describes the information of the CPU.
+type InstanceTypeCPU struct {
+	// PhysicalCores is the number of physical cores of the CPU, e.g. "4", "8".
+	PhysicalCores string `json:"physicalCores,omitempty" protobuf:"bytes,1,opt,name=physicalCores"`
+
+	// ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. "2", "4".
+	ThreadsPerPhysicalCore string `json:"threadsPerPhysicalCore,omitempty" protobuf:"bytes,2,opt,name=threadsPerPhysicalCore"`
+
+	// LogicalCores is the number of logical cores of the CPU, e.g. "8", "16".
+	LogicalCores string `json:"logicalCores,omitempty" protobuf:"bytes,3,opt,name=logicalCores"`
+
+	// Stepping is the stepping of the CPU, e.g. "0", "1".
+	Stepping string `json:"stepping,omitempty" protobuf:"bytes,4,opt,name=stepping"`
+
+	// ClockSpeed is the speed in Hz of the CPU, e.g. "2000"
+	ClockSpeed string `json:"clockSpeed,omitempty" protobuf:"bytes,5,opt,name=clockSpeed"`
+
+	// MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. "3000"
+	MaxClockSpeed string `json:"maxClockSpeed,omitempty" protobuf:"bytes,6,opt,name=maxClockSpeed"`
+
+	// CacheLine is the cache line size in bytes of the CPU, e.g. "64", "128".
+	CacheLine string `json:"cacheLine,omitempty" protobuf:"bytes,7,opt,name=cacheLine"`
+
+	// Cache describes the cache information of the CPU.
+	Cache InstanceTypeCPUCache `json:"cache,omitempty" protobuf:"bytes,8,opt,name=cache"`
+}
+
+// InstanceTypeCPUCache describes the cache information of the CPU.
+type InstanceTypeCPUCache struct {
+	// L1I is the L1 instruction cache size in bytes of the CPU.
+	L1I string `json:"l1i,omitempty" protobuf:"bytes,1,opt,name=l1i"`
+
+	// L1D is the L1 data cache size in bytes of the CPU.
+	L1D string `json:"l1d,omitempty" protobuf:"bytes,2,opt,name=l1d"`
+
+	// L2 is the L2 cache size in bytes of the CPU.
+	L2 string `json:"l2,omitempty" protobuf:"bytes,3,opt,name=l2"`
+
+	// L3 is the L3 cache size in bytes of the CPU.
+	L3 string `json:"l3,omitempty" protobuf:"bytes,4,opt,name=l3"`
+}
+
+// InstanceTypeAccelerator describes the information of the accelerator.
+type InstanceTypeAccelerator struct {
+	// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
+	Memory string `json:"memory,omitempty" protobuf:"bytes,1,opt,name=memory"`
+
+	// Cores is the number of cores of the accelerator, e.g. "128", "256".
+	Cores string `json:"cores,omitempty" protobuf:"bytes,2,opt,name=cores"`
+
+	// ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
+	ComputeCapability string `json:"computeCapability,omitempty" protobuf:"bytes,3,opt,name=computeCapability"`
+
+	// Sliced indicates whether the accelerator is sliced.
+	// When Sliced is blank, that means the InstanceType is not sliced.
+	Sliced int64 `json:"sliced,omitempty" protobuf:"varint,4,opt,name=sliced"`
+
+	// CPU describes the CPU information of the accelerator.
+	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
+}
+
+// InstanceTypeAcceleratorCPU describes the CPU information of the accelerator.
+type InstanceTypeAcceleratorCPU struct {
+	// Manufacturer is the name of the CPU manufacturer, e.g. "amd", "intel".
+	Manufacturer string `json:"manufacturer,omitempty" protobuf:"bytes,1,opt,name=manufacturer"`
+
+	// Product is the name of the CPU product.
+	Product string `json:"product,omitempty" protobuf:"bytes,2,opt,name=product"`
+
+	// Family is the family of the CPU.
+	Family string `json:"family,omitempty" protobuf:"bytes,3,opt,name=family"`
+
+	// Detail inlines the CPU details of the CPU.
+	InstanceTypeCPU `json:",inline" protobuf:"bytes,4,opt,name=cpu"`
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.

@@ -86,9 +86,10 @@ master:
       {{ $.ManagedLabel }}: "true"
   config:
     restrictions:
+      disableAnnotations: false
       nodeFeatureNamespaceSelector:
-       matchLabels:
-         kubernetes.io/metadata.name: "{{ $.Namespace }}"
+        matchLabels:
+          kubernetes.io/metadata.name: "{{ $.Namespace }}"
 
 {{- $pciClassPrefixes := getPciClassPrefixes }}
 {{- $pciVendorIDs := getPciVendorIDs }}

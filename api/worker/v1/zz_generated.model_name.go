@@ -121,6 +121,26 @@ func (in InstanceType) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeAccelerator) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeAccelerator"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeAcceleratorCPU) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeAcceleratorCPU"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeCPU) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeCPU"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeCPUCache) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeCPUCache"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceTypeList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceTypeList"
 }

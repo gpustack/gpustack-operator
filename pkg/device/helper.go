@@ -46,7 +46,12 @@ func NormalizeVersion(ver string) string {
 // ConstructGroupID constructs a group ID from the given name,
 // removes the manufacturer prefix and formats the memory size if enabled.
 func ConstructGroupID(manufacturer, name string, memory uint64) string {
-	n := formatName(name, manufacturer)
+	// ${manufacturer}-${name}[-${memory}]
+	budget := 63 - len(manufacturer) - 1
+	if constructGroupIDWithMemory {
+		budget -= 7 // 7 is the max length of the suffix "-memory".
+	}
+	n := NormalizeName(name, manufacturer, budget)
 	if !constructGroupIDWithMemory {
 		return n
 	}
@@ -54,27 +59,22 @@ func ConstructGroupID(manufacturer, name string, memory uint64) string {
 	return n + "-" + m
 }
 
-// ConstructTopology constructs a Topology for the given PCI bus ID, root ID, and class.
-func ConstructTopology(pciBusId, pciRootId, pciClass string) Topology {
-	return Topology{
-		PciBusID:     pciBusId,
-		PciRootID:    pciRootId,
-		PciClass:     pciClass,
-		NumaAffinity: binding.GetNumaNodeByBDF(pciBusId),
-		CpuAffinity:  binding.MapNumaNodeStrToCPUAffinity(binding.GetNumaNodeByBDF(pciBusId)),
-	}
-}
+// _TrademarkMarkerReplacer drops the trademark markers carried by device or CPU product names.
+var _TrademarkMarkerReplacer = strings.NewReplacer("(R)", "", "(r)", "", "(TM)", "", "(tm)", "")
 
-// CalculateUtilization calculates the utilization percentage based on the given usage and total values.
-func CalculateUtilization[U, T typex.Integer](usage U, total T) uint32 {
-	if usage <= 0 || total <= 0 {
-		return 0
-	}
-	return uint32(float64(usage) / float64(total) * 100)
-}
+// NormalizeName sanitizes the given device or CPU product name into a Kubernetes
+// label-safe slug: it drops trademark markers like "(R)"/"(TM)" and the frequency
+// part led by " CPU @ ", lowercases letters, keeps only [a-z0-9-_.], converts
+// whitespace to "-", collapses consecutive separators, trims the leading prefix
+// when matched case-insensitively, and trims leading/trailing separators.
+// When maxLength is positive, the result is truncated to at most maxLength runes.
+func NormalizeName(name, prefix string, maxLength int) string {
+	name, _, _ = strings.Cut(name, " CPU @ ")
+	name = _TrademarkMarkerReplacer.Replace(name)
 
-func formatName(name, manufacturer string) string {
-	maxLength := 63 - len(manufacturer) - 7 // 7 is the max length of the suffix "-memory".
+	if maxLength <= 0 {
+		maxLength = len(name)
+	}
 
 	buf := make([]rune, 0, min(len(name), maxLength))
 	var pr rune
@@ -100,9 +100,9 @@ func formatName(name, manufacturer string) string {
 		buf = append(buf, r)
 		pr = r
 
-		// Trim manufacturer prefix.
-		if len(buf) == len(manufacturer) {
-			if strings.EqualFold(string(buf), manufacturer) {
+		// Trim prefix.
+		if len(buf) == len(prefix) {
+			if strings.EqualFold(string(buf), prefix) {
 				buf = buf[:0]
 				pr = 0
 			}
@@ -114,12 +114,35 @@ func formatName(name, manufacturer string) string {
 		}
 	}
 
+	if len(buf) == 0 {
+		return ""
+	}
+
 	// Trim trailing non-alphanumeric character.
 	if c := buf[len(buf)-1]; c == '-' || c == '_' || c == '.' {
 		buf = buf[:len(buf)-1]
 	}
 
 	return string(buf)
+}
+
+// ConstructTopology constructs a Topology for the given PCI bus ID, root ID, and class.
+func ConstructTopology(pciBusId, pciRootId, pciClass string) Topology {
+	return Topology{
+		PciBusID:     pciBusId,
+		PciRootID:    pciRootId,
+		PciClass:     pciClass,
+		NumaAffinity: binding.GetNumaNodeByBDF(pciBusId),
+		CpuAffinity:  binding.MapNumaNodeStrToCPUAffinity(binding.GetNumaNodeByBDF(pciBusId)),
+	}
+}
+
+// CalculateUtilization calculates the utilization percentage based on the given usage and total values.
+func CalculateUtilization[U, T typex.Integer](usage U, total T) uint32 {
+	if usage <= 0 || total <= 0 {
+		return 0
+	}
+	return uint32(float64(usage) / float64(total) * 100)
 }
 
 // formatMemory formats the given memory size in MiB to a string.

@@ -128,14 +128,15 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
+							// Don't need to consider the changes of
+							// - "feature.node.kubernetes.io/cpu-model.*" labels
+							// - "feature.gpustack.ai/cpu-*" annotations,
+							// As they are managed by NFD and stable enough.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.ManagedLabelKey,
 								nodefeature.FeatureLabelPrefix,
 								nodefeature.GeneralFeatureLabelPrefix,
-								nodefeature.AcceleratableFeatureLabelPrefix,
-								// The general(CPU) key is derived from the NFD
-								// cpu-model labels, re-reconcile when they change.
-								nodefeature.NFDCPUModelLabelPrefix) {
+								nodefeature.AcceleratableFeatureLabelPrefix) {
 								return true
 							}
 						}
