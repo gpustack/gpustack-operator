@@ -142,6 +142,8 @@ The differences from the general view:
 2. `cpuUnit = max(cpu/acc, 1)`, `ramUnit = max(ram/acc, 1)` Gi — i.e. the fair per-device share of the node.
 3. If the user-supplied label `acceleratable.${prefix}${aKey}.sliced.partitions=${partitions}` is present, `sliced` appends an `-${sliced}s` suffix to `z-flavor` and `z-queue`. `z-cohort` **never** carries the sliced suffix — it is the matching key at the cohort level, so sliced and exclusive queues of the same per-unit shape join the same Cohort.
 
+> **Opt-out:** setting any of a view's `.cpu` / `.ram` / `.storage` labels to an explicit `0` (or any non-positive quantity) suppresses that view's `.z-flavor` / `.z-queue` / `.z-cohort` labels — the zero value is echoed back as-is to keep the opt-out sticky, and the node's resources for that view (general or a specific accelerator model) are not exposed as Kueue flavors/queues.
+
 > **Known behavior:** when one node carries several accelerator models, each model's labels claim the **full** node cpu/ram/storage. The resulting ClusterQueue quotas overlap across the per-model queues, i.e. the host resources are oversold across queues on such nodes.
 
 ### Stage 4: The Kueue scheduling chain

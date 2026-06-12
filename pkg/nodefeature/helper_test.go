@@ -486,6 +486,15 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		}
 	}
 
+	// withoutZ strips the .z-* labels from an expected view, mirroring an
+	// explicit-zero opt-out.
+	withoutZ := func(m map[string]string, pfx string) map[string]string {
+		delete(m, pfx+".z-flavor")
+		delete(m, pfx+".z-queue")
+		delete(m, pfx+".z-cohort")
+		return m
+	}
+
 	cases := []struct {
 		name     string
 		node     *core.Node
@@ -825,6 +834,76 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 				generalExpected("8", "16Gi", "96Gi", "8c-16g-96g", "1c-2g"),
 				deviceExpected(t4Pfx, "8", "64Gi", "96Gi", "8c-64g-96g-2d", "4c-32g-1d", "4c-32g-1d"),
 			),
+		},
+		{
+			// An explicit general .cpu=0 label opts the general view out of
+			// Kueue exposure: the zero is echoed as-is (keeping the opt-out
+			// sticky across reconciles) and no .z-* labels are emitted, so
+			// no general flavor/queue is built downstream.
+			name: "explicit general .cpu=0 opts the general view out",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
+				mergeLabels(cpuModelLabels(), map[string]string{
+					gPfx + ".cpu": "0",
+				})),
+			expected: withoutZ(generalExpected("0", "32Gi", "96Gi", "", ""), gPfx),
+		},
+		{
+			// Same opt-out via an explicit general .ram=0 label.
+			name: "explicit general .ram=0 opts the general view out",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
+				mergeLabels(cpuModelLabels(), map[string]string{
+					gPfx + ".ram": "0",
+				})),
+			expected: withoutZ(generalExpected("16", "0", "96Gi", "", ""), gPfx),
+		},
+		{
+			// Same opt-out via an explicit general .storage=0 label.
+			name: "explicit general .storage=0 opts the general view out",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
+				mergeLabels(cpuModelLabels(), map[string]string{
+					gPfx + ".storage": "0",
+				})),
+			expected: withoutZ(generalExpected("16", "32Gi", "0", "", ""), gPfx),
+		},
+		{
+			// An explicit device .cpu=0 label opts only that acceleratable
+			// view out — the general view keeps its .z-* labels.
+			name: "explicit device .cpu=0 opts the device view out",
+			node: newNode(
+				"cluster-1-node-2", "4", "15Gi", "97Gi",
+				mergeLabels(cpuModelLabels(), deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "1"), map[string]string{
+					t4Pfx + ".cpu": "0",
+				}),
+			),
+			expected: mergeLabels(
+				generalExpected("4", "16Gi", "96Gi", "4c-16g-96g", "1c-4g"),
+				withoutZ(deviceExpected(t4Pfx, "0", "16Gi", "96Gi", "", "", ""), t4Pfx),
+			),
+		},
+		{
+			// Conversely, opting out the general view leaves the device view
+			// fully exposed.
+			name: "explicit general .cpu=0 leaves the device view exposed",
+			node: newNode(
+				"cluster-1-node-2", "4", "15Gi", "97Gi",
+				mergeLabels(cpuModelLabels(), deviceLabels("tesla-t4", "Tesla-T4", "15Gi", "1"), map[string]string{
+					gPfx + ".cpu": "0",
+				}),
+			),
+			expected: mergeLabels(
+				withoutZ(generalExpected("0", "16Gi", "96Gi", "", ""), gPfx),
+				deviceExpected(t4Pfx, "4", "16Gi", "96Gi", "4c-16g-96g-1d", "4c-16g-1d", "4c-16g-1d"),
+			),
+		},
+		{
+			// An unparsable capacity label is not an opt-out — it falls back
+			// to Status.Capacity as before.
+			name: "unparsable general .cpu label falls back to Status.Capacity",
+			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi",
+				mergeLabels(cpuModelLabels(), map[string]string{
+					gPfx + ".cpu": "garbage",
+				})),
+			expected: generalExpected("16", "32Gi", "96Gi", "16c-32g-96g", "1c-2g"),
 		},
 	}
 

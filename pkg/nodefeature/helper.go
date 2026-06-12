@@ -239,6 +239,19 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
 	}
 
+	// parseCapacityLabel parses a user-supplied capacity label value.
+	// An explicit non-positive value opts the view out of Kueue exposure:
+	// the value is echoed as-is and no .z-* labels are built for the view.
+	parseCapacityLabel := func(v string) (q resource.Quantity, zeroed bool) {
+		if v == "" {
+			return q, false
+		}
+		if p, err := resource.ParseQuantity(v); err == nil {
+			return p, p.Value() <= 0
+		}
+		return q, false
+	}
+
 	if gKey := ExtractGeneralNodeKey(node); gKey != "" {
 		generalKey := GeneralFeatureLabelPrefix + gKey
 		gManu, _, _ := strings.Cut(gKey, "-")
@@ -250,10 +263,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 
 		// "general.${prefix}${manufacturer}-${id}.cpu=${cpu}"
 		cpuKey := generalKey + ".cpu"
-		var cpuQ resource.Quantity
-		if v := node.Labels[cpuKey]; v != "" {
-			cpuQ = funcx.NoError(resource.ParseQuantity(v))
-		}
+		cpuQ, cpuZeroed := parseCapacityLabel(node.Labels[cpuKey])
 		if cpuQ.Value() <= 0 {
 			cpuQ = node.Status.Capacity[core.ResourceCPU]
 		}
@@ -261,14 +271,15 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if cpuC <= 0 {
 			cpuC = 1
 		}
-		labels[cpuKey] = strconvx.Itoa(cpuC)
+		if cpuZeroed {
+			labels[cpuKey] = node.Labels[cpuKey]
+		} else {
+			labels[cpuKey] = strconvx.Itoa(cpuC)
+		}
 
 		// "general.${prefix}${manufacturer}-${id}.ram=${ram}"
 		ramKey := generalKey + ".ram"
-		var ramQ resource.Quantity
-		if v := node.Labels[ramKey]; v != "" {
-			ramQ = funcx.NoError(resource.ParseQuantity(v))
-		}
+		ramQ, ramZeroed := parseCapacityLabel(node.Labels[ramKey])
 		if ramQ.Value() <= 0 {
 			ramQ = node.Status.Capacity[core.ResourceMemory]
 		}
@@ -283,14 +294,15 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if node.Labels[ramKey] == "" && opts.GeneralRAMGiPerCPU > 0 {
 			generalRamC = opts.GeneralRAMGiPerCPU * cpuC
 		}
-		labels[ramKey] = strconvx.Itoa(generalRamC) + "Gi"
+		if ramZeroed {
+			labels[ramKey] = node.Labels[ramKey]
+		} else {
+			labels[ramKey] = strconvx.Itoa(generalRamC) + "Gi"
+		}
 
 		// "general.${prefix}${manufacturer}-${id}.storage=${stg}"
 		stgKey := generalKey + ".storage"
-		var stgQ resource.Quantity
-		if v := node.Labels[stgKey]; v != "" {
-			stgQ = funcx.NoError(resource.ParseQuantity(v))
-		}
+		stgQ, stgZeroed := parseCapacityLabel(node.Labels[stgKey])
 		if stgQ.Value() <= 0 {
 			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
 		}
@@ -301,20 +313,28 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if stgC <= 0 {
 			stgC = 15 * cpuC
 		}
-		labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
+		if stgZeroed {
+			labels[stgKey] = node.Labels[stgKey]
+		} else {
+			labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
+		}
 
-		// General has no sliced concept, so z-queue and z-cohort
-		// always carry the same per-unit value.
-		//
-		// "general.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g"
-		labels[generalKey+".z-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, generalRamC, stgC)
+		// Skip the .z-* labels when any of cpu/ram/storage is explicitly
+		// zeroed, so the general view is not exposed to Kueue.
+		if !cpuZeroed && !ramZeroed && !stgZeroed {
+			// General has no sliced concept, so z-queue and z-cohort
+			// always carry the same per-unit value.
+			//
+			// "general.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g"
+			labels[generalKey+".z-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, generalRamC, stgC)
 
-		// "general.${prefix}${manufacturer}-${id}.z-queue=1c-${ramUnit}g"
-		// "general.${prefix}${manufacturer}-${id}.z-cohort=1c-${ramUnit}g"
-		ramUnit := generalRamC / cpuC
-		generalUnit := fmt.Sprintf("1c-%dg", ramUnit)
-		labels[generalKey+".z-queue"] = generalUnit
-		labels[generalKey+".z-cohort"] = generalUnit
+			// "general.${prefix}${manufacturer}-${id}.z-queue=1c-${ramUnit}g"
+			// "general.${prefix}${manufacturer}-${id}.z-cohort=1c-${ramUnit}g"
+			ramUnit := generalRamC / cpuC
+			generalUnit := fmt.Sprintf("1c-%dg", ramUnit)
+			labels[generalKey+".z-queue"] = generalUnit
+			labels[generalKey+".z-cohort"] = generalUnit
+		}
 	}
 
 	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
@@ -333,10 +353,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.cpu=${cpu}"
 		cpuKey := nodeKey + ".cpu"
-		var cpuQ resource.Quantity
-		if v := node.Labels[cpuKey]; v != "" {
-			cpuQ = funcx.NoError(resource.ParseQuantity(v))
-		}
+		cpuQ, cpuZeroed := parseCapacityLabel(node.Labels[cpuKey])
 		if cpuQ.Value() <= 0 {
 			cpuQ = node.Status.Capacity[core.ResourceCPU]
 		}
@@ -344,14 +361,15 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if cpuC < accC {
 			cpuC = accC
 		}
-		labels[cpuKey] = strconvx.Itoa(cpuC)
+		if cpuZeroed {
+			labels[cpuKey] = node.Labels[cpuKey]
+		} else {
+			labels[cpuKey] = strconvx.Itoa(cpuC)
+		}
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.ram=${ram}"
 		ramKey := nodeKey + ".ram"
-		var ramQ resource.Quantity
-		if v := node.Labels[ramKey]; v != "" {
-			ramQ = funcx.NoError(resource.ParseQuantity(v))
-		}
+		ramQ, ramZeroed := parseCapacityLabel(node.Labels[ramKey])
 		if ramQ.Value() <= 0 {
 			ramQ = node.Status.Capacity[core.ResourceMemory]
 		}
@@ -362,14 +380,15 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if ramC < accC {
 			ramC = accC
 		}
-		labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
+		if ramZeroed {
+			labels[ramKey] = node.Labels[ramKey]
+		} else {
+			labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
+		}
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.storage=${stg}"
 		stgKey := nodeKey + ".storage"
-		var stgQ resource.Quantity
-		if v := node.Labels[stgKey]; v != "" {
-			stgQ = funcx.NoError(resource.ParseQuantity(v))
-		}
+		stgQ, stgZeroed := parseCapacityLabel(node.Labels[stgKey])
 		if stgQ.Value() <= 0 {
 			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
 		}
@@ -380,7 +399,17 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if stgC <= 0 {
 			stgC = 15 * accC
 		}
-		labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
+		if stgZeroed {
+			labels[stgKey] = node.Labels[stgKey]
+		} else {
+			labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
+		}
+
+		// Skip the .z-* labels when any of cpu/ram/storage is explicitly
+		// zeroed, so the acceleratable view is not exposed to Kueue.
+		if cpuZeroed || ramZeroed || stgZeroed {
+			continue
+		}
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.sliced.partitions=${slicedC}" is a
 		// user-supplied input: when present and positive it appends
