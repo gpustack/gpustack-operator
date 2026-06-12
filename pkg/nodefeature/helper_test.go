@@ -261,7 +261,7 @@ func TestExtractAcceleratableNodeKeys(t *testing.T) {
 	}
 }
 
-func TestExtractGeneralNodeKey(t *testing.T) {
+func Test_extractGeneralNodeKey(t *testing.T) {
 	newNode := func(labels, annotations map[string]string) *core.Node {
 		return &core.Node{
 			ObjectMeta: meta.ObjectMeta{
@@ -277,27 +277,37 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 	}
 
 	cases := []struct {
-		name     string
-		node     *core.Node
-		expected string
+		name        string
+		withCPUName bool
+		node        *core.Node
+		expected    string
 	}{
 		{
-			name:     "no cpu information yields empty key",
-			node:     newNode(map[string]string{}, nil),
-			expected: "",
-		},
-		{
-			name:     "cpu-model labels without os/arch labels",
-			node:     newNode(cpuModelLabels(), nil),
-			expected: "amd-25-1",
-		},
-		{
-			name:     "os/arch labels trail the id",
+			name:     "disabled blending yields generic regardless of cpu information",
 			node:     newNode(mergeLabels(cpuModelLabels(), osArchLabels), nil),
-			expected: "amd-25-1-ln-x64",
+			expected: "generic",
 		},
 		{
-			name: "arm64 arch abbreviates to a64",
+			name:        "no cpu information falls back to generic",
+			withCPUName: true,
+			node:        newNode(map[string]string{}, nil),
+			expected:    "generic",
+		},
+		{
+			name:        "cpu-model labels without os/arch labels",
+			withCPUName: true,
+			node:        newNode(cpuModelLabels(), nil),
+			expected:    "amd-25-1",
+		},
+		{
+			name:        "os/arch labels trail the id",
+			withCPUName: true,
+			node:        newNode(mergeLabels(cpuModelLabels(), osArchLabels), nil),
+			expected:    "amd-25-1-ln-x64",
+		},
+		{
+			name:        "arm64 arch abbreviates to a64",
+			withCPUName: true,
 			node: newNode(mergeLabels(cpuModelLabels(), map[string]string{
 				core.LabelOSStable:   "linux",
 				core.LabelArchStable: "arm64",
@@ -305,7 +315,8 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			expected: "amd-25-1-ln-a64",
 		},
 		{
-			name: "unmapped os/arch pass through unchanged",
+			name:        "unmapped os/arch pass through unchanged",
+			withCPUName: true,
 			node: newNode(mergeLabels(cpuModelLabels(), map[string]string{
 				core.LabelOSStable:   "js",
 				core.LabelArchStable: "386",
@@ -313,7 +324,8 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			expected: "amd-25-1-js-386",
 		},
 		{
-			name: "cpu-name annotation leads the id",
+			name:        "cpu-name annotation leads the id",
+			withCPUName: true,
 			node: newNode(
 				mergeLabels(cpuModelLabels(), osArchLabels),
 				map[string]string{
@@ -323,7 +335,8 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			expected: "amd-epyc-7763-ln-x64",
 		},
 		{
-			name: "unresolved cpu-name annotation falls back to cpu-model labels",
+			name:        "unresolved cpu-name annotation falls back to cpu-model labels",
+			withCPUName: true,
 			node: newNode(
 				mergeLabels(cpuModelLabels(), osArchLabels),
 				map[string]string{
@@ -333,7 +346,8 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			expected: "amd-25-1-ln-x64",
 		},
 		{
-			name: "trademark markers and frequency are stripped from the cpu-name",
+			name:        "trademark markers and frequency are stripped from the cpu-name",
+			withCPUName: true,
 			node: newNode(
 				map[string]string{
 					_NFDCPUModelVendorIDLabelKey: "Intel",
@@ -345,7 +359,8 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			expected: "intel-xeon-platinum-8358",
 		},
 		{
-			name: "unknown vendor keys off generic",
+			name:        "unknown vendor keys off generic",
+			withCPUName: true,
 			node: newNode(
 				mergeLabels(osArchLabels, map[string]string{
 					_NFDCPUModelVendorIDLabelKey: "VendorUnknown",
@@ -357,23 +372,26 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			expected: "generic-kunpeng-920-ln-x64",
 		},
 		{
-			name: "vendor without family yields empty key",
+			name:        "vendor without family falls back to generic",
+			withCPUName: true,
 			node: newNode(map[string]string{
 				_NFDCPUModelVendorIDLabelKey: "AMD",
 				_NFDCPUModelIDLabelKey:       "1",
 			}, nil),
-			expected: "",
+			expected: "generic",
 		},
 		{
-			name: "vendor without id yields empty key",
+			name:        "vendor without id falls back to generic",
+			withCPUName: true,
 			node: newNode(map[string]string{
 				_NFDCPUModelVendorIDLabelKey: "AMD",
 				_NFDCPUModelFamilyLabelKey:   "25",
 			}, nil),
-			expected: "",
+			expected: "generic",
 		},
 		{
-			name: "cpu-name sanitized to empty yields empty key",
+			name:        "cpu-name sanitized to empty falls back to generic",
+			withCPUName: true,
 			node: newNode(
 				mergeLabels(osArchLabels, map[string]string{
 					_NFDCPUModelVendorIDLabelKey: "AMD",
@@ -382,13 +400,13 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 					FeatureLabelPrefix + "cpu-name": "(TM)",
 				},
 			),
-			expected: "",
+			expected: "generic",
 		},
 	}
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual := ExtractGeneralNodeKey(cs.node)
+			actual := extractGeneralNodeKey(cs.node, cs.withCPUName)
 			assert.Equal(t, cs.expected, actual, "unexpected general node key")
 		})
 	}
@@ -411,14 +429,18 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// Gi; storage rounds down).
 	//
 	// All cluster-1 nodes carry the NFD cpu-model labels of an AMD family 25
-	// model 1 CPU, so their general(CPU) node key is "amd-25-1".
+	// model 1 CPU, so their general(CPU) node key is "amd-25-1" with the
+	// CPU-name blending enabled below. The generic fallback of the key
+	// derivation itself is covered by Test_extractGeneralNodeKey.
+	generalNodeKeyWithCPUName = true
 
 	gPfx := GeneralFeatureLabelPrefix + "amd-25-1"
+	genericPfx := GeneralFeatureLabelPrefix + GeneralManufacturerGeneric
 	t4Pfx := AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
 	a10gPfx := AcceleratableFeatureLabelPrefix + "nvidia-a10g"
 
 	// ConstructNodeCapacityLabels reads accelerator count from the
-	// ${nodeKey}.accelerators label (emitted by applyAcceleratorLabels), not from
+	// ${aKey}.count label (emitted by applyAcceleratorLabels), not from
 	// Node.Status.Capacity[<gpu resource>]. The capacity passed to newNode
 	// only carries CPU / RAM / ephemeral-storage; device count is steered
 	// entirely through deviceLabels(..., accelerators).
@@ -495,6 +517,20 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		return m
 	}
 
+	// genericExpected is the general(CPU) view keyed off "generic".
+	genericExpected := func(cpu, ram, stg, flavor, unit string) map[string]string {
+		return map[string]string{
+			systemname.ManagedLabelKey: "true",
+			genericPfx:                 "true",
+			genericPfx + ".cpu":        cpu,
+			genericPfx + ".ram":        ram,
+			genericPfx + ".storage":    stg,
+			genericPfx + ".z-flavor":   flavor,
+			genericPfx + ".z-queue":    unit,
+			genericPfx + ".z-cohort":   unit,
+		}
+	}
+
 	cases := []struct {
 		name     string
 		node     *core.Node
@@ -510,13 +546,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			expected: generalExpected("16", "32Gi", "96Gi", "16c-32g-96g", "1c-2g"),
 		},
 		{
-			// No NFD cpu information at all — the general key is empty and
-			// the whole general view is skipped.
-			name: "cpu-only node without cpu information yields no general view",
-			node: newNode("cluster-1-node-1", "16", "31Gi", "97Gi", nil),
-			expected: map[string]string{
-				systemname.ManagedLabelKey: "true",
-			},
+			// No NFD cpu information at all — the general key falls back to
+			// "generic" and the general view is emitted under it.
+			name:     "cpu-only node without cpu information falls back to generic view",
+			node:     newNode("cluster-1-node-1", "16", "31Gi", "97Gi", nil),
+			expected: genericExpected("16", "32Gi", "96Gi", "16c-32g-96g", "1c-2g"),
 		},
 		{
 			name: "cpu-only node with Intel cpu-model labels",
@@ -621,7 +655,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			),
 		},
 		{
-			// User-supplied ${nodeKey}.sliced.partitions=8 appends "-8s"
+			// User-supplied ${aKey}.sliced.partitions=8 appends "-8s"
 			// to z-flavor and z-queue. z-cohort is the
 			// cohort-level per-unit view and is never sliced-suffixed —
 			// it is the matching key cross-flavor at the cohort level.
@@ -703,11 +737,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			),
 		},
 		{
-			// Accelerated feature label is set but the ${nodeKey}.accelerators
+			// Accelerated feature label is set but the ${aKey}.count
 			// label is absent — the per-device loop reads accelerator count
 			// strictly from that label, so the device is skipped entirely
 			// (no fallback). Only the general capacity labels are emitted.
-			name: "accelerated feature label without .accelerators is skipped",
+			name: "accelerated feature label without .count is skipped",
 			node: newNode(
 				"cluster-1-node-2", "4", "15Gi", "97Gi",
 				mergeLabels(cpuModelLabels(), map[string]string{
@@ -933,8 +967,15 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 	// order is non-deterministic. We compare the head directly and the
 	// tail as a multiset via ElementsMatch.
 
+	// All capacity labels below assume the CPU-name blending is enabled, so
+	// the general(CPU) node key derives from the NFD cpu-model labels. The
+	// generic fallback of the key derivation itself is covered by
+	// Test_extractGeneralNodeKey.
+	generalNodeKeyWithCPUName = true
+
 	gKey := "amd-25-1"
 	gPfx := GeneralFeatureLabelPrefix + gKey
+	genericPfx := GeneralFeatureLabelPrefix + GeneralManufacturerGeneric
 	nvPfx := AcceleratableFeatureLabelPrefix + "nvidia"
 	t4Pfx := AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
 	a10gPfx := AcceleratableFeatureLabelPrefix + "nvidia-a10g"
@@ -979,7 +1020,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 	cases := []struct {
 		name string
 		// labels populates node.ObjectMeta.Labels. The per-device
-		// Accelerator field sources from the ${nodeKey}.accelerators
+		// Accelerator field sources from the ${aKey}.count
 		// label written by applyAcceleratorLabels.
 		labels          map[string]string
 		wantCPU         NodeResourceFlavor
@@ -1400,9 +1441,10 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			},
 		},
 		{
-			// Without any NFD cpu information the general key is empty: the
-			// general flavor is skipped and the device flavor pairs with the
-			// "generic" segment without pinning a general(CPU) identity.
+			// Without any NFD cpu information the general key falls back to
+			// "generic": the general flavor is skipped (no generic-prefixed
+			// capacity labels) but the device flavor pairs with the "generic"
+			// segment and pins the generic general(CPU) identity.
 			name: "device pairs with generic when cpu information is missing",
 			labels: map[string]string{
 				systemname.ManagedLabelKey: "true",
@@ -1429,6 +1471,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					Acceleratable: true,
 					NodeLabels: map[string]string{
 						systemname.ManagedLabelKey: "true",
+						genericPfx:                 "true",
 						t4Pfx + ".z-queue":         "4c-16g-1d",
 					},
 					Tolerations:  expectedToleration,
@@ -1437,6 +1480,37 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					RAM:          "16Gi",
 					LocalStorage: "96Gi",
 				},
+			},
+		},
+		{
+			// A node whose general key fell back to "generic" (no usable
+			// cpu information) emits the general flavor from the
+			// generic-prefixed capacity labels.
+			name: "general flavor keys off generic when cpu information is missing",
+			labels: map[string]string{
+				systemname.ManagedLabelKey: "true",
+				core.LabelHostname:         "cluster-1-node-1",
+				genericPfx:                 "true",
+				genericPfx + ".cpu":        "16",
+				genericPfx + ".ram":        "32Gi",
+				genericPfx + ".storage":    "96Gi",
+				genericPfx + ".z-flavor":   "16c-32g-96g",
+				genericPfx + ".z-queue":    "1c-2g",
+				genericPfx + ".z-cohort":   "1c-2g",
+			},
+			wantCPU: NodeResourceFlavor{
+				ProfileCohort: "gpustack--generic-1c-2g",
+				ProfileQueue:  "gpustack--generic-1c-2g",
+				ProfileFlavor: "gpustack--generic-16c-32g-96g",
+				Manufacturer:  GeneralManufacturerGeneric,
+				NodeLabels: map[string]string{
+					systemname.ManagedLabelKey: "true",
+					genericPfx + ".z-queue":    "1c-2g",
+				},
+				Tolerations:  expectedToleration,
+				CPU:          "16",
+				RAM:          "32Gi",
+				LocalStorage: "96Gi",
 			},
 		},
 	}
@@ -1467,7 +1541,7 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 	}
 }
 
-func TestExtractNodeQueue(t *testing.T) {
+func Test_extractNodeQueue(t *testing.T) {
 	t4Pfx := AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
 
 	cpuAnnotations := map[string]string{
@@ -1512,14 +1586,16 @@ func TestExtractNodeQueue(t *testing.T) {
 	}
 
 	cases := []struct {
-		name     string
-		node     *core.Node
-		accKey   string
-		expected NodeQueue
-		wantOK   bool
+		name        string
+		withCPUName bool
+		node        *core.Node
+		accKey      string
+		expected    NodeQueue
+		wantOK      bool
 	}{
 		{
-			name: "general(CPU) queue",
+			name:        "general(CPU) queue",
+			withCPUName: true,
 			node: newNode(
 				map[string]string{
 					core.LabelOSStable:           "linux",
@@ -1538,7 +1614,24 @@ func TestExtractNodeQueue(t *testing.T) {
 			},
 		},
 		{
-			name: "acceleratable queue",
+			// With the CPU-name blending disabled the general queue is empty
+			// — the generic key pools heterogeneous CPUs, so no single
+			// node's os/arch or CPU identity/details are recorded.
+			name: "general(CPU) queue without cpu-name blending is empty",
+			node: newNode(
+				map[string]string{
+					core.LabelOSStable:           "linux",
+					core.LabelArchStable:         "amd64",
+					_NFDCPUModelVendorIDLabelKey: "AMD",
+				},
+				cpuAnnotations,
+			),
+			wantOK:   true,
+			expected: NodeQueue{},
+		},
+		{
+			name:        "acceleratable queue",
+			withCPUName: true,
 			node: newNode(
 				map[string]string{
 					core.LabelOSStable:           "linux",
@@ -1574,7 +1667,39 @@ func TestExtractNodeQueue(t *testing.T) {
 			},
 		},
 		{
-			name: "unresolved cpu annotations are treated as empty",
+			// With the CPU-name blending disabled the acceleratable queue
+			// still carries the device fields, but omits the node's os/arch
+			// and the paired CPU.
+			name: "acceleratable queue without cpu-name blending omits os/arch and paired cpu",
+			node: newNode(
+				map[string]string{
+					core.LabelOSStable:           "linux",
+					core.LabelArchStable:         "amd64",
+					_NFDCPUModelVendorIDLabelKey: "AMD",
+					t4Pfx:                        "true",
+					t4Pfx + ".product":           "Tesla-T4",
+					t4Pfx + ".family":            "Turing",
+					t4Pfx + ".memory":            "15Gi",
+					t4Pfx + ".cores":             "2560",
+					t4Pfx + ".comcap":            "7.5",
+				},
+				cpuAnnotations,
+			),
+			accKey: "nvidia-tesla-t4",
+			wantOK: true,
+			expected: NodeQueue{
+				Product: "Tesla-T4",
+				Family:  "Turing",
+				NodeResourceFlavorAccelerator: NodeResourceFlavorAccelerator{
+					Memory:            "15Gi",
+					Cores:             "2560",
+					ComputeCapability: "7.5",
+				},
+			},
+		},
+		{
+			name:        "unresolved cpu annotations are treated as empty",
+			withCPUName: true,
 			node: newNode(
 				nil,
 				map[string]string{
@@ -1596,7 +1721,7 @@ func TestExtractNodeQueue(t *testing.T) {
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
-			actual, ok := ExtractNodeQueue(cs.node, cs.accKey)
+			actual, ok := extractNodeQueue(cs.node, cs.accKey, cs.withCPUName)
 			assert.Equal(t, cs.wantOK, ok, "unexpected ok")
 			if !ok {
 				return
