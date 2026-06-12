@@ -19,7 +19,7 @@ var (
 )
 
 func init() {
-	constructGroupIDWithMemory = os.Getenv("GPUSTACK_DEVICES_DETECT_GROUP_ID_WITH_MEMORY") == "true"
+	constructGroupIDWithMemory = os.Getenv("GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY") == "true"
 }
 
 // ConvertBytesToMiB converts the given bytes to MiB.
