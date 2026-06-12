@@ -139,6 +139,14 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			}
 			memory = device.ConvertBytesToMiB(memInfo.Total)
 
+			// When ECC is enabled the GPU reserves ~6.25% of physical
+			// memory for parity, so NVML reports the reduced usable
+			// capacity. Restore the loss so the advertised Memory
+			// matches the physical (marketing) size.
+			if cur, _, ret := dev.GetEccMode(); ret.IsSuccess() && cur == nvml.FEATURE_ENABLED {
+				memory = memory * 16 / 15
+			}
+
 			memEccDramUE, ret := dev.GetMemoryErrorCounter(
 				nvml.MEMORY_ERROR_TYPE_UNCORRECTED,
 				nvml.VOLATILE_ECC,

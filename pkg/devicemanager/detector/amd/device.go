@@ -179,10 +179,12 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 				family = hsaAgt.Family()
 			)
 			if cores == 0 {
-				gpuInfo, ret2 := in.amdgpu.QueryGPUInfo(physicalIndexes[0])
-				if ret2.IsSuccess() {
-					cores = gpuInfo.Cu_active_number
-					family = gpuInfo.Family()
+				if len(physicalIndexes) != 0 {
+					gpuInfo, ret2 := in.amdgpu.QueryGPUInfo(physicalIndexes[0])
+					if ret2.IsSuccess() {
+						cores = gpuInfo.Cu_active_number
+						family = gpuInfo.Family()
+					}
 				}
 			}
 			grpList = append(grpList, device.DevicesGroup{

@@ -262,6 +262,17 @@ func (l MemoryInfoHandler) V2() (Memory_v2, Return) {
 	return memory, ret
 }
 
+// GetEccMode retrieves the current and pending ECC mode of the device.
+func (l Device) GetEccMode() (EnableState, EnableState, Return) {
+	if l.so.Lookup("nvmlDeviceGetEccMode") != nil {
+		return FEATURE_DISABLED, FEATURE_DISABLED, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	var current, pending EnableState
+	ret := nvmlDeviceGetEccMode(l.handle, &current, &pending)
+	return current, pending, ret
+}
+
 // GetMemoryErrorCounter retrieves the count of memory errors for the device based on the specified error type,
 // ECC counter type, and memory location,
 // returning the error count as a uint64 value.
