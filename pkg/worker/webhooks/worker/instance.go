@@ -17,6 +17,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
@@ -66,14 +67,18 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 			Name: inst.Spec.Type,
 		},
 	}
-	err := r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
 			return nil, field.InternalError(
 				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
 		}
-		return nil, field.NotFound(
-			field.NewPath("spec.type"), inst.Spec.Type)
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			return nil, field.NotFound(
+				field.NewPath("spec.type"), inst.Spec.Type)
+		}
 	}
 
 	var errs field.ErrorList
@@ -245,6 +250,10 @@ func (r *InstanceWebhook) ValidateDelete(ctx context.Context, obj runtime.Object
 func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	inst := obj.(*workercore.Instance)
 
+	if inst.Spec.Type == "" {
+		return field.Required(
+			field.NewPath("spec.type"), "type must be specified")
+	}
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
 			Name: inst.Spec.Type,
@@ -256,8 +265,12 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			return field.InternalError(
 				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
 		}
-		return field.NotFound(
-			field.NewPath("spec.type"), inst.Spec.Type)
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			return field.NotFound(
+				field.NewPath("spec.type"), inst.Spec.Type)
+		}
 	}
 
 	if inst.Spec.ImagePullPolicy == "" {
