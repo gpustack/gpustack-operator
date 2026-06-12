@@ -105,7 +105,7 @@ func (r *CohortReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 const (
-	IndexingNodeByCohortProfile = "nodes.labels['feature.gpustack.ai/*.profile-cohort']"
+	IndexingNodeByCohortProfile = "nodes.labels['feature.gpustack.ai/*.z-cohort']"
 )
 
 func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {

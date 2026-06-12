@@ -130,7 +130,7 @@ func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 }
 
 const (
-	IndexingNodeByFlavorProfile = "nodes.labels['feature.gpustack.ai/*.profile-flavor']"
+	IndexingNodeByFlavorProfile = "nodes.labels['feature.gpustack.ai/*.z-flavor']"
 )
 
 func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {

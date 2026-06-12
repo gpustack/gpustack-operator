@@ -79,9 +79,9 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 	if v := group.Family; v != "" {
 		labels[nodeKey+".family"] = v
 	}
-	// "acceleratable.${prefix}${manufacturer}-${id}.compute-capability=${computeCapability}"
+	// "acceleratable.${prefix}${manufacturer}-${id}.comcap=${computeCapability}"
 	if v := group.ComputeCapability; v != "" {
-		labels[nodeKey+".compute-capability"] = v
+		labels[nodeKey+".comcap"] = v
 	}
 
 	// Match Kubernetes label values' requirements.
@@ -285,8 +285,8 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		}
 		labels[ramKey] = strconvx.Itoa(generalRamC) + "Gi"
 
-		// "general.${prefix}${manufacturer}-${id}.local-storage=${stg}"
-		stgKey := generalKey + ".local-storage"
+		// "general.${prefix}${manufacturer}-${id}.storage=${stg}"
+		stgKey := generalKey + ".storage"
 		var stgQ resource.Quantity
 		if v := node.Labels[stgKey]; v != "" {
 			stgQ = funcx.NoError(resource.ParseQuantity(v))
@@ -303,18 +303,18 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		}
 		labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
 
-		// General has no sliced concept, so profile-queue and profile-cohort
+		// General has no sliced concept, so z-queue and z-cohort
 		// always carry the same per-unit value.
 		//
-		// "general.${prefix}${manufacturer}-${id}.profile-flavor=${cpu}c-${ram}g-${stg}g"
-		labels[generalKey+".profile-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, generalRamC, stgC)
+		// "general.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g"
+		labels[generalKey+".z-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, generalRamC, stgC)
 
-		// "general.${prefix}${manufacturer}-${id}.profile-queue=1c-${ramUnit}g"
-		// "general.${prefix}${manufacturer}-${id}.profile-cohort=1c-${ramUnit}g"
+		// "general.${prefix}${manufacturer}-${id}.z-queue=1c-${ramUnit}g"
+		// "general.${prefix}${manufacturer}-${id}.z-cohort=1c-${ramUnit}g"
 		ramUnit := generalRamC / cpuC
 		generalUnit := fmt.Sprintf("1c-%dg", ramUnit)
-		labels[generalKey+".profile-queue"] = generalUnit
-		labels[generalKey+".profile-cohort"] = generalUnit
+		labels[generalKey+".z-queue"] = generalUnit
+		labels[generalKey+".z-cohort"] = generalUnit
 	}
 
 	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
@@ -364,8 +364,8 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		}
 		labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
 
-		// "acceleratable.${prefix}${manufacturer}-${id}.local-storage=${stg}"
-		stgKey := nodeKey + ".local-storage"
+		// "acceleratable.${prefix}${manufacturer}-${id}.storage=${stg}"
+		stgKey := nodeKey + ".storage"
 		var stgQ resource.Quantity
 		if v := node.Labels[stgKey]; v != "" {
 			stgQ = funcx.NoError(resource.ParseQuantity(v))
@@ -384,7 +384,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.sliced.partitions=${slicedC}" is a
 		// user-supplied input: when present and positive it appends
-		// "-${slicedC}s" to profile-flavor and profile-queue. profile-cohort
+		// "-${slicedC}s" to z-flavor and z-queue. z-cohort
 		// is the cohort-level per-unit view and never carries a sliced
 		// suffix — it is what cohort matching compares on.
 		var slicedC int64
@@ -394,15 +394,15 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 			}
 		}
 
-		// "acceleratable.${prefix}${manufacturer}-${id}.profile-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]"
+		// "acceleratable.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]"
 		profFlavor := fmt.Sprintf("%dc-%dg-%dg-%dd", cpuC, ramC, stgC, accC)
 		if slicedC > 0 {
 			profFlavor = fmt.Sprintf("%s-%ds", profFlavor, slicedC)
 		}
-		labels[nodeKey+".profile-flavor"] = profFlavor
+		labels[nodeKey+".z-flavor"] = profFlavor
 
-		// "acceleratable.${prefix}${manufacturer}-${id}.profile-queue=${cpuUnit}c-${ramUnit}g-1d[-${sliced}s]"
-		// "acceleratable.${prefix}${manufacturer}-${id}.profile-cohort=${cpuUnit}c-${ramUnit}g-1d"
+		// "acceleratable.${prefix}${manufacturer}-${id}.z-queue=${cpuUnit}c-${ramUnit}g-1d[-${sliced}s]"
+		// "acceleratable.${prefix}${manufacturer}-${id}.z-cohort=${cpuUnit}c-${ramUnit}g-1d"
 		cpuUnit := cpuC / accC
 		ramUnit := ramC / accC
 		profCohort := fmt.Sprintf("%dc-%dg-1d", cpuUnit, ramUnit)
@@ -410,8 +410,8 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		if slicedC > 0 {
 			profQueue = fmt.Sprintf("%s-%ds", profCohort, slicedC)
 		}
-		labels[nodeKey+".profile-queue"] = profQueue
-		labels[nodeKey+".profile-cohort"] = profCohort
+		labels[nodeKey+".z-queue"] = profQueue
+		labels[nodeKey+".z-cohort"] = profCohort
 	}
 
 	return labels
@@ -464,12 +464,12 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 	if gKey != "" {
 		nodeKey := GeneralFeatureLabelPrefix + gKey
 
-		profFlavorKey := nodeKey + ".profile-flavor"
-		profQueueKey := nodeKey + ".profile-queue"
-		profCohortKey := nodeKey + ".profile-cohort"
+		profFlavorKey := nodeKey + ".z-flavor"
+		profQueueKey := nodeKey + ".z-queue"
+		profCohortKey := nodeKey + ".z-cohort"
 		cpuKey := nodeKey + ".cpu"
 		ramKey := nodeKey + ".ram"
-		stgKey := nodeKey + ".local-storage"
+		stgKey := nodeKey + ".storage"
 
 		if kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, cpuKey, ramKey, stgKey) {
 			profQueue := labels[profQueueKey]
@@ -507,13 +507,13 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
 		nodeKey := AcceleratableFeatureLabelPrefix + ndKey
 
-		profFlavorKey := nodeKey + ".profile-flavor"
-		profQueueKey := nodeKey + ".profile-queue"
-		profCohortKey := nodeKey + ".profile-cohort"
+		profFlavorKey := nodeKey + ".z-flavor"
+		profQueueKey := nodeKey + ".z-queue"
+		profCohortKey := nodeKey + ".z-cohort"
 		accKey := nodeKey + ".count"
 		cpuKey := nodeKey + ".cpu"
 		ramKey := nodeKey + ".ram"
-		stgKey := nodeKey + ".local-storage"
+		stgKey := nodeKey + ".storage"
 
 		if !kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, accKey, cpuKey, ramKey, stgKey) {
 			continue
@@ -683,7 +683,7 @@ func ExtractNodeQueue(node *core.Node, acceleratableNodeKey string) (NodeQueue, 
 	nq.NodeResourceFlavorAccelerator = NodeResourceFlavorAccelerator{
 		Memory:            node.Labels[nodeKey+".memory"],
 		Cores:             node.Labels[nodeKey+".cores"],
-		ComputeCapability: node.Labels[nodeKey+".compute-capability"],
+		ComputeCapability: node.Labels[nodeKey+".comcap"],
 		CPU: NodeResourceFlavorAcceleratorCPU{
 			Manufacturer:          extractGeneralNodeKeyManufacturer(node),
 			Product:               generalFeatureAnnotation(node, "name"),
@@ -723,9 +723,9 @@ func ExtractNodeProfiles(node *core.Node) (profiles []NodeProfile) {
 		if accKey != "" {
 			nodeKey = AcceleratableFeatureLabelPrefix + accKey
 		}
-		flavor := labels[nodeKey+".profile-flavor"]
-		queue := labels[nodeKey+".profile-queue"]
-		cohort := labels[nodeKey+".profile-cohort"]
+		flavor := labels[nodeKey+".z-flavor"]
+		queue := labels[nodeKey+".z-queue"]
+		cohort := labels[nodeKey+".z-cohort"]
 		if flavor == "" || queue == "" || cohort == "" {
 			return
 		}
