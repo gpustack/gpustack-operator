@@ -8,36 +8,45 @@ import (
 
 func TestNormalizeName(t *testing.T) {
 	cases := []struct {
-		name      string
-		prefix    string
-		maxLength int
-		expected  string
+		name       string
+		prefix     string
+		maxLength  int
+		stripCruft bool
+		expected   string
 	}{
-		{"AMD Instinct MI300X OAM", "amd", 49, "instinct-mi300x-oam"},
-		{"AMD Instinct MI308X OAM", "amd", 49, "instinct-mi308x-oam"},
-		{"Navi 32 [Radeon RX 7700 XT / 7800 XT]", "amd", 49, "navi-32-radeon-rx-7700-xt-7800-xt"},
-		{"Ascend910B2", "ascend", 46, "910b2"},
-		{"310P3", "ascend", 46, "310p3"},
-		{"K100_AI", "hygon", 47, "k100_ai"},
-		{"MXC500", "metax", 47, "mxc500"},
-		{"NVIDIA A100", "nvidia", 46, "a100"},
-		{"NVIDIA H100 80GB HBM3", "nvidia", 46, "h100-80gb-hbm3"},
-		{"NVIDIA H200", "nvidia", 46, "h200"},
-		{"Tesla 4", "nvidia", 46, "tesla-4"},
-		{"Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz", "intel", 0, "xeon-platinum-8358"},
-		{"Intel(R) Xeon(R) Platinum 8480+ CPU @ 2.00GHz", "intel", 0, "xeon-platinum-8480"},
-		{"Intel(R) Core(TM) i9-14900K", "intel", 0, "core-i9-14900k"},
-		{"AMD EPYC 7763 64-Core Processor", "amd", 0, "epyc-7763-64-core-processor"},
-		{"Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz", "intel", 10, "xeon-plati"},
-		{"NVIDIA", "nvidia", 46, ""},
-		{"", "nvidia", 46, ""},
-		{"   ", "", 0, ""},
+		{"AMD Instinct MI300X OAM", "amd", 49, false, "instinct-mi300x-oam"},
+		{"AMD Instinct MI308X OAM", "amd", 49, false, "instinct-mi308x-oam"},
+		{"Navi 32 [Radeon RX 7700 XT / 7800 XT]", "amd", 49, false, "navi-32-radeon-rx-7700-xt-7800-xt"},
+		{"Ascend910B2", "ascend", 46, false, "910b2"},
+		{"310P3", "ascend", 46, false, "310p3"},
+		{"K100_AI", "hygon", 47, false, "k100_ai"},
+		{"MXC500", "metax", 47, false, "mxc500"},
+		{"NVIDIA A100", "nvidia", 46, false, "a100"},
+		{"NVIDIA H100 80GB HBM3", "nvidia", 46, false, "h100-80gb-hbm3"},
+		{"NVIDIA H200", "nvidia", 46, false, "h200"},
+		{"Tesla 4", "nvidia", 46, false, "tesla-4"},
+		{"Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz", "intel", 0, true, "xeon-platinum-8358"},
+		{"Intel(R) Xeon(R) Platinum 8480+ CPU @ 2.00GHz", "intel", 0, true, "xeon-platinum-8480"},
+		{"Intel(R) Core(TM) i9-14900K", "intel", 0, true, "core-i9-14900k"},
+		{"Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz", "intel", 10, true, "xeon-plati"},
+		{"AMD EPYC 7763 64-Core Processor", "amd", 0, true, "epyc-7763"},
+		{"AMD Ryzen 9 7950X 16-Core Processor", "amd", 0, true, "ryzen-9-7950x"},
+		{"AMD Ryzen Threadripper PRO 5995WX 64-Cores", "amd", 0, true, "ryzen-threadripper-pro-5995wx"},
+		{"11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz", "intel", 0, true, "core-i7-1165g7"},
+		{"13th Gen Intel(R) Core(TM) i9-13900K", "intel", 0, true, "core-i9-13900k"},
+		{"Genuine Intel(R) CPU 0000 @ 2.00GHz", "intel", 0, true, "cpu-0000"},
+		// Without stripCruft the trademark/frequency/Processor cruft is retained.
+		{"AMD EPYC 7763 64-Core Processor", "amd", 0, false, "epyc-7763-64-core-processor"},
+		{"Intel(R) Core(TM) i9-14900K", "intel", 0, false, "r-coretm-i9-14900k"},
+		{"NVIDIA", "nvidia", 46, false, ""},
+		{"", "nvidia", 46, false, ""},
+		{"   ", "", 0, false, ""},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			result := NormalizeName(c.name, c.prefix, c.maxLength)
-			assert.Equal(t, c.expected, result, "NormalizeName(%q, %q, %d) should return %q, got %q", c.name, c.prefix, c.maxLength, c.expected, result)
+			result := NormalizeName(c.name, c.prefix, c.maxLength, c.stripCruft)
+			assert.Equal(t, c.expected, result, "NormalizeName(%q, %q, %d, %t) should return %q, got %q", c.name, c.prefix, c.maxLength, c.stripCruft, c.expected, result)
 		})
 	}
 }

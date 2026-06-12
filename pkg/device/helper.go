@@ -2,6 +2,7 @@ package device
 
 import (
 	"os"
+	"regexp"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -51,7 +52,7 @@ func ConstructGroupID(manufacturer, name string, memory uint64) string {
 	if constructGroupIDWithMemory {
 		budget -= 7 // 7 is the max length of the suffix "-memory".
 	}
-	n := NormalizeName(name, manufacturer, budget)
+	n := NormalizeName(name, manufacturer, budget, false)
 	if !constructGroupIDWithMemory {
 		return n
 	}
@@ -59,18 +60,37 @@ func ConstructGroupID(manufacturer, name string, memory uint64) string {
 	return n + "-" + m
 }
 
-// _TrademarkMarkerReplacer drops the trademark markers carried by device or CPU product names.
-var _TrademarkMarkerReplacer = strings.NewReplacer("(R)", "", "(r)", "", "(TM)", "", "(tm)", "")
+var (
+	// _CPUNameTrademarkMarkerReplacer drops the trademark markers carried by CPU product names.
+	_CPUNameTrademarkMarkerReplacer = strings.NewReplacer("(R)", "", "(r)", "", "(TM)", "", "(tm)", "")
+
+	// _CPUNamePrefixCruft matches the leading cruft carried by CPU product names,
+	// e.g. "Genuine " and "11th Gen ".
+	_CPUNamePrefixCruft = regexp.MustCompile(`^(Genuine |[0-9]+(st|nd|rd|th) Gen )+`)
+
+	// _CPUNameCoreCountSuffix matches the trailing core-count carried by CPU product
+	// names, e.g. " 64-Core" and " 16-Cores".
+	_CPUNameCoreCountSuffix = regexp.MustCompile(`(?i) [0-9]+-cores?$`)
+)
 
 // NormalizeName sanitizes the given device or CPU product name into a Kubernetes
-// label-safe slug: it drops trademark markers like "(R)"/"(TM)" and the frequency
-// part led by " CPU @ ", lowercases letters, keeps only [a-z0-9-_.], converts
+// label-safe slug: it lowercases letters, keeps only [a-z0-9-_.], converts
 // whitespace to "-", collapses consecutive separators, trims the leading prefix
 // when matched case-insensitively, and trims leading/trailing separators.
+// When stripCruft is true, it first strips CPU-name cruft: the "@ <freq>" tail,
+// trademark markers like "(R)"/"(TM)", the "Genuine"/"Nth Gen" leading words, the
+// trailing "CPU"/"Processor" words, and the trailing "<n>-Core(s)" count.
 // When maxLength is positive, the result is truncated to at most maxLength runes.
-func NormalizeName(name, prefix string, maxLength int) string {
-	name, _, _ = strings.Cut(name, " CPU @ ")
-	name = _TrademarkMarkerReplacer.Replace(name)
+func NormalizeName(name, prefix string, maxLength int, stripCruft bool) string {
+	if stripCruft {
+		name, _, _ = strings.Cut(name, " @ ")
+		name = _CPUNameTrademarkMarkerReplacer.Replace(name)
+		name = _CPUNamePrefixCruft.ReplaceAllString(name, "")
+		name = strings.TrimSpace(name)
+		name = strings.TrimSuffix(name, " CPU")
+		name = strings.TrimSuffix(name, " Processor")
+		name = _CPUNameCoreCountSuffix.ReplaceAllString(name, "")
+	}
 
 	if maxLength <= 0 {
 		maxLength = len(name)

@@ -166,7 +166,7 @@ func ExtractGeneralNodeKey(node *core.Node) string {
 	if name := generalFeatureAnnotation(node, "name"); name != "" {
 		// "${manufacturer}-${idPrefix}${idSuffix}"
 		budget := 63 - len(manu) - 1 - len(idSuffix)
-		idPrefix = device.NormalizeName(name, manu, budget)
+		idPrefix = device.NormalizeName(name, manu, budget, true)
 	} else {
 		family := node.Labels[_NFDCPUModelFamilyLabelKey]
 		modelID := node.Labels[_NFDCPUModelIDLabelKey]

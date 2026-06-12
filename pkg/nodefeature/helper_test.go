@@ -320,7 +320,7 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 					FeatureLabelPrefix + "cpu-name": "AMD EPYC 7763 64-Core Processor",
 				},
 			),
-			expected: "amd-epyc-7763-64-core-processor-ln-x64",
+			expected: "amd-epyc-7763-ln-x64",
 		},
 		{
 			name: "unresolved cpu-name annotation falls back to cpu-model labels",
@@ -544,7 +544,7 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 				return nd
 			}(),
 			expected: func() map[string]string {
-				pfx := GeneralFeatureLabelPrefix + "amd-epyc-7763-64-core-processor-ln-x64"
+				pfx := GeneralFeatureLabelPrefix + "amd-epyc-7763-ln-x64"
 				return map[string]string{
 					systemname.ManagedLabelKey:        "true",
 					GeneralFeatureLabelPrefix + "amd": "true",
