@@ -447,15 +447,15 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// deviceLabels mirrors what ConstructAcceleratableNodeLabels would have put on
 	// the node before ConstructNodeCapacityLabels is invoked.
 	deviceLabels := func(id, product, memory, accelerators string) map[string]string {
-		ndKey := AcceleratableFeatureLabelPrefix + "nvidia-" + id
+		aKey := AcceleratableFeatureLabelPrefix + "nvidia-" + id
 		return map[string]string{
 			systemname.ManagedLabelKey:                 "true",
 			AcceleratableFeatureLabelPrefix + "nvidia": "true",
-			ndKey:              "true",
-			ndKey + ".product": product,
-			ndKey + ".memory":  memory,
-			ndKey + ".cores":   "0",
-			ndKey + ".count":   accelerators,
+			aKey:              "true",
+			aKey + ".product": product,
+			aKey + ".memory":  memory,
+			aKey + ".cores":   "0",
+			aKey + ".count":   accelerators,
 		}
 	}
 

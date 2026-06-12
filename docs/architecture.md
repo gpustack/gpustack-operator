@@ -88,7 +88,7 @@ At startup, `pkg/worker/kuberess` installs the NFD Helm chart. NFD performs thre
 
 `pkg/worker/kuberess` also installs the Device Manager. For each known manufacturer, a DaemonSet named `gpustack-operator-device-manager-${manufacturer}` is created with a node selector on the NFD PCI label. For example, nodes labeled `feature.node.kubernetes.io/pci-10de.present: "true"` receive a Pod from the `gpustack-operator-device-manager-nvidia` DaemonSet.
 
-Once running, the DM detect loop (`pkg/devicemanager/detector/detector.go`) periodically detects accelerators and reports a NodeFeature object named `${NODE_NAME}-gpustack-device-manager` (owned by the Node), whose labels are built by `nodefeature.ConstructAcceleratableNodeLabels`:
+Once running, the DM detect loop (`pkg/devicemanager/detector/detector.go`) periodically detects accelerators and reports a NodeFeature object named `${NODE_NAME}-gpustack-device-manager` (owned by the Node), whose labels are built by `nodefeature.ConstructAcceleratableNodeLabels`. Each detected accelerator model is keyed by the accelerated device key `${aKey} = ${manufacturer}-${id}`, where `id` is the product name sanitized to satisfy Kubernetes label naming rules:
 
 | Label                                                                | Meaning                                                            |
 |----------------------------------------------------------------------|--------------------------------------------------------------------|
@@ -96,13 +96,13 @@ Once running, the DM detect loop (`pkg/devicemanager/detector/detector.go`) peri
 | `acceleratable.${prefix}${manufacturer}=true`                         | Accelerator manufacturer                                            |
 | `acceleratable.${prefix}${manufacturer}.driver-version=${dv}`         | Device driver version (omitted when undetected)                     |
 | `acceleratable.${prefix}${manufacturer}.runtime-version=${rv}`        | Device runtime version (omitted when undetected)                    |
-| `acceleratable.${prefix}${manufacturer}-${id}=true`                   | Concrete device model; `id` is the product name sanitized to satisfy Kubernetes label naming rules |
-| `acceleratable.${prefix}${manufacturer}-${id}.product=${name}`        | Product name                                                        |
-| `acceleratable.${prefix}${manufacturer}-${id}.memory=${memory}`       | VRAM size, formatted at the largest binary unit (e.g. `16Gi`)       |
-| `acceleratable.${prefix}${manufacturer}-${id}.cores=${cores}`         | Accelerator core count                                              |
-| `acceleratable.${prefix}${manufacturer}-${id}.count=${acc}`           | Number of accelerators of this model on the node                    |
-| `acceleratable.${prefix}${manufacturer}-${id}.family=${family}`       | Product family (omitted when undetected)                            |
-| `acceleratable.${prefix}${manufacturer}-${id}.comcap=${cc}` | Compute capability (omitted when undetected)                      |
+| `acceleratable.${prefix}${aKey}=true`                                 | Concrete device model marker                                        |
+| `acceleratable.${prefix}${aKey}.product=${name}`        | Product name                                                        |
+| `acceleratable.${prefix}${aKey}.memory=${memory}`       | VRAM size, formatted at the largest binary unit (e.g. `16Gi`)       |
+| `acceleratable.${prefix}${aKey}.cores=${cores}`         | Accelerator core count                                              |
+| `acceleratable.${prefix}${aKey}.count=${acc}`           | Number of accelerators of this model on the node                    |
+| `acceleratable.${prefix}${aKey}.family=${family}`       | Product family (omitted when undetected)                            |
+| `acceleratable.${prefix}${aKey}.comcap=${cc}` | Compute capability (omitted when undetected)                      |
 
 where `prefix` is `feature.gpustack.ai/` — so the device labels live under the dedicated `acceleratable.feature.gpustack.ai/` key namespace — and `manufacturer` is one of the manufacturers supported by `pkg/devicemanager/detector` (NVIDIA, AMD, Ascend, Cambricon, Hygon, Iluvatar, MetaX, MThreads, T-Head). The per-manufacturer PCI vendor IDs, resource names, and runtime class names can all be overridden — see [Environment Variables](environment-variables.md#per-manufacturer-overrides).
 
@@ -125,22 +125,22 @@ For the **general** (CPU-only) view of every node, keyed by the general(CPU) nod
 | `general.${prefix}${gKey}.z-queue=1c-${ramUnit}g`      | Per-unit queue profile spec, `ramUnit = max(ram/cpu, 1)` Gi                     |
 | `general.${prefix}${gKey}.z-cohort=1c-${ramUnit}g`     | Cohort profile spec (identical to the queue spec — general has no slicing)      |
 
-For **each accelerator model** reported by the DM (keyed `${manufacturer}-${id}`), the analogous labels are produced under the `acceleratable.` namespace:
+For **each accelerator model** reported by the DM (keyed by the accelerated device key `${aKey}`), the analogous labels are produced under the `acceleratable.` namespace:
 
 | Label                                                                                | Value                                                  |
 |---------------------------------------------------------------------------------------|---------------------------------------------------------|
-| `acceleratable.${prefix}${manufacturer}-${id}.cpu=${cpu}`                               | Node CPU (floored at the accelerator count)              |
-| `acceleratable.${prefix}${manufacturer}-${id}.ram=${ram}`                               | Node RAM in Gi (rounded up to even, floored at the accelerator count) |
-| `acceleratable.${prefix}${manufacturer}-${id}.storage=${stg}`                     | Node local storage in Gi (rounded down to even; falls back to 15 Gi per accelerator when unusable) |
-| `acceleratable.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]` | Per-node flavor profile spec               |
-| `acceleratable.${prefix}${manufacturer}-${id}.z-queue=${cpuUnit}c-${ramUnit}g-1d[-${sliced}s]`       | Per-unit queue profile spec                |
-| `acceleratable.${prefix}${manufacturer}-${id}.z-cohort=${cpuUnit}c-${ramUnit}g-1d`                   | Cohort profile spec                        |
+| `acceleratable.${prefix}${aKey}.cpu=${cpu}`                               | Node CPU (floored at the accelerator count)              |
+| `acceleratable.${prefix}${aKey}.ram=${ram}`                               | Node RAM in Gi (rounded up to even, floored at the accelerator count) |
+| `acceleratable.${prefix}${aKey}.storage=${stg}`                     | Node local storage in Gi (rounded down to even; falls back to 15 Gi per accelerator when unusable) |
+| `acceleratable.${prefix}${aKey}.z-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]` | Per-node flavor profile spec               |
+| `acceleratable.${prefix}${aKey}.z-queue=${cpuUnit}c-${ramUnit}g-1d[-${sliced}s]`       | Per-unit queue profile spec                |
+| `acceleratable.${prefix}${aKey}.z-cohort=${cpuUnit}c-${ramUnit}g-1d`                   | Cohort profile spec                        |
 
 The differences from the general view:
 
 1. `acc` is read from the DM-reported `.count` label (the model's labels are skipped entirely when it is missing or non-positive).
 2. `cpuUnit = max(cpu/acc, 1)`, `ramUnit = max(ram/acc, 1)` Gi — i.e. the fair per-device share of the node.
-3. If the user-supplied label `acceleratable.${prefix}${manufacturer}-${id}.sliced.partitions=${partitions}` is present, `sliced` appends an `-${sliced}s` suffix to `z-flavor` and `z-queue`. `z-cohort` **never** carries the sliced suffix — it is the matching key at the cohort level, so sliced and exclusive queues of the same per-unit shape join the same Cohort.
+3. If the user-supplied label `acceleratable.${prefix}${aKey}.sliced.partitions=${partitions}` is present, `sliced` appends an `-${sliced}s` suffix to `z-flavor` and `z-queue`. `z-cohort` **never** carries the sliced suffix — it is the matching key at the cohort level, so sliced and exclusive queues of the same per-unit shape join the same Cohort.
 
 > **Known behavior:** when one node carries several accelerator models, each model's labels claim the **full** node cpu/ram/storage. The resulting ClusterQueue quotas overlap across the per-model queues, i.e. the host resources are oversold across queues on such nodes.
 
@@ -149,7 +149,7 @@ The differences from the general view:
 Together these labels drive the scheduling chain, implemented on top of Kueue by four controllers in `pkg/worker/controllers/worker`. Every Kueue object name carries the general(CPU) segment first, then (for accelerated profiles) the device segment, joined by `--`:
 
 ```
-gpustack--${gKey}-${cpu}c-${ram}g[-${stg}g][--${manufacturer}-${id}-${acc}d[-${sliced}s]]
+gpustack--${gKey}-${cpu}c-${ram}g[-${stg}g][--${aKey}-${acc}d[-${sliced}s]]
 ```
 
 ```mermaid
@@ -167,7 +167,7 @@ flowchart LR
     NODE --> COR
     NODE --> CQR
 
-    RFR -- "one per z-flavor<br/>gpustack--GKEY-CPUc-RAMg-STGg[--ACCKEY-ACCd[-SLICEDs]]" --> RF["ResourceFlavor"]
+    RFR -- "one per z-flavor<br/>gpustack--GKEY-CPUc-RAMg-STGg[--AKEY-ACCd[-SLICEDs]]" --> RF["ResourceFlavor"]
     COR -- "one per z-cohort" --> CO["Cohort"]
     RF --> CQR
     CQR -- "aggregates flavors sharing<br/>the same z-queue" --> CQ["ClusterQueue"]
@@ -177,7 +177,7 @@ flowchart LR
     LQR -- "one per (ClusterQueue, Namespace)<br/>named gpustack-fnv64-HASH" --> LQ["LocalQueue"]
 ```
 
-- **`ResourceFlavorReconciler`** (`resourceflavor.go`) watches Node label/taint changes and, via `nodefeature.ExtractNodeResourceFlavors`, creates one `ResourceFlavor` per profile, named `gpustack--${gKey}-${z-flavor}` for the general profile and `gpustack--${gKey}-${host}--${manufacturer}-${id}-${acc}d[-${sliced}s]` for accelerated profiles. The flavor pins workloads to matching nodes through `spec.nodeLabels` — the node's `z-queue` label, plus the `general.${prefix}${gKey}=true` marker for accelerated flavors so that the same device model on a different CPU never matches. The target queue/cohort names are recorded in the `schedule.gpustack.ai/queue` and `schedule.gpustack.ai/cohort` **annotations** (annotations rather than labels: the names may exceed the 63-character label value limit). A companion cleanup controller (`resourceflavor_cleanup.go`) deletes flavors no longer referenced by any node.
+- **`ResourceFlavorReconciler`** (`resourceflavor.go`) watches Node label/taint changes and, via `nodefeature.ExtractNodeResourceFlavors`, creates one `ResourceFlavor` per profile, named `gpustack--${gKey}-${z-flavor}` for the general profile and `gpustack--${gKey}-${cpu}c-${ram}g[-${stg}g]--${aKey}-${acc}d[-${sliced}s]` for accelerated profiles. The flavor pins workloads to matching nodes through `spec.nodeLabels` — the node's `z-queue` label, plus the `general.${prefix}${gKey}=true` marker for accelerated flavors so that the same device model on a different CPU never matches. The target queue/cohort names are recorded in the `schedule.gpustack.ai/queue` and `schedule.gpustack.ai/cohort` **annotations** (annotations rather than labels: the names may exceed the 63-character label value limit). A companion cleanup controller (`resourceflavor_cleanup.go`) deletes flavors no longer referenced by any node.
 - **`CohortReconciler`** (`cohort.go`) watches Node label changes and creates a `Cohort` per distinct cohort profile as soon as one node references it, deleting it again when orphaned.
 - **`ClusterQueueReconciler`** (`clusterqueue.go`) watches ResourceFlavors and Nodes. It aggregates all flavors carrying the same queue annotation into one `ClusterQueue`, computing each flavor's nominal quota as the per-node capacity multiplied by the number of matching nodes (accelerator quota is summed from node allocatable, exposed as `credits.gpustack.ai/${manufacturer}`). The queue is bound to its `Cohort`, prefers nominal quota over borrowing, and never preempts within the cohort; sliced queues additionally pin `borrowingLimit: 0` on every resource, so they can never borrow from the cohort.
 - **`LocalQueueReconciler`** (`localqueue.go`) watches ClusterQueues and Namespaces, creating a `LocalQueue` in every non-system Namespace so workloads can submit from anywhere. Because workloads reference the LocalQueue through the `kueue.x-k8s.io/queue-name` **label** (value limit: 63 characters) while ClusterQueue names may be longer, the LocalQueue is named `gpustack-fnv64-${fnv64a(ClusterQueue name)}` — always 31 characters — and records the full ClusterQueue name in the `schedule.gpustack.ai/cluster-queue` annotation (`spec.clusterQueue` also points at it).

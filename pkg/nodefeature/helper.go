@@ -317,8 +317,8 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		labels[generalKey+".z-cohort"] = generalUnit
 	}
 
-	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
-		nodeKey := AcceleratableFeatureLabelPrefix + ndKey
+	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
+		nodeKey := AcceleratableFeatureLabelPrefix + aKey
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.count=${accelerator}".
 		accKey := nodeKey + ".count"
@@ -504,8 +504,8 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		gKey = GeneralManufacturerGeneric
 	}
 
-	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
-		nodeKey := AcceleratableFeatureLabelPrefix + ndKey
+	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
+		nodeKey := AcceleratableFeatureLabelPrefix + aKey
 
 		profFlavorKey := nodeKey + ".z-flavor"
 		profQueueKey := nodeKey + ".z-queue"
@@ -520,7 +520,7 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		}
 
 		profQueue := labels[profQueueKey]
-		manufacturer, _, _ := strings.Cut(ndKey, "-")
+		manufacturer, _, _ := strings.Cut(aKey, "-")
 
 		nodeLabels := map[string]string{
 			systemname.ManagedLabelKey: "true",
@@ -533,9 +533,9 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		}
 
 		ndf := NodeResourceFlavor{
-			ProfileCohort: FormatNodeProfile(gKey, ndKey, labels[profCohortKey]),
-			ProfileQueue:  FormatNodeProfile(gKey, ndKey, profQueue),
-			ProfileFlavor: FormatNodeProfile(gKey, ndKey, labels[profFlavorKey]),
+			ProfileCohort: FormatNodeProfile(gKey, aKey, labels[profCohortKey]),
+			ProfileQueue:  FormatNodeProfile(gKey, aKey, profQueue),
+			ProfileFlavor: FormatNodeProfile(gKey, aKey, labels[profFlavorKey]),
 			Manufacturer:  manufacturer,
 			Acceleratable: true,
 			NodeLabels:    nodeLabels,
@@ -741,8 +741,8 @@ func ExtractNodeProfiles(node *core.Node) (profiles []NodeProfile) {
 	} else {
 		gKey = GeneralManufacturerGeneric
 	}
-	for _, ndKey := range ExtractAcceleratableNodeKeys(node) {
-		emit(gKey, ndKey)
+	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
+		emit(gKey, aKey)
 	}
 
 	return profiles
