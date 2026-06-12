@@ -86,7 +86,12 @@ master:
       {{ $.ManagedLabel }}: "true"
   config:
     restrictions:
+      disableLabels: false
+      disableTaints: false
       disableAnnotations: false
+      disableExtendedResources: false
+      allowOverwrite: true
+      denyNodeFeatureLabels: false
       nodeFeatureNamespaceSelector:
         matchLabels:
           kubernetes.io/metadata.name: "{{ $.Namespace }}"
@@ -209,7 +214,7 @@ func extendNfdChartValuesTemplateFuncMap() template.FuncMap {
 			if len(r) == 0 {
 				// Default to the PCI device classes of display/accelerator related devices,
 				// see https://admin.pci-ids.ucw.cz/read/PD.
-				r = []string{"02", "03", "06", "0b", "12"}
+				r = []string{"02", "03", "0b", "12"}
 			}
 			return r
 		},

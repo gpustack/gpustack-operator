@@ -15,11 +15,20 @@ import (
 
 // Toggle of the functions.
 var (
-	getPCIDevicesWithoutDefaultClassPrefixes bool
+	getPCIDevicesDefaultClassPrefixes []string
 )
 
 func init() {
-	getPCIDevicesWithoutDefaultClassPrefixes = os.Getenv("GPUSTACK_PCI_CHECK_WITHOUT_DEFAULT_CLASS_PREFIXES") == "true"
+	for _, p := range strings.Split(os.Getenv("GPUSTACK_PCI_CLASS_PREFIXES"), ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			getPCIDevicesDefaultClassPrefixes = append(getPCIDevicesDefaultClassPrefixes, p)
+		}
+	}
+	if len(getPCIDevicesDefaultClassPrefixes) == 0 {
+		// Default to the PCI device classes of display/accelerator related devices,
+		// see https://admin.pci-ids.ucw.cz/read/PD.
+		getPCIDevicesDefaultClassPrefixes = []string{"02", "03", "0b", "12"}
+	}
 }
 
 func getCPUSize() int {
@@ -140,8 +149,8 @@ func getPCIDevices(vendors, classPrefixes []string) PCIDevices {
 		return devices
 	}
 
-	if classPrefixes == nil && !getPCIDevicesWithoutDefaultClassPrefixes {
-		classPrefixes = []string{"02", "03", "0b", "12"}
+	if classPrefixes == nil {
+		classPrefixes = getPCIDevicesDefaultClassPrefixes
 	}
 
 	entries, err := os.ReadDir(sysfsPCIPath)

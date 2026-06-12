@@ -104,10 +104,8 @@ managerConfig:
     apiVersion: config.kueue.x-k8s.io/v1beta2
     kind: Configuration
     featureGates:
-      TASBalancedPlacement: true
-      # Never label pods with the cluster/local queue names:
-      # the ClusterQueue name may exceed the 63-character label value limit.
       AssignQueueLabelsForPods: false
+      TASBalancedPlacement: true
     health:
       healthProbeBindAddress: :8081
     metrics:
