@@ -32,8 +32,6 @@ const (
 	FeatureLabelPrefix = "feature." + systemname.LabelPrefix
 	// CreditsLabelPrefix prefixes the node feature credits label/annotation keys.
 	CreditsLabelPrefix = "credits." + systemname.LabelPrefix
-	// ScheduleLabelPrefix prefixes the schedule label/annatation keys.
-	ScheduleLabelPrefix = "schedule." + systemname.LabelPrefix
 )
 
 const (

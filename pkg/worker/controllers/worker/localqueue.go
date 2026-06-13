@@ -44,7 +44,7 @@ var _ ctrlreconcile.Reconciler = (*LocalQueueReconciler)(nil)
 const (
 	// _LocalQueueClusterQueueNameAnnoKey is for the cluster queue name of a local queue,
 	// whose value records the full ClusterQueue name behind the hash-named LocalQueue.
-	_LocalQueueClusterQueueNameAnnoKey = nodefeature.ScheduleLabelPrefix + "cluster-queue"
+	_LocalQueueClusterQueueNameAnnoKey = ScheduleLabelPrefix + "queue"
 )
 
 func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

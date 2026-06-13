@@ -37,16 +37,19 @@ type ResourceFlavorReconciler struct {
 var _ ctrlreconcile.Reconciler = (*ResourceFlavorReconciler)(nil)
 
 const (
+	// ScheduleLabelPrefix prefixes the schedule label/annatation keys.
+	ScheduleLabelPrefix = "schedule." + systemname.LabelPrefix
+
 	// _ResourceFlavorQueueNameAnnoKey is for the queue name of a resource flavor,
 	// whose value represents the queue that the resource flavor belongs to.
 	//
 	// NB: annotations rather than labels, because the queue/cohort names
 	// carry the general(CPU) and acceleratable(device) keys and may exceed
 	// the 63-character label value limit.
-	_ResourceFlavorQueueNameAnnoKey = nodefeature.ScheduleLabelPrefix + "queue"
+	_ResourceFlavorQueueNameAnnoKey = ScheduleLabelPrefix + "queue"
 	// _ResourceFlavorCohortNameAnnoKey is for the cohort name of a resource flavor,
 	// whose value represents the cohort that the resource flavor's queue longs to.
-	_ResourceFlavorCohortNameAnnoKey = nodefeature.ScheduleLabelPrefix + "cohort"
+	_ResourceFlavorCohortNameAnnoKey = ScheduleLabelPrefix + "cohort"
 )
 
 func (r *ResourceFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
