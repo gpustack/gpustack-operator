@@ -197,9 +197,11 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Create the Pod if not exists.
 	if pod == nil {
-		// If the instance is marked as stopping or stopped,
-		// mark it as starting first to avoid racing with other controllers or users to update the instance status.
-		if inst.Status.Phase == PhaseStopping || inst.Status.Phase == PhaseStopped {
+		// If the instance is marked as stopping/stopped/ready, mark it as starting first
+		// to avoid racing with other controllers or users to update the instance status.
+		if inst.Status.Phase == PhaseStopping ||
+			inst.Status.Phase == PhaseStopped ||
+			inst.Status.Phase == PhaseReady {
 			inst.Status = workercore.InstanceStatus{
 				Phase: PhaseStarting,
 			}
