@@ -129,29 +129,32 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
-    rules:
-      - path: _test\.go
-        linters:
-          - errcheck
-          - gosec
-          - lll
-          - makezero
-      - path: binding/
-        linters:
-          - errname
-          - godot
-          - lll
-      - path: _expansion\.go
-        linters:
-          - lll
-          - errcheck
-          - gocritic
-          - unconvert
     paths:
       - doc.go
       - zz_generated.*.go
       - generated.*.go
       - staging/
+    rules:
+      - linters:
+          - lll
+        source: '^\s*//'
+      - linters:
+          - errcheck
+          - gosec
+          - lll
+          - makezero
+        path: _test\.go
+      - linters:
+          - errname
+          - godot
+          - lll
+        path: binding/
+      - linters:
+          - lll
+          - errcheck
+          - gocritic
+          - unconvert
+        path: _expansion\.go
 formatters:
   enable:
     - gofmt

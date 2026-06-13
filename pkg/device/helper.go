@@ -47,7 +47,7 @@ func NormalizeVersion(ver string) string {
 // ConstructGroupID constructs a group ID from the given name,
 // removes the manufacturer prefix and formats the memory size if enabled.
 func ConstructGroupID(manufacturer, name string, memory uint64) string {
-	// ${manufacturer}-${name}[-${memory}]
+	// ${manufacturer}-${name}[-${memory}], limit to 63 characters in total.
 	budget := 63 - len(manufacturer) - 1
 	if constructGroupIDWithMemory {
 		budget -= 7 // 7 is the max length of the suffix "-memory".

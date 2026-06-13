@@ -24,7 +24,7 @@ var (
 )
 
 func init() {
-	generalNodeKeyWithCPUName = osx.Getenv(_GeneralNodeKeyWithCPUNameEnvKey) == "true"
+	generalNodeKeyWithCPUName = osx.Getenv("GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME") == "true"
 }
 
 const (
@@ -152,9 +152,6 @@ const (
 	_NFDCPUModelVendorIDLabelKey = "feature.node.kubernetes.io/cpu-model.vendor_id"
 	_NFDCPUModelFamilyLabelKey   = "feature.node.kubernetes.io/cpu-model.family"
 	_NFDCPUModelIDLabelKey       = "feature.node.kubernetes.io/cpu-model.id"
-
-	// _GeneralNodeKeyWithCPUNameEnvKey toggles blending the CPU name into the general node key.
-	_GeneralNodeKeyWithCPUNameEnvKey = "GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME"
 )
 
 // ExtractGeneralNodeKey derives the general(CPU) node key of the given Node,
@@ -171,38 +168,84 @@ func ExtractGeneralNodeKey(node *core.Node) string {
 	return extractGeneralNodeKey(node, generalNodeKeyWithCPUName)
 }
 
+// extractGeneralNodeKey is ExtractGeneralNodeKey with the CPU-name blending
+// toggle passed in explicitly, so tests can exercise both modes.
+//
+// The key always trails with the node's os and arch — the well-known
+// "kubernetes.io/os" and "kubernetes.io/arch" labels abbreviated via
+// generalOSAbbrev/generalArchAbbrev — so the "-ln-x64" tail is present
+// regardless of the toggle. The os/arch suffix is a correctness safeguard,
+// not cosmetic: the other key sources can collide across architectures. The
+// "generic" fallback carries no CPU identity at all, and the cpu-model family
+// and id labels are independent numbering spaces on x86 (CPUID) versus arm64
+// (MIDR), so a small value such as "25-1" can legitimately appear on both. Only
+// the sanitized cpu-name annotation tends to be arch-distinct in practice, and
+// even that is not guaranteed under virtualization (generic hypervisor brand
+// strings). Without the suffix, nodes of different ISAs could pool into one
+// Kueue flavor/queue/cohort, which is wrong — amd64 and arm64 binaries are not
+// interchangeable.
+//
+// When generalNodeKeyWithCPUName is false, the key is "generic-${os}-${arch}":
+// every CPU pools together and only os/arch separate the pools.
+//
+// When it is true, the manufacturer (the lowercased NFD cpu-model vendor_id,
+// or "generic" when unknown) leads and a CPU identity is blended in between:
+// the sanitized "feature.gpustack.ai/cpu-name" annotation when reported
+// (e.g. "amd-epyc-7763-ln-x64"), the NFD cpu-model family and id labels as the
+// rare fallback when the annotation is absent (e.g. "amd-25-1-ln-x64"), or
+// nothing when no CPU identity is usable (e.g. "amd-ln-x64", or
+// "generic-ln-x64" when the vendor is unknown too).
 func extractGeneralNodeKey(node *core.Node, generalNodeKeyWithCPUName bool) string {
-	if !generalNodeKeyWithCPUName {
-		return GeneralManufacturerGeneric
-	}
-
-	var idSuffix string
-	if os := node.Labels[core.LabelOSStable]; os != "" {
-		idSuffix += "-" + abbreviate(generalOSAbbrev, os)
-	}
-	if arch := node.Labels[core.LabelArchStable]; arch != "" {
-		idSuffix += "-" + abbreviate(generalArchAbbrev, arch)
-	}
-
-	manu := extractGeneralNodeKeyManufacturer(node)
-
-	var idPrefix string
-	if name := generalFeatureAnnotation(node, "name"); name != "" {
-		// "${manufacturer}-${idPrefix}${idSuffix}"
-		budget := 63 - len(manu) - 1 - len(idSuffix)
-		idPrefix = device.NormalizeName(name, manu, budget, true)
+	// If generalNodeKeyWithCPUName is enabled,
+	// the manufacturer part of the general node key is derived from the NFD cpu-model vendor_id label.
+	var manu string
+	if generalNodeKeyWithCPUName {
+		manu = extractGeneralNodeKeyManufacturer(node)
 	} else {
-		family := node.Labels[_NFDCPUModelFamilyLabelKey]
-		modelID := node.Labels[_NFDCPUModelIDLabelKey]
-		if family != "" && modelID != "" {
-			idPrefix = family + "-" + modelID
+		manu = GeneralManufacturerGeneric
+	}
+
+	// "kubernetes.io/os" and "kubernetes.io/arch" are the well-known labels for OS and architecture,
+	// they are always present and meaningful when the node information is properly collected.
+	var idSuffix string
+	{
+		idSuffix = abbreviate(generalOSAbbrev, node.Labels[core.LabelOSStable])
+		idSuffix += "-" + abbreviate(generalArchAbbrev, node.Labels[core.LabelArchStable])
+	}
+
+	// When generalNodeKeyWithCPUName is enabled,
+	// try to blend the CPU name into the general node key for better readability and differentiation.
+	// The CPU name is reported by the NFD NodeFeatureRule with the "feature.gpustack.ai/cpu-name" annotation,
+	// it is sanitized and truncated to fit the Kubernetes label value requirements when constructing the node key.
+	//
+	// When the annotation is unavailable,
+	// the NFD cpu-model family and id labels are used as the fallback id prefix,
+	// which are always present and meaningful when CPU information is properly collected.
+	//
+	// If NFD is not deployed, or the CPU information is not properly collected,
+	// the id prefix is empty and the general node key falls back to "${manufacturer}-${idSuffix}".
+	var idPrefix string
+	if generalNodeKeyWithCPUName {
+		if name := generalFeatureAnnotation(node, "name"); name != "" {
+			// "${manufacturer}-${idPrefix}-${idSuffix}", limit to 63 characters in total.
+			budget := 63 - len(manu) - len(idSuffix) - 2
+			idPrefix = device.NormalizeName(name, manu, budget, true)
+		} else {
+			family := node.Labels[_NFDCPUModelFamilyLabelKey]
+			modelID := node.Labels[_NFDCPUModelIDLabelKey]
+			if family != "" && modelID != "" {
+				idPrefix = family + "-" + modelID
+			}
 		}
 	}
+
+	// "${manufacturer}-${idSuffix}"
 	if idPrefix == "" {
-		return GeneralManufacturerGeneric
+		return manu + "-" + idSuffix
 	}
 
-	return manu + "-" + idPrefix + idSuffix
+	// "${manufacturer}-${idPrefix}-${idSuffix}"
+	return manu + "-" + idPrefix + "-" + idSuffix
 }
 
 // extractGeneralNodeKeyManufacturer returns the manufacturer part of the general(CPU) node key of the given Node,
@@ -217,18 +260,6 @@ func extractGeneralNodeKeyManufacturer(node *core.Node) string {
 		manu = GeneralManufacturerGeneric
 	}
 	return manu
-}
-
-// generalFeatureAnnotation returns the "feature.gpustack.ai/cpu-${name}" annotation
-// of the given Node, which is reported by the NFD NodeFeatureRule. NFD keeps the
-// "@cpu.model.*" template reference as-is when the attribute is unresolved,
-// so values leading with "@" are treated as empty.
-func generalFeatureAnnotation(node *core.Node, name string) string {
-	v := node.Annotations[FeatureLabelPrefix+"cpu-"+name]
-	if strings.HasPrefix(v, "@") {
-		return ""
-	}
-	return v
 }
 
 type (
@@ -685,6 +716,20 @@ type (
 	}
 )
 
+// generalFeatureAnnotation returns the "feature.gpustack.ai/cpu-${name}"
+// annotation of the given Node, the shared accessor for every CPU attribute
+// reported by the NFD NodeFeatureRule (name, family, the core counts, the cache
+// sizes, ...). When NFD cannot resolve an attribute it leaves the "@cpu.model.*"
+// template reference verbatim as the value, so any value leading with "@" is
+// treated as unreported and returned as empty.
+func generalFeatureAnnotation(node *core.Node, name string) string {
+	v := node.Annotations[FeatureLabelPrefix+"cpu-"+name]
+	if strings.HasPrefix(v, "@") {
+		return ""
+	}
+	return v
+}
+
 // extractGeneralDetail extracts the CPU details from the
 // "feature.gpustack.ai/cpu-*" annotations of the given node.
 func extractGeneralDetail(node *core.Node) NodeResourceFlavorCPU {
@@ -709,25 +754,29 @@ func extractGeneralDetail(node *core.Node) NodeResourceFlavorCPU {
 // If the acceleratableNodeKey is empty, it extracts the general(CPU-only) queue;
 // otherwise, it extracts the acceleratable queue with the given key, which
 // always carries the device product/family/memory/cores/comcap.
-// The node's os/arch and every CPU-related field — the general queue's
-// product/family/details and the acceleratable queue's paired CPU — are
-// reported only when the GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME environment
-// variable is truthy at startup: the default "generic" general node key pools
-// nodes with heterogeneous CPUs, where a single node's CPU and os/arch would
-// be misleading.
+// The node's os/arch are always recorded — they are part of the general node
+// key, so every node pooled under the same key shares them. Every CPU-related
+// field — the general queue's product/family/details and the acceleratable
+// queue's paired CPU — is reported only when the
+// GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME environment variable is truthy at
+// startup: the default "generic" general node key pools nodes with
+// heterogeneous CPUs, where a single node's CPU identity would be misleading.
 func ExtractNodeQueue(node *core.Node, acceleratableNodeKey string) (NodeQueue, bool) {
 	return extractNodeQueue(node, acceleratableNodeKey, generalNodeKeyWithCPUName)
 }
 
+// extractNodeQueue is ExtractNodeQueue with the CPU-name blending toggle passed
+// in explicitly, so tests can exercise both modes.
 func extractNodeQueue(node *core.Node, acceleratableNodeKey string, generalNodeKeyWithCPUName bool) (NodeQueue, bool) {
-	var nq NodeQueue
-
-	if generalNodeKeyWithCPUName {
-		nq.OS = node.Labels[core.LabelOSStable]
-		nq.Arch = node.Labels[core.LabelArchStable]
+	nq := NodeQueue{
+		OS:   node.Labels[core.LabelOSStable],
+		Arch: node.Labels[core.LabelArchStable],
 	}
 
+	// The acceleratable node key is blank, we are extracting the general(CPU-only) queue.
 	if acceleratableNodeKey == "" {
+		// Extract the CPU details for the general queue only
+		// when generalNodeKeyWithCPUName is enabled.
 		if generalNodeKeyWithCPUName {
 			nq.Product = generalFeatureAnnotation(node, "name")
 			nq.Family = generalFeatureAnnotation(node, "family")
@@ -736,6 +785,7 @@ func extractNodeQueue(node *core.Node, acceleratableNodeKey string, generalNodeK
 		return nq, true
 	}
 
+	// The acceleratable node key is non-blank, we are extracting the acceleratable queue with the given key.
 	label := AcceleratableFeatureLabelPrefix + acceleratableNodeKey
 	if node.Labels[label] != "true" {
 		return NodeQueue{}, false
@@ -747,6 +797,8 @@ func extractNodeQueue(node *core.Node, acceleratableNodeKey string, generalNodeK
 		Cores:             node.Labels[label+".cores"],
 		ComputeCapability: node.Labels[label+".comcap"],
 	}
+	// Extract the paired CPU details for the acceleratable queue only
+	// when generalNodeKeyWithCPUName is enabled.
 	if generalNodeKeyWithCPUName {
 		nq.CPU = NodeResourceFlavorAcceleratorCPU{
 			Manufacturer:          extractGeneralNodeKeyManufacturer(node),
@@ -890,12 +942,19 @@ func splitNodeProfileSpec(spec string) (host, dev string) {
 // ${stg}, the whole acceleratable segment, and ${sliced} are optional. Each
 // segment's numeric part must be a non-empty ASCII decimal.
 //
+// The general key normally carries the sanitized CPU name and the node's
+// os/arch (e.g. "amd-epyc-7763-ln-x64"), or just "generic" with the os/arch
+// when CPU-name blending is off (e.g. "generic-ln-x64"); the bare cpu-model
+// "${family}-${id}" form (e.g. "amd-25-1-ln-x64") is only the rare fallback
+// when the cpu-name annotation is unavailable.
+//
 // Examples:
 //
-//	"gpustack--amd-25-1-16c-32g-88g"                          -> generalKey="amd-25-1", cpu=16, ram=32, stg=88
-//	"gpustack--generic-4c-16g"                                -> generalKey="generic",  cpu=4,  ram=16
-//	"gpustack--amd-25-1-4c-16g-88g--nvidia-t4-1d"             -> generalKey="amd-25-1", accKey="nvidia-t4", cpu=4, ram=16, stg=88, acc=1
-//	"gpustack--amd-25-1-4c-16g--nvidia-t4-1d-8s"              -> generalKey="amd-25-1", accKey="nvidia-t4", cpu=4, ram=16, acc=1, sliced=8
+//	"gpustack--generic-ln-x64-4c-16g"                              -> generalKey="generic-ln-x64", cpu=4, ram=16
+//	"gpustack--amd-epyc-7763-ln-x64-16c-32g-88g"                  -> generalKey="amd-epyc-7763-ln-x64", cpu=16, ram=32, stg=88
+//	"gpustack--amd-epyc-7763-ln-x64-4c-16g-88g--nvidia-t4-1d"     -> generalKey="amd-epyc-7763-ln-x64", accKey="nvidia-t4", cpu=4, ram=16, stg=88, acc=1
+//	"gpustack--amd-epyc-7763-ln-x64-4c-16g--nvidia-t4-1d-8s"      -> generalKey="amd-epyc-7763-ln-x64", accKey="nvidia-t4", cpu=4, ram=16, acc=1, sliced=8
+//	"gpustack--amd-25-1-ln-x64-16c-32g-88g"                       -> generalKey="amd-25-1-ln-x64" (rare cpu-model family/id fallback), cpu=16, ram=32, stg=88
 //
 // Returns ok=false (and zero-valued keys/spec) when the prefix is missing,
 // either key is empty, cpu or ram is missing or malformed, the acceleratable

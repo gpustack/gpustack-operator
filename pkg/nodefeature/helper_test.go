@@ -283,24 +283,24 @@ func Test_extractGeneralNodeKey(t *testing.T) {
 		expected    string
 	}{
 		{
-			name:     "disabled blending yields generic regardless of cpu information",
+			// With blending off the CPU identity is ignored entirely; only the
+			// manufacturer "generic" and the os/arch tail form the key.
+			name:     "disabled blending keys off generic with os/arch",
 			node:     newNode(mergeLabels(cpuModelLabels(), osArchLabels), nil),
-			expected: "generic",
+			expected: "generic-ln-x64",
 		},
 		{
-			name:        "no cpu information falls back to generic",
+			// Blending on, but no vendor/name/family — the manufacturer falls
+			// back to "generic" and no id prefix is blended in.
+			name:        "no cpu information keys off generic",
 			withCPUName: true,
-			node:        newNode(map[string]string{}, nil),
-			expected:    "generic",
+			node:        newNode(osArchLabels, nil),
+			expected:    "generic-ln-x64",
 		},
 		{
-			name:        "cpu-model labels without os/arch labels",
-			withCPUName: true,
-			node:        newNode(cpuModelLabels(), nil),
-			expected:    "amd-25-1",
-		},
-		{
-			name:        "os/arch labels trail the id",
+			// No cpu-name annotation, so the cpu-model family/id labels supply
+			// the id prefix — the rare fallback path.
+			name:        "cpu-model family/id is the fallback id prefix",
 			withCPUName: true,
 			node:        newNode(mergeLabels(cpuModelLabels(), osArchLabels), nil),
 			expected:    "amd-25-1-ln-x64",
@@ -349,14 +349,14 @@ func Test_extractGeneralNodeKey(t *testing.T) {
 			name:        "trademark markers and frequency are stripped from the cpu-name",
 			withCPUName: true,
 			node: newNode(
-				map[string]string{
+				mergeLabels(osArchLabels, map[string]string{
 					_NFDCPUModelVendorIDLabelKey: "Intel",
-				},
+				}),
 				map[string]string{
 					FeatureLabelPrefix + "cpu-name": "Intel(R) Xeon(R) Platinum 8358 CPU @ 2.60GHz",
 				},
 			),
-			expected: "intel-xeon-platinum-8358",
+			expected: "intel-xeon-platinum-8358-ln-x64",
 		},
 		{
 			name:        "unknown vendor keys off generic",
@@ -372,25 +372,30 @@ func Test_extractGeneralNodeKey(t *testing.T) {
 			expected: "generic-kunpeng-920-ln-x64",
 		},
 		{
-			name:        "vendor without family falls back to generic",
+			// Vendor is known but the family/id pair is incomplete and there is
+			// no cpu-name — no id prefix is blended, so the key is just
+			// "${manufacturer}-${os}-${arch}".
+			name:        "vendor without family keys off manufacturer and os/arch",
 			withCPUName: true,
-			node: newNode(map[string]string{
+			node: newNode(mergeLabels(osArchLabels, map[string]string{
 				_NFDCPUModelVendorIDLabelKey: "AMD",
 				_NFDCPUModelIDLabelKey:       "1",
-			}, nil),
-			expected: "generic",
+			}), nil),
+			expected: "amd-ln-x64",
 		},
 		{
-			name:        "vendor without id falls back to generic",
+			name:        "vendor without id keys off manufacturer and os/arch",
 			withCPUName: true,
-			node: newNode(map[string]string{
+			node: newNode(mergeLabels(osArchLabels, map[string]string{
 				_NFDCPUModelVendorIDLabelKey: "AMD",
 				_NFDCPUModelFamilyLabelKey:   "25",
-			}, nil),
-			expected: "generic",
+			}), nil),
+			expected: "amd-ln-x64",
 		},
 		{
-			name:        "cpu-name sanitized to empty falls back to generic",
+			// The cpu-name sanitizes to empty, so no id prefix is blended; the
+			// known vendor still leads the key.
+			name:        "cpu-name sanitized to empty keys off manufacturer and os/arch",
 			withCPUName: true,
 			node: newNode(
 				mergeLabels(osArchLabels, map[string]string{
@@ -400,7 +405,7 @@ func Test_extractGeneralNodeKey(t *testing.T) {
 					FeatureLabelPrefix + "cpu-name": "(TM)",
 				},
 			),
-			expected: "generic",
+			expected: "amd-ln-x64",
 		},
 	}
 
@@ -429,13 +434,14 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// Gi; storage rounds down).
 	//
 	// All cluster-1 nodes carry the NFD cpu-model labels of an AMD family 25
-	// model 1 CPU, so their general(CPU) node key is "amd-25-1" with the
-	// CPU-name blending enabled below. The generic fallback of the key
-	// derivation itself is covered by Test_extractGeneralNodeKey.
+	// model 1 CPU and are linux/amd64, so with the CPU-name blending enabled
+	// below their general(CPU) node key is "amd-25-1-ln-x64". The generic
+	// fallback of the key derivation itself is covered by
+	// Test_extractGeneralNodeKey.
 	generalNodeKeyWithCPUName = true
 
-	gPfx := GeneralFeatureLabelPrefix + "amd-25-1"
-	genericPfx := GeneralFeatureLabelPrefix + GeneralManufacturerGeneric
+	gPfx := GeneralFeatureLabelPrefix + "amd-25-1-ln-x64"
+	genericPfx := GeneralFeatureLabelPrefix + "generic-ln-x64"
 	t4Pfx := AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
 	a10gPfx := AcceleratableFeatureLabelPrefix + "nvidia-a10g"
 
@@ -454,6 +460,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			labels = map[string]string{}
 		}
 		labels[core.LabelHostname] = name
+		// os/arch are well-known labels always present on a node; they are part
+		// of the general node key, so every node here is a linux/amd64 box and
+		// its general key trails with "-ln-x64".
+		labels[core.LabelOSStable] = "linux"
+		labels[core.LabelArchStable] = "amd64"
 		return &core.Node{
 			ObjectMeta: meta.ObjectMeta{
 				Name:   name,
@@ -517,17 +528,18 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 		return m
 	}
 
-	// genericExpected is the general(CPU) view keyed off "generic".
+	// genericExpected is the general(CPU) view keyed off "generic-ln-x64".
 	genericExpected := func(cpu, ram, stg, flavor, unit string) map[string]string {
 		return map[string]string{
-			systemname.ManagedLabelKey: "true",
-			genericPfx:                 "true",
-			genericPfx + ".cpu":        cpu,
-			genericPfx + ".ram":        ram,
-			genericPfx + ".storage":    stg,
-			genericPfx + ".z-flavor":   flavor,
-			genericPfx + ".z-queue":    unit,
-			genericPfx + ".z-cohort":   unit,
+			systemname.ManagedLabelKey:            "true",
+			GeneralFeatureLabelPrefix + "generic": "true",
+			genericPfx:                            "true",
+			genericPfx + ".cpu":                   cpu,
+			genericPfx + ".ram":                   ram,
+			genericPfx + ".storage":               stg,
+			genericPfx + ".z-flavor":              flavor,
+			genericPfx + ".z-queue":               unit,
+			genericPfx + ".z-cohort":              unit,
 		}
 	}
 
@@ -560,15 +572,15 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 				_NFDCPUModelIDLabelKey:       "143",
 			}),
 			expected: map[string]string{
-				systemname.ManagedLabelKey:                         "true",
-				GeneralFeatureLabelPrefix + "intel":                "true",
-				GeneralFeatureLabelPrefix + "intel-6-143":          "true",
-				GeneralFeatureLabelPrefix + "intel-6-143.cpu":      "16",
-				GeneralFeatureLabelPrefix + "intel-6-143.ram":      "32Gi",
-				GeneralFeatureLabelPrefix + "intel-6-143.storage":  "96Gi",
-				GeneralFeatureLabelPrefix + "intel-6-143.z-flavor": "16c-32g-96g",
-				GeneralFeatureLabelPrefix + "intel-6-143.z-queue":  "1c-2g",
-				GeneralFeatureLabelPrefix + "intel-6-143.z-cohort": "1c-2g",
+				systemname.ManagedLabelKey:                                "true",
+				GeneralFeatureLabelPrefix + "intel":                       "true",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64":          "true",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64.cpu":      "16",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64.ram":      "32Gi",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64.storage":  "96Gi",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64.z-flavor": "16c-32g-96g",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64.z-queue":  "1c-2g",
+				GeneralFeatureLabelPrefix + "intel-6-143-ln-x64.z-cohort": "1c-2g",
 			},
 		},
 		{
@@ -704,8 +716,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			name: "missing Status.Capacity falls back to defaults",
 			node: &core.Node{
 				ObjectMeta: meta.ObjectMeta{
-					Name:   "blank-node",
-					Labels: cpuModelLabels(),
+					Name: "blank-node",
+					Labels: mergeLabels(cpuModelLabels(), map[string]string{
+						core.LabelOSStable:   "linux",
+						core.LabelArchStable: "amd64",
+					}),
 				},
 				Status: core.NodeStatus{
 					Capacity: core.ResourceList{},
@@ -967,15 +982,15 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 	// order is non-deterministic. We compare the head directly and the
 	// tail as a multiset via ElementsMatch.
 
-	// All capacity labels below assume the CPU-name blending is enabled, so
-	// the general(CPU) node key derives from the NFD cpu-model labels. The
-	// generic fallback of the key derivation itself is covered by
-	// Test_extractGeneralNodeKey.
+	// All capacity labels below assume the CPU-name blending is enabled and the
+	// nodes are linux/amd64, so the general(CPU) node key derives from the NFD
+	// cpu-model labels plus the os/arch tail. The generic fallback of the key
+	// derivation itself is covered by Test_extractGeneralNodeKey.
 	generalNodeKeyWithCPUName = true
 
-	gKey := "amd-25-1"
+	gKey := "amd-25-1-ln-x64"
 	gPfx := GeneralFeatureLabelPrefix + gKey
-	genericPfx := GeneralFeatureLabelPrefix + GeneralManufacturerGeneric
+	genericPfx := GeneralFeatureLabelPrefix + "generic-ln-x64"
 	nvPfx := AcceleratableFeatureLabelPrefix + "nvidia"
 	t4Pfx := AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4"
 	a10gPfx := AcceleratableFeatureLabelPrefix + "nvidia-a10g"
@@ -1065,9 +1080,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("4c-16g-96g", "1c-4g", "4", "16Gi", "96Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					ProfileCohort: "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d",
-					ProfileQueue:  "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d",
-					ProfileFlavor: "gpustack--amd-25-1-4c-16g-96g--nvidia-tesla-t4-1d",
+					ProfileCohort: "gpustack--amd-25-1-ln-x64-4c-16g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--amd-25-1-ln-x64-4c-16g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-ln-x64-4c-16g-96g--nvidia-tesla-t4-1d",
 					Manufacturer:  "nvidia",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1111,9 +1126,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("8c-32g-96g", "1c-4g", "8", "32Gi", "96Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					ProfileCohort: "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d", // == node-2's device queue
-					ProfileQueue:  "gpustack--amd-25-1-4c-16g--nvidia-tesla-t4-1d",
-					ProfileFlavor: "gpustack--amd-25-1-8c-32g-96g--nvidia-tesla-t4-2d",
+					ProfileCohort: "gpustack--amd-25-1-ln-x64-4c-16g--nvidia-tesla-t4-1d", // == node-2's device queue
+					ProfileQueue:  "gpustack--amd-25-1-ln-x64-4c-16g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-ln-x64-8c-32g-96g--nvidia-tesla-t4-2d",
 					Manufacturer:  "nvidia",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1155,9 +1170,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("48c-188g-196g", "1c-3g", "48", "188Gi", "196Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					ProfileCohort: "gpustack--amd-25-1-12c-47g--nvidia-a10g-1d",
-					ProfileQueue:  "gpustack--amd-25-1-12c-47g--nvidia-a10g-1d",
-					ProfileFlavor: "gpustack--amd-25-1-48c-188g-196g--nvidia-a10g-4d",
+					ProfileCohort: "gpustack--amd-25-1-ln-x64-12c-47g--nvidia-a10g-1d",
+					ProfileQueue:  "gpustack--amd-25-1-ln-x64-12c-47g--nvidia-a10g-1d",
+					ProfileFlavor: "gpustack--amd-25-1-ln-x64-48c-188g-196g--nvidia-a10g-4d",
 					Manufacturer:  "nvidia",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1216,9 +1231,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("32c-128g-200g", "1c-4g", "32", "128Gi", "200Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					ProfileCohort: "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
-					ProfileQueue:  "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
-					ProfileFlavor: "gpustack--amd-25-1-32c-128g-200g--nvidia-tesla-t4-1d",
+					ProfileCohort: "gpustack--amd-25-1-ln-x64-32c-128g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--amd-25-1-ln-x64-32c-128g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-ln-x64-32c-128g-200g--nvidia-tesla-t4-1d",
 					Manufacturer:  "nvidia",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1233,9 +1248,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 					LocalStorage: "200Gi",
 				},
 				{
-					ProfileCohort: "gpustack--amd-25-1-16c-64g--amd-mi300x-1d",
-					ProfileQueue:  "gpustack--amd-25-1-16c-64g--amd-mi300x-1d",
-					ProfileFlavor: "gpustack--amd-25-1-32c-128g-200g--amd-mi300x-2d",
+					ProfileCohort: "gpustack--amd-25-1-ln-x64-16c-64g--amd-mi300x-1d",
+					ProfileQueue:  "gpustack--amd-25-1-ln-x64-16c-64g--amd-mi300x-1d",
+					ProfileFlavor: "gpustack--amd-25-1-ln-x64-32c-128g-200g--amd-mi300x-2d",
 					Manufacturer:  "amd",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1422,9 +1437,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantCPU: cpuFlavor("32c-128g-200g", "1c-4g", "32", "128Gi", "200Gi"),
 			wantDevices: []NodeResourceFlavor{
 				{
-					ProfileCohort: "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
-					ProfileQueue:  "gpustack--amd-25-1-32c-128g--nvidia-tesla-t4-1d",
-					ProfileFlavor: "gpustack--amd-25-1-32c-128g-200g--nvidia-tesla-t4-1d",
+					ProfileCohort: "gpustack--amd-25-1-ln-x64-32c-128g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--amd-25-1-ln-x64-32c-128g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--amd-25-1-ln-x64-32c-128g-200g--nvidia-tesla-t4-1d",
 					Manufacturer:  "nvidia",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1464,9 +1479,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 			wantDevicesOnly: true,
 			wantDevices: []NodeResourceFlavor{
 				{
-					ProfileCohort: "gpustack--generic-4c-16g--nvidia-tesla-t4-1d",
-					ProfileQueue:  "gpustack--generic-4c-16g--nvidia-tesla-t4-1d",
-					ProfileFlavor: "gpustack--generic-4c-16g-96g--nvidia-tesla-t4-1d",
+					ProfileCohort: "gpustack--generic-ln-x64-4c-16g--nvidia-tesla-t4-1d",
+					ProfileQueue:  "gpustack--generic-ln-x64-4c-16g--nvidia-tesla-t4-1d",
+					ProfileFlavor: "gpustack--generic-ln-x64-4c-16g-96g--nvidia-tesla-t4-1d",
 					Manufacturer:  "nvidia",
 					Acceleratable: true,
 					NodeLabels: map[string]string{
@@ -1499,9 +1514,9 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 				genericPfx + ".z-cohort":   "1c-2g",
 			},
 			wantCPU: NodeResourceFlavor{
-				ProfileCohort: "gpustack--generic-1c-2g",
-				ProfileQueue:  "gpustack--generic-1c-2g",
-				ProfileFlavor: "gpustack--generic-16c-32g-96g",
+				ProfileCohort: "gpustack--generic-ln-x64-1c-2g",
+				ProfileQueue:  "gpustack--generic-ln-x64-1c-2g",
+				ProfileFlavor: "gpustack--generic-ln-x64-16c-32g-96g",
 				Manufacturer:  GeneralManufacturerGeneric,
 				NodeLabels: map[string]string{
 					systemname.ManagedLabelKey: "true",
@@ -1517,6 +1532,13 @@ func TestExtractNodeResourceFlavors(t *testing.T) {
 
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
+			// os/arch are part of the general node key; add them to every
+			// non-nil fixture so the key trails with "-ln-x64". The nil-labels
+			// case is left untouched to exercise the empty-labels guard.
+			if cs.labels != nil {
+				cs.labels[core.LabelOSStable] = "linux"
+				cs.labels[core.LabelArchStable] = "amd64"
+			}
 			node := &core.Node{
 				ObjectMeta: meta.ObjectMeta{
 					Name:   "cluster-1-node",
@@ -1614,10 +1636,11 @@ func Test_extractNodeQueue(t *testing.T) {
 			},
 		},
 		{
-			// With the CPU-name blending disabled the general queue is empty
-			// — the generic key pools heterogeneous CPUs, so no single
-			// node's os/arch or CPU identity/details are recorded.
-			name: "general(CPU) queue without cpu-name blending is empty",
+			// With the CPU-name blending disabled the general queue still
+			// records the node's os/arch (they are part of the generic key, so
+			// every pooled node shares them) but omits the CPU identity and
+			// details, which would be misleading across heterogeneous CPUs.
+			name: "general(CPU) queue without cpu-name blending records only os/arch",
 			node: newNode(
 				map[string]string{
 					core.LabelOSStable:           "linux",
@@ -1626,8 +1649,11 @@ func Test_extractNodeQueue(t *testing.T) {
 				},
 				cpuAnnotations,
 			),
-			wantOK:   true,
-			expected: NodeQueue{},
+			wantOK: true,
+			expected: NodeQueue{
+				OS:   "linux",
+				Arch: "amd64",
+			},
 		},
 		{
 			name:        "acceleratable queue",
@@ -1667,10 +1693,10 @@ func Test_extractNodeQueue(t *testing.T) {
 			},
 		},
 		{
-			// With the CPU-name blending disabled the acceleratable queue
-			// still carries the device fields, but omits the node's os/arch
-			// and the paired CPU.
-			name: "acceleratable queue without cpu-name blending omits os/arch and paired cpu",
+			// With the CPU-name blending disabled the acceleratable queue still
+			// carries the device fields and the node's os/arch, but omits the
+			// paired CPU.
+			name: "acceleratable queue without cpu-name blending omits the paired cpu",
 			node: newNode(
 				map[string]string{
 					core.LabelOSStable:           "linux",
@@ -1690,6 +1716,8 @@ func Test_extractNodeQueue(t *testing.T) {
 			expected: NodeQueue{
 				Product: "Tesla-T4",
 				Family:  "Turing",
+				OS:      "linux",
+				Arch:    "amd64",
 				NodeResourceFlavorAccelerator: NodeResourceFlavorAccelerator{
 					Memory:            "15Gi",
 					Cores:             "2560",
