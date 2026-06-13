@@ -5,26 +5,26 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type NonQuorumOption string
+type ResourceVersion string
 
-func (NonQuorumOption) ApplyToGet(opts *ctrlcli.GetOptions) {
+func (v ResourceVersion) ApplyToGet(opts *ctrlcli.GetOptions) {
 	if opts.Raw == nil {
 		opts.Raw = &meta.GetOptions{}
 	}
-	opts.Raw.ResourceVersion = "0"
+	opts.Raw.ResourceVersion = string(v)
 }
 
-func (NonQuorumOption) ApplyToList(opts *ctrlcli.ListOptions) {
+func (v ResourceVersion) ApplyToList(opts *ctrlcli.ListOptions) {
 	if opts.Raw == nil {
 		opts.Raw = &meta.ListOptions{}
 	}
-	opts.Raw.ResourceVersion = "0"
+	opts.Raw.ResourceVersion = string(v)
 }
 
 // WithoutQuorum is a GetOption and ListOption that sets ResourceVersion to "0",
 // which means the result is served on APIServer, without waiting for the quorum of etcd to acknowledge the read.
 // This can be useful for reducing latency when stale data is acceptable.
-const WithoutQuorum = NonQuorumOption("")
+const WithoutQuorum = ResourceVersion("0")
 
 // ToPatchOptions converts ctrlcli.UpdateOptions to ctrlcli.PatchOptions,
 // as they share some common fields.
