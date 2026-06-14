@@ -5,6 +5,46 @@ GPUStack Operator turns raw node hardware into a Kueue-based scheduling chain. I
 - [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery): detects hardware features and system configuration, and publishes them as Node labels.
 - [Kueue](https://github.com/kubernetes-sigs/kueue): a Kubernetes-native job queueing system that manages workload admission, queuing, and preemption across ClusterQueues and Cohorts.
 
+## Code Layout
+
+### One binary, three subcommands
+
+`cmd/gpustack-operator/main.go` wires a single binary with three cobra subcommands:
+
+- **`worker`** (alias `w`, `pkg/worker`) — the control-plane process. Runs an aggregated extension API server *and* a controller-runtime manager in one process, installs the NFD / Kueue / Device-Manager / CSI applications, and runs the four scheduling-chain controllers (see [Stage 4](#stage-4-the-kueue-scheduling-chain)).
+- **`worker-gateway`** (`pkg/workergateway`) — aggregates resources from upstream Kubernetes clusters.
+- **`device-manager`** (`pkg/devicemanager`) — the per-node DaemonSet. Subcommands `serve` / `detect` / `monitor`: detects and monitors local accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator for device injection.
+
+### Worker startup order matters
+
+`pkg/worker/worker.go` runs `Prepare` (install system namespace → CRDs → extension API services →
+webhook configs → settings → NFD/Kueue/DM/CSI apps) then `Start`. In `Start`, the controller
+manager is deliberately started **only after** the extension API services report ready, so
+controllers can index extension-API resources. Preserve this ordering when adding startup steps.
+
+### Per-manufacturer device support
+
+Detection (`pkg/devicemanager/detector/<mfr>`) and allocation (`pkg/devicemanager/allocator/<mfr>`)
+have one subpackage per manufacturer: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax,
+mthreads, thead. Platform-specific code is split into `_linux.go` / `_other.go` build-constrained
+files. The set of supported manufacturers and their PCI vendor IDs / resource names live in
+`pkg/nodefeature` (overridable via `GPUSTACK_*` env vars).
+
+### CGO bindings (`binding/`)
+
+Generated Go bindings to vendor GPU runtime/management libraries (nvml, rsmi/amdsmi/amdgpu, cndev,
+dcmi, hgml, ixml, mtml/mxsml, hsa, dl). The generators read `gen/binding/<runtime>/config.yaml` and
+emit into `binding/<runtime>/` via `make generate binding` (c-for-go is vendored in `.sbin/`). The
+top-level `binding/helper*.go` files are hand-written CPU/NUMA topology helpers — those are *not*
+generated.
+
+### The 63-character constraint, recurring
+
+Kubernetes label *values* cap at 63 chars. Long names (ClusterQueue names, queue/cohort references)
+are stored in `schedule.gpustack.ai/*` **annotations**, not labels; LocalQueues are named
+`gpustack-fnv64-<hash>` (always 31 chars — see [Stage 4](#stage-4-the-kueue-scheduling-chain)). When
+generating any name that flows into a label value, check this limit.
+
 ## How It Works
 
 The chain is built in four stages:

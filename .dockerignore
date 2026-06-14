@@ -18,7 +18,8 @@
 *.tfstate.*
 *.tfvars
 *.tfvars.*
-*.local.json
+!AGENTS.md
+!CLAUDE.md
 
 # Dirs
 /.idea
@@ -34,3 +35,7 @@
 /log
 /certs
 .terraform
+!.claude
+.claude/settings.local.json
+.claude/skills/generated
+.claude/skills/gitnexus

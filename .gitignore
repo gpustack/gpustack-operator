@@ -20,7 +20,6 @@ go.work.*
 *.tfstate.*
 *.tfvars
 *.tfvars.*
-*.local.json
 !AGENTS.md
 !CLAUDE.md
 
@@ -39,4 +38,6 @@ go.work.*
 /certs
 .terraform
 !.claude
+.claude/settings.local.json
 .claude/skills/generated
+.claude/skills/gitnexus

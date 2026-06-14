@@ -1,77 +1,60 @@
-# GPUStack Operator Agent Instructions
+# GPUStack Operator
 
-GPUStack Operator is a Kubernetes operator for managing GPU resources in a cluster. It provides features like GPU discovery, allocation, and monitoring to optimize GPU usage for workloads. 
+A Kubernetes operator that turns raw node hardware into a Kueue-based scheduling chain for
+accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
-GPUStack Operator relies on following famous Kubernetes projects:
-- Node Feature Discovery: A Kubernetes add-on for detecting hardware features and system configuration.
-- Kueue: A Kubernetes-native job queueing system. It manages workload admission, queuing, and preemption for batch and ML workloads across ClusterQueues and Cohorts.
+## Project Structure
 
-## Guidelines
+- `cmd/` — single `gpustack-operator` binary entrypoint (three cobra subcommands).
+- `pkg/` — implementation: `worker` (control plane), `devicemanager` (per-node DaemonSet), `nodefeature` (label algebra), and supporting packages.
+- `api/` — API types: CRDs + aggregated extension APIs.
+- `binding/` — generated CGO bindings to vendor GPU runtime/management libraries.
+- `gen/` — code generators (`api`, `binding`).
+- `hack/` — build/lint/test/deps/generate scripts behind the Makefile.
+- `staging/` — patched k8s modules, managed by `make deps`.
+- `docs/` — architecture, development, and environment-variable guides.
+- `pack/` / `deploy/` — container image builds and deployment manifests.
 
-Behavioral guidelines to reduce common coding mistakes, derived from [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on LLM coding pitfalls.
+## Architecture
 
-Tradeoff: These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-stage chain: NFD labels
+nodes → the Device Manager detects accelerators → the worker profiles node capacity → four
+controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue` objects.
+`pkg/nodefeature` holds the label algebra.
 
-### 1. Think Before Coding
+Read `docs/architecture.md` before touching the scheduling chain or `pkg/nodefeature` — it has the
+stage-by-stage detail, label/naming conventions, and a worked example.
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+## Development
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
+See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
+For a guided tour of the directory layout and naming conventions, use the `code-overview` skill;
+after editing API types or webhooks, use the `code-generate` skill to run `make generate`.
 
-### 2. Simplicity First
+## Code Style
 
-**Minimum code that solves the problem. Nothing speculative.**
+### Go style is mostly idiomatic Go, with some project-specific conventions:
 
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
+- **Clarity**: favor clear code over cleverness for easier ongoing maintenance.
+- **Linting**: the `code-lint` hook runs `make lint` after Go changes; run it yourself too when editing Go.
+- **Errors**: explicitly handle errors; avoid panics for control flow.
+- **Interfaces**: keep interfaces small; accept interfaces, return concrete types.
+- **Naming**: use concise, meaningful names reflecting their exact purpose.
+- **Functions**: write short, single-purpose functions for focused, readable logic.
+- **Composition**: favor composition and value semantics over complex inheritance.
+- **Concurrency**: keep concurrency simple, safe, and use it sparingly.
+- **State**: minimize shared mutable state to prevent concurrency bugs.
+- **Documentation**: clearly document exported APIs to explain their intended behavior.
 
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+### Kubernetes style follows the project-specific conventions below:
 
-### 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-## Skills
-
-Operational runbook index for common GPUStack Operator debugging tasks are in [.claude/skills](.claude/skills/README.md). Consult these proactively when a user asks about GPU discovery, allocation, monitoring, or workload scheduling — even if the question is informal or incomplete.
-
-When a skill is triggered, read the corresponding SKILL.md file directly and follow its steps. These are plain Markdown guides, not plugins in the Claude Code skill system.
-
-@.claude/skills/README.md
+- **Declarative**: Always reconcile desired states instead of scripting imperative actions.
+- **Idempotent**: Ensure every controller reconcile operation is perfectly safe to retry.
+- **Level-based**: Rely purely on level-based logic and avoid edge-triggered assumptions.
+- **Simplicity**: Maintain simple, versioned API types ensuring strict backward compatibility.
+- **Separation**: Strictly separate the desired user intent from the observed status.
+- **Fail-fast**: Always fail fast by returning typed errors and clear conditions.
+- **Context**: Consistently utilize contexts everywhere to honor process cancellations and timeouts.
+- **Composition**: Strongly prefer composition over inheritance to maximize controller code reuse.
+- **Efficiency**: Minimize reconciliation workloads by watching only what affects desired states.
+- **Consistency**: Design systems for eventual consistency rather than expecting immediate convergence.

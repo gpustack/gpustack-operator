@@ -1,1 +1,1 @@
-@CLAUDE.md
+@CLAUD.md
