@@ -1,6 +1,7 @@
 ---
-name: code-overview
+name: gpustack-operator-overview
 description: "Use when you need a guided tour of the GPUStack Operator codebase — its architecture, where things live (key directories), and naming conventions. Examples: \"Give me an overview of this repo\", \"How is this project structured?\", \"Where does X live?\", onboarding to the scheduling chain."
+model: haiku
 ---
 
 # GPUStack Operator — Code Overview
@@ -29,7 +30,7 @@ cmd/gpustack-operator/            single binary entrypoint (3 cobra subcommands)
 pkg/
   worker/                         control-plane process (worker subcommand)
     worker.go                     Prepare → Start lifecycle (startup ordering)
-    controllers/worker/           the 4 scheduling-chain reconcilers + cleanup
+    controllers/worker/           the 4 scheduling-chain reconcilers
     extensionapis/                aggregated extension-API handlers (Instance, Devices, …)
     webhooks/worker/              admission webhooks (generated + hand-written)
     kuberess/                     installs NFD / Kueue / Device-Manager / CSI apps
@@ -53,6 +54,10 @@ staging/                          patched k8s modules (managed by make deps)
 
 Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads, thead.
 
+Reconcilers under `controllers/worker/` are unit-tested with the controller-runtime fake client
+(`sigs.k8s.io/controller-runtime/pkg/client/fake`), registering the same field indexers the
+controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
+
 ## Naming conventions
 
 - **Kueue object names**: `gpustack--${gKey}-…[--${aKey}-…]` — general(CPU) segment first, then the device segment, joined by `--`.
@@ -60,7 +65,7 @@ Manufacturers: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax, mthreads,
 - **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models), `general.feature.gpustack.ai/` (CPU-only capacity), `schedule.gpustack.ai/` (long names as annotations).
 - **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.
-- **Generated files**: anything matching `zz_generated.*`, `generated.pb.go`, `generated.proto` is generated — never hand-edit; edit the source types and run the `code-generate` skill.
+- **Generated files**: anything matching `zz_generated.*`, `generated.pb.go`, `generated.proto` is generated — never hand-edit; edit the source types and run the `gpustack-operator-generate` skill.
 
 ## Going deeper
 

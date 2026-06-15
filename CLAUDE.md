@@ -28,15 +28,15 @@ stage-by-stage detail, label/naming conventions, and a worked example.
 ## Development
 
 See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
-For a guided tour of the directory layout and naming conventions, use the `code-overview` skill;
-after editing API types or webhooks, use the `code-generate` skill to run `make generate`.
+For a guided tour of the directory layout and naming conventions, use the `gpustack-operator-overview` skill;
+after editing API types or webhooks, use the `gpustack-operator-generate` skill to run `make generate`.
 
 ## Code Style
 
 ### Go style is mostly idiomatic Go, with some project-specific conventions:
 
 - **Clarity**: favor clear code over cleverness for easier ongoing maintenance.
-- **Linting**: the `code-lint` hook runs `make lint` after Go changes; run it yourself too when editing Go.
+- **Linting**: the `gpustack-operator-lint` hook runs `make lint` after Go changes; run it yourself too when editing Go.
 - **Errors**: explicitly handle errors; avoid panics for control flow.
 - **Interfaces**: keep interfaces small; accept interfaces, return concrete types.
 - **Naming**: use concise, meaningful names reflecting their exact purpose.

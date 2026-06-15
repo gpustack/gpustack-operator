@@ -19,6 +19,14 @@ and `make <target> [args]` forwards `args` to the script. All builds use `CGO_EN
 
 CI (`hack/ci.sh`) runs: `make generate && make deps && make lint && make build`.
 
+### Commit messages
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`type: subject`),
+checked by [commitsar](https://github.com/aevea/commitsar) (`v1.0.3`, pinned in `hack/lib/style.sh`).
+The check runs as part of `make lint`, but only when the working tree is clean (`hack/lint.sh` →
+`gpustack::commit::lint`), over the commits ahead of `origin/main` (scope in `.commitsar.yml`). Types
+in use: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
+
 ### Running a single test
 
 `make test` only excludes packages, so to target one package or test run `go test` directly with the
@@ -40,7 +48,7 @@ GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKe
 `gen/api/main.go` configures which packages are CRDs vs extension APIs and drives custom generators
 in `gen/api/generator` (apireg-gen, crd-gen, webhook-gen). **Never hand-edit generated files**
 (`zz_generated.*`, `generated.pb.go`, `generated.proto`); edit the source `*.go` types or
-`gen/api/main.go` and run `make generate` (the `code-generate` skill automates this).
+`gen/api/main.go` and run `make generate` (the `gpustack-operator-generate` skill automates this).
 
 ## Vendored / patched dependencies
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# code-lint: Stop hook. Runs `make lint` once at the end of a turn, but only when
+# gpustack-operator-lint: Stop hook. Runs `make lint` once at the end of a turn, but only when
 # Go files are dirty in the working tree. Report-only — it surfaces lint output but
 # always exits 0 so it never blocks the turn (and never risks a Stop-hook loop).
 
@@ -18,7 +18,7 @@ status=$?
 
 if [ "${status}" -ne 0 ]; then
   {
-    echo "code-lint: 'make lint' reported issues (non-blocking):"
+    echo "gpustack-operator-lint: 'make lint' reported issues (non-blocking):"
     echo "${output}"
   } >&2
 fi
