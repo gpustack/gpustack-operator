@@ -120,7 +120,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 		}
 
-		logger.V(3).Info("pod deletion in progress, retry later")
+		logger.V(3).Info("pod deletion in progress; requeue in 2s")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -191,7 +191,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 
 		// Pod deletion in progress, requeue and wait for it to be deleted.
-		logger.V(2).Info("pod deletion in progress, retry later")
+		logger.V(2).Info("pod deletion in progress; requeue in 2s")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -238,7 +238,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 	} else if pod.DeletionTimestamp != nil {
-		logger.V(3).Info("previous pod deletion in progress, retry later")
+		logger.V(3).Info("previous pod deletion in progress; requeue in 2s")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -263,7 +263,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 	} else if svc.DeletionTimestamp != nil {
-		logger.V(3).Info("previous service deletion in progress, retry later")
+		logger.V(3).Info("previous service deletion in progress; requeue in 2s")
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
@@ -294,7 +294,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 					})
 				}
 			} else {
-				logger.V(2).Info("instance ports not ready, retry later")
+				logger.V(2).Info("instance ports not ready; requeue in 2s")
 				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 			}
 		}
