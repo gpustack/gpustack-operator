@@ -237,6 +237,8 @@ jobs:
           file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
           context: ${{ github.workspace }}
           platforms: ${{ matrix.platform }}
+          build-args: |
+            GPUSTACK_GIT_COMMIT=${{ github.sha }}
           tags: |
             ${{ steps.metadata.outputs.tags }}
           labels: |

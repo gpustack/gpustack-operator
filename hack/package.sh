@@ -72,6 +72,7 @@ function pack() {
       --builder "gpustack" \
       --platform "linux/${PACKAGE_ARCH}" \
       --tag "${tag}" \
+      --build-arg "GPUSTACK_GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")" \
       --file "${ROOT_DIR}/pack/${task}/Dockerfile" \
       --ulimit nofile=65536:65536 \
       --shm-size 16G \

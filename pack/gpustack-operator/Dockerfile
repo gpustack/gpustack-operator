@@ -136,6 +136,7 @@ EOF
 # Build gpustack-operator
 
 ARG GPUSTACK_WORKSPACE="/usr/local/go/src/gpustack.ai/gpustack"
+ARG GPUSTACK_GIT_COMMIT
 
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/go/pkg/mod,sharing=locked \
@@ -143,6 +144,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=${GPUSTACK_WORKSPACE}/.sbin,sharing=locked <<EOF
     # Build
     set -exo pipefail
+    echo "GPUSTACK_GIT_COMMIT=${GPUSTACK_GIT_COMMIT}"
 
     # Link staging modules under GOROOT/src for legacy lookups.
     for dir in $(find ${GPUSTACK_WORKSPACE}/staging -mindepth 1 -maxdepth 1 -type d); do
