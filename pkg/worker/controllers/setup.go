@@ -16,7 +16,6 @@ var setups = []controller.Setup{
 	new(worker.LocalQueueReconciler),
 	new(worker.NodeFeatureReconciler),
 	new(worker.ResourceFlavorReconciler),
-	new(worker.ResourceFlavorCleanupReconciler),
 }
 
 // Get returns the controller setup of the specified type.
