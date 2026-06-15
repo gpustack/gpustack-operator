@@ -1,15 +1,22 @@
 package worker
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
@@ -223,4 +230,63 @@ func TestGetResourceRequirements(t *testing.T) {
 			assertResourceList(t, c.wantRequests, rr.Requests, "requests")
 		})
 	}
+}
+
+func buildInstanceClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithStatusSubresource(&workercore.Instance{}).
+		WithObjects(objs...).
+		Build()
+}
+
+func reconcileInstance(t *testing.T, cli ctrlcli.Client, namespace, name string) (ctrlreconcile.Result, error) {
+	t.Helper()
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+	return r.Reconcile(context.Background(),
+		ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: namespace, Name: name}})
+}
+
+// newReadyInstance builds a running Instance (Ready, no backing Pod) referencing
+// the given InstanceType.
+func newReadyInstance(namespace, name, instType string) *workercore.Instance {
+	return &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: namespace, Name: name},
+		Spec:       workercore.InstanceSpec{Type: instType},
+		Status:     workercore.InstanceStatus{Phase: InstancePhaseReady},
+	}
+}
+
+func TestInstanceReconciler_Reconcile_ReadyInstanceTypeRemovedStops(t *testing.T) {
+	// A Ready instance whose Pod is gone and whose InstanceType no longer exists
+	// (ClusterQueue drained and deleted) must be stopped, not recreated.
+	inst := newReadyInstance("default", "inst", "missing-type")
+	cli := buildInstanceClient(inst)
+
+	_, err := reconcileInstance(t, cli, "default", "inst")
+	require.NoError(t, err)
+
+	got := &workercore.Instance{}
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
+	assert.True(t, ptr.Deref(got.Spec.Stop, false), "instance must be marked stopped")
+}
+
+func TestInstanceReconciler_Reconcile_ReadyInstanceTypeInactiveStops(t *testing.T) {
+	// A Ready instance whose Pod is gone while its InstanceType is Inactive
+	// (ClusterQueue in HoldAndDrain) must be stopped, not recreated.
+	inst := newReadyInstance("default", "inst", "draining-type")
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "draining-type"},
+		Status:     worker.InstanceTypeStatus{Phase: InstanceTypePhaseInactive},
+	}
+	cli := buildInstanceClient(inst, it)
+
+	_, err := reconcileInstance(t, cli, "default", "inst")
+	require.NoError(t, err)
+
+	got := &workercore.Instance{}
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
+	assert.True(t, ptr.Deref(got.Spec.Stop, false), "instance must be marked stopped")
 }

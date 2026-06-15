@@ -38,14 +38,6 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
-const (
-	PhaseStarting = "Starting"
-	PhaseStopping = "Stopping"
-	PhaseStopped  = "Stopped"
-	PhaseReady    = "Ready"
-	PhaseDeleting = "Deleting"
-)
-
 // InstanceReconciler reconciles v1alpha1.Instance objects to finish the following tasks:
 //   - Create/Update/Delete a Kubernetes Pod as the backing resource of the Instance based on the Instance spec.
 //   - Create a Kubernetes Service to expose the ports of the backing Pod if specified in the Instance spec.
@@ -56,6 +48,31 @@ type InstanceReconciler struct {
 }
 
 var _ ctrlreconcile.Reconciler = (*InstanceReconciler)(nil)
+
+const (
+	// InstancePhaseStarting is the Instance status phase reported when the
+	// backing Pod is being created or updated to match the Instance spec.
+	InstancePhaseStarting = "Starting"
+	// InstancePhaseStopping is the Instance status phase reported when the
+	// backing Pod is being deleted to stop the Instance.
+	InstancePhaseStopping = "Stopping"
+	// InstancePhaseStopped is the Instance status phase reported when the
+	// backing Pod is deleted and the Instance is stopped.
+	InstancePhaseStopped = "Stopped"
+	// InstancePhaseReady is the Instance status phase reported when the
+	// backing Pod is running and ready.
+	InstancePhaseReady = "Ready"
+	// InstancePhaseDeleting is the Instance status phase reported when the
+	// Instance is marked as deleted and the backing Pod is being deleted.
+	InstancePhaseDeleting = "Deleting"
+)
+
+const (
+	// InstanceTypePhaseInactive is the InstanceType status phase reported when its
+	// backing Kueue ClusterQueue is not active (e.g., draining via HoldAndDrain),
+	// mirroring the "Inactive" summary from apistatus.GetSummaryOfClusterQueue.
+	InstanceTypePhaseInactive = "Inactive"
+)
 
 func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
@@ -98,10 +115,10 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			return ctrl.Result{}, err
 		}
 
-		if inst.Status.Phase != PhaseDeleting {
+		if inst.Status.Phase != InstancePhaseDeleting {
 			logger.Info("instance deleting")
 
-			inst.Status.Phase = PhaseDeleting
+			inst.Status.Phase = InstancePhaseDeleting
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
 				logger.Error(err, "update instance status to deleting")
@@ -150,13 +167,13 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	if ptr.Deref(inst.Spec.Stop, false) {
 		// Pod already deleted, mark the Instance as stopped.
 		if pod == nil {
-			if inst.Status.Phase == PhaseStopped {
+			if inst.Status.Phase == InstancePhaseStopped {
 				logger.V(3).Info("instance already stopped")
 				return ctrl.Result{}, nil
 			}
 
 			inst.Status = workercore.InstanceStatus{
-				Phase: PhaseStopped,
+				Phase: InstancePhaseStopped,
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
@@ -169,8 +186,8 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		// If instance is not marked as stopping,
 		// mark it as stopping first to avoid racing with other controllers or users to update the instance status.
-		if inst.Status.Phase != PhaseStopping {
-			inst.Status.Phase = PhaseStopping
+		if inst.Status.Phase != InstancePhaseStopping {
+			inst.Status.Phase = InstancePhaseStopping
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
 				logger.Error(err, "update instance status to stopping")
@@ -197,13 +214,47 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Create the Pod if not exists.
 	if pod == nil {
+		// Fetch the InstanceType that backs the Pod.
+		instType := new(worker.InstanceType)
+		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				logger.Error(err, "fetch instance type")
+				return ctrl.Result{}, err
+			}
+			// Maybe the InstanceType is not cached yet,
+			// try to fetch directly from API server to avoid the cache staleness.
+			err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
+				ctrlclix.WithoutQuorum)
+			if err != nil && !kerrors.IsNotFound(err) {
+				logger.Error(err, "fetch instance type")
+				return ctrl.Result{}, err
+			}
+		}
+		instTypeGone := kerrors.IsNotFound(err)
+
+		if instTypeGone || instType.Status.Phase == InstanceTypePhaseInactive {
+			// Persist the stop intent first so the instance reliably stays stopped
+			// even if the status update below fails.
+			inst.Spec.Stop = ptr.To(true)
+			err = r.Client.Update(ctx, inst)
+			if err != nil {
+				logger.Error(err, "stop instance with inactive instance type")
+				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			}
+
+			logger.Info("stop instance as inactive instance type", "type", inst.Spec.Type)
+			return ctrl.Result{}, nil
+		}
+
 		// If the instance is marked as stopping/stopped/ready, mark it as starting first
 		// to avoid racing with other controllers or users to update the instance status.
-		if inst.Status.Phase == PhaseStopping ||
-			inst.Status.Phase == PhaseStopped ||
-			inst.Status.Phase == PhaseReady {
+		if inst.Status.Phase == InstancePhaseStopping ||
+			inst.Status.Phase == InstancePhaseStopped ||
+			inst.Status.Phase == InstancePhaseReady {
 			inst.Status = workercore.InstanceStatus{
-				Phase: PhaseStarting,
+				Phase: InstancePhaseStarting,
 			}
 			err = r.Client.Status().Update(ctx, inst)
 			if err != nil {
@@ -212,23 +263,6 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 
 			logger.Info("instance starting")
-		}
-
-		// Fetch the InstanceType.
-		instType := new(worker.InstanceType)
-		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
-			ctrlclix.WithoutQuorum)
-		if err != nil {
-			// Maybe the InstanceType is not cached yet,
-			// try to fetch directly from API server to avoid the cache staleness.
-			if kerrors.IsNotFound(err) {
-				err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
-					ctrlclix.WithoutQuorum)
-			}
-			if err != nil {
-				logger.Error(err, "fetch instance type")
-				return ctrl.Result{}, err
-			}
 		}
 
 		pod = r.convertPodFromInstance(ctx, inst, instType)
@@ -360,7 +394,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	if currentPhase != lastPhase && lastPhase == PhaseReady {
+	if currentPhase != lastPhase && lastPhase == InstancePhaseReady {
 		logger.Info("instance started")
 	} else {
 		logger.V(3).Info("updated instance status")

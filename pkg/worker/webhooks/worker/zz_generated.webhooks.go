@@ -130,6 +130,7 @@ func mwh_pkg_worker_webhooks_worker_InstanceWebhook(c v1.WebhookClientConfig) v1
 				},
 				Operations: []v1.OperationType{
 					"CREATE",
+					"UPDATE",
 				},
 			},
 		},

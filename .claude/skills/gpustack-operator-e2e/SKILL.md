@@ -155,7 +155,95 @@ kubectl -n gpustack-system logs deploy/gpustack-operator-worker --tail=200
 kubectl -n gpustack-system describe deploy/gpustack-operator-worker
 ```
 
-## 4. Optional — simulated accelerator & drain-recycle
+## 4. Instance lifecycle & drain-recycle (run when the change touches the Instance controller/webhook)
+
+`pkg/worker/controllers/worker/instance.go` and `pkg/worker/webhooks/worker/instance.go` are **not**
+covered by §3. When a change touches either, verify the **Instance ↔ InstanceType** contract on a real
+cluster — the unit tests cannot (blind spot below). Core behavior: when the `InstanceType` a *running*
+Instance references is drained — its backing `ClusterQueue` goes `HoldAndDrain` so the InstanceType
+reports `Inactive`, or the type is removed — the `InstanceReconciler` must **stop** the Instance
+(`spec.stop=true`), *not* recreate its Pod; it may restart only once a live InstanceType exists again.
+
+Why a real cluster is required:
+
+- `InstanceType` is a live projection of a `ClusterQueue` (`instance_type.go`); its `status.phase`
+  comes from `apistatus.GetSummaryOfClusterQueue` — `Active` condition `True`→`Active`, `False`→`Inactive`.
+- The Instance's Pod carries the Kueue `kueue.x-k8s.io/queue-name` label, so it is admission-managed:
+  `HoldAndDrain` evicts the Pod → `pod==nil` → the reconciler re-evaluates and stops the Instance.
+- **Unit-test blind spot:** the fake client cannot store the aggregated `InstanceType`, so
+  `Get(InstanceType)` returns NotFound and the "Inactive" unit test silently degrades into the
+  "type gone" path. The `phase==Inactive` branch is exercised **only** here, on a real cluster.
+
+**Drain injection on a CPU-only cluster (no accelerator needed):** bump the `ram` capacity label in the
+Worker-authored `<node>-gpustack-worker` NodeFeature. The node then matches a *new* general profile and
+the *old* profile (the one the Instance's InstanceType is built from) drains. This is stable:
+`ConstructNodeCapacityLabels` prefers the node's existing capacity label over `Status.Capacity`
+(`pkg/nodefeature/helper.go`), and `NodeFeatureReconciler` watches Node-label changes only (not the
+NodeFeature), so the edit is not reconciled away.
+
+```bash
+NS=gpustack-system; NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+IT=$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[?(@.status.phase=="Active")].metadata.name}' | awk '{print $1}')
+echo "active InstanceType: $IT on node $NODE"
+
+# 1. Create a running Instance referencing the Active InstanceType. alpine is kept alive (sleep) so its
+#    Kueue Workload holds quota; the ephemeral volume lets non-type validation pass.
+cat <<EOF | kubectl apply -f -
+apiVersion: worker.gpustack.ai/v1
+kind: Instance
+metadata: { name: gpustack-e2e-instance, namespace: default }
+spec:
+  type: ${IT}
+  image: alpine
+  command: ["sleep", "86400"]
+  volume: { ephemeral: { capacity: 1Gi } }
+EOF
+
+# 2. Assert the Pod is created AND admitted by Kueue (holding quota is what lets HoldAndDrain evict it).
+kubectl -n default get pod gpustack-e2e-instance -o jsonpath='{.status.phase}'; echo
+kubectl -n default get workloads.kueue.x-k8s.io \
+  -o custom-columns=NAME:.metadata.name,ADMITTED:'.status.conditions[?(@.type=="Admitted")].status'
+# spec.stop must be unset/false here — the Instance is running and its InstanceType is Active.
+kubectl -n default get instance gpustack-e2e-instance -o jsonpath='{.spec.stop}'; echo
+
+# 3. Drain: bump the general ram label so the node matches a new profile and the old one drains.
+gKey=$(kubectl get node "$NODE" -o json | grep -oE '"general\.feature\.gpustack\.ai/[a-z0-9-]+\.ram"' | head -1 | sed -E 's#.*/(.*)\.ram"#\1#')
+old=$(kubectl -n "$NS" get nodefeature "${NODE}-gpustack-worker" -o jsonpath="{.spec.labels.general\.feature\.gpustack\.ai/${gKey}\.ram}")
+new=32Gi; [ "$old" = "32Gi" ] && new=24Gi   # any different even Gi value forces a new profile
+echo "draining: ram ${old} -> ${new} (gKey=${gKey})"
+kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
+  -p "{\"spec\":{\"labels\":{\"general.feature.gpustack.ai/${gKey}.ram\":\"${new}\"}}}"
+```
+
+Poll the chain, then assert the Instance is **stopped, not recreated**:
+
+```bash
+# Old flavor draining, old ClusterQueue HoldAndDrain, old InstanceType Inactive, new profile Active.
+kubectl get resourceflavors.kueue.x-k8s.io -o custom-columns=NAME:.metadata.name,DRAIN:'.metadata.annotations.schedule\.gpustack\.ai/drain' | grep gpustack--
+kubectl get clusterqueues.kueue.x-k8s.io   -o custom-columns=NAME:.metadata.name,STOP:.spec.stopPolicy | grep gpustack--
+kubectl get instancetypes.worker.gpustack.ai -o custom-columns=NAME:.metadata.name,PHASE:.status.phase
+
+# THE assertion: the Instance whose InstanceType is now Inactive gets stopped.
+kubectl -n default get instance gpustack-e2e-instance \
+  -o custom-columns=STOP:.spec.stop,PHASE:.status.phase    # expect: true / Stopped
+kubectl -n default get pod gpustack-e2e-instance || echo "pod evicted (expected)"
+# Ground truth in the logs — proves the phase==Inactive branch ran, not some other path:
+kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=400 | grep "stop instance as inactive instance type"
+```
+
+A buggy `Phase != Inactive` condition would **recreate the Pod instead of stopping the Instance** —
+that is the regression this test exists to catch. (A harmless `create service … spec.ports: Required
+value` error appears because the test Instance declares no ports; it is unrelated to the drain path.)
+
+Restore when keeping the deployment (skip if doing a full §6 teardown):
+
+```bash
+kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
+  -p "{\"spec\":{\"labels\":{\"general.feature.gpustack.ai/${gKey}.ram\":\"${old}\"}}}"
+kubectl -n default delete instance gpustack-e2e-instance
+```
+
+## 5. Optional — simulated accelerator & drain-recycle (accelerated chain)
 
 This exercises the accelerated chain and the drain-recycle behavior (the `ResourceFlavor` tombstone,
 `ClusterQueue` `HoldAndDrain`, and `Cohort` reclaim — see [architecture.md](../../../docs/architecture.md)
@@ -193,7 +281,7 @@ handling. Run only if the change under test touches the accelerated or drain pat
    kubectl get cohorts.kueue.x-k8s.io -o name | grep 'gpustack--' || echo "cohort reclaimed"
    ```
 
-## 5. Teardown (ask first)
+## 6. Teardown (ask first)
 
 When verification finishes, **ask the user** (with `AskUserQuestion`) whether to clean up or keep the
 deployment for inspection.
@@ -202,7 +290,12 @@ If cleaning up — uninstall via Helm and remove the operator's objects. The `gp
 namespace is **kept** (deleting it can hang in `Terminating` on the orphaned aggregated APIServices):
 
 ```bash
-# Injected fake NodeFeature(s) and test workloads first.
+# §4 test Instance (delete before NodeFeature so its Pod/Workload drain cleanly).
+kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found
+
+# Injected fake NodeFeature(s) and test workloads. Deleting the Worker-authored
+# <node>-gpustack-worker NodeFeature also discards any §4 ram edit; the operator
+# rebuilds it from the Node on the next reconcile.
 kubectl -n gpustack-system delete nodefeature --all
 
 # Operator-installed apps (Helm), then their CRDs.
@@ -244,6 +337,16 @@ Never delete the user's pre-existing namespaces or resources.
   patch them by hand: `kubectl patch <resourceflavor|clusterqueue>/<name> --type=merge -p '{"metadata":{"finalizers":[]}}'`.
 - **No Kueue objects appear** — confirm NFD and Kueue pods are Ready (§3 step 4) and that nodes carry
   the `feature.gpustack.ai/cpu-*` labels (§3 step 5); the chain is driven entirely by those labels.
+- **§4 ram edit reverts / old profile never drains** — the patch must land on the
+  `<node>-gpustack-worker` NodeFeature (Worker-authored), not on the Node directly (NFD overwrites Node
+  labels). Confirm NFD merged it: `kubectl get node <node> -o json | grep '<gKey>.ram'` should show the
+  new value. If a new profile never appears, the chosen value matched the old one (must differ and be
+  even Gi).
+- **§4 Instance not stopped after drain** — check the Pod was actually admitted (held quota) before the
+  drain; an unadmitted/finished Workload leaves nothing for `HoldAndDrain` to evict, so `pod==nil` may
+  never recur. Keep the container alive (`sleep`). If the Instance's InstanceType went straight to
+  *gone* rather than *Inactive*, the `phase==Inactive` branch was skipped — re-run and assert
+  `Inactive` is observed while the ClusterQueue is `HoldAndDrain`.
 - **Behavior matches old code / `--version` ≠ HEAD (§3 step 1b)** — you're running a stale image.
   Commit your change (the `GPUSTACK_GIT_COMMIT` build-arg recompiles per commit), rebuild with a fresh
   `TAG=dev-$(git rev-parse --short HEAD)`, reload, and redeploy pointing at the new tag. (Symptom seen

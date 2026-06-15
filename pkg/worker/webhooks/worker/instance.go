@@ -31,7 +31,7 @@ import (
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="instances",scope="Namespaced"
 // +k8s:webhook-gen:validating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
 // +k8s:webhook-gen:mutating:group="worker.gpustack.ai",version="v1alpha1",resource="instances",scope="Namespaced"
-// +k8s:webhook-gen:mutating:operations=["CREATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
+// +k8s:webhook-gen:mutating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
 type InstanceWebhook struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader
@@ -62,27 +62,33 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 			field.NewPath("spec.type"), "type must be specified")
 	}
 
-	instType := &worker.InstanceType{
-		ObjectMeta: meta.ObjectMeta{
-			Name: inst.Spec.Type,
-		},
-	}
-	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType)
-	if err != nil {
-		if !kerrors.IsNotFound(err) {
-			return nil, field.InternalError(
-				field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
+	// Only a wanna run instance requires an existing InstanceType and resource limits
+	// validated against it; a stopped instance may reference an InstanceType that is
+	// draining or already removed.
+	var instType *worker.InstanceType
+	if !ptr.Deref(inst.Spec.Stop, false) {
+		instType = &worker.InstanceType{
+			ObjectMeta: meta.ObjectMeta{
+				Name: inst.Spec.Type,
+			},
 		}
-		err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
-			ctrlclix.WithoutQuorum)
+		err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType)
 		if err != nil {
-			return nil, field.NotFound(
-				field.NewPath("spec.type"), inst.Spec.Type)
+			if !kerrors.IsNotFound(err) {
+				return nil, field.InternalError(
+					field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
+			}
+			err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
+				ctrlclix.WithoutQuorum)
+			if err != nil {
+				return nil, field.NotFound(
+					field.NewPath("spec.type"), inst.Spec.Type)
+			}
 		}
 	}
 
 	var errs field.ErrorList
-	if instRess := inst.Spec.Resources; instRess != nil {
+	if instRess := inst.Spec.Resources; instType != nil && instRess != nil {
 		// Validate accelerator request first since it may determine the validation of other resource requests.
 		if instType.Spec.Acceleratable {
 			if instRess.Accelerator != nil {
@@ -158,81 +164,111 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (ctrladmission.Warnings, error) {
 	instOld, inst := oldObj.(*workercore.Instance), newObj.(*workercore.Instance)
 
+	stopped := ptr.Deref(instOld.Spec.Stop, false)
+	starting := stopped && !ptr.Deref(inst.Spec.Stop, false)
+	stopping := !stopped && ptr.Deref(inst.Spec.Stop, false)
+
 	var errs field.ErrorList
 
-	// Immutable fields validation.
-	if inst.Spec.Type != instOld.Spec.Type {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.type"), "type is immutable"),
-		)
-	}
-	if inst.Spec.Image != instOld.Spec.Image {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.image"), "image is immutable"),
-		)
-	}
-	if inst.Spec.ImagePullPolicy != instOld.Spec.ImagePullPolicy {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable"),
-		)
-	}
-	if !kubemeta.DeepEqual(inst.Spec.Command, instOld.Spec.Command) {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.command"), "command is immutable"),
-		)
-	}
-	if inst.Spec.Privileged != instOld.Spec.Privileged {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.privileged"), "privileged is immutable"),
-		)
-	}
-	if !kubemeta.DeepEqual(inst.Spec.Ports, instOld.Spec.Ports) {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.ports"), "ports is immutable"),
-		)
-	}
-	if !kubemeta.DeepEqual(inst.Spec.Env, instOld.Spec.Env) {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.env"), "env is immutable"),
-		)
-	}
-	if inst.Spec.VolumeMount != instOld.Spec.VolumeMount {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.volumeMount"), "volumeMount is immutable"),
-		)
-	}
-	if !kubemeta.DeepEqual(inst.Spec.ImagePullSecret, instOld.Spec.ImagePullSecret) {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable"),
-		)
-	}
-	if !kubemeta.DeepEqual(inst.Spec.Resources, instOld.Spec.Resources) {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.resources"), "resources is immutable"),
-		)
+	// Validate filed modification,
+	// only can be modified when the instance is stopped,
+	// except the "Volume".
+	if !stopped {
+		if inst.Spec.Type != instOld.Spec.Type {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.type"), "type is immutable"),
+			)
+		}
+		if inst.Spec.Image != instOld.Spec.Image {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.image"), "image is immutable"),
+			)
+		}
+		if inst.Spec.ImagePullPolicy != instOld.Spec.ImagePullPolicy {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.imagePullPolicy"), "imagePullPolicy is immutable"),
+			)
+		}
+		if !kubemeta.DeepEqual(inst.Spec.Command, instOld.Spec.Command) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.command"), "command is immutable"),
+			)
+		}
+		if inst.Spec.Privileged != instOld.Spec.Privileged {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.privileged"), "privileged is immutable"),
+			)
+		}
+		if !kubemeta.DeepEqual(inst.Spec.Ports, instOld.Spec.Ports) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.ports"), "ports is immutable"),
+			)
+		}
+		if !kubemeta.DeepEqual(inst.Spec.Env, instOld.Spec.Env) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.env"), "env is immutable"),
+			)
+		}
+		if inst.Spec.VolumeMount != instOld.Spec.VolumeMount {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.volumeMount"), "volumeMount is immutable"),
+			)
+		}
+		if !kubemeta.DeepEqual(inst.Spec.ImagePullSecret, instOld.Spec.ImagePullSecret) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.imagePullSecret"), "imagePullSecret is immutable"),
+			)
+		}
+		if !kubemeta.DeepEqual(inst.Spec.Resources, instOld.Spec.Resources) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.resources"), "resources is immutable"),
+			)
+		}
+		if !kubemeta.DeepEqual(inst.Spec.SSHPublicKey, instOld.Spec.SSHPublicKey) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable"),
+			)
+		}
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Volume, instOld.Spec.Volume) {
 		errs = append(errs, field.Forbidden(
 			field.NewPath("spec.volume"), "volume is immutable"),
 		)
 	}
-	if !kubemeta.DeepEqual(inst.Spec.SSHPublicKey, instOld.Spec.SSHPublicKey) {
-		errs = append(errs, field.Forbidden(
-			field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable"),
-		)
-	}
 
-	// Phase transition validation.
-	if !ptr.Deref(instOld.Spec.Stop, false) && ptr.Deref(inst.Spec.Stop, false) {
-		if instOld.Status.Phase == workerctrl.PhaseStarting {
-			errs = append(errs, field.Forbidden(
-				field.NewPath("spec.stop"), "cannot stop starting instance"))
-		}
-	}
-	if ptr.Deref(instOld.Spec.Stop, false) && !ptr.Deref(inst.Spec.Stop, false) {
-		if instOld.Status.Phase != workerctrl.PhaseStopped {
+	// Validate state transition.
+	switch {
+	case starting:
+		// Validate the instance is actually stopped before allowing it to be started.
+		if instOld.Status.Phase != workerctrl.InstancePhaseStopped {
 			errs = append(errs, field.Forbidden(
 				field.NewPath("spec.stop"), "can only start stopped instance"))
+		}
+		// Validate the existence of the referenced InstanceType when starting a stopped instance.
+		instType := &worker.InstanceType{
+			ObjectMeta: meta.ObjectMeta{
+				Name: inst.Spec.Type,
+			},
+		}
+		err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				return nil, field.InternalError(
+					field.NewPath("spec.type"), fmt.Errorf("get instance type: %w", err))
+			}
+			err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(instType), instType,
+				ctrlclix.WithoutQuorum)
+			if err != nil {
+				errs = append(errs, field.NotFound(
+					field.NewPath("spec.type"), inst.Spec.Type))
+			}
+		}
+	case stopping:
+		// Validate the instance is not starting when trying to stop it,
+		// to avoid the race condition between starting and stopping an instance.
+		if instOld.Status.Phase == workerctrl.InstancePhaseStarting {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.stop"), "cannot stop starting instance"))
 		}
 	}
 
@@ -250,10 +286,30 @@ func (r *InstanceWebhook) ValidateDelete(ctx context.Context, obj runtime.Object
 func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	inst := obj.(*workercore.Instance)
 
-	if inst.Spec.Type == "" {
-		return field.Required(
-			field.NewPath("spec.type"), "type must be specified")
+	if inst.Spec.ImagePullPolicy == "" {
+		inst.Spec.ImagePullPolicy = core.PullIfNotPresent
 	}
+
+	if inst.Spec.VolumeMount == "" {
+		inst.Spec.VolumeMount = "/workspace"
+	}
+
+	if inst.Spec.Resources == nil {
+		inst.Spec.Resources = &workercore.InstanceResources{}
+	}
+
+	// If type is not specified,
+	// skip defaulting resources and let later validation to block it.
+	if inst.Spec.Type == "" {
+		return nil
+	}
+
+	// If the instance is stopped,
+	// skip defaulting resources.
+	if ptr.Deref(inst.Spec.Stop, false) {
+		return nil
+	}
+
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
 			Name: inst.Spec.Type,
@@ -271,18 +327,6 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			return field.NotFound(
 				field.NewPath("spec.type"), inst.Spec.Type)
 		}
-	}
-
-	if inst.Spec.ImagePullPolicy == "" {
-		inst.Spec.ImagePullPolicy = core.PullIfNotPresent
-	}
-
-	if inst.Spec.VolumeMount == "" {
-		inst.Spec.VolumeMount = "/workspace"
-	}
-
-	if inst.Spec.Resources == nil {
-		inst.Spec.Resources = &workercore.InstanceResources{}
 	}
 
 	withGeneralOvercommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
