@@ -7,6 +7,7 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -106,6 +107,7 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 		capacity    core.ResourceList
 		reservation core.ResourceList
 		overcommit  bool
+		draining    bool
 
 		wantAcceleratable bool
 		wantCapAcc        resource.Quantity
@@ -281,12 +283,40 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 			wantOrmStg: qty("0"),
 			wantOrmAcc: qty("0"),
 		},
+
+		// --- draining ---
+		{
+			// A draining (HoldAndDrain) queue exposes zero capacity across all
+			// four resources, even though its flavor still carries nominal
+			// quota — no new workload should target a queue being drained.
+			name:        "draining: HoldAndDrain zeroes all resources",
+			cqName:      nonAccName,
+			notes:       nonAccNotes,
+			capacity:    nonAccCapacity,
+			reservation: nil,
+			overcommit:  false,
+			draining:    true,
+
+			wantAcceleratable: false,
+			wantCapAcc:        qty("0"),
+			wantRemCPU:        qty("0"),
+			wantRemRAM:        qty("0"),
+			wantRemStg:        qty("0"),
+			wantRemAcc:        qty("0"),
+			wantOrmCPU:        qty("0"),
+			wantOrmRAM:        qty("0"),
+			wantOrmStg:        qty("0"),
+			wantOrmAcc:        qty("0"),
+		},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			cq := mkClusterQueue(c.cqName, c.notes, c.capacity, c.reservation)
+			if c.draining {
+				cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+			}
 			it := convertInstanceTypeFromClusterQueue(cq, c.overcommit)
 			if !assert.NotNil(t, it, "expected InstanceType") {
 				return
@@ -295,10 +325,17 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 			// Spec.
 			assert.Equal(t, c.wantAcceleratable, it.Spec.Acceleratable, "Spec.Acceleratable")
 
-			// Capacity comes straight from the ClusterQueue input.
-			qtyEqual(t, c.capacity[core.ResourceCPU], it.Status.CPU.Capacity, "Capacity.CPU")
-			qtyEqual(t, c.capacity[core.ResourceMemory], it.Status.RAM.Capacity, "Capacity.RAM")
-			qtyEqual(t, c.capacity[core.ResourceEphemeralStorage], it.Status.LocalStorage.Capacity, "Capacity.Storage")
+			// Capacity comes straight from the ClusterQueue input, unless the
+			// queue is draining (HoldAndDrain), where every resource is zeroed.
+			wantCapCPU := c.capacity[core.ResourceCPU]
+			wantCapRAM := c.capacity[core.ResourceMemory]
+			wantCapStg := c.capacity[core.ResourceEphemeralStorage]
+			if c.draining {
+				wantCapCPU, wantCapRAM, wantCapStg = qty("0"), qty("0"), qty("0")
+			}
+			qtyEqual(t, wantCapCPU, it.Status.CPU.Capacity, "Capacity.CPU")
+			qtyEqual(t, wantCapRAM, it.Status.RAM.Capacity, "Capacity.RAM")
+			qtyEqual(t, wantCapStg, it.Status.LocalStorage.Capacity, "Capacity.Storage")
 			qtyEqual(t, c.wantCapAcc, it.Status.Accelerator.Capacity, "Capacity.Accelerator")
 
 			// Remaining.

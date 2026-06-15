@@ -273,13 +273,19 @@ func convertInstanceTypeFromClusterQueue(
 	slicedAccelerator := funcx.NoError(strconvx.Atoi[int64](notes["slicedAccelerator"]))
 	acceleratable := notes["acceleratable"] == "true"
 
+	// When the queue is draining (HoldAndDrain), Kueue is evicting workloads and
+	// canceling reservations; expose zero capacity so the InstanceType reflects
+	// that no new workload should target it. The quota quantities declared below
+	// stay at their zero value because the aggregation block is skipped.
+	draining := cq.Spec.StopPolicy != nil && *cq.Spec.StopPolicy == kueue.HoldAndDrain
+
 	var (
 		capAcc, remAcc, ormAcc resource.Quantity
 		capCpu, remCpu, ormCpu resource.Quantity
 		capRam, remRam, ormRam resource.Quantity
 		capStg, remStg, ormStg resource.Quantity
 	)
-	{
+	if !draining {
 		resourceAccelerator := nodefeature.GetAcceleratableCreditsResourceName(notes["manufacturer"])
 
 		// Index quantities for later use.
