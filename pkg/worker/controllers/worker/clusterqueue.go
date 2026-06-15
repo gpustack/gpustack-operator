@@ -12,6 +12,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +35,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
+	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
@@ -63,8 +65,14 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 		return ctrlreconcile.Result{}, err
 	}
 
-	// Remove ClusterQueue if no ResourceFlavor.
-	if len(rfList.Items) == 0 {
+	// Determine whether the queue should drain: either no ResourceFlavor backs
+	// it, or every backing flavor is draining (no Node uses its profile).
+	allDrained := slicex.All(rfList.Items, func(i int) bool {
+		return rfList.Items[i].Annotations[_ResourceFlavorDrainAnnoKey] == "true"
+	})
+
+	// Drain and remove the ClusterQueue when it has no active ResourceFlavor.
+	if len(rfList.Items) == 0 || allDrained {
 		cq := &kueue.ClusterQueue{
 			ObjectMeta: meta.ObjectMeta{
 				Name: queueName,
@@ -84,21 +92,30 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 				return ctrlreconcile.Result{}, ctrlcli.IgnoreNotFound(err)
 			}
 		}
-		var reserved bool
-		for i := range cq.Status.FlavorsReservation {
-			fr := &cq.Status.FlavorsReservation[i]
-			for j := range fr.Resources {
-				if !fr.Resources[j].Total.IsZero() ||
-					!fr.Resources[j].Borrowed.IsZero() {
-					reserved = true
-					break
-				}
-			}
-			if reserved {
-				break
-			}
+
+		// Skip if already being deleted.
+		if cq.DeletionTimestamp != nil {
+			logger.V(3).Info("skip deleted cluster queue")
+			return ctrlreconcile.Result{}, nil
 		}
-		if reserved {
+
+		// Phase 1: switch the queue to HoldAndDrain so Kueue evicts admitted
+		// workloads and cancels reservations. The ResourceGroups are frozen
+		// as-is — the orphaned flavors carry ~zero quota, and recomputing would
+		// only churn the spec and reset the StopPolicy.
+		if ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.HoldAndDrain {
+			cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)
+			err = r.Client.Update(ctx, cq)
+			if err != nil {
+				logger.Error(err, "set cluster queue to hold and drain")
+				return ctrlreconcile.Result{}, err
+			}
+			logger.V(2).Info("set cluster queue to hold and drain; requeue in 15s")
+			return ctrlreconcile.Result{RequeueAfter: 15 * time.Second}, nil
+		}
+
+		// Phase 2: wait until Kueue has drained all reservations, then delete.
+		if hasReserved(cq) {
 			logger.V(2).Info("cluster queue still has reserved resources; requeue in 15s")
 			return ctrlreconcile.Result{RequeueAfter: 15 * time.Second}, nil
 		}
@@ -109,7 +126,7 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 				return ctrlreconcile.Result{}, err
 			}
 		}
-		logger.V(2).Info("deleted cluster queue: no resource flavors")
+		logger.V(2).Info("deleted drained cluster queue")
 		return ctrlreconcile.Result{}, nil
 	}
 
@@ -146,6 +163,9 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 		Spec: kueue.ClusterQueueSpec{
 			NamespaceSelector: &meta.LabelSelector{},
 			CohortName:        kueue.CohortReference(cohortName), // Updated if changed.
+			// Active flavors back this queue: keep it running, lifting any
+			// previous drain by forcing the StopPolicy back to None.
+			StopPolicy: ptr.To(kueue.None),
 			// Prefer using nominal quota instead of borrowing.
 			FlavorFungibility: &kueue.FlavorFungibility{
 				WhenCanBorrow:  kueue.TryNextFlavor,
@@ -201,6 +221,24 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 	}
 	logger.V(2).Info("synced cluster queue")
 	return ctrlreconcile.Result{}, nil
+}
+
+// hasReserved reports whether the ClusterQueue still holds reserved quota or
+// admitted/reserving workloads. The queue must not be deleted until Kueue has
+// finished draining; the workload counters guard against the flavor
+// reservation snapshot momentarily reading zero while eviction is still in
+// flight. Pending workloads are intentionally not counted — they hold no
+// reservation, and gating on them would block deletion forever.
+func hasReserved(cq *kueue.ClusterQueue) bool {
+	if cq.Status.ReservingWorkloads != 0 || cq.Status.AdmittedWorkloads != 0 {
+		return true
+	}
+	return slicex.Any(cq.Status.FlavorsReservation, func(i int) bool {
+		return slicex.Any(cq.Status.FlavorsReservation[i].Resources, func(j int) bool {
+			return !cq.Status.FlavorsReservation[i].Resources[j].Total.IsZero() ||
+				!cq.Status.FlavorsReservation[i].Resources[j].Borrowed.IsZero()
+		})
+	})
 }
 
 func (r *ClusterQueueReconciler) constructResourceGroups(
@@ -377,32 +415,32 @@ const (
 	IndexingResourceFlavorsByQueueName = "resourceflavors.annotations['device.gpustack.ai/queue']"
 )
 
+// indexResourceFlavorByQueueName mirrors the field index registered by
+// ClusterQueueReconciler.SetupController, so the fake client resolves
+// MatchingFields{IndexingResourceFlavorsByQueueName} as the manager does.
+func indexResourceFlavorByQueueName(obj ctrlcli.Object) []string {
+	if obj == nil {
+		return nil
+	}
+
+	rf := obj.(*kueue.ResourceFlavor)
+	if rf.DeletionTimestamp != nil {
+		return nil
+	}
+	if !systemmeta.MatchResource(rf, "nodes") {
+		return nil
+	}
+	if !kubemeta.HasAnnotations(rf, _ResourceFlavorQueueNameAnnoKey, _ResourceFlavorCohortNameAnnoKey) {
+		return nil
+	}
+
+	return []string{rf.Annotations[_ResourceFlavorQueueNameAnnoKey]}
+}
+
 func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	// Configure field indexer.
 	fi := opts.Manager.GetFieldIndexer()
-	err := fi.IndexField(ctx, &kueue.ResourceFlavor{}, IndexingResourceFlavorsByQueueName,
-		func(obj ctrlcli.Object) []string {
-			if obj == nil {
-				return nil
-			}
-
-			rf := obj.(*kueue.ResourceFlavor)
-			if rf.DeletionTimestamp != nil {
-				return nil
-			}
-			if !systemmeta.MatchResource(rf, "nodes") {
-				return nil
-			}
-			if !kubemeta.HasAnnotations(rf,
-				_ResourceFlavorQueueNameAnnoKey,
-				_ResourceFlavorCohortNameAnnoKey) {
-				return nil
-			}
-
-			return []string{
-				rf.Annotations[_ResourceFlavorQueueNameAnnoKey],
-			}
-		})
+	err := fi.IndexField(ctx, &kueue.ResourceFlavor{}, IndexingResourceFlavorsByQueueName, indexResourceFlavorByQueueName)
 	if err != nil {
 		return fmt.Errorf("index resource flavor '%s': %w", IndexingResourceFlavorsByQueueName, err)
 	}
@@ -431,6 +469,9 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 				// Trigger reconciliation when a ResourceFlavor is:
 				// - created.
 				// - deleted.
+				// - updated if its drain mark has changed, so the queue enters
+				//   HoldAndDrain once every flavor drains and leaves it once a
+				//   flavor becomes active again.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return true
@@ -438,8 +479,11 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldRf, newRf := e.ObjectOld.(*kueue.ResourceFlavor), e.ObjectNew.(*kueue.ResourceFlavor)
 						if newRf.DeletionTimestamp == nil {
-							return false
+							// Fire when the drain mark has changed.
+							return !mapx.EqualWithKey(oldRf.Annotations, newRf.Annotations,
+								_ResourceFlavorDrainAnnoKey)
 						}
+						// Fire when the deletion timestamp changes.
 						if oldRf.DeletionTimestamp == nil {
 							return true
 						}
@@ -460,10 +504,10 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 				r.enqueueCohortWhenNodeChanged,
 			),
 			ctrlbuilder.WithPredicates(
-				// Interested in Node objects:
+				// Trigger reconciliation when a Node is:
 				// - created.
 				// - deleted.
-				// - updated if labels or allocatable resources have changed.
+				// - updated if its feature labels or allocatable resources have changed.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						if aggressive {
@@ -472,7 +516,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							// Check if labels have changed.
+							// Fire when feature labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
 								systemname.LabelPrefix,
 								nodefeature.FeatureLabelPrefix,
@@ -480,7 +524,7 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 								nodefeature.AcceleratableFeatureLabelPrefix) {
 								return true
 							}
-							// Check if the allocatable resources have changed.
+							// Fire when allocatable resources have changed.
 							for cn := range newNd.Status.Allocatable {
 								switch {
 								default:
