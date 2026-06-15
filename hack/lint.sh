@@ -15,12 +15,21 @@ function lint() {
   opts+=("./...")
   GOLANGCI_LINT_CACHE="$(go env GOCACHE)/golangci-lint" gpustack::lint::run "${opts[@]}"
 
+  local dirty="false"
+  if [[ -n "$(command -v git)" ]]; then
+    if git_status=$(git status --porcelain 2>/dev/null) && [[ -n ${git_status} ]]; then
+      dirty="true"
+    fi
+  fi
+
+  if [[ "${dirty}" == "false" ]]; then
+    gpustack::commit::lint
+  fi
+
   if [[ "$*" =~ dirty ]] || [[ "${LINT_DIRTY:-}" == "true" ]]; then
-    if [[ -n "$(command -v git)" ]]; then
-        if git_status=$(git status --porcelain 2>/dev/null) && [[ -n ${git_status} ]]; then
-          gpustack::log::fatal "the git tree is dirty:\n$(git status --porcelain)"
-        fi
-      fi
+    if [[ "${dirty}" != "false" ]]; then
+      gpustack::log::fatal "the git tree is dirty:\n$(git status --porcelain)"
+    fi
   fi
 }
 

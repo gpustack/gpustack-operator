@@ -1,4 +1,6 @@
+version: 1
 commits:
+  upstreamBranch: origin/main
   disabled: false
   strict: false
   limit: 100
