@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-e2e
-description: "Run a local end-to-end (E2E) verification of the GPUStack Operator on a reachable local cluster (k3s / docker-desktop): build & load the :dev image, deploy via ytt, then assert the NFD → Worker → Kueue scheduling chain materializes. Proactively offer this when a branch ahead of main changes controller reconcile, admission webhook, extension-apiserver, or in-cluster app-installation code. Examples: \"run the e2e test\", \"verify my reconcile change on a real cluster\", \"deploy the operator to my local k3s and check the Kueue objects\", \"does this drain change actually work end to end?\"."
+description: "Run a local end-to-end (E2E) verification of the GPUStack Operator on a reachable local cluster (k3s / docker-desktop): build & load the dev image, deploy via the Helm chart, then assert the NFD → Worker → Kueue scheduling chain materializes. Proactively offer this when a branch ahead of main changes controller reconcile, admission webhook, extension-apiserver, or in-cluster app-installation code. Examples: \"run the e2e test\", \"verify my reconcile change on a real cluster\", \"deploy the operator to my local k3s and check the Kueue objects\", \"does this drain change actually work end to end?\"."
 allowed-tools: "Bash(kubectl get*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(git diff*), Bash(command -v*), Read"
 model: sonnet
 ---
@@ -19,7 +19,7 @@ This skill **mutates a cluster**. Hard rules:
   is the intended local cluster. If a different context is needed, **stop and ask** — never run
   `kubectl config use-context`.
 - Build the image **locally only** — never push (`PACKAGE_PUSH` stays `false`).
-- Touch only objects this skill creates (the `ytt` deployment, injected fake labels, test workloads).
+- Touch only objects this skill creates (the Helm release, injected fake labels, test workloads).
   **Never** modify or delete the user's pre-existing namespaces/resources.
 - Every mutating step (build/load, deploy, inject, teardown) is confirmed before running.
 
@@ -46,9 +46,8 @@ If nothing matches, say so and run only on explicit request.
 ## Preflight (read-only)
 
 ```bash
-# Required host tools (helm runs *inside* the operator image, so host helm is informational only).
-command -v kubectl ytt docker || echo "missing a required tool"
-command -v helm || echo "helm not on host (ok — used inside the image)"
+# Required host tools (the operator is deployed via its Helm chart).
+command -v kubectl helm docker || echo "missing a required tool"
 
 # Show the active context and confirm it is the intended LOCAL cluster before any mutation.
 kubectl config current-context
@@ -85,21 +84,21 @@ Load it into the cluster's runtime:
 If pods later report `ErrImagePull` / `ImagePullBackOff` even though the image is built, the cluster
 runtime does not share the docker store — use the explicit import path above for your runtime.
 
-## 2. Deploy the operator (confirm)
+## 2. Deploy the operator via Helm (confirm)
 
 ```bash
-ytt -f deploy/gpustack-operator/ytt | kubectl apply -f -
+NS=gpustack-system
+helm install gpustack-operator deploy/gpustack-operator/chart \
+  -n "$NS" --create-namespace \
+  --set image.tag="$TAG" \
+  --set image.pullPolicy=IfNotPresent
 ```
 
-Default namespace is `gpustack-system` (override with `-v namespaceName=...`). The manifest pins
-`image: …:dev` with `imagePullPolicy: Always`, so the kubelet would try to pull from a registry and
-fail even though the image is loaded locally. **Point it at your per-build tag and use `IfNotPresent`:**
-
-```bash
-kubectl -n gpustack-system set image deploy/gpustack-operator-worker main="gpustack/gpustack-operator:$TAG"
-kubectl -n gpustack-system patch deployment gpustack-operator-worker --type=json \
-  -p='[{"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]'
-```
+`image.tag` defaults to `v<Chart.AppVersion>`; pinning it to your per-build `$TAG` (plus
+`IfNotPresent`) is what makes the kubelet run the locally-loaded image instead of pulling from a
+registry. The chart deploys the worker + the per-manufacturer device-manager DaemonSets and passes
+`--disable-applications=device-manager` to the worker; the worker self-installs Kueue / NFD / CSI at
+runtime. Override the namespace with `-n <ns>` (the chart deploys into the release namespace).
 
 ## 3. Verify the CPU-only chain (mandatory)
 
@@ -128,9 +127,11 @@ kubectl get apiservices v1.gpustack.ai v1.worker.gpustack.ai \
 # 3. CRDs are established.
 kubectl get crd instances.worker.gpustack.ai devices.worker.gpustack.ai
 
-# 4. The operator self-installed NFD and Kueue; wait for their pods to be Ready.
-#    (Names/namespaces come from the in-cluster Helm releases — discover, then wait.)
-kubectl get pods -A | grep -Ei 'nfd|node-feature|kueue'
+# 4. The operator self-installs the bundled (inlined) charts as separate Helm releases — wait for them.
+#    Always: gpustack-kueue, gpustack-node-feature-discovery, gpustack-csi-driver-nfs, gpustack-csi-driver-s3.
+#    Plus gpustack-operator-device-manager only when deployed with deviceManager.enabled=false (otherwise
+#    the chart renders the DaemonSets directly). `helm list -n "$NS"` should show each STATUS=deployed.
+kubectl get pods -A | grep -Ei 'nfd|node-feature|kueue|csi-'
 #    Soft check: DM DaemonSets exist (0 pods on a GPU-less node is expected).
 kubectl get daemonset -A | grep -i device-manager || true
 
@@ -286,40 +287,28 @@ handling. Run only if the change under test touches the accelerated or drain pat
 When verification finishes, **ask the user** (with `AskUserQuestion`) whether to clean up or keep the
 deployment for inspection.
 
-If cleaning up — uninstall via Helm and remove the operator's objects. The `gpustack-system`
-namespace is **kept** (deleting it can hang in `Terminating` on the orphaned aggregated APIServices):
+If cleaning up — first remove the E2E test artifacts, then `helm uninstall` the operator, then run the
+shared cleanup script for the runtime leftovers Helm does not manage. The `gpustack-system` namespace is
+**kept** (deleting it can hang in `Terminating` on the orphaned aggregated APIServices):
 
 ```bash
+NS=gpustack-system
+
 # §4 test Instance (delete before NodeFeature so its Pod/Workload drain cleanly).
 kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found
 
 # Injected fake NodeFeature(s) and test workloads. Deleting the Worker-authored
 # <node>-gpustack-worker NodeFeature also discards any §4 ram edit; the operator
 # rebuilds it from the Node on the next reconcile.
-kubectl -n gpustack-system delete nodefeature --all
+kubectl -n "$NS" delete nodefeature --all
 
-# Operator-installed apps (Helm), then their CRDs.
-helm uninstall gpustack-csi-driver-nfs -n gpustack-system
-helm uninstall gpustack-csi-driver-s3 -n gpustack-system
-helm uninstall gpustack-node-feature-discovery -n gpustack-system
-kubectl get crd | grep nodefeature | cut -d ' ' -f 1 | xargs -I{} kubectl delete crd {}
-helm uninstall gpustack-kueue -n gpustack-system
-# Kueue CRs hold a kueue.x-k8s.io/resource-in-use finalizer that only the (now
-# uninstalled) controller clears — strip it, or `kubectl delete crd` hangs forever.
-for k in resourceflavors clusterqueues cohorts; do
-  kubectl get "$k.kueue.x-k8s.io" -o name 2>/dev/null | xargs -r -I{} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}'
-done
-kubectl get crd | grep kueue | cut -d ' ' -f 1 | xargs -I{} kubectl delete crd {}
+# The operator's own resources (worker, device-managers, RBAC, webhooks).
+helm uninstall gpustack-operator -n "$NS"
 
-# The operator's own workloads, webhooks, CRDs, and aggregated APIServices.
-kubectl -n gpustack-system get daemonset  | grep gpustack-operator | cut -d ' ' -f 1 | xargs -I{} kubectl -n gpustack-system delete daemonset {}
-kubectl get mutatingwebhookconfigurations   | grep gpustack | cut -d ' ' -f 1 | xargs -I{} kubectl delete mutatingwebhookconfigurations {}
-kubectl get validatingwebhookconfigurations | grep gpustack | cut -d ' ' -f 1 | xargs -I{} kubectl delete validatingwebhookconfigurations {}
-kubectl -n gpustack-system get deployment | grep gpustack-operator | cut -d ' ' -f 1 | xargs -I{} kubectl -n gpustack-system delete deployment {}
-kubectl -n gpustack-system get job        | grep gpustack-operator | cut -d ' ' -f 1 | xargs -I{} kubectl -n gpustack-system delete job {}
-kubectl -n gpustack-system get svc        | grep gpustack-operator | cut -d ' ' -f 1 | xargs -I{} kubectl -n gpustack-system delete svc {}
-kubectl get crd        | grep gpustack | cut -d ' ' -f 1 | xargs -I{} kubectl delete crd {}
-kubectl get apiservice | grep gpustack | cut -d ' ' -f 1 | xargs -I{} kubectl delete apiservice {}
+# Everything Helm leaves behind: the worker-installed Kueue/NFD/CSI sub-releases, their CRDs, the
+# finalizers pinning Kueue/Instance objects, and the runtime-registered APIServices/webhooks. This is
+# the same single-source script the chart's post-delete hook runs (see deploy/.../chart/files/).
+bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
 ```
 
 Never delete the user's pre-existing namespaces or resources.
@@ -327,7 +316,7 @@ Never delete the user's pre-existing namespaces or resources.
 ## Troubleshooting
 
 - **`ImagePullBackOff` on `gpustack-operator-worker`** — image not in the cluster runtime, or
-  `imagePullPolicy` still `Always`. Re-do the load (§1) and the patch (§2).
+  `imagePullPolicy` still `Always`. Re-do the load (§1) and reinstall with the `--set image.*` flags (§2).
 - **Extension APIService not `Available`** — the aggregated apiserver isn't ready; check the worker
   logs. Startup order matters: controllers start only after the extension APIs report ready
   (see [architecture.md](../../../docs/architecture.md)).

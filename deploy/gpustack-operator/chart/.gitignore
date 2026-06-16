@@ -1,0 +1,5 @@
+# Transient dependency artifacts fetched by `helm dependency update`.
+# Exact versions are pinned in Chart.yaml, so these are rebuilt in CI and at
+# package time rather than committed.
+charts/*.tgz
+Chart.lock

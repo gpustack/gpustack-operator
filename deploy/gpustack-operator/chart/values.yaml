@@ -1,0 +1,165 @@
+# yaml-language-server: $schema=values.schema.json
+# Default values for gpustack-operator.
+
+# -- Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers
+# the worker creates at runtime but Helm does not manage: the Kueue / Node Feature
+# Discovery / CSI Helm releases, their CRDs, the finalizers pinning Kueue and
+# Instance objects, and the aggregated APIServices / webhooks. Disabled by default
+# because those CRDs may be shared with other workloads; enable only when this
+# release exclusively owns them (e.g. CI / e2e).
+cleanupOnUninstall: false
+
+# -- Global values shared across the chart and its subcharts.
+global:
+  # -- Image registry override applied to the operator image (e.g. "docker.io").
+  # When empty, the registry encoded in `image.repository` is used as-is.
+  imageRegistry: ""
+  # -- Image namespace override applied to the operator image. When non-empty it
+  # replaces the namespace segment of `image.repository` (e.g. "gpustack").
+  imageNamespace: ""
+  # -- Image pull secrets applied to all workloads.
+  imagePullSecrets: []
+  # -- Node selector applied to all workloads when a component does not set its own.
+  nodeSelector: {}
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the fully qualified release name used as the base of resource names.
+fullnameOverride: ""
+# -- Namespace to deploy the resources into; defaults to the release namespace.
+namespaceOverride: ""
+
+# -- Extra labels added to every resource.
+commonLabels: {}
+# -- Extra annotations added to every resource.
+commonAnnotations: {}
+
+# -- Default operator image (shared by the worker and the device-manager). Each
+# component may override any of these keys via its own `image` block.
+image:
+  # -- Operator image repository (shared by the worker and the device-manager).
+  repository: gpustack/gpustack-operator
+  # @schema
+  # type: string
+  # @schema
+  # -- Operator image tag; defaults to "v<.Chart.AppVersion>" when empty.
+  tag: ""
+  # @schema
+  # enum: [Always, IfNotPresent, Never]
+  # @schema
+  # -- Operator image pull policy.
+  pullPolicy: IfNotPresent
+
+# -- Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the
+# single source for the worker `--manufacturer` list, the per-manufacturer device-manager
+# DaemonSets, and the GPUSTACK_<MANUFACTURER>_PCI_VENDOR_ID environment variable propagated
+# to both the worker and the device-managers. The manufacturer list is derived from these
+# keys (sorted for stable rendering); each device-manager DaemonSet only schedules on nodes
+# labelled by NFD with the matching PCI vendor.
+manufacturers:
+  amd: "1002"
+  ascend: "19e5"
+  cambricon: "cabc"
+  hygon: "1d94"
+  iluvatar: "1e3e"
+  metax: "9999"
+  mthreads: "1ed5"
+  nvidia: "10de"
+  thead: "1ded"
+
+worker:
+  # -- Deploy the worker (control plane). Disable to deploy only the device-managers.
+  enabled: true
+  # -- Configure cert-manager integration for the worker webhook serving certificate.
+  certmanager:
+    # @schema
+    # type: [string, boolean]
+    # enum: [auto, "true", "false", true, false]
+    # @schema
+    # -- Whether to issue the worker webhook serving certificate with cert-manager.
+    # Accepts a string (or the equivalent boolean): "auto" creates the cert-manager
+    # resources only when the cert-manager CRDs are detected in the cluster; "true"
+    # always creates them (cert-manager must be installed); "false" never creates
+    # them and the worker generates and manages its own certificate.
+    enabled: auto
+    issuer:
+      # -- Existing issuer name to use; when empty a self-signed Issuer is created.
+      name: ""
+      # -- Issuer kind ("Issuer" or "ClusterIssuer"); only used when `issuer.name` is set.
+      kind: Issuer
+  # -- Number of operator (control plane) replicas.
+  replicas: 1
+  # -- Secure serving port of the worker container.
+  securePort: 31443
+  # -- Per-worker image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall
+  # back to the chart-level `image`.
+  image: {}
+  # -- Host path mounted at /var/lib/gpustack for persistent operator data.
+  dataDir: /var/lib/gpustack
+  # -- Resource requests and limits for the worker container.
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  # -- Node selector for the worker; falls back to `global.nodeSelector` when empty.
+  nodeSelector: {}
+  # @schema
+  # type: array
+  # items:
+  #   type: object
+  # @schema
+  # -- Tolerations for the worker. Defaults let the control plane run on
+  # control-plane/master nodes.
+  tolerations:
+    - key: "node-role.kubernetes.io/master"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/controlplane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
+      effect: "NoSchedule"
+  # -- Extra command-line arguments appended to the worker container args.
+  extraArgs: []
+  # -- Extra environment variables for the worker, as a name/value map.
+  env: {}
+
+deviceManager:
+  # -- Deploy the per-manufacturer device-manager DaemonSets.
+  enabled: true
+  # -- Secure serving port of the device-manager container.
+  securePort: 32443
+  # -- Per-device-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys
+  # fall back to the chart-level `image`.
+  image: {}
+  # -- Create the nvidia/mthreads RuntimeClass objects. Disable when the cluster
+  # already provides them (e.g. via the NVIDIA GPU operator).
+  createRuntimeClasses: true
+  # -- Resource requests and limits for each device-manager container.
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  # @schema
+  # type: array
+  # items:
+  #   type: object
+  # @schema
+  # -- Tolerations for the device-manager DaemonSets. Defaults tolerate every taint
+  # so a manager schedules on any node carrying the matching accelerator.
+  tolerations:
+    - operator: "Exists"
+  # -- Extra command-line arguments appended to each device-manager container args.
+  extraArgs: []
+  # -- Extra environment variables for the device-manager, as a name/value map.
+  env: {}

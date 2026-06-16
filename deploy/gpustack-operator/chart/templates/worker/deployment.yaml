@@ -1,0 +1,159 @@
+{{- if .Values.worker.enabled }}
+{{- $certmanager := eq (include "gpustack-operator.worker.certmanager.enabled" .) "true" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "gpustack-operator.worker.fullname" . }}
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.worker.labels" . | nindent 4 }}
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.worker.replicas }}
+  selector:
+    matchLabels:
+      {{- include "gpustack-operator.worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.worker.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "gpustack-operator.worker.fullname" . }}
+      restartPolicy: Always
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      {{- with (.Values.worker.nodeSelector | default .Values.global.nodeSelector) }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    {{- include "gpustack-operator.worker.selectorLabels" . | nindent 20 }}
+      containers:
+        - name: main
+          image: {{ include "gpustack-operator.image" (dict "root" . "overrides" .Values.worker.image) | quote }}
+          imagePullPolicy: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.worker.image) }}
+          args:
+            - gpustack-operator
+            - worker
+            - -v=2
+            - --secure-port={{ .Values.worker.securePort }}
+            {{- if $certmanager }}
+            - --cert-dir=/var/run/gpustack/certs
+            {{- end }}
+            {{- if .Values.manufacturers }}
+            - --manufacturer={{ keys .Values.manufacturers | sortAlpha | join "," }}
+            {{- end }}
+            {{- if .Values.deviceManager.enabled }}
+            # The chart renders the device-manager DaemonSets directly, so the worker must
+            # not also install them at runtime.
+            - --disable-applications=device-manager
+            {{- end }}
+            {{- with .Values.worker.extraArgs }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
+          env:
+            # User-supplied env first, so a misconfiguration can never shadow the
+            # managed downward-API variables below (last value wins).
+            {{- range $key, $value := .Values.worker.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: KUBERNETES_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: KUBERNETES_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: KUBERNETES_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KUBERNETES_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: KUBERNETES_SERVICE_NAME
+              value: {{ include "gpustack-operator.worker.fullname" . | quote }}
+            # Propagate the chart's image configuration so the applications the worker
+            # installs at runtime (Kueue/NFD/CSI/device-manager) share the same registry,
+            # namespace, pull secrets and pull policy.
+            - name: GPUSTACK_CONTAINER_REGISTRY
+              value: {{ .Values.global.imageRegistry | quote }}
+            - name: GPUSTACK_CONTAINER_NAMESPACE
+              value: {{ .Values.global.imageNamespace | quote }}
+            - name: GPUSTACK_IMAGE_PULL_SECRETS
+              value: "{{ range $i, $s := .Values.global.imagePullSecrets }}{{ if $i }},{{ end }}{{ if kindIs "string" $s }}{{ $s }}{{ else }}{{ $s.name }}{{ end }}{{ end }}"
+            - name: GPUSTACK_IMAGE_PULL_POLICY
+              value: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.worker.image) | quote }}
+            # Propagate each manufacturer's PCI vendor ID so the worker renders the NFD and
+            # Kueue manifests with the same values configured here.
+            {{- range $manu, $vendorID := .Values.manufacturers }}
+            - name: GPUSTACK_{{ upper $manu }}_PCI_VENDOR_ID
+              value: {{ $vendorID | quote }}
+            {{- end }}
+          ports:
+            - name: https
+              containerPort: {{ .Values.worker.securePort }}
+          startupProbe:
+            failureThreshold: 10
+            periodSeconds: 5
+            httpGet:
+              scheme: HTTPS
+              port: https
+              path: /readyz
+          readinessProbe:
+            failureThreshold: 3
+            timeoutSeconds: 5
+            periodSeconds: 5
+            httpGet:
+              scheme: HTTPS
+              port: https
+              path: /readyz
+          livenessProbe:
+            failureThreshold: 10
+            timeoutSeconds: 5
+            periodSeconds: 10
+            httpGet:
+              scheme: HTTPS
+              port: https
+              path: /livez
+          volumeMounts:
+            - name: gpustack-data-dir
+              mountPath: /var/lib/gpustack
+            {{- if $certmanager }}
+            - name: gpustack-cert-dir
+              mountPath: /var/run/gpustack/certs
+            {{- end }}
+      volumes:
+        - name: gpustack-data-dir
+          hostPath:
+            path: {{ .Values.worker.dataDir }}
+            type: DirectoryOrCreate
+        {{- if $certmanager }}
+        - name: gpustack-cert-dir
+          secret:
+            secretName: {{ include "gpustack-operator.worker.fullname" . }}-cert
+        {{- end }}
+{{- end }}

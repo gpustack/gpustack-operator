@@ -1,0 +1,22 @@
+{{- if .Values.cleanupOnUninstall }}
+{{- /*
+  Carries the shared cleanup script (the same files/cleanup.sh the e2e skills run
+  on the host) so the post-delete hook Job can mount and execute it in-cluster.
+  A post-delete hook so the script survives the deletion of the release's own
+  resources; weight -5 so it (and the RBAC) exist before the Job at weight 0.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-cleanup
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+data:
+  cleanup.sh: |-
+{{ .Files.Get "files/cleanup.sh" | indent 4 }}
+{{- end }}

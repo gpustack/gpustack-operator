@@ -121,6 +121,20 @@ function generate_binding() {
   done
 }
 
+function generate_chart() {
+  local chart="${ROOT_DIR}/deploy/gpustack-operator/chart"
+
+  if ! gpustack::helm::deps "${chart}"; then
+    return 1
+  fi
+  if ! gpustack::helm::docs "${chart}"; then
+    return 1
+  fi
+  if ! gpustack::helm::schema "${chart}"; then
+    return 1
+  fi
+}
+
 function generate() {
   local tasks
   if [[ "$#" -gt 0 ]]; then

@@ -137,6 +137,7 @@ EOF
 
 ARG GPUSTACK_WORKSPACE="/usr/local/go/src/gpustack.ai/gpustack"
 ARG GPUSTACK_GIT_COMMIT
+ARG GPUSTACK_GIT_VERSION
 
 RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     --mount=type=cache,target=/go/pkg/mod,sharing=locked \
@@ -145,6 +146,14 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
     # Build
     set -exo pipefail
     echo "GPUSTACK_GIT_COMMIT=${GPUSTACK_GIT_COMMIT}"
+    echo "GPUSTACK_GIT_VERSION=${GPUSTACK_GIT_VERSION}"
+
+    # Stamp the version deterministically from the build-arg (set by hack/package.sh / CI from the git
+    # tag), so the builder cache key tracks the VERSION — not just the commit — and a release tag on an
+    # already-built commit cannot serve a stale binary. Empty falls back to in-container git detection.
+    if [[ -n "${GPUSTACK_GIT_VERSION}" ]]; then
+        export VERSION="${GPUSTACK_GIT_VERSION}"
+    fi
 
     # Link staging modules under GOROOT/src for legacy lookups.
     for dir in $(find ${GPUSTACK_WORKSPACE}/staging -mindepth 1 -maxdepth 1 -type d); do
@@ -256,10 +265,6 @@ RUN <<EOF
 }
 EOT
 
-    # Link gpustack-operator to gpustack for backward compatibility.
-    # TODO: Remove this later.
-    cp /usr/bin/gpustack-operator /usr/bin/gpustack
-
     # Review
     skopeo --version
     helm version
@@ -287,6 +292,23 @@ ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.0/kueue-0.1
 
 ## Node Features Discovery
 ADD https://thxcode.github.io/node-feature-discovery/charts/node-feature-discovery-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
+
+## GPUStack Operator
+RUN --mount=type=bind,src=deploy/gpustack-operator/chart,target=/tmp/gpustack-operator-chart <<EOF
+    set -exo pipefail
+
+    # Extract version from the built binary, fallback to 0.0.0 if not in expected format (e.g. during development).
+    CHART_VERSION="$(gpustack-operator --version | awk '{for (i = 1; i < NF; i++) if ($i == "version") print $(i + 1)}')"
+    CHART_VERSION="${CHART_VERSION#v}"
+    if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
+        CHART_VERSION="0.0.0"
+    fi
+
+    # Package the chart with the resolved version.
+    helm package /tmp/gpustack-operator-chart \
+        --version "${CHART_VERSION}" --app-version "${CHART_VERSION}" \
+        --destination "${GPUSTACK_CHARTS_DIR}"
+EOF
 
 # Runtime
 

@@ -1,0 +1,31 @@
+apiVersion: v2
+name: gpustack-operator
+description: A Kubernetes operator that turns raw node hardware into a Kueue-based scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) and Kueue.
+type: application
+# NB(thxCode): version and appVersion are kept in sync on purpose, so that the
+# operator image tag can default to "v<appVersion>" and the chart input stays simple.
+# The release workflow overrides both from the pushed git tag.
+version: 0.0.0
+appVersion: "0.0.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/gpustack/gpustack
+sources:
+  - https://github.com/gpustack/gpustack
+keywords:
+  - gpustack
+  - operator
+  - kueue
+  - node-feature-discovery
+  - gpu
+  - npu
+  - accelerator
+maintainers:
+  - name: GPUStack Authors
+    url: https://github.com/gpustack
+icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.png
+annotations:
+  artifacthub.io/license: Apache-2.0
+  artifacthub.io/operator: "true"
+# NB(thxCode): Kueue, Node Feature Discovery and the CSI drivers are bundled into the
+# operator image (see pack/gpustack-operator/Dockerfile) and installed at runtime by the
+# worker, so they are intentionally not declared as chart dependencies.

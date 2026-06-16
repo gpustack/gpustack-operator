@@ -11,6 +11,11 @@ TEST_DIR="${ROOT_DIR}/.dist/test"
 mkdir -p "${TEST_DIR}"
 
 function test() {
+  if [[ "${1:-}" == "chart" ]]; then
+    gpustack::helm::test "${ROOT_DIR}/deploy/gpustack-operator/chart"
+    return
+  fi
+
   local ldflags=(
     "-X gpustack.ai/gpustack/pkg/utils/version.Version=${GIT_VERSION}"  # Inject the git version.
     "-X gpustack.ai/gpustack/pkg/utils/version.GitCommit=${GIT_COMMIT}" # Inject the git commit.

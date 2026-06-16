@@ -1,0 +1,39 @@
+{{- if .Values.cleanupOnUninstall }}
+{{- /*
+  Dedicated ServiceAccount for the post-delete cleanup Job. It uninstalls the
+  worker's runtime sub-releases and deletes cluster-scoped CRDs/APIServices/
+  webhooks across the cluster, so it is bound to cluster-admin (the worker uses
+  the same binding). Hook-managed and removed on success, so the broad grant
+  exists only for the duration of the uninstall.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-cleanup
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-cleanup
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "-5"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gpustack-operator.fullname" . }}-cleanup
+    namespace: {{ include "gpustack-operator.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+{{- end }}

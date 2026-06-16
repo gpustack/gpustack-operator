@@ -1,0 +1,49 @@
+{{- if .Values.cleanupOnUninstall }}
+{{- /*
+  Post-delete hook Job that runs the shared cleanup script in-cluster using the
+  operator image (which bundles kubectl + helm). Weight 0 runs it after the
+  ConfigMap/RBAC at weight -5. helm uninstall waits for this Job to complete.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-cleanup
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-delete
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.commonLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "gpustack-operator.fullname" . }}-cleanup
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: cleanup
+          image: {{ include "gpustack-operator.image" (dict "root" . "overrides" dict) | quote }}
+          imagePullPolicy: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" dict) }}
+          command: ["/usr/bin/env", "bash", "/scripts/cleanup.sh"]
+          args:
+            - {{ include "gpustack-operator.namespace" . | quote }}
+          volumeMounts:
+            - name: cleanup-script
+              mountPath: /scripts
+      volumes:
+        - name: cleanup-script
+          configMap:
+            name: {{ include "gpustack-operator.fullname" . }}-cleanup
+            defaultMode: 0755
+{{- end }}

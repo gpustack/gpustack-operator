@@ -1,0 +1,22 @@
+GPUStack Operator {{ .Chart.AppVersion }} has been deployed as release "{{ .Release.Name }}" in namespace "{{ include "gpustack-operator.namespace" . }}".
+
+Components:
+{{- if .Values.worker.enabled }}
+  - Worker (control plane): {{ include "gpustack-operator.worker.fullname" . }} ({{ .Values.worker.replicas }} replica(s))
+{{- end }}
+{{- if .Values.deviceManager.enabled }}
+  - Device managers: one DaemonSet per manufacturer ({{ join ", " (keys .Values.manufacturers | sortAlpha) }})
+    Each only schedules on nodes that NFD labels with the matching PCI vendor.
+{{- end }}
+{{- if .Values.worker.enabled }}
+
+Check the worker rollout:
+
+  kubectl -n {{ include "gpustack-operator.namespace" . }} rollout status deployment/{{ include "gpustack-operator.worker.fullname" . }}
+{{- end }}
+
+{{- if .Values.worker.enabled }}
+
+NOTE: Node Feature Discovery, Kueue and the CSI drivers are bundled into the operator
+image and installed by the worker at runtime.
+{{- end }}

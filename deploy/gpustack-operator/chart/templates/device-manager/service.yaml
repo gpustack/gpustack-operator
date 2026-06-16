@@ -1,0 +1,25 @@
+{{- if .Values.deviceManager.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gpustack-operator.deviceManager.fullname" . }}
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.deviceManager.labels" . | nindent 4 }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "443"
+    prometheus.io/path: "/metrics"
+    prometheus.io/scheme: "https"
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    {{- include "gpustack-operator.deviceManager.selectorLabels" . | nindent 4 }}
+  sessionAffinity: ClientIP
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+{{- end }}

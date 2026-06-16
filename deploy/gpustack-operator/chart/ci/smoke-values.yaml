@@ -1,0 +1,12 @@
+# Values used only by `ct install` (make test chart), auto-discovered by
+# chart-testing. The chart's operator image tag defaults to "v<.Chart.AppVersion>",
+# which is "v0.0.0" in development and never a real published image. Pin the install
+# smoke test to the rolling "dev" tag so it pulls an image that actually exists.
+image:
+  tag: dev
+# Let `helm uninstall` (run between chart-testing's install iterations) trigger the
+# post-delete cleanup Job that removes the cluster-scoped leftovers the worker installs
+# at runtime (Kueue / Node Feature Discovery / CSI releases, their CRDs, finalizers and
+# aggregated APIServices / webhooks), so repeated test runs don't pollute each other.
+# Safe here because the test release exclusively owns the cluster.
+cleanupOnUninstall: true
