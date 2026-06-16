@@ -19,6 +19,19 @@ and `make <target> [args]` forwards `args` to the script. All builds use `CGO_EN
 
 CI (`hack/ci.sh`) runs: `make generate && make deps && make lint && make build`.
 
+### Helm chart
+
+The `generate`, `lint`, and `test` targets take a `chart` argument that operates on
+`deploy/gpustack-operator/chart` (via [chart-testing](https://github.com/helm/chart-testing),
+[helm-docs](https://github.com/norwoodj/helm-docs), and helm-schema):
+
+- `make generate chart` — update chart dependencies, then regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two files**; edit `values.yaml`/value annotations/`README.md.gotmpl` and re-run.
+- `make lint chart` — lint the chart with `ct lint` in a container.
+- `make test chart` — install the chart onto the current cluster with `ct install` in a container; needs a reachable cluster (e.g. kind) and `~/.kube/config`.
+
+For a full local install → version-consistency → uninstall (zero-leftover) cycle against a real cluster,
+use the `gpustack-operator-chart-e2e` skill; for the deep scheduling-chain behavior, use `gpustack-operator-e2e`.
+
 ### Commit messages
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org) (`type: subject`),

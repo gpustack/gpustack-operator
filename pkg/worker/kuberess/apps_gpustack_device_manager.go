@@ -3,446 +3,180 @@ package kuberess
 import (
 	"context"
 	"fmt"
-	"text/template"
+	"path/filepath"
+	"strings"
 
-	core "k8s.io/api/core/v1"
+	conregname "github.com/google/go-containerregistry/pkg/name"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"gpustack.ai/gpustack/pkg/devicemanager"
-	"gpustack.ai/gpustack/pkg/devicemanager/kuberess"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
-	"gpustack.ai/gpustack/pkg/kubeappyaml"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
-	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/osx"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/version"
-	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 func installGPUStackDeviceManager(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
+	// NB(thxCode): the device-managers are rendered from the operator's own chart, which is
+	// packaged into the image at build time (see pack/gpustack-operator/Dockerfile). The chart
+	// version is resolved by deviceManagerChartVersion below.
+
 	name := "device-manager"
 	if disable.Has(name) {
 		return nil
 	}
 
-	ctrCfg := extractContainerConfig(ctx, helmCli.KubeClientSet())
+	chartName := "gpustack-operator"
+	chartVersion := deviceManagerChartVersion()
+	release := "gpustack-operator-device-manager"
+	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", chartName, chartVersion))
+
+	// Reuse the exact image of the running worker so the device-managers always match the
+	// operator in use; fall back to the chart-composed image when it cannot be determined.
+	imageRepository, imageTag := splitImageReference(extractWorkerImage(ctx, helmCli.KubeClientSet()))
+
+	// Build the manufacturer -> PCI vendor ID map from the worker's --manufacturer list.
+	manufacturers, _ := globalValuesContext["Manufacturers"].([]string)
+	manufacturerVendorIDs := make(map[string]string, len(manufacturers))
+	for _, m := range manufacturers {
+		manufacturerVendorIDs[m] = nodefeature.GetPciVendorID(m)
+	}
 
 	valuesContext := globalValuesContext
+	valuesContext["Release"] = release
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
-	valuesContext["Image"] = ctrCfg.Image
-	valuesContext["ImagePullPolicy"] = ctrCfg.ImagePullPolicy
-	if len(ctrCfg.Env) > 0 {
-		envV := valuesContext["Env"]
-		if envV != nil {
-			if envList, ok := envV.([]core.EnvVar); ok {
-				valuesContext["Env"] = append(envList, ctrCfg.Env...)
-			} else {
-				// This should not happen, but in case it does,
-				// fallback to using ctrCfg.Env directly to avoid installation failure.
-				valuesContext["Env"] = ctrCfg.Env
-			}
-		} else {
-			valuesContext["Env"] = ctrCfg.Env
-		}
-	}
-	valuesContext["Version"] = version.Version
-	valuesContext["SecurePort"] = devicemanager.NewOptions().ServerOptions.BindPort
+	valuesContext["ImageRepository"] = imageRepository
+	valuesContext["ImageTag"] = imageTag
+	valuesContext["ManufacturerVendorIDs"] = manufacturerVendorIDs
 
-	funcMap := extendDeviceManagerApplyYamlTemplateFuncMap()
-	funcMap["lookup"] = func(apiversion, kind, namespace, name string) (map[string]any, error) {
-		return kubediscovery.Lookup(ctx, helmCli.KubeClientSet().Discovery(), apiversion, kind, namespace, name)
+	values := getGPUStackDeviceManagerChartTemplateValues(chartName, valuesContext)
+
+	chart := &helm.Chart{
+		Name:                    chartName,
+		Version:                 chartVersion,
+		Release:                 release,
+		Path:                    path,
+		Values:                  values,
+		SkippedCRDsInstallation: true,
 	}
-	content, err := renderDeviceManagerApplyYamlTemplate(valuesContext, funcMap)
+	_, err := helmCli.Install(ctx, chart)
 	if err != nil {
 		return err
 	}
 
-	return kubeappyaml.ApplyWithRestClientGetter(ctx, content, helmCli.KubeRestClientGetter())
+	return nil
 }
 
-const deviceManagerApplyYamlTemplate kubeappyaml.Template = `
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  namespace: {{ $.Namespace }}
-  name: gpustack-operator-device-manager
-  labels:
-    "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: gpustack-operator-device-manager
-  labels:
-    "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
-subjects:
-  - kind: ServiceAccount
-    namespace: {{ $.Namespace }}
-    name: gpustack-operator-device-manager
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
----
-apiVersion: v1
-kind: Service
-metadata:
-  namespace: {{ $.Namespace }}
-  name: gpustack-operator-device-manager
-  annotations:
-    "prometheus.io/scrape": "true"
-    "prometheus.io/port": "443"
-    "prometheus.io/path": "/metrics"
-    "prometheus.io/scheme": "https"
-  labels:
-    "app.kubernetes.io/part-of": "gpustack-operator-device-manager"
-spec:
-  selector:
-    "app.kubernetes.io/part-of": "gpustack-operator"
-    "app.kubernetes.io/component": "device-manager"
-    "app.kubernetes.io/name": "gpustack-operator-device-manager"
-  sessionAffinity: ClientIP
-  ports:
-    - name: https
-      port: 443
-      targetPort: https
-{{- $image := "" }}
-{{- if $.Image -}}
-  {{- $image = $.Image -}}
-{{- else -}}
-  {{- $registry := default "docker.io" $.ContainerRegistry -}}
-  {{- $namespace := default "gpustack" $.ContainerNamespace -}}
-  {{- $image = printf "%s/%s/gpustack-operator:%s" $registry $namespace $.Version -}}
+// gpustackDeviceManagerChartTemplate renders the operator chart's values so that only the
+// per-manufacturer device-manager DaemonSets are installed (the worker is already running).
+// fullnameOverride pins the resource names regardless of the release name.
+const gpustackDeviceManagerChartTemplate = `
+{{- if or (not $.ImageRepository) $.ImagePullSecrets }}
+global:
+  {{- if not $.ImageRepository }}
+  imageRegistry: {{ default "" $.ContainerRegistry | quote }}
+  imageNamespace: {{ default "" $.ContainerNamespace | quote }}
+  {{- end }}
+  {{- if $.ImagePullSecrets }}
+  imagePullSecrets:
+  {{- range $.ImagePullSecrets }}
+    - name: {{ . }}
+  {{- end }}
+  {{- end }}
 {{- end }}
-{{- range $.Manufacturers }}
-{{- $manu := . }}
-{{- $manuPciVendorID := getPciVendorID $manu }}
-{{- $daemonSet := lookup "apps/v1" "DaemonSet" $.Namespace (printf "gpustack-operator-device-manager-%s" $manu) }}
-{{- if or (not $daemonSet) (ne $image ($daemonSet | dig "spec" "template" "spec" "containers" (list (dict)) | first | dig "image" "")) }}
-{{- if has $manu (list "nvidia" "mthreads") }}
-{{- if not (lookup "node.k8s.io/v1" "RuntimeClass" "" $manu) }}
----
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: {{ $manu }}
-handler: {{ $manu }}
+
+fullnameOverride: gpustack-operator
+
+worker:
+  enabled: false
+deviceManager:
+  enabled: true
+{{- if $.ImageRepository }}
+  image:
+    repository: {{ $.ImageRepository | quote }}
+    {{- if $.ImageTag }}
+    tag: {{ $.ImageTag | quote }}
+    {{- end }}
 {{- end }}
-{{- end }}
----
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  namespace: "{{ $.Namespace }}"
-  name: gpustack-operator-device-manager-{{ $manu }}
-  labels:
-    "app.kubernetes.io/part-of": "gpustack-operator"
-    "app.kubernetes.io/component": "device-manager"
-    "app.kubernetes.io/name": "gpustack-operator-device-manager"
-spec:
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-      maxSurge: 0
-  revisionHistoryLimit: 5
-  selector:
-    matchLabels:
-      "app.kubernetes.io/part-of": "gpustack-operator"
-      "app.kubernetes.io/component": "device-manager"
-      "app.kubernetes.io/name": "gpustack-operator-device-manager"
-  template:
-    metadata:
-      labels:
-        "app.kubernetes.io/part-of": "gpustack-operator"
-        "app.kubernetes.io/component": "device-manager"
-        "app.kubernetes.io/name": "gpustack-operator-device-manager"
-    spec:
-{{- if $.ImagePullSecrets }}
-      imagePullSecrets:
-{{- range $.ImagePullSecrets }}
-        - name: {{ . }}
-{{- end }}
-{{- end }}
-{{- if has $manu (list "nvidia" "mthreads") }}
-      runtimeClassName: {{ $manu }}
-{{- end }}
-      nodeSelector:
-        # Rely on NFD.
-        #
-        feature.node.kubernetes.io/pci-{{ $manuPciVendorID }}.present: "true"
-      serviceAccountName: gpustack-operator-device-manager
-      priorityClassName: system-cluster-critical
-      tolerations:
-        - operator: "Exists"
-      containers:
-        - name: main
-          image: "{{ $image }}"
-          imagePullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
-          args:
-            - gpustack-operator
-            - device-manager
-            - serve
-            - -v=2
-            - --secure-port={{ $.SecurePort }}
-            - --manufacturer={{ $manu }}
-          resources:
-            limits:
-              cpu: '4'
-              memory: '8Gi'
-            requests:
-              cpu: '100m'
-              memory: '128Mi'
-          securityContext:
-            allowPrivilegeEscalation: true
-            capabilities: {}
-            privileged: true
-            readOnlyRootFilesystem: false
-            runAsNonRoot: false
-          env:
-            # Pass pod IP and name to worker, which can be used for worker identification and debugging.
-            #
-            - name: KUBERNETES_POD_IP
-              valueFrom:
-                fieldRef:
-                  fieldPath: status.podIP
-            - name: KUBERNETES_POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: KUBERNETES_POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-            - name: KUBERNETES_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: spec.nodeName
-            - name: KUBERNETES_SERVICE_NAME
-              value: "gpustack-operator-device-manager"
-{{- if $.Env }}
-{{- toYaml $.Env | nindent 12 }}
-{{- end }}
-          ports:
-            - name: https
-              containerPort: {{ $.SecurePort }}
-          startupProbe:
-            failureThreshold: 10
-            periodSeconds: 5
-            httpGet:
-              port: https
-              path: /readyz
-              scheme: HTTPS
-          readinessProbe:
-            failureThreshold: 3
-            timeoutSeconds: 5
-            periodSeconds: 5
-            httpGet:
-              port: https
-              path: /readyz
-              scheme: HTTPS
-          livenessProbe:
-            failureThreshold: 10
-            timeoutSeconds: 5
-            periodSeconds: 10
-            httpGet:
-              port: https
-              path: /livez
-              scheme: HTTPS
-          volumeMounts:
-            - name: dev-dir
-              mountPath: /dev
-            - name: sys-dir
-              mountPath: /sys
-            - name: gpustack-data-dir
-              mountPath: /var/lib/gpustack
-            - name: cdi-dir
-              mountPath: /var/run/cdi
-            - name: kubelet-device-plugins-dir
-              mountPath: /var/lib/kubelet/device-plugins
-{{- if eq $manu "amd" }}
-            - name: gpustack-amd-driver
-              mountPath: /opt/rocm
-              readOnly: true
-{{- end }}
-{{- if eq $manu "ascend" }}
-            - name: gpustack-ascend-driver
-              mountPath: /usr/local/dcmi
-              readOnly: true
-            - name: gpustack-ascend-toolkit
-              mountPath: /usr/local/Ascend
-              readOnly: true
-{{- end }}
-{{- if eq $manu "cambricon" }}
-            - name: gpustack-cambricon-driver
-              mountPath: /usr/local/neuware
-              readOnly: true
-{{- end }}
-{{- if eq $manu "hygon" }}
-            - name: gpustack-hygon-driver
-              mountPath: /opt/hyhal
-              readOnly: true
-            - name: gpustack-hygon-toolkit
-              mountPath: /opt/dtk
-              readOnly: true
-{{- end }}
-{{- if eq $manu "iluvatar" }}
-            - name: gpustack-iluvatar-toolkit
-              mountPath: /usr/local/corex
-              readOnly: true
-{{- end }}
-{{- if eq $manu "metax" }}
-            - name: gpustack-metax-driver
-              mountPath: /opt/mxdriver
-              readOnly: true
-            - name: gpustack-metax-toolkit
-              mountPath: /opt/maca
-              readOnly: true
-{{- end }}
-{{- if eq $manu "thead" }}
-            - name: gpustack-thead-toolkit
-              mountPath: /usr/local/PPU_SDK
-              readOnly: true
-{{- end }}
-      volumes:
-        - name: dev-dir
-          hostPath:
-            path: /dev
-            type: Directory
-        - name: sys-dir
-          hostPath:
-            path: /sys
-            type: Directory
-        - name: gpustack-data-dir
-          hostPath:
-            path: /var/lib/gpustack
-            type: DirectoryOrCreate
-        - name: cdi-dir
-          hostPath:
-            path: /var/run/cdi
-            type: DirectoryOrCreate
-        - name: kubelet-device-plugins-dir
-          hostPath:
-            path: /var/lib/kubelet/device-plugins
-            type: DirectoryOrCreate
-{{- if eq $manu "amd" }}
-        - name: gpustack-amd-driver
-          hostPath:
-            path: /opt/rocm
-            type: DirectoryOrCreate
-{{- end }}
-{{- if eq $manu "ascend" }}
-        - name: gpustack-ascend-driver
-          hostPath:
-            path: /usr/local/dcmi
-            type: DirectoryOrCreate
-        - name: gpustack-ascend-toolkit
-          hostPath:
-            path: /usr/local/Ascend
-            type: DirectoryOrCreate
-{{- end }}
-{{- if eq $manu "cambricon" }}
-        - name: gpustack-cambricon-driver
-          hostPath:
-            path: /usr/local/neuware
-            type: DirectoryOrCreate
-{{- end }}
-{{- if eq $manu "hygon" }}
-        - name: gpustack-hygon-driver
-          hostPath:
-            path: /opt/hyhal
-            type: DirectoryOrCreate
-        - name: gpustack-hygon-toolkit
-          hostPath:
-            path: /opt/dtk
-            type: DirectoryOrCreate
-{{- end }}
-{{- if eq $manu "iluvatar" }}
-        - name: gpustack-iluvatar-toolkit
-          hostPath:
-            path: /usr/local/corex
-            type: DirectoryOrCreate
-{{- end }}
-{{- if eq $manu "metax" }}
-        - name: gpustack-metax-driver
-          hostPath:
-            path: /opt/mxdriver
-            type: DirectoryOrCreate
-        - name: gpustack-metax-toolkit
-          hostPath:
-            path: /opt/maca
-            type: DirectoryOrCreate
-{{- end }}
-{{- if eq $manu "thead" }}
-        - name: gpustack-thead-toolkit
-          hostPath:
-            path: /usr/local/PPU_SDK
-            type: DirectoryOrCreate
-{{- end }}
+
+image:
+  pullPolicy: {{ default "IfNotPresent" $.ImagePullPolicy | quote }}
+
+{{- if $.ManufacturerVendorIDs }}
+manufacturers:
+{{- range $manu, $vendorID := $.ManufacturerVendorIDs }}
+  {{ $manu }}: {{ $vendorID | quote }}
 {{- end }}
 {{- end }}
 `
 
-func renderDeviceManagerApplyYamlTemplate(data map[string]any, extendFuncMap template.FuncMap) (string, error) {
-	return deviceManagerApplyYamlTemplate.Render(data, extendFuncMap)
-}
-
-func extendDeviceManagerApplyYamlTemplateFuncMap() template.FuncMap {
-	return map[string]any{
-		"getPciVendorID": func(v any) string {
-			s, ok := v.(string)
-			if !ok {
-				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
-			}
-			return nodefeature.GetPciVendorID(s)
-		},
-		"lookup": func(apiversion, kind, namespace, name string) (map[string]any, error) {
-			return map[string]any{}, nil
-		},
+func getGPUStackDeviceManagerChartTemplateValues(name string, data map[string]any) helm.TemplateValues {
+	return helm.TemplateValues{
+		Application: name,
+		Template:    gpustackDeviceManagerChartTemplate,
+		Context:     data,
 	}
 }
 
-type _ContainerConfig struct {
-	Image           string
-	ImagePullPolicy string
-	Env             []core.EnvVar
-}
+// extractWorkerImage returns the image of the running worker's "main" container, or an empty
+// string when it cannot be determined (e.g. running outside the cluster).
+func extractWorkerImage(ctx context.Context, cli kubernetes.Interface) string {
+	podName := osx.Getenv("KUBERNETES_POD_NAME")
+	if podName == "" {
+		return ""
+	}
 
-func extractContainerConfig(ctx context.Context, cli kubernetes.Interface) (ctrCfg _ContainerConfig) {
-	if v := osx.Getenv("KUBERNETES_POD_NAME"); v != "" {
-		pod, err := cli.CoreV1().
-			Pods(kuberess.SystemNamespaceName).
-			Get(ctx, v,
-				meta.GetOptions{
-					ResourceVersion: "0",
-				})
-		if err == nil {
-			var ctr *core.Container
-			for i := range pod.Spec.Containers {
-				if pod.Spec.Containers[i].Name == "main" {
-					ctr = &pod.Spec.Containers[i]
-					break
-				}
-			}
-			if ctr == nil {
-				ctr = &pod.Spec.Containers[0]
-			}
-			ctrCfg.Image = ctr.Image
-			ctrCfg.ImagePullPolicy = string(ctr.ImagePullPolicy)
-			ctrCfg.Env = make([]core.EnvVar, 0, len(ctr.Env))
-			for i := range ctr.Env {
-				if !stringx.HasPrefix(ctr.Env[i].Name, "GPUSTACK_") {
-					continue
-				}
-				ctrCfg.Env = append(ctrCfg.Env, ctr.Env[i])
-			}
-			return ctrCfg
+	pod, err := cli.CoreV1().
+		Pods(SystemNamespaceName).
+		Get(ctx, podName, meta.GetOptions{ResourceVersion: "0"})
+	if err != nil {
+		return ""
+	}
+
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "main" {
+			return pod.Spec.Containers[i].Image
 		}
 	}
+	if len(pod.Spec.Containers) > 0 {
+		return pod.Spec.Containers[0].Image
+	}
+	return ""
+}
 
-	ctrCfg.ImagePullPolicy = settings.ImagePullPolicy.ShouldValueFromRemote(ctx)
-	return ctrCfg
+// splitImageReference splits a tagged image reference into the repository and tag understood by the
+// chart's "image" values. References that cannot be expressed as "<repository>:<tag>" — digest
+// pinned ("<repo>@sha256:...") or otherwise unparseable — return empty fields, letting the chart
+// compose its own default image instead of an invalid "<repo>@<digest>:<tag>".
+func splitImageReference(ref string) (repository, tag string) {
+	if ref == "" {
+		return "", ""
+	}
+	// Classify the reference with the registry library; only tag-based references map cleanly onto
+	// the chart's repository/tag fields. Digest references parse as conregname.Digest, not Tag.
+	parsed, err := conregname.ParseReference(ref)
+	if err != nil {
+		return "", ""
+	}
+	if _, ok := parsed.(conregname.Tag); !ok {
+		return "", ""
+	}
+	lastSlash := strings.LastIndex(ref, "/")
+	if lastColon := strings.LastIndex(ref, ":"); lastColon > lastSlash {
+		return ref[:lastColon], ref[lastColon+1:]
+	}
+	return ref, ""
+}
+
+// deviceManagerChartVersion resolves the version of the operator chart bundled into the image.
+// It tracks the operator binary version (a release tag like "v0.6.2", stripped of its "v"),
+// falling back to "0.0.0" for development builds. The image build derives the same value when
+// packaging the chart (see pack/gpustack-operator/Dockerfile).
+func deviceManagerChartVersion() string {
+	if version.IsValid() {
+		return strings.TrimPrefix(version.Version, "v")
+	}
+	return "0.0.0"
 }

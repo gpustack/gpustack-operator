@@ -1,0 +1,480 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "cleanupOnUninstall": {
+      "default": false,
+      "description": "Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers\nthe worker creates at runtime but Helm does not manage: the Kueue / Node Feature\nDiscovery / CSI Helm releases, their CRDs, the finalizers pinning Kueue and\nInstance objects, and the aggregated APIServices / webhooks. Disabled by default\nbecause those CRDs may be shared with other workloads; enable only when this\nrelease exclusively owns them (e.g. CI / e2e).",
+      "title": "cleanupOnUninstall",
+      "type": "boolean"
+    },
+    "commonAnnotations": {
+      "description": "Extra annotations added to every resource.",
+      "required": [],
+      "title": "commonAnnotations",
+      "type": "object"
+    },
+    "commonLabels": {
+      "description": "Extra labels added to every resource.",
+      "required": [],
+      "title": "commonLabels",
+      "type": "object"
+    },
+    "deviceManager": {
+      "properties": {
+        "createRuntimeClasses": {
+          "default": true,
+          "description": "Create the nvidia/mthreads RuntimeClass objects. Disable when the cluster\nalready provides them (e.g. via the NVIDIA GPU operator).",
+          "title": "createRuntimeClasses",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Deploy the per-manufacturer device-manager DaemonSets.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "env": {
+          "description": "Extra environment variables for the device-manager, as a name/value map.",
+          "required": [],
+          "title": "env",
+          "type": "object"
+        },
+        "extraArgs": {
+          "description": "Extra command-line arguments appended to each device-manager container args.",
+          "items": {
+            "required": []
+          },
+          "title": "extraArgs",
+          "type": "array"
+        },
+        "image": {
+          "description": "Per-device-manager image overrides (`repository`/`tag`/`pullPolicy`); unset keys\nfall back to the chart-level `image`.",
+          "required": [],
+          "title": "image",
+          "type": "object"
+        },
+        "resources": {
+          "description": "Resource requests and limits for each device-manager container.",
+          "properties": {
+            "limits": {
+              "properties": {
+                "cpu": {
+                  "default": "4",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "8Gi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ],
+              "title": "limits",
+              "type": "object"
+            },
+            "requests": {
+              "properties": {
+                "cpu": {
+                  "default": "100m",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "128Mi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ],
+              "title": "requests",
+              "type": "object"
+            }
+          },
+          "required": [
+            "limits",
+            "requests"
+          ],
+          "title": "resources",
+          "type": "object"
+        },
+        "securePort": {
+          "default": 32443,
+          "description": "Secure serving port of the device-manager container.",
+          "title": "securePort",
+          "type": "integer"
+        },
+        "tolerations": {
+          "description": "Tolerations for the device-manager DaemonSets. Defaults tolerate every taint\nso a manager schedules on any node carrying the matching accelerator.",
+          "items": {
+            "required": [],
+            "type": "object"
+          },
+          "title": "tolerations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "securePort",
+        "image",
+        "createRuntimeClasses",
+        "resources",
+        "extraArgs",
+        "env"
+      ],
+      "title": "deviceManager",
+      "type": "object"
+    },
+    "fullnameOverride": {
+      "default": "",
+      "description": "Override the fully qualified release name used as the base of resource names.",
+      "title": "fullnameOverride",
+      "type": "string"
+    },
+    "global": {
+      "description": "Global values shared across the chart and its subcharts.",
+      "properties": {
+        "imageNamespace": {
+          "default": "",
+          "description": "Image namespace override applied to the operator image. When non-empty it\nreplaces the namespace segment of `image.repository` (e.g. \"gpustack\").",
+          "title": "imageNamespace",
+          "type": "string"
+        },
+        "imagePullSecrets": {
+          "description": "Image pull secrets applied to all workloads.",
+          "items": {
+            "required": []
+          },
+          "title": "imagePullSecrets",
+          "type": "array"
+        },
+        "imageRegistry": {
+          "default": "",
+          "description": "Image registry override applied to the operator image (e.g. \"docker.io\").\nWhen empty, the registry encoded in `image.repository` is used as-is.",
+          "title": "imageRegistry",
+          "type": "string"
+        },
+        "nodeSelector": {
+          "description": "Node selector applied to all workloads when a component does not set its own.",
+          "required": [],
+          "title": "nodeSelector",
+          "type": "object"
+        }
+      },
+      "required": [
+        "imageRegistry",
+        "imageNamespace",
+        "imagePullSecrets",
+        "nodeSelector"
+      ],
+      "title": "global",
+      "type": "object"
+    },
+    "image": {
+      "description": "Default operator image (shared by the worker and the device-manager). Each\ncomponent may override any of these keys via its own `image` block.",
+      "properties": {
+        "pullPolicy": {
+          "default": "IfNotPresent",
+          "description": "Operator image pull policy.",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "required": [],
+          "title": "pullPolicy"
+        },
+        "repository": {
+          "default": "gpustack/gpustack-operator",
+          "description": "Operator image repository (shared by the worker and the device-manager).",
+          "title": "repository",
+          "type": "string"
+        },
+        "tag": {
+          "default": "",
+          "description": "Operator image tag; defaults to \"v\u003c.Chart.AppVersion\u003e\" when empty.",
+          "title": "tag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "title": "image",
+      "type": "object"
+    },
+    "manufacturers": {
+      "description": "Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the\nsingle source for the worker `--manufacturer` list, the per-manufacturer device-manager\nDaemonSets, and the GPUSTACK_\u003cMANUFACTURER\u003e_PCI_VENDOR_ID environment variable propagated\nto both the worker and the device-managers. The manufacturer list is derived from these\nkeys (sorted for stable rendering); each device-manager DaemonSet only schedules on nodes\nlabelled by NFD with the matching PCI vendor.",
+      "properties": {
+        "amd": {
+          "default": "1002",
+          "title": "amd",
+          "type": "string"
+        },
+        "ascend": {
+          "default": "19e5",
+          "title": "ascend",
+          "type": "string"
+        },
+        "cambricon": {
+          "default": "cabc",
+          "title": "cambricon",
+          "type": "string"
+        },
+        "hygon": {
+          "default": "1d94",
+          "title": "hygon",
+          "type": "string"
+        },
+        "iluvatar": {
+          "default": "1e3e",
+          "title": "iluvatar",
+          "type": "string"
+        },
+        "metax": {
+          "default": "9999",
+          "title": "metax",
+          "type": "string"
+        },
+        "mthreads": {
+          "default": "1ed5",
+          "title": "mthreads",
+          "type": "string"
+        },
+        "nvidia": {
+          "default": "10de",
+          "title": "nvidia",
+          "type": "string"
+        },
+        "thead": {
+          "default": "1ded",
+          "title": "thead",
+          "type": "string"
+        }
+      },
+      "required": [
+        "amd",
+        "ascend",
+        "cambricon",
+        "hygon",
+        "iluvatar",
+        "metax",
+        "mthreads",
+        "nvidia",
+        "thead"
+      ],
+      "title": "manufacturers",
+      "type": "object"
+    },
+    "nameOverride": {
+      "default": "",
+      "description": "Override the chart name used in resource names.",
+      "title": "nameOverride",
+      "type": "string"
+    },
+    "namespaceOverride": {
+      "default": "",
+      "description": "Namespace to deploy the resources into; defaults to the release namespace.",
+      "title": "namespaceOverride",
+      "type": "string"
+    },
+    "worker": {
+      "properties": {
+        "certmanager": {
+          "description": "Configure cert-manager integration for the worker webhook serving certificate.",
+          "properties": {
+            "enabled": {
+              "default": "auto",
+              "description": "Whether to issue the worker webhook serving certificate with cert-manager.\nAccepts a string (or the equivalent boolean): \"auto\" creates the cert-manager\nresources only when the cert-manager CRDs are detected in the cluster; \"true\"\nalways creates them (cert-manager must be installed); \"false\" never creates\nthem and the worker generates and manages its own certificate.",
+              "enum": [
+                "auto",
+                "true",
+                "false",
+                true,
+                false
+              ],
+              "required": [],
+              "title": "enabled",
+              "type": [
+                "string",
+                "boolean"
+              ]
+            },
+            "issuer": {
+              "properties": {
+                "kind": {
+                  "default": "Issuer",
+                  "description": "Issuer kind (\"Issuer\" or \"ClusterIssuer\"); only used when `issuer.name` is set.",
+                  "title": "kind",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "description": "Existing issuer name to use; when empty a self-signed Issuer is created.",
+                  "title": "name",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind"
+              ],
+              "title": "issuer",
+              "type": "object"
+            }
+          },
+          "required": [
+            "issuer"
+          ],
+          "title": "certmanager",
+          "type": "object"
+        },
+        "dataDir": {
+          "default": "/var/lib/gpustack",
+          "description": "Host path mounted at /var/lib/gpustack for persistent operator data.",
+          "title": "dataDir",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Deploy the worker (control plane). Disable to deploy only the device-managers.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "env": {
+          "description": "Extra environment variables for the worker, as a name/value map.",
+          "required": [],
+          "title": "env",
+          "type": "object"
+        },
+        "extraArgs": {
+          "description": "Extra command-line arguments appended to the worker container args.",
+          "items": {
+            "required": []
+          },
+          "title": "extraArgs",
+          "type": "array"
+        },
+        "image": {
+          "description": "Per-worker image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall\nback to the chart-level `image`.",
+          "required": [],
+          "title": "image",
+          "type": "object"
+        },
+        "nodeSelector": {
+          "description": "Node selector for the worker; falls back to `global.nodeSelector` when empty.",
+          "required": [],
+          "title": "nodeSelector",
+          "type": "object"
+        },
+        "replicas": {
+          "default": 1,
+          "description": "Number of operator (control plane) replicas.",
+          "title": "replicas",
+          "type": "integer"
+        },
+        "resources": {
+          "description": "Resource requests and limits for the worker container.",
+          "properties": {
+            "limits": {
+              "properties": {
+                "cpu": {
+                  "default": "4",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "8Gi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ],
+              "title": "limits",
+              "type": "object"
+            },
+            "requests": {
+              "properties": {
+                "cpu": {
+                  "default": "100m",
+                  "title": "cpu",
+                  "type": "string"
+                },
+                "memory": {
+                  "default": "128Mi",
+                  "title": "memory",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "cpu",
+                "memory"
+              ],
+              "title": "requests",
+              "type": "object"
+            }
+          },
+          "required": [
+            "limits",
+            "requests"
+          ],
+          "title": "resources",
+          "type": "object"
+        },
+        "securePort": {
+          "default": 31443,
+          "description": "Secure serving port of the worker container.",
+          "title": "securePort",
+          "type": "integer"
+        },
+        "tolerations": {
+          "description": "Tolerations for the worker. Defaults let the control plane run on\ncontrol-plane/master nodes.",
+          "items": {
+            "required": [],
+            "type": "object"
+          },
+          "title": "tolerations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "enabled",
+        "certmanager",
+        "replicas",
+        "securePort",
+        "image",
+        "dataDir",
+        "resources",
+        "nodeSelector",
+        "extraArgs",
+        "env"
+      ],
+      "title": "worker",
+      "type": "object"
+    }
+  },
+  "required": [
+    "cleanupOnUninstall",
+    "global",
+    "nameOverride",
+    "fullnameOverride",
+    "namespaceOverride",
+    "commonLabels",
+    "commonAnnotations",
+    "image",
+    "manufacturers",
+    "worker",
+    "deviceManager"
+  ],
+  "type": "object"
+}

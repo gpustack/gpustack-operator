@@ -8,6 +8,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 source "${ROOT_DIR}/hack/lib/init.sh"
 
 function lint() {
+  if [[ "${1:-}" == "chart" ]]; then
+    gpustack::helm::lint "${ROOT_DIR}/deploy/gpustack-operator/chart"
+    return
+  fi
+
   local opts=()
   if [[ ${#BUILD_TAGS[@]} -gt 0 ]]; then
     opts+=("--build-tags=\"${BUILD_TAGS[*]}\"")

@@ -1,0 +1,23 @@
+{{- if and .Values.deviceManager.enabled .Values.deviceManager.createRuntimeClasses }}
+{{- range $manu := (keys .Values.manufacturers | sortAlpha) }}
+{{- if has $manu (list "nvidia" "mthreads") }}
+{{- $existing := lookup "node.k8s.io/v1" "RuntimeClass" "" $manu }}
+{{- /*
+  A RuntimeClass is a cluster-scoped, fixed-name object that another component (e.g. a vendor GPU
+  operator) may already own. Render it only when it is absent, or when this release already owns it.
+  Skipping a foreign one avoids an install ownership conflict; still rendering our own keeps Helm
+  managing it so upgrades don't prune it (lookup would otherwise hide it from the manifest).
+*/}}
+{{- if or (not $existing) (eq (dig "metadata" "annotations" "meta.helm.sh/release-name" "" $existing) $.Release.Name) }}
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: {{ $manu }}
+  labels:
+    {{- include "gpustack-operator.deviceManager.labels" $ | nindent 4 }}
+handler: {{ $manu }}
+---
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

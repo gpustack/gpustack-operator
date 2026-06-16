@@ -263,349 +263,58 @@ resource "null_resource" "update_kubeconfig" {
   }
 }
 
-provider "kubectl" {
-  apply_retry_count      = 15
-  load_config_file       = false
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args        = ["eks", "get-token", "--region", var.region, "--cluster-name", module.eks.cluster_name]
+provider "helm" {
+  kubernetes {
+    host                   = module.eks.cluster_endpoint
+    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
+    exec {
+      api_version = "client.authentication.k8s.io/v1beta1"
+      command     = "aws"
+      args        = ["eks", "get-token", "--region", var.region, "--cluster-name", module.eks.cluster_name]
+    }
   }
 }
 
-resource "kubectl_manifest" "gpustack_system" {
+locals {
+  # Split the test image reference "<repository>:<tag>" into the separate fields
+  # expected by the chart's "image" values. Falls back to empty fields when no
+  # image is provided.
+  gpustack_operator_image = length(var.image) > 0 ? try(regex("^(?P<repository>.+):(?P<tag>[^:/]+)$", var.image), { repository = var.image, tag = "" }) : { repository = "", tag = "" }
+}
+
+resource "helm_release" "gpustack_operator" {
   count      = length(var.image) > 0 ? 1 : 0
   depends_on = [null_resource.update_kubeconfig]
 
-  yaml_body = yamlencode(
-    {
-      apiVersion = "v1"
-      kind       = "Namespace"
-      metadata = {
-        name = "gpustack-system"
-        labels = {
-          "app.kubernetes.io/part-of" = "gpustack-operator"
-        }
-      }
-    }
-  )
-}
+  name             = "gpustack-operator"
+  namespace        = "gpustack-system"
+  create_namespace = true
 
-provider "kubernetes" {
-  host                   = module.eks.cluster_endpoint
-  cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-  exec {
-    api_version = "client.authentication.k8s.io/v1beta1"
-    command     = "aws"
-    args        = ["eks", "get-token", "--region", var.region, "--cluster-name", module.eks.cluster_name]
+  chart             = "${path.module}/../../../../deploy/gpustack-operator/chart"
+  dependency_update = true
+
+  # Match the previous behaviour: do not block apply on the worker rollout, as
+  # the operator installs the in-cluster applications after it starts.
+  wait    = false
+  timeout = 600
+
+  set {
+    name  = "image.repository"
+    value = local.gpustack_operator_image.repository
   }
-}
-
-data "kubernetes_namespace_v1" "gpustack_system" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  metadata {
-    name = yamldecode(kubectl_manifest.gpustack_system[0].yaml_body)["metadata"]["name"]
+  set {
+    name  = "image.tag"
+    value = local.gpustack_operator_image.tag
   }
-}
-
-resource "kubernetes_service_account_v1" "gpustack_worker" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  metadata {
-    name      = "gpustack-operator-worker"
-    namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
-    labels = {
-      "app.kubernetes.io/part-of" = "gpustack-operator-worker"
-    }
+  set {
+    name  = "image.pullPolicy"
+    value = "Always"
   }
-}
 
-resource "kubernetes_cluster_role_binding_v1" "gpustack_worker" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  metadata {
-    name = "gpustack-operator-worker"
-    labels = {
-      "app.kubernetes.io/part-of" = "gpustack-operator-worker"
-    }
-  }
-  subject {
-    kind      = "ServiceAccount"
-    name      = kubernetes_service_account_v1.gpustack_worker[0].metadata[0].name
-    namespace = kubernetes_service_account_v1.gpustack_worker[0].metadata[0].namespace
-  }
-  role_ref {
-    api_group = "rbac.authorization.k8s.io"
-    kind      = "ClusterRole"
-    name      = "cluster-admin"
-  }
-}
-
-resource "kubernetes_service_v1" "gpustack_worker" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  metadata {
-    name      = "gpustack-operator-worker"
-    namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
-    annotations = {
-      "prometheus.io/scrape" = "true"
-      "prometheus.io/port"   = "443"
-      "prometheus.io/path"   = "/metrics"
-      "prometheus.io/scheme" = "https"
-    }
-    labels = {
-      "app.kubernetes.io/part-of" = "gpustack-operator-worker"
-    }
-  }
-  spec {
-    selector = {
-      "app.kubernetes.io/part-of"   = "gpustack-operator"
-      "app.kubernetes.io/component" = "operator-worker"
-      "app.kubernetes.io/name"      = "gpustack-operator-worker"
-    }
-    session_affinity = "ClientIP"
-    port {
-      name        = "https"
-      port        = 443
-      target_port = "https"
-    }
-  }
-}
-
-resource "kubectl_manifest" "gpustack_worker_cert_issuer" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  yaml_body = yamlencode(
-    {
-      apiVersion = "cert-manager.io/v1"
-      kind       = "Issuer"
-      metadata = {
-        name      = "gpustack-operator-worker-selfsigned-issuer"
-        namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
-        labels = {
-          "app.kubernetes.io/part-of" = "gpustack-operator-worker"
-        }
-      }
-      spec = {
-        selfSigned = {}
-      }
-    }
-  )
-}
-
-resource "kubectl_manifest" "gpustack_worker_cert" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  yaml_body = yamlencode(
-    {
-      apiVersion = "cert-manager.io/v1"
-      kind       = "Certificate"
-      metadata = {
-        name      = "gpustack-operator-worker-cert"
-        namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
-        labels = {
-          "app.kubernetes.io/part-of" = "gpustack-operator-worker"
-        }
-      }
-      spec = {
-        secretName = "gpustack-operator-worker-cert"
-        issuerRef = {
-          name = "gpustack-operator-worker-selfsigned-issuer"
-          kind = "Issuer"
-        }
-        commonName = "gpustack-operator-worker"
-        dnsNames = [
-          "${kubernetes_service_v1.gpustack_worker[0].metadata[0].name}.${kubernetes_service_v1.gpustack_worker[0].metadata[0].namespace}.svc.cluster.local",
-          "${kubernetes_service_v1.gpustack_worker[0].metadata[0].name}.${kubernetes_service_v1.gpustack_worker[0].metadata[0].namespace}.svc",
-          "${kubernetes_service_v1.gpustack_worker[0].metadata[0].name}.${kubernetes_service_v1.gpustack_worker[0].metadata[0].namespace}",
-          kubernetes_service_v1.gpustack_worker[0].metadata[0].name,
-        ]
-      }
-    }
-  )
-}
-
-resource "kubernetes_deployment_v1" "gpustack_worker" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  wait_for_rollout = false
-
-  metadata {
-    name      = "gpustack-operator-worker"
-    namespace = data.kubernetes_namespace_v1.gpustack_system[0].metadata[0].name
-    labels = {
-      "app.kubernetes.io/part-of"   = "gpustack-operator"
-      "app.kubernetes.io/component" = "operator-worker"
-      "app.kubernetes.io/name"      = "gpustack-operator-worker"
-    }
-  }
-  spec {
-    replicas = 1
-    selector {
-      match_labels = {
-        "app.kubernetes.io/part-of"   = "gpustack-operator"
-        "app.kubernetes.io/component" = "operator-worker"
-        "app.kubernetes.io/name"      = "gpustack-operator-worker"
-      }
-    }
-    template {
-      metadata {
-        labels = {
-          "app.kubernetes.io/part-of"   = "gpustack-operator"
-          "app.kubernetes.io/component" = "operator-worker"
-          "app.kubernetes.io/name"      = "gpustack-operator-worker"
-        }
-      }
-      spec {
-        affinity {
-          pod_anti_affinity {
-            preferred_during_scheduling_ignored_during_execution {
-              weight = 100
-              pod_affinity_term {
-                topology_key = "kubernetes.io/hostname"
-                label_selector {
-                  match_expressions {
-                    key      = "app.kubernetes.io/part-of"
-                    operator = "In"
-                    values   = ["gpustack-operator"]
-                  }
-                  match_expressions {
-                    key      = "app.kubernetes.io/component"
-                    operator = "In"
-                    values   = ["operator-worker"]
-                  }
-                  match_expressions {
-                    key      = "app.kubernetes.io/name"
-                    operator = "In"
-                    values   = ["gpustack-operator-worker"]
-                  }
-                }
-              }
-            }
-          }
-        }
-        restart_policy       = "Always"
-        service_account_name = kubernetes_service_account_v1.gpustack_worker[0].metadata[0].name
-        container {
-          name              = "main"
-          image             = var.image
-          image_pull_policy = "Always"
-          args = [
-            "gpustack",
-            "worker",
-            "-v=2",
-            "--cert-dir=/var/run/gpustack/certs",
-          ]
-          resources {
-            limits = {
-              cpu    = 4
-              memory = "8Gi"
-            }
-            requests = {
-              cpu    = "100m"
-              memory = "128Mi"
-            }
-          }
-          env {
-            name = "KUBERNETES_POD_IP"
-            value_from {
-              field_ref {
-                field_path = "status.podIP"
-              }
-            }
-          }
-          env {
-            name = "KUBERNETES_POD_NAME"
-            value_from {
-              field_ref {
-                field_path = "metadata.name"
-              }
-            }
-          }
-          env {
-            name = "KUBERNETES_POD_NAMESPACE"
-            value_from {
-              field_ref {
-                field_path = "metadata.namespace"
-              }
-            }
-          }
-          env {
-            name = "KUBERNETES_NODE_NAME"
-            value_from {
-              field_ref {
-                field_path = "spec.nodeName"
-              }
-            }
-          }
-          env {
-            name  = "KUBERNETES_SERVICE_NAME"
-            value = "gpustack-operator-worker"
-          }
-          port {
-            name           = "https"
-            container_port = 31443
-          }
-          startup_probe {
-            failure_threshold = 10
-            period_seconds    = 5
-            http_get {
-              scheme = "HTTPS"
-              port   = "https"
-              path   = "/readyz"
-            }
-          }
-          readiness_probe {
-            failure_threshold = 3
-            timeout_seconds   = 5
-            period_seconds    = 5
-            http_get {
-              scheme = "HTTPS"
-              port   = "https"
-              path   = "/readyz"
-            }
-          }
-          liveness_probe {
-            failure_threshold = 10
-            timeout_seconds   = 5
-            period_seconds    = 10
-            http_get {
-              scheme = "HTTPS"
-              port   = "https"
-              path   = "/livez"
-            }
-          }
-          volume_mount {
-            name       = "gpustack-data-dir"
-            mount_path = "/var/lib/gpustack"
-          }
-          volume_mount {
-            name       = "gpustack-cert-dir"
-            mount_path = "/var/run/gpustack/certs"
-            read_only  = true
-          }
-        }
-        volume {
-          name = "gpustack-data-dir"
-          empty_dir {}
-        }
-        volume {
-          name = "gpustack-cert-dir"
-          secret {
-            secret_name = "gpustack-operator-worker-cert"
-          }
-        }
-      }
-    }
+  # The EKS module installs the cert-manager addon, so let the chart issue the
+  # worker webhook certificate through cert-manager.
+  set {
+    name  = "worker.certmanager.enabled"
+    value = "true"
   }
 }
