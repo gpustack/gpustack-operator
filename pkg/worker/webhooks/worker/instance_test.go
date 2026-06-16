@@ -40,96 +40,152 @@ func webhookInstance(name, instType string) *workercore.Instance {
 	}
 }
 
-func TestInstanceWebhook_ValidateCreate_StoppedAllowsMissingType(t *testing.T) {
-	w := newInstanceWebhook()
-	inst := webhookInstance("a", "missing")
-	inst.Spec.Stop = ptr.To(true)
+func TestInstanceWebhook_ValidateCreate(t *testing.T) {
+	cases := []struct {
+		name string
 
-	_, err := w.ValidateCreate(context.Background(), inst)
-	assert.NoError(t, err)
+		instType string
+		stop     bool
+
+		wantErr bool
+	}{
+		{
+			name:     "stopped allows missing type",
+			instType: "missing",
+			stop:     true,
+		},
+		{
+			name:     "running requires type",
+			instType: "missing",
+			wantErr:  true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook()
+			inst := webhookInstance("a", c.instType)
+			if c.stop {
+				inst.Spec.Stop = ptr.To(true)
+			}
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
-func TestInstanceWebhook_ValidateCreate_RunningRequiresType(t *testing.T) {
-	w := newInstanceWebhook()
-	inst := webhookInstance("a", "missing")
+func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
+	cases := []struct {
+		name string
 
-	_, err := w.ValidateCreate(context.Background(), inst)
-	assert.Error(t, err)
+		oldType, newType string
+		oldStop, newStop *bool  // nil → Stop left unset (distinct from false)
+		phase            string // applied to both old and new status
+		registerType     string // "" → no InstanceType registered
+
+		wantErr bool
+	}{
+		{
+			name:    "stopped allows type change",
+			oldType: "old", newType: "new",
+			oldStop: ptr.To(true), newStop: ptr.To(true),
+			phase: workerctrl.InstancePhaseStopped,
+		},
+		{
+			name:    "running forbids type change",
+			oldType: "old", newType: "new",
+			phase:   workerctrl.InstancePhaseReady,
+			wantErr: true,
+		},
+		{
+			name:    "start stopped requires existing type",
+			oldType: "gone", newType: "gone",
+			oldStop: ptr.To(true), newStop: ptr.To(false),
+			phase:   workerctrl.InstancePhaseStopped,
+			wantErr: true,
+		},
+		{
+			name:    "start stopped with existing type allowed",
+			oldType: "live", newType: "live",
+			oldStop: ptr.To(true), newStop: ptr.To(false),
+			phase:        workerctrl.InstancePhaseStopped,
+			registerType: "live",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var objs []ctrlcli.Object
+			if c.registerType != "" {
+				objs = append(objs, &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: c.registerType}})
+			}
+			w := newInstanceWebhook(objs...)
+
+			old := webhookInstance("a", c.oldType)
+			old.Spec.Stop = c.oldStop
+			old.Status.Phase = c.phase
+			neu := webhookInstance("a", c.newType)
+			neu.Spec.Stop = c.newStop
+			neu.Status.Phase = c.phase
+
+			_, err := w.ValidateUpdate(context.Background(), old, neu)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
-func TestInstanceWebhook_ValidateUpdate_StoppedAllowsTypeChange(t *testing.T) {
-	w := newInstanceWebhook()
-	old := webhookInstance("a", "old")
-	old.Spec.Stop = ptr.To(true)
-	old.Status.Phase = workerctrl.InstancePhaseStopped
-	neu := webhookInstance("a", "new")
-	neu.Spec.Stop = ptr.To(true)
-	neu.Status.Phase = workerctrl.InstancePhaseStopped
+func TestInstanceWebhook_Default(t *testing.T) {
+	cases := []struct {
+		name string
 
-	_, err := w.ValidateUpdate(context.Background(), old, neu)
-	assert.NoError(t, err)
-}
+		stop  bool
+		phase string
 
-func TestInstanceWebhook_ValidateUpdate_RunningForbidsTypeChange(t *testing.T) {
-	w := newInstanceWebhook()
-	old := webhookInstance("a", "old")
-	old.Status.Phase = workerctrl.InstancePhaseReady
-	neu := webhookInstance("a", "new")
-	neu.Status.Phase = workerctrl.InstancePhaseReady
+		wantErr bool
+	}{
+		{
+			// Fresh (Phase "", not stopped) → the type must exist.
+			name:    "fresh requires type",
+			wantErr: true,
+		},
+		{
+			name: "stopped skips type",
+			stop: true,
+		},
+		{
+			name:    "running update skips type",
+			phase:   workerctrl.InstancePhaseReady,
+			wantErr: true,
+		},
+	}
 
-	_, err := w.ValidateUpdate(context.Background(), old, neu)
-	assert.Error(t, err)
-}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook()
+			inst := webhookInstance("a", "missing")
+			if c.stop {
+				inst.Spec.Stop = ptr.To(true)
+			}
+			inst.Status.Phase = c.phase
 
-func TestInstanceWebhook_ValidateUpdate_StartStoppedRequiresExistingType(t *testing.T) {
-	w := newInstanceWebhook() // no InstanceType registered
-	old := webhookInstance("a", "gone")
-	old.Spec.Stop = ptr.To(true)
-	old.Status.Phase = workerctrl.InstancePhaseStopped
-	neu := webhookInstance("a", "gone")
-	neu.Spec.Stop = ptr.To(false)
-	neu.Status.Phase = workerctrl.InstancePhaseStopped
-
-	_, err := w.ValidateUpdate(context.Background(), old, neu)
-	assert.Error(t, err)
-}
-
-func TestInstanceWebhook_ValidateUpdate_StartStoppedWithExistingTypeAllowed(t *testing.T) {
-	it := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "live"}}
-	w := newInstanceWebhook(it)
-	old := webhookInstance("a", "live")
-	old.Spec.Stop = ptr.To(true)
-	old.Status.Phase = workerctrl.InstancePhaseStopped
-	neu := webhookInstance("a", "live")
-	neu.Spec.Stop = ptr.To(false)
-	neu.Status.Phase = workerctrl.InstancePhaseStopped
-
-	_, err := w.ValidateUpdate(context.Background(), old, neu)
-	assert.NoError(t, err)
-}
-
-func TestInstanceWebhook_Default_FreshRequiresType(t *testing.T) {
-	w := newInstanceWebhook()
-	inst := webhookInstance("a", "missing") // Phase "", not stopped
-
-	err := w.Default(context.Background(), inst)
-	assert.Error(t, err)
-}
-
-func TestInstanceWebhook_Default_StoppedSkipsType(t *testing.T) {
-	w := newInstanceWebhook()
-	inst := webhookInstance("a", "missing")
-	inst.Spec.Stop = ptr.To(true)
-
-	err := w.Default(context.Background(), inst)
-	assert.NoError(t, err)
-}
-
-func TestInstanceWebhook_Default_RunningUpdateSkipsType(t *testing.T) {
-	w := newInstanceWebhook()
-	inst := webhookInstance("a", "missing")
-	inst.Status.Phase = workerctrl.InstancePhaseReady
-
-	err := w.Default(context.Background(), inst)
-	assert.Error(t, err)
+			err := w.Default(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }

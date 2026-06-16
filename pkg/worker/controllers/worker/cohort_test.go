@@ -48,47 +48,68 @@ func reconcileCohort(t *testing.T, cli ctrlcli.Client, name string) (ctrl.Result
 		ctrl.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
 }
 
-func TestCohortReconciler_Reconcile_NodePresentCreatesCohort(t *testing.T) {
-	node := newGeneralNode("node-1")
-	cohortName := nodefeature.ExtractNodeProfiles(node)[0].Cohort
+func TestCohortReconciler_Reconcile(t *testing.T) {
+	// The cohort name is derived purely from the general profile (os/arch/CPU),
+	// not the node name, so a probe node yields the same name every node uses.
+	cohortName := nodefeature.ExtractNodeProfiles(newGeneralNode("probe"))[0].Cohort
 
-	cli := buildCohortClient(node)
-	_, err := reconcileCohort(t, cli, cohortName)
-	require.NoError(t, err)
+	cases := []struct {
+		name string
 
-	co := &kueue.Cohort{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: cohortName}, co),
-		"cohort must be created when a node references it")
-}
+		withNode         bool
+		withCohort       bool
+		withClusterQueue bool
 
-func TestCohortReconciler_Reconcile_NoNodeButClusterQueueKeepsCohort(t *testing.T) {
-	// No Node references the cohort, but a ClusterQueue still does (e.g. it is
-	// draining). The cohort must be kept — deleting it would cascade-delete the
-	// CQ via the ownerRef and disrupt running workloads.
-	const cohortName = "gpustack--generic-ln-x64-4c-16g"
-	co := &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: cohortName}}
-	cq := newInstanceTypeClusterQueue("gpustack--generic-ln-x64-4c-16g", cohortName)
+		wantExists bool
+	}{
+		{
+			// A Node references the cohort → it must be created.
+			name:       "node present creates cohort",
+			withNode:   true,
+			wantExists: true,
+		},
+		{
+			// No Node references the cohort, but a ClusterQueue still does (e.g. it
+			// is draining). The cohort must be kept — deleting it would
+			// cascade-delete the CQ via the ownerRef and disrupt running workloads.
+			name:             "no node but ClusterQueue keeps cohort",
+			withCohort:       true,
+			withClusterQueue: true,
+			wantExists:       true,
+		},
+		{
+			// Fully idle: neither a Node nor a ClusterQueue references the cohort.
+			name:       "no node no ClusterQueue deletes cohort",
+			withCohort: true,
+		},
+	}
 
-	cli := buildCohortClient(co, cq)
-	_, err := reconcileCohort(t, cli, cohortName)
-	require.NoError(t, err)
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var objs []ctrlcli.Object
+			if c.withNode {
+				objs = append(objs, newGeneralNode("node-1"))
+			}
+			if c.withCohort {
+				objs = append(objs, &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: cohortName}})
+			}
+			if c.withClusterQueue {
+				objs = append(objs, newInstanceTypeClusterQueue(cohortName, cohortName))
+			}
+			cli := buildCohortClient(objs...)
 
-	got := &kueue.Cohort{}
-	assert.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: cohortName}, got),
-		"cohort with a referencing ClusterQueue must be kept")
-}
+			_, err := reconcileCohort(t, cli, cohortName)
+			require.NoError(t, err)
 
-func TestCohortReconciler_Reconcile_NoNodeNoClusterQueueDeletesCohort(t *testing.T) {
-	// Fully idle: neither a Node nor a ClusterQueue references the cohort.
-	const cohortName = "gpustack--generic-ln-x64-4c-16g"
-	co := &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: cohortName}}
-
-	cli := buildCohortClient(co)
-	_, err := reconcileCohort(t, cli, cohortName)
-	require.NoError(t, err)
-
-	got := &kueue.Cohort{}
-	err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: cohortName}, got)
-	assert.True(t, kerrors.IsNotFound(err),
-		"fully idle cohort (no node, no CQ) must be deleted, got err=%v", err)
+			got := &kueue.Cohort{}
+			err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: cohortName}, got)
+			if c.wantExists {
+				assert.NoError(t, err, "cohort must be kept/created")
+				return
+			}
+			assert.True(t, kerrors.IsNotFound(err),
+				"fully idle cohort (no node, no CQ) must be deleted, got err=%v", err)
+		})
+	}
 }

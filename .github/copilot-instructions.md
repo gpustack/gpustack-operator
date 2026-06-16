@@ -22,7 +22,7 @@ and cite the file and line.
 - Keep concurrency simple and minimal; flag shared mutable state that risks data races.
 - Exported APIs need doc comments describing intended behavior.
 
-## Kubernetes / controller conventions
+## Kubernetes conventions
 
 - Reconcile desired state declaratively; flag imperative, scripted actions.
 - Every reconcile must be idempotent and safe to retry.
@@ -35,9 +35,21 @@ and cite the file and line.
 - Watch only what affects desired state; flag reconcile work triggered by irrelevant objects.
 - Design for eventual consistency, not immediate convergence.
 
+## Testing conventions
+
+- Prefer table-driven tests with a shared execution loop; flag duplicated per-case execution logic.
+- Each case should verify one behavior or contract; flag cases asserting many unrelated things.
+- Keep cases declarative — data, not control flow — and build fixtures through shared helpers.
+- Assert observable final state, not implementation details.
+- Prefer fake clients over real dependencies.
+- Fail fast on setup errors instead of letting them corrupt later assertions.
+- Compare semantic equivalence, not incidental representation; flag brittle string/format comparisons.
+- Tests must be deterministic and repeatable; flag time-, ordering-, or randomness-dependent assertions.
+
 ## Review focus
 
 - Correctness and idempotency of reconcile logic.
 - Backward compatibility of API type changes (run `make generate` is required after
   editing `api/` types or webhooks — flag PRs that change these without regenerated code).
 - Error handling and context propagation.
+- Test quality: table-driven structure, deterministic assertions, fake clients over real dependencies.

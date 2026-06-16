@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -61,6 +62,14 @@ func newNodesResourceFlavor(name string, draining bool) *kueue.ResourceFlavor {
 	return rf
 }
 
+func buildFlavorClient(objs ...ctrlcli.Object) ctrlcli.Client {
+	return ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(objs...).
+		WithIndex(&core.Node{}, IndexingNodeByFlavorProfile, indexNodeByFlavorProfile).
+		Build()
+}
+
 func reconcileFlavor(t *testing.T, cli ctrlcli.Client, name string) {
 	t.Helper()
 	r := &ResourceFlavorReconciler{Client: cli}
@@ -69,95 +78,82 @@ func reconcileFlavor(t *testing.T, cli ctrlcli.Client, name string) {
 	require.NoError(t, err)
 }
 
-func TestResourceFlavorReconciler_Reconcile_OrphanGetsDrainAnnotation(t *testing.T) {
-	// An orphaned flavor (no Node references it) must be kept and marked draining,
-	// never hard-deleted.
+func TestResourceFlavorReconciler_Reconcile(t *testing.T) {
+	// The flavor name depends only on the general profile, not the node name, so
+	// derive it once from a probe node.
 	flavorName := nodefeature.ExtractNodeResourceFlavors(newGeneralNode("probe"))[0].ProfileFlavor
-	rf := newNodesResourceFlavor(flavorName, false)
 
-	cli := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(rf).
-		WithIndex(&core.Node{}, IndexingNodeByFlavorProfile, indexNodeByFlavorProfile).
-		Build()
+	cases := []struct {
+		name string
 
-	reconcileFlavor(t, cli, flavorName)
+		withFlavor     bool
+		flavorDraining bool
+		withNode       bool
 
-	got := &kueue.ResourceFlavor{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: flavorName}, got),
-		"orphaned flavor must be kept, not deleted")
-	assert.Equal(t, "true", got.Annotations[_ResourceFlavorDrainAnnoKey],
-		"orphaned flavor must be marked draining")
-}
+		wantExists   bool
+		wantDraining bool // _ResourceFlavorDrainAnnoKey present
+	}{
+		{
+			// An orphaned flavor (no Node references it) must be kept and marked
+			// draining, never hard-deleted.
+			name:         "orphan gets drain annotation",
+			withFlavor:   true,
+			wantExists:   true,
+			wantDraining: true,
+		},
+		{
+			// Re-reconciling an already-draining orphan is a no-op (still draining).
+			name:           "orphan drain is idempotent",
+			withFlavor:     true,
+			flavorDraining: true,
+			wantExists:     true,
+			wantDraining:   true,
+		},
+		{
+			// When a Node uses the flavor's profile again, the drain mark clears.
+			name:           "active removes drain annotation",
+			withFlavor:     true,
+			flavorDraining: true,
+			withNode:       true,
+			wantExists:     true,
+		},
+		{
+			// No flavor and no node: reconcile is a no-op, nothing is created.
+			name: "not found is noop",
+		},
+		{
+			// A Node introduces a flavor profile that has no ResourceFlavor yet: the
+			// reconciler must CREATE the flavor, active (not draining).
+			name:       "creates flavor for new node profile",
+			withNode:   true,
+			wantExists: true,
+		},
+	}
 
-func TestResourceFlavorReconciler_Reconcile_OrphanDrainIsIdempotent(t *testing.T) {
-	// Re-reconciling an already-draining orphan is a no-op (still draining, no error).
-	flavorName := nodefeature.ExtractNodeResourceFlavors(newGeneralNode("probe"))[0].ProfileFlavor
-	rf := newNodesResourceFlavor(flavorName, true)
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var objs []ctrlcli.Object
+			if c.withFlavor {
+				objs = append(objs, newNodesResourceFlavor(flavorName, c.flavorDraining))
+			}
+			if c.withNode {
+				objs = append(objs, newGeneralNode("node-1"))
+			}
+			cli := buildFlavorClient(objs...)
 
-	cli := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(rf).
-		WithIndex(&core.Node{}, IndexingNodeByFlavorProfile, indexNodeByFlavorProfile).
-		Build()
+			reconcileFlavor(t, cli, flavorName)
 
-	reconcileFlavor(t, cli, flavorName)
-
-	got := &kueue.ResourceFlavor{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: flavorName}, got))
-	assert.Equal(t, "true", got.Annotations[_ResourceFlavorDrainAnnoKey])
-}
-
-func TestResourceFlavorReconciler_Reconcile_ActiveRemovesDrainAnnotation(t *testing.T) {
-	// When a Node uses the flavor's profile again, the drain mark must be cleared.
-	node := newGeneralNode("node-1")
-	ndfs := nodefeature.ExtractNodeResourceFlavors(node)
-	require.NotEmpty(t, ndfs)
-	flavorName := ndfs[0].ProfileFlavor
-	rf := newNodesResourceFlavor(flavorName, true)
-
-	cli := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(node, rf).
-		WithIndex(&core.Node{}, IndexingNodeByFlavorProfile, indexNodeByFlavorProfile).
-		Build()
-
-	reconcileFlavor(t, cli, flavorName)
-
-	got := &kueue.ResourceFlavor{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: flavorName}, got))
-	_, has := got.Annotations[_ResourceFlavorDrainAnnoKey]
-	assert.False(t, has, "drain annotation must be cleared once a node uses the flavor again")
-}
-
-func TestResourceFlavorReconciler_Reconcile_NotFoundIsNoop(t *testing.T) {
-	cli := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithIndex(&core.Node{}, IndexingNodeByFlavorProfile, indexNodeByFlavorProfile).
-		Build()
-
-	reconcileFlavor(t, cli, "gpustack--generic-ln-x64-4c-16g-32g")
-}
-
-func TestResourceFlavorReconciler_Reconcile_CreatesFlavorForNewNodeProfile(t *testing.T) {
-	// A Node introduces a flavor profile that has no ResourceFlavor yet: the
-	// reconciler must CREATE the flavor, not skip it as "already deleted".
-	node := newGeneralNode("node-1")
-	ndfs := nodefeature.ExtractNodeResourceFlavors(node)
-	require.NotEmpty(t, ndfs)
-	flavorName := ndfs[0].ProfileFlavor
-
-	cli := ctrlfake.NewClientBuilder().
-		WithScheme(scheme.Scheme).
-		WithObjects(node). // no pre-existing ResourceFlavor
-		WithIndex(&core.Node{}, IndexingNodeByFlavorProfile, indexNodeByFlavorProfile).
-		Build()
-
-	reconcileFlavor(t, cli, flavorName)
-
-	got := &kueue.ResourceFlavor{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: flavorName}, got),
-		"a node-referenced flavor must be created when missing")
-	_, draining := got.Annotations[_ResourceFlavorDrainAnnoKey]
-	assert.False(t, draining, "a freshly created active flavor must not be marked draining")
+			got := &kueue.ResourceFlavor{}
+			err := cli.Get(context.Background(), ctrlcli.ObjectKey{Name: flavorName}, got)
+			if !c.wantExists {
+				assert.True(t, kerrors.IsNotFound(err),
+					"flavor must not be created, got err=%v", err)
+				return
+			}
+			require.NoError(t, err, "flavor must be kept/created")
+			_, draining := got.Annotations[_ResourceFlavorDrainAnnoKey]
+			assert.Equal(t, c.wantDraining, draining, "drain annotation presence")
+		})
+	}
 }

@@ -11,6 +11,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -102,80 +103,87 @@ func TestHasReserved(t *testing.T) {
 	}
 }
 
-func TestClusterQueueReconciler_Reconcile_AllDrainedEntersHoldAndDrain(t *testing.T) {
-	// Phase 1: every ResourceFlavor is draining → the queue switches to
-	// HoldAndDrain and requeues, rather than being hard-deleted.
-	rf := newQueuedResourceFlavor(drainFlavorName, drainQueueName, drainCohortName, true)
-	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: drainQueueName}}
-	cli := buildQueueClient(rf, cq)
+func TestClusterQueueReconciler_Reconcile(t *testing.T) {
+	cases := []struct {
+		name string
 
-	res, err := reconcileQueue(t, cli, drainCohortName, drainQueueName)
-	require.NoError(t, err)
-	assert.Equal(t, 15*time.Second, res.RequeueAfter, "should requeue while draining")
+		// Inputs.
+		flavorDraining    bool
+		stopPolicy        *kueue.StopPolicy
+		admittedWorkloads int32
+		withCohort        bool
 
-	got := &kueue.ClusterQueue{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: drainQueueName}, got),
-		"queue must not be deleted in phase 1")
-	require.NotNil(t, got.Spec.StopPolicy)
-	assert.Equal(t, kueue.HoldAndDrain, *got.Spec.StopPolicy)
-}
-
-func TestClusterQueueReconciler_Reconcile_DrainedNoReservationDeletes(t *testing.T) {
-	// Phase 2: already HoldAndDrain and no reservation remains → delete.
-	sp := kueue.HoldAndDrain
-	rf := newQueuedResourceFlavor(drainFlavorName, drainQueueName, drainCohortName, true)
-	cq := &kueue.ClusterQueue{
-		ObjectMeta: meta.ObjectMeta{Name: drainQueueName},
-		Spec:       kueue.ClusterQueueSpec{StopPolicy: &sp},
+		// Expectations.
+		wantRequeueAfter time.Duration     // 0 → not asserted
+		wantDeleted      bool              // queue is hard-deleted
+		wantStopPolicy   *kueue.StopPolicy // nil → not asserted
+	}{
+		{
+			// Phase 1: every ResourceFlavor is draining → the queue switches to
+			// HoldAndDrain and requeues, rather than being hard-deleted.
+			name:             "all drained enters HoldAndDrain",
+			flavorDraining:   true,
+			wantRequeueAfter: 15 * time.Second,
+			wantStopPolicy:   ptr.To(kueue.HoldAndDrain),
+		},
+		{
+			// Phase 2: already HoldAndDrain and no reservation remains → delete.
+			name:           "drained, no reservation, deletes",
+			flavorDraining: true,
+			stopPolicy:     ptr.To(kueue.HoldAndDrain),
+			wantDeleted:    true,
+		},
+		{
+			// HoldAndDrain but still has admitted workloads → wait, do not delete.
+			name:              "drained, with reservation, waits",
+			flavorDraining:    true,
+			stopPolicy:        ptr.To(kueue.HoldAndDrain),
+			admittedWorkloads: 1,
+			wantRequeueAfter:  15 * time.Second,
+		},
+		{
+			// An active flavor (not draining) → rebuild the queue and force
+			// StopPolicy back to None, lifting a previous drain.
+			name:           "active restores StopPolicy None",
+			stopPolicy:     ptr.To(kueue.HoldAndDrain),
+			withCohort:     true,
+			wantStopPolicy: ptr.To(kueue.None),
+		},
 	}
-	cli := buildQueueClient(rf, cq)
 
-	_, err := reconcileQueue(t, cli, drainCohortName, drainQueueName)
-	require.NoError(t, err)
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			rf := newQueuedResourceFlavor(drainFlavorName, drainQueueName, drainCohortName, c.flavorDraining)
+			cq := &kueue.ClusterQueue{
+				ObjectMeta: meta.ObjectMeta{Name: drainQueueName},
+				Spec:       kueue.ClusterQueueSpec{StopPolicy: c.stopPolicy},
+				Status:     kueue.ClusterQueueStatus{AdmittedWorkloads: c.admittedWorkloads},
+			}
+			objs := []ctrlcli.Object{rf, cq}
+			if c.withCohort {
+				objs = append(objs, &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: drainCohortName}})
+			}
+			cli := buildQueueClient(objs...)
 
-	got := &kueue.ClusterQueue{}
-	err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: drainQueueName}, got)
-	assert.True(t, kerrors.IsNotFound(err),
-		"drained queue with no reservation must be deleted, got err=%v", err)
-}
+			res, err := reconcileQueue(t, cli, drainCohortName, drainQueueName)
+			require.NoError(t, err)
+			if c.wantRequeueAfter != 0 {
+				assert.Equal(t, c.wantRequeueAfter, res.RequeueAfter, "RequeueAfter")
+			}
 
-func TestClusterQueueReconciler_Reconcile_DrainedWithReservationWaits(t *testing.T) {
-	// HoldAndDrain but still has admitted workloads → wait, do not delete.
-	sp := kueue.HoldAndDrain
-	rf := newQueuedResourceFlavor(drainFlavorName, drainQueueName, drainCohortName, true)
-	cq := &kueue.ClusterQueue{
-		ObjectMeta: meta.ObjectMeta{Name: drainQueueName},
-		Spec:       kueue.ClusterQueueSpec{StopPolicy: &sp},
-		Status:     kueue.ClusterQueueStatus{AdmittedWorkloads: 1},
+			got := &kueue.ClusterQueue{}
+			err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: drainQueueName}, got)
+			if c.wantDeleted {
+				assert.True(t, kerrors.IsNotFound(err),
+					"drained queue must be deleted, got err=%v", err)
+				return
+			}
+			require.NoError(t, err, "queue must not be deleted")
+			if c.wantStopPolicy != nil {
+				require.NotNil(t, got.Spec.StopPolicy, "queue must carry an explicit StopPolicy")
+				assert.Equal(t, *c.wantStopPolicy, *got.Spec.StopPolicy, "Spec.StopPolicy")
+			}
+		})
 	}
-	cli := buildQueueClient(rf, cq)
-
-	res, err := reconcileQueue(t, cli, drainCohortName, drainQueueName)
-	require.NoError(t, err)
-	assert.Equal(t, 15*time.Second, res.RequeueAfter)
-
-	got := &kueue.ClusterQueue{}
-	assert.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: drainQueueName}, got),
-		"queue with admitted workloads must not be deleted")
-}
-
-func TestClusterQueueReconciler_Reconcile_ActiveRestoresStopPolicyNone(t *testing.T) {
-	// An active flavor (not draining) → rebuild the queue and force StopPolicy
-	// back to None, lifting a previous drain.
-	sp := kueue.HoldAndDrain
-	rf := newQueuedResourceFlavor(drainFlavorName, drainQueueName, drainCohortName, false)
-	co := &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: drainCohortName}}
-	cq := &kueue.ClusterQueue{
-		ObjectMeta: meta.ObjectMeta{Name: drainQueueName},
-		Spec:       kueue.ClusterQueueSpec{StopPolicy: &sp},
-	}
-	cli := buildQueueClient(rf, co, cq)
-
-	_, err := reconcileQueue(t, cli, drainCohortName, drainQueueName)
-	require.NoError(t, err)
-
-	got := &kueue.ClusterQueue{}
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: drainQueueName}, got))
-	require.NotNil(t, got.Spec.StopPolicy, "active queue must carry an explicit StopPolicy")
-	assert.Equal(t, kueue.None, *got.Spec.StopPolicy, "active queue must reset StopPolicy to None")
 }

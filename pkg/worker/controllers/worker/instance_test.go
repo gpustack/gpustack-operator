@@ -257,36 +257,54 @@ func newReadyInstance(namespace, name, instType string) *workercore.Instance {
 	}
 }
 
-func TestInstanceReconciler_Reconcile_ReadyInstanceTypeRemovedStops(t *testing.T) {
-	// A Ready instance whose Pod is gone and whose InstanceType no longer exists
-	// (ClusterQueue drained and deleted) must be stopped, not recreated.
-	inst := newReadyInstance("default", "inst", "missing-type")
-	cli := buildInstanceClient(inst)
+func TestInstanceReconciler_Reconcile(t *testing.T) {
+	cases := []struct {
+		name string
 
-	_, err := reconcileInstance(t, cli, "default", "inst")
-	require.NoError(t, err)
+		instType         string
+		withInstanceType bool
+		itPhase          string
 
-	got := &workercore.Instance{}
-	require.NoError(t, cli.Get(context.Background(),
-		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
-	assert.True(t, ptr.Deref(got.Spec.Stop, false), "instance must be marked stopped")
-}
-
-func TestInstanceReconciler_Reconcile_ReadyInstanceTypeInactiveStops(t *testing.T) {
-	// A Ready instance whose Pod is gone while its InstanceType is Inactive
-	// (ClusterQueue in HoldAndDrain) must be stopped, not recreated.
-	inst := newReadyInstance("default", "inst", "draining-type")
-	it := &worker.InstanceType{
-		ObjectMeta: meta.ObjectMeta{Name: "draining-type"},
-		Status:     worker.InstanceTypeStatus{Phase: InstanceTypePhaseInactive},
+		wantStop bool
+	}{
+		{
+			// A Ready instance whose Pod is gone and whose InstanceType no longer
+			// exists (ClusterQueue drained and deleted) must be stopped, not recreated.
+			name:     "InstanceType removed stops instance",
+			instType: "missing-type",
+			wantStop: true,
+		},
+		{
+			// A Ready instance whose Pod is gone while its InstanceType is Inactive
+			// (ClusterQueue in HoldAndDrain) must be stopped, not recreated.
+			name:             "InstanceType inactive stops instance",
+			instType:         "draining-type",
+			withInstanceType: true,
+			itPhase:          InstanceTypePhaseInactive,
+			wantStop:         true,
+		},
 	}
-	cli := buildInstanceClient(inst, it)
 
-	_, err := reconcileInstance(t, cli, "default", "inst")
-	require.NoError(t, err)
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst := newReadyInstance("default", "inst", c.instType)
+			objs := []ctrlcli.Object{inst}
+			if c.withInstanceType {
+				objs = append(objs, &worker.InstanceType{
+					ObjectMeta: meta.ObjectMeta{Name: c.instType},
+					Status:     worker.InstanceTypeStatus{Phase: c.itPhase},
+				})
+			}
+			cli := buildInstanceClient(objs...)
 
-	got := &workercore.Instance{}
-	require.NoError(t, cli.Get(context.Background(),
-		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
-	assert.True(t, ptr.Deref(got.Spec.Stop, false), "instance must be marked stopped")
+			_, err := reconcileInstance(t, cli, "default", "inst")
+			require.NoError(t, err)
+
+			got := &workercore.Instance{}
+			require.NoError(t, cli.Get(context.Background(),
+				ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
+			assert.Equal(t, c.wantStop, ptr.Deref(got.Spec.Stop, false), "Spec.Stop")
+		})
+	}
 }
