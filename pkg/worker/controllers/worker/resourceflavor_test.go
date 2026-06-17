@@ -89,6 +89,7 @@ func TestResourceFlavorReconciler_Reconcile(t *testing.T) {
 		withFlavor     bool
 		flavorDraining bool
 		withNode       bool
+		nodeUnmanaged  bool // node present but gpustack.ai/managed=false
 
 		wantExists   bool
 		wantDraining bool // _ResourceFlavorDrainAnnoKey present
@@ -128,6 +129,18 @@ func TestResourceFlavorReconciler_Reconcile(t *testing.T) {
 			withNode:   true,
 			wantExists: true,
 		},
+		{
+			// A Node exists but is no longer managed (gpustack.ai/managed=false), so
+			// indexNodeByFlavorProfile excludes it: the flavor is orphaned and must be
+			// marked draining. Guards the index's managed filter (the path a node
+			// leaving management relies on); does NOT exercise the Node-watch predicate.
+			name:          "unmanaged node drains flavor",
+			withFlavor:    true,
+			withNode:      true,
+			nodeUnmanaged: true,
+			wantExists:    true,
+			wantDraining:  true,
+		},
 	}
 
 	for _, c := range cases {
@@ -138,7 +151,11 @@ func TestResourceFlavorReconciler_Reconcile(t *testing.T) {
 				objs = append(objs, newNodesResourceFlavor(flavorName, c.flavorDraining))
 			}
 			if c.withNode {
-				objs = append(objs, newGeneralNode("node-1"))
+				nd := newGeneralNode("node-1")
+				if c.nodeUnmanaged {
+					nd.Labels[systemname.ManagedLabelKey] = "false"
+				}
+				objs = append(objs, nd)
 			}
 			cli := buildFlavorClient(objs...)
 

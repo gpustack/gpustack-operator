@@ -195,7 +195,6 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 	r.Client = opts.Manager.GetClient()
 
 	dedupWindow := ctrlhandlerx.NewDedupWindow[ctrlreconcile.Request]()
-	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("cohort").
@@ -211,17 +210,14 @@ func (r *CohortReconciler) SetupController(ctx context.Context, opts controller.
 				// Trigger reconciliation when a Node is:
 				// - created.
 				// - deleted.
-				// - updated if its feature labels have changed.
+				// - updated if its managed mark or feature labels have changed.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						if aggressive {
-							return true
-						}
-
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							// Fire when feature labels have changed.
+							// Fire when the managed mark or feature labels have changed.
 							return !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+								systemname.ManagedLabelKey,
 								nodefeature.FeatureLabelPrefix,
 								nodefeature.GeneralFeatureLabelPrefix,
 								nodefeature.AcceleratableFeatureLabelPrefix)

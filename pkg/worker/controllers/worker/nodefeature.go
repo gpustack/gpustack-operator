@@ -108,7 +108,6 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 
-	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("nodefeature").
 		For(
@@ -122,10 +121,6 @@ func (r *NodeFeatureReconciler) SetupController(_ context.Context, opts controll
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						if aggressive {
-							return e.ObjectNew.GetDeletionTimestamp() == nil
-						}
-
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							// Fire when labels have changed.

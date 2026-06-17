@@ -449,7 +449,6 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 	r.APIReader = opts.Manager.GetAPIReader()
 
 	dedupWindow := ctrlhandlerx.NewDedupWindow[ctrlreconcile.Request]()
-	aggressive := opts.Manager.AllowAggressiveEventFiltering()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("clusterqueue").
@@ -510,15 +509,11 @@ func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts contr
 				// - updated if its feature labels or allocatable resources have changed.
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						if aggressive {
-							return true
-						}
-
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
 							// Fire when feature labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
-								systemname.LabelPrefix,
+								systemname.ManagedLabelKey,
 								nodefeature.FeatureLabelPrefix,
 								nodefeature.GeneralFeatureLabelPrefix,
 								nodefeature.AcceleratableFeatureLabelPrefix) {

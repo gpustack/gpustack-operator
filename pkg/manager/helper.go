@@ -21,11 +21,10 @@ type (
 	// CtrlManager is a wrapper around ctrl.Manager.
 	CtrlManager struct {
 		ctrl.Manager
-		aggressiveEventFiltering bool
-		options                  ctrl.Options
-		httpClient               *http.Client
-		disableController        bool
-		indexedFields            sets.Set[string]
+		options           ctrl.Options
+		httpClient        *http.Client
+		disableController bool
+		indexedFields     sets.Set[string]
 	}
 
 	// RepeatableCtrlFieldIndexer is a wrapper around ctrlcli.FieldIndexer.
@@ -109,11 +108,6 @@ func (m CtrlManager) GetLeaderElectionNamespacedName() types.NamespacedName {
 		Namespace: m.options.LeaderElectionNamespace,
 		Name:      m.options.LeaderElectionID,
 	}
-}
-
-// AllowAggressiveEventFiltering returns whether aggressive event filtering is allowed.
-func (m CtrlManager) AllowAggressiveEventFiltering() bool {
-	return m.aggressiveEventFiltering
 }
 
 // _CtrlManagerSentinel is a ctrlmgr.Runnable implementation for observing
