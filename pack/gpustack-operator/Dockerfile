@@ -298,15 +298,15 @@ RUN --mount=type=bind,src=deploy/gpustack-operator/chart,target=/tmp/gpustack-op
     set -exo pipefail
 
     # Extract version from the built binary, fallback to 0.0.0 if not in expected format (e.g. during development).
-    CHART_VERSION="$(gpustack-operator --version | awk '{for (i = 1; i < NF; i++) if ($i == "version") print $(i + 1)}')"
-    CHART_VERSION="${CHART_VERSION#v}"
+    VERSION="$(gpustack-operator --version | awk '{for (i = 1; i < NF; i++) if ($i == "version") print $(i + 1)}')"
+    CHART_VERSION="${VERSION#v}"
     if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
         CHART_VERSION="0.0.0"
     fi
 
     # Package the chart with the resolved version.
     helm package /tmp/gpustack-operator-chart \
-        --version "${CHART_VERSION}" --app-version "${CHART_VERSION}" \
+        --version "${CHART_VERSION}" --app-version "${VERSION}" \
         --destination "${GPUSTACK_CHARTS_DIR}"
 EOF
 

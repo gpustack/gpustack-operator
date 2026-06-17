@@ -6,13 +6,14 @@ type: application
 # operator image tag can default to "v<appVersion>" and the chart input stays simple.
 # The release workflow overrides both from the pushed git tag.
 version: 0.0.0
-appVersion: "0.0.0"
+appVersion: dev
 kubeVersion: ">=1.27.0-0"
-home: https://github.com/gpustack/gpustack
+home: https://github.com/gpustack/gpustack-operator
 sources:
   - https://github.com/gpustack/gpustack
+  - https://github.com/gpustack/gpustack-operator
 keywords:
-  - gpustack
+  - gpustack-operator
   - operator
   - kueue
   - node-feature-discovery

@@ -3,6 +3,7 @@ package kuberess
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -32,6 +33,16 @@ func installGPUStackDeviceManager(ctx context.Context, helmCli *helm.Client, glo
 	chartVersion := deviceManagerChartVersion()
 	release := "gpustack-operator-device-manager"
 	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", chartName, chartVersion))
+	if !osx.ExistsFile(path) {
+		dir, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("get working directory: %w", err)
+		}
+		path = filepath.Join(dir, "deploy", "gpustack-operator", "chart")
+		if !osx.ExistsDir(path) {
+			return fmt.Errorf("chart not found at %s", path)
+		}
+	}
 
 	// Reuse the exact image of the running worker so the device-managers always match the
 	// operator in use; fall back to the chart-composed image when it cannot be determined.
