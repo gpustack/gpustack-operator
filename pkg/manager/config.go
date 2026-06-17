@@ -27,7 +27,6 @@ import (
 
 type Config struct {
 	InformerCacheResyncPeriod time.Duration
-	AggressiveEventFiltering  bool
 	LoopbackKubeConfigPath    string
 	LoopbackKubeRestConfig    rest.Config
 	LoopbackKubeHTTPClient    *http.Client
@@ -120,11 +119,10 @@ func (c *Config) Apply(ctx context.Context) (*Manager, error) {
 			return nil, fmt.Errorf("create controller manager: %w", err)
 		}
 		ctrlManager = CtrlManager{
-			Manager:                  rawCtrlManager,
-			aggressiveEventFiltering: c.AggressiveEventFiltering,
-			options:                  ctrlMgrOpts,
-			httpClient:               c.LoopbackKubeHTTPClient,
-			indexedFields:            sets.Set[string]{},
+			Manager:       rawCtrlManager,
+			options:       ctrlMgrOpts,
+			httpClient:    c.LoopbackKubeHTTPClient,
+			indexedFields: sets.Set[string]{},
 		}
 	}
 

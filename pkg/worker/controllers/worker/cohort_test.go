@@ -17,6 +17,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 )
 
 // newInstanceTypeClusterQueue builds an "instancetypes" ClusterQueue that
@@ -57,6 +58,7 @@ func TestCohortReconciler_Reconcile(t *testing.T) {
 		name string
 
 		withNode         bool
+		nodeUnmanaged    bool // node present but gpustack.ai/managed=false
 		withCohort       bool
 		withClusterQueue bool
 
@@ -82,6 +84,17 @@ func TestCohortReconciler_Reconcile(t *testing.T) {
 			name:       "no node no ClusterQueue deletes cohort",
 			withCohort: true,
 		},
+		{
+			// A Node exists but is no longer managed (gpustack.ai/managed=false), so
+			// indexNodeByCohortProfile excludes it. With no ClusterQueue either, the
+			// cohort is idle and must be deleted. Guards the index's managed filter
+			// (the path a node leaving management relies on); does NOT exercise the
+			// Node-watch predicate.
+			name:          "unmanaged node deletes cohort",
+			withNode:      true,
+			nodeUnmanaged: true,
+			withCohort:    true,
+		},
 	}
 
 	for _, c := range cases {
@@ -89,7 +102,11 @@ func TestCohortReconciler_Reconcile(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			var objs []ctrlcli.Object
 			if c.withNode {
-				objs = append(objs, newGeneralNode("node-1"))
+				nd := newGeneralNode("node-1")
+				if c.nodeUnmanaged {
+					nd.Labels[systemname.ManagedLabelKey] = "false"
+				}
+				objs = append(objs, nd)
 			}
 			if c.withCohort {
 				objs = append(objs, &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: cohortName}})

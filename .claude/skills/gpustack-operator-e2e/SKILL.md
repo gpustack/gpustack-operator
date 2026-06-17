@@ -244,6 +244,43 @@ kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
 kubectl -n default delete instance gpustack-e2e-instance
 ```
 
+### 4b. Managed toggle — a *second, independent* drain trigger (run when the change touches the ResourceFlavor/Cohort Node-watch)
+
+Excluding a node from management (`gpustack.ai/managed=false`) must drain its single-node
+ResourceFlavors with the **same** chain as §4 (flavor `schedule.gpustack.ai/drain=true` → ClusterQueue
+`HoldAndDrain` → the InstanceType's running Instances `spec.stop=true`). What is non-obvious is that it
+is a *different trigger on a different code path*:
+
+- A §4 capacity reshape changes a *feature label*, so any feature-prefix predicate fires. **A managed
+  toggle changes only `gpustack.ai/managed`** — no feature label — so it drains **only if** the
+  `ResourceFlavorReconciler`/`CohortReconciler` Node-watch `UpdateFunc` predicates include
+  `systemname.ManagedLabelKey` in their `mapx.EqualWithStringPrefix(...)`
+  (`pkg/worker/controllers/worker/{resourceflavor,cohort}.go`). Missing it is the historical bug: the
+  flavor is never enqueued or drained, while the ClusterQueue silently recomputes to a misleading
+  `0/-1` (Active but negative-remaining) quota and the Instance keeps running.
+- **Restart masks it.** The `For`-watch start-up resync re-reconciles every ResourceFlavor, so a freshly
+  (re)started operator drains the orphan regardless of the predicate. Verify against a **continuously
+  running** operator — do not restart between the toggle and the assertion.
+- Toggle via the NodeFeature, not the node (§4 explains why: NFD reverts a direct node label). The unit
+  cases `unmanaged node drains flavor` / `unmanaged node deletes cohort` only guard the index filter,
+  **not** the predicate — so this live check is the only guard for the enqueue path.
+
+```bash
+NS=gpustack-system; NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+before=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}')
+
+# Toggle out of management, then poll the §4 chain (flavor drain → CQ HoldAndDrain → Instance stop).
+kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
+  -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
+
+# Restore (skip if doing a full §6 teardown).
+kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
+  -p "{\"spec\":{\"labels\":{\"gpustack.ai/managed\":\"${before:-true}\"}}}"
+```
+
+> Toggling a node that hosts a *running* Instance Stops that Instance, so on a shared cluster pick a node
+> whose Instances you can disrupt (or one with none, to assert the flavor/CQ drain alone).
+
 ## 5. Optional — simulated accelerator & drain-recycle (accelerated chain)
 
 This exercises the accelerated chain and the drain-recycle behavior (the `ResourceFlavor` tombstone,

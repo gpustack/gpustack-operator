@@ -236,8 +236,6 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 
 	r.Client = opts.Manager.GetClient()
 
-	aggressive := opts.Manager.AllowAggressiveEventFiltering()
-
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("resourceflavor").
 		For(
@@ -295,17 +293,15 @@ func (r *ResourceFlavorReconciler) SetupController(ctx context.Context, opts con
 				// Trigger reconciliation when a Node is:
 				// - created.
 				// - deleted (so a flavor losing its last Node gets drained).
-				// - updated if its feature labels or taints have changed.
+				// - updated if its managed mark, feature labels or taints have
+				//   changed (a node leaving management drains its orphaned flavors).
 				ctrlpredicate.Funcs{
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
-						if aggressive {
-							return e.ObjectNew.GetDeletionTimestamp() == nil
-						}
-
 						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
 						if newNd.DeletionTimestamp == nil {
-							// Fire when labels have changed.
+							// Fire when the managed mark or feature labels have changed.
 							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+								systemname.ManagedLabelKey,
 								nodefeature.FeatureLabelPrefix,
 								nodefeature.GeneralFeatureLabelPrefix,
 								nodefeature.AcceleratableFeatureLabelPrefix) {
