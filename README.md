@@ -1,5 +1,10 @@
 # GPUStack Operator
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/gpustack/gpustack-operator)](https://goreportcard.com/report/github.com/gpustack/gpustack-operator)
+[![CI](https://img.shields.io/github/actions/workflow/status/gpustack/gpustack-operator/ci.yml?label=ci&branch=main)](https://github.com/gpustack/gpustack-operator/actions)
+[![License](https://img.shields.io/github/license/gpustack/gpustack-operator?label=license)](https://github.com/gpustack/gpustack-operator#license)
+[![Docker Pulls](https://img.shields.io/docker/pulls/gpustack/gpustack-operator)](https://hub.docker.com/r/gpustack/gpustack-operator)
+
 GPUStack Operator provides a fantastic way to manage accelerator resources in Kubernetes.
 
 Built on top of [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) and [Kueue](https://github.com/kubernetes-sigs/kueue), it discovers accelerators (GPU/NPU/TPU) on every node, profiles node capacity into normalized per-device units, and materializes the results into a Kueue-based scheduling chain (`ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue`).
