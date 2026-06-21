@@ -18,10 +18,10 @@ import (
 
 func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
 	// NB: please update the following files if changed.
-	// - pack/gpustack/image/Dockerfile.
+	// - pack/gpustack-operator/image/Dockerfile.
 
 	name := "kueue"
-	version := "0.18.0"
+	version := "0.18.1"
 	if disable.Has(name) {
 		return nil
 	}
