@@ -241,11 +241,14 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
   finding under Open Question #2. **Dependencies:** None. **Files:** spec only (no code). **Scope:** S.
 
 **Phase 1 — Accounting foundation (pure constants/funcs, no behavior change)**
-- [ ] **Task 1:** Introduce `D=12800`, raise `SlicedResourceMaxSize` 16→512, regenerate the size set (powers
-  of two up to 512) / base (D/maxSize=25), and rewrite `QuantityToSliceCount` / `QuantityToAlignedValue` /
-  `QuantityToOriginalValue`. **Acceptance:** every size satisfies `D % partitions == 0` and `1/D` is
-  nano-clean; the worked-example table (1/8→1600, 1/512→25) passes. **Verify:** `make test
-  ./pkg/nodefeature/...`, `make lint`. **Dependencies:** None. **Files:**
+- [x] **Task 1:** Set the global denominator `D=12800` as the single per-card unit basis for every mode by
+  changing the existing `ResourceMaxUnits` 10000→12800 (one source of truth — also seeds the device-plugin
+  grid and the AcceleratorAllocation ruler), raise `SlicedResourceMaxSize` 16→512, regenerate the size set
+  (powers of two up to 512) / per-slice units (D/size, e.g. D/512=25), and rewrite `QuantityToSliceCount`
+  (floor(q·sliced), D-independent) / `QuantityToAlignedValue` (q·D/sliced) / `QuantityToOriginalValue`.
+  **Acceptance:** every per-mode max size divides D evenly (so `12800/10=1280` Shared and `12800/512=25`
+  Sliced are exact) and `1/D` is nano-clean; the worked-example table (1/8→1600, 1/512→25) passes.
+  **Verify:** `make test ./pkg/nodefeature/...`, `make lint`. **Dependencies:** None. **Files:**
   `pkg/nodefeature/knowns.go(+_test)`. **Scope:** M.
 - [ ] **Task 2:** Add the bare `.sliced` resource-name helper (`GetAcceleratableSlicedCardResourceName` →
   `nvidia.com/gpu.sliced`). **Acceptance:** returns the bare key; `.sliced.units` unchanged. Unit test.
@@ -322,9 +325,10 @@ rejected.*
   idempotent repatch. **Acceptance:** node `status.capacity` carries `.sliced.units`; self-heals after a
   simulated re-reconcile; test. **Dependencies:** T1. **Files:** `pkg/devicemanager/detector/detector.go` or a
   new patcher (+_test). **Scope:** M.
-- [ ] **Task 15:** Adjust `MaxUnits/_Step*` in `pkg/deviceplugin/helper.go` to D and remove the sliced
-  thousands-of-fake-devices path (counting has moved to Patch Node). **Acceptance:** no 10000 fake devices;
-  constants consistent with D; Exclusive/Shared unaffected; test. **Dependencies:** T13. **Files:**
+- [ ] **Task 15:** Remove the sliced thousands-of-fake-devices path in `pkg/deviceplugin/helper.go` (counting
+  has moved to Patch Node) and confirm the `_Step*` derivations now built on `MaxUnits=D=12800` (Task 1).
+  **Acceptance:** no per-card fake-device pool for sliced; `_MinUnitsInPartitioned = 12800/512 = 25` divides
+  evenly; Exclusive/Shared unaffected; test. **Dependencies:** T13. **Files:**
   `pkg/deviceplugin/helper.go(+_test)`. **Scope:** S.
 
 *Final Checkpoint: local-cluster e2e (`gpustack-operator-e2e`) — label a node `partitions=8` → sliced
