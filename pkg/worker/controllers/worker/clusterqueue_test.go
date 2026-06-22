@@ -290,6 +290,65 @@ func TestClusterQueueReconciler_Reconcile(t *testing.T) {
 	}
 }
 
+// TestClusterQueueReconciler_ReclaimWithinCohort pins Task 7: accelerator queues
+// (exclusive and sliced) enable cohort reclaim so the exclusive side can take back
+// the credits it lends to the sliced side, while CPU-only queues never reclaim.
+// BorrowWithinCohort stays Never to satisfy Kueue's XValidation (reclaim=Never
+// requires borrow=Never), per the Task 0 finding.
+func TestClusterQueueReconciler_ReclaimWithinCohort(t *testing.T) {
+	const (
+		exclusiveQueue = "gpustack--amd-epyc-7r13-processor-ln-x64-12c-48g--nvidia-a10g-1d"
+		slicedQueue    = exclusiveQueue + "-8s"
+		cpuQueue       = "gpustack--generic-ln-x64-4c-16g"
+	)
+
+	cases := []struct {
+		name        string
+		queue       string
+		cohort      string
+		wantReclaim kueue.PreemptionPolicy
+	}{
+		{
+			name:        "cpu-only queue never reclaims",
+			queue:       cpuQueue,
+			cohort:      cpuQueue,
+			wantReclaim: kueue.PreemptionPolicyNever,
+		},
+		{
+			name:        "exclusive accelerator queue reclaims",
+			queue:       exclusiveQueue,
+			cohort:      exclusiveQueue,
+			wantReclaim: kueue.PreemptionPolicyAny,
+		},
+		{
+			name:        "sliced accelerator queue reclaims",
+			queue:       slicedQueue,
+			cohort:      exclusiveQueue,
+			wantReclaim: kueue.PreemptionPolicyAny,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			rf := newQueuedResourceFlavor("flavor", c.queue, c.cohort, false)
+			cohort := &kueue.Cohort{ObjectMeta: meta.ObjectMeta{Name: c.cohort}}
+			cli := buildQueueClient(rf, cohort)
+
+			_, err := reconcileQueue(t, cli, c.cohort, c.queue)
+			require.NoError(t, err)
+
+			got := &kueue.ClusterQueue{}
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: c.queue}, got))
+			require.NotNil(t, got.Spec.Preemption, "queue must carry a preemption policy")
+			assert.Equal(t, c.wantReclaim, got.Spec.Preemption.ReclaimWithinCohort, "ReclaimWithinCohort")
+			require.NotNil(t, got.Spec.Preemption.BorrowWithinCohort)
+			assert.Equal(t, kueue.BorrowWithinCohortPolicyNever,
+				got.Spec.Preemption.BorrowWithinCohort.Policy, "BorrowWithinCohort stays Never")
+		})
+	}
+}
+
 // newSlicedAccelNode builds a managed Node whose nvidia-a10g card model is sliced
 // into `partitions`, reporting `cards` participating cards as ".sliced.units" (D
 // units per card). Its single acceleratable profile is the sliced flavor/queue

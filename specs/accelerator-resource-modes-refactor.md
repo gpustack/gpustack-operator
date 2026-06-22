@@ -354,7 +354,7 @@ rejected.*
   borrowing). **Acceptance:** node-5 8s → sliced CQ credits=0, exclusive CQ credits=4 borrowingLimit nil;
   table test. **Dependencies:** T2, T5. **Files:** `pkg/worker/controllers/worker/clusterqueue.go(+_test)`.
   **Scope:** M.
-- [ ] **Task 7:** Enable `ReclaimWithinCohort` in `ClusterQueueSpec` (sliced/exclusive queues), leaving
+- [x] **Task 7:** Enable `ReclaimWithinCohort` in `ClusterQueueSpec` (sliced/exclusive queues), leaving
   CPU-only queues unchanged. **Acceptance:** preemption fields set correctly by queue type; table test +
   cross-check against the Task 0 finding. **Dependencies:** T0, T6. **Files:**
   `pkg/worker/controllers/worker/clusterqueue.go(+_test)`. **Scope:** S.
