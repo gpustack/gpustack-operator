@@ -697,6 +697,48 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 			),
 		},
 		{
+			// The maximum partition count (512) is now a valid power of two and
+			// materializes a "-512s" suffix end to end.
+			name: "cluster-1/node-5 A10G with sliced.partitions=512 appends -512s",
+			node: func() *core.Node {
+				lbs := mergeLabels(cpuModelLabels(), deviceLabels("a10g", "A10G", "23Gi", "4"))
+				lbs[a10gPfx+".sliced.partitions"] = "512"
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", lbs)
+			}(),
+			expected: mergeLabels(
+				generalExpected("48", "188Gi", "196Gi", "48c-188g-196g", "1c-3g"),
+				deviceExpected(a10gPfx, "48", "188Gi", "196Gi", "48c-188g-196g-4d-512s", "12c-47g-1d-512s", "12c-47g-1d"),
+			),
+		},
+		{
+			// Non-power-of-two sliced.partitions is rejected by the label algebra
+			// (the admission webhook also rejects it) — no suffix is emitted.
+			name: "cluster-1/node-5 A10G with sliced.partitions=3 yields no suffix",
+			node: func() *core.Node {
+				lbs := mergeLabels(cpuModelLabels(), deviceLabels("a10g", "A10G", "23Gi", "4"))
+				lbs[a10gPfx+".sliced.partitions"] = "3"
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", lbs)
+			}(),
+			expected: mergeLabels(
+				generalExpected("48", "188Gi", "196Gi", "48c-188g-196g", "1c-3g"),
+				deviceExpected(a10gPfx, "48", "188Gi", "196Gi", "48c-188g-196g-4d", "12c-47g-1d", "12c-47g-1d"),
+			),
+		},
+		{
+			// partitions=1 (a single slice = a whole card) is below the minimum of
+			// 2 and is ignored.
+			name: "cluster-1/node-5 A10G with sliced.partitions=1 yields no suffix",
+			node: func() *core.Node {
+				lbs := mergeLabels(cpuModelLabels(), deviceLabels("a10g", "A10G", "23Gi", "4"))
+				lbs[a10gPfx+".sliced.partitions"] = "1"
+				return newNode("cluster-1-node-5", "48", "188Gi", "196Gi", lbs)
+			}(),
+			expected: mergeLabels(
+				generalExpected("48", "188Gi", "196Gi", "48c-188g-196g", "1c-3g"),
+				deviceExpected(a10gPfx, "48", "188Gi", "196Gi", "48c-188g-196g-4d", "12c-47g-1d", "12c-47g-1d"),
+			),
+		},
+		{
 			// Existing capacity labels take precedence over Status.Capacity
 			// — covers idempotent re-runs and operator overrides.
 			name: "existing capacity labels override Status.Capacity",

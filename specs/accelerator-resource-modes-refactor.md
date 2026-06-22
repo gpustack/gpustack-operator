@@ -260,10 +260,12 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
 *Checkpoint 1: `./pkg/nodefeature/...` all green, lint clean, no behavior regression.*
 
 **Phase 2 — Admin enables slicing (Story 1 input + `-Ns` materialization + validation)**
-- [ ] **Task 3:** Lift the partitions parsing in `helper.go:468` to any power of two (bounded by
-  MaxPartitions); `-Ns` supports up to 512; z-cohort still carries no suffix. **Acceptance:**
-  `partitions=512`→`-512s`; table test `helper_test.go`. **Dependencies:** T1. **Files:**
-  `pkg/nodefeature/helper.go(+_test)`. **Scope:** S.
+- [x] **Task 3:** Tighten the partitions parsing in `helper.go` to accept only valid power-of-two counts via
+  a reusable `IsValidSlicedPartitions` helper (power of two in [2, 512]; the per-card MaxPartitions bound is
+  enforced by the Task 4 webhook); `-Ns` supports up to 512; z-cohort still carries no suffix. **Acceptance:**
+  `partitions=512`→`-512s`; non-power-of-two (3) / below-min (1) / out-of-range silently ignored; table tests
+  in `helper_test.go` + `IsValidSlicedPartitions` unit test. **Dependencies:** T1. **Files:**
+  `pkg/nodefeature/knowns.go`, `pkg/nodefeature/helper.go(+_test)`. **Scope:** S.
 - [ ] **Task 4:** Add a Validating Webhook rejecting illegal `.sliced.partitions` on the `*-gpustack-worker`
   NodeFeature (non-power-of-two / > `MaxPartitions`, with MaxPartitions taken from the `Devices` CR).
   **Acceptance:** non-power-of-two rejected, over-limit rejected, legal accepted; webhook-gen markers + setup
