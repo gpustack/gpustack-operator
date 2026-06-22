@@ -4,8 +4,46 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
+
+func TestAcceleratableResourceNames(t *testing.T) {
+	// The sliced mode advertises two distinct keys: the fine-grained counting key
+	// `.sliced.units` (via Patch Node) and the bare card-count / injection-token
+	// key `.sliced` (via device-plugin). They must not collide.
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu"),
+		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.shared"),
+		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeShared))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.units"),
+		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced"),
+		GetAcceleratableSlicedCardResourceName(ManufacturerNVIDIA))
+}
+
+func TestIsKnownAcceleratableResourceName(t *testing.T) {
+	cases := []struct {
+		name string
+		in   core.ResourceName
+		want bool
+	}{
+		{"exclusive", "nvidia.com/gpu", true},
+		{"shared", "nvidia.com/gpu.shared", true},
+		{"sliced units", "nvidia.com/gpu.sliced.units", true},
+		{"sliced card", "nvidia.com/gpu.sliced", true},
+		{"amd exclusive", "amd.com/gpu", true},
+		{"unknown", "example.com/foo", false},
+		{"credits is not a device resource", "credits.gpustack.ai/nvidia", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, IsKnownAcceleratableResourceName(c.in))
+		})
+	}
+}
 
 // TestSlicedResourceDenominatorInvariants pins the global credits denominator D
 // invariants required by the normalization model: every power-of-two partition

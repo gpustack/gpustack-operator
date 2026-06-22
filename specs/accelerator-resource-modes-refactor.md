@@ -250,9 +250,12 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
   Sliced are exact) and `1/D` is nano-clean; the worked-example table (1/8→1600, 1/512→25) passes.
   **Verify:** `make test ./pkg/nodefeature/...`, `make lint`. **Dependencies:** None. **Files:**
   `pkg/nodefeature/knowns.go(+_test)`. **Scope:** M.
-- [ ] **Task 2:** Add the bare `.sliced` resource-name helper (`GetAcceleratableSlicedCardResourceName` →
-  `nvidia.com/gpu.sliced`). **Acceptance:** returns the bare key; `.sliced.units` unchanged. Unit test.
-  **Dependencies:** None. **Files:** `pkg/nodefeature/knowns.go(+_test)`. **Scope:** S.
+- [x] **Task 2:** Add the bare `.sliced` resource-name helper (`GetAcceleratableSlicedCardResourceName` →
+  `nvidia.com/gpu.sliced`) plus the `SlicedCardResourceNameSuffix` constant, and teach
+  `IsKnownAcceleratableResourceName` to recognize the bare key (so device-plugin-advertised `.sliced`
+  allocatable changes trigger reconcile). **Acceptance:** returns the bare key; `.sliced.units` unchanged;
+  the suffix-match does not collide. Unit tests. **Dependencies:** None. **Files:**
+  `pkg/nodefeature/knowns.go(+_test)`. **Scope:** S.
 
 *Checkpoint 1: `./pkg/nodefeature/...` all green, lint clean, no behavior regression.*
 
