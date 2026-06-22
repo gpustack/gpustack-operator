@@ -266,12 +266,15 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
   `partitions=512`→`-512s`; non-power-of-two (3) / below-min (1) / out-of-range silently ignored; table tests
   in `helper_test.go` + `IsValidSlicedPartitions` unit test. **Dependencies:** T1. **Files:**
   `pkg/nodefeature/knowns.go`, `pkg/nodefeature/helper.go(+_test)`. **Scope:** S.
-- [ ] **Task 4:** Add a Validating Webhook rejecting illegal `.sliced.partitions` on the `*-gpustack-worker`
-  NodeFeature (non-power-of-two / > `MaxPartitions`, with MaxPartitions taken from the `Devices` CR).
-  **Acceptance:** non-power-of-two rejected, over-limit rejected, legal accepted; webhook-gen markers + setup
-  registration + table test. **Dependencies:** T3. **Files:**
-  `pkg/worker/webhooks/worker/{nodefeature.go,setup.go,zz_generated…}(+_test)`. **Scope:** M. **⚠ To
-  confirm:** the webhook target object (NodeFeature `*-gpustack-worker` vs Node).
+- [x] **Task 4:** Add a Validating Webhook (`NodeFeatureWebhook`) on `nfd.NodeFeature` (CREATE/UPDATE,
+  failurePolicy=Fail) that validates only the `${node}-gpustack-worker` object (identified by the
+  `nfd.node.kubernetes.io/node-name` label + name convention), rejecting `.sliced.partitions` Spec.Labels that
+  are not a power of two in [2, 512], and — best-effort, when the node's `Devices` CR is available — counts
+  exceeding the card's `MaxPartitions` (a lookup miss degrades to power-of-two only, never a false rejection).
+  **Acceptance:** non-power-of-two / non-integer / over-512 / over-MaxPartitions rejected; legal accepted;
+  non-worker NodeFeatures pass through; webhook-gen markers + setup registration + 12-case table test.
+  **Verified:** code review APPROVE. **Dependencies:** T3. **Files:**
+  `pkg/worker/webhooks/worker/{nodefeature.go(+_test),setup.go,zz_generated.webhooks.go}`. **Scope:** M.
 
 *Checkpoint 2: an admin labels node-5 `partitions=8` and `-8s` flavor/queue materialize; an illegal N is
 rejected.*
@@ -414,5 +417,16 @@ Table-driven; target date 2026-06-22:
 3. **The boundary between MIG AdmissionCheck and deferred runtime.** This spec does no MIG card-level
    blocking, so when a qos node enables `partitions=8`, who backstops the 8th slice's strand (for now, the
    allocator's placement failure + reschedule)?
-4. **The partitions validating-webhook target object.** Intercept the NodeFeature `*-gpustack-worker` (matching
-   Story 1's literal wording) or the Node? Default to the former; confirm during Task 4.
+4. **The partitions validating-webhook target object — RESOLVED.** The webhook intercepts the
+   `*-gpustack-worker` `nfd.NodeFeature` objects (the place users are advised to set `.sliced.partitions`).
+   Identification: `metadata.labels` contains `nfd.NodeFeatureObjNodeNameLabel` **and** the object name equals
+   `${labels[nfd.NodeFeatureObjNodeNameLabel]}-gpustack-worker`. The `.sliced.partitions` labels live in the
+   NodeFeature's `Spec.Labels`. Other authoring paths (direct Node labels, other NodeFeatures) are out of
+   scope for now.
+
+   **Follow-up dependency (deferred — "other places not now").** `ConstructNodeCapacityLabels` reads
+   `.sliced.partitions` from `node.Labels` and the `NodeFeatureReconciler` fully replaces the worker
+   NodeFeature's `Spec.Labels` each reconcile, so a user-set `.sliced.partitions` on the worker NodeFeature is
+   currently not durable. For the worker NodeFeature to actually drive slicing end to end, the reconciler must
+   preserve/echo the user-supplied `.sliced.partitions`. Tracked as a follow-up task (not Task 4, which only
+   adds the validation webhook).
