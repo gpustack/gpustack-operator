@@ -19,6 +19,10 @@ type InstanceResourcesApplyConfiguration struct {
 	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
 	// Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
+	// AcceleratorUnits is the number of slice units requested per accelerator on a
+	// sliced InstanceType (U): a power of two strictly less than the card's partition
+	// count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.
+	AcceleratorUnits *int32 `json:"acceleratorUnits,omitempty"`
 }
 
 // InstanceResourcesApplyConfiguration constructs a declarative configuration of the InstanceResources type for use with
@@ -56,5 +60,13 @@ func (b *InstanceResourcesApplyConfiguration) WithLocalStorage(value resource.Qu
 // If called multiple times, the Accelerator field is set to the value of the last call.
 func (b *InstanceResourcesApplyConfiguration) WithAccelerator(value resource.Quantity) *InstanceResourcesApplyConfiguration {
 	b.Accelerator = &value
+	return b
+}
+
+// WithAcceleratorUnits sets the AcceleratorUnits field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorUnits field is set to the value of the last call.
+func (b *InstanceResourcesApplyConfiguration) WithAcceleratorUnits(value int32) *InstanceResourcesApplyConfiguration {
+	b.AcceleratorUnits = &value
 	return b
 }

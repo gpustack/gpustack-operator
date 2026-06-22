@@ -284,6 +284,14 @@ message InstanceResources {
 
   // Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity accelerator = 4;
+
+  // AcceleratorUnits is the number of slice units requested per accelerator on a
+  // sliced InstanceType (U): a power of two strictly less than the card's partition
+  // count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.
+  //
+  // +optional
+  // +default=1
+  optional int32 acceleratorUnits = 5;
 }
 
 // InstanceServicePort defines the port to expose from the container and the port to expose on the node.

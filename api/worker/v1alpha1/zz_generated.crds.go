@@ -566,6 +566,14 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 													Nullable:     true,
 													XIntOrString: true,
 												},
+												"acceleratorUnits": {
+													Description: "AcceleratorUnits is the number of slice units requested per accelerator on a\nsliced InstanceType (U): a power of two strictly less than the card's partition\ncount. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.",
+													Type:        "integer",
+													Format:      "int32",
+													Default: &v1.JSON{
+														Raw: []byte(`1`),
+													},
+												},
 												"cpu": {
 													Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",
 													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
