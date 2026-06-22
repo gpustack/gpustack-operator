@@ -102,6 +102,15 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
 				}
 			}
+			// On a sliced InstanceType the per-card unit count U must be smaller than
+			// the partition count; U == partitions would request a whole card. The
+			// power-of-two and OnceMaxRequest bounds are enforced separately.
+			if instType.Spec.Sliced > 0 && int64(instRess.AcceleratorUnits) >= instType.Spec.Sliced {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec.resources.acceleratorUnits"), instRess.AcceleratorUnits,
+					fmt.Sprintf("must be less than the partition count %d of instance type %s",
+						instType.Spec.Sliced, instType.Name)))
+			}
 		} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),

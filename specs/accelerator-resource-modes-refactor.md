@@ -369,10 +369,18 @@ rejected.*
   <.sliced>`; add the template func `getSlicedCardResourceName`; `.sliced` is not an input. **Acceptance:**
   the rendered Kueue config has the three rules correct; template render test. **Dependencies:** T2. **Files:**
   `pkg/worker/kuberess/apps_kueue.go(+_test)`. **Scope:** S.
-- [ ] **Task 10:** Instance mutating webhook unit conversion — pod `.sliced.units`=`U×D/partitions` (per-card,
-  not multiplied by C), `.sliced`=C unchanged, request==limit, U first power-of-two aligned and validated `<
-  partitions`, pair both keys. **Acceptance:** worked-example table (1/8→1600, U=2→3200, units=8 rejected on
-  8s). **Dependencies:** T1, T8. **Files:** `pkg/worker/webhooks/worker/instance.go(+_test)`. **Scope:** M.
+- [x] **Task 10:** Sliced unit conversion across the Instance webhook + controller (pod resource keys live in
+  the controller's `getResourceRequirements`, not the webhook — confirmed during build). **(a)** U defaults to
+  1 via the CRD schema default (`+default=1` from Task 8, applied by kube-apiserver before webhooks); the
+  controller keeps a `u<=0→1` guard, so no redundant webhook defaulting is added. **(b)** Controller
+  `getResourceRequirements`: for a sliced type write the paired pod keys `.sliced.units`=`U×D/partitions`
+  (per-card, not multiplied by C, via `QuantityToAlignedValue(U, partitions)`) and `.sliced`=C (card count),
+  request==limit. **(c)** Webhook `ValidateCreate`: reject `U >= partitions`. The power-of-two and `<=
+  OnceMaxRequest` checks are deferred to Task 12 (keeping them here would make Task 12's "3 rejected"
+  unreachable; the power-of-two check there also rejects U=0/negatives). **Acceptance:** worked-example table
+  (1/8→1600, U=2→3200, units=8 rejected on 8s). **Dependencies:** T1, T8. **Files:**
+  `pkg/worker/webhooks/worker/instance.go(+_test)`, `pkg/worker/controllers/worker/instance.go(+_test)`.
+  **Scope:** M.
 
 *Checkpoint 4: `credits = C×U/partitions` worked-example table passes end to end.*
 

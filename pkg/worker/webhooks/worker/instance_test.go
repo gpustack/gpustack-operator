@@ -80,6 +80,57 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 	}
 }
 
+// TestInstanceWebhook_ValidateCreate_SlicedUnits pins Task 10(c): on a sliced
+// InstanceType the per-card unit count U must be strictly less than the partition
+// count. Power-of-two and OnceMaxRequest bounds are Task 12's concern.
+func TestInstanceWebhook_ValidateCreate_SlicedUnits(t *testing.T) {
+	const typeName = "sliced-8s"
+
+	cases := []struct {
+		name    string
+		units   int32
+		wantErr bool
+	}{
+		{name: "one unit is allowed", units: 1},
+		{name: "two units is allowed", units: 2},
+		{name: "four units is allowed", units: 4},
+		{name: "units equal to partitions is rejected", units: 8, wantErr: true},
+		{name: "units above partitions is rejected", units: 16, wantErr: true},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: worker.InstanceTypeSpec{
+					Acceleratable:           true,
+					Manufacturer:            "nvidia",
+					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: 8},
+				},
+				Status: worker.InstanceTypeStatus{
+					Accelerator: worker.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+				},
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			acc := resource.MustParse("1")
+			inst.Spec.Resources = &workercore.InstanceResources{
+				Accelerator:      &acc,
+				AcceleratorUnits: c.units,
+			}
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 	cases := []struct {
 		name string

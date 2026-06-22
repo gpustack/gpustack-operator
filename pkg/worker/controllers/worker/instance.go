@@ -802,16 +802,29 @@ func getResourceRequirements(
 		inst.Spec.Resources.Accelerator.Sign() > 0
 	if requestAccelerator {
 		if withAccelerator {
-			var resName core.ResourceName
-			resQuantity := *inst.Spec.Resources.Accelerator
 			if instType.Spec.Sliced > 0 {
-				resQuantity = nodefeature.QuantityToAlignedValue(resQuantity, instType.Spec.Sliced)
-				resName = nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+				// Sliced types request a pair of keys: the per-card unit count
+				// (.sliced.units = U×D/partitions, independent of the card count C)
+				// and the bare card count C (.sliced), which Kueue folds into
+				// credits via multiplyBy. The per-card units never multiply by C.
+				u := inst.Spec.Resources.AcceleratorUnits
+				if u <= 0 {
+					u = 1
+				}
+				unitsQ := nodefeature.QuantityToAlignedValue(*resource.NewQuantity(int64(u), resource.DecimalSI), instType.Spec.Sliced)
+				unitsResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+				cardQ := *inst.Spec.Resources.Accelerator
+				cardResName := nodefeature.GetAcceleratableSlicedCardResourceName(instType.Spec.Manufacturer)
+				rr.Limits[unitsResName] = unitsQ
+				rr.Requests[unitsResName] = unitsQ
+				rr.Limits[cardResName] = cardQ
+				rr.Requests[cardResName] = cardQ
 			} else {
-				resName = nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+				resQuantity := *inst.Spec.Resources.Accelerator
+				resName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+				rr.Limits[resName] = resQuantity
+				rr.Requests[resName] = resQuantity
 			}
-			rr.Limits[resName] = resQuantity
-			rr.Requests[resName] = resQuantity
 		}
 	}
 
