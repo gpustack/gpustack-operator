@@ -253,23 +253,24 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 
 	logger := ctrllog.FromContext(ctx)
 
-	// Sliced queues never borrow.
 	var (
 		acceleratable bool
 		manufacturer  string
-		borLimit      *resource.Quantity
 	)
 	{
 		acceleratable = accKey != "" && spec.Accelerator != ""
 		if acceleratable {
 			manufacturer, _, _ = strings.Cut(accKey, "-")
-			if spec.SlicedAccelerator != "" {
-				borLimit = resource.NewQuantity(0, resource.DecimalSI)
-			}
 		} else {
 			manufacturer, _, _ = strings.Cut(generalKey, "-")
 		}
 	}
+	// queueSliced is the partition count when queueName is a sliced queue
+	// ("-${N}s" suffix), empty for an exclusive queue. The sliced flavor holds
+	// zero credits in its sliced queue and borrows from the exclusive queue; the
+	// same flavor lends its card count to the exclusive queue so the exclusive
+	// side can reclaim it. All quotas leave BorrowingLimit nil (unlimited).
+	queueSliced := spec.SlicedAccelerator
 
 	for i := range rfList.Items {
 		rf := &rfList.Items[i]
@@ -346,9 +347,28 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 				ramQ = quantityx.Multiply(ramQ, ndCount)
 				stgQ = quantityx.Multiply(stgQ, ndCount)
 				if acceleratable {
-					accResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)
-					for j := range ndList.Items {
-						accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
+					_, rfSliced := stripSlicedQueueSuffix(rf.Name)
+					switch {
+					case rfSliced && queueSliced != "":
+						// Sliced flavor in its own sliced queue: zero credits,
+						// borrowed from the exclusive queue. accQ stays zero.
+					case rfSliced:
+						// Sliced flavor lent into the exclusive queue: contribute
+						// the participating card count, derived from the node's
+						// ".sliced.units" allocatable (D units per card).
+						unitsResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
+						var unitsQ resource.Quantity
+						for j := range ndList.Items {
+							unitsQ.Add(ndList.Items[j].Status.Allocatable[unitsResName])
+						}
+						accQ = *resource.NewQuantity(unitsQ.Value()/nodefeature.ResourceMaxUnits, resource.DecimalSI)
+					default:
+						// Exclusive flavor: the card count from the node's
+						// exclusive accelerator resource.
+						accResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)
+						for j := range ndList.Items {
+							accQ.Add(ndList.Items[j].Status.Allocatable[accResName])
+						}
 					}
 				}
 			}
@@ -381,28 +401,24 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			Name: kueue.ResourceFlavorReference(rf.Name),
 			Resources: []kueue.ResourceQuota{
 				{
-					Name:           core.ResourceCPU,
-					NominalQuota:   cpuQ,
-					BorrowingLimit: borLimit,
+					Name:         core.ResourceCPU,
+					NominalQuota: cpuQ,
 				},
 				{
-					Name:           core.ResourceMemory,
-					NominalQuota:   ramQ,
-					BorrowingLimit: borLimit,
+					Name:         core.ResourceMemory,
+					NominalQuota: ramQ,
 				},
 				{
-					Name:           core.ResourceEphemeralStorage,
-					NominalQuota:   stgQ,
-					BorrowingLimit: borLimit,
+					Name:         core.ResourceEphemeralStorage,
+					NominalQuota: stgQ,
 				},
 			},
 		})
 		if acceleratable {
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
-					Name:           nodefeature.GetAcceleratableCreditsResourceName(manufacturer),
-					NominalQuota:   accQ,
-					BorrowingLimit: borLimit,
+					Name:         nodefeature.GetAcceleratableCreditsResourceName(manufacturer),
+					NominalQuota: accQ,
 				},
 			)
 		}

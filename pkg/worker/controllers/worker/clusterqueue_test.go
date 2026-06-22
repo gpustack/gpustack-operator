@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -17,8 +18,11 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 )
 
 const (
@@ -282,6 +286,116 @@ func TestClusterQueueReconciler_Reconcile(t *testing.T) {
 				require.NotNil(t, got.Spec.StopPolicy, "queue must carry an explicit StopPolicy")
 				assert.Equal(t, *c.wantStopPolicy, *got.Spec.StopPolicy, "Spec.StopPolicy")
 			}
+		})
+	}
+}
+
+// newSlicedAccelNode builds a managed Node whose nvidia-a10g card model is sliced
+// into `partitions`, reporting `cards` participating cards as ".sliced.units" (D
+// units per card). Its single acceleratable profile is the sliced flavor/queue
+// exercised by the borrow+reclaim credits test below.
+func newSlicedAccelNode(name string, cards, partitions int64) *core.Node {
+	nd := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				systemname.ManagedLabelKey: "true",
+				core.LabelOSStable:         "linux",
+				core.LabelArchStable:       "amd64",
+			},
+		},
+		Status: core.NodeStatus{
+			Allocatable: core.ResourceList{
+				nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced): *resource.NewQuantity(cards*nodefeature.ResourceMaxUnits, resource.DecimalSI),
+			},
+		},
+	}
+	accKey := nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g"
+	nd.Labels[accKey] = "true"
+	nd.Labels[accKey+".z-flavor"] = fmt.Sprintf("48c-192g-88g-%dd-%ds", cards, partitions)
+	nd.Labels[accKey+".z-queue"] = fmt.Sprintf("12c-48g-1d-%ds", partitions)
+	nd.Labels[accKey+".z-cohort"] = "12c-48g-1d"
+	return nd
+}
+
+// creditsQuota returns the nvidia credits ResourceQuota for the named flavor in
+// the constructed resource groups, or nil when absent.
+func creditsQuota(groups []kueue.ResourceGroup, flavor string) *kueue.ResourceQuota {
+	creditsName := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
+	for gi := range groups {
+		for fi := range groups[gi].Flavors {
+			fq := &groups[gi].Flavors[fi]
+			if string(fq.Name) != flavor {
+				continue
+			}
+			for ri := range fq.Resources {
+				if fq.Resources[ri].Name == creditsName {
+					return &fq.Resources[ri]
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// TestConstructResourceGroups_SlicedCredits pins Story 1's borrow+reclaim
+// topology: the sliced flavor holds zero credits in its own sliced queue (it
+// borrows) and contributes the card count to the exclusive queue (it lends), and
+// no quota carries a BorrowingLimit.
+func TestConstructResourceGroups_SlicedCredits(t *testing.T) {
+	const (
+		cards      = 4
+		partitions = 8
+	)
+	node5 := newSlicedAccelNode("node-5", cards, partitions)
+
+	profiles := nodefeature.ExtractNodeProfiles(node5)
+	require.Len(t, profiles, 1, "node must expose exactly the sliced profile")
+	slicedFlavor := profiles[0].Flavor
+	slicedQueue := profiles[0].Queue
+	exclusiveQueue, ok := stripSlicedQueueSuffix(slicedQueue)
+	require.True(t, ok, "sliced queue must carry a -Ns suffix")
+
+	rf := &kueue.ResourceFlavor{ObjectMeta: meta.ObjectMeta{Name: slicedFlavor}}
+	systemmeta.NoteResource(rf, "nodes", map[string]string{
+		"cpu":          "48",
+		"ram":          "192",
+		"localStorage": "88",
+	})
+
+	cases := []struct {
+		name        string
+		queue       string
+		wantCredits int64
+	}{
+		{
+			// In its own sliced queue the flavor holds no credits and borrows.
+			name:        "sliced queue holds zero credits",
+			queue:       slicedQueue,
+			wantCredits: 0,
+		},
+		{
+			// Lent into the exclusive queue it contributes the card count so the
+			// exclusive side can reclaim it.
+			name:        "exclusive queue holds the card count",
+			queue:       exclusiveQueue,
+			wantCredits: cards,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			cli := buildQueueClient(node5)
+			r := &ClusterQueueReconciler{Client: cli, APIReader: cli}
+			rfList := &kueue.ResourceFlavorList{Items: []kueue.ResourceFlavor{*rf}}
+
+			groups, _ := r.constructResourceGroups(context.Background(), c.queue, rfList)
+
+			cq := creditsQuota(groups, slicedFlavor)
+			require.NotNil(t, cq, "credits quota must be present for the sliced flavor")
+			assert.Equal(t, c.wantCredits, cq.NominalQuota.Value(), "credits nominal quota")
+			assert.Nil(t, cq.BorrowingLimit, "credits must leave BorrowingLimit nil (unlimited borrowing)")
 		})
 	}
 }

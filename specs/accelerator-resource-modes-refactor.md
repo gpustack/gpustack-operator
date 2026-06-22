@@ -224,6 +224,70 @@ func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAll
 Conventions: return errors explicitly, never panic for control flow; reconcile idempotently and level-based;
 table-driven tests; document exported APIs with behavior/constraints.
 
+### Worked Example — Story 1 borrow + reclaim (node-5, A10G×4, partitions=8)
+
+After the admin enables `partitions=8`, node-5 is pinned by the sliced flavor `…-4d-8s` and reports
+`nvidia.com/gpu.sliced.units = 51200` (`D × 4 cards`, `D=12800`). `constructResourceGroups` (Task 6) derives
+the card count as `51200 / D = 4` and the index (Task 5) lists the **one** sliced flavor under **both** queues
+of the shared cohort:
+
+```yaml
+# Cohort — never carries a sliced suffix; aggregates its member queues' quota.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: Cohort
+metadata:
+  name: gpustack--...-12c-48g--nvidia-a10g-1d
+---
+# Sliced CQ — sliced workloads land here; the sliced flavor holds NO credits and borrows.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: gpustack--...-12c-48g--nvidia-a10g-1d-8s
+spec:
+  cohortName: gpustack--...-12c-48g--nvidia-a10g-1d
+  resourceGroups:
+    - flavors:
+        - name: gpustack--...-48c-192g-88g--nvidia-a10g-4d-8s
+          resources:
+            - name: credits.gpustack.ai/nvidia
+              nominalQuota: 0       # borrows from the cohort (borrowingLimit omitted = null = unlimited)
+            # ... cpu / memory / ephemeral-storage: nominalQuota=<node>, borrowingLimit omitted
+---
+# Exclusive CQ — the same flavor is LENT here with the real card count; exclusive workloads land here.
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: gpustack--...-12c-48g--nvidia-a10g-1d
+spec:
+  cohortName: gpustack--...-12c-48g--nvidia-a10g-1d
+  preemption:
+    reclaimWithinCohort: Any        # Task 7: lets exclusive reclaim what it lent
+  resourceGroups:
+    - flavors:
+        - name: gpustack--...-48c-192g-88g--nvidia-a10g-4d-8s   # lent sliced flavor
+          resources:
+            - name: credits.gpustack.ai/nvidia
+              nominalQuota: 4       # lends 4 to the cohort (borrowingLimit omitted = null)
+            # ... cpu / memory / ephemeral-storage: nominalQuota=<node>, borrowingLimit omitted
+        - name: gpustack--...-48c-192g-88g--nvidia-a10g-4d      # exclusive tombstone, draining
+          resources:
+            - name: credits.gpustack.ai/nvidia
+              nominalQuota: 0       # no Node uses this profile anymore
+```
+
+Flow, on the shared flavor `…-4d-8s`:
+- **Cohort total credits** = `0` (sliced CQ) + `4` (exclusive CQ) = `4` — counted once, no double-count.
+- **Borrow.** A sliced workload requesting `1/8` of a card (`0.125` credits, see the credits table above)
+  fits nowhere in the sliced CQ's own nominal (`0`), so Kueue admits it by **borrowing** the unused 4 credits
+  the exclusive CQ contributes on that same flavor (`borrowingLimit: null` = unlimited). Up to `4 × 8 = 32`
+  such `1/8` slices can be admitted concurrently.
+- **Reclaim.** When an exclusive workload becomes pending and fits within the exclusive CQ's **own** nominal
+  (`4`), `reclaimWithinCohort: Any` lets it preempt the borrowing sliced workloads to take its lent credits
+  back. Sliced workloads never fit their own nominal (`0`), so they never trigger reclaim themselves.
+- **Residual placement risk** (deferred to e2e): credits accounting is exact, but cpu/memory nominal sits on
+  the same physical node in both queues, so simultaneous exclusive+sliced admission can over-subscribe the
+  node and leave pods Pending — acceptable per Risk #2 / Open Question #2.
+
 ### Implementation Plan
 
 Sliced along the data flow, vertically; each phase ends with the system compiling and tests passing; the
@@ -284,7 +348,7 @@ rejected.*
   `-Ns` RF. **Acceptance:** the sliced RF appears in both the sliced CQ's and the exclusive CQ's rfList; unit
   test. **Dependencies:** T3. **Files:** `pkg/worker/controllers/worker/clusterqueue.go(+_test)`. **Scope:**
   S.
-- [ ] **Task 6:** Rework credits in `constructResourceGroups` — derive card count from the node's
+- [x] **Task 6:** Rework credits in `constructResourceGroups` — derive card count from the node's
   `.sliced`/`.sliced.units` allocatable; set the sliced flavor's credits=0 in the sliced CQ and
   credits=card-count + `borrowingLimit=nil` in the exclusive CQ; **remove the sliced `borLimit=0`** (allow
   borrowing). **Acceptance:** node-5 8s → sliced CQ credits=0, exclusive CQ credits=4 borrowingLimit nil;
