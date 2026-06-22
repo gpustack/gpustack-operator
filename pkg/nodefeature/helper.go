@@ -948,7 +948,7 @@ func splitNodeProfileSpec(spec string) (host, dev string) {
 //
 // Examples:
 //
-//	"gpustack--generic-ln-x64-4c-16g"                              -> generalKey="generic-ln-x64", cpu=4, ram=16
+//	"gpustack--generic-ln-x64-4c-16g"                             -> generalKey="generic-ln-x64", cpu=4, ram=16
 //	"gpustack--amd-epyc-7763-ln-x64-16c-32g-88g"                  -> generalKey="amd-epyc-7763-ln-x64", cpu=16, ram=32, stg=88
 //	"gpustack--amd-epyc-7763-ln-x64-4c-16g-88g--nvidia-t4-1d"     -> generalKey="amd-epyc-7763-ln-x64", accKey="nvidia-t4", cpu=4, ram=16, stg=88, acc=1
 //	"gpustack--amd-epyc-7763-ln-x64-4c-16g--nvidia-t4-1d-8s"      -> generalKey="amd-epyc-7763-ln-x64", accKey="nvidia-t4", cpu=4, ram=16, acc=1, sliced=8
