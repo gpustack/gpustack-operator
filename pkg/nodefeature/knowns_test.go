@@ -75,7 +75,7 @@ func TestIsValidSlicedPartitions(t *testing.T) {
 		{3, false}, // not a power of two
 		{8, true},
 		{16, true},
-		{512, true}, // the maximum
+		{512, true},   // the maximum
 		{1024, false}, // above SlicedResourceMaxSize
 		{-8, false},
 	}

@@ -34,6 +34,9 @@ const (
 )
 
 const (
+	// SharedResourceNameSuffix is the coarse-grained shared counting key,
+	// advertised by the device-plugin (its value is the sharing ownership card count)
+	// and used for Kueue credits accounting.
 	SharedResourceNameSuffix = ".shared"
 	// SlicedResourceNameSuffix is the fine-grained sliced counting key, reported
 	// per node via Patch Node and used for Kueue credits accounting.
@@ -234,6 +237,14 @@ func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 // usually, it's used as the container runtime class name for the accelerator resource.
 func GetAcceleratableRuntimeName(manufacturer string) string {
 	return _ManufacturerAcceleratableRuntimeNameMap[manufacturer]
+}
+
+// IsValidSlicedPartitions reports whether n is a usable slice partition count: a
+// power of two in [2, SlicedResourceMaxSize]. A single slice (n=1) is a whole card
+// and is not a valid slicing request. The per-card hardware limit (MaxPartitions)
+// is enforced separately by the admission webhook.
+func IsValidSlicedPartitions(n int64) bool {
+	return n >= 2 && n <= SlicedResourceMaxSize && n&(n-1) == 0
 }
 
 // QuantityToSliceCount converts a per-card credits quantity to the number of

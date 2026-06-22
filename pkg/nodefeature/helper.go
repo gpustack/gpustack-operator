@@ -466,13 +466,14 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		}
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.sliced.partitions=${slicedC}" is a
-		// user-supplied input: when present and positive it appends
-		// "-${slicedC}s" to z-flavor and z-queue. z-cohort
-		// is the cohort-level per-unit view and never carries a sliced
-		// suffix — it is what cohort matching compares on.
+		// user-supplied input: when present and a valid partition count (a power of
+		// two in [2, SlicedResourceMaxSize]) it appends "-${slicedC}s" to z-flavor and
+		// z-queue. Invalid values are silently ignored here (the admission webhook
+		// rejects them at write time). z-cohort is the cohort-level per-unit view and
+		// never carries a sliced suffix — it is what cohort matching compares on.
 		var slicedC int64
 		if v := node.Labels[nodeKey+".sliced.partitions"]; v != "" {
-			if n, err := strconvx.Atoi[int64](v); err == nil && n > 0 {
+			if n, err := strconvx.Atoi[int64](v); err == nil && IsValidSlicedPartitions(n) {
 				slicedC = n
 			}
 		}
