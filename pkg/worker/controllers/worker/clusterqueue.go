@@ -154,6 +154,15 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 		return ctrlreconcile.Result{}, nil
 	}
 
+	// Accelerator queues (both exclusive and sliced) enable cohort reclaim so the
+	// exclusive side can take back the credits it lends to the sliced side; CPU-only
+	// queues never reclaim. BorrowWithinCohort stays Never to satisfy Kueue's
+	// XValidation (reclaim=Never requires borrow=Never).
+	reclaimWithinCohort := kueue.PreemptionPolicyNever
+	if _, accKey, spec, ok := nodefeature.ParseNodeProfile(queueName); ok && accKey != "" && spec.Accelerator != "" {
+		reclaimWithinCohort = kueue.PreemptionPolicyAny
+	}
+
 	// Sync ClusterQueue.
 	eResGroups, eNotes := r.constructResourceGroups(ctx, queueName, rfList)
 	eCq := &kueue.ClusterQueue{
@@ -171,9 +180,10 @@ func (r *ClusterQueueReconciler) Reconcile(ctx context.Context, req ctrlreconcil
 				WhenCanBorrow:  kueue.TryNextFlavor,
 				WhenCanPreempt: kueue.MayStopSearch,
 			},
-			// Never preempt within cohort.
+			// Reclaim lent credits within the cohort for accelerator queues only;
+			// never borrow-preempt; preempt lower-priority workloads in-queue.
 			Preemption: &kueue.ClusterQueuePreemption{
-				ReclaimWithinCohort: kueue.PreemptionPolicyNever,
+				ReclaimWithinCohort: reclaimWithinCohort,
 				BorrowWithinCohort: &kueue.BorrowWithinCohort{
 					Policy: kueue.BorrowWithinCohortPolicyNever,
 				},
