@@ -362,7 +362,7 @@ rejected.*
 *Checkpoint 3: a fake-client test asserts node-5's Story 1 scheduling chain (RF/CQ/Cohort/credits/borrowing).*
 
 **Phase 4 — credits end to end (Webhook conversion + transformations)**
-- [ ] **Task 8:** Add `AcceleratorUnits` (U, default 1, next protobuf tag) to `InstanceResources` + `make
+- [x] **Task 8:** Add `AcceleratorUnits` (U, default 1, next protobuf tag) to `InstanceResources` + `make
   generate`. **Acceptance:** field generated, deepcopy/protobuf clean. **Dependencies:** None. **Files:**
   `api/worker/v1alpha1/instance.go`, generated artifacts. **Scope:** S (generation).
 - [ ] **Task 9:** `apps_kueue.go` transformations — the sliced rule's factor `1/12800` plus `multiplyBy:

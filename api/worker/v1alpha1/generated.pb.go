@@ -879,6 +879,9 @@ func (m *InstanceResources) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorUnits))
+	i--
+	dAtA[i] = 0x28
 	if m.Accelerator != nil {
 		{
 			size, err := m.Accelerator.MarshalToSizedBuffer(dAtA[:i])
@@ -1605,6 +1608,7 @@ func (m *InstanceResources) Size() (n int) {
 		l = m.Accelerator.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
+	n += 1 + sovGenerated(uint64(m.AcceleratorUnits))
 	return n
 }
 
@@ -2004,6 +2008,7 @@ func (this *InstanceResources) String() string {
 		`RAM:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.RAM), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
 		`LocalStorage:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.LocalStorage), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
 		`Accelerator:` + strings.Replace(fmt.Sprintf("%v", this.Accelerator), "Quantity", "resource.Quantity", 1) + `,`,
+		`AcceleratorUnits:` + fmt.Sprintf("%v", this.AcceleratorUnits) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4832,6 +4837,25 @@ func (m *InstanceResources) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorUnits", wireType)
+			}
+			m.AcceleratorUnits = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AcceleratorUnits |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

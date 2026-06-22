@@ -2999,6 +2999,14 @@ func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceC
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
+					"acceleratorUnits": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorUnits is the number of slice units requested per accelerator on a sliced InstanceType (U): a power of two strictly less than the card's partition count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.",
+							Default:     1,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 				},
 				Required: []string{"cpu", "ram", "localStorage"},
 			},

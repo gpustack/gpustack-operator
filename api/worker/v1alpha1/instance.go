@@ -163,6 +163,14 @@ type InstanceResources struct {
 
 	// Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
 	Accelerator *resource.Quantity `json:"accelerator,omitempty" protobuf:"bytes,4,opt,name=accelerator"`
+
+	// AcceleratorUnits is the number of slice units requested per accelerator on a
+	// sliced InstanceType (U): a power of two strictly less than the card's partition
+	// count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.
+	//
+	// +optional
+	// +default=1
+	AcceleratorUnits int32 `json:"acceleratorUnits,omitempty" protobuf:"varint,5,opt,name=acceleratorUnits"`
 }
 
 // InstanceVolume defines the volume to mount in the Instance,
