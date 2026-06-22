@@ -14,6 +14,7 @@ import (
 // setups is the list of all webhook handlers.
 var setups = []webhook.Setup{
 	new(worker.InstanceWebhook),
+	new(worker.NodeFeatureWebhook),
 }
 
 // cfgGetters is the list of all webhook configuration getters.
