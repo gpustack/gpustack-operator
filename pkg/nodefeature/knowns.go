@@ -39,9 +39,20 @@ const (
 )
 
 const (
-	ResourceMaxUnits      = 10000
+	// ResourceMaxUnits is the global credits denominator D = 2^9 * 5^2 = 12800 and
+	// the single per-card unit basis shared by every allocation mode: one whole
+	// card is worth D normalized units (= 1 credit), Shared yields D/10 per
+	// ownership, and a card sliced into N partitions yields D/N units per slice.
+	// D is chosen so that D/N is an exact integer for every per-mode max size below
+	// (SharedResourceMaxSize, SlicedResourceMaxSize) and so that the Kueue credits
+	// factor 1/D is representable cleanly in nano. It also seeds the device-plugin
+	// per-card unit grid and the Devices CR AcceleratorAllocation ruler.
+	ResourceMaxUnits = 12800
+	// SharedResourceMaxSize is the maximum number of owners a card can be shared among.
 	SharedResourceMaxSize = 10
-	SlicedResourceMaxSize = 16
+	// SlicedResourceMaxSize is the maximum number of partitions a card can be
+	// sliced into (a power of two; the largest divisor of D below).
+	SlicedResourceMaxSize = 512
 )
 
 var (
@@ -51,7 +62,7 @@ var (
 	_AcceleratableResourceNameSet             sets.Set[core.ResourceName]
 	_SlicedResourceSizes                      []int64
 	_SlicedResourceOperatedSizesSet           sets.Set[string]
-	_SlicedResourceMicroScaledBase            map[int64]int64
+	_SlicedResourceUnitsPerSlice              map[int64]int64
 )
 
 func init() {
@@ -141,10 +152,12 @@ func init() {
 		_SlicedResourceOperatedSizesSet.Insert(strconvx.FormatInt(size, 10))
 	}
 
-	// Pre-calculate the micro-scaled quantity base for sliced resources.
-	_SlicedResourceMicroScaledBase = make(map[int64]int64)
+	// Pre-calculate the normalized per-slice unit value D/size for each sliced
+	// size. D is divisible by every power-of-two size up to SlicedResourceMaxSize,
+	// so these are exact integers.
+	_SlicedResourceUnitsPerSlice = make(map[int64]int64)
 	for _, size := range _SlicedResourceSizes {
-		_SlicedResourceMicroScaledBase[size] = 1e6 / size
+		_SlicedResourceUnitsPerSlice[size] = ResourceMaxUnits / size
 	}
 }
 
@@ -205,41 +218,48 @@ func GetAcceleratableRuntimeName(manufacturer string) string {
 	return _ManufacturerAcceleratableRuntimeNameMap[manufacturer]
 }
 
-// QuantityToSliceCount converts the given quantity to the count of slices for sliced resources based on the sliced size.
+// QuantityToSliceCount converts a per-card credits quantity to the number of
+// slices it represents on a card sliced into `sliced` partitions: floor(q * sliced).
+// It is independent of the global denominator D (a whole card always yields
+// `sliced` slices), and floors to an integer count.
 func QuantityToSliceCount(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
 		return q
 	}
-	base, ok := _SlicedResourceMicroScaledBase[sliced]
-	if !ok {
+	if _, ok := _SlicedResourceUnitsPerSlice[sliced]; !ok {
 		return q
 	}
-	q.Set(q.ScaledValue(resource.Micro) / base)
+	// Multiply-first (×sliced before ÷1e6) keeps full precision; inputs are
+	// per-card credits bounded by physical accelerator counts, so the int64
+	// intermediate (q·1e6·sliced) never overflows in practice.
+	q.Set(q.ScaledValue(resource.Micro) * sliced / 1e6)
 	return q
 }
 
-// QuantityToAlignedValue converts the given quantity to the aligned value for sliced resources based on the sliced size.
+// QuantityToAlignedValue converts a slice count to the normalized per-card unit
+// value written to the `.sliced.units` resource: q * (D / sliced).
 func QuantityToAlignedValue(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
 		return q
 	}
-	base, ok := _SlicedResourceMicroScaledBase[sliced]
+	unitsPerSlice, ok := _SlicedResourceUnitsPerSlice[sliced]
 	if !ok {
 		return q
 	}
-	q.Mul(base / 100)
+	q.Mul(unitsPerSlice)
 	return q
 }
 
-// QuantityToOriginalValue converts the given quantity of slices back to the original value for sliced resources based on the sliced size.
+// QuantityToOriginalValue converts a normalized per-card unit value back to the
+// original slice count: q / (D / sliced).
 func QuantityToOriginalValue(q resource.Quantity, sliced int64) resource.Quantity {
 	if sliced <= 0 {
 		return q
 	}
-	base, ok := _SlicedResourceMicroScaledBase[sliced]
+	unitsPerSlice, ok := _SlicedResourceUnitsPerSlice[sliced]
 	if !ok {
 		return q
 	}
-	q.SetScaled(q.ScaledValue(resource.Micro)/base/10, resource.Milli)
+	q.SetScaled(q.ScaledValue(resource.Micro)/unitsPerSlice, resource.Micro)
 	return q
 }
