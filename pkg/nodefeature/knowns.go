@@ -35,7 +35,13 @@ const (
 
 const (
 	SharedResourceNameSuffix = ".shared"
+	// SlicedResourceNameSuffix is the fine-grained sliced counting key, reported
+	// per node via Patch Node and used for Kueue credits accounting.
 	SlicedResourceNameSuffix = ".sliced.units"
+	// SlicedCardResourceNameSuffix is the coarse sliced card-count / injection-token
+	// key, advertised by the device-plugin (its value is the participating card
+	// count); it triggers the allocator's Allocate() injection hook.
+	SlicedCardResourceNameSuffix = ".sliced"
 )
 
 const (
@@ -201,13 +207,25 @@ func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAll
 	}
 }
 
+// GetAcceleratableSlicedCardResourceName returns the bare sliced card-count /
+// injection-token resource name for the given manufacturer (e.g.
+// "nvidia.com/gpu.sliced"). It is advertised by the device-plugin and is distinct
+// from the sliced counting key returned by GetAcceleratableResourceName with
+// DeviceAllocationModeSliced (".sliced.units").
+func GetAcceleratableSlicedCardResourceName(manufacturer string) core.ResourceName {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedCardResourceNameSuffix
+}
+
 // IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
 func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	switch {
 	case stringx.HasSuffix(name, SharedResourceNameSuffix):
 		name = name[:len(name)-len(SharedResourceNameSuffix)]
 	case stringx.HasSuffix(name, SlicedResourceNameSuffix):
+		// Match ".sliced.units" before the bare ".sliced" suffix.
 		name = name[:len(name)-len(SlicedResourceNameSuffix)]
+	case stringx.HasSuffix(name, SlicedCardResourceNameSuffix):
+		name = name[:len(name)-len(SlicedCardResourceNameSuffix)]
 	}
 	return _AcceleratableResourceNameSet.Has(name)
 }
