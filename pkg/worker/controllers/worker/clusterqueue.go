@@ -412,7 +412,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 }
 
 const (
-	IndexingResourceFlavorsByQueueName = "resourceflavors.annotations['device.gpustack.ai/queue']"
+	IndexingResourceFlavorsByQueueName = "resourceflavors.annotations['schedule.gpustack.ai/queue']"
 )
 
 // indexResourceFlavorByQueueName mirrors the field index registered by
