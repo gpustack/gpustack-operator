@@ -365,7 +365,7 @@ rejected.*
 - [x] **Task 8:** Add `AcceleratorUnits` (U, default 1, next protobuf tag) to `InstanceResources` + `make
   generate`. **Acceptance:** field generated, deepcopy/protobuf clean. **Dependencies:** None. **Files:**
   `api/worker/v1alpha1/instance.go`, generated artifacts. **Scope:** S (generation).
-- [ ] **Task 9:** `apps_kueue.go` transformations — the sliced rule's factor `1/12800` plus `multiplyBy:
+- [x] **Task 9:** `apps_kueue.go` transformations — the sliced rule's factor `1/12800` plus `multiplyBy:
   <.sliced>`; add the template func `getSlicedCardResourceName`; `.sliced` is not an input. **Acceptance:**
   the rendered Kueue config has the three rules correct; template render test. **Dependencies:** T2. **Files:**
   `pkg/worker/kuberess/apps_kueue.go(+_test)`. **Scope:** S.
