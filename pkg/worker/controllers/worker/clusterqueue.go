@@ -434,7 +434,49 @@ func indexResourceFlavorByQueueName(obj ctrlcli.Object) []string {
 		return nil
 	}
 
-	return []string{rf.Annotations[_ResourceFlavorQueueNameAnnoKey]}
+	// A sliced flavor's queue carries a trailing "-${N}s" suffix and borrows
+	// credits from its exclusive queue, so index it under both the sliced queue
+	// and the suffix-stripped exclusive queue. A non-sliced flavor indexes under
+	// itself only.
+	return queueNamesToEnqueue(rf.Annotations[_ResourceFlavorQueueNameAnnoKey])
+}
+
+// queueNamesToEnqueue returns the ClusterQueue names that must be reconciled when
+// the flavor or node backing queueName changes. A sliced queue ("-${N}s") also
+// yields its suffix-stripped exclusive queue: the sliced flavor is dual-indexed
+// there (see indexResourceFlavorByQueueName) and lends it credits, so the
+// exclusive queue must re-reconcile too — otherwise it never picks up the lent
+// flavor until the next resync. Both queues share the same cohort, so callers
+// reuse the cohort/namespace unchanged.
+func queueNamesToEnqueue(queueName string) []string {
+	if exclusiveQueueName, ok := stripSlicedQueueSuffix(queueName); ok {
+		return []string{queueName, exclusiveQueueName}
+	}
+	return []string{queueName}
+}
+
+// stripSlicedQueueSuffix removes a trailing "-${N}s" sliced suffix from a queue
+// name, returning the exclusive (un-sliced) queue name and whether a suffix was
+// present. ${N} must be a non-empty run of decimal digits.
+func stripSlicedQueueSuffix(queueName string) (string, bool) {
+	idx := strings.LastIndex(queueName, "-")
+	if idx < 0 {
+		return queueName, false
+	}
+	digits := queueName[idx+1:]
+	if !strings.HasSuffix(digits, "s") {
+		return queueName, false
+	}
+	digits = strings.TrimSuffix(digits, "s")
+	if digits == "" {
+		return queueName, false
+	}
+	for _, c := range digits {
+		if c < '0' || c > '9' {
+			return queueName, false
+		}
+	}
+	return queueName[:idx], true
 }
 
 func (r *ClusterQueueReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
@@ -573,13 +615,13 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenResourceFlavorChanged(
 		cohortName := rf.Annotations[_ResourceFlavorCohortNameAnnoKey]
 		queueName := rf.Annotations[_ResourceFlavorQueueNameAnnoKey]
 		if cohortName != "" && queueName != "" {
-			reqs = []ctrlreconcile.Request{
-				{
+			for _, qn := range queueNamesToEnqueue(queueName) {
+				reqs = append(reqs, ctrlreconcile.Request{
 					NamespacedName: ctrlcli.ObjectKey{
-						Name:      queueName,
+						Name:      qn,
 						Namespace: cohortName,
 					},
-				},
+				})
 			}
 		}
 	}
@@ -611,12 +653,14 @@ func (r *ClusterQueueReconciler) enqueueCohortWhenNodeChanged(
 		if profiles[i].Queue == "" || profiles[i].Cohort == "" {
 			continue
 		}
-		reqs = append(reqs, ctrlreconcile.Request{
-			NamespacedName: ctrlcli.ObjectKey{
-				Name:      profiles[i].Queue,
-				Namespace: profiles[i].Cohort,
-			},
-		})
+		for _, qn := range queueNamesToEnqueue(profiles[i].Queue) {
+			reqs = append(reqs, ctrlreconcile.Request{
+				NamespacedName: ctrlcli.ObjectKey{
+					Name:      qn,
+					Namespace: profiles[i].Cohort,
+				},
+			})
+		}
 	}
 	if len(reqs) == 0 {
 		return nil

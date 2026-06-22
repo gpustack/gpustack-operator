@@ -66,6 +66,104 @@ func reconcileQueue(t *testing.T, cli ctrlcli.Client, cohort, queue string) (ctr
 		ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: cohort, Name: queue}})
 }
 
+func TestIndexResourceFlavorByQueueName(t *testing.T) {
+	const (
+		exclusiveQueue = "gpustack--amd-epyc-7r13-processor-ln-x64-12c-48g--nvidia-a10g-1d"
+		slicedQueue    = exclusiveQueue + "-8s"
+	)
+
+	cases := []struct {
+		name  string
+		queue string
+		want  []string
+	}{
+		{
+			name:  "non-sliced queue indexes only itself",
+			queue: exclusiveQueue,
+			want:  []string{exclusiveQueue},
+		},
+		{
+			// A sliced flavor borrows credits from the exclusive queue, so it must
+			// be discoverable under both the sliced queue and the exclusive one.
+			name:  "sliced queue indexes itself and the exclusive queue",
+			queue: slicedQueue,
+			want:  []string{slicedQueue, exclusiveQueue},
+		},
+		{
+			name:  "cpu-only queue ending in g is not stripped",
+			queue: "gpustack--generic-ln-x64-4c-16g",
+			want:  []string{"gpustack--generic-ln-x64-4c-16g"},
+		},
+		{
+			name:  "trailing segment with empty digits is not stripped",
+			queue: exclusiveQueue + "-s",
+			want:  []string{exclusiveQueue + "-s"},
+		},
+		{
+			name:  "trailing non-s suffix is not stripped",
+			queue: exclusiveQueue + "-12x",
+			want:  []string{exclusiveQueue + "-12x"},
+		},
+		{
+			name:  "queue without a hyphen is not stripped",
+			queue: "8s",
+			want:  []string{"8s"},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			rf := newQueuedResourceFlavor("flavor", c.queue, c.queue, false)
+			assert.Equal(t, c.want, indexResourceFlavorByQueueName(rf))
+		})
+	}
+}
+
+// TestEnqueueCohortWhenResourceFlavorChanged verifies a changed sliced flavor
+// enqueues both its sliced queue and the suffix-stripped exclusive queue (the
+// queue it lends credits to, under the shared cohort), so the exclusive queue
+// re-reconciles to pick up the lent flavor. A non-sliced flavor enqueues only
+// itself.
+func TestEnqueueCohortWhenResourceFlavorChanged(t *testing.T) {
+	const (
+		cohort         = "gpustack--amd-epyc-7r13-processor-ln-x64-12c-48g--nvidia-a10g-1d"
+		exclusiveQueue = cohort
+		slicedQueue    = exclusiveQueue + "-8s"
+	)
+
+	cases := []struct {
+		name  string
+		queue string
+		want  []ctrlreconcile.Request
+	}{
+		{
+			name:  "non-sliced flavor enqueues only its queue",
+			queue: exclusiveQueue,
+			want: []ctrlreconcile.Request{
+				{NamespacedName: ctrlcli.ObjectKey{Name: exclusiveQueue, Namespace: cohort}},
+			},
+		},
+		{
+			name:  "sliced flavor enqueues the sliced and exclusive queues",
+			queue: slicedQueue,
+			want: []ctrlreconcile.Request{
+				{NamespacedName: ctrlcli.ObjectKey{Name: slicedQueue, Namespace: cohort}},
+				{NamespacedName: ctrlcli.ObjectKey{Name: exclusiveQueue, Namespace: cohort}},
+			},
+		},
+	}
+
+	r := &ClusterQueueReconciler{}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			rf := newQueuedResourceFlavor("flavor", c.queue, cohort, false)
+			assert.Equal(t, c.want, r.enqueueCohortWhenResourceFlavorChanged(context.Background(), rf))
+		})
+	}
+}
+
 func TestHasReserved(t *testing.T) {
 	reserved := func(total, borrowed string) kueue.ClusterQueueStatus {
 		return kueue.ClusterQueueStatus{
