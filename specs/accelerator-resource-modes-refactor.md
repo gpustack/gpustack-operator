@@ -280,7 +280,7 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
 rejected.*
 
 **Phase 3 — Kueue scheduling topology (Story 1 output: borrow + reclaim)**
-- [ ] **Task 5:** `indexResourceFlavorByQueueName` emits the suffix-stripped queue name in addition for an
+- [x] **Task 5:** `indexResourceFlavorByQueueName` emits the suffix-stripped queue name in addition for an
   `-Ns` RF. **Acceptance:** the sliced RF appears in both the sliced CQ's and the exclusive CQ's rfList; unit
   test. **Dependencies:** T3. **Files:** `pkg/worker/controllers/worker/clusterqueue.go(+_test)`. **Scope:**
   S.
