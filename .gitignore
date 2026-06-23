@@ -36,6 +36,6 @@ go.work.*
 /certs
 .terraform
 .claude/*
-!.claude/hooks
-!.claude/skills/gpustack-operator-*
+!.claude/hooks/
+!.claude/skills/
 !.claude/settings.json
