@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -74,6 +75,160 @@ func mkClusterQueue(
 	}
 
 	return cq
+}
+
+// mkSlicedClusterQueue builds the sliced InstanceType's ClusterQueue: the queue
+// name is the per-unit "-1d-8s" profile while its single flavor is the per-node
+// "-4d-8s" profile carrying 0 credits (the borrow topology), with the partition
+// count and unit resources noted as the reconciler would.
+func mkSlicedClusterQueue(reservation core.ResourceList) *kueue.ClusterQueue {
+	const (
+		queueName  = "gpustack--amd-epyc-7r13-processor-ln-x64-12c-48g--nvidia-a10g-1d-8s"
+		flavorName = "gpustack--amd-epyc-7r13-processor-ln-x64-48c-192g-88g--nvidia-a10g-4d-8s"
+	)
+	credits := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
+
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{Name: queueName},
+		Spec: kueue.ClusterQueueSpec{
+			ResourceGroups: []kueue.ResourceGroup{{
+				CoveredResources: []core.ResourceName{
+					core.ResourceCPU, core.ResourceMemory, core.ResourceEphemeralStorage, credits,
+				},
+				Flavors: []kueue.FlavorQuotas{{
+					Name: kueue.ResourceFlavorReference(flavorName),
+					Resources: []kueue.ResourceQuota{
+						{Name: core.ResourceCPU, NominalQuota: qty("48")},
+						{Name: core.ResourceMemory, NominalQuota: qty("192Gi")},
+						{Name: core.ResourceEphemeralStorage, NominalQuota: qty("88Gi")},
+						{Name: credits, NominalQuota: qty("0")}, // borrows from the exclusive queue
+					},
+				}},
+			}},
+		},
+	}
+	systemmeta.NoteResource(cq, "instancetypes", map[string]string{
+		"acceleratable":     "true",
+		"manufacturer":      nodefeature.ManufacturerNVIDIA,
+		"slicedAccelerator": "8",
+		"unitCPU":           "12",
+		"unitRAM":           "48",
+		"detail":            "{}",
+	})
+
+	if reservation != nil {
+		usage := kueue.FlavorUsage{
+			Name:      kueue.ResourceFlavorReference(flavorName),
+			Resources: make([]kueue.ResourceUsage, 0, len(reservation)),
+		}
+		for n, q := range reservation {
+			usage.Resources = append(usage.Resources, kueue.ResourceUsage{Name: n, Total: q})
+		}
+		cq.Status.FlavorsReservation = []kueue.FlavorUsage{usage}
+	}
+	return cq
+}
+
+// TestConvertInstanceTypeFromClusterQueue_ExclusiveWithLentSliced pins the
+// exclusive InstanceType in the borrow topology: its queue (the un-suffixed
+// "-1d") now carries the lent sliced flavor ("-4d-8s", credits=4) plus a drained
+// "-4d" tombstone (credits=0). The non-sliced path is unchanged, so capacity is
+// the credits sum (4 whole cards) and unit resources are not folded.
+func TestConvertInstanceTypeFromClusterQueue_ExclusiveWithLentSliced(t *testing.T) {
+	const (
+		queueName  = "gpustack--amd-epyc-7r13-processor-ln-x64-12c-48g--nvidia-a10g-1d"
+		lentFlavor = "gpustack--amd-epyc-7r13-processor-ln-x64-48c-192g-88g--nvidia-a10g-4d-8s"
+		tombstone  = "gpustack--amd-epyc-7r13-processor-ln-x64-48c-192g-88g--nvidia-a10g-4d"
+	)
+	credits := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
+	covered := []core.ResourceName{
+		core.ResourceCPU, core.ResourceMemory, core.ResourceEphemeralStorage, credits,
+	}
+	mkFlavor := func(name, cpu, ram, stg, cred string) kueue.FlavorQuotas {
+		return kueue.FlavorQuotas{
+			Name: kueue.ResourceFlavorReference(name),
+			Resources: []kueue.ResourceQuota{
+				{Name: core.ResourceCPU, NominalQuota: qty(cpu)},
+				{Name: core.ResourceMemory, NominalQuota: qty(ram)},
+				{Name: core.ResourceEphemeralStorage, NominalQuota: qty(stg)},
+				{Name: credits, NominalQuota: qty(cred)},
+			},
+		}
+	}
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{Name: queueName},
+		Spec: kueue.ClusterQueueSpec{
+			ResourceGroups: []kueue.ResourceGroup{{
+				CoveredResources: covered,
+				Flavors: []kueue.FlavorQuotas{
+					mkFlavor(lentFlavor, "48", "192Gi", "88Gi", "4"),
+					mkFlavor(tombstone, "0", "0", "0", "0"),
+				},
+			}},
+		},
+	}
+	systemmeta.NoteResource(cq, "instancetypes", map[string]string{
+		"acceleratable": "true",
+		"manufacturer":  nodefeature.ManufacturerNVIDIA,
+		"unitCPU":       "12",
+		"unitRAM":       "48",
+		"detail":        "{}",
+	})
+
+	it := convertInstanceTypeFromClusterQueue(cq, false)
+	require.NotNil(t, it)
+	assert.True(t, it.Spec.Acceleratable, "Acceleratable")
+	assert.Zero(t, it.Spec.Sliced, "Sliced (exclusive)")
+	qtyEqual(t, qty("4"), it.Status.Accelerator.Capacity, "Capacity.Accelerator (whole cards)")
+	qtyEqual(t, qty("4"), it.Status.Accelerator.Remaining, "Remaining.Accelerator")
+	qtyEqual(t, qty("4"), it.Status.Accelerator.OnceMaxRequest, "OnceMaxRequest.Accelerator")
+	assert.Equal(t, "12", it.Spec.UnitResources.CPU, "UnitResources.CPU (not folded)")
+	assert.Equal(t, "48Gi", it.Spec.UnitResources.RAM, "UnitResources.RAM (not folded)")
+}
+
+// TestConvertInstanceTypeFromClusterQueue_Sliced pins Task 11: a sliced
+// InstanceType reports Accelerator capacity = card-count × partitions, remaining
+// at the slice rate, OnceMaxRequest = partitions/2, and per-slice unit resources
+// rounded down.
+func TestConvertInstanceTypeFromClusterQueue_Sliced(t *testing.T) {
+	credits := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
+
+	cases := []struct {
+		name        string
+		reservation core.ResourceList
+		wantCap     resource.Quantity
+		wantRem     resource.Quantity
+	}{
+		{
+			// node-5: 4 cards × 8 partitions = 32 slices, none reserved.
+			name:    "no reservation: capacity and remaining are 32 slices",
+			wantCap: qty("32"),
+			wantRem: qty("32"),
+		},
+		{
+			// One 1/8 slice reserved = 0.125 credits → remaining (4−0.125)×8 = 31.
+			name:        "one slice reserved: remaining drops to 31",
+			reservation: core.ResourceList{credits: qty("125m")},
+			wantCap:     qty("32"),
+			wantRem:     qty("31"),
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			it := convertInstanceTypeFromClusterQueue(mkSlicedClusterQueue(c.reservation), false)
+			require.NotNil(t, it, "expected InstanceType")
+
+			assert.True(t, it.Spec.Acceleratable, "Acceleratable")
+			assert.Equal(t, int64(8), it.Spec.Sliced, "Sliced")
+			qtyEqual(t, c.wantCap, it.Status.Accelerator.Capacity, "Capacity.Accelerator")
+			qtyEqual(t, c.wantRem, it.Status.Accelerator.Remaining, "Remaining.Accelerator")
+			qtyEqual(t, qty("4"), it.Status.Accelerator.OnceMaxRequest, "OnceMaxRequest.Accelerator")
+			assert.Equal(t, "1", it.Spec.UnitResources.CPU, "UnitResources.CPU (12/8 round down)")
+			assert.Equal(t, "6Gi", it.Spec.UnitResources.RAM, "UnitResources.RAM (48/8 round down)")
+		})
+	}
 }
 
 func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
