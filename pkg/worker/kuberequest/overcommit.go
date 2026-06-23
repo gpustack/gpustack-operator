@@ -59,13 +59,13 @@ func ScaleToOvercommit(
 	switch resName {
 	case core.ResourceCPU:
 		if acceleratable {
-			return quantityx.SafeMultiply(_CPUOvercommitBaseQuantityForAcceleratable, val.Value())
+			return quantityx.Multiply(_CPUOvercommitBaseQuantityForAcceleratable, val.Value())
 		}
-		return quantityx.SafeMultiply(_CPUOvercommitBaseQuantity, val.Value())
+		return quantityx.Multiply(_CPUOvercommitBaseQuantity, val.Value())
 	case core.ResourceMemory:
-		return quantityx.SafeMultiply(_RAMOvercommitBaseQuantity, val.Value()/quantityx.Gi)
+		return quantityx.Multiply(_RAMOvercommitBaseQuantity, val.Value()/quantityx.Gi)
 	case core.ResourceEphemeralStorage:
-		return quantityx.SafeMultiply(_LocalStorageOvercommitBaseQuantity, val.Value()/quantityx.Gi)
+		return quantityx.Multiply(_LocalStorageOvercommitBaseQuantity, val.Value()/quantityx.Gi)
 	}
 	return val
 }

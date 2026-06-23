@@ -17,10 +17,12 @@ const (
 	Ei = 1 << 60
 )
 
-var binaryUnits = [...]struct {
+type _Unit struct {
 	scale  int64
 	suffix string
-}{
+}
+
+var binaryUnits = [...]_Unit{
 	{Ei, "Ei"},
 	{Pi, "Pi"},
 	{Ti, "Ti"},
@@ -29,10 +31,7 @@ var binaryUnits = [...]struct {
 	{Ki, "Ki"},
 }
 
-var decimalUnits = [...]struct {
-	scale  int64
-	suffix string
-}{
+var decimalUnits = [...]_Unit{
 	{1e18, "E"},
 	{1e15, "P"},
 	{1e12, "T"},
@@ -89,10 +88,9 @@ func FormatDecimalSI(q resource.Quantity) string {
 	return formatScaled(q, decimalUnits[:])
 }
 
-func formatScaled(q resource.Quantity, units []struct {
-	scale  int64
-	suffix string
-},
+func formatScaled(
+	q resource.Quantity,
+	units []_Unit,
 ) string {
 	if q.IsZero() {
 		return "0"
@@ -114,21 +112,16 @@ func formatScaled(q resource.Quantity, units []struct {
 	return sign + strconv.FormatInt(v, 10)
 }
 
-// Multiply multiplies q by multiplier and returns the result,
-// modifying the input quantity in-place.
-// If multiplier is 1, q is returned unmodified.
+// Multiply multiplies quantity by multiplier and returns the result as a new
+// quantity; the input is not modified. If multiplier is 1, quantity is returned
+// unchanged.
 func Multiply(quantity resource.Quantity, multiplier int64) resource.Quantity {
 	if multiplier == 1 {
 		return quantity
 	}
-	quantity.Mul(multiplier)
-	return quantity
-}
-
-// SafeMultiply is like Multiply but does not modify the input quantity.
-func SafeMultiply(quantity resource.Quantity, multiplier int64) resource.Quantity {
 	q := quantity.DeepCopy()
-	return Multiply(q, multiplier)
+	q.Mul(multiplier)
+	return q
 }
 
 // StringMultiply multiplies q by multiplier and returns the result.
@@ -139,4 +132,26 @@ func StringMultiply(quantityStr string, multiplier int64) (resource.Quantity, er
 		return resource.Quantity{}, err
 	}
 	return Multiply(q, multiplier), nil
+}
+
+// Divide divides quantity by divisor, rounding the result DOWN, and returns it as
+// a new quantity preserving the input's format. The input is not modified (so no
+// Safe variant is needed). A divisor <= 0, or 1, returns quantity unchanged.
+// It floors the quantity's base-unit value, so it is intended for integer/count
+// quantities (e.g. CPU cores, Gi of RAM).
+func Divide(quantity resource.Quantity, divisor int64) resource.Quantity {
+	if divisor <= 0 || divisor == 1 {
+		return quantity
+	}
+	return *resource.NewQuantity(quantity.Value()/divisor, quantity.Format)
+}
+
+// StringDivide divides q by divisor and returns the result.
+// The input q is a string, which will be parsed into a resource.Quantity.
+func StringDivide(quantityStr string, divisor int64) (resource.Quantity, error) {
+	q, err := resource.ParseQuantity(quantityStr)
+	if err != nil {
+		return resource.Quantity{}, err
+	}
+	return Divide(q, divisor), nil
 }
