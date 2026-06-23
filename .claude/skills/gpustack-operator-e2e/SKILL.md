@@ -1,7 +1,7 @@
 ---
 name: gpustack-operator-e2e
 description: "Run a local end-to-end (E2E) verification of the GPUStack Operator on a reachable local cluster (k3s / docker-desktop): build & load the dev image, deploy via the Helm chart, then assert the NFD → Worker → Kueue scheduling chain materializes. Proactively offer this when a branch ahead of main changes controller reconcile, admission webhook, extension-apiserver, or in-cluster app-installation code. Examples: \"run the e2e test\", \"verify my reconcile change on a real cluster\", \"deploy the operator to my local k3s and check the Kueue objects\", \"does this drain change actually work end to end?\"."
-allowed-tools: "Bash(kubectl get*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(git diff*), Bash(command -v*), Read"
+allowed-tools: "Read, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/gpustack-operator-e2e/cases/case-1.sh*), Bash(kubectl get*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*)"
 model: sonnet
 ---
 
@@ -10,371 +10,98 @@ model: sonnet
 Deploy the operator onto a **local** cluster and verify the four-stage scheduling chain end to end:
 NFD labels nodes → Device Manager detects accelerators → Worker profiles capacity → four controllers
 materialize Kueue `ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue`. See
-[architecture.md](../../../docs/architecture.md) for the chain and [development.md](../../../docs/development.md)
-for build/package.
+[architecture.md](../../../docs/architecture.md) for the chain.
 
 This skill **mutates a cluster**. Hard rules:
 
-- **Never switch kube context.** Show the active context and proceed only after the user confirms it
-  is the intended local cluster. If a different context is needed, **stop and ask** — never run
-  `kubectl config use-context`.
-- Build the image **locally only** — never push (`PACKAGE_PUSH` stays `false`).
-- Touch only objects this skill creates (the Helm release, injected fake labels, test workloads).
-  **Never** modify or delete the user's pre-existing namespaces/resources.
-- Every mutating step (build/load, deploy, inject, teardown) is confirmed before running.
+- **Never switch kube context.** Show the active context (via `preflight.sh`) and proceed only after
+  the user confirms it is the intended local cluster. **Stop and ask** if a different context is
+  needed — never run `kubectl config use-context`.
+- Build the image **locally only** — never push (`build-load.sh` keeps `PACKAGE_PUSH=false`).
+- Touch only objects this skill creates (the Helm release, injected labels, test workloads). **Never**
+  modify or delete the user's pre-existing namespaces/resources.
+- Every **mutating** step (`build-load.sh`, `deploy.sh`, the mutating cases, `teardown.sh`) is
+  confirmed before running. Read-only steps (`preflight.sh`, `assert-core.sh`, CASE 1) run without
+  prompting.
 
-## When to run
+The work is split into shared phase scripts and numbered, self-contained cases:
 
-On invocation, detect whether the branch's changes warrant E2E:
+- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG>`,
+  `assert-core.sh <NS>`, `teardown.sh <NS>` (self-contained cleanup; mirrors the chart's `cleanup.sh`).
+- `cases/case-N.sh <NS>` — one numbered scenario each, ending in a `STATUS | CHECK | OBJECT` table and
+  exiting non-zero on any FAIL.
+- `references/` — `drain-recycle.md` (CASE 2/3/4 rationale) and shared `../_e2e-lib/references/troubleshooting.md`.
 
-```bash
-git diff --name-only origin/main...HEAD
-```
+## Cases (locked titles)
 
-If any path matches a high-impact surface, ask the user (with `AskUserQuestion`) whether to run E2E,
-naming the surface that changed:
+| Case | Title | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
+|---|---|---|---|---|
+| 1 | CPU-only scheduling chain materializes | always (mandatory) | `cases/case-1.sh` | no |
+| 2 | Drain stops a running Instance (not recreate) | `pkg/worker/controllers/worker/instance.go`, `pkg/worker/webhooks/worker/instance.go` | `cases/case-2.sh` | yes (confirm) |
+| 3 | Managed-toggle is an independent drain trigger | `pkg/worker/controllers/worker/{resourceflavor,cohort}.go` | `cases/case-3.sh` | yes (confirm) |
+| 4 | Accelerated chain & drain-recycle (approx.) | accelerated / drain paths (optional) | `cases/case-4.sh` | yes (confirm) |
 
-| Surface | Path glob |
-|---|---|
-| Controller reconcile | `pkg/worker/controllers/**` |
-| Admission webhooks | `pkg/*/webhooks/**` |
-| Extension apiserver | `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**` |
-| App installation | `pkg/worker/kuberess/**` |
+Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
+`pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
 
-If nothing matches, say so and run only on explicit request.
+## Flow
 
-## Preflight (read-only)
-
-```bash
-# Required host tools (the operator is deployed via its Helm chart).
-command -v kubectl helm docker || echo "missing a required tool"
-
-# Show the active context and confirm it is the intended LOCAL cluster before any mutation.
-kubectl config current-context
-kubectl cluster-info
-kubectl get nodes -o wide
-```
-
-Confirm with the user that the context is a local `k3s` / `docker-desktop` cluster. Do not continue
-otherwise.
-
-## 1. Build & load the image (confirm)
-
-`make package` builds `gpustack/gpustack-operator:dev` for `linux/$(uname -m)`. The operator binary is
-recompiled whenever the commit changes — the Dockerfile's `GPUSTACK_GIT_COMMIT` build-arg busts that
-layer — so the registry build cache is safe to keep (base layers stay warm, no full rebuild). **Tag
-the image uniquely per build**: a fixed `:dev` tag plus `imagePullPolicy: IfNotPresent` lets the
-kubelet keep running a previously cached `:dev` even after you rebuild (it matches by name, not
-digest); a per-commit tag forces the new image.
-
-```bash
-TAG=dev-$(git rev-parse --short HEAD)
-PACKAGE_TAG="$TAG" make package   # builds gpustack/gpustack-operator:$TAG
-```
-
-Load it into the cluster's runtime:
-
-- **docker-desktop** — the K8s node usually shares the docker image store; no import needed.
-- **k3s** (containerd, separate store):
-
-  ```bash
-  docker save "gpustack/gpustack-operator:$TAG" | sudo k3s ctr images import -
-  ```
-
-If pods later report `ErrImagePull` / `ImagePullBackOff` even though the image is built, the cluster
-runtime does not share the docker store — use the explicit import path above for your runtime.
-
-## 2. Deploy the operator via Helm (confirm)
-
-```bash
-NS=gpustack-system
-helm install gpustack-operator deploy/gpustack-operator/chart \
-  -n "$NS" --create-namespace \
-  --set image.tag="$TAG" \
-  --set image.pullPolicy=IfNotPresent
-```
-
-`image.tag` defaults to `v<Chart.AppVersion>`; pinning it to your per-build `$TAG` (plus
-`IfNotPresent`) is what makes the kubelet run the locally-loaded image instead of pulling from a
-registry. The chart deploys the worker + the per-manufacturer device-manager DaemonSets and passes
-`--disable-applications=device-manager` to the worker; the worker self-installs Kueue / NFD / CSI at
-runtime. Override the namespace with `-n <ns>` (the chart deploys into the release namespace).
-
-## 3. Verify the CPU-only chain (mandatory)
-
-All assertions are level-based polling — safe to re-run. On a GPU-less local cluster the
-per-manufacturer Device-Manager DaemonSets exist but schedule **zero** pods (their node selector
-needs a PCI accelerator label) — that is expected; the mandatory phase covers the general (CPU-only)
-chain only.
-
-```bash
-NS=gpustack-system
-
-# 1. Operator Deployment becomes Available.
-kubectl -n "$NS" rollout status deploy/gpustack-operator-worker --timeout=300s
-
-# 1b. CRITICAL — confirm the RUNNING binary is built from your HEAD, not a stale cached image.
-#     The image label can claim HEAD while the embedded binary is an older cached build (see §1).
-want=$(git rev-parse HEAD)
-got=$(kubectl -n "$NS" exec deploy/gpustack-operator-worker -- gpustack-operator --version 2>/dev/null | grep -oiE '[0-9a-f]{40}')
-[ "$want" = "$got" ] && echo "revision OK: $got" \
-  || echo "STALE IMAGE: running [$got], expected [$want] — rebuild (commit first) and redeploy with the new TAG"
-
-# 2. Aggregated extension APIs are registered and Available.
-kubectl get apiservices v1.gpustack.ai v1.worker.gpustack.ai \
-  -o custom-columns=NAME:.metadata.name,AVAILABLE:'.status.conditions[?(@.type=="Available")].status'
-
-# 3. CRDs are established.
-kubectl get crd instances.worker.gpustack.ai devices.worker.gpustack.ai
-
-# 4. The operator self-installs the bundled (inlined) charts as separate Helm releases — wait for them.
-#    Always: gpustack-kueue, gpustack-node-feature-discovery, gpustack-csi-driver-nfs, gpustack-csi-driver-s3.
-#    Plus gpustack-operator-device-manager only when deployed with deviceManager.enabled=false (otherwise
-#    the chart renders the DaemonSets directly). `helm list -n "$NS"` should show each STATUS=deployed.
-kubectl get pods -A | grep -Ei 'nfd|node-feature|kueue|csi-'
-#    Soft check: DM DaemonSets exist (0 pods on a GPU-less node is expected).
-kubectl get daemonset -A | grep -i device-manager || true
-
-# 5. NFD labeled the node(s) with CPU identity, and marked GPU-less nodes non-acceleratable.
-kubectl get nodes -o json | \
-  grep -Eo '"feature\.gpustack\.ai/(cpu-[a-z]+|acceleratable)"[^,]*' | sort -u
-
-# 6. The Worker derived general capacity labels (NodeFeature <node>-gpustack-worker).
-kubectl get nodefeatures -A -o json | grep -Eo '"general\.feature\.gpustack\.ai/[^"]+"' | sort -u | head
-
-# 7. The four controllers materialized the general chain (names are prefixed gpustack--).
-kubectl get resourceflavors.kueue.x-k8s.io -o name | grep 'gpustack--'
-kubectl get clusterqueues.kueue.x-k8s.io     -o name | grep 'gpustack--'
-kubectl get cohorts.kueue.x-k8s.io           -o name | grep 'gpustack--'
-kubectl get localqueues.kueue.x-k8s.io -A     -o name | grep 'gpustack-fnv64-'
-```
-
-Each step asserts a concrete object/label. If one is empty, stop and diagnose that stage:
-
-```bash
-kubectl -n gpustack-system logs deploy/gpustack-operator-worker --tail=200
-kubectl -n gpustack-system describe deploy/gpustack-operator-worker
-```
-
-## 4. Instance lifecycle & drain-recycle (run when the change touches the Instance controller/webhook)
-
-`pkg/worker/controllers/worker/instance.go` and `pkg/worker/webhooks/worker/instance.go` are **not**
-covered by §3. When a change touches either, verify the **Instance ↔ InstanceType** contract on a real
-cluster — the unit tests cannot (blind spot below). Core behavior: when the `InstanceType` a *running*
-Instance references is drained — its backing `ClusterQueue` goes `HoldAndDrain` so the InstanceType
-reports `Inactive`, or the type is removed — the `InstanceReconciler` must **stop** the Instance
-(`spec.stop=true`), *not* recreate its Pod; it may restart only once a live InstanceType exists again.
-
-Why a real cluster is required:
-
-- `InstanceType` is a live projection of a `ClusterQueue` (`instance_type.go`); its `status.phase`
-  comes from `apistatus.GetSummaryOfClusterQueue` — `Active` condition `True`→`Active`, `False`→`Inactive`.
-- The Instance's Pod carries the Kueue `kueue.x-k8s.io/queue-name` label, so it is admission-managed:
-  `HoldAndDrain` evicts the Pod → `pod==nil` → the reconciler re-evaluates and stops the Instance.
-- **Unit-test blind spot:** the fake client cannot store the aggregated `InstanceType`, so
-  `Get(InstanceType)` returns NotFound and the "Inactive" unit test silently degrades into the
-  "type gone" path. The `phase==Inactive` branch is exercised **only** here, on a real cluster.
-
-**Drain injection on a CPU-only cluster (no accelerator needed):** bump the `ram` capacity label in the
-Worker-authored `<node>-gpustack-worker` NodeFeature. The node then matches a *new* general profile and
-the *old* profile (the one the Instance's InstanceType is built from) drains. This is stable:
-`ConstructNodeCapacityLabels` prefers the node's existing capacity label over `Status.Capacity`
-(`pkg/nodefeature/helper.go`), and `NodeFeatureReconciler` watches Node-label changes only (not the
-NodeFeature), so the edit is not reconciled away.
-
-```bash
-NS=gpustack-system; NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-IT=$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[?(@.status.phase=="Active")].metadata.name}' | awk '{print $1}')
-echo "active InstanceType: $IT on node $NODE"
-
-# 1. Create a running Instance referencing the Active InstanceType. alpine is kept alive (sleep) so its
-#    Kueue Workload holds quota; the ephemeral volume lets non-type validation pass.
-cat <<EOF | kubectl apply -f -
-apiVersion: worker.gpustack.ai/v1
-kind: Instance
-metadata: { name: gpustack-e2e-instance, namespace: default }
-spec:
-  type: ${IT}
-  image: alpine
-  command: ["sleep", "86400"]
-  volume: { ephemeral: { capacity: 1Gi } }
-EOF
-
-# 2. Assert the Pod is created AND admitted by Kueue (holding quota is what lets HoldAndDrain evict it).
-kubectl -n default get pod gpustack-e2e-instance -o jsonpath='{.status.phase}'; echo
-kubectl -n default get workloads.kueue.x-k8s.io \
-  -o custom-columns=NAME:.metadata.name,ADMITTED:'.status.conditions[?(@.type=="Admitted")].status'
-# spec.stop must be unset/false here — the Instance is running and its InstanceType is Active.
-kubectl -n default get instance gpustack-e2e-instance -o jsonpath='{.spec.stop}'; echo
-
-# 3. Drain: bump the general ram label so the node matches a new profile and the old one drains.
-gKey=$(kubectl get node "$NODE" -o json | grep -oE '"general\.feature\.gpustack\.ai/[a-z0-9-]+\.ram"' | head -1 | sed -E 's#.*/(.*)\.ram"#\1#')
-old=$(kubectl -n "$NS" get nodefeature "${NODE}-gpustack-worker" -o jsonpath="{.spec.labels.general\.feature\.gpustack\.ai/${gKey}\.ram}")
-new=32Gi; [ "$old" = "32Gi" ] && new=24Gi   # any different even Gi value forces a new profile
-echo "draining: ram ${old} -> ${new} (gKey=${gKey})"
-kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
-  -p "{\"spec\":{\"labels\":{\"general.feature.gpustack.ai/${gKey}.ram\":\"${new}\"}}}"
-```
-
-Poll the chain, then assert the Instance is **stopped, not recreated**:
-
-```bash
-# Old flavor draining, old ClusterQueue HoldAndDrain, old InstanceType Inactive, new profile Active.
-kubectl get resourceflavors.kueue.x-k8s.io -o custom-columns=NAME:.metadata.name,DRAIN:'.metadata.annotations.schedule\.gpustack\.ai/drain' | grep gpustack--
-kubectl get clusterqueues.kueue.x-k8s.io   -o custom-columns=NAME:.metadata.name,STOP:.spec.stopPolicy | grep gpustack--
-kubectl get instancetypes.worker.gpustack.ai -o custom-columns=NAME:.metadata.name,PHASE:.status.phase
-
-# THE assertion: the Instance whose InstanceType is now Inactive gets stopped.
-kubectl -n default get instance gpustack-e2e-instance \
-  -o custom-columns=STOP:.spec.stop,PHASE:.status.phase    # expect: true / Stopped
-kubectl -n default get pod gpustack-e2e-instance || echo "pod evicted (expected)"
-# Ground truth in the logs — proves the phase==Inactive branch ran, not some other path:
-kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=400 | grep "stop instance as inactive instance type"
-```
-
-A buggy `Phase != Inactive` condition would **recreate the Pod instead of stopping the Instance** —
-that is the regression this test exists to catch. (A harmless `create service … spec.ports: Required
-value` error appears because the test Instance declares no ports; it is unrelated to the drain path.)
-
-Restore when keeping the deployment (skip if doing a full §6 teardown):
-
-```bash
-kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
-  -p "{\"spec\":{\"labels\":{\"general.feature.gpustack.ai/${gKey}.ram\":\"${old}\"}}}"
-kubectl -n default delete instance gpustack-e2e-instance
-```
-
-### 4b. Managed toggle — a *second, independent* drain trigger (run when the change touches the ResourceFlavor/Cohort Node-watch)
-
-Excluding a node from management (`gpustack.ai/managed=false`) must drain its single-node
-ResourceFlavors with the **same** chain as §4 (flavor `schedule.gpustack.ai/drain=true` → ClusterQueue
-`HoldAndDrain` → the InstanceType's running Instances `spec.stop=true`). What is non-obvious is that it
-is a *different trigger on a different code path*:
-
-- A §4 capacity reshape changes a *feature label*, so any feature-prefix predicate fires. **A managed
-  toggle changes only `gpustack.ai/managed`** — no feature label — so it drains **only if** the
-  `ResourceFlavorReconciler`/`CohortReconciler` Node-watch `UpdateFunc` predicates include
-  `systemname.ManagedLabelKey` in their `mapx.EqualWithStringPrefix(...)`
-  (`pkg/worker/controllers/worker/{resourceflavor,cohort}.go`). Missing it is the historical bug: the
-  flavor is never enqueued or drained, while the ClusterQueue silently recomputes to a misleading
-  `0/-1` (Active but negative-remaining) quota and the Instance keeps running.
-- **Restart masks it.** The `For`-watch start-up resync re-reconciles every ResourceFlavor, so a freshly
-  (re)started operator drains the orphan regardless of the predicate. Verify against a **continuously
-  running** operator — do not restart between the toggle and the assertion.
-- Toggle via the NodeFeature, not the node (§4 explains why: NFD reverts a direct node label). The unit
-  cases `unmanaged node drains flavor` / `unmanaged node deletes cohort` only guard the index filter,
-  **not** the predicate — so this live check is the only guard for the enqueue path.
-
-```bash
-NS=gpustack-system; NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-before=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}')
-
-# Toggle out of management, then poll the §4 chain (flavor drain → CQ HoldAndDrain → Instance stop).
-kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
-  -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
-
-# Restore (skip if doing a full §6 teardown).
-kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
-  -p "{\"spec\":{\"labels\":{\"gpustack.ai/managed\":\"${before:-true}\"}}}"
-```
-
-> Toggling a node that hosts a *running* Instance Stops that Instance, so on a shared cluster pick a node
-> whose Instances you can disrupt (or one with none, to assert the flavor/CQ drain alone).
-
-## 5. Optional — simulated accelerator & drain-recycle (accelerated chain)
-
-This exercises the accelerated chain and the drain-recycle behavior (the `ResourceFlavor` tombstone,
-`ClusterQueue` `HoldAndDrain`, and `Cohort` reclaim — see [architecture.md](../../../docs/architecture.md)
-Stage 4) on a GPU-less cluster **by approximation**. There is no real Device-Manager `Devices` CR or
-device-plugin allocation, so this validates the controller/label algebra, not physical device
-handling. Run only if the change under test touches the accelerated or drain paths.
-
-1. **Inject** a fake accelerator on one node. The Worker derives accelerated profiles from the
-   `acceleratable.feature.gpustack.ai/*` labels that NFD merges onto the node from the DM's
-   `<node>-gpustack-device-manager` NodeFeature. The cleanest simulation is to create a NodeFeature
-   carrying those labels (manufacturer, `<aKey>`, `.count`, memory/cores) and let NFD merge it.
-   **Confirm NFD's label-merge config and the exact label set against `pkg/nodefeature` on first run**
-   before relying on this — the precise keys/ownership are what to validate empirically here.
-
-2. **Assert the accelerated chain** appears (names carry the `--<aKey>-<acc>d` segment):
+1. **Preflight (read-only).** Run it and confirm the context with the user:
 
    ```bash
-   kubectl get resourceflavors.kueue.x-k8s.io -o name | grep -E 'gpustack--.*--.*-[0-9]+d'
-   kubectl get clusterqueues.kueue.x-k8s.io   -o name | grep -E 'gpustack--.*--.*-[0-9]+d'
+   bash .claude/skills/_e2e-lib/scripts/preflight.sh
    ```
 
-3. **Drain**: remove the injected labels/NodeFeature so the profile no longer matches any node, then
-   assert (poll — the controllers reconcile asynchronously):
+   Do not continue unless the user confirms a local `k3s` / `docker-desktop` context.
+
+2. **Pick cases.** Match the changed surface against the table above with
+   `git diff --name-only origin/main...HEAD`. If a high-impact surface changed, ask the user (with
+   `AskUserQuestion`) which cases to run; CASE 1 is always included. If nothing matches, say so and run
+   CASE 1 only on explicit request.
+
+3. **Build & load (confirm).** Compute a per-commit tag so the kubelet runs the new image:
 
    ```bash
-   # ResourceFlavor is NOT deleted — it is a draining, zero-quota tombstone.
-   kubectl get resourceflavors.kueue.x-k8s.io -o json | \
-     grep -B2 '"schedule.gpustack.ai/drain": *"true"'
-
-   # ClusterQueue switches to HoldAndDrain (removed only after no reservation remains).
-   kubectl get clusterqueues.kueue.x-k8s.io \
-     -o custom-columns=NAME:.metadata.name,STOP:.spec.stopPolicy | grep HoldAndDrain
-
-   # Cohort is reclaimed only once no node AND no ClusterQueue still reference it.
-   kubectl get cohorts.kueue.x-k8s.io -o name | grep 'gpustack--' || echo "cohort reclaimed"
+   TAG=dev-$(git rev-parse --short HEAD)
+   bash .claude/skills/_e2e-lib/scripts/build-load.sh "$TAG"
    ```
 
-## 6. Teardown (ask first)
+4. **Deploy (confirm).**
 
-When verification finishes, **ask the user** (with `AskUserQuestion`) whether to clean up or keep the
-deployment for inspection.
+   ```bash
+   NS=gpustack-system
+   bash .claude/skills/_e2e-lib/scripts/deploy.sh "$NS" "$TAG"
+   ```
 
-If cleaning up — first remove the E2E test artifacts, then `helm uninstall` the operator, then run the
-shared cleanup script for the runtime leftovers Helm does not manage. The `gpustack-system` namespace is
-**kept** (deleting it can hang in `Terminating` on the orphaned aggregated APIServices):
+5. **Run the selected cases.** CASE 1 is read-only (no prompt); CASE 2/3/4 mutate and self-recover, so
+   confirm each before running. Each prints a PASS/FAIL table and exits non-zero on failure — read the
+   table, do not re-derive from raw output.
 
-```bash
-NS=gpustack-system
+   ```bash
+   NS=gpustack-system
+   bash .claude/skills/gpustack-operator-e2e/cases/case-1.sh "$NS"   # mandatory, read-only
+   # then, per the picked cases (each confirmed):
+   bash .claude/skills/gpustack-operator-e2e/cases/case-2.sh "$NS"
+   bash .claude/skills/gpustack-operator-e2e/cases/case-3.sh "$NS"
+   bash .claude/skills/gpustack-operator-e2e/cases/case-4.sh "$NS"
+   ```
 
-# §4 test Instance (delete before NodeFeature so its Pod/Workload drain cleanly).
-kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found
+   On a FAIL, diagnose the named stage (`kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=200`,
+   `kubectl -n "$NS" describe deploy/gpustack-operator-worker`) and see the references.
 
-# Injected fake NodeFeature(s) and test workloads. Deleting the Worker-authored
-# <node>-gpustack-worker NodeFeature also discards any §4 ram edit; the operator
-# rebuilds it from the Node on the next reconcile.
-kubectl -n "$NS" delete nodefeature --all
+6. **Teardown (ask first).** Ask the user (with `AskUserQuestion`) whether to clean up or keep the
+   deployment. To clean up (confirm):
 
-# The operator's own resources (worker, device-managers, RBAC, webhooks).
-helm uninstall gpustack-operator -n "$NS"
+   ```bash
+   bash .claude/skills/_e2e-lib/scripts/teardown.sh gpustack-system
+   ```
 
-# Everything Helm leaves behind: the worker-installed Kueue/NFD/CSI sub-releases, their CRDs, the
-# finalizers pinning Kueue/Instance objects, and the runtime-registered APIServices/webhooks. This is
-# the same single-source script the chart's post-delete hook runs (see deploy/.../chart/files/).
-bash deploy/gpustack-operator/chart/files/cleanup.sh "$NS"
-```
+   `teardown.sh` removes the test artifacts, the operator release, the worker-installed
+   Kueue/NFD/CSI sub-releases, their CRDs/finalizers, and the runtime APIServices/webhooks. The
+   `gpustack-system` namespace is kept on purpose. Never delete the user's pre-existing resources.
 
-Never delete the user's pre-existing namespaces or resources.
+## References
 
-## Troubleshooting
-
-- **`ImagePullBackOff` on `gpustack-operator-worker`** — image not in the cluster runtime, or
-  `imagePullPolicy` still `Always`. Re-do the load (§1) and reinstall with the `--set image.*` flags (§2).
-- **Extension APIService not `Available`** — the aggregated apiserver isn't ready; check the worker
-  logs. Startup order matters: controllers start only after the extension APIs report ready
-  (see [architecture.md](../../../docs/architecture.md)).
-- **Teardown hangs deleting kueue CRDs** — `helm uninstall gpustack-kueue` removes the controller, but
-  its ResourceFlavor/ClusterQueue CRs keep the `kueue.x-k8s.io/resource-in-use` finalizer, so `kubectl
-  delete crd` waits forever. The teardown strips those finalizers first; if a run predates that fix,
-  patch them by hand: `kubectl patch <resourceflavor|clusterqueue>/<name> --type=merge -p '{"metadata":{"finalizers":[]}}'`.
-- **No Kueue objects appear** — confirm NFD and Kueue pods are Ready (§3 step 4) and that nodes carry
-  the `feature.gpustack.ai/cpu-*` labels (§3 step 5); the chain is driven entirely by those labels.
-- **§4 ram edit reverts / old profile never drains** — the patch must land on the
-  `<node>-gpustack-worker` NodeFeature (Worker-authored), not on the Node directly (NFD overwrites Node
-  labels). Confirm NFD merged it: `kubectl get node <node> -o json | grep '<gKey>.ram'` should show the
-  new value. If a new profile never appears, the chosen value matched the old one (must differ and be
-  even Gi).
-- **§4 Instance not stopped after drain** — check the Pod was actually admitted (held quota) before the
-  drain; an unadmitted/finished Workload leaves nothing for `HoldAndDrain` to evict, so `pod==nil` may
-  never recur. Keep the container alive (`sleep`). If the Instance's InstanceType went straight to
-  *gone* rather than *Inactive*, the `phase==Inactive` branch was skipped — re-run and assert
-  `Inactive` is observed while the ClusterQueue is `HoldAndDrain`.
-- **Behavior matches old code / `--version` ≠ HEAD (§3 step 1b)** — you're running a stale image.
-  Commit your change (the `GPUSTACK_GIT_COMMIT` build-arg recompiles per commit), rebuild with a fresh
-  `TAG=dev-$(git rev-parse --short HEAD)`, reload, and redeploy pointing at the new tag. (Symptom seen
-  in practice: an orphaned `ResourceFlavor` getting *deleted* instead of marked
-  `schedule.gpustack.ai/drain=true` — i.e. pre-drain-recycle behavior.)
+- `references/drain-recycle.md` — why CASE 2/3/4 need a real cluster, the unit-test blind spot, the
+  managed-toggle code path, and the injection recipes.
+- `../_e2e-lib/references/troubleshooting.md` — shared image/rollout/teardown failure modes.
