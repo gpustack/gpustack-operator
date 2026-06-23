@@ -284,6 +284,11 @@ func convertInstanceTypeFromClusterQueue(
 		capCpu, remCpu, ormCpu resource.Quantity
 		capRam, remRam, ormRam resource.Quantity
 		capStg, remStg, ormStg resource.Quantity
+		// cardAcc sums the per-flavor card count parsed from the flavor names
+		// (the "Nd" segment). The sliced queue holds zero credits (it borrows from
+		// the exclusive queue), so the sliced capacity is derived from cardAcc ×
+		// partitions rather than from the credits nominal quota.
+		cardAcc resource.Quantity
 	)
 	if !draining {
 		resourceAccelerator := nodefeature.GetAcceleratableCreditsResourceName(notes["manufacturer"])
@@ -307,6 +312,9 @@ func convertInstanceTypeFromClusterQueue(
 					core.ResourceMemory:           ormRamRf,
 					core.ResourceEphemeralStorage: ormStgRf,
 				}
+
+				// Sum the per-flavor card count for the sliced capacity.
+				cardAcc.Add(ormAccRf)
 
 				// Calculate the once max request by comparing the once max request of each flavor if there is no reservation.
 				if len(cq.Status.FlavorsReservation) == 0 {
@@ -429,16 +437,32 @@ func convertInstanceTypeFromClusterQueue(
 		}
 
 		if slicedAccelerator > 0 {
-			// Only allow to request 1 slice at most.
-			if !ormAcc.IsZero() {
-				ormAcc.Set(1)
+			// Borrow topology: the sliced queue's credits nominal is 0, so capacity
+			// is card-count × partitions, taken from the flavor names (cardAcc), and
+			// remaining is (cards − reserved credits) × partitions. remAcc still
+			// carries the reservation subtraction off the 0 nominal (≤ 0).
+			remCards := cardAcc.DeepCopy()
+			remCards.Add(remAcc)
+			capAcc = nodefeature.QuantityToSliceCount(cardAcc, slicedAccelerator)
+			remAcc = nodefeature.QuantityToSliceCount(remCards, slicedAccelerator)
+			// OnceMaxRequest is the per-card unit cap U_max = partitions/2 (the
+			// largest power of two strictly below partitions), the bound the
+			// admission webhook enforces on U — independent of current usage.
+			ormAcc = resource.Quantity{}
+			if cardAcc.Sign() > 0 {
+				ormAcc = *resource.NewQuantity(slicedAccelerator/2, resource.DecimalSI)
 			}
-			// Align the accelerator resource with the slice.
-			remAcc = nodefeature.QuantityToSliceCount(remAcc, slicedAccelerator)
-			capAcc = nodefeature.QuantityToSliceCount(capAcc, slicedAccelerator)
 		} else {
 			ormAcc = nodefeature.QuantityToSliceCount(ormAcc, 1)
 		}
+	}
+
+	// On a sliced type each slice gets a per-partition share of the unit resources,
+	// rounded down (e.g. a 12c/48g card sliced into 8 yields 1c/6g per slice).
+	unitCPU, unitRAM := notes["unitCPU"], notes["unitRAM"]
+	if slicedAccelerator > 0 {
+		unitCPU = sliceDownUnit(unitCPU, slicedAccelerator)
+		unitRAM = sliceDownUnit(unitRAM, slicedAccelerator)
 	}
 
 	instTypeSpec := worker.InstanceTypeSpec{
@@ -450,8 +474,8 @@ func convertInstanceTypeFromClusterQueue(
 		OS:            notes["os"],
 		Arch:          notes["arch"],
 		UnitResources: worker.InstanceTypeUnitResources{
-			CPU: notes["unitCPU"],
-			RAM: notes["unitRAM"] + "Gi",
+			CPU: unitCPU,
+			RAM: unitRAM + "Gi",
 		},
 	}
 	detail := notes["detail"]
@@ -534,6 +558,17 @@ func instanceTypeMatchFieldSelector(opts ctrlcli.ListOptions, insType *worker.In
 	return fs.Matches(fields.Set{"metadata.name": insType.Name})
 }
 
+// sliceDownUnit divides an integer unit-resource string by the partition count,
+// rounding down. Non-integer or non-positive inputs are returned unchanged.
+func sliceDownUnit(s string, partitions int64) string {
+	n, err := strconvx.Atoi[int64](s)
+	if err != nil || partitions <= 0 {
+		return s
+	}
+	return resource.NewQuantity(n/partitions, resource.DecimalSI).String()
+}
+
+// parseNodeResourceFlavorName parses the node resource flavor name to get the once max request of each resource.
 func parseNodeResourceFlavorName(name string) (ormAccRf, ormCpuRf, ormRamRf, ormStgRf resource.Quantity, ok bool) {
 	_, _, spec, ok := nodefeature.ParseNodeProfile(name)
 	if ok {

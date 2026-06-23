@@ -288,6 +288,62 @@ Flow, on the shared flavor `…-4d-8s`:
   the same physical node in both queues, so simultaneous exclusive+sliced admission can over-subscribe the
   node and leave pods Pending — acceptable per Risk #2 / Open Question #2.
 
+### Worked Example — Story 2 sliced InstanceType output (Task 11, node-5, A10G×4, partitions=8)
+
+`convertInstanceTypeFromClusterQueue` turns the sliced ClusterQueue above into the user-facing InstanceType.
+Because the sliced queue's credits nominal is 0 (it borrows), the accelerator counts are derived from the
+flavor name's card count (`4d` → 4) × partitions (`8s` → 8), and the unit resources are folded per slice:
+
+The two ClusterQueues of the cohort surface as two InstanceTypes — the sliced one (slice-rate counts) and the
+exclusive one (whole-card counts, backed by the credits it lends):
+
+```yaml
+# Sliced InstanceType — slice-rate accelerator counts, folded unit resources.
+apiVersion: worker.gpustack.ai/v1
+kind: InstanceType
+metadata:
+  name: gpustack--...-12c-48g--nvidia-a10g-1d-8s   # the sliced queue name
+spec:
+  acceleratable: true
+  manufacturer: nvidia
+  sliced: 8                       # partition count N
+  unitResources:
+    cpu: "1"                      # 12c / 8, round down
+    ram: 6Gi                      # 48g / 8, round down
+  # ... product / family / os / arch / accelerator detail
+status:
+  accelerator:
+    capacity: 32                  # card-count(4) × partitions(8)
+    remaining: 32                 # (4 − reserved credits) × 8; 31 after one 1/8 slice is taken
+    onceMaxRequest: 4             # partitions/2 = max power-of-two U < partitions
+  # ... cpu / ram / localStorage: capacity/remaining/onceMaxRequest at node scale (unchanged)
+---
+# Exclusive InstanceType — whole-card counts; capacity is the credits the sliced
+# flavor lends here (4), reclaimable from the borrowers. Unit resources are NOT
+# folded. The drained "-4d" tombstone contributes 0.
+apiVersion: worker.gpustack.ai/v1
+kind: InstanceType
+metadata:
+  name: gpustack--...-12c-48g--nvidia-a10g-1d      # the exclusive queue name
+spec:
+  acceleratable: true
+  manufacturer: nvidia
+  # sliced omitted (0) — not a sliced type
+  unitResources:
+    cpu: "12"                     # one whole card's unit
+    ram: 48Gi
+  # ...
+status:
+  accelerator:
+    capacity: 4                   # whole cards (sum of lent credits)
+    remaining: 4
+    onceMaxRequest: 4
+  # ... cpu / ram / localStorage
+```
+
+A user then requests the sliced InstanceType with `acceleratorUnits` ∈ {1, 2, 4} (Story 2 / Task 12); `8`
+(== N) and non-powers-of-two are rejected.
+
 ### Implementation Plan
 
 Sliced along the data flow, vertically; each phase ends with the system compiling and tests passing; the
@@ -385,7 +441,7 @@ rejected.*
 *Checkpoint 4: `credits = C×U/partitions` worked-example table passes end to end.*
 
 **Phase 5 — User-facing output (Story 2)**
-- [ ] **Task 11:** extensionapis output — Capacity=`card-count×partitions`, Remaining at slice rate,
+- [x] **Task 11:** extensionapis output — Capacity=`card-count×partitions`, Remaining at slice rate,
   UnitResource round-down, OnceMaxRequest=`partitions/2`. **Acceptance:** node-5 8s InstanceType Accelerator
   Capacity=32, UnitResource 1c/6g, OnceMaxRequest=4; table test. **Dependencies:** T1, T6. **Files:**
   `pkg/worker/extensionapis/worker/instance_type.go(+_test)`. **Scope:** M.
