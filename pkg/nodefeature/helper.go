@@ -38,7 +38,40 @@ const (
 	// AcceleratableFeatureLabelPrefix prefixes the acceleratable(device) feature label keys,
 	// e.g. "acceleratable.feature.gpustack.ai/nvidia-tesla-t4.product".
 	AcceleratableFeatureLabelPrefix = "acceleratable." + FeatureLabelPrefix
+
+	// SlicedPartitionsLabelSuffix is the suffix of the admin-authored slicing label
+	// that enables slicing on an accelerator model, e.g.
+	// "acceleratable.feature.gpustack.ai/nvidia-a10g.sliced.partitions". Its value is
+	// the partition count N (a power of two validated by the admission webhook).
+	SlicedPartitionsLabelSuffix = ".sliced.partitions"
 )
+
+// GetAcceleratableSlicedPartitions returns the validated slice partition count the
+// admin enabled for accelerator model aKey on node — the value of the
+// "<AcceleratableFeatureLabelPrefix><aKey><SlicedPartitionsLabelSuffix>" label — or 0
+// when the label is absent, unparseable, or not a valid partition count.
+func GetAcceleratableSlicedPartitions(node *core.Node, aKey string) int64 {
+	v := node.Labels[AcceleratableFeatureLabelPrefix+aKey+SlicedPartitionsLabelSuffix]
+	if v == "" {
+		return 0
+	}
+	n, err := strconvx.Atoi[int64](v)
+	if err != nil || !IsValidSlicedPartitions(n) {
+		return 0
+	}
+	return n
+}
+
+// FilterAcceleratableSlicedPartitionsLabels returns the admin-authored slicing
+// opt-in labels carried by labels — those matching
+// "<AcceleratableFeatureLabelPrefix>...<SlicedPartitionsLabelSuffix>" — and drops
+// every other entry. The result is nil when labels carries no such opt-in.
+func FilterAcceleratableSlicedPartitionsLabels(labels map[string]string) map[string]string {
+	return mapx.Filter(labels, func(k, _ string) bool {
+		return strings.HasPrefix(k, AcceleratableFeatureLabelPrefix) &&
+			strings.HasSuffix(k, SlicedPartitionsLabelSuffix)
+	})
+}
 
 // ConstructAcceleratableNodeLabels constructs accelerator feature labels from the given device group list.
 func ConstructAcceleratableNodeLabels(groups device.DevicesGroupList) map[string]string {
@@ -471,12 +504,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		// z-queue. Invalid values are silently ignored here (the admission webhook
 		// rejects them at write time). z-cohort is the cohort-level per-unit view and
 		// never carries a sliced suffix — it is what cohort matching compares on.
-		var slicedC int64
-		if v := node.Labels[nodeKey+".sliced.partitions"]; v != "" {
-			if n, err := strconvx.Atoi[int64](v); err == nil && IsValidSlicedPartitions(n) {
-				slicedC = n
-			}
-		}
+		slicedC := GetAcceleratableSlicedPartitions(node, aKey)
 
 		// "acceleratable.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]"
 		profFlavor := fmt.Sprintf("%dc-%dg-%dg-%dd", cpuC, ramC, stgC, accC)

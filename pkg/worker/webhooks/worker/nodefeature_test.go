@@ -14,7 +14,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-const _a10gPartitionsKey = nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g" + _SlicedPartitionsLabelSuffix
+const _a10gPartitionsKey = nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g" + nodefeature.SlicedPartitionsLabelSuffix
 
 // newWorkerNodeFeature builds a "${node}-gpustack-worker" NodeFeature carrying the
 // given spec labels, mirroring what NodeFeatureReconciler produces.
@@ -116,7 +116,7 @@ func TestNodeFeatureWebhook_validate(t *testing.T) {
 			// hyphen (manufacturer=nvidia, id=tesla-t4).
 			name: "embedded-hyphen id matches its device group",
 			nf: newWorkerNodeFeature("node-5", map[string]string{
-				nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4" + _SlicedPartitionsLabelSuffix: "16",
+				nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4" + nodefeature.SlicedPartitionsLabelSuffix: "16",
 			}),
 			devices: devicesWithMaxPartitions("node-5", "tesla-t4", 8),
 			wantErr: true,
