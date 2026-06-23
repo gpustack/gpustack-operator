@@ -458,20 +458,52 @@ rejected.*
 *Checkpoint 5: a user picks an 8s InstanceType and can request 1/2/4; 8 is rejected.*
 
 **Phase 6 — Node dual-key reporting**
-- [ ] **Task 13:** Register the Sliced device-plugin server in the NVIDIA allocator `New()`; advertise
-  `.sliced`=`card-count×partitions`; `Allocate()` does placement bookkeeping only + writes back
+
+The dual-key split and who enforces what (resolved during the Phase 6 survey):
+- `.sliced.units` (= `D × card-count`, e.g. 51200) is reported via **Patch Node** (T13) and is the **binding
+  physical constraint**: a pod requests `U×D/partitions` of it (partitions = the admin-chosen N, baked in by
+  T10), so the scheduler's `Σ ≤ D×card-count` correctly accounts for U. Kueue reads the same pod request as
+  the `multiplyBy` input.
+- `.sliced` (= `card-count × MaxPartitions`) is advertised by the **device-plugin** (T14) and is a **loose,
+  non-binding injection token**: it only needs to be `≥` the real max concurrency so it never blocks; the
+  device-plugin uses the hardware `MaxPartitions` (not the admin N — avoids wiring N into the device-plugin),
+  because `.sliced.units` always binds first. Its sole jobs are to make the pod's `.sliced=C` schedulable and
+  to trigger `Allocate()`.
+- Real limits are enforced by **Webhook** (U power-of-two, `< N`, `≤ OnceMaxRequest`), **Kueue credits**
+  (`C×U/partitions` ≤ borrowable card-count), and **Patch-Node `.sliced.units`** (scheduler capacity). The
+  allocator's `Allocate()` does **bookkeeping only** (writes `AcceleratorAllocation`); runtime isolation is
+  deferred.
+
+- [x] **Task 13:** Patch Node `.sliced.units`=`D×participating-card-count` from a **worker control-plane
+  controller** (`NodeCapacityReconciler`, modeled on `NodeFeatureReconciler`), **not** the device-manager
+  detector — the detector's report loop only re-runs on device-set changes, so it would miss admin
+  `.sliced.partitions` label edits and never self-heal a capacity wipe. The reconciler watches managed
+  `core.Node` objects (predicate fires on managed/acceleratable label changes or `.sliced.units` capacity
+  changes) and reconciles via: `desiredSlicedUnitsCapacity(node)` (nil unless `gpustack.ai/managed=true`; per
+  manufacturer, D × the `.count` of models carrying a valid `.sliced.partitions` label; relies on
+  `ExtractAcceleratableNodeKeys` for known-manufacturer filtering) + `buildSlicedUnitsCapacityPatch` (sets
+  changed keys, nulls stale `.sliced.units`, nil when equal — idempotent, so the self-write feedback loop
+  terminates in one no-op reconcile) → `Client.Status().Patch` merge on the node `status` subresource (only
+  touches `.sliced.units`, never kubelet-managed capacity or the bare `.sliced`). RBAC: worker control plane
+  already patches node-derived objects. **Acceptance:** managed sliced node's `status.capacity` carries
+  `.sliced.units`; idempotent no-op re-reconcile; disabling slicing removes it; unmanaged node untouched;
+  table + fake-client tests. **Dependencies:** T1. **Files:**
+  `pkg/worker/controllers/worker/node.go(+_test)`, `pkg/worker/controllers/setup.go`. **Scope:** M.
+- [ ] **Task 14:** Register the Sliced device-plugin server in the NVIDIA allocator `New()` (gated on the
+  existing `opts.NoSliced`, parallel to Shared). The sliced server advertises the **bare `.sliced`** key
+  (`GetAcceleratableSlicedCardResourceName`, not `.sliced.units`), with **`MaxPartitions` device IDs per card**
+  (total `card-count×MaxPartitions`) — replacing the old per-card `.sliced.units` advertisement. `Allocate()`
+  does placement bookkeeping only: `Allocated` is the simple token count, writes back
   `Devices.Status.AcceleratorAllocation` (no real isolation). **Acceptance:** an NVIDIA node advertises
-  `nvidia.com/gpu.sliced`; Allocate writes AcceleratorAllocation; test. **Dependencies:** T2. **Files:**
-  `pkg/devicemanager/allocator/nvidia/deviceplugin.go`, `pkg/deviceplugin/server.go(+_test)`. **Scope:** M.
-- [ ] **Task 14:** device-manager direct Patch Node `.sliced.units`=`D×participating-card-count`, level-based
-  idempotent repatch. **Acceptance:** node `status.capacity` carries `.sliced.units`; self-heals after a
-  simulated re-reconcile; test. **Dependencies:** T1. **Files:** `pkg/devicemanager/detector/detector.go` or a
-  new patcher (+_test). **Scope:** M.
-- [ ] **Task 15:** Remove the sliced thousands-of-fake-devices path in `pkg/deviceplugin/helper.go` (counting
-  has moved to Patch Node) and confirm the `_Step*` derivations now built on `MaxUnits=D=12800` (Task 1).
-  **Acceptance:** no per-card fake-device pool for sliced; `_MinUnitsInPartitioned = 12800/512 = 25` divides
-  evenly; Exclusive/Shared unaffected; test. **Dependencies:** T13. **Files:**
-  `pkg/deviceplugin/helper.go(+_test)`. **Scope:** S.
+  `nvidia.com/gpu.sliced` sized by MaxPartitions; Allocate writes AcceleratorAllocation; test. **Dependencies:**
+  T2. **Files:** `pkg/devicemanager/allocator/nvidia/deviceplugin.go`, `pkg/deviceplugin/server.go(+_test)`.
+  **Scope:** M.
+- [ ] **Task 15:** Remove the sliced thousands-of-fake-devices path in `pkg/deviceplugin/helper.go`
+  (`GetDeviceIds(Sliced)` no longer emits `MaxUnits` IDs — counting moved to Patch Node; the `.sliced` pool now
+  comes from MaxPartitions per T14), and retire/relocate the now-unused `_StepInPartitioned` /
+  `PadPartitionedAllocationSize` if T14 dropped their last caller; confirm `_MinUnitsInPartitioned = 12800/512
+  = 25` still divides evenly. **Acceptance:** no per-card 12800 fake-device pool for sliced; Exclusive/Shared
+  unaffected; test. **Dependencies:** T14. **Files:** `pkg/deviceplugin/helper.go(+_test)`. **Scope:** S.
 
 *Final Checkpoint: local-cluster e2e (`gpustack-operator-e2e`) — label a node `partitions=8` → sliced
 InstanceType Capacity=32 → a 1/8 request admits and consumes 0.125 credit.*

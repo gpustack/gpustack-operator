@@ -14,6 +14,7 @@ var setups = []controller.Setup{
 	new(worker.CohortReconciler),
 	new(worker.InstanceReconciler),
 	new(worker.LocalQueueReconciler),
+	new(worker.NodeCapacityReconciler),
 	new(worker.NodeFeatureReconciler),
 	new(worker.ResourceFlavorReconciler),
 }
