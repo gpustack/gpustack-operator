@@ -10,21 +10,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/utils/mathx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
-)
-
-const (
-	MaxUnits = nodefeature.ResourceMaxUnits
-
-	_MaxSizeInExclusive = 1
-	_StepInExclusive    = MaxUnits / _MaxSizeInExclusive
-
-	_MaxSizeInShared = nodefeature.SharedResourceMaxSize
-	_StepInShared    = MaxUnits / _MaxSizeInShared
-
-	_MaxSizeInPartitioned  = nodefeature.SlicedResourceMaxSize
-	_MinUnitsInPartitioned = MaxUnits / _MaxSizeInPartitioned
 )
 
 type Resource struct {
@@ -46,8 +32,10 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartiti
 	}
 
 	if mode == workercore.DeviceAllocationModeShared {
-		devIDs := make([]string, 0, MaxUnits/_StepInShared)
-		for i := uint64(0); i < MaxUnits; i += _StepInShared {
+		// One device ID per shared owner; indices step by D/maxOwners units.
+		const step = uint64(nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize)
+		devIDs := make([]string, 0, nodefeature.SharedResourceMaxSize)
+		for i := uint64(0); i < nodefeature.ResourceMaxUnits; i += step {
 			devIDs = append(devIDs, str+padIndex(i))
 		}
 		return devIDs
@@ -66,6 +54,38 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartiti
 		devIDs[i] = str + padIndex(uint64(i))
 	}
 	return devIDs
+}
+
+// PadSlicedUnits rounds a raw ".sliced.units" request up to the nearest whole-slice
+// boundary D/2^k that a card of maxPartitions can physically provide:
+//   - the result is the smallest D/2^k >= units, with 2^k in [1, maxPartitions];
+//   - a request finer than the hardware (units < D/maxPartitions) rounds up to the
+//     finest hardware slice D/maxPartitions;
+//   - a request of a whole card or larger caps at D.
+//
+// It lets the sliced injection allocator map an arbitrary, unvalidated raw-Pod
+// ".sliced.units" request onto a real partition without a Pod admission webhook.
+func PadSlicedUnits(units, maxPartitions int64) int64 {
+	const d = nodefeature.ResourceMaxUnits
+	if units >= d {
+		return d
+	}
+	// Floor maxPartitions to a power of two (the finest slice the hardware offers).
+	maxP := int64(1)
+	for maxP<<1 <= maxPartitions {
+		maxP <<= 1
+	}
+	if units <= d/maxP {
+		return d / maxP
+	}
+	// Walk slice sizes from finest (maxP) to whole card (1); the first boundary
+	// D/p that covers the request is the padded upper bound.
+	for p := maxP; p >= 1; p >>= 1 {
+		if v := d / p; v >= units {
+			return v
+		}
+	}
+	return d
 }
 
 func padIndex(idx uint64) string {
@@ -176,21 +196,6 @@ func ConvertResourceUnitFromDeviceIds(id string) (ResourceUnit, error) {
 		},
 		Index: idx,
 	}, nil
-}
-
-// PadPartitionedAllocationSize pads the allocation size to the nearest power of two up to max partitions.
-func PadPartitionedAllocationSize(allocationSize, maxPartitions int32) int32 {
-	powers := mathx.PowersOfTwoUpTo(maxPartitions)
-	if powers[len(powers)-1] == maxPartitions {
-		powers = powers[:len(powers)-1]
-	}
-	for i := range powers {
-		expectedAllocationSize := _MinUnitsInPartitioned * powers[i]
-		if allocationSize <= expectedAllocationSize {
-			return expectedAllocationSize
-		}
-	}
-	return MaxUnits
 }
 
 // NewDevice creates a DeviceSpec with the given path and permissions.

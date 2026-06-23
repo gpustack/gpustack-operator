@@ -509,12 +509,19 @@ The dual-key split and who enforces what (resolved during the Phase 6 survey):
   writes AcceleratorAllocation; table + fake-client tests. **Dependencies:** T2. **Files:**
   `pkg/devicemanager/allocator/nvidia/deviceplugin.go`, `pkg/deviceplugin/server.go(+_test)`,
   `pkg/deviceplugin/helper.go(+_test)`. **Scope:** M.
-- [ ] **Task 15:** Finish the sliced fake-device cleanup in `pkg/deviceplugin/helper.go`: retire the now-dead
-  `PadPartitionedAllocationSize` (T14 dropped its last caller) and its sole dependent `_MinUnitsInPartitioned` /
-  `_MaxSizeInPartitioned` if unused; confirm `MaxUnits / SlicedResourceMaxSize = 12800/512 = 25` still divides
-  evenly (a guard test) in case the partitioned units math is reintroduced for real isolation later.
-  **Acceptance:** no dead partitioned-padding helpers; Exclusive/Shared unaffected; test. **Dependencies:** T14.
-  **Files:** `pkg/deviceplugin/helper.go(+_test)`. **Scope:** S.
+- [x] **Task 15:** Finish the sliced fake-device cleanup in `pkg/deviceplugin/helper.go`: retire the now-dead
+  `PadPartitionedAllocationSize` (T14 dropped its last caller) and its dependents `_MinUnitsInPartitioned` /
+  `_MaxSizeInPartitioned`; also remove the over-abstracted header constant ladder
+  (`MaxUnits` / `_MaxSizeIn*` / `_StepIn*`) and reference `nodefeature.ResourceMaxUnits` /
+  `nodefeature.SharedResourceMaxSize` directly (inline `D / maxOwners` math in `GetDeviceIds`/`Allocate`).
+  Add **`PadSlicedUnits(units, maxPartitions int64) int64`**: rounds a raw `.sliced.units` request up to the
+  nearest whole-slice boundary `D/2^k` the card can provide (finer-than-hardware → finest slice; whole card or
+  larger → `D`). This is the alignment the **sliced injection allocator** uses to map an arbitrary,
+  unvalidated raw-Pod (non-`Instance`) `.sliced.units` request onto a real partition **without a Pod admission
+  webhook**. Keep a guard test that `D / SlicedResourceMaxSize = 12800/512 = 25` divides evenly.
+  **Acceptance:** no dead partitioned-padding helpers; no local re-export const ladder; `PadSlicedUnits` table
+  test green; Exclusive/Shared unaffected. **Dependencies:** T14. **Files:** `pkg/deviceplugin/helper.go(+_test)`,
+  `pkg/deviceplugin/server.go`, `pkg/deviceplugin/controller.go`. **Scope:** S.
 - [ ] **Task 16:** Close the Story 1 authoring loop — make `NodeFeatureReconciler` preserve admin-authored
   `.sliced.partitions` on the `${node}-gpustack-worker` NodeFeature instead of wiping it. Today
   `Reconcile` does `aNf.Spec = eNf.Spec` where `eNf.Spec.Labels = ConstructNodeCapacityLabels(nd)` (capacity-derived,

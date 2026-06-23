@@ -27,6 +27,7 @@ import (
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
@@ -90,7 +91,7 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				ID:        devAccelerator.ID,
 				Index:     devAccelerator.Index,
 				Mode:      workercore.DeviceAllocationModeNone,
-				Remaining: MaxUnits,
+				Remaining: nodefeature.ResourceMaxUnits,
 			})
 		}
 		eDevsStatus.Groups = append(eDevsStatus.Groups, devsStatusGroup)

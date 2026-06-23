@@ -350,15 +350,15 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 			var allocated int32
 			switch s.AllocationMode {
 			default:
-				allocated = _StepInExclusive
+				allocated = nodefeature.ResourceMaxUnits // a whole card
 			case workercore.DeviceAllocationModeShared:
-				allocated = _StepInShared
+				allocated = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize // units per owner
 			case workercore.DeviceAllocationModeSliced:
 				// Bookkeeping only: the loose injection-token count (no isolation).
 				allocated = int32(len(resUnits))
 			}
-			if allocated > MaxUnits {
-				allocated = MaxUnits
+			if allocated > nodefeature.ResourceMaxUnits {
+				allocated = nodefeature.ResourceMaxUnits
 			}
 			if len(allocatedStatus.Groups) == 0 || allocatedStatus.Groups[len(allocatedStatus.Groups)-1].ID != devsGroup.ID {
 				allocatedStatus.Groups = append(allocatedStatus.Groups, workercore.DevicesAllocationGroup{
