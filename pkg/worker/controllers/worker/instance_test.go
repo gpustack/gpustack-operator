@@ -55,8 +55,8 @@ func assertResourceList(t *testing.T, want, got core.ResourceList, label string)
 
 func TestGetResourceRequirements(t *testing.T) {
 	accNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	slicedUnitsNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
-	slicedCardNVIDIA := nodefeature.GetAcceleratableSlicedCardResourceName(nodefeature.ManufacturerNVIDIA)
+	slicedUnitsNVIDIA := nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)
+	slicedCardNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
 
 	cases := []struct {
 		name string

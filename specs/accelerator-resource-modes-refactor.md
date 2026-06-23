@@ -31,11 +31,15 @@ borrows from the exclusive resource while the exclusive side may reclaim it). **
    appears in both the sliced ClusterQueue (credits=0) and the exclusive ClusterQueue (credits=4,
    `borrowingLimit` left empty); sliced workloads borrow quota from the exclusive queue through the cohort,
    and exclusive workloads can reclaim the lent quota via `ReclaimWithinCohort`.
-5. **Dual-key node reporting.** `.sliced.units` (fine-grained count = `D × participating-card-count`) is
-   reported by the **device-manager via a direct Patch Node** (level-based, resilient to the kubelet wiping
-   extended-resource capacity on restart); `.sliced` (slice-instance count = `card-count × partitions`,
-   the injection-token / unified injection hook) is advertised by the **device-plugin**, which also requires
-   **registering a Sliced device-plugin server**.
+5. **Dual-key node reporting.** `.sliced.units` (fine-grained binding count = `D × participating-card-count`)
+   is reported by a **worker control-plane controller (`NodeCapacityReconciler`) via Patch Node** —
+   level-based and resilient to the kubelet wiping extended-resource capacity on restart, and (unlike the
+   device-manager detector, whose report loop only fires on device-set changes) reacting to admin
+   `.sliced.partitions` label edits; `.sliced` (a **loose injection token** = `card-count × MaxPartitions`,
+   using the card's hardware `MaxPartitions` rather than the admin `N`, so `N` never wires into the
+   device-plugin) is advertised by the **device-plugin**, which also requires **registering a Sliced
+   device-plugin server**. `.sliced.units` is the binding constraint; `.sliced` only needs to be `≥` the real
+   max concurrency so it never blocks.
 6. **Correct external output (Story 2).** A sliced InstanceType reports `Accelerator.Capacity =
    card-count × partitions` (node-5: 4×8=32); `UnitResource` is folded by `partitions` with round-down
    (1d=12c/48g → per slice 1c/6g); `OnceMaxRequest = floorPow2(min(partitions/2, remaining slices))` —
@@ -105,8 +109,8 @@ and may request more than one slice.
   3. The user-supplied units must be a power of two and **strictly less than `partitions`** (on `8s`,
      1/2/4 are allowed, 8 is not).
 - **Scenario (continuing Story 1):** the InstanceType for CQ `…--nvidia-a10g-1d-8s` reports Accelerator = 32;
-  `UnitResource` is folded: 1d is allotted 12c/48g, so each slice (1/8) is 12/8=1c, 48/8=6g (**round down
-  only**).
+  `UnitResource` is folded: 1d is allotted 12c/48g, so each slice (1/8) is ⌊12/8⌋=1c (1.5 floored), 48/8=6g
+  (**round down only**).
 
 ### Core Features & Acceptance Criteria
 
@@ -118,7 +122,7 @@ and may request more than one slice.
 | F4 | Webhook unit conversion | Pod `.sliced.units` rewritten to `U×D/partitions` (per-card, not multiplied by C); `.sliced`=C unchanged; request==limit; U first power-of-two aligned and validated `< partitions`. |
 | F5 | Kueue transformations | Three global `Replace` rules; the sliced one uses `multiplyBy: .sliced` with factor `1/D`; `credits = C×U/partitions` verified by the table below. |
 | F6 | Borrow + reclaim topology | The sliced flavor's credits=0 in the sliced CQ; credits=4, borrowingLimit=nil in the exclusive CQ; `IndexingResourceFlavorsByQueueName` strips `-Ns` so the sliced RF enters the exclusive rfList; `ReclaimWithinCohort` enabled. |
-| F7 | Dual-key node reporting | `.sliced.units` via Patch Node = `D×card-count` (level-based repatch); `.sliced` via device-plugin = `card-count×partitions`; NVIDIA registers a Sliced server. |
+| F7 | Dual-key node reporting | `.sliced.units` via Patch Node from the worker `NodeCapacityReconciler` = `D×card-count` (level-based repatch, binding constraint); `.sliced` via device-plugin = `card-count×MaxPartitions` (loose injection token, hardware MaxPartitions not admin N); NVIDIA registers a Sliced server. |
 | F8 | extensionapis output | Sliced InstanceType: Capacity=`card-count×partitions`, Remaining at slice rate, UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining))` (round DOWN, shrinks with usage). |
 | F9 | API field | `InstanceResources` gains `AcceleratorUnits` (U, default 1, next protobuf tag); `make generate` passes. |
 
@@ -164,7 +168,7 @@ and may request more than one slice.
    explicitly documented; introduce TAS only at scale.
 4. **kubelet restart wipes capacity** → level-based repatch reconcile.
 5. **D=12800 amplifying fake-device pressure** → `.sliced.units` goes through Patch Node (not the
-   device-plugin's thousands of fake devices); `.sliced` is only `card-count × partitions`, on the order of
+   device-plugin's thousands of fake devices); `.sliced` is only `card-count × MaxPartitions`, on the order of
    tens.
 6. **Kueue borrow + reclaim semantics unverified** → de-risk with an early envtest/fake-client spike (Task 0)
    before locking the T6/T7 topology.
@@ -198,10 +202,10 @@ pkg/nodefeature/helper.go              # .sliced.partitions → -Ns (lift the po
 pkg/worker/webhooks/                   # new node-label partitions validating webhook; Instance mutating unit conversion
 pkg/worker/controllers/worker/clusterqueue.go   # IndexingResourceFlavorsByQueueName strips -Ns; borrow + reclaim; credits calc
 pkg/worker/kuberess/apps_kueue.go      # transformations: add multiplyBy, factor 1/D
-pkg/worker/extensionapis/worker/instance_type.go # Capacity=card-count×partitions, UnitResource, OnceMaxRequest=partitions/2
-pkg/devicemanager/allocator/nvidia/deviceplugin.go # register Sliced server
-pkg/devicemanager/...                  # Patch Node reporting .sliced.units; device-plugin advertising .sliced
-pkg/deviceplugin/helper.go             # MaxUnits/_Step* adjusted to D
+pkg/worker/extensionapis/worker/instance_type.go # Capacity=card-count×partitions, UnitResource, OnceMaxRequest=floorPow2(min(partitions/2, remaining))
+pkg/worker/controllers/worker/node.go  # NodeCapacityReconciler: Patch Node .sliced.units = D×card-count (level-based)
+pkg/devicemanager/allocator/nvidia/deviceplugin.go # register Sliced server; advertise .sliced = card-count×MaxPartitions
+pkg/deviceplugin/helper.go             # GetDeviceIds(Sliced) sized by MaxPartitions; MaxUnits/_Step* to D
 ```
 
 ### Code Style
@@ -314,10 +318,11 @@ spec:
   # ... product / family / os / arch / accelerator detail
 status:
   accelerator:
-    capacity: 32                  # card-count(4) × partitions(8)
-    remaining: 32                 # (4 − reserved credits) × 8; 31 after one 1/8 slice is taken
-    onceMaxRequest: 4             # floorPow2(min(partitions/2, remaining)); drops as slices are used:
-                                  # remaining 3 → 2, remaining 2 → 2, remaining 1 → 1, remaining 0 → 0
+    capacity: 32                  # slices = card-count(4) × partitions(8)
+    remaining: 32                 # slices; (4 − reserved credits) × 8; 31 after one 1/8 slice is taken
+    onceMaxRequest: 4             # floorPow2(min(partitions/2, remaining slices)) = floorPow2(min(4, 32)).
+                                  # Shrinks near exhaustion — illustrating the tail (remaining in slices):
+                                  # 3 → 2, 2 → 2, 1 → 1, 0 → 0
   # ... cpu / ram / localStorage: capacity/remaining/onceMaxRequest at node scale (unchanged)
 ---
 # Exclusive InstanceType — whole-card counts; capacity is the credits the sliced
@@ -372,10 +377,11 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
   Sliced are exact) and `1/D` is nano-clean; the worked-example table (1/8→1600, 1/512→25) passes.
   **Verify:** `make test ./pkg/nodefeature/...`, `make lint`. **Dependencies:** None. **Files:**
   `pkg/nodefeature/knowns.go(+_test)`. **Scope:** M.
-- [x] **Task 2:** Add the bare `.sliced` resource-name helper (`GetAcceleratableSlicedCardResourceName` →
-  `nvidia.com/gpu.sliced`) plus the `SlicedCardResourceNameSuffix` constant, and teach
-  `IsKnownAcceleratableResourceName` to recognize the bare key (so device-plugin-advertised `.sliced`
-  allocatable changes trigger reconcile). **Acceptance:** returns the bare key; `.sliced.units` unchanged;
+- [x] **Task 2:** Make `GetAcceleratableResourceName(_, Sliced)` return the bare device-plugin-advertised key
+  `nvidia.com/gpu.sliced` (suffix `SlicedResourceNameSuffix = ".sliced"`), and add the fine-grained counting
+  helper `GetAcceleratableSlicedUnitsResourceName` → `nvidia.com/gpu.sliced.units` (suffix
+  `SlicedUnitsResourceNameSuffix`). Teach `IsKnownAcceleratableResourceName` to recognize both (so
+  device-plugin-advertised `.sliced` allocatable changes trigger reconcile). **Acceptance:** returns the bare key; `.sliced.units` unchanged;
   the suffix-match does not collide. Unit tests. **Dependencies:** None. **Files:**
   `pkg/nodefeature/knowns.go(+_test)`. **Scope:** S.
 
@@ -398,8 +404,8 @@ highest-uncertainty item (Kueue borrowing/reclaim semantics) goes first to fail 
   **Verified:** code review APPROVE. **Dependencies:** T3. **Files:**
   `pkg/worker/webhooks/worker/{nodefeature.go(+_test),setup.go,zz_generated.webhooks.go}`. **Scope:** M.
 
-*Checkpoint 2: an admin labels node-5 `partitions=8` and `-8s` flavor/queue materialize; an illegal N is
-rejected.*
+*Checkpoint 2: an admin labels the `node-5-gpustack-worker` NodeFeature `partitions=8` and `-8s` flavor/queue
+materialize; an illegal N is rejected.*
 
 **Phase 3 — Kueue scheduling topology (Story 1 output: borrow + reclaim)**
 - [x] **Task 5:** `indexResourceFlavorByQueueName` emits the suffix-stripped queue name in addition for an
@@ -423,8 +429,9 @@ rejected.*
 - [x] **Task 8:** Add `AcceleratorUnits` (U, default 1, next protobuf tag) to `InstanceResources` + `make
   generate`. **Acceptance:** field generated, deepcopy/protobuf clean. **Dependencies:** None. **Files:**
   `api/worker/v1alpha1/instance.go`, generated artifacts. **Scope:** S (generation).
-- [x] **Task 9:** `apps_kueue.go` transformations — the sliced rule's factor `1/12800` plus `multiplyBy:
-  <.sliced>`; add the template func `getSlicedCardResourceName`; `.sliced` is not an input. **Acceptance:**
+- [x] **Task 9:** `apps_kueue.go` transformations — the sliced rule's `input: <.sliced.units>` (template func
+  `getSlicedUnitsResourceName`) with factor `1/12800` plus `multiplyBy: <.sliced>` (template func
+  `getSlicedResourceName`); the bare `.sliced` is not an input. **Acceptance:**
   the rendered Kueue config has the three rules correct; template render test. **Dependencies:** T2. **Files:**
   `pkg/worker/kuberess/apps_kueue.go(+_test)`. **Scope:** S.
 - [x] **Task 10:** Sliced unit conversion across the Instance webhook + controller (pod resource keys live in
@@ -489,24 +496,40 @@ The dual-key split and who enforces what (resolved during the Phase 6 survey):
   `.sliced.units`; idempotent no-op re-reconcile; disabling slicing removes it; unmanaged node untouched;
   table + fake-client tests. **Dependencies:** T1. **Files:**
   `pkg/worker/controllers/worker/node.go(+_test)`, `pkg/worker/controllers/setup.go`. **Scope:** M.
-- [ ] **Task 14:** Register the Sliced device-plugin server in the NVIDIA allocator `New()` (gated on the
+- [x] **Task 14:** Register the Sliced device-plugin server in the NVIDIA allocator `New()` (gated on the
   existing `opts.NoSliced`, parallel to Shared). The sliced server advertises the **bare `.sliced`** key
-  (`GetAcceleratableSlicedCardResourceName`, not `.sliced.units`), with **`MaxPartitions` device IDs per card**
-  (total `card-count×MaxPartitions`) — replacing the old per-card `.sliced.units` advertisement. `Allocate()`
-  does placement bookkeeping only: `Allocated` is the simple token count, writes back
-  `Devices.Status.AcceleratorAllocation` (no real isolation). **Acceptance:** an NVIDIA node advertises
-  `nvidia.com/gpu.sliced` sized by MaxPartitions; Allocate writes AcceleratorAllocation; test. **Dependencies:**
-  T2. **Files:** `pkg/devicemanager/allocator/nvidia/deviceplugin.go`, `pkg/deviceplugin/server.go(+_test)`.
-  **Scope:** M.
-- [ ] **Task 15:** Remove the sliced thousands-of-fake-devices path in `pkg/deviceplugin/helper.go`
-  (`GetDeviceIds(Sliced)` no longer emits `MaxUnits` IDs — counting moved to Patch Node; the `.sliced` pool now
-  comes from MaxPartitions per T14), and retire/relocate the now-unused `_StepInPartitioned` /
-  `PadPartitionedAllocationSize` if T14 dropped their last caller; confirm `_MinUnitsInPartitioned = 12800/512
-  = 25` still divides evenly. **Acceptance:** no per-card 12800 fake-device pool for sliced; Exclusive/Shared
-  unaffected; test. **Dependencies:** T14. **Files:** `pkg/deviceplugin/helper.go(+_test)`. **Scope:** S.
+  (`GetResourceName` returns `GetAcceleratableResourceName(_, Sliced)` = the bare `.sliced`, not `.sliced.units`), with
+  **`MaxPartitions` device IDs per card** (total `card-count×MaxPartitions`, clamped `>=1`) — replacing the old
+  per-card `MaxUnits`(12800) fake-device pool. This required moving the sliced sizing into `GetDeviceIds`
+  (new `maxPartitions` arg, sourced from `Features.MaxPartitions` at the `ListAndWatch` call site) and dropping
+  the now-orphaned `_StepInPartitioned`. `GetPreferredAllocation`'s sliced branch collapses into the
+  exclusive/shared path (one loose token per card); `Allocate()` does placement bookkeeping only: `Allocated` is
+  the simple token count `len(resUnits)`, writes back `Devices.Status.AcceleratorAllocation` (no real
+  isolation). **Acceptance:** an NVIDIA node advertises `nvidia.com/gpu.sliced` sized by MaxPartitions; Allocate
+  writes AcceleratorAllocation; table + fake-client tests. **Dependencies:** T2. **Files:**
+  `pkg/devicemanager/allocator/nvidia/deviceplugin.go`, `pkg/deviceplugin/server.go(+_test)`,
+  `pkg/deviceplugin/helper.go(+_test)`. **Scope:** M.
+- [ ] **Task 15:** Finish the sliced fake-device cleanup in `pkg/deviceplugin/helper.go`: retire the now-dead
+  `PadPartitionedAllocationSize` (T14 dropped its last caller) and its sole dependent `_MinUnitsInPartitioned` /
+  `_MaxSizeInPartitioned` if unused; confirm `MaxUnits / SlicedResourceMaxSize = 12800/512 = 25` still divides
+  evenly (a guard test) in case the partitioned units math is reintroduced for real isolation later.
+  **Acceptance:** no dead partitioned-padding helpers; Exclusive/Shared unaffected; test. **Dependencies:** T14.
+  **Files:** `pkg/deviceplugin/helper.go(+_test)`. **Scope:** S.
+- [ ] **Task 16:** Close the Story 1 authoring loop — make `NodeFeatureReconciler` preserve admin-authored
+  `.sliced.partitions` on the `${node}-gpustack-worker` NodeFeature instead of wiping it. Today
+  `Reconcile` does `aNf.Spec = eNf.Spec` where `eNf.Spec.Labels = ConstructNodeCapacityLabels(nd)` (capacity-derived,
+  never `.sliced.partitions`), so the admin's slicing label is overwritten on the next reconcile and never
+  reaches `Node.Labels` (the source every downstream consumer — T13 + RF/CQ/InstanceType — reads). Fix: before
+  the overwrite, carry forward any existing `.sliced.partitions`-suffixed Spec.Labels keys from the live worker
+  NodeFeature into the desired Spec, so capacity-derived keys still reconcile level-based while admin slicing
+  keys persist. (Logically a Phase 2 gap; surfaced during the Phase 6 build, executed here so the committed
+  T6–T15 numbering is untouched.) **Acceptance:** an admin-set `.sliced.partitions` on the worker NodeFeature
+  survives repeated reconciles; capacity-derived labels still converge; removing the admin label drops it;
+  fake-client + table tests. **Dependencies:** T1. **Files:**
+  `pkg/worker/controllers/worker/nodefeature.go(+_test)`. **Scope:** S.
 
-*Final Checkpoint: local-cluster e2e (`gpustack-operator-e2e`) — label a node `partitions=8` → sliced
-InstanceType Capacity=32 → a 1/8 request admits and consumes 0.125 credit.*
+*Final Checkpoint: local-cluster e2e (`gpustack-operator-e2e`) — label the `${node}-gpustack-worker`
+NodeFeature `partitions=8` → sliced InstanceType Capacity=32 → a 1/8 request admits and consumes 0.125 credit.*
 
 ### Test Plan
 [ ] I/we understand the owners of the involved components may require updates to existing tests to make this
@@ -535,7 +558,8 @@ Table-driven; target date 2026-06-22:
 - Webhook envtest: illegal partitions / `units=8` are rejected at admission.
 
 #### e2e tests
-- `gpustack-operator-e2e`: label a node `partitions=8` → sliced InstanceType Capacity=32 → submit a 1/8
+- `gpustack-operator-e2e`: label the `${node}-gpustack-worker` NodeFeature `partitions=8` (asserting the label
+  survives reconcile and propagates to `Node.Labels` per T16) → sliced InstanceType Capacity=32 → submit a 1/8
   request, it admits and consumes 0.125 credit; remove the label → the RF becomes draining.
 
 ## Alternatives
@@ -590,9 +614,12 @@ Table-driven; target date 2026-06-22:
    NodeFeature's `Spec.Labels`. Other authoring paths (direct Node labels, other NodeFeatures) are out of
    scope for now.
 
-   **Follow-up dependency (deferred — "other places not now").** `ConstructNodeCapacityLabels` reads
-   `.sliced.partitions` from `node.Labels` and the `NodeFeatureReconciler` fully replaces the worker
-   NodeFeature's `Spec.Labels` each reconcile, so a user-set `.sliced.partitions` on the worker NodeFeature is
-   currently not durable. For the worker NodeFeature to actually drive slicing end to end, the reconciler must
-   preserve/echo the user-supplied `.sliced.partitions`. Tracked as a follow-up task (not Task 4, which only
-   adds the validation webhook).
+   **Story 1 authoring is end-to-end via the worker NodeFeature (resolved by Task 16).** The admin's
+   `.sliced.partitions` lives on the `${node}-gpustack-worker` NodeFeature `Spec.Labels`; NFD propagates it to
+   `Node.Labels`, where every downstream consumer reads it (Task 13's `NodeCapacityReconciler`, and the
+   RF/CQ/InstanceType materialization). The one blocker is that `NodeFeatureReconciler` currently overwrites the
+   worker NodeFeature's whole `Spec` (`aNf.Spec = eNf.Spec`, where `eNf.Spec.Labels = ConstructNodeCapacityLabels(nd)`,
+   which never includes `.sliced.partitions`), wiping the admin's label on the next reconcile. **Task 16** makes
+   the reconciler preserve admin-authored `.sliced.partitions` Spec.Labels (merge, not wholesale overwrite), so
+   the worker-NodeFeature authoring path is durable. Other authoring paths (direct Node labels, other
+   NodeFeatures) remain out of scope.

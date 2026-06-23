@@ -38,13 +38,15 @@ const (
 	// advertised by the device-plugin (its value is the sharing ownership card count)
 	// and used for Kueue credits accounting.
 	SharedResourceNameSuffix = ".shared"
-	// SlicedResourceNameSuffix is the fine-grained sliced counting key, reported
-	// per node via Patch Node and used for Kueue credits accounting.
-	SlicedResourceNameSuffix = ".sliced.units"
-	// SlicedCardResourceNameSuffix is the coarse sliced card-count / injection-token
-	// key, advertised by the device-plugin (its value is the participating card
-	// count); it triggers the allocator's Allocate() injection hook.
-	SlicedCardResourceNameSuffix = ".sliced"
+	// SlicedResourceNameSuffix is the coarse sliced injection-token key, advertised
+	// by the device-plugin as a loose per-card token pool sized by the card's
+	// hardware MaxPartitions (so node allocatable is cards*MaxPartitions, not the
+	// card count); it only triggers the allocator's Allocate() injection hook. The
+	// binding credits accounting lives on the fine-grained ".sliced.units" key.
+	SlicedResourceNameSuffix = ".sliced"
+	// SlicedUnitsResourceNameSuffix is the fine-grained sliced counting key,
+	// reported per node via Patch Node and used for Kueue credits accounting.
+	SlicedUnitsResourceNameSuffix = ".sliced.units"
 )
 
 const (
@@ -197,7 +199,9 @@ func GetAcceleratablePciVendorIDs() []string {
 	return ids
 }
 
-// GetAcceleratableResourceName returns the accelerator resource name for the given manufacturer and allocation mode.
+// GetAcceleratableResourceName returns the accelerator resource name advertised
+// by the device-plugin to the kubelet for the given manufacturer and allocation
+// mode (e.g. "nvidia.com/gpu", "nvidia.com/gpu.shared", "nvidia.com/gpu.sliced").
 func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAllocationMode) core.ResourceName {
 	resName := _ManufacturerAcceleratableResourceNameMap[manufacturer]
 	switch mode {
@@ -210,13 +214,13 @@ func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAll
 	}
 }
 
-// GetAcceleratableSlicedCardResourceName returns the bare sliced card-count /
-// injection-token resource name for the given manufacturer (e.g.
-// "nvidia.com/gpu.sliced"). It is advertised by the device-plugin and is distinct
-// from the sliced counting key returned by GetAcceleratableResourceName with
-// DeviceAllocationModeSliced (".sliced.units").
-func GetAcceleratableSlicedCardResourceName(manufacturer string) core.ResourceName {
-	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedCardResourceNameSuffix
+// GetAcceleratableSlicedUnitsResourceName returns the fine-grained sliced counting
+// key for the given manufacturer (e.g. "nvidia.com/gpu.sliced.units"). It is
+// reported per node via Patch Node and used as the Kueue credits transformation
+// input, distinct from the coarse injection-token key returned by
+// GetAcceleratableResourceName with DeviceAllocationModeSliced (".sliced").
+func GetAcceleratableSlicedUnitsResourceName(manufacturer string) core.ResourceName {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedUnitsResourceNameSuffix
 }
 
 // IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
@@ -224,11 +228,10 @@ func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	switch {
 	case stringx.HasSuffix(name, SharedResourceNameSuffix):
 		name = name[:len(name)-len(SharedResourceNameSuffix)]
+	case stringx.HasSuffix(name, SlicedUnitsResourceNameSuffix):
+		name = name[:len(name)-len(SlicedUnitsResourceNameSuffix)]
 	case stringx.HasSuffix(name, SlicedResourceNameSuffix):
-		// Match ".sliced.units" before the bare ".sliced" suffix.
 		name = name[:len(name)-len(SlicedResourceNameSuffix)]
-	case stringx.HasSuffix(name, SlicedCardResourceNameSuffix):
-		name = name[:len(name)-len(SlicedCardResourceNameSuffix)]
 	}
 	return _AcceleratableResourceNameSet.Has(name)
 }

@@ -25,7 +25,6 @@ const (
 
 	_MaxSizeInPartitioned  = nodefeature.SlicedResourceMaxSize
 	_MinUnitsInPartitioned = MaxUnits / _MaxSizeInPartitioned
-	_StepInPartitioned     = 1
 )
 
 type Resource struct {
@@ -39,7 +38,7 @@ func (in Resource) String() string {
 	return in.Group + ":" + in.Device
 }
 
-func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode) []string {
+func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartitions int32) []string {
 	str := in.String() + ":"
 
 	if mode == workercore.DeviceAllocationModeExclusive {
@@ -54,9 +53,17 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode) []string {
 		return devIDs
 	}
 
-	devIDs := make([]string, MaxUnits/_StepInPartitioned)
-	for i := uint64(0); i < MaxUnits; i += _StepInPartitioned {
-		devIDs[i] = str + padIndex(i)
+	// Sliced advertises a coarse, loose injection-token pool sized by the card's
+	// hardware MaxPartitions. It only needs to be >= the real max concurrency (the
+	// admin partition count N, which the Webhook bounds to <= MaxPartitions) so it
+	// never blocks; the binding constraint is always the ".sliced.units" capacity.
+	n := maxPartitions
+	if n < 1 {
+		n = 1
+	}
+	devIDs := make([]string, n)
+	for i := int32(0); i < n; i++ {
+		devIDs[i] = str + padIndex(uint64(i))
 	}
 	return devIDs
 }

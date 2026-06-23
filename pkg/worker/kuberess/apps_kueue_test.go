@@ -90,8 +90,8 @@ func Test_kueueChartTransformations(t *testing.T) {
 	var (
 		exclusive  = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive))
 		shared     = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeShared))
-		slicedUnit = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced))
-		slicedCard = string(nodefeature.GetAcceleratableSlicedCardResourceName(manu))
+		slicedUnit = string(nodefeature.GetAcceleratableSlicedUnitsResourceName(manu))
+		slicedCard = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced))
 		credits    = string(nodefeature.GetAcceleratableCreditsResourceName(manu))
 	)
 

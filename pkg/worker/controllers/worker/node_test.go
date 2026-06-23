@@ -13,13 +13,12 @@ import (
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemname"
 )
 
-var nvidiaSlicedUnits = nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+var nvidiaSlicedUnits = nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)
 
 // acceleratableNode builds a managed Node carrying the acceleratable feature
 // labels (presence, count, and optionally sliced.partitions) for one model.
@@ -91,7 +90,7 @@ func TestDesiredSlicedUnitsCapacity(t *testing.T) {
 			node: withModel(acceleratableNode("node-5", "nvidia-a10g", "4", "8", true), "amd-mi300", "2", "8"),
 			want: map[string]int64{
 				string(nvidiaSlicedUnits): 4 * nodefeature.ResourceMaxUnits,
-				string(nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerAMD, workercore.DeviceAllocationModeSliced)): 2 * nodefeature.ResourceMaxUnits,
+				string(nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerAMD)): 2 * nodefeature.ResourceMaxUnits,
 			},
 		},
 	}

@@ -27,6 +27,11 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModeShared),
 		)
 	}
+	if !opts.NoSliced {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModeSliced),
+		)
+	}
 
 	return aggregated{
 		logger:     logger,
