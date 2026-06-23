@@ -188,8 +188,8 @@ func TestConvertInstanceTypeFromClusterQueue_ExclusiveWithLentSliced(t *testing.
 
 // TestConvertInstanceTypeFromClusterQueue_Sliced pins Task 11: a sliced
 // InstanceType reports Accelerator capacity = card-count × partitions, remaining
-// at the slice rate, OnceMaxRequest = partitions/2, and per-slice unit resources
-// rounded down.
+// at the slice rate, OnceMaxRequest = floorPow2(min(partitions/2, remaining))
+// (round DOWN, shrinking with usage), and per-slice unit resources rounded down.
 func TestConvertInstanceTypeFromClusterQueue_Sliced(t *testing.T) {
 	credits := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
 
@@ -198,19 +198,55 @@ func TestConvertInstanceTypeFromClusterQueue_Sliced(t *testing.T) {
 		reservation core.ResourceList
 		wantCap     resource.Quantity
 		wantRem     resource.Quantity
+		wantOrm     resource.Quantity
 	}{
 		{
 			// node-5: 4 cards × 8 partitions = 32 slices, none reserved.
-			name:    "no reservation: capacity and remaining are 32 slices",
+			name:    "no reservation: 32 slices, ORM capped at partitions/2",
 			wantCap: qty("32"),
 			wantRem: qty("32"),
+			wantOrm: qty("4"), // min(4, 32) = 4
 		},
 		{
 			// One 1/8 slice reserved = 0.125 credits → remaining (4−0.125)×8 = 31.
-			name:        "one slice reserved: remaining drops to 31",
+			name:        "one slice reserved: remaining 31, ORM still 4",
 			reservation: core.ResourceList{credits: qty("125m")},
 			wantCap:     qty("32"),
 			wantRem:     qty("31"),
+			wantOrm:     qty("4"), // min(4, 31) = 4
+		},
+		{
+			// 29 slices reserved = 3.625 credits → remaining (4−3.625)×8 = 3.
+			// ORM rounds DOWN: floorPow2(min(4,3)) = 2 (not 4).
+			name:        "remaining 3: ORM rounds down to 2",
+			reservation: core.ResourceList{credits: qty("3625m")},
+			wantCap:     qty("32"),
+			wantRem:     qty("3"),
+			wantOrm:     qty("2"),
+		},
+		{
+			// 30 slices reserved = 3.75 credits → remaining 2 → ORM 2.
+			name:        "remaining 2: ORM is 2",
+			reservation: core.ResourceList{credits: qty("3750m")},
+			wantCap:     qty("32"),
+			wantRem:     qty("2"),
+			wantOrm:     qty("2"),
+		},
+		{
+			// 31 slices reserved = 3.875 credits → remaining 1 → ORM 1.
+			name:        "remaining 1: ORM is 1",
+			reservation: core.ResourceList{credits: qty("3875m")},
+			wantCap:     qty("32"),
+			wantRem:     qty("1"),
+			wantOrm:     qty("1"),
+		},
+		{
+			// Fully reserved (4 credits) → remaining 0 → ORM 0.
+			name:        "remaining 0: ORM collapses to 0",
+			reservation: core.ResourceList{credits: qty("4")},
+			wantCap:     qty("32"),
+			wantRem:     qty("0"),
+			wantOrm:     qty("0"),
 		},
 	}
 
@@ -224,7 +260,7 @@ func TestConvertInstanceTypeFromClusterQueue_Sliced(t *testing.T) {
 			assert.Equal(t, int64(8), it.Spec.Sliced, "Sliced")
 			qtyEqual(t, c.wantCap, it.Status.Accelerator.Capacity, "Capacity.Accelerator")
 			qtyEqual(t, c.wantRem, it.Status.Accelerator.Remaining, "Remaining.Accelerator")
-			qtyEqual(t, qty("4"), it.Status.Accelerator.OnceMaxRequest, "OnceMaxRequest.Accelerator")
+			qtyEqual(t, c.wantOrm, it.Status.Accelerator.OnceMaxRequest, "OnceMaxRequest.Accelerator")
 			assert.Equal(t, "1", it.Spec.UnitResources.CPU, "UnitResources.CPU (12/8 round down)")
 			assert.Equal(t, "6Gi", it.Spec.UnitResources.RAM, "UnitResources.RAM (48/8 round down)")
 		})

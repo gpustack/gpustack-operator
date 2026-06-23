@@ -80,27 +80,44 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 	}
 }
 
-// TestInstanceWebhook_ValidateCreate_SlicedUnits pins Task 10(c): on a sliced
-// InstanceType the per-card unit count U must be strictly less than the partition
-// count. Power-of-two and OnceMaxRequest bounds are Task 12's concern.
+// TestInstanceWebhook_ValidateCreate_SlicedUnits pins Task 12: on a sliced 8s
+// InstanceType the per-card unit count U must be a power of two, at most the
+// OnceMaxRequest (partitions/2 = 4), and strictly less than the partition count.
 func TestInstanceWebhook_ValidateCreate_SlicedUnits(t *testing.T) {
 	const typeName = "sliced-8s"
 
 	cases := []struct {
 		name    string
 		units   int32
+		onceMax string // OnceMaxRequest; "" → 4 (fresh 8s)
 		wantErr bool
 	}{
 		{name: "one unit is allowed", units: 1},
 		{name: "two units is allowed", units: 2},
-		{name: "four units is allowed", units: 4},
+		{name: "four units (== OnceMaxRequest) is allowed", units: 4},
+		{name: "three units (not a power of two) is rejected", units: 3, wantErr: true},
+		{name: "zero units is normalized to one and allowed", units: 0},
 		{name: "units equal to partitions is rejected", units: 8, wantErr: true},
 		{name: "units above partitions is rejected", units: 16, wantErr: true},
+		{
+			// When capacity is low the dynamic ORM drops (Task 11), so U beyond it
+			// is rejected even though it is < partitions.
+			name:  "units above a shrunken OnceMaxRequest is rejected",
+			units: 4, onceMax: "2", wantErr: true,
+		},
+		{
+			name:  "units within a shrunken OnceMaxRequest is allowed",
+			units: 2, onceMax: "2",
+		},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
+			onceMax := c.onceMax
+			if onceMax == "" {
+				onceMax = "4"
+			}
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: worker.InstanceTypeSpec{
@@ -109,7 +126,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedUnits(t *testing.T) {
 					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: 8},
 				},
 				Status: worker.InstanceTypeStatus{
-					Accelerator: worker.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+					Accelerator: worker.InstanceTypeResource{OnceMaxRequest: resource.MustParse(onceMax)},
 				},
 			}
 			w := newInstanceWebhook(instType)

@@ -189,3 +189,35 @@ func TestFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestDivide(t *testing.T) {
+	cases := []struct {
+		name    string
+		q       string
+		divisor int64
+		want    string
+	}{
+		{"exact decimal", "48", 8, "6"},
+		{"round down decimal", "12", 8, "1"},
+		{"divisor one is unchanged", "12", 1, "12"},
+		{"non-positive divisor is unchanged", "12", 0, "12"},
+		{"binary SI preserves unit", "48Gi", 8, "6Gi"},
+		{"round down binary SI", "12Gi", 8, "1536Mi"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got := Divide(resource.MustParse(c.q), c.divisor)
+			assert.Equal(t, c.want, got.String(), "Divide(%s, %d)", c.q, c.divisor)
+		})
+	}
+}
+
+func TestStringDivide(t *testing.T) {
+	got, err := StringDivide("48", 8)
+	assert.NoError(t, err)
+	assert.Equal(t, "6", got.String())
+
+	_, err = StringDivide("not-a-quantity", 8)
+	assert.Error(t, err)
+}

@@ -23,6 +23,8 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/json"
+	"gpustack.ai/gpustack/pkg/utils/mathx"
+	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
@@ -445,13 +447,16 @@ func convertInstanceTypeFromClusterQueue(
 			remCards.Add(remAcc)
 			capAcc = nodefeature.QuantityToSliceCount(cardAcc, slicedAccelerator)
 			remAcc = nodefeature.QuantityToSliceCount(remCards, slicedAccelerator)
-			// OnceMaxRequest is the per-card unit cap U_max = partitions/2 (the
-			// largest power of two strictly below partitions), the bound the
-			// admission webhook enforces on U — independent of current usage.
-			ormAcc = resource.Quantity{}
-			if cardAcc.Sign() > 0 {
-				ormAcc = *resource.NewQuantity(slicedAccelerator/2, resource.DecimalSI)
+			// OnceMaxRequest is the largest power-of-two units U a single request
+			// may ask for: bounded by the per-card cap partitions/2 and by the
+			// remaining slices, rounded DOWN to a power of two (3 free → 2). It
+			// shrinks as slices are consumed, matching the dynamic ORM of the
+			// non-sliced path; the admission webhook enforces U <= this value.
+			maxU := slicedAccelerator / 2
+			if rem := remAcc.Value(); rem < maxU {
+				maxU = rem
 			}
+			ormAcc = *resource.NewQuantity(mathx.LargestPowerOfTwoUpTo(maxU), resource.DecimalSI)
 		} else {
 			ormAcc = nodefeature.QuantityToSliceCount(ormAcc, 1)
 		}
@@ -461,8 +466,12 @@ func convertInstanceTypeFromClusterQueue(
 	// rounded down (e.g. a 12c/48g card sliced into 8 yields 1c/6g per slice).
 	unitCPU, unitRAM := notes["unitCPU"], notes["unitRAM"]
 	if slicedAccelerator > 0 {
-		unitCPU = sliceDownUnit(unitCPU, slicedAccelerator)
-		unitRAM = sliceDownUnit(unitRAM, slicedAccelerator)
+		if q, err := quantityx.StringDivide(unitCPU, slicedAccelerator); err == nil {
+			unitCPU = q.String()
+		}
+		if q, err := quantityx.StringDivide(unitRAM, slicedAccelerator); err == nil {
+			unitRAM = q.String()
+		}
 	}
 
 	instTypeSpec := worker.InstanceTypeSpec{
@@ -556,16 +565,6 @@ func instanceTypeMatchFieldSelector(opts ctrlcli.ListOptions, insType *worker.In
 		return true
 	}
 	return fs.Matches(fields.Set{"metadata.name": insType.Name})
-}
-
-// sliceDownUnit divides an integer unit-resource string by the partition count,
-// rounding down. Non-integer or non-positive inputs are returned unchanged.
-func sliceDownUnit(s string, partitions int64) string {
-	n, err := strconvx.Atoi[int64](s)
-	if err != nil || partitions <= 0 {
-		return s
-	}
-	return resource.NewQuantity(n/partitions, resource.DecimalSI).String()
 }
 
 // parseNodeResourceFlavorName parses the node resource flavor name to get the once max request of each resource.

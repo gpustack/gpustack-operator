@@ -38,7 +38,8 @@ borrows from the exclusive resource while the exclusive side may reclaim it). **
    **registering a Sliced device-plugin server**.
 6. **Correct external output (Story 2).** A sliced InstanceType reports `Accelerator.Capacity =
    card-count × partitions` (node-5: 4×8=32); `UnitResource` is folded by `partitions` with round-down
-   (1d=12c/48g → per slice 1c/6g); `OnceMaxRequest = partitions/2`.
+   (1d=12c/48g → per slice 1c/6g); `OnceMaxRequest = floorPow2(min(partitions/2, remaining slices))` —
+   capped at the per-card half-card limit, rounded DOWN to a power of two, and shrinking as slices are used.
 
 **Testable success criteria.** Using node-5 (A10G×4) from `docs/architecture.md` as the canonical case, after
 enabling `partitions=8`: the RF/CQ/Cohort names, credits values (sliced CQ=0 / exclusive CQ=4), Capacity=32,
@@ -118,7 +119,7 @@ and may request more than one slice.
 | F5 | Kueue transformations | Three global `Replace` rules; the sliced one uses `multiplyBy: .sliced` with factor `1/D`; `credits = C×U/partitions` verified by the table below. |
 | F6 | Borrow + reclaim topology | The sliced flavor's credits=0 in the sliced CQ; credits=4, borrowingLimit=nil in the exclusive CQ; `IndexingResourceFlavorsByQueueName` strips `-Ns` so the sliced RF enters the exclusive rfList; `ReclaimWithinCohort` enabled. |
 | F7 | Dual-key node reporting | `.sliced.units` via Patch Node = `D×card-count` (level-based repatch); `.sliced` via device-plugin = `card-count×partitions`; NVIDIA registers a Sliced server. |
-| F8 | extensionapis output | Sliced InstanceType: Capacity=`card-count×partitions`, Remaining at slice rate, UnitResource round-down, OnceMaxRequest=`partitions/2`. |
+| F8 | extensionapis output | Sliced InstanceType: Capacity=`card-count×partitions`, Remaining at slice rate, UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining))` (round DOWN, shrinks with usage). |
 | F9 | API field | `InstanceResources` gains `AcceleratorUnits` (U, default 1, next protobuf tag); `make generate` passes. |
 
 **credits worked examples (D=12800, for acceptance):**
@@ -315,7 +316,8 @@ status:
   accelerator:
     capacity: 32                  # card-count(4) × partitions(8)
     remaining: 32                 # (4 − reserved credits) × 8; 31 after one 1/8 slice is taken
-    onceMaxRequest: 4             # partitions/2 = max power-of-two U < partitions
+    onceMaxRequest: 4             # floorPow2(min(partitions/2, remaining)); drops as slices are used:
+                                  # remaining 3 → 2, remaining 2 → 2, remaining 1 → 1, remaining 0 → 0
   # ... cpu / ram / localStorage: capacity/remaining/onceMaxRequest at node scale (unchanged)
 ---
 # Exclusive InstanceType — whole-card counts; capacity is the credits the sliced
@@ -442,12 +444,16 @@ rejected.*
 
 **Phase 5 — User-facing output (Story 2)**
 - [x] **Task 11:** extensionapis output — Capacity=`card-count×partitions`, Remaining at slice rate,
-  UnitResource round-down, OnceMaxRequest=`partitions/2`. **Acceptance:** node-5 8s InstanceType Accelerator
-  Capacity=32, UnitResource 1c/6g, OnceMaxRequest=4; table test. **Dependencies:** T1, T6. **Files:**
+  UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining slices))` (a `floorPow2`
+  helper; the dynamic ORM matches the non-sliced path and rounds DOWN: 3 free → 2). **Acceptance:** node-5 8s
+  InstanceType Accelerator Capacity=32, UnitResource 1c/6g, fresh OnceMaxRequest=4, and ORM drops to 2/2/1/0
+  as remaining falls to 3/2/1/0; table test. **Dependencies:** T1, T6. **Files:**
   `pkg/worker/extensionapis/worker/instance_type.go(+_test)`. **Scope:** M.
-- [ ] **Task 12:** Instance validating webhook — accept U that is a power of two `<= OnceMaxRequest` and `<
-  partitions`, reject otherwise. **Acceptance:** on 8s, 1/2/4 accepted, 8 rejected, 3 rejected; table test.
-  **Dependencies:** T10, T11. **Files:** `pkg/worker/webhooks/worker/instance.go(+_test)`. **Scope:** S.
+- [x] **Task 12:** Instance validating webhook — accept U that is a power of two `<= OnceMaxRequest` and `<
+  partitions`, reject otherwise. Because the ORM (T11) is now the dynamic round-down value, `U <= OnceMaxRequest`
+  also tracks current availability (U beyond a shrunken ORM is rejected). **Acceptance:** on 8s, 1/2/4 accepted,
+  8 rejected, 3 rejected, 0 rejected; with ORM=2, U=4 rejected; table test. **Dependencies:** T10, T11.
+  **Files:** `pkg/worker/webhooks/worker/instance.go(+_test)`. **Scope:** S.
 
 *Checkpoint 5: a user picks an 8s InstanceType and can request 1/2/4; 8 is rejected.*
 
