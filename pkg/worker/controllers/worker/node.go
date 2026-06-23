@@ -89,11 +89,11 @@ func desiredSlicedUnitsCapacity(nd *core.Node) core.ResourceList {
 	}
 	cardsByManufacturer := make(map[string]int64)
 	for _, aKey := range nodefeature.ExtractAcceleratableNodeKeys(nd) {
-		nodeKey := nodefeature.AcceleratableFeatureLabelPrefix + aKey
-		n, err := strconvx.Atoi[int64](nd.Labels[nodeKey+".sliced.partitions"])
-		if err != nil || !nodefeature.IsValidSlicedPartitions(n) {
+		// Only models the admin enabled slicing for (a valid ".sliced.partitions").
+		if nodefeature.GetAcceleratableSlicedPartitions(nd, aKey) == 0 {
 			continue
 		}
+		nodeKey := nodefeature.AcceleratableFeatureLabelPrefix + aKey
 		cards, err := strconvx.Atoi[int64](nd.Labels[nodeKey+".count"])
 		if err != nil || cards <= 0 {
 			continue

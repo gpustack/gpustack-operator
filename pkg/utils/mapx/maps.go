@@ -105,6 +105,22 @@ func Filter[K comparable, V any, M ~map[K]V](m M, f func(K, V) bool) M {
 	return ret
 }
 
+// Merge returns a new map combining the entries of the provided maps.
+// When several maps share a key, the value from the last map wins.
+// Nil or empty maps are skipped. Returns nil when the result would be empty.
+func Merge[K comparable, V any, M ~map[K]V](ms ...M) M {
+	ret := make(map[K]V)
+	for i := range ms {
+		for k, v := range ms[i] {
+			ret[k] = v
+		}
+	}
+	if len(ret) == 0 {
+		return nil
+	}
+	return ret
+}
+
 // EqualWithKey reports whether two maps contain the same value for each specified key.
 // Returns true when neither map contains a given key (treated as equal absence).
 func EqualWithKey[K, V comparable, M ~map[K]V](a, b M, k K, ks ...K) bool {

@@ -17,11 +17,6 @@ import (
 	"gpustack.ai/gpustack/pkg/webhook"
 )
 
-// _SlicedPartitionsLabelSuffix is the suffix of the user-supplied label that opts
-// an accelerator model into slicing, e.g.
-// "acceleratable.feature.gpustack.ai/nvidia-a10g.sliced.partitions".
-const _SlicedPartitionsLabelSuffix = ".sliced.partitions"
-
 // NodeFeatureWebhook validates the "${nodeName}-gpustack-worker" nfd.NodeFeature
 // objects — the place users are advised to set the slicing opt-in label
 // "acceleratable.${prefix}${aKey}.sliced.partitions". It rejects partition counts
@@ -72,7 +67,7 @@ func (r *NodeFeatureWebhook) validate(ctx context.Context, nf *nfd.NodeFeature) 
 	)
 	for key, val := range nf.Spec.Labels {
 		if !strings.HasPrefix(key, nodefeature.AcceleratableFeatureLabelPrefix) ||
-			!strings.HasSuffix(key, _SlicedPartitionsLabelSuffix) {
+			!strings.HasSuffix(key, nodefeature.SlicedPartitionsLabelSuffix) {
 			continue
 		}
 		fldPath := field.NewPath("spec", "labels").Key(key)
@@ -97,7 +92,7 @@ func (r *NodeFeatureWebhook) validate(ctx context.Context, nf *nfd.NodeFeature) 
 			}
 		}
 		aKey := strings.TrimSuffix(
-			strings.TrimPrefix(key, nodefeature.AcceleratableFeatureLabelPrefix), _SlicedPartitionsLabelSuffix)
+			strings.TrimPrefix(key, nodefeature.AcceleratableFeatureLabelPrefix), nodefeature.SlicedPartitionsLabelSuffix)
 		if maxParts := maxPartitionsForAKey(devs, aKey); maxParts > 0 && n > int64(maxParts) {
 			return field.Invalid(fldPath, val,
 				fmt.Sprintf("sliced partitions exceeds the device's maximum partitions (%d)", maxParts))

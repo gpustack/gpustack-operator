@@ -6,6 +6,45 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestMerge(t *testing.T) {
+	cases := []struct {
+		name string
+		ms   []map[string]string
+		want map[string]string
+	}{
+		{
+			name: "no maps",
+			ms:   nil,
+			want: nil,
+		},
+		{
+			name: "all nil or empty maps",
+			ms:   []map[string]string{nil, {}},
+			want: nil,
+		},
+		{
+			name: "disjoint keys combine",
+			ms:   []map[string]string{{"foo": "1"}, {"bar": "2"}},
+			want: map[string]string{"foo": "1", "bar": "2"},
+		},
+		{
+			name: "later map wins on conflict",
+			ms:   []map[string]string{{"foo": "1", "bar": "2"}, {"foo": "9"}},
+			want: map[string]string{"foo": "9", "bar": "2"},
+		},
+		{
+			name: "skips nil among non-nil",
+			ms:   []map[string]string{nil, {"foo": "1"}, nil},
+			want: map[string]string{"foo": "1"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, Merge(c.ms...))
+		})
+	}
+}
+
 func TestEqualWithKey(t *testing.T) {
 	cases := []struct {
 		name string

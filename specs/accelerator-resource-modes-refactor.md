@@ -522,18 +522,26 @@ The dual-key split and who enforces what (resolved during the Phase 6 survey):
   **Acceptance:** no dead partitioned-padding helpers; no local re-export const ladder; `PadSlicedUnits` table
   test green; Exclusive/Shared unaffected. **Dependencies:** T14. **Files:** `pkg/deviceplugin/helper.go(+_test)`,
   `pkg/deviceplugin/server.go`, `pkg/deviceplugin/controller.go`. **Scope:** S.
-- [ ] **Task 16:** Close the Story 1 authoring loop — make `NodeFeatureReconciler` preserve admin-authored
+- [x] **Task 16:** Close the Story 1 authoring loop — make `NodeFeatureReconciler` preserve admin-authored
   `.sliced.partitions` on the `${node}-gpustack-worker` NodeFeature instead of wiping it. Today
   `Reconcile` does `aNf.Spec = eNf.Spec` where `eNf.Spec.Labels = ConstructNodeCapacityLabels(nd)` (capacity-derived,
   never `.sliced.partitions`), so the admin's slicing label is overwritten on the next reconcile and never
-  reaches `Node.Labels` (the source every downstream consumer — T13 + RF/CQ/InstanceType — reads). Fix: before
-  the overwrite, carry forward any existing `.sliced.partitions`-suffixed Spec.Labels keys from the live worker
-  NodeFeature into the desired Spec, so capacity-derived keys still reconcile level-based while admin slicing
-  keys persist. (Logically a Phase 2 gap; surfaced during the Phase 6 build, executed here so the committed
-  T6–T15 numbering is untouched.) **Acceptance:** an admin-set `.sliced.partitions` on the worker NodeFeature
-  survives repeated reconciles; capacity-derived labels still converge; removing the admin label drops it;
-  fake-client + table tests. **Dependencies:** T1. **Files:**
-  `pkg/worker/controllers/worker/nodefeature.go(+_test)`. **Scope:** S.
+  reaches `Node.Labels` (the source every downstream consumer — T13 + RF/CQ/InstanceType — reads). Fix: drop the
+  full-Spec overwrite and **converge** `Spec.Labels` to the capacity-derived set the controller owns
+  (`ConstructNodeCapacityLabels`), preserving only the admin-authored `.sliced.partitions` opt-in — via
+  `nodefeature.FilterAcceleratableSlicedPartitionsLabels` + `mapx.Merge(<preserved opt-in>, <desired>)`, replacing
+  the live `Spec.Labels` when it differs (`kubemeta.DeepEqual`). Converging — rather than a plain key-merge —
+  prunes stale owned keys when the node's derived key set changes (e.g. an accelerator model swap), so dead
+  flavors/queues stop being advertised, while the suffix-scoped filter keeps the admin slicing label untouched.
+  Also centralize the label key in `nodefeature`:
+  `SlicedPartitionsLabelSuffix` constant + `GetAcceleratableSlicedPartitions(node, aKey)` helper (read + parse +
+  validate), deduping the 4 prior literal/private-const sites (`ConstructNodeCapacityLabels`,
+  `NodeCapacityReconciler`, the NodeFeature webhook, this reconciler). (Logically a Phase 2 gap; surfaced during
+  the Phase 6 build, executed here so the committed T6–T15 numbering is untouched.) **Acceptance:** an admin-set
+  `.sliced.partitions` on the worker NodeFeature survives repeated reconciles; capacity-derived labels still
+  converge; stale owned labels converge away; removing the admin label drops it; fake-client + table tests. **Dependencies:** T1. **Files:**
+  `pkg/worker/controllers/worker/nodefeature.go(+_test)`, `pkg/nodefeature/helper.go`,
+  `pkg/worker/controllers/worker/node.go`, `pkg/worker/webhooks/worker/nodefeature.go`. **Scope:** S.
 
 *Final Checkpoint: local-cluster e2e (`gpustack-operator-e2e`) — label the `${node}-gpustack-worker`
 NodeFeature `partitions=8` → sliced InstanceType Capacity=32 → a 1/8 request admits and consumes 0.125 credit.*
@@ -630,3 +638,19 @@ Table-driven; target date 2026-06-22:
    the reconciler preserve admin-authored `.sliced.partitions` Spec.Labels (merge, not wholesale overwrite), so
    the worker-NodeFeature authoring path is durable. Other authoring paths (direct Node labels, other
    NodeFeatures) remain out of scope.
+5. **Raw-Pod `.sliced.units` quota-vs-physical drift (defer to the slicing-injection work).** The
+   Instance path already emits aligned `.sliced.units = U×(D/N)` (`instance.go` request build) and the
+   Instance webhook bounds `U` to a power of two `< N`, so Instance-submitted Pods keep
+   **accounted == physical**. A *raw* Pod (created directly, bypassing the Instance path) can request an
+   unaligned `.sliced.units` — e.g. `1700`. This is **not a full Kueue bypass**: it still needs the
+   `kueue.x-k8s.io/queue-name` label to enter the sliced CQ (true of exclusive/shared raw Pods too — no
+   new hole), Kueue counts `units×cards/D` credits on the face value, and the default scheduler's
+   NodeResourcesFit counts the face value against the node's `cards×D` pool. The real risk is at
+   **injection time**: `PadSlicedUnits` rounds the physical carve *up* to the next realizable slice
+   (`1700 → 3200 = ¼ card`), so the Pod physically consumes more than Kueue accounted — a **bounded
+   over-allocation** of at most one slice-granule per Pod. Options when the injection work lands:
+   (a) align raw-Pod `.sliced.units` to `D/N` at admission (a lightweight Pod validating webhook, or a
+   Kueue-admission alignment) so accounted == physical; (b) round *down* at injection (physical ≤
+   accounted, at the cost of pinning tiny requests to the smallest slice); or (c) accept the bounded
+   drift. `PadSlicedUnits` stays as the injection-time safety net regardless — it only guarantees a
+   malformed value maps to a *realizable* slice, it is not the accounting gate.

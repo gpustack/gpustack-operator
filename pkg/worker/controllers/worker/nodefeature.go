@@ -80,13 +80,20 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				skip = false
 			}
 		}
-		// Update spec.
-		if !kubemeta.DeepEqual(aNf.Spec, eNf.Spec) {
-			aNf.Spec = eNf.Spec
-			skip = false
+		// Converge spec labels to the capacity-derived set this reconciler owns
+		// (eNf), while preserving the admin-authored "*.sliced.partitions" opt-in
+		// labels that live only on the worker NodeFeature. A plain merge would leave
+		// stale owned labels behind when the node's derived key set changes (e.g. an
+		// accelerator model swap), keeping dead flavors/queues advertised.
+		desired := mapx.Merge(
+			nodefeature.FilterAcceleratableSlicedPartitionsLabels(aNf.Spec.Labels),
+			eNf.Spec.Labels)
+		if !kubemeta.DeepEqual(aNf.Spec.Labels, desired) {
 			logger.V(2).Info("node feature spec changed, need update",
 				"old", aNf.Spec.Labels,
-				"new", eNf.Spec.Labels)
+				"new", desired)
+			aNf.Spec.Labels = desired
+			skip = false
 		}
 		// Update owner reference.
 		if !kubemeta.IsControlledBy(aNf, nd) {
