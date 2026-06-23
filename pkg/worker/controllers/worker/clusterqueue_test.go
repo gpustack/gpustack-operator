@@ -18,7 +18,6 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -365,7 +364,7 @@ func newSlicedAccelNode(name string, cards, partitions int64) *core.Node {
 		},
 		Status: core.NodeStatus{
 			Allocatable: core.ResourceList{
-				nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced): *resource.NewQuantity(cards*nodefeature.ResourceMaxUnits, resource.DecimalSI),
+				nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA): *resource.NewQuantity(cards*nodefeature.ResourceMaxUnits, resource.DecimalSI),
 			},
 		},
 	}

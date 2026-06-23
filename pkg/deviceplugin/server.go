@@ -17,7 +17,6 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
@@ -46,6 +45,8 @@ type ResourceServer struct {
 
 // GetResourceName returns the resource name to be registered to the Device Manager based on the kind and name.
 func (s *ResourceServer) GetResourceName() core.ResourceName {
+	// For sliced this is the bare ".sliced" injection-token key; the ".sliced.units"
+	// counting key is reported separately via Patch Node, not the device-plugin.
 	return nodefeature.GetAcceleratableResourceName(s.Manufacturer, s.AllocationMode)
 }
 
@@ -133,7 +134,7 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 					}),
 				}
 			}
-			ids := res.GetDeviceIds(s.AllocationMode)
+			ids := res.GetDeviceIds(s.AllocationMode, devAccelerator.Features.MaxPartitions)
 			for k := range ids {
 				resp.Devices = append(resp.Devices,
 					&deviceplugin.Device{
@@ -240,67 +241,22 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 				continue
 			}
 
-			// Allocate exclusive and shared resources.
-			if s.AllocationMode != workercore.DeviceAllocationModeSliced {
-				if miResUnits, existed := mustIncludedResUnitsMap[res]; existed {
-					preferredDeviceIDsSet.Delete(res.Device)
-					selectedResUnits = append(selectedResUnits, miResUnits[0])
-				} else {
-					if preferredDeviceIDsSet.Len() != 0 && !preferredDeviceIDsSet.Has(res.Device) {
-						unselectedResUnits = append(unselectedResUnits, resUnits[0])
-						continue
-					}
-					preferredDeviceIDsSet.Delete(res.Device)
-					selectedResUnits = append(selectedResUnits, resUnits[0])
-				}
-				remainingSize -= 1
-				if preferredDeviceIDsSet.Len() == 0 && remainingSize <= 0 {
-					goto outside
-				}
-				continue
-			}
-
-			// Allocate partitioned resources.
+			// Exclusive, shared and sliced all select one device unit (token) per
+			// card; the per-card concurrency/units accounting lives elsewhere (Kueue
+			// credits and the ".sliced.units" capacity), not in the device plugin.
 			if miResUnits, existed := mustIncludedResUnitsMap[res]; existed {
-				// Skip the resource if it's partitioned but the quantity is not enough.
-				remainingSize = PadPartitionedAllocationSize(
-					remainingSize,
-					devsAccelerator.Features.MaxPartitions,
-				)
-				if int32(len(resUnits)) < remainingSize {
-					remainingSize -= int32(len(resUnits))
-					goto outside
-				}
+				// Only the first must-include unit per card is consumed (one token).
 				preferredDeviceIDsSet.Delete(res.Device)
-				selectedResUnits = append(selectedResUnits, miResUnits...)
-				remainingSize -= int32(len(miResUnits))
-				miResUnitsSet := sets.New[ResourceUnit](miResUnits...)
-				for k := range resUnits {
-					if miResUnitsSet.Has(resUnits[k]) {
-						continue
-					}
-					selectedResUnits = append(selectedResUnits, resUnits[k])
-					remainingSize -= 1
-					if remainingSize == 0 {
-						break
-					}
-				}
+				selectedResUnits = append(selectedResUnits, miResUnits[0])
 			} else {
-				remainingSize = PadPartitionedAllocationSize(
-					remainingSize,
-					devsAccelerator.Features.MaxPartitions,
-				)
-				if int32(len(resUnits)) < remainingSize {
-					continue
-				}
 				if preferredDeviceIDsSet.Len() != 0 && !preferredDeviceIDsSet.Has(res.Device) {
-					unselectedResUnits = append(unselectedResUnits, resUnits[:remainingSize]...)
+					unselectedResUnits = append(unselectedResUnits, resUnits[0])
 					continue
 				}
 				preferredDeviceIDsSet.Delete(res.Device)
-				selectedResUnits = append(selectedResUnits, resUnits[:remainingSize]...)
-				remainingSize = 0
+				selectedResUnits = append(selectedResUnits, resUnits[0])
 			}
+			remainingSize -= 1
 			if preferredDeviceIDsSet.Len() == 0 && remainingSize <= 0 {
 				goto outside
 			}
@@ -398,10 +354,8 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 			case workercore.DeviceAllocationModeShared:
 				allocated = _StepInShared
 			case workercore.DeviceAllocationModeSliced:
-				allocated = PadPartitionedAllocationSize(
-					int32(len(resUnits)),
-					devsAccelerator.Features.MaxPartitions,
-				)
+				// Bookkeeping only: the loose injection-token count (no isolation).
+				allocated = int32(len(resUnits))
 			}
 			if allocated > MaxUnits {
 				allocated = MaxUnits

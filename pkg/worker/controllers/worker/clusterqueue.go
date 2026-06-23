@@ -366,7 +366,7 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 						// Sliced flavor lent into the exclusive queue: contribute
 						// the participating card count, derived from the node's
 						// ".sliced.units" allocatable (D units per card).
-						unitsResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
+						unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(manufacturer)
 						var unitsQ resource.Quantity
 						for j := range ndList.Items {
 							unitsQ.Add(ndList.Items[j].Status.Allocatable[unitsResName])

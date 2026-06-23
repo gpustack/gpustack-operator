@@ -812,9 +812,9 @@ func getResourceRequirements(
 					u = 1
 				}
 				unitsQ := nodefeature.QuantityToAlignedValue(*resource.NewQuantity(int64(u), resource.DecimalSI), instType.Spec.Sliced)
-				unitsResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+				unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(instType.Spec.Manufacturer)
 				cardQ := *inst.Spec.Resources.Accelerator
-				cardResName := nodefeature.GetAcceleratableSlicedCardResourceName(instType.Spec.Manufacturer)
+				cardResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
 				rr.Limits[unitsResName] = unitsQ
 				rr.Requests[unitsResName] = unitsQ
 				rr.Limits[cardResName] = cardQ

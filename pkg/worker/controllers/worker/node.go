@@ -15,7 +15,6 @@ import (
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -107,7 +106,7 @@ func desiredSlicedUnitsCapacity(nd *core.Node) core.ResourceList {
 	}
 	out := make(core.ResourceList, len(cardsByManufacturer))
 	for manufacturer, cards := range cardsByManufacturer {
-		resName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
+		resName := nodefeature.GetAcceleratableSlicedUnitsResourceName(manufacturer)
 		out[resName] = *resource.NewQuantity(cards*nodefeature.ResourceMaxUnits, resource.DecimalSI)
 	}
 	return out
@@ -127,7 +126,7 @@ func buildSlicedUnitsCapacityPatch(desired, current core.ResourceList) map[strin
 		}
 	}
 	for name := range current {
-		if !stringx.HasSuffix(string(name), nodefeature.SlicedResourceNameSuffix) {
+		if !stringx.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix) {
 			continue
 		}
 		if _, ok := desired[name]; !ok {
@@ -144,7 +143,7 @@ func buildSlicedUnitsCapacityPatch(desired, current core.ResourceList) map[strin
 // was added, removed, or changed between the two capacity maps.
 func slicedUnitsCapacityChanged(oldCap, newCap core.ResourceList) bool {
 	for name, q := range newCap {
-		if !stringx.HasSuffix(string(name), nodefeature.SlicedResourceNameSuffix) {
+		if !stringx.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix) {
 			continue
 		}
 		if old, ok := oldCap[name]; !ok || old.Cmp(q) != 0 {
@@ -152,7 +151,7 @@ func slicedUnitsCapacityChanged(oldCap, newCap core.ResourceList) bool {
 		}
 	}
 	for name := range oldCap {
-		if !stringx.HasSuffix(string(name), nodefeature.SlicedResourceNameSuffix) {
+		if !stringx.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix) {
 			continue
 		}
 		if _, ok := newCap[name]; !ok {

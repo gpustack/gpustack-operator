@@ -11,17 +11,18 @@ import (
 )
 
 func TestAcceleratableResourceNames(t *testing.T) {
-	// The sliced mode advertises two distinct keys: the fine-grained counting key
-	// `.sliced.units` (via Patch Node) and the bare card-count / injection-token
-	// key `.sliced` (via device-plugin). They must not collide.
+	// The sliced mode advertises two distinct keys: the bare card-count /
+	// injection-token key `.sliced` (via device-plugin, returned by
+	// GetAcceleratableResourceName) and the fine-grained counting key
+	// `.sliced.units` (via Patch Node). They must not collide.
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu"),
 		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive))
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.shared"),
 		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeShared))
-	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.units"),
-		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced))
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced"),
-		GetAcceleratableSlicedCardResourceName(ManufacturerNVIDIA))
+		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.units"),
+		GetAcceleratableSlicedUnitsResourceName(ManufacturerNVIDIA))
 }
 
 func TestIsKnownAcceleratableResourceName(t *testing.T) {

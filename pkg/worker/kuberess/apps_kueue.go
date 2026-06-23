@@ -185,7 +185,7 @@ managerConfig:
 {{- $manuExclusiveResName := getExclusiveResourceName $manu }}
 {{- $manuSharedResName := getSharedResourceName $manu }}
 {{- $manuSlicedResName := getSlicedResourceName $manu }}
-{{- $manuSlicedCardResName := getSlicedCardResourceName $manu }}
+{{- $manuSlicedUnitsResName := getSlicedUnitsResourceName $manu }}
       - input: {{ $manuExclusiveResName }}
         strategy: Replace
         outputs:
@@ -194,9 +194,9 @@ managerConfig:
         strategy: Replace
         outputs:
           {{ $manuCreditsResName }}: "0.1"
-      - input: {{ $manuSlicedResName }}
+      - input: {{ $manuSlicedUnitsResName }}
         strategy: Replace
-        multiplyBy: {{ $manuSlicedCardResName }}
+        multiplyBy: {{ $manuSlicedResName }}
         outputs:
           {{ $manuCreditsResName }}: "0.000078125"
 {{- end }}
@@ -239,12 +239,12 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 			}
 			return string(nodefeature.GetAcceleratableResourceName(s, workercore.DeviceAllocationModeSliced))
 		},
-		"getSlicedCardResourceName": func(v any) string {
+		"getSlicedUnitsResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
-			return string(nodefeature.GetAcceleratableSlicedCardResourceName(s))
+			return string(nodefeature.GetAcceleratableSlicedUnitsResourceName(s))
 		},
 		"getCreditsResourceName": func(v any) string {
 			s, ok := v.(string)
