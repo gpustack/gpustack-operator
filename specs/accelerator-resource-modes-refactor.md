@@ -1,5 +1,7 @@
 # Spec: Accelerator Resource Modes Refactor (Exclusive / Shared / Sliced)
 
+Status: Shipped
+
 ## Summary
 
 Normalize the three accelerator (GPU/NPU/TPU) resource modes — **Exclusive / Shared / Sliced** — onto a
