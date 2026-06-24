@@ -187,7 +187,7 @@ their tests); `node_test.go` only uses `ResourceMaxUnits` for `.sliced.units` al
   `BorrowingLimit` still nil. **Verify:** `go test ./pkg/worker/controllers/worker/...` (rescale
   `clusterqueue_test` `wantCredits`: 4→51200, etc.).
 
-- [ ] **Task 4 — Divide-at-read on the display side (`instance_type.go`
+- [x] **Task 4 — Divide-at-read on the display side (`instance_type.go`
   `convertInstanceTypeFromClusterQueue`).** Apply `CreditsToCards` at the two credit read points — the
   `capAcc.Add(res.NominalQuota)` sum and the `remAcc.Sub(total)` / `remAccRf.Sub(total)` reservation
   subtraction for the credits resource — so all downstream card math is unchanged. The exclusive whole-card
