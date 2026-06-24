@@ -89,6 +89,59 @@ The ClusterQueue's `HoldAndDrain` is only a transient step on its way to removal
 once no reservation remains), so it is not a reliable post-drain assertion; the flavor tombstone is
 the contract. The Cohort is reclaimed only once no node AND no ClusterQueue still reference it.
 
+## CASE 5 — Sliced accelerator injection recipe (validated)
+
+CASE 5 implements the Final Checkpoint of `specs/accelerator-resource-modes-refactor.md`:
+`partitions=8` → sliced InstanceType **Capacity=32** → a 1/8 request **admits** and **consumes 0.125
+credit**. On a GPU-less cluster the whole sliced chain is driven by `DeviceManager`, which never runs
+without hardware, so its two outputs are mocked:
+
+1. **Accelerator feature labels** (DeviceManager detector → `<node>-gpustack-device-manager`
+   NodeFeature → NFD merges onto `Node.Labels`): `acceleratable.feature.gpustack.ai/<aKey>=true` plus
+   `.count` / `.product` / `.memory` / `.cores`. Reuse the CASE 4 NodeFeature recipe; set
+   `.count=4` to reproduce the spec canonical node-5 A10G×4 case (Capacity = 4×8 = 32). `.count` is the
+   gate for `ConstructNodeCapacityLabels` — without it no `.z-flavor`/`.z-queue` is derived.
+2. **Admin `.sliced.partitions=8`** on the `${node}-gpustack-worker` NodeFeature. This is the T16
+   assertion: `NodeFeatureReconciler` must **merge** (not wholesale-overwrite) `Spec.Labels`, so the
+   admin slicing opt-in survives reconcile and reaches `Node.Labels` — the source every downstream
+   consumer (T13, RF/CQ/InstanceType) reads.
+3. **The bare device-plugin token `nvidia.com/gpu.sliced`** patched onto `Node.status.capacity`
+   (`kubectl patch node <n> --subresource=status --type=merge -p '{"capacity":{"nvidia.com/gpu.sliced":"1"}}'`).
+   A sliced Pod requests `.sliced=C` (the card count); the default scheduler's NodeResourcesFit needs
+   this on the node to place the Pod, so without the mock the Pod stays Pending and Kueue never admits.
+
+**Deliberately NOT mocked — `nvidia.com/gpu.sliced.units`.** It is auto-patched by the worker
+control-plane `NodeCapacityReconciler` (T13) from `gpustack.ai/managed=true` + `.count` +
+`.sliced.partitions`, yielding `count × D` (D=12800 → `4×12800 = 51200`). Mocking it would mask the T13
+verification; leaving it unmocked is itself the assertion (CASE 5 check C).
+
+**Borrow topology.** The sliced ClusterQueue's sliced flavor carries `nominalQuota=0` (it borrows); the
+exclusive ClusterQueue lends the card count (4 credits) on that same sliced flavor (T6). A 1/8 request
+is `0.125` credits, borrowed from the exclusive side through the cohort.
+
+**Observability (verified against the kueue v0.17.1 source — a correction to an earlier assumption).**
+`enableClusterQueueResources` commented out in `pkg/worker/kuberess/apps_kueue.go` gates **only
+Prometheus metrics** (consumed at `pkg/controller/core/core.go:81` as `cfg.Metrics.EnableClusterQueueResources`
+→ `metrics.ReportClusterQueueResourceUsage`). It does **not** affect status. `ClusterQueue.status.flavorsUsage`
+is a stable v1beta2 field (`apis/kueue/v1beta2/clusterqueue_types.go`); `ResourceUsage.Total` includes
+cohort borrows and `Borrowed = used − Nominal` (`pkg/cache/scheduler/cache.go` `getUsage`), written by
+`clusterqueue_controller.go`. So CASE 5 asserts credit consumption directly on the sliced CQ:
+`status.flavorsUsage[flavor].resources[credits.gpustack.ai/nvidia].total == 0.125` **and**
+`borrowed == 0.125` — `borrowed > 0` is the direct proof of the Story 1 borrow topology (sliced CQ
+nominal is 0). Admit is asserted via `status.admittedWorkloads >= 1` (cluster-level, no Workload-name
+coupling). There is no need to parse `Workload.status.admission`.
+
+**Capacity=32, not 8.** `count=4 × partitions=8`. On a single-card cluster (`.count=1`) it would be 8;
+CASE 5 mocks `.count=4` to match the spec canonical case.
+
+**Cleanup nuance.** The bare `nvidia.com/gpu.sliced` must be **manually** patch-removed (`null`) in the
+trap — T13 only ever manages `.sliced.units` keys. `.sliced.units` is auto-reclaimed by T13 once the
+admin label drops (leave a short retry window; teardown covers any straggler).
+
+**Webhook tolerance.** `NodeFeatureWebhook` (`pkg/worker/webhooks/worker/nodefeature.go`) best-effort
+queries the `Devices` CR to bound `partitions ≤ MaxPartitions`; a lookup miss degrades to a pure
+power-of-two check, so `partitions=8` (a power of two) is accepted **without** mocking a Devices CR.
+
 ## Skill-specific troubleshooting
 
 - **CASE 2 ram edit reverts / old profile never drains** — the patch must land on the

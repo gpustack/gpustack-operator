@@ -10,7 +10,9 @@ model: sonnet
 Deploy the operator onto a **local** cluster and verify the four-stage scheduling chain end to end:
 NFD labels nodes → Device Manager detects accelerators → Worker profiles capacity → four controllers
 materialize Kueue `ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue`. See
-[architecture.md](../../../docs/architecture.md) for the chain.
+[architecture.md](../../../docs/architecture.md) for the chain. **CASE 5** additionally exercises the
+**sliced accelerator** borrow-and-reclaim path (`partitions=8` → 1/8 admits, 0.125 credit) on a GPU-less
+cluster by injecting feature labels and mocking the device-plugin capacity.
 
 This skill **mutates a cluster**. Hard rules:
 
@@ -30,7 +32,7 @@ The work is split into shared phase scripts and numbered, self-contained cases:
   `assert-core.sh <NS>`, `teardown.sh <NS>` (self-contained cleanup; mirrors the chart's `cleanup.sh`).
 - `cases/case-N.sh <NS>` — one numbered scenario each, ending in a `STATUS | CHECK | OBJECT` table and
   exiting non-zero on any FAIL.
-- `references/` — `drain-recycle.md` (CASE 2/3/4 rationale) and shared `../_e2e-lib/references/troubleshooting.md`.
+- `references/` — `drain-recycle.md` (CASE 2/3/4/5 rationale) and shared `../_e2e-lib/references/troubleshooting.md`.
 
 ## Cases (locked titles)
 
@@ -40,6 +42,7 @@ The work is split into shared phase scripts and numbered, self-contained cases:
 | 2 | Drain stops a running Instance (not recreate) | `pkg/worker/controllers/worker/instance.go`, `pkg/worker/webhooks/worker/instance.go` | `cases/case-2.sh` | yes (confirm) |
 | 3 | Managed-toggle is an independent drain trigger | `pkg/worker/controllers/worker/{resourceflavor,cohort}.go` | `cases/case-3.sh` | yes (confirm) |
 | 4 | Accelerated chain & drain-recycle (approx.) | accelerated / drain paths (optional) | `cases/case-4.sh` | yes (confirm) |
+| 5 | Sliced accelerator: partitions=8 → 1/8 admits, 0.125 credit | `pkg/worker/controllers/worker/{clusterqueue,node,nodefeature}.go`, `pkg/worker/webhooks/worker/{nodefeature,instance}.go`, `pkg/worker/kuberess/apps_kueue.go`, `pkg/worker/extensionapis/worker/instance_type.go`, `pkg/nodefeature/{knowns,helper}.go`, `pkg/devicemanager/**`, `pkg/deviceplugin/**` | `cases/case-5.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
@@ -73,7 +76,7 @@ Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `p
    bash .claude/skills/_e2e-lib/scripts/deploy.sh "$NS" "$TAG"
    ```
 
-5. **Run the selected cases.** CASE 1 is read-only (no prompt); CASE 2/3/4 mutate and self-recover, so
+5. **Run the selected cases.** CASE 1 is read-only (no prompt); CASE 2/3/4/5 mutate and self-recover, so
    confirm each before running. Each prints a PASS/FAIL table and exits non-zero on failure — read the
    table, do not re-derive from raw output.
 
@@ -84,6 +87,7 @@ Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `p
    bash .claude/skills/gpustack-operator-e2e/cases/case-2.sh "$NS"
    bash .claude/skills/gpustack-operator-e2e/cases/case-3.sh "$NS"
    bash .claude/skills/gpustack-operator-e2e/cases/case-4.sh "$NS"
+   bash .claude/skills/gpustack-operator-e2e/cases/case-5.sh "$NS"
    ```
 
    On a FAIL, diagnose the named stage (`kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=200`,
@@ -102,6 +106,6 @@ Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `p
 
 ## References
 
-- `references/drain-recycle.md` — why CASE 2/3/4 need a real cluster, the unit-test blind spot, the
-  managed-toggle code path, and the injection recipes.
+- `references/drain-recycle.md` — why CASE 2/3/4/5 need a real cluster, the unit-test blind spot, the
+  managed-toggle code path, and the injection recipes (incl. the sliced CASE 5 mock recipe).
 - `../_e2e-lib/references/troubleshooting.md` — shared image/rollout/teardown failure modes.
