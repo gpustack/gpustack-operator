@@ -1,6 +1,6 @@
 # Spec: Unified Integer Credit-Base Scoring (Exclusive / Shared / Sliced)
 
-Status: Building
+Status: Built
 
 ## Summary
 The sliced-accelerator borrow model is silently broken: a 1/8 slice that should consume `0.125` credits is
@@ -121,7 +121,10 @@ As an operator, `kubectl get instancetype` shows the exclusive type's Accelerato
 ```bash
 make lint
 go test ./pkg/nodefeature/... ./pkg/worker/...
-helm template deploy/gpustack-operator/chart | grep -A4 transformations   # integer factors
+# The Kueue credits transformations are rendered by the worker at runtime via a
+# Go text/template (not helm), so the integer factors are pinned by this unit test
+# (it parses the rendered manager config back), not by `helm template`:
+go test ./pkg/worker/kuberess/... -run Test_kueueChartTransformations
 bash .claude/skills/gpustack-operator-e2e/cases/case-5.sh gpustack-system  # sliced admission + true credit
 ```
 ### Project Structure (files in scope)
@@ -203,7 +206,7 @@ their tests); `node_test.go` only uses `ResourceMaxUnits` for `.sliced.units` al
   *Checkpoint: full `go test ./pkg/nodefeature/... ./pkg/worker/...` green and `make lint` clean — scheduling,
   admission, and display are all consistent on the integer basis.*
 
-- [ ] **Task 5 — e2e case-5 + comment refresh.** Update any case-5 assertion that reads the credit magnitude
+- [x] **Task 5 — e2e case-5 + comment refresh.** Update any case-5 assertion that reads the credit magnitude
   to expect the true base-scaled value (a 1/8 slice consumes `1600` credits, not a ceiled `1`); confirm the
   sliced workload is **admitted**. Sweep remaining `0.000078125` / "= 1 credit" comments across the touched
   files to the integer model (doc-only).

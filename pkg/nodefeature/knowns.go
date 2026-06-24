@@ -50,14 +50,16 @@ const (
 )
 
 const (
-	// ResourceMaxUnits is the global credits denominator D = 2^9 * 5^2 = 12800 and
-	// the single per-card unit basis shared by every allocation mode: one whole
-	// card is worth D normalized units (= 1 credit), Shared yields D/10 per
-	// ownership, and a card sliced into N partitions yields D/N units per slice.
-	// D is chosen so that D/N is an exact integer for every per-mode max size below
-	// (SharedResourceMaxSize, SlicedResourceMaxSize) and so that the Kueue credits
-	// factor 1/D is representable cleanly in nano. It also seeds the device-plugin
-	// per-card unit grid and the Devices CR AcceleratorAllocation ruler.
+	// ResourceMaxUnits is the global denominator D = 2^9 * 5^2 = 12800 and the
+	// single per-card unit basis shared by every allocation mode: one whole card is
+	// worth D normalized units, Shared yields D/10 per ownership, and a card sliced
+	// into N partitions yields D/N units per slice. D is chosen so that D/N is an
+	// exact integer for every per-mode max size below (SharedResourceMaxSize,
+	// SlicedResourceMaxSize). It is also the integer credit base B = CreditsPerCard
+	// (one whole card = D credits), so the .sliced.units→credits Kueue factor is
+	// B/D = 1 and every per-mode credit value stays integer-valued. It also seeds
+	// the device-plugin per-card unit grid and the Devices CR AcceleratorAllocation
+	// ruler.
 	ResourceMaxUnits = 12800
 	// SharedResourceMaxSize is the maximum number of owners a card can be shared among.
 	SharedResourceMaxSize = 10

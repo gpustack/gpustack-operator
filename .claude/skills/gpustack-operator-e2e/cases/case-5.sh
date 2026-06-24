@@ -6,7 +6,10 @@
 #
 # Implements the Final Checkpoint of specs/accelerator-resource-modes-refactor.md:
 # label the ${node}-gpustack-worker NodeFeature partitions=8 → sliced InstanceType
-# Capacity=32 → a 1/8 request admits and consumes 0.125 credit.
+# Capacity=32 → a 1/8 request admits and consumes 0.125 of a card. On the integer
+# credit base B=D=12800 (specs/unified-credit-base-scoring.md) that 0.125 card is
+# scored as 1600 credits, so Kueue's ResourceValue int64 ceil no longer rounds it
+# up to 1 — Assertion G checks the true 1600, not a ceiled 1.
 #
 # Runs on a GPU-LESS cluster BY APPROXIMATION. The whole sliced chain depends on
 # two DeviceManager-reported inputs that a GPU-less cluster never produces, so both
@@ -212,12 +215,16 @@ for _ in $(seq 1 30); do
   [ "${aw:-0}" -ge 1 ] 2>/dev/null && { admitted=1; break; }
   sleep 3
 done
-[ -n "$admitted" ] && record PASS "workload admitted" "sliced CQ admittedWorkloads>=1 (0.125 borrowed from exclusive's ${COUNT} credits)" \
+[ -n "$admitted" ] && record PASS "workload admitted" "sliced CQ admittedWorkloads>=1 (1600 credits = 0.125 card borrowed from exclusive)" \
   || record FAIL "workload admitted" "admittedWorkloads=${aw:-0} — credit borrow failed or Pod unschedulable (check .sliced mock + .sliced.units)"
 
-# --- Assertion G: consumed exactly 0.125 credit, and it is borrowed (Story 1 topology).
-#     ClusterQueue.status.flavorsUsage[].resources[credits].total / borrowed. Verified via
-#     source that enableClusterQueueResources gates only metrics, not status. ---
+# --- Assertion G: consumed exactly 1600 credits (= 0.125 card on the integer base
+#     B=D=12800), and it is borrowed (Story 1 topology). Integer-valued credits are
+#     the whole point of specs/unified-credit-base-scoring.md: Kueue's ResourceValue
+#     ceils non-CPU usage to int64, so the pre-fix 0.125 was rounded up to 1 — 1600
+#     passes through untouched. ClusterQueue.status.flavorsUsage[].resources[credits]
+#     .total/borrowed; enableClusterQueueResources gates only metrics, not status. ---
+expCredits=$((PARTITIONS > 0 ? 12800 / PARTITIONS : 0))   # B/partitions = 12800/8 = 1600
 credits=""
 for _ in $(seq 1 30); do
   credits=$(kubectl get clusterqueue "$slicedCQ" -o json 2>/dev/null | python3 -c "
@@ -235,13 +242,13 @@ for fu in cq.get('status',{}).get('flavorsUsage',[]):
 " 2>/dev/null)
   total=$(echo "$credits" | awk '{print $1}')
   borrowed=$(echo "$credits" | awk '{print $2}')
-  [ "$total" = "0.125" ] && [ "$borrowed" = "0.125" ] && break
+  [ "$total" = "$expCredits" ] && [ "$borrowed" = "$expCredits" ] && break
   sleep 3
 done
-if [ "$total" = "0.125" ] && [ "$borrowed" = "0.125" ]; then
-  record PASS "consumes 0.125 credit (borrowed)" "flavorsUsage[${CREDITS_RES}] total=${total} borrowed=${borrowed} (Story 1 borrow)"
+if [ "$total" = "$expCredits" ] && [ "$borrowed" = "$expCredits" ]; then
+  record PASS "consumes ${expCredits} credits (= 0.125 card, borrowed)" "flavorsUsage[${CREDITS_RES}] total=${total} borrowed=${borrowed} (Story 1 borrow, integer base)"
 else
-  record FAIL "consumes 0.125 credit (borrowed)" "got total=${total:-<missing>} borrowed=${borrowed:-<missing>} — transformation (T9) or webhook pairing (T10) off"
+  record FAIL "consumes ${expCredits} credits (= 0.125 card, borrowed)" "got total=${total:-<missing>} borrowed=${borrowed:-<missing>}, want ${expCredits} — base scaling (unified-credit-base-scoring) or transform/webhook off"
 fi
 
 # --- Assertion E (record-only): UnitResource folded per slice (round-down). ---
