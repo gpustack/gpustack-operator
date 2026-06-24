@@ -90,8 +90,8 @@ func Test_kueueChartTransformations(t *testing.T) {
 	var (
 		exclusive  = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive))
 		shared     = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeShared))
+		sliced     = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced))
 		slicedUnit = string(nodefeature.GetAcceleratableSlicedUnitsResourceName(manu))
-		slicedCard = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced))
 		credits    = string(nodefeature.GetAcceleratableCreditsResourceName(manu))
 	)
 
@@ -120,7 +120,7 @@ func Test_kueueChartTransformations(t *testing.T) {
 			// test pins the wiring (multiplyBy + factor) that produces those values.
 			name:           "sliced unit folds the card count with factor 1/D",
 			input:          slicedUnit,
-			wantMultiplyBy: slicedCard,
+			wantMultiplyBy: sliced,
 			wantCredits:    "0.000078125",
 		},
 	}
@@ -136,7 +136,12 @@ func Test_kueueChartTransformations(t *testing.T) {
 		})
 	}
 
-	// The bare .sliced card key is only a multiplier, never a transformation input.
-	_, ok := byInput[slicedCard]
-	assert.False(t, ok, ".sliced must not be a transformation input")
+	// The bare .sliced key appears as a transformation input only to be dropped:
+	// Kueue does not consume a multiplyBy resource on Replace, so without an
+	// explicit drop rule it leaks into the Workload's resource requirements and
+	// the CQ (which only covers credits/cpu/memory/storage) cannot admit it.
+	dropRule, ok := byInput[sliced]
+	require.True(t, ok, ".sliced must have a drop transformation input")
+	assert.Equal(t, "Replace", dropRule.Strategy, ".sliced drop rule strategy")
+	assert.Empty(t, dropRule.Outputs, ".sliced drop rule outputs must be empty")
 }
