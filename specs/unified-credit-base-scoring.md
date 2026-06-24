@@ -170,7 +170,7 @@ their tests); `node_test.go` only uses `ResourceMaxUnits` for `.sliced.units` al
   round-trips whole cards (`CardsToCredits(4)=51200`, `CreditsToCards(51200)=4`) and preserves the sliced
   fraction (`CreditsToCards(1600)=0.125`). **Verify:** `go test ./pkg/nodefeature/...`.
 
-- [ ] **Task 2 — Rescale Kueue transformations (`apps_kueue.go`).** Change the per-manufacturer factors:
+- [x] **Task 2 — Rescale Kueue transformations (`apps_kueue.go`).** Change the per-manufacturer factors:
   exclusive→credits `"1"`→`"12800"`, shared→`"0.1"`→`"1280"`, `.sliced.units`→credits `"0.000078125"`→`"1"`
   (= `B/D`); keep `multiplyBy: <.sliced>` and the `.sliced` empty-`outputs` drain rule. Prefer deriving the
   factors from `B` via a template func over hardcoded literals to avoid drift. Update the `0.000078125`-era

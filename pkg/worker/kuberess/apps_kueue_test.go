@@ -82,9 +82,11 @@ func renderKueueTransformations(t *testing.T, manufacturers []string) map[string
 	return byInput
 }
 
-// Test_kueueChartTransformations pins Task 9: the three per-manufacturer credits
-// rules. The sliced rule folds in the card count via multiplyBy: <.sliced> with
-// the single global factor 1/D = 1/12800, so credits = C×U/partitions.
+// Test_kueueChartTransformations pins the three per-manufacturer credits rules on
+// the integer credit base B = D = 12800: exclusive→B, shared→B/10, and the sliced
+// rule folds in the card count via multiplyBy: <.sliced> with factor B/D = 1, so
+// credits = B×C×U/partitions stays integer-valued and Kueue's ResourceValue int64
+// ceil never rounds a fractional credit up to 1.
 func Test_kueueChartTransformations(t *testing.T) {
 	const manu = nodefeature.ManufacturerNVIDIA
 	var (
@@ -104,24 +106,25 @@ func Test_kueueChartTransformations(t *testing.T) {
 		wantCredits    string
 	}{
 		{
-			name:        "exclusive whole card is one credit",
+			name:        "exclusive whole card is B credits",
 			input:       exclusive,
-			wantCredits: "1",
+			wantCredits: "12800",
 		},
 		{
-			name:        "shared ownership is a tenth of a credit",
+			name:        "shared ownership is B/10 credits",
 			input:       shared,
-			wantCredits: "0.1",
+			wantCredits: "1280",
 		},
 		{
-			// credits = .sliced.units × (1/12800) × .sliced = C×U/partitions, e.g.
-			// 1/8 single card → 0.125, 2 cards ×1/8 → 0.25, 1/4 single → 0.25,
-			// 1/512 single → 0.001953125. Kueue performs the multiplication; this
-			// test pins the wiring (multiplyBy + factor) that produces those values.
-			name:           "sliced unit folds the card count with factor 1/D",
+			// credits = .sliced.units × (B/D) × .sliced = B×C×U/partitions, e.g.
+			// 1/8 single card → 1600, 2 cards ×1/8 → 3200, 1/4 single → 3200,
+			// 1/512 single → 25. With B=D the factor is exactly 1, so the
+			// .sliced.units value is itself the credit value. Kueue performs the
+			// multiplication; this test pins the wiring (multiplyBy + factor).
+			name:           "sliced unit folds the card count with factor B/D",
 			input:          slicedUnit,
 			wantMultiplyBy: sliced,
-			wantCredits:    "0.000078125",
+			wantCredits:    "1",
 		},
 	}
 
