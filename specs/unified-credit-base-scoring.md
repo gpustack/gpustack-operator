@@ -1,6 +1,6 @@
 # Spec: Unified Integer Credit-Base Scoring (Exclusive / Shared / Sliced)
 
-Status: Built
+Status: Shipped — https://github.com/gpustack/gpustack-operator/pull/4
 
 ## Summary
 The sliced-accelerator borrow model is silently broken: a 1/8 slice that should consume `0.125` credits is
