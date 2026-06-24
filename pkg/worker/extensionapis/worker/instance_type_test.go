@@ -263,6 +263,19 @@ func TestConvertInstanceTypeFromClusterQueue_Sliced(t *testing.T) {
 			qtyEqual(t, c.wantOrm, it.Status.Accelerator.OnceMaxRequest, "OnceMaxRequest.Accelerator")
 			assert.Equal(t, "1", it.Spec.UnitResources.CPU, "UnitResources.CPU (12/8 round down)")
 			assert.Equal(t, "6Gi", it.Spec.UnitResources.RAM, "UnitResources.RAM (48/8 round down)")
+
+			// CPU/RAM/Storage: the fixture has no CPU/RAM in the reservation, so
+			// remaining == capacity. ORM must be non-zero (the sliced borrow topology
+			// makes remAccRf ≤ 0 which used to leave ormCpu/ormRam/ormStg at 0).
+			qtyEqual(t, qty("48"), it.Status.CPU.Capacity, "Capacity.CPU")
+			qtyEqual(t, qty("48"), it.Status.CPU.Remaining, "Remaining.CPU")
+			qtyEqual(t, qty("48"), it.Status.CPU.OnceMaxRequest, "OnceMaxRequest.CPU")
+			qtyEqual(t, qty("192Gi"), it.Status.RAM.Capacity, "Capacity.RAM")
+			qtyEqual(t, qty("192Gi"), it.Status.RAM.Remaining, "Remaining.RAM")
+			qtyEqual(t, qty("192Gi"), it.Status.RAM.OnceMaxRequest, "OnceMaxRequest.RAM")
+			qtyEqual(t, qty("88Gi"), it.Status.LocalStorage.Capacity, "Capacity.LocalStorage")
+			qtyEqual(t, qty("88Gi"), it.Status.LocalStorage.Remaining, "Remaining.LocalStorage")
+			qtyEqual(t, qty("88Gi"), it.Status.LocalStorage.OnceMaxRequest, "OnceMaxRequest.LocalStorage")
 		})
 	}
 }

@@ -123,7 +123,7 @@ and may request more than one slice.
 | F5 | Kueue transformations | Per manufacturer four global `Replace` rules: exclusive→credits, shared→credits, `.sliced.units`→credits with `multiplyBy: .sliced` and factor `1/D`, plus a **drop rule** `input: .sliced` with empty `outputs: {}` (Kueue does not consume the `multiplyBy` resource, so the bare `.sliced` must be drained or it leaks into the Workload request); `credits = C×U/partitions` verified by the table below. |
 | F6 | Borrow + reclaim topology | The sliced flavor's credits=0 in the sliced CQ; credits=4, borrowingLimit=nil in the exclusive CQ; `IndexingResourceFlavorsByQueueName` strips `-Ns` so the sliced RF enters the exclusive rfList; `ReclaimWithinCohort` enabled. |
 | F7 | Dual-key node reporting | `.sliced.units` via Patch Node from the worker `NodeCapacityReconciler` = `D×card-count` (level-based repatch, binding constraint); `.sliced` via device-plugin = `card-count×MaxPartitions` (loose injection token, hardware MaxPartitions not admin N); NVIDIA registers a Sliced server. |
-| F8 | extensionapis output | Sliced InstanceType: Capacity=`card-count×partitions`, Remaining at slice rate, UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining))` (round DOWN, shrinks with usage). |
+| F8 | extensionapis output | Sliced InstanceType: Capacity=`card-count×partitions`, Remaining at slice rate, UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining))` (round DOWN, shrinks with usage). CPU/RAM/Storage ORM is tracked via a sliced-specific case (borrow topology makes `remAccRf ≤ 0`, so the accelerator gate cannot drive it — see Task 11). |
 | F9 | API field | `InstanceResources` gains `AcceleratorUnits` (U, default 1, next protobuf tag); `make generate` passes. |
 
 **credits worked examples (D=12800, for acceptance):**
@@ -458,9 +458,16 @@ materialize; an illegal N is rejected.*
 **Phase 5 — User-facing output (Story 2)**
 - [x] **Task 11:** extensionapis output — Capacity=`card-count×partitions`, Remaining at slice rate,
   UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining slices))` (a `floorPow2`
-  helper; the dynamic ORM matches the non-sliced path and rounds DOWN: 3 free → 2). **Acceptance:** node-5 8s
+  helper; the dynamic ORM matches the non-sliced path and rounds DOWN: 3 free → 2). The reservation loop's
+  display-ORM switch needs a **sliced-specific case**: the sliced ClusterQueue's credits nominal is 0 (borrow
+  topology), so `remAccRf` (credits remaining after reservation) is always `≤ 0` and the `remAccRf > ormAcc`
+  accelerator gate never fires — leaving CPU/RAM/Storage ORM stuck at 0. When `slicedAccelerator > 0`, bypass
+  the accelerator gate and update CPU/RAM/Storage ORM directly from the per-flavor remaining (same as the
+  non-acceleratable path); the accelerator ORM is computed by the sliced block that follows (commit `d98ff4a`).
+  **Acceptance:** node-5 8s
   InstanceType Accelerator Capacity=32, UnitResource 1c/6g, fresh OnceMaxRequest=4, and ORM drops to 2/2/1/0
-  as remaining falls to 3/2/1/0; table test. **Dependencies:** T1, T6. **Files:**
+  as remaining falls to 3/2/1/0; CPU/RAM/Storage Capacity/Remaining/OnceMaxRequest are non-zero (48 / 192Gi /
+  88Gi for the fixture); table test. **Dependencies:** T1, T6. **Files:**
   `pkg/worker/extensionapis/worker/instance_type.go(+_test)`. **Scope:** M.
 - [x] **Task 12:** Instance validating webhook — accept U that is a power of two `<= OnceMaxRequest` and `<
   partitions`, reject otherwise. Because the ORM (T11) is now the dynamic round-down value, `U <= OnceMaxRequest`
