@@ -65,6 +65,78 @@ func TestSlicedResourceDenominatorInvariants(t *testing.T) {
 	assert.Zero(t, int64(1e9)%ResourceMaxUnits, "1/D must be nano-clean")
 }
 
+func TestCreditsPerCardInvariants(t *testing.T) {
+	assert.Equal(t, int64(12800), int64(CreditsPerCard), "B = D = 12800")
+
+	// B must divide evenly by every per-mode max size so the per-mode credit
+	// magnitudes (shared B/10, sliced B/size) are exact integers and Kueue's
+	// ResourceValue int64 ceil never rounds them up.
+	assert.Zerof(t, CreditsPerCard%SharedResourceMaxSize,
+		"B %% %d must be 0", SharedResourceMaxSize)
+	for _, size := range _SlicedResourceSizes {
+		assert.Zerof(t, CreditsPerCard%size,
+			"B %% %d must be 0 for integer per-slice credits", size)
+	}
+}
+
+func TestCardsToCredits(t *testing.T) {
+	cases := []struct {
+		name     string
+		cards    string
+		expected string
+	}{
+		{name: "1 card", cards: "1", expected: "12800"},
+		{name: "4 cards", cards: "4", expected: "51200"},
+		{name: "0 cards", cards: "0", expected: "0"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			q, err := resource.ParseQuantity(c.cards)
+			assert.NoError(t, err)
+			got := CardsToCredits(q)
+			assert.Equal(t, c.expected, got.String())
+		})
+	}
+}
+
+func TestCreditsToCards(t *testing.T) {
+	cases := []struct {
+		name     string
+		credits  string
+		expected string
+	}{
+		{name: "whole card", credits: "12800", expected: "1"},
+		{name: "four cards", credits: "51200", expected: "4"},
+		{name: "1/8 slice", credits: "1600", expected: "125m"},
+		{name: "2/8 slice", credits: "3200", expected: "250m"},
+		{name: "29 1/8 slices", credits: "46400", expected: "3625m"},
+		{name: "smallest slice (1/512)", credits: "25", expected: "1953u"},
+		{name: "zero", credits: "0", expected: "0"},
+		// Misconfigured fractional credit: Value() ceils like Kueue's ResourceValue
+		// (1599.5 → 1600) before the divide, so the card view stays consistent.
+		{name: "fractional credit ceils", credits: "1599500m", expected: "125m"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			q, err := resource.ParseQuantity(c.credits)
+			assert.NoError(t, err)
+			got := CreditsToCards(q)
+			assert.Equal(t, c.expected, got.String())
+		})
+	}
+}
+
+// TestCreditsRoundTrip pins that whole-card counts survive the credits↔cards
+// round trip exactly.
+func TestCreditsRoundTrip(t *testing.T) {
+	for _, cards := range []string{"1", "2", "4", "8"} {
+		q, err := resource.ParseQuantity(cards)
+		assert.NoError(t, err)
+		got := CreditsToCards(CardsToCredits(q))
+		assert.Equal(t, cards, got.String(), "round trip for %s cards", cards)
+	}
+}
+
 func TestIsValidSlicedPartitions(t *testing.T) {
 	cases := []struct {
 		n    int64

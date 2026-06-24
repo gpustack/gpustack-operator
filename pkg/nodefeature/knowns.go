@@ -295,3 +295,35 @@ func QuantityToOriginalValue(q resource.Quantity, sliced int64) resource.Quantit
 	q.SetScaled(q.ScaledValue(resource.Micro)/unitsPerSlice, resource.Micro)
 	return q
 }
+
+const (
+	// CreditsPerCard is the integer credit base B: one whole accelerator card is
+	// worth B credits. It equals the global denominator D (ResourceMaxUnits), so
+	// the finest sliced unit (1/SlicedResourceMaxSize of a card) maps to the
+	// integer B/SlicedResourceMaxSize (=25) and the ".sliced.units"→credits Kueue
+	// factor is exactly B/D=1. Scoring credits as B×card-fraction keeps every
+	// per-mode value an integer, so Kueue's ResourceValue int64 quantization
+	// (q.Value(), which ceils non-CPU resources) never rounds a fractional credit
+	// up to 1 — the failure that broke the sliced borrow accounting.
+	CreditsPerCard = ResourceMaxUnits
+)
+
+// CardsToCredits scales a whole-card count to its integer credit value (cards×B).
+// It is used to build the Kueue ClusterQueue credits NominalQuota so the quota is
+// expressed on the same integer basis as the transformed credit requests.
+func CardsToCredits(cards resource.Quantity) resource.Quantity {
+	cards.Mul(CreditsPerCard)
+	return cards
+}
+
+// CreditsToCards converts a credit quantity back to card units (credits÷B),
+// preserving the fraction at micro scale so the exclusive whole-card display and
+// the sliced per-partition display (×partitions) stay exact. It first reads the
+// credit count via Value() — the same int64 quantization Kueue's ResourceValue
+// applies to non-CPU resources (Value() ceils) — so the operator's card view
+// always agrees with Kueue's accounting and a misconfigured fractional credit
+// degrades to a safe integer rather than a misleading fraction.
+func CreditsToCards(credits resource.Quantity) resource.Quantity {
+	credits.SetScaled(credits.Value()*1_000_000/CreditsPerCard, resource.Micro)
+	return credits
+}
