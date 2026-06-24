@@ -199,6 +199,12 @@ managerConfig:
         multiplyBy: {{ $manuSlicedResName }}
         outputs:
           {{ $manuCreditsResName }}: "0.000078125"
+      # nvidia.com/gpu.sliced is the multiplyBy above: Kueue does not consume a
+      # multiplyBy resource on Replace, so it would leak into the Pod request.
+      # Drain it with empty Outputs + Replace so Kueue ignores it.
+      - input: {{ $manuSlicedResName }}
+        strategy: Replace
+        outputs: {}
 {{- end }}
 {{- end }}
     #objectRetentionPolicies:

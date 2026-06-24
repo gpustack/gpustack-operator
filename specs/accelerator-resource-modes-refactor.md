@@ -120,7 +120,7 @@ and may request more than one slice.
 | F2 | `-Ns` materialization | After enabling, node-5 gets RF/CQ/InstanceType with `-8s`; after disabling, the RF becomes a draining tombstone. |
 | F3 | Global denominator D=12800 | `SlicedResourceMaxSize` 16→512; the size set and base derivation satisfy `D % partitions == 0` and `1/D` is nano-clean; `AcceleratorAllocation` is metered by Mode (whole card 12800 / Shared 1280 / Sliced base 25). |
 | F4 | Webhook unit conversion | Pod `.sliced.units` rewritten to `U×D/partitions` (per-card, not multiplied by C); `.sliced`=C unchanged; request==limit; U first power-of-two aligned and validated `< partitions`. |
-| F5 | Kueue transformations | Three global `Replace` rules; the sliced one uses `multiplyBy: .sliced` with factor `1/D`; `credits = C×U/partitions` verified by the table below. |
+| F5 | Kueue transformations | Per manufacturer four global `Replace` rules: exclusive→credits, shared→credits, `.sliced.units`→credits with `multiplyBy: .sliced` and factor `1/D`, plus a **drop rule** `input: .sliced` with empty `outputs: {}` (Kueue does not consume the `multiplyBy` resource, so the bare `.sliced` must be drained or it leaks into the Workload request); `credits = C×U/partitions` verified by the table below. |
 | F6 | Borrow + reclaim topology | The sliced flavor's credits=0 in the sliced CQ; credits=4, borrowingLimit=nil in the exclusive CQ; `IndexingResourceFlavorsByQueueName` strips `-Ns` so the sliced RF enters the exclusive rfList; `ReclaimWithinCohort` enabled. |
 | F7 | Dual-key node reporting | `.sliced.units` via Patch Node from the worker `NodeCapacityReconciler` = `D×card-count` (level-based repatch, binding constraint); `.sliced` via device-plugin = `card-count×MaxPartitions` (loose injection token, hardware MaxPartitions not admin N); NVIDIA registers a Sliced server. |
 | F8 | extensionapis output | Sliced InstanceType: Capacity=`card-count×partitions`, Remaining at slice rate, UnitResource round-down, OnceMaxRequest=`floorPow2(min(partitions/2, remaining))` (round DOWN, shrinks with usage). |
@@ -431,8 +431,14 @@ materialize; an illegal N is rejected.*
   `api/worker/v1alpha1/instance.go`, generated artifacts. **Scope:** S (generation).
 - [x] **Task 9:** `apps_kueue.go` transformations — the sliced rule's `input: <.sliced.units>` (template func
   `getSlicedUnitsResourceName`) with factor `1/12800` plus `multiplyBy: <.sliced>` (template func
-  `getSlicedResourceName`); the bare `.sliced` is not an input. **Acceptance:**
-  the rendered Kueue config has the three rules correct; template render test. **Dependencies:** T2. **Files:**
+  `getSlicedResourceName`). Because Kueue's `Replace` strategy does **not** consume the `multiplyBy` resource,
+  the bare `.sliced` would leak into the Workload's resource requirements after the `.sliced.units` rule — and
+  the sliced ClusterQueue only covers `{credits, cpu, memory, ephemeral-storage}`, so Kueue could never admit a
+  sliced workload. Add a fourth `Replace` rule `input: <.sliced>` with empty `outputs: {}` to drain it from the
+  accounting layer while leaving the pod's `spec.containers[].resources` untouched (still needed by the
+  scheduler and device-plugin) (commit `3cc4745`). **Acceptance:**
+  the rendered Kueue config has the four rules correct, including the `.sliced` drop rule (Replace + empty
+  outputs); template render test. **Dependencies:** T2. **Files:**
   `pkg/worker/kuberess/apps_kueue.go(+_test)`. **Scope:** S.
 - [x] **Task 10:** Sliced unit conversion across the Instance webhook + controller (pod resource keys live in
   the controller's `getResourceRequirements`, not the webhook — confirmed during build). **(a)** U defaults to
