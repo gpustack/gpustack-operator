@@ -179,7 +179,7 @@ their tests); `node_test.go` only uses `ResourceMaxUnits` for `.sliced.units` al
   `multiplyBy: nvidia.com/gpu.sliced`; the `.sliced` drop rule remains. **Verify:**
   `go test ./pkg/worker/kuberess/...` + `helm template deploy/gpustack-operator/chart | grep -A4 transformations`.
 
-- [ ] **Task 3 — Rescale NominalQuota (`clusterqueue.go` `constructResourceGroups`).** Wrap the exclusive
+- [x] **Task 3 — Rescale NominalQuota (`clusterqueue.go` `constructResourceGroups`).** Wrap the exclusive
   `accQ` (node exclusive allocatable, cards) and the sliced-lent `accQ` (`unitsQ/D`, cards) with
   `CardsToCredits` so the credits `NominalQuota` becomes `B × cards`; the sliced-in-its-own-queue credits stay
   `0`. With `B = D`, the sliced-lent quota collapses to `unitsQ.Value()` — note this identity in a comment.

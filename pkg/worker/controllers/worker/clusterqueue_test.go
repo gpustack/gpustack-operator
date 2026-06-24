@@ -433,11 +433,12 @@ func TestConstructResourceGroups_SlicedCredits(t *testing.T) {
 			wantCredits: 0,
 		},
 		{
-			// Lent into the exclusive queue it contributes the card count so the
-			// exclusive side can reclaim it.
+			// Lent into the exclusive queue it contributes the card count scored on
+			// the integer credit base (cards × B) so the exclusive side can reclaim
+			// it; B = D, so this equals the node's .sliced.units allocatable.
 			name:        "exclusive queue holds the card count",
 			queue:       exclusiveQueue,
-			wantCredits: cards,
+			wantCredits: cards * nodefeature.CreditsPerCard,
 		},
 	}
 
