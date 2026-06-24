@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"text/template"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -178,6 +179,11 @@ managerConfig:
     #    example.com/gpu: 100 # and you care only about GPUs usage
 {{- if $.Manufacturers }}
     resources:
+      # Credits are scored on the integer base B = D = 12800 (one whole card = B
+      # credits): exclusive→B, shared→B/10, sliced.units→B/D=1 (× multiplyBy
+      # .sliced). Every per-mode value stays an integer, so Kueue's ResourceValue
+      # int64 quantization (q.Value(), which ceils non-CPU resources) never rounds
+      # a fractional credit up to 1.
       transformations:
 {{- range $.Manufacturers }}
 {{- $manu := . }}
@@ -189,16 +195,16 @@ managerConfig:
       - input: {{ $manuExclusiveResName }}
         strategy: Replace
         outputs:
-          {{ $manuCreditsResName }}: "1"
+          {{ $manuCreditsResName }}: "{{ getExclusiveCreditsFactor }}"
       - input: {{ $manuSharedResName }}
         strategy: Replace
         outputs:
-          {{ $manuCreditsResName }}: "0.1"
+          {{ $manuCreditsResName }}: "{{ getSharedCreditsFactor }}"
       - input: {{ $manuSlicedUnitsResName }}
         strategy: Replace
         multiplyBy: {{ $manuSlicedResName }}
         outputs:
-          {{ $manuCreditsResName }}: "0.000078125"
+          {{ $manuCreditsResName }}: "{{ getSlicedCreditsFactor }}"
       # nvidia.com/gpu.sliced is the multiplyBy above: Kueue does not consume a
       # multiplyBy resource on Replace, so it would leak into the Pod request.
       # Drain it with empty Outputs + Replace so Kueue ignores it.
@@ -258,6 +264,19 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
 			return string(nodefeature.GetAcceleratableCreditsResourceName(s))
+		},
+		// The credits transformation factors are derived from the integer credit
+		// base B = D so they cannot drift from the accounting constants: a whole
+		// exclusive card is worth B, a shared ownership B/SharedResourceMaxSize,
+		// and one normalized sliced unit B/D (=1, since B=D).
+		"getExclusiveCreditsFactor": func() string {
+			return strconv.Itoa(nodefeature.CreditsPerCard)
+		},
+		"getSharedCreditsFactor": func() string {
+			return strconv.Itoa(nodefeature.CreditsPerCard / nodefeature.SharedResourceMaxSize)
+		},
+		"getSlicedCreditsFactor": func() string {
+			return strconv.Itoa(nodefeature.CreditsPerCard / nodefeature.ResourceMaxUnits)
 		},
 		"hasAPIResource": func(apiversion, kind string) bool {
 			return false
