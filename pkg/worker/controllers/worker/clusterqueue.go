@@ -425,10 +425,14 @@ func (r *ClusterQueueReconciler) constructResourceGroups(
 			},
 		})
 		if acceleratable {
+			// accQ is a whole-card count (zero for a sliced flavor in its own
+			// borrowing queue). Score it on the integer credit base (cards × B) so
+			// the nominal matches the base-scaled credit requests Kueue computes via
+			// the resource transformations, keeping every value integer-valued.
 			rg.Flavors[len(rg.Flavors)-1].Resources = append(rg.Flavors[len(rg.Flavors)-1].Resources,
 				kueue.ResourceQuota{
 					Name:         nodefeature.GetAcceleratableCreditsResourceName(manufacturer),
-					NominalQuota: accQ,
+					NominalQuota: nodefeature.CardsToCredits(accQ),
 				},
 			)
 		}
