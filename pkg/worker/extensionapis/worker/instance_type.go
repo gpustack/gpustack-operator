@@ -424,13 +424,24 @@ func convertInstanceTypeFromClusterQueue(
 			}
 
 			// Adjust the display once max request.
-			if !acceleratable {
+			switch {
+			case !acceleratable:
 				if remCpuRf.Cmp(ormCpu) > 0 {
 					ormCpu = remCpuRf
 					ormRam = remRamRf
 					ormStg = remStgRf
 				}
-			} else if remAccRf.Cmp(ormAcc) > 0 {
+			case slicedAccelerator > 0:
+				// Sliced queue: credits nominal is 0 (borrow topology), so
+				// remAccRf is always ≤ 0 and cannot gate the CPU/RAM/Storage ORM.
+				// The accelerator ORM is computed by the sliced block below; track
+				// CPU/RAM/Storage directly, same as the non-acceleratable path.
+				if remCpuRf.Cmp(ormCpu) > 0 {
+					ormCpu = remCpuRf
+					ormRam = remRamRf
+					ormStg = remStgRf
+				}
+			case remAccRf.Cmp(ormAcc) > 0:
 				ormAcc = remAccRf
 				ormCpu = remCpuRf
 				ormRam = remRamRf
