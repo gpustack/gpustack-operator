@@ -131,9 +131,9 @@ func mkSlicedClusterQueue(reservation core.ResourceList) *kueue.ClusterQueue {
 
 // TestConvertInstanceTypeFromClusterQueue_ExclusiveWithLentSliced pins the
 // exclusive InstanceType in the borrow topology: its queue (the un-suffixed
-// "-1d") now carries the lent sliced flavor ("-4d-8s", credits=4) plus a drained
-// "-4d" tombstone (credits=0). The non-sliced path is unchanged, so capacity is
-// the credits sum (4 whole cards) and unit resources are not folded.
+// "-1d") now carries the lent sliced flavor ("-4d-8s", credits=4×B=51200) plus a
+// drained "-4d" tombstone (credits=0). The non-sliced path divides the credits
+// sum by the base, so capacity is 4 whole cards and unit resources are not folded.
 func TestConvertInstanceTypeFromClusterQueue_ExclusiveWithLentSliced(t *testing.T) {
 	const (
 		queueName  = "gpustack--amd-epyc-7r13-processor-ln-x64-12c-48g--nvidia-a10g-1d"
@@ -161,7 +161,7 @@ func TestConvertInstanceTypeFromClusterQueue_ExclusiveWithLentSliced(t *testing.
 			ResourceGroups: []kueue.ResourceGroup{{
 				CoveredResources: covered,
 				Flavors: []kueue.FlavorQuotas{
-					mkFlavor(lentFlavor, "48", "192Gi", "88Gi", "4"),
+					mkFlavor(lentFlavor, "48", "192Gi", "88Gi", "51200"), // 4 cards × B
 					mkFlavor(tombstone, "0", "0", "0", "0"),
 				},
 			}},
@@ -208,42 +208,43 @@ func TestConvertInstanceTypeFromClusterQueue_Sliced(t *testing.T) {
 			wantOrm: qty("4"), // min(4, 32) = 4
 		},
 		{
-			// One 1/8 slice reserved = 0.125 credits → remaining (4−0.125)×8 = 31.
+			// One 1/8 slice reserved = 1600 credits (B/8) → CreditsToCards = 0.125
+			// card → remaining (4−0.125)×8 = 31.
 			name:        "one slice reserved: remaining 31, ORM still 4",
-			reservation: core.ResourceList{credits: qty("125m")},
+			reservation: core.ResourceList{credits: qty("1600")},
 			wantCap:     qty("32"),
 			wantRem:     qty("31"),
 			wantOrm:     qty("4"), // min(4, 31) = 4
 		},
 		{
-			// 29 slices reserved = 3.625 credits → remaining (4−3.625)×8 = 3.
-			// ORM rounds DOWN: floorPow2(min(4,3)) = 2 (not 4).
+			// 29 slices reserved = 46400 credits → 3.625 cards → remaining
+			// (4−3.625)×8 = 3. ORM rounds DOWN: floorPow2(min(4,3)) = 2 (not 4).
 			name:        "remaining 3: ORM rounds down to 2",
-			reservation: core.ResourceList{credits: qty("3625m")},
+			reservation: core.ResourceList{credits: qty("46400")},
 			wantCap:     qty("32"),
 			wantRem:     qty("3"),
 			wantOrm:     qty("2"),
 		},
 		{
-			// 30 slices reserved = 3.75 credits → remaining 2 → ORM 2.
+			// 30 slices reserved = 48000 credits → 3.75 cards → remaining 2 → ORM 2.
 			name:        "remaining 2: ORM is 2",
-			reservation: core.ResourceList{credits: qty("3750m")},
+			reservation: core.ResourceList{credits: qty("48000")},
 			wantCap:     qty("32"),
 			wantRem:     qty("2"),
 			wantOrm:     qty("2"),
 		},
 		{
-			// 31 slices reserved = 3.875 credits → remaining 1 → ORM 1.
+			// 31 slices reserved = 49600 credits → 3.875 cards → remaining 1 → ORM 1.
 			name:        "remaining 1: ORM is 1",
-			reservation: core.ResourceList{credits: qty("3875m")},
+			reservation: core.ResourceList{credits: qty("49600")},
 			wantCap:     qty("32"),
 			wantRem:     qty("1"),
 			wantOrm:     qty("1"),
 		},
 		{
-			// Fully reserved (4 credits) → remaining 0 → ORM 0.
+			// Fully reserved (51200 credits = 4 cards) → remaining 0 → ORM 0.
 			name:        "remaining 0: ORM collapses to 0",
-			reservation: core.ResourceList{credits: qty("4")},
+			reservation: core.ResourceList{credits: qty("51200")},
 			wantCap:     qty("32"),
 			wantRem:     qty("0"),
 			wantOrm:     qty("0"),
@@ -300,7 +301,7 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 		core.ResourceCPU:              qty("4"),
 		core.ResourceMemory:           qty("16Gi"),
 		core.ResourceEphemeralStorage: qty("100Gi"),
-		credits:                       qty("1"),
+		credits:                       qty("12800"), // 1 card × B
 	}
 
 	cases := []struct {
@@ -436,7 +437,7 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 				core.ResourceCPU:              qty("2"),
 				core.ResourceMemory:           qty("8Gi"),
 				core.ResourceEphemeralStorage: qty("15Gi"),
-				credits:                       qty("1"),
+				credits:                       qty("12800"), // 1 card × B
 			},
 			overcommit: false,
 
@@ -465,11 +466,12 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 				// CPU = 100m × CPU.Value() = 100m × 2 = 200m  (acceleratable base)
 				// RAM = 128Mi × 8  = 1Gi
 				// Stg = 128Mi × 15 = 1920Mi
-				// credits = 1  (accelerator is not overcommitted; reservation stored as-is)
+				// credits = 12800 (1 card × B; accelerator is not overcommitted, so
+				// the base-scaled reservation is stored as-is)
 				core.ResourceCPU:              qty("200m"),
 				core.ResourceMemory:           qty("1Gi"),
 				core.ResourceEphemeralStorage: qty("1920Mi"),
-				credits:                       qty("1"),
+				credits:                       qty("12800"),
 			},
 			overcommit: true,
 
@@ -478,8 +480,9 @@ func TestConvertInstanceTypeFromClusterQueue(t *testing.T) {
 			wantRemCPU:        qty("2"),    // 4 - ScaleBack(200m, acc) = 4 - 2
 			wantRemRAM:        qty("8Gi"),  // 16Gi - ScaleBack(1Gi, RAM) = 16Gi - 8Gi
 			wantRemStg:        qty("85Gi"), // 100Gi - ScaleBack(1920Mi, Stg) = 100Gi - 15Gi
-			// Key invariant: ScaleBack is a pass-through for the credits
-			// resource name, so 1 reserved credit subtracts 1 directly.
+			// Key invariant: ScaleBack is a pass-through for the credits resource
+			// name, then CreditsToCards converts the base-scaled reservation, so
+			// 12800 reserved credits subtract exactly 1 card.
 			wantRemAcc: qty("0"),
 			// Same "fully reserved → ORM zero" outcome as the off case.
 			wantOrmCPU: qty("0"),

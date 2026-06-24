@@ -339,16 +339,25 @@ func convertInstanceTypeFromClusterQueue(
 				capRfIndexer[flv.Name] = make(map[core.ResourceName]resource.Quantity)
 				for k := range flv.Resources {
 					res := &flv.Resources[k]
-					capRfIndexer[flv.Name][res.Name] = res.NominalQuota
+					// The accelerator quota is credits scored on the integer base B
+					// (cards × B); convert it back to whole-card units here so the
+					// InstanceType displays card counts, not raw base-scaled credits.
+					// CreditsToCards mirrors Kueue's ResourceValue quantization. Other
+					// resources pass through unchanged.
+					nominal := res.NominalQuota
+					if res.Name == resourceAccelerator {
+						nominal = nodefeature.CreditsToCards(nominal)
+					}
+					capRfIndexer[flv.Name][res.Name] = nominal
 					switch res.Name {
 					case resourceAccelerator:
-						capAcc.Add(res.NominalQuota)
+						capAcc.Add(nominal)
 					case core.ResourceCPU:
-						capCpu.Add(res.NominalQuota)
+						capCpu.Add(nominal)
 					case core.ResourceMemory:
-						capRam.Add(res.NominalQuota)
+						capRam.Add(nominal)
 					case core.ResourceEphemeralStorage:
-						capStg.Add(res.NominalQuota)
+						capStg.Add(nominal)
 					}
 				}
 			}
@@ -386,6 +395,12 @@ func convertInstanceTypeFromClusterQueue(
 				total := res.Total
 				if withOvercommit {
 					total = kuberequest.ScaleBackOvercommit(res.Name, total, acceleratable)
+				}
+				// Reserved accelerator usage is base-scaled credits (ScaleBack is a
+				// pass-through for credits); convert to card units to match the
+				// card-unit capacity/remaining computed above.
+				if res.Name == resourceAccelerator {
+					total = nodefeature.CreditsToCards(total)
 				}
 				switch res.Name {
 				case resourceAccelerator:
