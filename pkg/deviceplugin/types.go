@@ -41,6 +41,12 @@ type (
 	ContainerAllocateResponder interface {
 		// GetContainerAllocateResponse returns the ContainerAllocateResponse
 		// for the given pod, devices and allocated resources.
-		GetContainerAllocateResponse(context.Context, *core.Pod, *workercore.Devices, map[Resource]int32) (*ContainerAllocateResponse, error)
+		GetContainerAllocateResponse(
+			context.Context,
+			*core.Pod,
+			*core.Container,
+			*workercore.Devices,
+			map[Resource]int32,
+		) (*ContainerAllocateResponse, error)
 	}
 )

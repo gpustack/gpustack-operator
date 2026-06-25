@@ -95,6 +95,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
 	_ *core.Pod,
+	_ *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {

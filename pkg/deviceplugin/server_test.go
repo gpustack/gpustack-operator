@@ -54,7 +54,7 @@ func TestResourceServer_GetResourceName(t *testing.T) {
 type stubResponder struct{}
 
 func (stubResponder) GetContainerAllocateResponse(
-	context.Context, *core.Pod, *workercore.Devices, map[Resource]int32,
+	context.Context, *core.Pod, *core.Container, *workercore.Devices, map[Resource]int32,
 ) (*ContainerAllocateResponse, error) {
 	return &ContainerAllocateResponse{}, nil
 }
