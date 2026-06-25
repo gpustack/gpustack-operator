@@ -362,7 +362,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
   container running `copy-dir.sh /etc/gpustack/lib /var/lib/gpustack/operator/lib`. **Acceptance:** rendered
   manifest carries the `/tmp` mount + the init container. **Verify:** `helm template` render test.
   **Files:** `deploy/gpustack-operator/chart/templates/device-manager/daemonset.yaml`.
-- [ ] **T7 — Ascend Sliced server + `GetContainerAllocateResponse`.** Register the Sliced server in
+- [x] **T7 — Ascend Sliced server + `GetContainerAllocateResponse`.** Register the Sliced server in
   `ascend.New()` (gated on `!opts.NoSliced`, parallel to NVIDIA). Branch the responder on `Sliced`: with
   `X=<podUID>/c-<ctrName>`, create `pods/<X>` (0777); render `pods/<X>/etc/enpu/vcann-rt/npu_info.config`
   (0644) with `physical-npu-id`=`Accelerator.Index`, **lowest-free `virtual-npu-id`** (scan existing on-disk
