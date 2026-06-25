@@ -8,6 +8,7 @@ ARG KUBECTL_VERSION="1.35.3"
 ARG GPUSTACK_DATA_DIR="/var/lib/gpustack"
 ARG GPUSTACK_CONF_DIR="/etc/gpustack"
 ARG GPUSTACK_CHARTS_DIR="${GPUSTACK_CONF_DIR}/charts"
+ARG GPUSTACK_LIB_DIR="${GPUSTACK_CONF_DIR}/lib"
 ARG UBUNTU_IMAGE="ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b"
 
 # =============================================================================
@@ -322,6 +323,9 @@ RUN --mount=type=bind,src=pack/gpustack-operator/rootfs,target=/rootfs <<EOF
 /lib/$(uname -m)-linux-gnu/gpustack
 EOT
     ldconfig -v
+
+    # Install the host-staging helper used by the device-manager init container.
+    install -m 0755 /rootfs/usr/bin/copy-dir.sh /usr/bin/copy-dir.sh
 
     # Try to update PCI IDs
     if ! update-pciids; then
