@@ -176,3 +176,13 @@ func formatMemory(mib uint64) string {
 	r := strings.ToLower(quantityx.Format(resource.MustParse(strconvx.Itoa(mib) + "Mi")))
 	return r[:len(r)-1] // Remove the "i" in "gi".
 }
+
+// RuntimeMajor returns the major component of a normalized runtime version (e.g.
+// "12.4" -> "12", "9.0" -> "9", "8" -> "8"), falling back to fallback when the version
+// is empty.
+func RuntimeMajor(runtimeVersion, fallback string) string {
+	if runtimeVersion == "" {
+		return fallback
+	}
+	return strings.SplitN(runtimeVersion, ".", 2)[0]
+}
