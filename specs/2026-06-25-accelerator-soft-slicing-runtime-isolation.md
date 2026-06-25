@@ -244,15 +244,36 @@ gitlink); base images are referenced by the **tags below, not pinned digests**.
 
 | Builder base image | Final-image dir (`${GPUSTACK_LIB_DIR}/ascend/...`) |
 |---|---|
-| `quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11` | `cann-8-910b` |
-| `quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.11`   | `cann-8-910c` |
-| `quay.io/ascend/cann:9.0.0-910b-ubuntu22.04-py3.11` | `cann-9-910b` |
-| `quay.io/ascend/cann:9.0.0-a3-ubuntu22.04-py3.11`   | `cann-9-910c` |
-| `quay.io/ascend/cann:9.0.0-950-ubuntu22.04-py3.11`  | `cann-9-950`  |
+| `quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11`        | `cann-8-910b` |
+| `quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.11`          | `cann-8-910c` |
+| `quay.io/ascend/cann:9.1.0-beta.1-910b-ubuntu22.04-py3.12` | `cann-9-910b` |
+| `quay.io/ascend/cann:9.1.0-beta.1-a3-ubuntu22.04-py3.12`   | `cann-9-910c` |
+| `quay.io/ascend/cann:9.1.0-beta.1-950-ubuntu22.04-py3.12`  | `cann-9-950`  |
 
 Each Ascend dir holds `lib/libvruntime.so` and `tools/enpu-monitor`. The allocator resolves the dir as
 `cann-<RuntimeVersion.Major>-<lower(Family)>` (default `cann-8` when `Major` is empty); NVIDIA resolves
 `cuda-<RuntimeVersion.Major>` (default `cuda-12` when empty).
+
+> **CANN 9 = 9.1.0-beta.1, not 9.0.0** (build finding): vcann-rt (master) fails to compile against the CANN
+> 9.0.0 toolkit — its `acl/acl_dump.h` references an undefined `acldumpType` — but builds cleanly against
+> 9.1.0-beta.1 (matching the README's "CANN 8.5 / 9.1" support claim). All five CANN images are multi-arch
+> (amd64 + arm64), so buildkit builds each `cannbuild-*` stage for the final image's target arch.
+>
+> **dcmi link stub:** the CANN toolkit ships no driver `dcmi` (the HDK driver is host-injected at runtime), so
+> the build compiles the in-tree `test/stub/dcmi_stub.c` into a stub `libdcmi.so` (SONAME `libdcmi.so`) to
+> satisfy `-ldcmi`; the dcmi entry points are weak, `--as-needed` drops the unused stub from `NEEDED`, and the
+> real driver libdcmi binds at runtime. `enpu-monitor` (an executable) additionally pulls in, transitively
+> through the vendor `.so` files, driver/toolkit symbols that a toolkit-only image (no host HDK driver) cannot
+> resolve at link time — the HAL entry points (`drv*`/`hal*`) in `libascend_hal.so` and `ErrorManager::*` in
+> `liberror_manager.so`; these bind at runtime where the real driver and full toolkit are present. The build
+> links with `-Wl,--allow-shlib-undefined` (via `LDFLAGS`, which CMake seeds into `CMAKE_EXE_LINKER_FLAGS`) so
+> the executable links against the SDK as shipped while its own direct deps (dcmi stub, `c_sec`, `ascendcl`)
+> stay strictly resolved. This is **arch-agnostic** (fixes amd64 + arm64). An earlier `uname -m`-keyed
+> `libascend_hal.so` LD_LIBRARY_PATH probe was rejected: the toolkit's `<arch>-linux` tree carries both the host
+> HAL and the device-side (always AArch64) HAL, so the path-name match non-deterministically picked the
+> wrong-arch stub on amd64 (ld rejected it as `libascend_hal.so ... not found`), and even when the HAL resolved,
+> the `liberror_manager.so` reference still failed — `--allow-shlib-undefined` covers the whole transitive
+> closure in one stroke.
 
 ### Code Style
 
@@ -315,7 +336,13 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
   `.gitmodules`. Read the README/CMake for build deps (`dcmi/ascendcl/c_sec`, `ASCEND_HOME_PATH`).
   **Acceptance:** submodule clones; build entrypoint identified. **Verify:** `git submodule update --init`.
   **Files:** `.gitmodules`, submodule gitlink.
-- [ ] **T4 — CANN builder stages, added one by one.** Add stage `cannbuild-8-910b`
+- [x] **T4 — CANN builder stages, added one by one.** (CANN 9 = `9.1.0-beta.1`, see Build Targets note.)
+  Locally verified-built: `cannbuild-8-910b`, `cannbuild-8-910c`, `cannbuild-9-910b` (each emits
+  `lib/libvruntime.so` 0644 + `tools/enpu-monitor` 0755). `cannbuild-9-910c` / `cannbuild-9-950` are
+  byte-identical bar the base-image tag (a3/950 of the same release, tags confirmed to exist) and their local
+  verification is **deferred to CI / a disk-rich host** — the local Docker disk filled and crashed mid-pull
+  (~55-60 GB of CANN images won't fit here). Original task text:
+  Add stage `cannbuild-8-910b`
   (`quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11`) that cmake-builds `libvruntime.so` + `enpu-monitor`;
   **build-verify that stage** (`--target cannbuild-8-910b`, artifacts present). Then add `8-910c`
   (`…8.5.0-a3…`), `9-910b` (`…9.0.0-910b…`), `9-910c` (`…9.0.0-a3…`), `9-950` (`…9.0.0-950…`) **one at a time,

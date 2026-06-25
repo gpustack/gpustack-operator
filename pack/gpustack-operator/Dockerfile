@@ -11,6 +11,11 @@ ARG GPUSTACK_CHARTS_DIR="${GPUSTACK_CONF_DIR}/charts"
 ARG GPUSTACK_LIB_DIR="${GPUSTACK_CONF_DIR}/lib"
 ARG UBUNTU_IMAGE="ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b"
 
+# Soft-slicing preload-library sources, cloned inline per build stage at a pinned
+# commit (no git submodule). Bump the commit to update; the ARG busts the build cache.
+ARG LIB_UBS_VIRT_ENPU_COMMIT="4d7e4b10ebc2416d761de7d9c1ab0282ae35dae9"
+ARG LIB_HAMI_CORE_COMMIT="0831874bce5af56cefca7093dfb2f9f95d1970aa"
+
 # =============================================================================
 # Stage: tools
 # Download static-linked CLI binaries into
@@ -180,6 +185,74 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
 EOF
 
 # =============================================================================
+# Stages: xbuild-ascend-cann-* (Ascend soft-slicing)
+# Build the vcann-rt runtime (libvruntime.so + enpu-monitor) once per CANN/family
+# target against the matching quay.io/ascend/cann base image. Each stage installs
+# its products under /out/{lib,tools}; the final image copies them into
+# ${GPUSTACK_LIB_DIR}/ascend/cann-<major>-<family>. dcmi is stubbed at link time
+# (see build-libvnpu.sh) since the driver is host-injected at runtime.
+# =============================================================================
+FROM quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11 AS xbuild-ascend-cann-8-910b
+ARG LIB_UBS_VIRT_ENPU_COMMIT
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+    set -exo pipefail
+    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
+    git remote add origin https://gitcode.com/openeuler/ubs-virt.git
+    git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_UBS_VIRT_ENPU_COMMIT}"
+    bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
+EOF
+
+FROM quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.11 AS xbuild-ascend-cann-8-910c
+ARG LIB_UBS_VIRT_ENPU_COMMIT
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+    set -exo pipefail
+    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
+    git remote add origin https://gitcode.com/openeuler/ubs-virt.git
+    git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_UBS_VIRT_ENPU_COMMIT}"
+    bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
+EOF
+
+FROM quay.io/ascend/cann:9.1.0-beta.1-910b-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910b
+ARG LIB_UBS_VIRT_ENPU_COMMIT
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+    set -exo pipefail
+    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
+    git remote add origin https://gitcode.com/openeuler/ubs-virt.git
+    git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_UBS_VIRT_ENPU_COMMIT}"
+    bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
+EOF
+
+FROM quay.io/ascend/cann:9.1.0-beta.1-a3-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910c
+ARG LIB_UBS_VIRT_ENPU_COMMIT
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+    set -exo pipefail
+    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
+    git remote add origin https://gitcode.com/openeuler/ubs-virt.git
+    git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_UBS_VIRT_ENPU_COMMIT}"
+    bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
+EOF
+
+FROM quay.io/ascend/cann:9.1.0-beta.1-950-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-950
+ARG LIB_UBS_VIRT_ENPU_COMMIT
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+    set -exo pipefail
+    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
+    git remote add origin https://gitcode.com/openeuler/ubs-virt.git
+    git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_UBS_VIRT_ENPU_COMMIT}"
+    bash /build-libvnpu.sh /tmp/ubs-virt/ubs-virt-enpu/vcann-rt /out
+EOF
+
+# =============================================================================
 # Stage: gpustack (final)
 # Ubuntu 24.04 with only runtime packages — no Go, no build toolchain, no
 # download utilities, no -dev headers. Compiled binaries and CLI tools are
@@ -238,6 +311,18 @@ RUN <<EOF
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*
 EOF
+
+## Copy the Ascend soft-slicing runtime (vcann-rt) per CANN/family target.
+## buildkit builds each xbuild-ascend-cann-* stage for the final image's target arch
+## (the CANN base images are multi-arch), so these are arch-correct.
+
+ARG GPUSTACK_LIB_DIR
+
+COPY --from=xbuild-ascend-cann-8-910b /out ${GPUSTACK_LIB_DIR}/ascend/cann-8-910b
+COPY --from=xbuild-ascend-cann-8-910c /out ${GPUSTACK_LIB_DIR}/ascend/cann-8-910c
+COPY --from=xbuild-ascend-cann-9-910b /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-910b
+COPY --from=xbuild-ascend-cann-9-910c /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-910c
+COPY --from=xbuild-ascend-cann-9-950  /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-950
 
 ## Copy CLI binaries from the build stages
 
