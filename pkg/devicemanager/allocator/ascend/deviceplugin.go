@@ -109,7 +109,7 @@ func (s *server) GetContainerAllocateResponse(
 			}
 			indexes = append(indexes, strconvx.FormatUint(devsAccelerator.Index, 10))
 		}
-		// TODO: mount HCCL topo file for 910D.
+		// TODO: mount HCCL topo file for 950.
 	}
 
 	// Delegate to container runtime for device injection,
