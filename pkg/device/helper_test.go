@@ -74,3 +74,19 @@ func Test_formatMemory(t *testing.T) {
 		})
 	}
 }
+
+func TestRuntimeMajor(t *testing.T) {
+	cases := []struct {
+		ver, fallback, want string
+	}{
+		{ver: "12.4", fallback: "12", want: "12"},
+		{ver: "13.0", fallback: "12", want: "13"},
+		{ver: "9.0", fallback: "8", want: "9"},
+		{ver: "8", fallback: "8", want: "8"}, // no dot
+		{ver: "", fallback: "12", want: "12"},
+		{ver: "", fallback: "8", want: "8"},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, RuntimeMajor(c.ver, c.fallback))
+	}
+}

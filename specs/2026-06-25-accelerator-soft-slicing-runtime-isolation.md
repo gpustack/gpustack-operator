@@ -303,7 +303,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
   in the final stage. **Acceptance:** `docker run --rm` script test passes (missing-dir create / identical
   skip / changed replace); image builds. **Verify:** the F1 docker-run test; `docker buildx build`.
   **Files:** `pack/gpustack-operator/rootfs/usr/bin/copy-dir.sh`, `pack/gpustack-operator/Dockerfile`.
-- [ ] **T2 — quota/version helpers** in `pkg/deviceplugin`: `sliceRatio(ctr, unitsResName) (float64, error)` =
+- [x] **T2 — quota/version helpers** in `pkg/deviceplugin`: `sliceRatio(ctr, unitsResName) (float64, error)` =
   `units/D`; `floorPct`, `runtimeMajor`, `ascendFamilyDir`, `nvidiaCudaDir`. **Acceptance:** worked-example
   table (1/8→R=0.125→pct 12; 1/4→25; empty Major→`cuda-12`/`cann-8`). **Verify:** `make test
   ./pkg/deviceplugin/...`, `make lint`. **Files:** `pkg/deviceplugin/helper.go(+_test)`.

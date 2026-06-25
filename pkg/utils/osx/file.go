@@ -23,7 +23,7 @@ func InlineTilde(path string) string {
 	return path
 }
 
-// Open is similar to os.Open but supports ~ as the home directory.
+// Open is similar to os.Open but supports a leading ~/ as the home directory.
 func Open(path string) (*os.File, error) {
 	p := filepath.Clean(path)
 	p = InlineTilde(p)
@@ -96,7 +96,21 @@ func ExistsDevice(path string) bool {
 	})
 }
 
-// WriteFile is similar to os.WriteFile but supports ~ as the home directory,
+// MkdirAll is similar to os.MkdirAll but supports a leading ~/ as the home directory, and forces
+// the leaf directory's permission bits to perm with a follow-up Chmod so the mode is
+// not reduced by the process umask (os.MkdirAll applies umask to the perm argument).
+func MkdirAll(name string, perm os.FileMode) error {
+	p := filepath.Clean(name)
+	p = InlineTilde(p)
+
+	if err := os.MkdirAll(p, perm); err != nil {
+		return err
+	}
+
+	return os.Chmod(p, perm)
+}
+
+// WriteFile is similar to os.WriteFile but supports a leading ~/ as the home directory,
 // and also supports the parent directory creation.
 func WriteFile(name string, data []byte, perm os.FileMode) error {
 	p := filepath.Clean(name)
@@ -109,7 +123,7 @@ func WriteFile(name string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(p, data, perm)
 }
 
-// CreateFile is similar to os.Create but supports ~ as the home directory,
+// CreateFile is similar to os.Create but supports a leading ~/ as the home directory,
 // and also supports the parent directory creation.
 func CreateFile(name string, perm os.FileMode) (*os.File, error) {
 	p := filepath.Clean(name)
@@ -122,7 +136,7 @@ func CreateFile(name string, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(p, os.O_RDWR|os.O_CREATE|os.O_TRUNC, perm)
 }
 
-// OpenFile is similar to os.OpenFile but supports ~ as the home directory,
+// OpenFile is similar to os.OpenFile but supports a leading ~/ as the home directory,
 // and also supports the parent directory creation.
 func OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	p := filepath.Clean(name)
@@ -135,7 +149,7 @@ func OpenFile(name string, flag int, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(p, flag, perm)
 }
 
-// Symlink is similar to os.Symlink but supports ~ as the home directory,
+// Symlink is similar to os.Symlink but supports a leading ~/ as the home directory,
 // and also supports the parent directory creation.
 func Symlink(oldname, newname string) error {
 	op, np := filepath.Clean(oldname), filepath.Clean(newname)

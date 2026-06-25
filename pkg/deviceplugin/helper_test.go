@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -104,5 +107,61 @@ func TestResource_GetDeviceIds(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestSliceRatio(t *testing.T) {
+	const unitsName core.ResourceName = "nvidia.com/gpu.sliced.units"
+
+	ctrWith := func(units int64) *core.Container {
+		return &core.Container{
+			Name: "main",
+			Resources: core.ResourceRequirements{
+				Limits: core.ResourceList{
+					unitsName: *resource.NewQuantity(units, resource.DecimalSI),
+				},
+			},
+		}
+	}
+
+	cases := []struct {
+		name    string
+		ctr     *core.Container
+		wantR   float64
+		wantErr bool
+	}{
+		{name: "1/8 card", ctr: ctrWith(1600), wantR: 0.125}, // 1600/12800
+		{name: "1/4 card", ctr: ctrWith(3200), wantR: 0.25},  // 3200/12800
+		{name: "finest 1/512 slice", ctr: ctrWith(25), wantR: 0.001953125},
+		{name: "missing request errors", ctr: &core.Container{Name: "main"}, wantErr: true},
+		{name: "zero request errors", ctr: ctrWith(0), wantErr: true},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			r, err := SliceRatio(c.ctr, unitsName)
+			if c.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.wantR, r)
+		})
+	}
+}
+
+func TestFloorPercent(t *testing.T) {
+	cases := []struct {
+		r    float64
+		want int
+	}{
+		{r: 0.125, want: 12}, // floor(12.5)
+		{r: 0.25, want: 25},
+		{r: 0.5, want: 50},
+		{r: 1, want: 100},
+	}
+	for _, c := range cases {
+		assert.Equal(t, c.want, FloorPercent(c.r))
 	}
 }

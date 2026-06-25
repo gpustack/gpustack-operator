@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	core "k8s.io/api/core/v1"
+
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/osx"
@@ -56,6 +58,20 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartiti
 	return devIDs
 }
 
+func padIndex(idx uint64) string {
+	idxStr := strconv.FormatUint(idx, 10)
+	switch {
+	case idx < 10:
+		return "000" + idxStr
+	case idx < 100:
+		return "00" + idxStr
+	case idx < 1000:
+		return "0" + idxStr
+	default:
+		return idxStr
+	}
+}
+
 // PadSlicedUnits rounds a raw ".sliced.units" request up to the nearest whole-slice
 // boundary D/2^k that a card of maxPartitions can physically provide:
 //   - the result is the smallest D/2^k >= units, with 2^k in [1, maxPartitions];
@@ -88,18 +104,28 @@ func PadSlicedUnits(units, maxPartitions int64) int64 {
 	return d
 }
 
-func padIndex(idx uint64) string {
-	idxStr := strconv.FormatUint(idx, 10)
-	switch {
-	case idx < 10:
-		return "000" + idxStr
-	case idx < 100:
-		return "00" + idxStr
-	case idx < 1000:
-		return "0" + idxStr
-	default:
-		return idxStr
+// SliceRatio derives the per-card fraction R = units / D from a container's
+// ".sliced.units" request, where D = nodefeature.ResourceMaxUnits. It is the single
+// source for every soft-slice quota (the compute percent and each per-card memory
+// limit). A missing or non-positive request is an error: a sliced allocate must fail
+// loudly rather than silently expose the whole card.
+func SliceRatio(ctr *core.Container, unitsResName core.ResourceName) (float64, error) {
+	q, ok := ctr.Resources.Limits[unitsResName]
+	if !ok {
+		return 0, fmt.Errorf("container %q has no %s request", ctr.Name, unitsResName)
 	}
+	units := q.Value()
+	if units <= 0 {
+		return 0, fmt.Errorf("container %q has non-positive %s request: %d", ctr.Name, unitsResName, units)
+	}
+	return float64(units) / float64(nodefeature.ResourceMaxUnits), nil
+}
+
+// FloorPercent converts a per-card fraction R into the integer compute percent the
+// soft-slicing runtimes expect (HAMi-core CUDA_DEVICE_SM_LIMIT, vcann-rt aicore-quota),
+// rounding down: floor(R*100).
+func FloorPercent(r float64) int {
+	return int(r * 100)
 }
 
 type ResourceUnit struct {
