@@ -496,13 +496,13 @@ func getFamilyFromSocName(socName string) string {
 			case socVersion < 220:
 				return "310P"
 			case socVersion < 240:
-				return "910B"
+				return "910B" // 910B/A2
 			case socVersion < 250:
 				return "310B"
 			case socVersion < 260:
-				return "910C"
+				return "910C" // 910C/A3
 			case socVersion < 270:
-				return "910D"
+				return "950" // 950/A5
 			}
 		}
 	}
