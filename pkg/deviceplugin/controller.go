@@ -184,19 +184,18 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 				r.enqueueDevicesWhenPodChanged,
 			),
 			ctrlbuilder.WithPredicates(
-				// Interested in Pods scheduled to the current node.
+				// Trigger reconciliation when a Pod is scheduled to the current node
+				// and has the AllocatedAcceleratorAnnoKey annotation.
 				ctrlpredicate.NewPredicateFuncs(func(object ctrlcli.Object) bool {
 					pod := object.(*core.Pod)
 					return pod.Spec.NodeName == r.NodeName
 				}),
-				// Interested in Pod updates with changes in accelerator allocation annotations,
-				// or deletion of Pods with allocated accelerators.
 				ctrlpredicate.Funcs{
 					CreateFunc: func(e ctrlevent.CreateEvent) bool {
-						return false
+						return kubemeta.HasAnnotation(e.Object, AllocatedAcceleratorAnnoKey)
 					},
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
-						return true
+						return kubemeta.HasAnnotation(e.Object, AllocatedAcceleratorAnnoKey)
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldPod, newPod := e.ObjectOld, e.ObjectNew
@@ -209,9 +208,6 @@ func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller
 							}
 							return !oldPod.GetDeletionTimestamp().Equal(newPod.GetDeletionTimestamp())
 						}
-						return false
-					},
-					GenericFunc: func(e ctrlevent.GenericEvent) bool {
 						return false
 					},
 				},
