@@ -30,8 +30,8 @@ var embeddedKubeConfigPath = filepath.Join(clientcmd.RecommendedConfigDir, "k3s.
 type Embedded struct{}
 
 func (Embedded) Start(ctx context.Context) error {
-	// Validate if run with privileged.
-	if !osx.ExistsDevice("/dev/kmsg") {
+	// Validate if run as privileged.
+	if !system.IsRunningAsPrivileged() {
 		if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 			return errors.New(`require "securityContext.privileged" feature of gpustack pod`)
 		}
@@ -107,8 +107,8 @@ func (Embedded) Start(ctx context.Context) error {
 	)
 
 	// Link air-gapped image to k3s agent data directory,
-	// e.g. /etc/gpustack/images -> /var/lib/gpustack/k3s/agent/images.
-	if imgConfDir := system.SubConfDir("images"); osx.ExistsDir(imgConfDir) {
+	// e.g. /etc/gpustack/k3s/agent/images -> /var/lib/gpustack/operator/k3s/agent/images.
+	if imgConfDir := system.SubConfDir("k3s", "agent", "images"); osx.ExistsDir(imgConfDir) {
 		k3sAgentImageDir := filepath.Join(k3sDataDir, "agent", "images")
 		err := osx.Link(
 			imgConfDir,
