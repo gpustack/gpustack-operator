@@ -358,7 +358,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
 *Checkpoint 1: image builds end-to-end; `${GPUSTACK_LIB_DIR}/ascend` shows the five targets + preload.*
 
 **Phase 2 — Ascend integration**
-- [ ] **T6 — DaemonSet host staging.** In `device-manager/daemonset.yaml`: mount host `/tmp`; add an init
+- [x] **T6 — DaemonSet host staging.** In `device-manager/daemonset.yaml`: mount host `/tmp`; add an init
   container running `copy-dir.sh /etc/gpustack/lib /var/lib/gpustack/operator/lib`. **Acceptance:** rendered
   manifest carries the `/tmp` mount + the init container. **Verify:** `helm template` render test.
   **Files:** `deploy/gpustack-operator/chart/templates/device-manager/daemonset.yaml`.
