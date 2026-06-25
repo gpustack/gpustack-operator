@@ -1,6 +1,6 @@
 # Spec: Accelerator Soft-Slicing Runtime Isolation (NVIDIA HAMi-core / Ascend vcann-rt)
 
-Status: Building
+Status: Built
 
 ## Summary
 
@@ -404,7 +404,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
 *Checkpoint 3: image holds `nvidia/cuda-{12,13}/libvgpu.so` + preload.*
 
 **Phase 5 — NVIDIA integration**
-- [ ] **T12 — NVIDIA sliced `GetContainerAllocateResponse`.** Branch on `Sliced`: create `/tmp/vgpulock`
+- [x] **T12 — NVIDIA sliced `GetContainerAllocateResponse`.** Branch on `Sliced`: create `/tmp/vgpulock`
   (0777), `pods/<X>` (0777), `pods/<X>/tmp/vgpu` (0777); envs `CUDA_DEVICE_SM_LIMIT=floor(R*100)`,
   `CUDA_DEVICE_MEMORY_LIMIT_<i>=floor(memKi*R)` (one per `.sliced` card), `CUDA_DEVICE_MEMORY_SHARED_CACHE=
   /tmp/vgpu/cudevshr.cache`, keep `NVIDIA_VISIBLE_DEVICES`; mounts `/tmp/vgpulock`(rw),
