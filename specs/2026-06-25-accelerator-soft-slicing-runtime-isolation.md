@@ -390,7 +390,9 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
 - [ ] **T9 — vendor HAMi-core submodule** at `pack/gpustack-operator/external/nvidia/libvgpu` (latest commit).
   **Acceptance:** clones; `build.sh` entrypoint identified. **Verify:** `git submodule update --init`.
   **Files:** `.gitmodules`, submodule gitlink.
-- [ ] **T10 — CUDA builder stages, one at a time.** Add `nvbuild-12`
+- [x] **T10 — CUDA builder stages, one at a time.** (Both stages locally verified-built: `nvbuild-12` and
+  `nvbuild-13` each emit `libvgpu.so` — HAMi-core compiles cleanly against cuda-13, no compat surprise.)
+  Add `nvbuild-12`
   (`nvidia/cuda:12.9.2-cudnn-devel-ubi8`) → `libvgpu.so`, build-verify; then `nvbuild-13`
   (`nvidia/cuda:13.0.3-cudnn-devel-ubi8`), build-verify; final `COPY` to
   `${GPUSTACK_LIB_DIR}/nvidia/cuda-{12,13}/libvgpu.so`. **Acceptance:** each stage builds; both artifacts
