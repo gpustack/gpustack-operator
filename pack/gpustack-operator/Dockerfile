@@ -253,6 +253,38 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.s
 EOF
 
 # =============================================================================
+# Stages: xbuild-nvidia-cuda-* (NVIDIA soft-slicing)
+# Build the HAMi-core preload library (libvgpu.so) once per CUDA major against the
+# matching nvidia/cuda devel image. Each stage installs its product at /out; the
+# final image copies it into ${GPUSTACK_LIB_DIR}/nvidia/cuda-<major>. HAMi-core only
+# needs the CUDA headers (it hooks the driver/NVML at runtime), so the devel image
+# alone suffices once cmake is installed.
+# =============================================================================
+FROM nvidia/cuda:12.9.2-cudnn-devel-ubi8 AS xbuild-nvidia-cuda-12
+ARG LIB_HAMI_CORE_COMMIT
+RUN dnf install -y cmake git && dnf clean all
+RUN --mount=type=bind,src=pack/gpustack-operator/external/nvidia/build-libvgpu.sh,target=/build-libvgpu.sh <<EOF
+    set -exo pipefail
+    rm -rf /tmp/hami-core-src && git init -q /tmp/hami-core-src && cd /tmp/hami-core-src
+    git remote add origin https://github.com/Project-HAMi/HAMi-core.git
+    git fetch --depth 1 origin "${LIB_HAMI_CORE_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_HAMI_CORE_COMMIT}"
+    bash /build-libvgpu.sh /tmp/hami-core-src /out
+EOF
+
+FROM nvidia/cuda:13.0.3-cudnn-devel-ubi8 AS xbuild-nvidia-cuda-13
+ARG LIB_HAMI_CORE_COMMIT
+RUN dnf install -y cmake git && dnf clean all
+RUN --mount=type=bind,src=pack/gpustack-operator/external/nvidia/build-libvgpu.sh,target=/build-libvgpu.sh <<EOF
+    set -exo pipefail
+    rm -rf /tmp/hami-core-src && git init -q /tmp/hami-core-src && cd /tmp/hami-core-src
+    git remote add origin https://github.com/Project-HAMi/HAMi-core.git
+    git fetch --depth 1 origin "${LIB_HAMI_CORE_COMMIT}" || git fetch origin
+    git checkout -q "${LIB_HAMI_CORE_COMMIT}"
+    bash /build-libvgpu.sh /tmp/hami-core-src /out
+EOF
+
+# =============================================================================
 # Stage: gpustack (final)
 # Ubuntu 24.04 with only runtime packages — no Go, no build toolchain, no
 # download utilities, no -dev headers. Compiled binaries and CLI tools are
@@ -323,6 +355,10 @@ COPY --from=xbuild-ascend-cann-8-910c /out ${GPUSTACK_LIB_DIR}/ascend/cann-8-910
 COPY --from=xbuild-ascend-cann-9-910b /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-910b
 COPY --from=xbuild-ascend-cann-9-910c /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-910c
 COPY --from=xbuild-ascend-cann-9-950  /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-950
+
+## Copy the NVIDIA soft-slicing runtime (HAMi-core) per CUDA major.
+COPY --from=xbuild-nvidia-cuda-12 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-12
+COPY --from=xbuild-nvidia-cuda-13 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-13
 
 ## Copy CLI binaries from the build stages
 
