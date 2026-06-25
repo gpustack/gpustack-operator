@@ -281,31 +281,29 @@ const (
 
 func (r *DevicesReconciler) getAllocatingPodWithRetry(
 	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
-) (*core.Pod, error) {
-	var pod *core.Pod
-	var err error
+) (pod *core.Pod, ctr *core.Container, err error) {
 	for i := 0; i < 5; i++ {
-		pod, err = r.getAllocatingPod(ctx, resName, resQuantity)
+		pod, ctr, err = r.getAllocatingPod(ctx, resName, resQuantity)
 		if err == nil {
-			return pod, nil
+			return pod, ctr, nil
 		}
 		time.Sleep(3 * time.Second)
 	}
-	return nil, fmt.Errorf("get allocating pod with retry: %w", err)
+	return nil, nil, fmt.Errorf("get allocating pod with retry: %w", err)
 }
 
 func (r *DevicesReconciler) getAllocatingPod(
 	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
-) (*core.Pod, error) {
+) (*core.Pod, *core.Container, error) {
 	podList := new(core.PodList)
 	err := r.Client.List(ctx, podList,
 		ctrlcli.MatchingFields{IndexingPodsByNodeName: r.NodeName},
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
-		return nil, fmt.Errorf("list pods with node name: %w", err)
+		return nil, nil, fmt.Errorf("list pods with node name: %w", err)
 	}
 	if len(podList.Items) == 0 {
-		return nil, fmt.Errorf("no pods found with node name %s", r.NodeName)
+		return nil, nil, fmt.Errorf("no pods found with node name %s", r.NodeName)
 	}
 
 	sort.Slice(podList.Items, func(i, j int) bool {
@@ -321,7 +319,7 @@ func (r *DevicesReconciler) getAllocatingPod(
 			ctr := &pod.Spec.InitContainers[j]
 			for actualResName, actualResQuantity := range ctr.Resources.Limits {
 				if actualResName == resName && actualResQuantity.Equal(resQuantity) {
-					return pod, nil
+					return pod, ctr, nil
 				}
 			}
 		}
@@ -329,13 +327,13 @@ func (r *DevicesReconciler) getAllocatingPod(
 			ctr := &pod.Spec.Containers[j]
 			for actualResName, actualResQuantity := range ctr.Resources.Limits {
 				if actualResName == resName && actualResQuantity.Equal(resQuantity) {
-					return pod, nil
+					return pod, ctr, nil
 				}
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("cannot find pending pod with resource request %s=%s", resName, resQuantity.String())
+	return nil, nil, fmt.Errorf("cannot find pending pod with resource request %s=%s", resName, resQuantity.String())
 }
 
 func (r *DevicesReconciler) patchAllocatingPod(ctx context.Context, pod *core.Pod, allocatedStatus workercore.DevicesStatus) error {

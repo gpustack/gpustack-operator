@@ -67,6 +67,7 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 	ctx := srv.Context()
 
 	// Send the initial ListAndWatch response.
+	s.Logger.Info("sending initial list and watch response")
 	err := waitx.PollUntilContextCancel(ctx, 2*time.Second, true, func(ctx context.Context) error {
 		resp, err := s.getListAndWatchResponse(ctx)
 		if err != nil {
@@ -84,6 +85,7 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 	}
 
 	// Watch for updates and send ListAndWatch response whenever there's a change.
+	s.Logger.Info("watching for device updates")
 	for {
 		select {
 		case <-ctx.Done():
@@ -91,13 +93,14 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 		case <-notifier:
 			resp, err := s.getListAndWatchResponse(ctx)
 			if err != nil {
-				s.Logger.Error(err, "get list and watch response")
+				s.Logger.Error(err, "get list and watch response on update")
 				return err
 			}
 			if err = srv.Send(resp); err != nil {
 				s.Logger.Error(err, "send list and watch response")
 				return err
 			}
+			s.Logger.Info("sent list and watch response")
 		}
 	}
 }
@@ -157,7 +160,7 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(ctrReq.GetAllocationSize()), resource.DecimalSI)
-	pod, err := s.Reconciler.getAllocatingPodWithRetry(ctx, resName, resQuantity)
+	pod, ctr, err := s.Reconciler.getAllocatingPodWithRetry(ctx, resName, resQuantity)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for preferred allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for preferred allocation: %v", err)
@@ -169,7 +172,7 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for preferred allocation: %v", err)
 	}
 
-	ctrResp, err := s.getContainerPreferredAllocationResponse(ctrReq, pod, devs)
+	ctrResp, err := s.getContainerPreferredAllocationResponse(ctrReq, pod, ctr, devs)
 	if err != nil {
 		s.Logger.Error(err, "get container preferred allocation response")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get container preferred allocation response: %v", err)
@@ -185,6 +188,7 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	ctrReq *ContainerPreferredAllocationRequest,
 	pod *core.Pod,
+	_ *core.Container,
 	devs *workercore.Devices,
 ) (*ContainerPreferredAllocationResponse, error) {
 	availableDeviceIDs := ctrReq.GetAvailableDeviceIDs()
@@ -316,7 +320,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	pod, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity)
+	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
@@ -383,7 +387,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 	}
 
-	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, devs, allocatedAllocation)
+	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
 	if err != nil {
 		s.Logger.Error(err, "get container allocate response")
 		return nil, err
