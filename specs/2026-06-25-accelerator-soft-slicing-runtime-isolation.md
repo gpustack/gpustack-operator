@@ -397,7 +397,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
   (`nvidia/cuda:13.0.3-cudnn-devel-ubi8`), build-verify; final `COPY` to
   `${GPUSTACK_LIB_DIR}/nvidia/cuda-{12,13}/libvgpu.so`. **Acceptance:** each stage builds; both artifacts
   present. **Verify:** per-stage `--target`; final `ls`. **Files:** `pack/gpustack-operator/Dockerfile`.
-- [ ] **T11 — NVIDIA `ld.so.preload` asset** = `/usr/local/vgpu/libvgpu.so`; final copy to
+- [x] **T11 — NVIDIA `ld.so.preload` asset** = `/usr/local/vgpu/libvgpu.so`; final copy to
   `/etc/gpustack/lib/nvidia/ld.so.preload` (0644). **Acceptance:** present, 0644. **Verify:** image inspect.
   **Files:** rootfs asset, `pack/gpustack-operator/Dockerfile`.
 
