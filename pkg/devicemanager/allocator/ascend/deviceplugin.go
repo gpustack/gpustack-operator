@@ -1,7 +1,12 @@
 package ascend
 
 import (
+	"bufio"
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -13,7 +18,9 @@ import (
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const Manufacturer = nodefeature.ManufacturerAscend
@@ -26,6 +33,11 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	if !opts.NoShared {
 		servers = append(servers,
 			newServer(logger, workercore.DeviceAllocationModeShared),
+		)
+	}
+	if !opts.NoSliced {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModeSliced),
 		)
 	}
 
@@ -88,14 +100,27 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 	return s
 }
 
+// _AllocatedAccelerator pairs an allocated accelerator with its group; the group
+// carries the memory + runtime version + family that drive the sliced quota and the
+// library subdir.
+type _AllocatedAccelerator struct {
+	group *workercore.DevicesGroup
+	accel *workercore.Accelerator
+}
+
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
-	_ *core.Pod,
-	_ *core.Container,
+	pod *core.Pod,
+	ctr *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	indexes := make([]string, 0, len(allocated))
+	// Single pass over the allocated accelerators: collect the visible indexes and
+	// the accelerator/group pairs the sliced path needs for quota and library subdir.
+	var (
+		indexes      = make([]string, 0, len(allocated))
+		accelerators []_AllocatedAccelerator
+	)
 	for i := range devs.Spec.Groups {
 		devsGroup := &devs.Spec.Groups[i]
 		for j := range devsGroup.Accelerators {
@@ -108,8 +133,15 @@ func (s *server) GetContainerAllocateResponse(
 				continue
 			}
 			indexes = append(indexes, strconvx.FormatUint(devsAccelerator.Index, 10))
+			accelerators = append(accelerators, _AllocatedAccelerator{group: devsGroup, accel: devsAccelerator})
 		}
 		// TODO: mount HCCL topo file for 950.
+	}
+
+	// Sliced containers get real soft-slicing isolation (vcann-rt preload + quota);
+	// exclusive/shared keep the plain device-visibility response below.
+	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
+		return s.getSlicedContainerAllocateResponse(pod, ctr, indexes, accelerators)
 	}
 
 	// Delegate to container runtime for device injection,
@@ -121,4 +153,160 @@ func (s *server) GetContainerAllocateResponse(
 		},
 	}
 	return ctrResp, nil
+}
+
+// In-container paths the vcann-rt soft-slicing runtime expects.
+const (
+	ctrLdPreloadPath = "/etc/ld.so.preload"
+	ctrVruntimePath  = "/opt/enpu/vcann-rt/lib/libvruntime.so"
+	ctrMonitorPath   = "/opt/enpu/vcann-rt/tools/enpu-monitor"
+	ctrConfigPath    = "/etc/enpu/vcann-rt/npu_info.config"
+	ctrDevShmPath    = "/dev/shm"
+
+	// vcann-rt scheduling policies: 1=fixed-share, 2=elastic (default), 3=best-effort.
+	vcannSchedulingPolicy = 2
+)
+
+// getSlicedContainerAllocateResponse renders the vcann-rt soft-slicing injection for
+// a sliced container: a per-container npu_info.config carrying the compute/memory
+// quota derived from the container's ".sliced.units" request, plus the mounts that
+// preload libvruntime.so and expose the config. The real driver libdcmi/HAL bind at
+// runtime; this only stages quota + library mounts.
+//
+// vcann-rt's npu_info.config models a single physical NPU, so a sliced Ascend
+// container maps to one card; ASCEND_VISIBLE_DEVICES still lists every allocated
+// index for visibility.
+func (s *server) getSlicedContainerAllocateResponse(
+	pod *core.Pod,
+	ctr *core.Container,
+	indexes []string,
+	accels []_AllocatedAccelerator,
+) (*deviceplugin.ContainerAllocateResponse, error) {
+	if len(accels) == 0 {
+		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
+	}
+	// vcann-rt's npu_info.config models a single physical NPU, so a sliced Ascend
+	// container maps to exactly one card. Reject a multi-card allocation rather than
+	// silently quota-isolating only the first card while exposing the rest.
+	if len(accels) > 1 {
+		return nil, fmt.Errorf("sliced container %q allocated %d accelerators, but vcann-rt soft slicing is single-NPU", ctr.Name, len(accels))
+	}
+
+	ratio, err := deviceplugin.SliceRatio(ctr, nodefeature.GetAcceleratableSlicedUnitsResourceName(Manufacturer))
+	if err != nil {
+		return nil, fmt.Errorf("derive slice ratio: %w", err)
+	}
+
+	// vcann-rt is single-NPU; configure the first allocated card.
+	group, accel := accels[0].group, accels[0].accel
+
+	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), ctr.Name)
+	if err = osx.MkdirAll(podWorkDir, 0o777); err != nil {
+		return nil, fmt.Errorf("create pod work dir %q: %w", podWorkDir, err)
+	}
+
+	configHostPath := filepath.Join(podWorkDir, "etc/enpu/vcann-rt/npu_info.config")
+	vnpuID := lowestFreeVNPUID(deviceplugin.OperatorPodsDir, accel.Index, configHostPath)
+	cfg := renderNPUInfoConfig(accel.Index, vnpuID, ratio, group.Memory, accel.ID)
+	if err = osx.WriteFile(configHostPath, stringx.ToBytes(&cfg), 0o644); err != nil {
+		return nil, fmt.Errorf("write npu_info.config %q: %w", configHostPath, err)
+	}
+
+	cannDir := ascendCANNDir(group.RuntimeVersion, group.Family)
+	libDir := filepath.Join(deviceplugin.OperatorLibDir, "ascend")
+	mounts := []*deviceplugin.Mount{
+		{ContainerPath: ctrLdPreloadPath, HostPath: filepath.Join(libDir, "ld.so.preload"), ReadOnly: true},
+		{ContainerPath: ctrVruntimePath, HostPath: filepath.Join(libDir, cannDir, "lib/libvruntime.so"), ReadOnly: true},
+		{ContainerPath: ctrMonitorPath, HostPath: filepath.Join(libDir, cannDir, "tools/enpu-monitor"), ReadOnly: true},
+		{ContainerPath: ctrConfigPath, HostPath: configHostPath, ReadOnly: true},
+		{ContainerPath: ctrDevShmPath, HostPath: ctrDevShmPath, ReadOnly: false},
+	}
+
+	return &deviceplugin.ContainerAllocateResponse{
+		Envs: map[string]string{
+			"ASCEND_VISIBLE_DEVICES": strings.Join(indexes, ","),
+		},
+		Mounts: mounts,
+	}, nil
+}
+
+// lowestFreeVNPUID picks the lowest virtual-npu-id not already used by another
+// container's config on the same physical NPU (level-based, survives restart). If
+// selfConfigPath already exists with a parsable vnpu id, that id is reused so a
+// re-allocation is idempotent.
+func lowestFreeVNPUID(podsDir string, npuId uint32, selfConfigPath string) int {
+	if phy, virt, ok := parseNPUInfoConfig(selfConfigPath); ok && phy == int(npuId) {
+		return virt
+	}
+
+	used := make(map[int]bool)
+	matches, _ := filepath.Glob(filepath.Join(podsDir, "*", "*", "etc/enpu/vcann-rt/npu_info.config"))
+	for _, f := range matches {
+		if f == selfConfigPath {
+			continue
+		}
+		if phy, virt, ok := parseNPUInfoConfig(f); ok && phy == int(npuId) {
+			used[virt] = true
+		}
+	}
+	for i := 0; ; i++ {
+		if !used[i] {
+			return i
+		}
+	}
+}
+
+// renderNPUInfoConfig builds the vcann-rt npu_info.config body. aicore-quota is the
+// floored compute percent; memory-quota is the floored MiB share; shm-id is the
+// accelerator ID with spaces replaced by '-' (the hyphen-joined VDie-ID form vcann-rt
+// expects); scheduling-policy is fixed to elastic (2).
+func renderNPUInfoConfig(npuId uint32, vnpuId int, ratio float64, memoryMiB uint64, acceleratorID string) string {
+	shmID := strings.ReplaceAll(acceleratorID, " ", "-")
+	var b strings.Builder
+	_, _ = fmt.Fprintf(&b, "physical-npu-id=%d\n", npuId)
+	_, _ = fmt.Fprintf(&b, "virtual-npu-id=%d\n", vnpuId)
+	_, _ = fmt.Fprintf(&b, "aicore-quota=%d\n", deviceplugin.FloorPercent(ratio))
+	_, _ = fmt.Fprintf(&b, "memory-quota=%d\n", int64(float64(memoryMiB)*ratio))
+	_, _ = fmt.Fprintf(&b, "shm-id=%s\n", shmID)
+	_, _ = fmt.Fprintf(&b, "scheduling-policy=%d\n", vcannSchedulingPolicy)
+	return b.String()
+}
+
+// parseNPUInfoConfig reads physical-npu-id and virtual-npu-id from a vcann-rt config.
+func parseNPUInfoConfig(path string) (npuId, vnpuId int, ok bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer func() { _ = f.Close() }()
+
+	phy, vnpu := -1, -1
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		key, val, found := strings.Cut(scanner.Text(), "=")
+		if !found {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(val))
+		if err != nil {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "physical-npu-id":
+			phy = n
+		case "virtual-npu-id":
+			vnpu = n
+		}
+	}
+	if phy < 0 || vnpu < 0 {
+		return 0, 0, false
+	}
+	return phy, vnpu, true
+}
+
+// ascendCANNDir returns the vcann-rt library subdirectory for a card's CANN runtime
+// version and family ("cann-<major>-<family>"), defaulting the major to "cann-8" when
+// the version is unknown. Family is lower-cased (e.g. "910B" -> "910b").
+func ascendCANNDir(runtimeVersion, family string) string {
+	return "cann-" + device.RuntimeMajor(runtimeVersion, "8") + "-" + strings.ToLower(family)
 }

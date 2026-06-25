@@ -15,6 +15,21 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
+// Soft-slicing host paths. The device-manager init container stages the in-image
+// /etc/gpustack/lib tree onto the host at OperatorLibDir; per-container working
+// directories live under OperatorPodsDir. They are package vars (not consts) so
+// tests can redirect them to a temporary directory.
+var (
+	OperatorLibDir  = "/var/lib/gpustack/operator/lib"
+	OperatorPodsDir = "/var/lib/gpustack/operator/pods"
+)
+
+// PodWorkDir returns the host working directory for a sliced container,
+// <OperatorPodsDir>/<podUID>/c-<container>.
+func PodWorkDir(podUID, containerName string) string {
+	return filepath.Join(OperatorPodsDir, podUID, "c-"+containerName)
+}
+
 type Resource struct {
 	// Group is the ID of the devices group.
 	Group string
