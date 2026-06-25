@@ -50,6 +50,20 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      initContainers:
+        # Stage the soft-slicing library tree (preload libs + ld.so.preload) baked
+        # into the image at /etc/gpustack/lib onto the host, idempotently (checksum
+        # guarded), so the allocator can mount it into sliced workload containers.
+        - name: stage-libs
+          image: {{ $image | quote }}
+          imagePullPolicy: {{ $imagePullPolicy }}
+          command:
+            - copy-dir.sh
+            - /etc/gpustack/lib
+            - /var/lib/gpustack/operator/lib
+          volumeMounts:
+            - name: gpustack-data-dir
+              mountPath: /var/lib/gpustack
       containers:
         - name: main
           image: {{ $image | quote }}
@@ -130,6 +144,10 @@ spec:
               mountPath: /dev
             - name: sys-dir
               mountPath: /sys
+            # Host /tmp so the allocator can create the shared vGPU lock
+            # (/tmp/vgpulock) the soft-slicing runtime mounts into containers.
+            - name: tmp-dir
+              mountPath: /tmp
             - name: gpustack-data-dir
               mountPath: /var/lib/gpustack
             - name: cdi-dir
@@ -188,6 +206,10 @@ spec:
         - name: sys-dir
           hostPath:
             path: /sys
+            type: Directory
+        - name: tmp-dir
+          hostPath:
+            path: /tmp
             type: Directory
         - name: gpustack-data-dir
           hostPath:
