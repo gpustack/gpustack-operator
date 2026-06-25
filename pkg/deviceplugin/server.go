@@ -84,13 +84,20 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 		return err
 	}
 
+	// Sliced containers leave per-pod working directories on the host; reclaim them
+	// as their pods disappear from the reconciler's live pod-UUID set.
+	var gc *podDirGC
+	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
+		gc = newPodDirGC(OperatorPodsDir)
+	}
+
 	// Watch for updates and send ListAndWatch response whenever there's a change.
 	s.Logger.Info("watching for device updates")
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-notifier:
+		case livePodUIDs := <-notifier:
 			resp, err := s.getListAndWatchResponse(ctx)
 			if err != nil {
 				s.Logger.Error(err, "get list and watch response on update")
@@ -101,6 +108,9 @@ func (s *ResourceServer) ListAndWatch(_ *Empty, srv grpc.ServerStreamingServer[L
 				return err
 			}
 			s.Logger.Info("sent list and watch response")
+			if gc != nil {
+				gc.reconcile(livePodUIDs)
+			}
 		}
 	}
 }

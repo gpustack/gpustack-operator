@@ -38,7 +38,7 @@ type (
 	_DevicesNotifier struct {
 		Manufacturer   string
 		AllocationMode workercore.DeviceAllocationMode
-		Channel        chan struct{}
+		Channel        chan []string
 	}
 
 	// DevicesReconciler reconciles v1alpha1.Devices objects on a Kubernetes Node
@@ -97,9 +97,17 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		eDevsStatus.Groups = append(eDevsStatus.Groups, devsStatusGroup)
 	}
 
-	// Merge allocated accelerators.
+	// Merge allocated accelerators, and in the same pass collect the live pod-UUID
+	// set this node hands to the sliced per-pod working-dir GC (empty/nil ⇒ no pods;
+	// non-sliced consumers ignore the payload).
+	livePodUIDs := make([]string, 0, len(podList.Items))
 	for i := range podList.Items {
 		pod := &podList.Items[i]
+		// Keep terminating pods (DeletionTimestamp != nil) in the live set: during
+		// the grace period their containers can still be running with the working
+		// dir mounted, so the per-pod GC must not reclaim it until the pod object is
+		// actually gone. They are still skipped for the allocation-status merge.
+		livePodUIDs = append(livePodUIDs, string(pod.UID))
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
@@ -131,7 +139,7 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		for i := range r.notifiers {
 			notifier := &r.notifiers[i]
 			select {
-			case notifier.Channel <- struct{}{}:
+			case notifier.Channel <- livePodUIDs:
 			default:
 				logger.Error(nil,
 					"notifier channel is full, skipping notify",
@@ -241,11 +249,11 @@ func (r *DevicesReconciler) enqueueDevicesWhenPodChanged(
 	return reqs
 }
 
-func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocationMode workercore.DeviceAllocationMode) <-chan struct{} {
+func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocationMode workercore.DeviceAllocationMode) <-chan []string {
 	r.notifiersMutex.Lock()
 	defer r.notifiersMutex.Unlock()
 
-	channel := make(chan struct{}, 4)
+	channel := make(chan []string, 4)
 	r.notifiers = append(r.notifiers, _DevicesNotifier{
 		Manufacturer:   manufacturer,
 		AllocationMode: allocationMode,

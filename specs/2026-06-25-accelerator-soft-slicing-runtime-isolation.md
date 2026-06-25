@@ -378,7 +378,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
 *Checkpoint 2: the Ascend sliced response is fully asserted by unit tests, vNPU-id uniqueness included.*
 
 **Phase 3 — Shared per-pod GC (lands with Ascend, serves both vendors)**
-- [ ] **T8 — notifier `chan struct{}` → `chan []string` + dir GC.** Widen the `DevicesReconciler` notifier to
+- [x] **T8 — notifier `chan struct{}` → `chan []string` + dir GC.** Widen the `DevicesReconciler` notifier to
   carry the live pod-UUID list (empty/nil ⇒ none) on each reconcile; the Sliced `ResourceServer` scans
   `pods/<uuid>` on startup and removes a UUID after **3 consecutive** absences from the list; a list UUID
   absent on disk is tracked. **Acceptance:** unit test feeding successive lists incl. nil asserts removal only
