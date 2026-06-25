@@ -1,0 +1,160 @@
+- id: 910b2
+  manufacturer: ascend
+  name: 910B2
+  memory: 65536
+  cores: 24
+  driverVersion: 25.5.1
+  family: 910B
+  accelerators:
+    - id: E0F4EE64 802061B1 6A691492 89528485 104301E3
+      index: 0
+      physicalIndexes:
+        - 0
+        - 0
+        - 0
+      topology:
+        pciBusId: 0000:c1:00.0
+        pciRootId: 0000:c0:00.0
+        pciClass: "120000"
+        numaAffinity: "6"
+        cpuAffinity: 144-167
+      features:
+        roce:
+          ip: 10.52.32.11
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: E281A66C 140C979 2CFBED72 A4500485 104301E3
+      index: 1
+      physicalIndexes:
+        - 1
+        - 1
+        - 0
+      topology:
+        pciBusId: "0000:01:00.0"
+        pciRootId: "0000:00:00.0"
+        pciClass: "120000"
+        numaAffinity: "0"
+        cpuAffinity: 0-23
+      features:
+        roce:
+          ip: 10.52.32.10
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: 7281A664 1003374 3444AB72 99D00485 104301E3
+      index: 2
+      physicalIndexes:
+        - 2
+        - 2
+        - 0
+      topology:
+        pciBusId: 0000:c2:00.0
+        pciRootId: 0000:c0:08.0
+        pciClass: "120000"
+        numaAffinity: "6"
+        cpuAffinity: 144-167
+      features:
+        roce:
+          ip: 10.52.32.13
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: 687DA66C 100D2DF 1915AB72 99D00485 104301E3
+      index: 3
+      physicalIndexes:
+        - 3
+        - 3
+        - 0
+      topology:
+        pciBusId: "0000:02:00.0"
+        pciRootId: "0000:00:08.0"
+        pciClass: "120000"
+        numaAffinity: "0"
+        cpuAffinity: 0-23
+      features:
+        roce:
+          ip: 10.52.32.12
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: D0DBA664 12066DD 27A93572 86D28485 104301E3
+      index: 4
+      physicalIndexes:
+        - 4
+        - 4
+        - 0
+      topology:
+        pciBusId: 0000:81:00.0
+        pciRootId: 0000:80:00.0
+        pciClass: "120000"
+        numaAffinity: "4"
+        cpuAffinity: 96-119
+      features:
+        roce:
+          ip: 10.52.32.16
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: 3281A664 1404B1E 1AC3572 86D28485 104301E3
+      index: 5
+      physicalIndexes:
+        - 5
+        - 5
+        - 0
+      topology:
+        pciBusId: "0000:41:00.0"
+        pciRootId: "0000:40:00.0"
+        pciClass: "120000"
+        numaAffinity: "2"
+        cpuAffinity: 48-71
+      features:
+        roce:
+          ip: 10.52.32.17
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: 7281A664 1207247 20B9E972 99D00485 104301E3
+      index: 6
+      physicalIndexes:
+        - 6
+        - 6
+        - 0
+      topology:
+        pciBusId: 0000:82:00.0
+        pciRootId: 0000:80:08.0
+        pciClass: "120000"
+        numaAffinity: "4"
+        cpuAffinity: 96-119
+      features:
+        roce:
+          ip: 10.52.32.15
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
+    - id: 785BA664 C0D378 3411B572 86D28485 104301E3
+      index: 7
+      physicalIndexes:
+        - 7
+        - 7
+        - 0
+      topology:
+        pciBusId: "0000:42:00.0"
+        pciRootId: "0000:40:08.0"
+        pciClass: "120000"
+        numaAffinity: "2"
+        cpuAffinity: 48-71
+      features:
+        roce:
+          ip: 10.52.32.14
+          subnetMask: 255.255.255.0
+          gateway: 10.52.32.1
+      status:
+        unhealthy: false
