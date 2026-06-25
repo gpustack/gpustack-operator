@@ -1,0 +1,3 @@
+/usr/local/dcmi/libdcmi.so
+/usr/local/Ascend/driver/lib64/driver/libdcmi.so
+/opt/enpu/vcann-rt/lib/libvruntime.so

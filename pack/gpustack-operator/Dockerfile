@@ -412,6 +412,11 @@ EOT
     # Install the host-staging helper used by the device-manager init container.
     install -m 0755 /rootfs/usr/bin/copy-dir.sh /usr/bin/copy-dir.sh
 
+    # Install the Ascend soft-slicing ld.so.preload (points at the in-container
+    # vcann-rt library mount); staged onto the host alongside the cann-* libs.
+    install -D -m 0644 /rootfs/etc/gpustack/lib/ascend/ld.so.preload \
+        "${GPUSTACK_LIB_DIR}"/ascend/ld.so.preload
+
     # Try to update PCI IDs
     if ! update-pciids; then
         curl -o /usr/share/misc/pci.ids https://pci-ids.ucw.cz/v2.2/pci.ids || true

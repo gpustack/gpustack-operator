@@ -350,7 +350,7 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
   910c,950}/{lib/libvruntime.so,tools/enpu-monitor}`. **Acceptance:** each stage builds; final image holds all
   five dirs with both artifacts. **Verify:** per-stage `docker buildx build --target …`; final-image `ls`.
   **Files:** `pack/gpustack-operator/Dockerfile`.
-- [ ] **T5 — Ascend `ld.so.preload` asset.** Add
+- [x] **T5 — Ascend `ld.so.preload` asset.** Add
   `pack/gpustack-operator/rootfs/etc/gpustack/lib/ascend/ld.so.preload` = `/opt/enpu/vcann-rt/lib/libvruntime.so`;
   final-stage copy to `/etc/gpustack/lib/ascend/ld.so.preload` (0644). **Acceptance:** present in image, mode
   0644. **Verify:** image inspect. **Files:** rootfs asset, `pack/gpustack-operator/Dockerfile`.
