@@ -144,10 +144,6 @@ spec:
               mountPath: /dev
             - name: sys-dir
               mountPath: /sys
-            # Host /tmp so the allocator can create the shared vGPU lock
-            # (/tmp/vgpulock) the soft-slicing runtime mounts into containers.
-            - name: tmp-dir
-              mountPath: /tmp
             - name: gpustack-data-dir
               mountPath: /var/lib/gpustack
             - name: cdi-dir
@@ -185,6 +181,10 @@ spec:
               mountPath: /usr/local/corex
               readOnly: true
             {{- end }}
+            {{- if eq $manu "nvidia" }}
+            - name: gpustack-nvidia-vgpulock-dir
+              mountPath: /tmp/vgpulock
+            {{- end }}
             {{- if eq $manu "metax" }}
             - name: gpustack-metax-driver
               mountPath: /opt/mxdriver
@@ -206,10 +206,6 @@ spec:
         - name: sys-dir
           hostPath:
             path: /sys
-            type: Directory
-        - name: tmp-dir
-          hostPath:
-            path: /tmp
             type: Directory
         - name: gpustack-data-dir
           hostPath:
@@ -260,6 +256,12 @@ spec:
           hostPath:
             path: /usr/local/corex
             type: DirectoryOrCreate
+        {{- end }}
+        {{- if eq $manu "nvidia" }}
+        - name: gpustack-nvidia-vgpulock-dir
+          hostPath:
+            path: /tmp/vgpulock
+            type: Directory
         {{- end }}
         {{- if eq $manu "metax" }}
         - name: gpustack-metax-driver

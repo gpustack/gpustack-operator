@@ -1,6 +1,6 @@
 # Spec: Accelerator Soft-Slicing Runtime Isolation (NVIDIA HAMi-core / Ascend vcann-rt)
 
-Status: Built
+Status: Shipped
 
 ## Summary
 
@@ -115,21 +115,21 @@ reclaim each pod's slice working directory after the pod is gone, so that node d
 | F3 | Ascend multi-stage build (vcann-rt) | The five CANN/family builder stages each emit `libvruntime.so` + `enpu-monitor`; the final image carries them under `${GPUSTACK_LIB_DIR}/ascend/cann-{8,9}-{910b,910c,950}` per the mapping. Local build inspection. |
 | F4 | `ld.so.preload` rootfs assets | Final image has `/etc/gpustack/lib/nvidia/ld.so.preload` (`/usr/local/vgpu/libvgpu.so`, mode 0644) and `/etc/gpustack/lib/ascend/ld.so.preload` (mode 0644). The Ascend file lists the host-injected `libdcmi.so` (`/usr/local/dcmi/libdcmi.so`, then `/usr/local/Ascend/driver/lib64/driver/libdcmi.so`) **before** `/opt/enpu/vcann-rt/lib/libvruntime.so` — see the libdcmi caveat below. |
 | F5 | DaemonSet host staging | The device-manager DaemonSet mounts host `/tmp`; an init container runs `copy-dir.sh /etc/gpustack/lib /var/lib/gpustack/operator/lib`. Chart render test. |
-| F6 | NVIDIA sliced `GetContainerAllocateResponse` | For a sliced container, the response carries `CUDA_DEVICE_SM_LIMIT=R`, `CUDA_DEVICE_MEMORY_LIMIT_<i>` (Mi→Ki × R, one per `.sliced` card), `CUDA_DEVICE_MEMORY_SHARED_CACHE=/tmp/vgpu/cudevshr.cache`; mounts `/tmp/vgpulock`(rw), `ld.so.preload`→`/etc/ld.so.preload`(ro), `cuda-{Major|12}/libvgpu.so`→`/usr/local/vgpu/libvgpu.so`(ro), `pods/<X>/tmp/vgpu`→`/tmp/vgpu`(rw), `/dev/shm`→`/dev/shm`. Creates `/tmp/vgpulock`(0777), `pods/<X>`(0777), `pods/<X>/tmp/vgpu`(0777). Table test. |
-| F7 | Ascend sliced `GetContainerAllocateResponse` | For a sliced container, renders `pods/<X>/etc/enpu/vcann-rt/npu_info.config`(0644) with `physical-npu-id`=accelerator Index, unique `virtual-npu-id` (lowest-free per physical NPU, from 0), `aicore-quota`=R, `memory-quota`=R × memory, `shm-id`=accelerator Id (spaces→`-`), `scheduling-policy=2` (vcann-rt *elastic* policy, the upstream default); mounts `ld.so.preload`→`/etc/ld.so.preload`(ro), `cann-{Major|8}-{lower(Family)}/{lib/libvruntime.so,tools/enpu-monitor}`→`/opt/enpu/vcann-rt/...`, the config file→container path, `/dev/shm`→`/dev/shm`. Creates `pods/<X>`(0777). Table test. |
-| F8 | Quota ratio `R` derivation (round down) | `R` is derived from the container's `.sliced.units` value (`R = units / D`, D=12800); every `R`-derived quota is **floored** (round down): compute percent = `floor(R×100)`, NVIDIA `CUDA_DEVICE_MEMORY_LIMIT_<i>` = `floor(memKi × R)`, Ascend `aicore-quota` = `floor(R×100)`, `memory-quota` = `floor(memMB × R)`. The count of `CUDA_DEVICE_MEMORY_LIMIT_<i>` entries equals the `.sliced` card count. Unit test over the worked examples below. |
+| F6 | NVIDIA sliced `GetContainerAllocateResponse` | For a sliced container, the response carries `CUDA_DEVICE_SM_LIMIT=floor(R×100)` (integer percent), `CUDA_DEVICE_MEMORY_LIMIT_<i>=floor(memMiB × R)` with an `m` suffix (one per `.sliced` card), `CUDA_DEVICE_MEMORY_SHARED_CACHE=/tmp/vgpu/cudevshr.cache`; mounts `/tmp/vgpulock`(rw), `ld.so.preload`→`/etc/ld.so.preload`(ro), `cuda-{Major|12}/libvgpu.so`→`/usr/local/vgpu/libvgpu.so`(ro), `pods/<X>/tmp/vgpu`→`/tmp/vgpu`(rw), `/dev/shm`→`/dev/shm`. Creates `/tmp/vgpulock`(0777), `pods/<X>`(0777), `pods/<X>/tmp/vgpu`(0777). Table test. |
+| F7 | Ascend sliced `GetContainerAllocateResponse` | For a sliced container, renders `pods/<X>/etc/enpu/vcann-rt/npu_info.config`(0644) with `physical-npu-id`=accelerator Index, unique `virtual-npu-id` (lowest-free per physical NPU, from 0), `aicore-quota`=floor(R×100) (integer percent), `memory-quota`=floor(memMiB × R), `shm-id`=accelerator Id (spaces→`-`), `scheduling-policy=2` (vcann-rt *elastic* policy, the upstream default); mounts `ld.so.preload`→`/etc/ld.so.preload`(ro), `cann-{Major|8}-{lower(Family)}/{lib/libvruntime.so,tools/enpu-monitor}`→`/opt/enpu/vcann-rt/...`, the config file→container path, `/dev/shm`→`/dev/shm`. Creates `pods/<X>`(0777). Table test. |
+| F8 | Quota ratio `R` derivation (round down) | `R` is derived from the container's `.sliced.units` value (`R = units / D`, D=12800); every `R`-derived quota is **floored** (round down): compute percent = `floor(R×100)`, NVIDIA `CUDA_DEVICE_MEMORY_LIMIT_<i>` = `floor(memMiB × R)` (with an `m` suffix), Ascend `aicore-quota` = `floor(R×100)`, `memory-quota` = `floor(memMiB × R)`. The count of `CUDA_DEVICE_MEMORY_LIMIT_<i>` entries equals the `.sliced` card count. Unit test over the worked examples below. |
 | F9 | Per-pod working-dir GC | The notifier channel changes from `chan struct{}` to `chan []string` carrying the **live pod-UUID list** (empty/nil ⇒ no pods on the node). The Sliced `ResourceServer` scans `pods/<uuid>` on startup; a UUID present on disk but absent from the latest list for 3 consecutive notifications is removed; a list UUID absent on disk is tracked. Unit test driving the notifier with successive lists (incl. nil) asserts removal only after 3 misses. |
 
 **`R` worked examples (D=12800, container key `X = <podUUID>/c-<containerName>`):**
 
 | Request | `.sliced.units` (per card) | `.sliced` (cards) | R | NVIDIA `CUDA_DEVICE_SM_LIMIT` | NVIDIA `CUDA_DEVICE_MEMORY_LIMIT_*` (24 GiB card) |
 |---|---|---|---|---|---|
-| 1/8 card | 1600 | 1 | 1600/12800 = 1/8 | `floor(12.5)` = 12 | `LIMIT_0` = `floor(24Gi→Ki × 1/8)` |
-| 1/4 card | 3200 | 1 | 1/4 | `floor(25)` = 25 | `LIMIT_0` |
-| 1/8 × 2 cards | 1600 | 2 | 1/8 | 12 | `LIMIT_0`, `LIMIT_1` |
+| 1/8 card | 1600 | 1 | 1600/12800 = 1/8 | `floor(12.5)` = 12 | `LIMIT_0` = `floor(24576Mi × 1/8)` = `3072m` |
+| 1/4 card | 3200 | 1 | 1/4 | `floor(25)` = 25 | `LIMIT_0` = `6144m` |
+| 1/8 × 2 cards | 1600 | 2 | 1/8 | 12 | `LIMIT_0`, `LIMIT_1` = `3072m` |
 
 All `R`-derived quotas **round down (floor)**: `CUDA_DEVICE_SM_LIMIT` / `aicore-quota` are integer percents
-`floor(R×100)`; memory limits are floored (HAMi-core Ki, vcann-rt MB).
+`floor(R×100)`; memory limits are floored MiB (HAMi-core `CUDA_DEVICE_MEMORY_LIMIT_<i>` with an `m` suffix, vcann-rt `memory-quota`).
 
 ### Notes / Constraints / Caveats
 

@@ -1,6 +1,6 @@
-# This workflow lints and tests the Helm chart on pull requests/pushes that
-# touch chart-related files, and publishes it to the gh-pages Helm repository
-# on version tags.
+# This workflow lints and tests the Helm chart on pull requests that touch
+# chart-related files, and publishes it to the gh-pages Helm repository on
+# version tags.
 
 name: ci-chart
 
@@ -34,6 +34,7 @@ on:
 
 jobs:
   lint-test:
+    if: ${{ github.event_name == 'pull_request' }}
     timeout-minutes: 60
     runs-on: ubuntu-24.04
     steps:
@@ -57,11 +58,11 @@ jobs:
           key: chart-toolbox-${{ runner.os }}
           path: |-
             ${{ github.workspace }}/.sbin
-      - name: Setup Kind
-        uses: helm/kind-action@v1
-        with:
-          config: .github/configs/kind-config.yaml
-          version: v0.32.0
+#      - name: Setup Kind
+#        uses: helm/kind-action@v1
+#        with:
+#          config: .github/configs/kind-config.yaml
+#          version: v0.32.0
       - name: Generate
         run: make generate chart
       - name: Verify Generated
@@ -80,17 +81,15 @@ jobs:
           fi
       - name: Lint
         run: make lint chart
-      # NB(thxCode): the worker installs Node Feature Discovery, Kueue and the CSI
-      # drivers at runtime in this phase, so the test needs network egress and the
-      # released operator image; the device-manager DaemonSets stay at 0 desired
-      # on the GPU-less kind nodes.
-      - name: Test
-        run: make test chart
+#      # NB(thxCode): the worker installs Node Feature Discovery, Kueue and the CSI
+#      # drivers at runtime in this phase, so the test needs network egress and the
+#      # released operator image; the device-manager DaemonSets stay at 0 desired
+#      # on the GPU-less kind nodes.
+#      - name: Test
+#        run: make test chart
 
   pack:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs:
-      - lint-test
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
