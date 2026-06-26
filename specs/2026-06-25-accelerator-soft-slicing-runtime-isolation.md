@@ -9,8 +9,9 @@ chain (global denominator D=12800, Webhook unit conversion, Kueue `multiplyBy`, 
 `.sliced.units`/`.sliced`, borrow+reclaim), but it explicitly left **runtime isolation** as a Non-Goal: the
 device-plugin `Allocate()` only does placement bookkeeping into `Devices.Status` and injects no real
 VRAM/compute limits. This spec implements that deferred Non-Goal for the **soft-slicing** path only (hard
-slicing — MIG / Ascend vNPU dynamic virtualization — stays out of scope). It vendors two preload libraries as
-git submodules and compiles them in the operator image (NVIDIA HAMi-core → `libvgpu.so`; Ascend vcann-rt →
+slicing — MIG / Ascend vNPU dynamic virtualization — stays out of scope). It clones two preload-library
+sources inline at pinned commits (each Docker build stage `git clone`s the repo; no git submodule) and
+compiles them in the operator image (NVIDIA HAMi-core → `libvgpu.so`; Ascend vcann-rt →
 `libvruntime.so` + `enpu-monitor`), stages them onto the host via the device-manager DaemonSet, and rewrites
 `GetContainerAllocateResponse` for the NVIDIA and Ascend allocators so a sliced container is launched with the
 preload library injected through `/etc/ld.so.preload` and per-container VRAM/compute quota derived from its
@@ -25,8 +26,9 @@ accumulate stale slice config/cache directories.
    that requests a slice (`.sliced.units` / `.sliced`) starts with a preload library injected and per-container
    memory/compute quota applied, instead of seeing the whole physical card. Target users: cluster operators
    running multi-tenant inference/training that over-commit a single GPU/NPU through GPUStack's Sliced mode.
-2. **Vendored, version-pinned preload libraries built in-image.** HAMi-core and vcann-rt are added as git
-   submodules and compiled via multi-stage Docker builds against pinned vendor SDK base images, producing the
+2. **Version-pinned preload libraries built in-image.** HAMi-core and vcann-rt are cloned inline at pinned
+   commits (each Docker build stage `git clone`s the repo at an `ARG`-pinned SHA — no git submodule) and
+   compiled via multi-stage Docker builds against pinned vendor SDK base images, producing the
    per-runtime-version `.so` artifacts laid out under `${GPUSTACK_LIB_DIR}` in the final image.
 3. **Host staging + container injection.** The device-manager DaemonSet copies the in-image library tree onto
    the host (idempotent, checksum-aware) via an init container; `Allocate()` then mounts the right library +
@@ -93,8 +95,9 @@ tenant cannot starve or OOM another sharing the same physical GPU/NPU.
   carrying its `aicore-quota` / `memory-quota` and a unique `virtual-npu-id`.
 
 #### Story 2 — Maintainer builds and ships the operator image with preload libraries
-As a **GPUStack maintainer**, I want the preload libraries vendored as submodules and compiled in the operator
-image against pinned vendor SDK bases, so that the final image carries `libvgpu.so` (per CUDA major) and
+As a **GPUStack maintainer**, I want the preload libraries cloned inline at pinned commits (no submodule) and
+compiled in the operator image against pinned vendor SDK bases, so that the final image carries `libvgpu.so`
+(per CUDA major) and
 `libvruntime.so` + `enpu-monitor` (per CANN/family) at deterministic paths, and a local multi-stage build
 verifies each artifact is produced and placed.
 
@@ -110,7 +113,7 @@ reclaim each pod's slice working directory after the pod is gone, so that node d
 | F1 | `copy-dir.sh` host-staging helper | `copy-dir.sh <src> <dst>` recurses; creates `<dst>` if absent; overwrites an existing destination file only when checksums differ. `docker run --rm` script test covers: missing-dir create, identical-file skip, changed-file replace. |
 | F2 | NVIDIA multi-stage build (HAMi-core) | `nvidia/cuda:13.0.3-cudnn-devel-ubi8` and `nvidia/cuda:12.9.2-cudnn-devel-ubi8` builder stages each emit `libvgpu.so`; the final image carries `${GPUSTACK_LIB_DIR}/nvidia/cuda-13/libvgpu.so` and `${GPUSTACK_LIB_DIR}/nvidia/cuda-12/libvgpu.so`. Local build inspection. |
 | F3 | Ascend multi-stage build (vcann-rt) | The five CANN/family builder stages each emit `libvruntime.so` + `enpu-monitor`; the final image carries them under `${GPUSTACK_LIB_DIR}/ascend/cann-{8,9}-{910b,910c,950}` per the mapping. Local build inspection. |
-| F4 | `ld.so.preload` rootfs assets | Final image has `/etc/gpustack/lib/nvidia/ld.so.preload` (`/usr/local/vgpu/libvgpu.so`, mode 0644) and `/etc/gpustack/lib/ascend/ld.so.preload` (`/opt/enpu/vcann-rt/lib/libvruntime.so`, mode 0644). |
+| F4 | `ld.so.preload` rootfs assets | Final image has `/etc/gpustack/lib/nvidia/ld.so.preload` (`/usr/local/vgpu/libvgpu.so`, mode 0644) and `/etc/gpustack/lib/ascend/ld.so.preload` (mode 0644). The Ascend file lists the host-injected `libdcmi.so` (`/usr/local/dcmi/libdcmi.so`, then `/usr/local/Ascend/driver/lib64/driver/libdcmi.so`) **before** `/opt/enpu/vcann-rt/lib/libvruntime.so` — see the libdcmi caveat below. |
 | F5 | DaemonSet host staging | The device-manager DaemonSet mounts host `/tmp`; an init container runs `copy-dir.sh /etc/gpustack/lib /var/lib/gpustack/operator/lib`. Chart render test. |
 | F6 | NVIDIA sliced `GetContainerAllocateResponse` | For a sliced container, the response carries `CUDA_DEVICE_SM_LIMIT=R`, `CUDA_DEVICE_MEMORY_LIMIT_<i>` (Mi→Ki × R, one per `.sliced` card), `CUDA_DEVICE_MEMORY_SHARED_CACHE=/tmp/vgpu/cudevshr.cache`; mounts `/tmp/vgpulock`(rw), `ld.so.preload`→`/etc/ld.so.preload`(ro), `cuda-{Major|12}/libvgpu.so`→`/usr/local/vgpu/libvgpu.so`(ro), `pods/<X>/tmp/vgpu`→`/tmp/vgpu`(rw), `/dev/shm`→`/dev/shm`. Creates `/tmp/vgpulock`(0777), `pods/<X>`(0777), `pods/<X>/tmp/vgpu`(0777). Table test. |
 | F7 | Ascend sliced `GetContainerAllocateResponse` | For a sliced container, renders `pods/<X>/etc/enpu/vcann-rt/npu_info.config`(0644) with `physical-npu-id`=accelerator Index, unique `virtual-npu-id` (lowest-free per physical NPU, from 0), `aicore-quota`=R, `memory-quota`=R × memory, `shm-id`=accelerator Id (spaces→`-`), `scheduling-policy=2` (vcann-rt *elastic* policy, the upstream default); mounts `ld.so.preload`→`/etc/ld.so.preload`(ro), `cann-{Major|8}-{lower(Family)}/{lib/libvruntime.so,tools/enpu-monitor}`→`/opt/enpu/vcann-rt/...`, the config file→container path, `/dev/shm`→`/dev/shm`. Creates `pods/<X>`(0777). Table test. |
@@ -148,25 +151,27 @@ All `R`-derived quotas **round down (floor)**: `CUDA_DEVICE_SM_LIMIT` / `aicore-
   (replacing `chan struct{}`); an empty/nil slice means the node currently has no pods.
 - After API/webhook/generated changes (none expected here) run `make generate`; run `make lint` after Go
   changes.
-- Submodules add a `.gitmodules` (currently none in repo) and `make deps`/build must clone them.
+- The preload sources are cloned inline by the Dockerfile build stages at pinned commits
+  (`ARG LIB_UBS_VIRT_ENPU_COMMIT` / `ARG LIB_HAMI_CORE_COMMIT`); no git submodule, no `.gitmodules`.
 
 ### Boundaries
 
 - **Always:** activate via `/etc/ld.so.preload`; keep `Allocate()` idempotent and safe to repeat; derive quota
-  from the request (`.sliced.units` / `.sliced`), never hard-code; pin submodule versions; run `make lint`
-  after Go changes; add table-driven unit tests for every new response/helper.
+  from the request (`.sliced.units` / `.sliced`), never hard-code; pin the preload-source commits (the build
+  `ARG *_COMMIT` values); run `make lint` after Go changes; add table-driven unit tests for every new
+  response/helper.
 - **Ask first:** changing the host path layout under `/var/lib/gpustack/operator`; adding hard-slicing code;
   changing D or the `.sliced.units`→R relationship; touching the detector / `slicing-policy` plumbing;
   selecting `vcann-rt` vs `hami-vnpu-core` for Ascend (this spec commits to `vcann-rt` per the task).
 - **Never:** inject via `LD_PRELOAD` env instead of `ld.so.preload`; expose the whole physical card to a sliced
   container; copy library files without the checksum guard; delete a pod working dir before the 3-miss
-  confirmation; pin submodules to a moving ref (`@latest`/branch tip).
+  confirmation; pin the preload-source commits to a moving ref (branch tip) instead of a fixed SHA.
 
 ### Risks and Mitigations
 
-1. **Compiler/SDK base drift produces an ABI-mismatched `.so`** → submodules track the latest upstream commit
-   (recorded in the gitlink) and base images use the fixed tag list in Build Targets (no digest pinning);
-   verify each artifact exists and loads in the build stage.
+1. **Compiler/SDK base drift produces an ABI-mismatched `.so`** → the preload sources are cloned at pinned
+   commits (the `ARG *_COMMIT` SHAs) and base images use the fixed tag list in Build Targets (no digest
+   pinning); verify each artifact exists and loads in the build stage.
 2. **`copy-dir.sh` overwrites a library a running container is mmap-ing** → checksum-guarded copy only replaces
    on change; staging runs in an init container before workloads on that node would mount the new tree.
 3. **Ascend `virtual-npu-id` collision on a shared physical NPU** → assign by scanning live allocations and
@@ -188,12 +193,12 @@ All `R`-derived quotas **round down (floor)**: `CUDA_DEVICE_SM_LIMIT` / `aicore-
 ### Commands
 
 ```bash
-# Submodules (added by this spec; tracked at latest upstream commit)
-git submodule update --init
+# Preload sources are cloned inline by the build stages at the ARG-pinned commits
+# (no submodule); bump ARG LIB_UBS_VIRT_ENPU_COMMIT / LIB_HAMI_CORE_COMMIT to update.
 
 # Incremental per-stage build-verify (add one builder stage at a time, --target each)
-docker buildx build -f pack/gpustack-operator/Dockerfile --target cannbuild-8-910b -t v .  # then 8-910c, 9-910b, 9-910c, 9-950
-docker buildx build -f pack/gpustack-operator/Dockerfile --target nvbuild-12  -t v .        # then nvbuild-13
+docker buildx build -f pack/gpustack-operator/Dockerfile --target xbuild-ascend-cann-8-910b -t v .  # then 8-910c, 9-910b, 9-910c, 9-950
+docker buildx build -f pack/gpustack-operator/Dockerfile --target xbuild-nvidia-cuda-12  -t v .        # then xbuild-nvidia-cuda-13
 
 # Full image + artifact-layout check (F2/F3/F4)
 docker buildx build -f pack/gpustack-operator/Dockerfile -t gpustack-operator:soft-slicing .
@@ -214,10 +219,9 @@ helm template deploy/gpustack-operator/chart --show-only templates/device-manage
 ### Project Structure (files in scope)
 
 ```
-.gitmodules                                              # NEW: hami-core + vcann-rt submodules
-pack/gpustack-operator/external/nvidia/libvgpu/          # NEW submodule: HAMi-core
-pack/gpustack-operator/external/ascend/libvnpu/          # NEW submodule: vcann-rt
-pack/gpustack-operator/Dockerfile                        # add GPUSTACK_LIB_DIR ARG; nvbuild/cannbuild stages; copy artifacts + copy-dir.sh + ld.so.preload
+pack/gpustack-operator/external/nvidia/build-libvgpu.sh  # NEW: build script (Dockerfile clones HAMi-core, calls this)
+pack/gpustack-operator/external/ascend/build-libvnpu.sh  # NEW: build script (Dockerfile clones vcann-rt, calls this)
+pack/gpustack-operator/Dockerfile                        # GPUSTACK_LIB_DIR + ARG *_COMMIT; nvbuild/cannbuild stages git-clone+build; copy artifacts + copy-dir.sh + ld.so.preload
 pack/gpustack-operator/rootfs/usr/bin/copy-dir.sh        # NEW: recursive, checksum-guarded copy
 pack/gpustack-operator/rootfs/etc/gpustack/lib/nvidia/ld.so.preload   # NEW: /usr/local/vgpu/libvgpu.so
 pack/gpustack-operator/rootfs/etc/gpustack/lib/ascend/ld.so.preload   # NEW: /opt/enpu/vcann-rt/lib/libvruntime.so
@@ -230,8 +234,9 @@ pkg/deviceplugin/controller.go                           # feed live pod UUIDs i
 
 ### Build Targets (base image → artifact → final-image path)
 
-Submodules track the **latest upstream commit** at add time (recorded in `.gitmodules` / the submodule
-gitlink); base images are referenced by the **tags below, not pinned digests**.
+Preload sources are cloned inline at the **pinned commits** in `ARG LIB_UBS_VIRT_ENPU_COMMIT` /
+`ARG LIB_HAMI_CORE_COMMIT` (no submodule); base images are referenced by the **tags below, not pinned
+digests**.
 
 **NVIDIA — HAMi-core → `libvgpu.so`** (`GPUSTACK_LIB_DIR = /etc/gpustack/lib`):
 
@@ -257,7 +262,7 @@ Each Ascend dir holds `lib/libvruntime.so` and `tools/enpu-monitor`. The allocat
 > **CANN 9 = 9.1.0-beta.1, not 9.0.0** (build finding): vcann-rt (master) fails to compile against the CANN
 > 9.0.0 toolkit — its `acl/acl_dump.h` references an undefined `acldumpType` — but builds cleanly against
 > 9.1.0-beta.1 (matching the README's "CANN 8.5 / 9.1" support claim). All five CANN images are multi-arch
-> (amd64 + arm64), so buildkit builds each `cannbuild-*` stage for the final image's target arch.
+> (amd64 + arm64), so buildkit builds each `xbuild-ascend-cann-*` stage for the final image's target arch.
 >
 > **dcmi link stub:** the CANN toolkit ships no driver `dcmi` (the HDK driver is host-injected at runtime), so
 > the build compiles the in-tree `test/stub/dcmi_stub.c` into a stub `libdcmi.so` (SONAME `libdcmi.so`) to
@@ -274,6 +279,20 @@ Each Ascend dir holds `lib/libvruntime.so` and `tools/enpu-monitor`. The allocat
 > wrong-arch stub on amd64 (ld rejected it as `libascend_hal.so ... not found`), and even when the HAL resolved,
 > the `liberror_manager.so` reference still failed — `--allow-shlib-undefined` covers the whole transitive
 > closure in one stroke.
+>
+> **libdcmi must be preloaded too (real-hardware finding, 910B2):** the same dcmi entry points are declared
+> `__attribute__((weak))` in vcann-rt and the build drops `libdcmi.so` from `NEEDED` (`--as-needed`), so at
+> runtime the weak `dcmi_*` symbols resolve to **NULL unless `libdcmi.so` is actually loaded into the process**.
+> The host driver `libdcmi.so` is injected by the Ascend container runtime (at `/usr/local/dcmi/libdcmi.so` and
+> `/usr/local/Ascend/driver/lib64/driver/libdcmi.so`, the latter on `LD_LIBRARY_PATH`) but is **not auto-loaded**:
+> it is neither `NEEDED` nor in `ld.so.cache`, and `LD_LIBRARY_PATH` only governs *where* libs are found, not
+> *which* are loaded — verified that even a full `acl.init()` + `aclrtSetDevice(0)` does not pull it in. So both
+> `enpu-monitor` (it calls dcmi directly) and the preloaded `libvruntime.so` (its `aclrtMalloc` memory-quota
+> hook calls dcmi) segfault on the first dcmi call. Fix: the Ascend `ld.so.preload` asset lists both injected
+> `libdcmi.so` paths **before** `libvruntime.so` (same SONAME ⇒ deduped; a missing path is silently skipped, so
+> listing both candidates is safe). Confirmed on a 910B2: `enpu-monitor` then reports `Aicore Limit Quota=20 /
+> Memory Limit quota=1024MB` for an `aicore-quota=20, memory-quota=1024` config, and ordinary container
+> processes are unaffected.
 
 ### Code Style
 
@@ -324,33 +343,30 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
   in the final stage. **Acceptance:** `docker run --rm` script test passes (missing-dir create / identical
   skip / changed replace); image builds. **Verify:** the F1 docker-run test; `docker buildx build`.
   **Files:** `pack/gpustack-operator/rootfs/usr/bin/copy-dir.sh`, `pack/gpustack-operator/Dockerfile`.
-- [x] **T2 — quota/version helpers** in `pkg/deviceplugin`: `sliceRatio(ctr, unitsResName) (float64, error)` =
-  `units/D`; `floorPct`, `runtimeMajor`, `ascendFamilyDir`, `nvidiaCudaDir`. **Acceptance:** worked-example
-  table (1/8→R=0.125→pct 12; 1/4→25; empty Major→`cuda-12`/`cann-8`). **Verify:** `make test
-  ./pkg/deviceplugin/...`, `make lint`. **Files:** `pkg/deviceplugin/helper.go(+_test)`.
+- [x] **T2 — quota/version helpers.** In `pkg/deviceplugin`: `SliceRatio(ctr, unitsResName) (float64, error)` =
+  `units/D` and `FloorPercent`. In `pkg/device`: the shared `RuntimeMajor(version, fallback)` (the per-vendor
+  library-subdir helpers `ascendCANNDir`/`nvidiaCUDADir` live next to their allocators and land in T6/T10).
+  **Acceptance:** worked-example table (1/8→R=0.125→pct 12; 1/4→25; empty Major→`cuda-12`/`cann-8`).
+  **Verify:** `make test ./pkg/deviceplugin/... ./pkg/device/...`, `make lint`. **Files:**
+  `pkg/deviceplugin/helper.go(+_test)`, `pkg/device/helper.go(+_test)`.
 
 *Checkpoint 0: helpers + copy-dir.sh green; no behavior change to existing allocators.*
 
 **Phase 1 — Ascend packaging (incremental docker)**
-- [ ] **T3 — vendor vcann-rt submodule** at `pack/gpustack-operator/external/ascend/libvnpu` (latest commit) +
-  `.gitmodules`. Read the README/CMake for build deps (`dcmi/ascendcl/c_sec`, `ASCEND_HOME_PATH`).
-  **Acceptance:** submodule clones; build entrypoint identified. **Verify:** `git submodule update --init`.
-  **Files:** `.gitmodules`, submodule gitlink.
-- [x] **T4 — CANN builder stages, added one by one.** (CANN 9 = `9.1.0-beta.1`, see Build Targets note.)
-  Locally verified-built: `cannbuild-8-910b`, `cannbuild-8-910c`, `cannbuild-9-910b` (each emits
-  `lib/libvruntime.so` 0644 + `tools/enpu-monitor` 0755). `cannbuild-9-910c` / `cannbuild-9-950` are
-  byte-identical bar the base-image tag (a3/950 of the same release, tags confirmed to exist) and their local
-  verification is **deferred to CI / a disk-rich host** — the local Docker disk filled and crashed mid-pull
-  (~55-60 GB of CANN images won't fit here). Original task text:
-  Add stage `cannbuild-8-910b`
-  (`quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11`) that cmake-builds `libvruntime.so` + `enpu-monitor`;
-  **build-verify that stage** (`--target cannbuild-8-910b`, artifacts present). Then add `8-910c`
-  (`…8.5.0-a3…`), `9-910b` (`…9.0.0-910b…`), `9-910c` (`…9.0.0-a3…`), `9-950` (`…9.0.0-950…`) **one at a time,
-  build-verifying each**. Finally add the final-image `COPY` into `${GPUSTACK_LIB_DIR}/ascend/cann-{8,9}-{910b,
-  910c,950}/{lib/libvruntime.so,tools/enpu-monitor}`. **Acceptance:** each stage builds; final image holds all
+- [x] **T3 — CANN builder stages: clone + build vcann-rt, added one by one.** (CANN 9 = `9.1.0-beta.1`, see
+  Build Targets note.) Each `xbuild-ascend-cann-*` stage clones ubs-virt **inline** at `ARG LIB_UBS_VIRT_ENPU_COMMIT`
+  (`git init` + `git fetch --depth 1 <SHA>` + checkout; install `git` if the base lacks it; no submodule) and
+  cmake-builds `lib/libvruntime.so` (0644) + `tools/enpu-monitor` (0755) via `build-libvnpu.sh <src> <out>`
+  (dcmi stubbed at link time — `dcmi/ascendcl/c_sec`, `ASCEND_HOME_PATH`). Add `xbuild-ascend-cann-8-910b`
+  (`quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11`), build-verify (`--target`, artifacts present); then
+  `8-910c` (`…8.5.0-a3…`), `9-910b`/`9-910c`/`9-950` (`9.1.0-beta.1-{910b,a3,950}-ubuntu22.04-py3.12`) one at a
+  time. Final `COPY` into `${GPUSTACK_LIB_DIR}/ascend/cann-{8,9}-{910b,910c,950}/{lib/libvruntime.so,tools/enpu-monitor}`,
+  placed **between the runtime-package install and the CLI-binary copies**. **Local full build deferred to CI /
+  a disk-rich host** — the ~55-60 GB of CANN base images won't fit locally (a standalone `cann-8-910b` build
+  confirmed the artifacts + the inline-clone wiring). **Acceptance:** each stage builds; final image holds all
   five dirs with both artifacts. **Verify:** per-stage `docker buildx build --target …`; final-image `ls`.
-  **Files:** `pack/gpustack-operator/Dockerfile`.
-- [x] **T5 — Ascend `ld.so.preload` asset.** Add
+  **Files:** `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/ascend/build-libvnpu.sh`.
+- [x] **T4 — Ascend `ld.so.preload` asset.** Add
   `pack/gpustack-operator/rootfs/etc/gpustack/lib/ascend/ld.so.preload` = `/opt/enpu/vcann-rt/lib/libvruntime.so`;
   final-stage copy to `/etc/gpustack/lib/ascend/ld.so.preload` (0644). **Acceptance:** present in image, mode
   0644. **Verify:** image inspect. **Files:** rootfs asset, `pack/gpustack-operator/Dockerfile`.
@@ -358,11 +374,11 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
 *Checkpoint 1: image builds end-to-end; `${GPUSTACK_LIB_DIR}/ascend` shows the five targets + preload.*
 
 **Phase 2 — Ascend integration**
-- [x] **T6 — DaemonSet host staging.** In `device-manager/daemonset.yaml`: mount host `/tmp`; add an init
+- [x] **T5 — DaemonSet host staging.** In `device-manager/daemonset.yaml`: mount host `/tmp`; add an init
   container running `copy-dir.sh /etc/gpustack/lib /var/lib/gpustack/operator/lib`. **Acceptance:** rendered
   manifest carries the `/tmp` mount + the init container. **Verify:** `helm template` render test.
   **Files:** `deploy/gpustack-operator/chart/templates/device-manager/daemonset.yaml`.
-- [x] **T7 — Ascend Sliced server + `GetContainerAllocateResponse`.** Register the Sliced server in
+- [x] **T6 — Ascend Sliced server + `GetContainerAllocateResponse`.** Register the Sliced server in
   `ascend.New()` (gated on `!opts.NoSliced`, parallel to NVIDIA). Branch the responder on `Sliced`: with
   `X=<podUID>/c-<ctrName>`, create `pods/<X>` (0777); render `pods/<X>/etc/enpu/vcann-rt/npu_info.config`
   (0644) with `physical-npu-id`=`Accelerator.Index`, **lowest-free `virtual-npu-id`** (scan existing on-disk
@@ -378,41 +394,40 @@ time with a build-verify after each** — no rushing. Every task leaves the tree
 *Checkpoint 2: the Ascend sliced response is fully asserted by unit tests, vNPU-id uniqueness included.*
 
 **Phase 3 — Shared per-pod GC (lands with Ascend, serves both vendors)**
-- [x] **T8 — notifier `chan struct{}` → `chan []string` + dir GC.** Widen the `DevicesReconciler` notifier to
+- [x] **T7 — notifier `chan struct{}` → `chan []string` + dir GC.** Widen the `DevicesReconciler` notifier to
   carry the live pod-UUID list (empty/nil ⇒ none) on each reconcile; the Sliced `ResourceServer` scans
   `pods/<uuid>` on startup and removes a UUID after **3 consecutive** absences from the list; a list UUID
   absent on disk is tracked. **Acceptance:** unit test feeding successive lists incl. nil asserts removal only
   after 3 misses; existing `ListAndWatch` still emits responses on every notification for all modes.
   **Verify:** `make test ./pkg/deviceplugin/...`, `make lint`. **Files:** `pkg/deviceplugin/controller.go`,
-  `pkg/deviceplugin/server.go(+_test)`.
+  `pkg/deviceplugin/server.go`, `pkg/deviceplugin/gc.go(+_test)`.
 
 **Phase 4 — NVIDIA packaging (incremental docker)**
-- [ ] **T9 — vendor HAMi-core submodule** at `pack/gpustack-operator/external/nvidia/libvgpu` (latest commit).
-  **Acceptance:** clones; `build.sh` entrypoint identified. **Verify:** `git submodule update --init`.
-  **Files:** `.gitmodules`, submodule gitlink.
-- [x] **T10 — CUDA builder stages, one at a time.** (Both stages locally verified-built: `nvbuild-12` and
-  `nvbuild-13` each emit `libvgpu.so` — HAMi-core compiles cleanly against cuda-13, no compat surprise.)
-  Add `nvbuild-12`
-  (`nvidia/cuda:12.9.2-cudnn-devel-ubi8`) → `libvgpu.so`, build-verify; then `nvbuild-13`
+- [x] **T8 — CUDA builder stages: clone + build HAMi-core, one at a time.** Each `xbuild-nvidia-cuda-*` stage clones
+  HAMi-core **inline** at `ARG LIB_HAMI_CORE_COMMIT` (`git init` + `git fetch --depth 1 <SHA>` + checkout;
+  `dnf install git cmake`; no submodule) and builds `libvgpu.so` via `build-libvgpu.sh <src> <out>` (HAMi-core
+  only needs the CUDA headers, so any cudnn-devel base works). Add `xbuild-nvidia-cuda-12`
+  (`nvidia/cuda:12.9.2-cudnn-devel-ubi8`) → `libvgpu.so`, build-verify; then `xbuild-nvidia-cuda-13`
   (`nvidia/cuda:13.0.3-cudnn-devel-ubi8`), build-verify; final `COPY` to
-  `${GPUSTACK_LIB_DIR}/nvidia/cuda-{12,13}/libvgpu.so`. **Acceptance:** each stage builds; both artifacts
-  present. **Verify:** per-stage `--target`; final `ls`. **Files:** `pack/gpustack-operator/Dockerfile`.
-- [x] **T11 — NVIDIA `ld.so.preload` asset** = `/usr/local/vgpu/libvgpu.so`; final copy to
+  `${GPUSTACK_LIB_DIR}/nvidia/cuda-{12,13}/libvgpu.so` (in the same moved library block as the CANN copies).
+  **Acceptance:** each stage builds; both artifacts present. **Verify:** per-stage `--target`; final `ls`.
+  **Files:** `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/nvidia/build-libvgpu.sh`.
+- [x] **T9 — NVIDIA `ld.so.preload` asset** = `/usr/local/vgpu/libvgpu.so`; final copy to
   `/etc/gpustack/lib/nvidia/ld.so.preload` (0644). **Acceptance:** present, 0644. **Verify:** image inspect.
   **Files:** rootfs asset, `pack/gpustack-operator/Dockerfile`.
 
 *Checkpoint 3: image holds `nvidia/cuda-{12,13}/libvgpu.so` + preload.*
 
 **Phase 5 — NVIDIA integration**
-- [x] **T12 — NVIDIA sliced `GetContainerAllocateResponse`.** Branch on `Sliced`: create `/tmp/vgpulock`
+- [x] **T10 — NVIDIA sliced `GetContainerAllocateResponse`.** Branch on `Sliced`: create `/tmp/vgpulock`
   (0777), `pods/<X>` (0777), `pods/<X>/tmp/vgpu` (0777); envs `CUDA_DEVICE_SM_LIMIT=floor(R*100)`,
-  `CUDA_DEVICE_MEMORY_LIMIT_<i>=floor(memKi*R)` (one per `.sliced` card), `CUDA_DEVICE_MEMORY_SHARED_CACHE=
+  `CUDA_DEVICE_MEMORY_LIMIT_<i>=floor(memMiB*R)`+`"m"` (one per `.sliced` card), `CUDA_DEVICE_MEMORY_SHARED_CACHE=
   /tmp/vgpu/cudevshr.cache`, keep `NVIDIA_VISIBLE_DEVICES`; mounts `/tmp/vgpulock`(rw),
   preload→`/etc/ld.so.preload`(ro), `cuda-<major|12>/libvgpu.so`→`/usr/local/vgpu/libvgpu.so`(ro),
   `pods/<X>/tmp/vgpu`→`/tmp/vgpu`(rw), `/dev/shm`→`/dev/shm`. **Acceptance:** table tests on envs + mounts +
   dir creation; entry count == `.sliced` card count. **Verify:** `make test
   ./pkg/devicemanager/allocator/nvidia/...`, `make lint`. **Files:**
-  `pkg/devicemanager/allocator/nvidia/deviceplugin.go(+_test)`, `pkg/deviceplugin/helper.go`.
+  `pkg/devicemanager/allocator/nvidia/deviceplugin.go(+_test)`.
 
 *Final Checkpoint: full image builds; Ascend + NVIDIA sliced responses unit-tested; Ascend exercised
 on-hardware per the Test Plan; NVIDIA on-hardware E2E runs externally.*
@@ -437,8 +452,8 @@ Table-driven; target date 2026-06-25:
 #### Integration tests
 - `copy-dir.sh` via `docker run --rm`: missing-dir create / identical-file skip / changed-file replace.
 - `helm template` device-manager: host `/tmp` mount + the `copy-dir.sh` init container present.
-- Incremental docker build per stage: each CANN stage (`cannbuild-8-910b` … `9-950`) and each CUDA stage
-  (`nvbuild-12`, `nvbuild-13`) emits its artifact under `--target`; the final image's
+- Incremental docker build per stage: each CANN stage (`xbuild-ascend-cann-8-910b` … `9-950`) and each CUDA stage
+  (`xbuild-nvidia-cuda-12`, `xbuild-nvidia-cuda-13`) emits its artifact under `--target`; the final image's
   `${GPUSTACK_LIB_DIR}` layout is asserted.
 
 #### e2e tests
@@ -465,6 +480,28 @@ Table-driven; target date 2026-06-25:
 
 ## Open Questions
 
-_None outstanding — all clarifications resolved (path layout, round-down quotas, latest-commit submodules +
+_None outstanding — all clarifications resolved (path layout, round-down quotas, pinned-commit inline clone +
 tagged base images, `chan []string` notifier payload, and the hyphen-joined `shm-id` / `scheduling-policy=2`
 confirmed against the vcann-rt README)._
+
+## Follow-ups (seed for the next spec)
+
+**DeviceManager detector simulation mode (to enable GPU-less in-cluster injection E2E).** The first cluster
+validation of the soft-slicing injection (2026-06-26, docker-desktop, ascend) surfaced a hard blocker: the
+allocator's `GetContainerAllocateResponse` injection can only be exercised in-cluster on a node with **real
+accelerator hardware**. The DeviceManager allocator starts a device-plugin server — and thus registers a
+resource and ever receives a kubelet `Allocate` — **only for manufacturers the detector reports**, and the
+detector probes real hardware via CGO (`binding/dcmi`, NVML, …). On a GPU-less node it reports nothing, so no
+server starts, `huawei.com/npu.sliced` never reaches `Node.status.capacity`, and `Allocate` is never called —
+even with a mocked NFD PCI label, a pre-applied `Devices` CR, and `--no-fast-failed` (which only keeps the DM
+process alive). The `Devices` CR is read by a server *after* it starts; it does not cause one to start.
+
+Proposed next-spec scope: add a **simulated detection source** to the DeviceManager — e.g. a
+`--simulate-devices=<file>` flag (or a mounted ConfigMap) whose YAML uses the `testing/sample/devices` shape;
+when set, `Detector.DetectAccelerator` returns those groups instead of probing hardware. The rest of the chain
+is already wired (`reportDevices` → `Devices` CR → device-plugin advertise → kubelet `Allocate` → allocator
+injection), so this alone makes the full soft-slicing injection runnable on a GPU-less cluster and unblocks a
+real `cases/case-6.sh`. Until it lands, CASE 6 injection coverage lives in the allocator unit tests
+(`pkg/devicemanager/allocator/{ascend,nvidia}/deviceplugin_test.go`); see
+`.claude/skills/gpustack-operator-e2e/references/soft-slicing-injection.md` for the validated finding and the
+real-hardware (Mode A) procedure.

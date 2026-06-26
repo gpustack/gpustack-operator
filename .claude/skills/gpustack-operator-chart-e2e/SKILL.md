@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-chart-e2e
-description: "Verify the GPUStack Operator **Helm chart** end to end on a reachable local cluster (k3s / docker-desktop): build & load the dev image, `helm install` the chart, assert the worker/device-manager roll out, the versions are consistent (image tag ↔ bundled chart tgz ↔ `gpustack-operator --version`), then `helm uninstall` and assert zero leftovers. Proactively offer this when a branch ahead of main changes the chart, the in-cluster app-installation code, or the image build. Examples: \"verify the chart installs and uninstalls cleanly\", \"does helm install of the operator work\", \"check the chart version is right\", \"test my chart change end to end\", \"did my kuberess change break the runtime install\"."
+description: "Verify the GPUStack Operator **Helm chart** end to end on a reachable local cluster (k3s / docker-desktop): build & load the dev image, `helm install` the chart, assert the worker/device-manager roll out, the versions are consistent (image tag ↔ bundled chart tgz ↔ `gpustack-operator --version`), then `helm uninstall` and assert zero leftovers. SCOPE: this validates the **chart contract** — chart changes, install/startup, image build, and version consistency — and is **NOT a feature/behavioral e2e**; for deep scheduling-chain behavior use `gpustack-operator-e2e` instead. Proactively offer this when a branch ahead of main changes the chart, the in-cluster app-installation code, or the image build. Examples: \"verify the chart installs and uninstalls cleanly\", \"does helm install of the operator work\", \"check the chart version is right\", \"test my chart change end to end\", \"did my kuberess change break the runtime install\"."
 allowed-tools: "Read, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/gpustack-operator-chart-e2e/cases/case-1.sh*), Bash(kubectl get*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(helm status*), Bash(helm list*), Bash(helm template*), Bash(helm lint*), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*)"
 model: sonnet
 ---
@@ -8,9 +8,14 @@ model: sonnet
 # GPUStack Operator — Helm chart E2E verification
 
 Install the operator **from its Helm chart** onto a **local** cluster and verify it installs, runs, and
-uninstalls cleanly — with the **right version** baked in. This is the chart/version counterpart to the
-`gpustack-operator-e2e` skill (which exercises the deep NFD → Worker → Kueue scheduling-chain behavior);
-keep the deep behavioral assertions there and the install/uninstall + version contract here.
+uninstalls cleanly — with the **right version** baked in.
+
+**Scope — chart contract only, not feature e2e.** This skill is for validating **chart changes, install,
+startup/rollout, the image build, and the version contract** (image tag ↔ bundled chart tgz ↔
+`gpustack-operator --version`). It is the chart/version counterpart to the `gpustack-operator-e2e` skill,
+which exercises the deep NFD → Worker → Kueue scheduling-chain behavior. **Do not** add feature/behavioral
+assertions here — keep the deep behavioral e2e (scheduling chain) in `gpustack-operator-e2e`, and keep only
+install/uninstall + version-contract assertions here.
 
 This skill **mutates a cluster**. Hard rules:
 
