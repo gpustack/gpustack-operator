@@ -64,11 +64,11 @@ jobs:
           cat <<EOF > matrix.json
           [
               {
-                "runner": "ubuntu-24.04",
+                "runner": "ubuntu-22.04-8x",
                 "platform": "linux/amd64"
               },
               {
-                "runner": "ubuntu-24.04-arm",
+                "runner": "ubuntu-22.04-arm-8x",
                 "platform": "linux/arm64"
               }
           ]
