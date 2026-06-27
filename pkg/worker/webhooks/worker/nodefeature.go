@@ -24,9 +24,15 @@ import (
 // when the node's Devices CR is available) counts exceeding the card's hardware
 // MaxPartitions. Other NodeFeature objects are not validated.
 //
+// The webhook is scoped by an objectSelector to the worker-owned NodeFeatures
+// (label "app.kubernetes.io/part-of=gpustack-operator-worker") so that the
+// NFD worker's per-node NodeFeature publishing is never gated on this
+// FailurePolicy=Fail webhook's backend being reachable.
+//
 // nolint: lll
 // +k8s:webhook-gen:validating:group="nfd.k8s-sigs.io",version="v1alpha1",resource="nodefeatures",scope="Namespaced"
 // +k8s:webhook-gen:validating:operations=["CREATE","UPDATE"],failurePolicy="Fail",sideEffects="None",matchPolicy="Equivalent",timeoutSeconds=10
+// +k8s:webhook-gen:validating:objectSelector={"matchLabels":{"app.kubernetes.io/part-of":"gpustack-operator-worker"}}
 type NodeFeatureWebhook struct {
 	Client    ctrlcli.Client
 	APIReader ctrlcli.Reader

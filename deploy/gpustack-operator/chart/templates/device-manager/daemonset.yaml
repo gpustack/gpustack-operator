@@ -144,6 +144,12 @@ spec:
               mountPath: /dev
             - name: sys-dir
               mountPath: /sys
+            - name: tmp-dir
+              mountPath: /tmp
+            - name: containerd-run-dir
+              mountPath: /run/containerd
+            - name: docker-run-dir
+              mountPath: /run/docker
             - name: gpustack-data-dir
               mountPath: /var/lib/gpustack
             - name: cdi-dir
@@ -181,10 +187,6 @@ spec:
               mountPath: /usr/local/corex
               readOnly: true
             {{- end }}
-            {{- if eq $manu "nvidia" }}
-            - name: gpustack-nvidia-vgpulock-dir
-              mountPath: /tmp/vgpulock
-            {{- end }}
             {{- if eq $manu "metax" }}
             - name: gpustack-metax-driver
               mountPath: /opt/mxdriver
@@ -207,6 +209,17 @@ spec:
           hostPath:
             path: /sys
             type: Directory
+        - name: tmp-dir
+          hostPath:
+            path: /tmp
+        - name: containerd-run-dir
+          hostPath:
+            path: /run/containerd
+            type: DirectoryOrCreate
+        - name: docker-run-dir
+          hostPath:
+            path: /run/docker
+            type: DirectoryOrCreate
         - name: gpustack-data-dir
           hostPath:
             path: /var/lib/gpustack
@@ -256,12 +269,6 @@ spec:
           hostPath:
             path: /usr/local/corex
             type: DirectoryOrCreate
-        {{- end }}
-        {{- if eq $manu "nvidia" }}
-        - name: gpustack-nvidia-vgpulock-dir
-          hostPath:
-            path: /tmp/vgpulock
-            type: Directory
         {{- end }}
         {{- if eq $manu "metax" }}
         - name: gpustack-metax-driver

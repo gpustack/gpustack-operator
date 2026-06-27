@@ -182,8 +182,13 @@ func vwh_pkg_worker_webhooks_worker_NodeFeatureWebhook(c v1.WebhookClientConfig)
 				},
 			},
 		},
-		FailurePolicy:  ptr.To[v1.FailurePolicyType]("Fail"),
-		MatchPolicy:    ptr.To[v1.MatchPolicyType]("Equivalent"),
+		FailurePolicy: ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:   ptr.To[v1.MatchPolicyType]("Equivalent"),
+		ObjectSelector: ptr.To(metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"app.kubernetes.io/part-of": "gpustack-operator-worker",
+			},
+		}),
 		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
 		TimeoutSeconds: ptr.To[int32](10),
 		AdmissionReviewVersions: []string{
