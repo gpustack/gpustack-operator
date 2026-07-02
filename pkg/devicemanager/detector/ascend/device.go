@@ -223,6 +223,16 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 			var features device.AcceleratorFeatures
 			{
+				// 910B/910C/950 support soft partitioning (temporal compute sharing
+				// plus soft VRAM partitioning); advertise a fixed SlicedResourceMaxSize
+				// budget so node-level ".sliced" capacity is cards*SlicedResourceMaxSize
+				// and the device-plugin GetDeviceIds token pool is sized to match.
+				switch grpList[grpIndex].Family {
+				case "910B", "910C", "950":
+					features.SoftPartition = true
+					features.MaxPartitions = int32(nodefeature.SlicedResourceMaxSize)
+				}
+
 				ip, snm, ret := dev.GetIp(dcmi.ROCE_PORT, 0)
 				if ret.IsSuccess() {
 					gw, ret := dev.GetGateway(dcmi.ROCE_PORT, 0)

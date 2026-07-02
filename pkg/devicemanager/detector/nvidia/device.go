@@ -2,7 +2,6 @@ package nvidia
 
 import (
 	"fmt"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -202,18 +201,10 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			case features.PhysicalPartition:
 			// TODO
 			case features.SoftPartition:
-				par := int32(math.Round(float64(memory) / 4096))
-				for j := 0; j < 5; j++ {
-					val := int32(1) << j
-					if val == par {
-						break
-					}
-					if val > par {
-						par = val >> 1
-						break
-					}
-				}
-				features.MaxPartitions = par
+				// A soft-sliced card advertises a fixed SlicedResourceMaxSize budget,
+				// so node-level ".sliced" capacity is cards*SlicedResourceMaxSize and
+				// the device-plugin GetDeviceIds token pool is sized to match.
+				features.MaxPartitions = int32(nodefeature.SlicedResourceMaxSize)
 			}
 		}
 

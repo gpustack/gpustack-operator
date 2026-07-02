@@ -147,7 +147,7 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F0b | Credit base `M = 1,600,000` | `CreditsPerCard` migrates to `M`; `M % 10 == 0`, `M % SlicedResourceMaxSize(512) == 0`, `M % 100 == 0`; `M = 2⁹×5⁵`. All `CardsToCredits`/`CreditsToCards` callers + tests updated. |
 | F0c | Three settings registered (dynamic) | `pkg/worker/settings/value.go` adds `node-management-manual` (`InitializeFromEnv("false")`), `instance-type-mixed-on-node` (`InitializeFromEnv("true")`), `instance-type-derived-from-node` (`InitializeFromEnv("true")`) — all `AllowBool()`; auto-mapping `GPUSTACK_NODE_MANAGEMENT_MANUAL` / `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` / `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE`. **All consumed per-reconcile via `ShouldValueBool(ctx)` (no package-level `osx.Getenv` cache) so an admin can flip them at runtime without restarting.** |
 | F0d | systemmeta notes extended | NodeQueue notes (resType `instancetypes`) gain top-level `memory` (per-card VRAM) and `localStorage`. |
-| F1a | detector MaxPartitions sourcing | **SoftPartition only**: `MaxPartitions = 512` (fixed, `2⁹`); `.sliced` node capacity = `cards × MaxPartitions` via the existing `GetDeviceIds(mode, MaxPartitions)` coupling. PhysicalPartition/VirtualPartition `MaxPartitions` sourcing is **deferred to the separate MIG/vNPU spec** (leave current behavior untouched). |
+| F1a | detector MaxPartitions sourcing | **SoftPartition only**: `MaxPartitions = SlicedResourceMaxSize` (512, `2⁹`, inlined — no trivial wrapper); `.sliced` node capacity = `cards × MaxPartitions` via the existing `GetDeviceIds(mode, MaxPartitions)` coupling. NVIDIA always soft-partitions; Ascend soft-partitions on family `910B`/`910C`/`950`. PhysicalPartition/VirtualPartition `MaxPartitions` sourcing is **deferred to the separate MIG/vNPU spec** (leave current behavior untouched). |
 | F1b | NodeCapacityReconciler emits 4 keys | For any node with `acceleratable.*`: `.sliced.units = count×M`, `.sliced.cores-percentage = count×51200` (`512×100`), `.sliced.memory-percentage = count×100`, `.sliced.memory-mib = count×VRAM`. Drops the `.sliced.partitions` opt-in gate (any acceleratable model counts); stale-cleanup recognizes all 4 suffixes. |
 | F1c | Manual node management (switch ①) | Setting `node-management-manual` (`GPUSTACK_NODE_MANAGEMENT_MANUAL`, default false), read per-reconcile: when true the operator does **not** auto-inject `gpustack.ai/managed=true`; toggling at runtime re-converges. |
 | F2 | DM allocator decouples cores/VRAM | `SliceRatio` splits: SM limit from `.sliced.cores-percentage`; VRAM limit from `.sliced.memory-mib` (or `memory-percentage × VRAM`). NVIDIA `getSlicedContainerAllocateResponse` + Ascend equivalent updated. `cores-percentage` unset defaults to 100. **Cleanup:** with the allocator no longer reading `.sliced.units` (it becomes Kueue-credits-counting-only), the old `.sliced.units`→R path is orphaned — delete `SliceRatio(units)`, the already-dead `PadSlicedUnits`, and their tests `TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity` so stale code does not mislead later readers. |
@@ -228,7 +228,7 @@ pkg/nodefeature/helper.go                          # gKey drops os/arch abbrev; 
 pkg/devicemanager/detector/nvidia/device.go        # F1a MaxPartitions: soft=512 (phys/virt deferred to MIG/vNPU spec)
 pkg/deviceplugin/helper.go, server.go              # F2 SliceRatio split (cores vs VRAM)
 pkg/devicemanager/allocator/nvidia/deviceplugin.go # F2 SM from cores-%, VRAM from memory-mib (Ascend equivalent)
-pkg/worker/controllers/worker/node.go              # F1b NodeCapacityReconciler: 4 keys, drop partitions gate
+pkg/worker/controllers/worker/nodecapacity.go      # F1b NodeCapacityReconciler: 4 keys, drop partitions gate
 pkg/worker/controllers/worker/resourceflavor.go    # F3a → NodeFlavorReconciler (label-indexed, capacity labels)
 pkg/worker/controllers/worker/clusterqueue.go      # F3b → NodeQueueReconciler (credits from RF labels; no CPU/RAM/storage on accel)
 pkg/worker/controllers/worker/cohort.go            # F3c DELETE CohortReconciler
@@ -291,16 +291,19 @@ coupled — its three tasks land together and the system is only fully consisten
   125× credit magnitude.*
 
 **Phase 1 — Discovery**
-- [ ] **T1.1 (F1a) — detector MaxPartitions (soft only).** `pkg/devicemanager/detector/nvidia/device.go:204-216`:
-  SoftPartition → `MaxPartitions = 512` (drop the VRAM-derived power-of-two loop). Physical/Virtual left untouched
-  (separate spec). **Accept:** a SoftPartition device reports `MaxPartitions=512`; `.sliced` node capacity =
-  `cards×512`. **Verify:** new `device_test.go` + `kubectl get node -o json`.
-- [ ] **T1.2 (F1b) — NodeCapacityReconciler emits 4 keys.** `pkg/worker/controllers/worker/node.go`: drop the
+- [x] **T1.1 (F1a) — detector MaxPartitions (soft only).** NVIDIA `detector/nvidia/device.go`: SoftPartition →
+  `MaxPartitions = nodefeature.SlicedResourceMaxSize` inlined (drop the VRAM-derived power-of-two loop, no helper).
+  Ascend `detector/ascend/device.go`: families `910B`/`910C`/`950` also set `SoftPartition=true` +
+  `MaxPartitions = nodefeature.SlicedResourceMaxSize`. Physical/Virtual left untouched (separate spec). **Accept:**
+  a SoftPartition device reports `MaxPartitions=512`; `.sliced` node capacity = `cards×512`. **Verify:**
+  `go build ./pkg/devicemanager/detector/...` + `kubectl get node -o json` (no unit test — the assignment is a
+  constant; a trivial wrapper+test would be noise).
+- [x] **T1.2 (F1b) — NodeCapacityReconciler emits 4 keys.** `pkg/worker/controllers/worker/nodecapacity.go` (renamed from `node.go`): drop the
   `.sliced.partitions` opt-in gate (`:93`); emit `units=count×M / cores-percentage=count×51200 /
   memory-percentage=count×100 / memory-mib=count×VRAM` (VRAM from `acceleratable.<…>.memory`); extend
   stale-cleanup (`:121,:144`) to all 4 suffixes. **Accept:** an acceleratable node shows all 4 capacities;
-  removing the model removes all 4. **Verify:** `go test ./pkg/worker/controllers/worker/...` (`node_test.go`).
-- [ ] **T1.3 (F1c) — wire `node-management-manual` (switch ①), read per-reconcile.** Gate the
+  removing the model removes all 4. **Verify:** `go test ./pkg/worker/controllers/worker/...` (`nodecapacity_test.go`).
+- [x] **T1.3 (F1c) — wire `node-management-manual` (switch ①), read per-reconcile.** Gate the
   `gpustack.ai/managed=true` injection (`pkg/nodefeature/helper.go:321`) on the setting, read at reconcile
   (NodeFeatureReconciler passes the value into `ConstructNodeCapacityLabels` — **not** a package-level env var) so
   a flip applies without restart. **Accept:** setting true → node not auto-managed; toggling at runtime
@@ -316,7 +319,7 @@ coupled — its three tasks land together and the system is only fully consisten
   allocators (`deviceplugin.go:188`/`:195`) stop calling `SliceRatio(.sliced.units)`, delete the old
   `.sliced.units`→R path — `SliceRatio(units)` and the already-dead `PadSlicedUnits` in `helper.go`, plus the
   tests `TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity` in `helper_test.go`. `.sliced.units`
-  then survives only as a Kueue-credits-counting / node-capacity key (`apps_kueue.go`, `node.go`,
+  then survives only as a Kueue-credits-counting / node-capacity key (`apps_kueue.go`, `nodecapacity.go`,
   `clusterqueue.go`, `instance.go`). **Accept:** a sliced container gets independent SM and VRAM limits; no
   remaining reference to `PadSlicedUnits`/`SliceRatio`. **Verify:** `go test ./pkg/deviceplugin/...
   ./pkg/devicemanager/allocator/nvidia/...` + `grep -r 'PadSlicedUnits\|SliceRatio' pkg/` empty.
@@ -400,7 +403,7 @@ code solid enough prior to committing the changes necessary to implement this en
 Every added unit gets coverage; target ≥ existing, no regression. Per-package (date 2026-06-29):
 - `pkg/nodefeature`: new suffix constructors; `M` invariants (`%10`/`%512`/`%100`); `CardsToCredits`/`CreditsToCards` round-trips; gKey without os/arch abbrev.
 - `pkg/devicemanager/detector/nvidia`: **NEW** — SoftPartition `MaxPartitions=512`.
-- `pkg/worker/controllers/worker`: `node_test` (4 sliced keys + stale-clean); `nodeflavor_test` (names + `capacity` label + index rules + nodeLabels os/arch pin); `nodequeue_test` (credits=`capacity×M`; accel has no CPU/RAM/storage; `cohortName` empty + `lendingLimit:0`); **DELETE** `cohort_test`.
+- `pkg/worker/controllers/worker`: `nodecapacity_test` (4 sliced keys + stale-clean); `nodeflavor_test` (names + `capacity` label + index rules + nodeLabels os/arch pin); `nodequeue_test` (credits=`capacity×M`; accel has no CPU/RAM/storage; `cohortName` empty + `lendingLimit:0`); **DELETE** `cohort_test`.
 - `pkg/worker/kuberess`: `apps_kueue_test` (factors `1,600,000/160,000/1`, `multiplyBy`, gate-2 excluded/drained, `.sliced` drain).
 - `pkg/deviceplugin` + `pkg/devicemanager/allocator/nvidia`: `SliceRatio` split; `SM←cores-%`, `VRAM←memory-mib`; `cores-%` default 100.
 - `pkg/worker/webhooks/worker`: **NEW** `pod_test` — fold `memory-%`/`memory-mib`→`units`, reject when neither, `failurePolicy:Fail`, no double-write when `.sliced.units` present.

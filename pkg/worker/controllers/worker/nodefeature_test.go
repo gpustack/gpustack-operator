@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -17,9 +18,20 @@ import (
 
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
+
+// TestMain configures an empty loopback client for the package's reconciler tests:
+// reconcilers read settings via ShouldValueBool, which reaches the loopback client,
+// so without this a setting read would nil-panic. An empty fake (no delegated Secret)
+// makes settings resolve to their defaults.
+func TestMain(m *testing.M) {
+	system.LoopbackCtrlClient.Configure(
+		ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+	os.Exit(m.Run())
+}
 
 // TestNodeFeatureReconciler_PreservesSlicedPartitions verifies the reconciler merges
 // only the capacity-derived labels it owns: admin-authored ".sliced.partitions"
