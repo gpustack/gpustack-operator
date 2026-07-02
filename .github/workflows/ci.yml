@@ -58,17 +58,65 @@ jobs:
     outputs:
       matrix: ${{ steps.expand-matrix.outputs.matrix }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Detect Heavy Changes
+        id: detect-heavy
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          #
+          # A change to the operator Dockerfile, go.sum, or this CI workflow either
+          # rebuilds the whole image (base image / dependency graph) or alters the
+          # build recipe, which needs a bigger runner. Detect it by diffing the event's
+          # changed files against its base, and when present mark the build "heavy" so
+          # the matrix targets the "-4x" runner variant.
+          #
+          HEAVY="false"
+          BASE=""
+          case "${EVENT_NAME}" in
+            pull_request) BASE="${PR_BASE_SHA}" ;;
+            push)         BASE="${PUSH_BEFORE_SHA}" ;;
+          esac
+          # Diff against the base when it is a known ancestor; otherwise (a branch's
+          # first push carries an all-zero before-sha, or workflow_dispatch has none)
+          # inspect the tip commit alone.
+          NULL_SHA="0000000000000000000000000000000000000000"
+          if [[ -n "${BASE}" && "${BASE}" != "${NULL_SHA}" ]] && git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            CHANGED="$(git diff --name-only "${BASE}" HEAD)"
+          else
+            CHANGED="$(git show --name-only --format='' HEAD)"
+          fi
+          if grep -qxE 'pack/gpustack-operator/Dockerfile|go\.sum|\.github/workflows/ci\.yml' <<<"${CHANGED}"; then
+            HEAVY="true"
+          fi
+          echo "heavy=${HEAVY}" >>"$GITHUB_OUTPUT"
+          echo "DEBUG: CHANGED=${CHANGED}"
+          echo "DEBUG: heavy=${HEAVY}"
       - name: Set Matrix
         id: expand-matrix
+        env:
+          HEAVY: ${{ steps.detect-heavy.outputs.heavy }}
         run: |
+          # A heavy build targets the "-4x" runner variant (4x resources); a normal
+          # build keeps the default runners.
+          SUFFIX=""
+          if [[ "${HEAVY}" == "true" ]]; then
+            SUFFIX="-4x"
+          fi
           cat <<EOF > matrix.json
           [
               {
-                "runner": "ubuntu-24.04",
+                "runner": "ubuntu-24.04${SUFFIX}",
                 "platform": "linux/amd64"
               },
               {
-                "runner": "ubuntu-24.04-arm",
+                "runner": "ubuntu-24.04-arm${SUFFIX}",
                 "platform": "linux/arm64"
               }
           ]
