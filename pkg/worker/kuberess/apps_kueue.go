@@ -12,6 +12,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
+	"gpustack.ai/gpustack/pkg/kubeappyaml"
 	"gpustack.ai/gpustack/pkg/kubediscovery"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
@@ -56,8 +57,27 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 		return err
 	}
 
-	return nil
+	// The gpustack chart cannot ship the node-devices AdmissionCheck: its CRD is
+	// installed here, at runtime. Apply it now that Kueue is up — the worker's
+	// NodeDevicesAdmissionCheckReconciler then marks it Active, and
+	// NodeQueueReconciler references it from accelerated ClusterQueues. Apply only
+	// sets spec, so it never clobbers the controller-owned Active condition.
+	return kubeappyaml.ApplyWithRestClientGetter(ctx, nodeDevicesAdmissionCheckYAML, helmCli.KubeRestClientGetter())
 }
+
+// nodeDevicesAdmissionCheckYAML is the gate-3 AdmissionCheck object. Its name and
+// controllerName are the contract shared with the worker's NodeDevicesAdmission
+// controllers (_NodeDevicesAdmissionCheckName / _NodeDevicesControllerName).
+const nodeDevicesAdmissionCheckYAML = `
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: AdmissionCheck
+metadata:
+  name: gpustack-node-devices
+  labels:
+    "app.kubernetes.io/part-of": "gpustack-operator"
+spec:
+  controllerName: worker.gpustack.ai/node-devices
+`
 
 const kueueChartValuesTemplate = `
 {{- $hasCertManager := hasAPIResource "cert-manager.io/v1" "Certificate" }}

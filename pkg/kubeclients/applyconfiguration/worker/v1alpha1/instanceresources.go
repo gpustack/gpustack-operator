@@ -19,10 +19,16 @@ type InstanceResourcesApplyConfiguration struct {
 	LocalStorage *resource.Quantity `json:"localStorage,omitempty"`
 	// Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
 	Accelerator *resource.Quantity `json:"accelerator,omitempty"`
-	// AcceleratorUnits is the number of slice units requested per accelerator on a
-	// sliced InstanceType (U): a power of two strictly less than the card's partition
-	// count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.
-	AcceleratorUnits *int32 `json:"acceleratorUnits,omitempty"`
+	// AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a
+	// sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request
+	// becomes an exclusive whole-card request). The Pod webhook folds it into the
+	// normalized .sliced.units; it is ignored by non-sliced requests.
+	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
+	// AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
+	// a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than
+	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
+	// copies it to the other. It is ignored by non-sliced requests.
+	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
 }
 
 // InstanceResourcesApplyConfiguration constructs a declarative configuration of the InstanceResources type for use with
@@ -63,10 +69,18 @@ func (b *InstanceResourcesApplyConfiguration) WithAccelerator(value resource.Qua
 	return b
 }
 
-// WithAcceleratorUnits sets the AcceleratorUnits field in the declarative configuration to the given value
+// WithAcceleratorSlicedMemoryPercentage sets the AcceleratorSlicedMemoryPercentage field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the AcceleratorUnits field is set to the value of the last call.
-func (b *InstanceResourcesApplyConfiguration) WithAcceleratorUnits(value int32) *InstanceResourcesApplyConfiguration {
-	b.AcceleratorUnits = &value
+// If called multiple times, the AcceleratorSlicedMemoryPercentage field is set to the value of the last call.
+func (b *InstanceResourcesApplyConfiguration) WithAcceleratorSlicedMemoryPercentage(value int32) *InstanceResourcesApplyConfiguration {
+	b.AcceleratorSlicedMemoryPercentage = &value
+	return b
+}
+
+// WithAcceleratorSlicedCoresPercentage sets the AcceleratorSlicedCoresPercentage field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorSlicedCoresPercentage field is set to the value of the last call.
+func (b *InstanceResourcesApplyConfiguration) WithAcceleratorSlicedCoresPercentage(value int32) *InstanceResourcesApplyConfiguration {
+	b.AcceleratorSlicedCoresPercentage = &value
 	return b
 }

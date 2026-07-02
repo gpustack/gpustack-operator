@@ -566,13 +566,15 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 													Nullable:     true,
 													XIntOrString: true,
 												},
-												"acceleratorUnits": {
-													Description: "AcceleratorUnits is the number of slice units requested per accelerator on a\nsliced InstanceType (U): a power of two strictly less than the card's partition\ncount. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.",
+												"acceleratorSlicedCoresPercentage": {
+													Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It must not be smaller than\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
 													Type:        "integer",
 													Format:      "int32",
-													Default: &v1.JSON{
-														Raw: []byte(`1`),
-													},
+												},
+												"acceleratorSlicedMemoryPercentage": {
+													Description: "AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a\nsliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request\nbecomes an exclusive whole-card request). The Pod webhook folds it into the\nnormalized .sliced.units; it is ignored by non-sliced requests.",
+													Type:        "integer",
+													Format:      "int32",
 												},
 												"cpu": {
 													Description: "CPU is the CPU resource requirement for the Instance, e.g. \"4\", \"8\".",

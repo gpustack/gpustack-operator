@@ -139,6 +139,19 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		core.LabelArchStable:                arch,
 	}
 
+	// Reference the node-devices AdmissionCheck on an auto-derived accelerated queue,
+	// but only once it reports Active: Kueue turns a ClusterQueue that lists a
+	// missing or inactive AdmissionCheck inactive, so it would stop admitting. The
+	// Watches on the AdmissionCheck re-runs this reconcile when it activates.
+	var admissionChecks *kueue.AdmissionChecksStrategy
+	if acceleratable && derived && r.nodeDevicesCheckActive(ctx) {
+		admissionChecks = &kueue.AdmissionChecksStrategy{
+			AdmissionChecks: []kueue.AdmissionCheckStrategyRule{
+				{Name: kueue.AdmissionCheckReference(_NodeDevicesAdmissionCheckName)},
+			},
+		}
+	}
+
 	eCq := &kueue.ClusterQueue{
 		ObjectMeta: meta.ObjectMeta{
 			Name:   req.Name,
@@ -163,7 +176,8 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				},
 				WithinClusterQueue: kueue.PreemptionPolicyLowerPriority,
 			},
-			ResourceGroups: eResGroups,
+			ResourceGroups:          eResGroups,
+			AdmissionChecksStrategy: admissionChecks,
 		},
 	}
 	systemmeta.NoteResource(eCq, _ClusterQueueResType, eNotes)
@@ -213,6 +227,13 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 			if aCq.Spec.NamespaceSelector == nil {
 				aCq.Spec.NamespaceSelector = eCq.Spec.NamespaceSelector
+				skip = false
+			}
+			// Converge the node-devices AdmissionCheck reference (added once the check
+			// is Active, dropped while it is not) so the queue never lists an inactive
+			// check.
+			if !kubemeta.DeepEqual(aCq.Spec.AdmissionChecksStrategy, eCq.Spec.AdmissionChecksStrategy) {
+				aCq.Spec.AdmissionChecksStrategy = eCq.Spec.AdmissionChecksStrategy
 				skip = false
 			}
 		}
@@ -277,6 +298,17 @@ func hasReserved(cq *kueue.ClusterQueue) bool {
 				!cq.Status.FlavorsReservation[i].Resources[j].Borrowed.IsZero()
 		})
 	})
+}
+
+// nodeDevicesCheckActive reports whether the node-devices AdmissionCheck exists and
+// is Active. The queue references it only when true, since listing an inactive
+// check would turn the ClusterQueue inactive and stop it admitting.
+func (r *NodeQueueReconciler) nodeDevicesCheckActive(ctx context.Context) bool {
+	ac := new(kueue.AdmissionCheck)
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: _NodeDevicesAdmissionCheckName}, ac); err != nil {
+		return false
+	}
+	return kubemeta.IsConditionTrue(ac.Status.Conditions, kueue.AdmissionCheckActive)
 }
 
 // buildResourceGroups builds the ClusterQueue resource groups from the feeding
@@ -514,7 +546,77 @@ func (r *NodeQueueReconciler) SetupController(ctx context.Context, opts controll
 				},
 			),
 		).
+		Watches(
+			// Re-enqueue the managed queues when the node-devices AdmissionCheck
+			// changes, so they acquire the reference once it turns Active.
+			&kueue.AdmissionCheck{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
+				3*time.Second,
+				r.enqueueNodeQueuesWhenAdmissionCheckChanged,
+			),
+			ctrlbuilder.WithPredicates(
+				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
+					ac := obj.(*kueue.AdmissionCheck)
+					return ac.Spec.ControllerName == _NodeDevicesControllerName
+				}),
+			),
+		).
 		Complete(r)
+}
+
+// enqueueNodeQueuesWhenAdmissionCheckChanged enqueues every managed ClusterQueue
+// when the node-devices AdmissionCheck changes, so they (re)acquire the reference
+// once the check turns Active (or drop it should the check go away).
+func (r *NodeQueueReconciler) enqueueNodeQueuesWhenAdmissionCheckChanged(
+	ctx context.Context,
+	obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	logger := ctrllog.FromContext(ctx).
+		WithValues("admission check", ctrlcli.ObjectKeyFromObject(obj))
+
+	ac := obj.(*kueue.AdmissionCheck)
+
+	// Skip if not reserved controller name.
+	if ac.Spec.ControllerName != _NodeDevicesControllerName {
+		logger.V(3).Info("skip admission check")
+		return nil
+	}
+
+	cqList := new(kueue.ClusterQueueList)
+	err := r.Client.List(ctx, cqList,
+		ctrlclix.WithoutQuorum,
+		ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil {
+		logger.Error(err, "list cluster queues for admission check")
+		return nil
+	}
+
+	reqs := make([]ctrlreconcile.Request, 0, len(cqList.Items))
+	for i := range cqList.Items {
+		cq := &cqList.Items[i]
+
+		// Skip if AdmissionCheck is terminating.
+		if cq.DeletionTimestamp != nil {
+			continue
+		}
+
+		// Skip if not a managed ClusterQueue (node queue / InstanceType).
+		if !systemmeta.MatchResource(cq, _ClusterQueueResType) {
+			continue
+		}
+
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKey{
+				Name: cq.Name,
+			},
+		})
+	}
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue cluster queues from admission check", "requests", reqs)
+	return reqs
 }
 
 func (r *NodeQueueReconciler) enqueueClusterQueueWhenResourceFlavorChanged(
@@ -524,18 +626,18 @@ func (r *NodeQueueReconciler) enqueueClusterQueueWhenResourceFlavorChanged(
 	logger := ctrllog.FromContext(ctx).
 		WithValues("resource flavor", ctrlcli.ObjectKeyFromObject(obj))
 
-	rf, ok := obj.(*kueue.ResourceFlavor)
-	if !ok {
-		return nil
-	}
+	rf := obj.(*kueue.ResourceFlavor)
+
 	name := resourceFlavorNodeQueueName(rf)
 	if name == "" {
 		logger.V(2).Info("resource flavor has no node-queue name")
 		return nil
 	}
 
-	logger.V(2).Info("enqueue cluster queue from resource flavor", "name", name)
-	return []ctrlreconcile.Request{
+	reqs := []ctrlreconcile.Request{
 		{NamespacedName: ctrlcli.ObjectKey{Name: name}},
 	}
+
+	logger.V(2).Info("enqueue cluster queue from resource flavor", "requests", reqs)
+	return reqs
 }

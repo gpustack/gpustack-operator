@@ -11,11 +11,14 @@ import (
 // setups is the list of controller setup functions.
 var setups = []controller.Setup{
 	new(worker.InstanceReconciler),
-	new(worker.LocalQueueReconciler),
+	new(worker.NodeQueueEntranceReconciler),
 	new(worker.NodeCapacityReconciler),
 	new(worker.NodeFeatureReconciler),
 	new(worker.NodeFlavorReconciler),
 	new(worker.NodeQueueReconciler),
+	new(worker.NodeDevicesReconciler),
+	new(worker.NodeDevicesAdmissionReconciler),
+	new(worker.NodeDevicesAdmissionCheckReconciler),
 }
 
 // Get returns the controller setup of the specified type.

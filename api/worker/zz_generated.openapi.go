@@ -2999,10 +2999,16 @@ func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceC
 							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
 						},
 					},
-					"acceleratorUnits": {
+					"acceleratorSlicedMemoryPercentage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorUnits is the number of slice units requested per accelerator on a sliced InstanceType (U): a power of two strictly less than the card's partition count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.",
-							Default:     1,
+							Description: "AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request becomes an exclusive whole-card request). The Pod webhook folds it into the normalized .sliced.units; it is ignored by non-sliced requests.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"acceleratorSlicedCoresPercentage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook copies it to the other. It is ignored by non-sliced requests.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},

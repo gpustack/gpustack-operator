@@ -768,9 +768,11 @@ func getPortName(port workercore.InstancePort) string {
 // 100m base to keep CPU from gating placement.
 //
 // For the accelerator entry the resource name and value depend on the
-// allocation mode: sliced types are quantized via QuantityToAlignedValue and
-// use the sliced resource name; exclusive types use the raw quantity and the
-// exclusive resource name.
+// allocation mode: a sliced request (a sliced type with a non-zero memory
+// percentage) emits the bare .sliced card count plus the per-card memory/compute
+// percentages, which the Pod webhook folds into .sliced.units; everything else
+// (a non-sliced type, or a 0% request) uses the raw quantity and the exclusive
+// resource name.
 func getResourceRequirements(
 	inst *workercore.Instance,
 	instType *worker.InstanceType,
@@ -802,28 +804,29 @@ func getResourceRequirements(
 		inst.Spec.Resources.Accelerator.Sign() > 0
 	if requestAccelerator {
 		if withAccelerator {
-			if instType.Spec.Sliced > 0 {
-				// Sliced types request a pair of keys: the per-card unit count
-				// (.sliced.units = U×D/partitions, independent of the card count C)
-				// and the bare card count C (.sliced), which Kueue folds into
-				// credits via multiplyBy. The per-card units never multiply by C.
-				u := inst.Spec.Resources.AcceleratorUnits
-				if u <= 0 {
-					u = 1
-				}
-				unitsQ := nodefeature.QuantityToAlignedValue(*resource.NewQuantity(int64(u), resource.DecimalSI), instType.Spec.Sliced)
-				unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(instType.Spec.Manufacturer)
-				cardQ := *inst.Spec.Resources.Accelerator
-				cardResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
-				rr.Limits[unitsResName] = unitsQ
-				rr.Requests[unitsResName] = unitsQ
-				rr.Limits[cardResName] = cardQ
-				rr.Requests[cardResName] = cardQ
+			cardQ := *inst.Spec.Resources.Accelerator
+			if instType.Spec.Sliced > 0 && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
+				// A sliced request emits the bare card count C (.sliced, which Kueue
+				// folds into credits via multiplyBy) plus the per-card memory/compute
+				// percentages. The Pod webhook folds .sliced.memory-percentage into the
+				// credit-counting .sliced.units before the Pod is persisted.
+				slicedResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
+				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(instType.Spec.Manufacturer)
+				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(instType.Spec.Manufacturer)
+				memQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
+				coresQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
+				rr.Limits[slicedResName] = cardQ
+				rr.Requests[slicedResName] = cardQ
+				rr.Limits[memResName] = memQ
+				rr.Requests[memResName] = memQ
+				rr.Limits[coresResName] = coresQ
+				rr.Requests[coresResName] = coresQ
 			} else {
-				resQuantity := *inst.Spec.Resources.Accelerator
+				// A non-sliced type, or a 0% request on a sliced type, is an exclusive
+				// whole-card request.
 				resName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
-				rr.Limits[resName] = resQuantity
-				rr.Requests[resName] = resQuantity
+				rr.Limits[resName] = cardQ
+				rr.Requests[resName] = cardQ
 			}
 		}
 	}

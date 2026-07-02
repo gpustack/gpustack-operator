@@ -164,13 +164,21 @@ type InstanceResources struct {
 	// Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
 	Accelerator *resource.Quantity `json:"accelerator,omitempty" protobuf:"bytes,4,opt,name=accelerator"`
 
-	// AcceleratorUnits is the number of slice units requested per accelerator on a
-	// sliced InstanceType (U): a power of two strictly less than the card's partition
-	// count. It defaults to 1 (the smallest slice) and is ignored by non-sliced requests.
+	// AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a
+	// sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request
+	// becomes an exclusive whole-card request). The Pod webhook folds it into the
+	// normalized .sliced.units; it is ignored by non-sliced requests.
 	//
 	// +optional
-	// +default=1
-	AcceleratorUnits int32 `json:"acceleratorUnits,omitempty" protobuf:"varint,5,opt,name=acceleratorUnits"`
+	AcceleratorSlicedMemoryPercentage int32 `json:"acceleratorSlicedMemoryPercentage,omitempty" protobuf:"varint,5,opt,name=acceleratorSlicedMemoryPercentage"` // nolint: lll
+
+	// AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
+	// a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than
+	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
+	// copies it to the other. It is ignored by non-sliced requests.
+	//
+	// +optional
+	AcceleratorSlicedCoresPercentage int32 `json:"acceleratorSlicedCoresPercentage,omitempty" protobuf:"varint,6,opt,name=acceleratorSlicedCoresPercentage"` // nolint: lll
 }
 
 // InstanceVolume defines the volume to mount in the Instance,
