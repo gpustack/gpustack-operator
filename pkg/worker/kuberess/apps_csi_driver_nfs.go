@@ -17,7 +17,7 @@ const (
 
 func installCSIDriverNFS(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
 	// NB: please update the following files if changed.
-	// - pack/gpustack-operator/image/Dockerfile.
+	// - pack/gpustack-operator/Dockerfile.
 	// - If update csi-node-driver-registrar and csi-provisioner,
 	//   please also update the versions in pkg/worker/kuberess/apps_csi_driver_s3.go.
 
