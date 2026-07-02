@@ -297,13 +297,17 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		svc = nil
 	}
 
-	// Create the Service if not exists.
+	// Create the Service only when the Pod exposes ports: a portless NodePort Service is
+	// rejected by the API, which would fail every reconcile before the status is written.
 	if svc == nil {
-		svc = r.convertServiceFromPod(ctx, pod)
-		err = r.Client.Create(ctx, svc)
-		if err != nil {
-			logger.Error(err, "create service")
-			return ctrl.Result{}, err
+		desired := r.convertServiceFromPod(ctx, pod)
+		if len(desired.Spec.Ports) > 0 {
+			err = r.Client.Create(ctx, desired)
+			if err != nil {
+				logger.Error(err, "create service")
+				return ctrl.Result{}, err
+			}
+			svc = desired
 		}
 	} else if svc.DeletionTimestamp != nil {
 		logger.V(3).Info("previous service deletion in progress; requeue in 2s")
@@ -316,8 +320,8 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	instStatus.Phase, instStatus.PhaseMessage = apistatus.GetSummaryOfPod(&pod.Status)
 
 	if pod.Status.Phase == core.PodRunning {
-		// Update the Ports in the Instance status if all ready.
-		if len(instStatus.Ports) == 0 {
+		// Surface the node ports once ready; skipped for a portless Instance (svc nil).
+		if svc != nil && len(instStatus.Ports) == 0 {
 			allReady := true
 			portsMap := make(map[string]int32)
 			for i := range svc.Spec.Ports {
