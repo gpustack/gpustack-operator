@@ -89,7 +89,7 @@ kube-scheduler binds (gate 2) → kubelet/device-plugin allocates and writes bac
 **Staged delivery (6 phases; detailed task breakdown deferred to `/my-plan`):**
 0. **Foundation & contract** (no runtime behavior change): new `.sliced.cores-percentage` /
    `.sliced.memory-percentage` / `.sliced.memory-mib` resource-name constants; migrate `M`; register the 3 env
-   switches (unused); extend systemmeta notes (`unitStorage`, top-level `memory`).
+   switches (unused); extend systemmeta notes (top-level `memory` and `localStorage`).
 1. **Discovery**: detector `MaxPartitions` (SoftPartition = 512; physical/virtual deferred to the separate MIG/vNPU spec); `NodeCapacityReconciler`
    emits 4 sliced keys, drops the `.sliced.partitions` gate; wire `node-management-manual` (switch ①).
 2. **Allocation (DM)**: split `SliceRatio` into a cores path (cores-percentage → `CUDA_DEVICE_SM_LIMIT`) and a
@@ -112,7 +112,7 @@ As a cluster admin, I want to Create / Update / Delete an InstanceType **through
 have my unit-spec changes (RAM-per-CPU, CPU/RAM-per-device) take effect in one Queue/InstanceType-level action,
 so that I never log into one or more nodes to edit `${NODE}-gpustack-worker` NodeFeature labels and spec
 governance is centralized and auditable. On Create/Update the APIService writes the changed fields back to the
-desired locations on the backing ClusterQueue — `note.gpustack.ai/*` annotations (unitCPU/unitRAM/unitStorage/…)
+desired locations on the backing ClusterQueue — `note.gpustack.ai/*` annotations (unitCPU/unitRAM/localStorage/…)
 and `schedule.gpustack.ai/*` labels; on Delete it tears down the backing ClusterQueue. The NodeQueueReconciler
 treats these admin-written values as the authoritative desired state and does not clobber them on reconcile.
 
@@ -146,13 +146,13 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F0a | New sliced resource-name suffixes | `pkg/nodefeature/knowns.go` defines `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` + `GetAcceleratable*ResourceName` (mirroring `.sliced.units`). |
 | F0b | Credit base `M = 1,600,000` | `CreditsPerCard` migrates to `M`; `M % 10 == 0`, `M % SlicedResourceMaxSize(512) == 0`, `M % 100 == 0`; `M = 2⁹×5⁵`. All `CardsToCredits`/`CreditsToCards` callers + tests updated. |
 | F0c | Three settings registered (dynamic) | `pkg/worker/settings/value.go` adds `node-management-manual` (`InitializeFromEnv("false")`), `instance-type-mixed-on-node` (`InitializeFromEnv("true")`), `instance-type-derived-from-node` (`InitializeFromEnv("true")`) — all `AllowBool()`; auto-mapping `GPUSTACK_NODE_MANAGEMENT_MANUAL` / `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` / `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE`. **All consumed per-reconcile via `ShouldValueBool(ctx)` (no package-level `osx.Getenv` cache) so an admin can flip them at runtime without restarting.** |
-| F0d | systemmeta notes extended | NodeQueue notes (resType `instancetypes`) gain top-level `memory` (per-card VRAM) and `unitStorage`. |
+| F0d | systemmeta notes extended | NodeQueue notes (resType `instancetypes`) gain top-level `memory` (per-card VRAM) and `localStorage`. |
 | F1a | detector MaxPartitions sourcing | **SoftPartition only**: `MaxPartitions = 512` (fixed, `2⁹`); `.sliced` node capacity = `cards × MaxPartitions` via the existing `GetDeviceIds(mode, MaxPartitions)` coupling. PhysicalPartition/VirtualPartition `MaxPartitions` sourcing is **deferred to the separate MIG/vNPU spec** (leave current behavior untouched). |
 | F1b | NodeCapacityReconciler emits 4 keys | For any node with `acceleratable.*`: `.sliced.units = count×M`, `.sliced.cores-percentage = count×51200` (`512×100`), `.sliced.memory-percentage = count×100`, `.sliced.memory-mib = count×VRAM`. Drops the `.sliced.partitions` opt-in gate (any acceleratable model counts); stale-cleanup recognizes all 4 suffixes. |
 | F1c | Manual node management (switch ①) | Setting `node-management-manual` (`GPUSTACK_NODE_MANAGEMENT_MANUAL`, default false), read per-reconcile: when true the operator does **not** auto-inject `gpustack.ai/managed=true`; toggling at runtime re-converges. |
 | F2 | DM allocator decouples cores/VRAM | `SliceRatio` splits: SM limit from `.sliced.cores-percentage`; VRAM limit from `.sliced.memory-mib` (or `memory-percentage × VRAM`). NVIDIA `getSlicedContainerAllocateResponse` + Ascend equivalent updated. `cores-percentage` unset defaults to 100. **Cleanup:** with the allocator no longer reading `.sliced.units` (it becomes Kueue-credits-counting-only), the old `.sliced.units`→R path is orphaned — delete `SliceRatio(units)`, the already-dead `PadSlicedUnits`, and their tests `TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity` so stale code does not mislead later readers. |
 | F3a | NodeFlavorReconciler rewrite | Label-indexed over nodes (not RF-driven). Names: `gpustack-${gKey}-${os}-${arch}-${cpu}c` (CPU) / `gpustack-${aKey}-${os}-${arch}-${device}d` (device). RF labels `schedule.gpustack.ai/{key,os,arch,count,capacity}` with `capacity = indexedNodes × count`. Index rules: deleting nodes count as present; `managed != true` excluded; `node.kubernetes.io/unreachable:NoSchedule` counts as absent; when `instance-type-mixed-on-node=false` (switch ②; default true = mixing allowed = current behavior) a GPU node drops its CPU-type index result. `spec.nodeLabels` explicitly pins `kubernetes.io/os` + `kubernetes.io/arch`. drain tombstone preserved. |
-| F3b | NodeQueueReconciler rewrite | Credits nominal from RF `schedule.gpustack.ai/capacity` (no Node list/watch). Accelerated CQ advertises **only** `credits` (no CPU/RAM/storage); non-accelerated CQ advertises only CPU (no RAM/storage). Notes (resType `instancetypes`) include `unitCPU/unitRAM/unitStorage/memory`. When `instance-type-derived-from-node=false` (switch ③; default true = auto-derive = current behavior), skip auto CQ create (only RF), still update an existing CQ. |
+| F3b | NodeQueueReconciler rewrite | Credits nominal from RF `schedule.gpustack.ai/capacity` (no Node list/watch). Accelerated CQ advertises **only** `credits` (no CPU/RAM/storage); non-accelerated CQ advertises only CPU (no RAM/storage). Notes (resType `instancetypes`) include `unitCPU/unitRAM/localStorage/memory`. When `instance-type-derived-from-node=false` (switch ③; default true = auto-derive = current behavior), skip auto CQ create (only RF), still update an existing CQ. |
 | F3b' | Auto-created CQ borrowing protection | Auto-created CQ is reconciled to keep `spec.cohortName` **empty** (manual edits reverted) **and** sets `lendingLimit: 0` on the credits quota — so it can never be pulled into a cohort and have its quota borrowed out by externally/manually managed queues. Skipped when `instance-type-derived-from-node=false` (admin owns the CQ). |
 | F3c | Cohort removed | `CohortReconciler` deleted; `IndexingNodeByCohortProfile`, `z-cohort` label construction removed; no `Cohort` objects created. |
 | F3d | Transformations rescaled + gate-2 exclusion | `apps_kueue.go` factors `1,600,000 / 160,000 / 1` (derived from `M`); sliced rule keeps `multiplyBy .sliced` + `.sliced` empty-outputs drain. **Gate-2 node resources must not block Kueue admission**: `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` are drained via **per-key `Replace → empty` rules** (preferred — same mechanism as the `.sliced` drain; `excludeResourcePrefixes` is the fallback), so only `.sliced.units → credits` is counted and a Pod requesting these (uncovered) resources is never marked inadmissible. |
@@ -160,7 +160,7 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F4b | AdmissionCheck + ledger completeness | New AdmissionCheck controller: after quota reservation, reads `Devices` CR per-card; `Retry`/`Reject` requests that can't be placed (no clean whole card for exclusive / no single card fits). **Ledger completeness**: the device-plugin `Allocate` writes **every** allocation — Kueue-routed or not — into the `Devices` CR `AcceleratorAllocation`, so even Pods that bypass Kueue land in the unified ledger; the AdmissionCheck consults this complete ledger (closes the "non-Kueue bypass" gap). |
 | F5a | InstanceType API | Remove `InstanceTypeAccelerator.Sliced int64`. Add three-view Status (allocatable-as-exclusive / shareable / sliceable) + `SlicedCoresPercentage`/`SlicedMemoryPercentage`/`SlicedMemoryMib`. `make generate` regenerates deepcopy/protobuf/CRD/conversion/apiservice. |
 | F5b | Extension API three-view (read) | `convertInstanceTypeFromClusterQueue` computes the three views by aggregating the `Devices` CR per-card state (not credits fold-down); CQ stays the metadata/total source. |
-| F5c | InstanceType Extension APIService writable (Create/Update/Delete) | The aggregated InstanceType API gains **Create / Update / Delete** (today read-only). Create/Update translate InstanceType fields (unit spec `unitCPU`/`unitRAM`/`unitStorage` + admin-set metadata) into write-backs on the backing ClusterQueue: `note.gpustack.ai/*` annotations + `schedule.gpustack.ai/*` labels. Delete tears down the backing ClusterQueue (and its LocalQueues). With `instance-type-derived-from-node=false`, Create is the admin's path to define a node-queue (operator then only aligns the ResourceFlavor). NodeQueueReconciler must treat admin-written unit-spec values as authoritative (level-based desired state) and not overwrite them. |
+| F5c | InstanceType Extension APIService writable (Create/Update/Delete) | The aggregated InstanceType API gains **Create / Update / Delete** (today read-only). Create/Update translate InstanceType fields (unit spec `unitCPU`/`unitRAM`, plus the InstanceType's `localStorage`, + admin-set metadata) into write-backs on the backing ClusterQueue: `note.gpustack.ai/*` annotations + `schedule.gpustack.ai/*` labels. Delete tears down the backing ClusterQueue (and its LocalQueues). With `instance-type-derived-from-node=false`, Create is the admin's path to define a node-queue (operator then only aligns the ResourceFlavor). NodeQueueReconciler must treat admin-written unit-spec values as authoritative (level-based desired state) and not overwrite them. |
 | F6 | Worker Gateway sync | `pkg/workergateway/service/types.go` aggregation types track the new InstanceType contract; no business-logic change. |
 | F7 | E2E acceptance | New e2e case: the 5-step pooling sequence reproduces the three-view progression exactly; a separate case proves AdmissionCheck rejects the 5th exclusive request on a fully-sliced 8-card node. |
 
@@ -275,17 +275,18 @@ coupled — its three tasks land together and the system is only fully consisten
   (`apps_kueue.go`). (`clusterqueue_test` was already base-relative via `cards × CreditsPerCard` — no change.)
   All consumers derive from the constant, so the system scales consistently. **Accept:**
   `M%10==0 && M%512==0 && M%100==0`; round-trips hold; full unit suite green. **Verify:** `go test ./pkg/...`.
-- [ ] **T0.3 (F0c) — register 3 dynamic settings.** Add `node-management-manual` (`InitializeFromEnv("false")`),
+- [x] **T0.3 (F0c) — register 3 dynamic settings.** Add `node-management-manual` (`InitializeFromEnv("false")`),
   `instance-type-mixed-on-node` (`InitializeFromEnv("true")`), `instance-type-derived-from-node`
   (`InitializeFromEnv("true")`) to `pkg/worker/settings/value.go` (`AllowBool()`); auto-mapped to
   `GPUSTACK_NODE_MANAGEMENT_MANUAL` / `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` / `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE`.
   Registered but unconsumed; consumers (T1.3 / T3.1 / T3.2 / T5.3) **read per-reconcile via `ShouldValueBool(ctx)`**
   (not a package var) so flips apply without restart. **Accept:** each resolves from its env var with the right
   default (false / true / true). **Verify:** new `pkg/worker/settings/value_test.go`.
-- [ ] **T0.4 (F0d) — note-key contract + CQ-VRAM reader.** Add note-key constants (`memory`, `unitStorage`) and a
-  helper to read a ClusterQueue's per-card VRAM from `note.gpustack.ai/memory` (used later by the webhook). Pure
-  addition. **Accept:** helper returns the VRAM quantity from a noted CQ. **Verify:**
-  `go test ./pkg/systemmeta/... ./pkg/nodefeature/...`.
+- [x] **T0.4 (F0d) — note-key naming contract.** Settle `memory` (per-card VRAM) and `localStorage` as the
+  canonical NodeQueue note keys, unified with the ResourceFlavor note names. They are written as plain literals
+  where the RF/CQ notes are produced (T3.1/T3.2) — no dedicated constants/helper module — and the Pod webhook
+  reads the CQ VRAM note inline when it is built (T4.1). **Accept:** the naming is recorded; consumers use the
+  literals.
 - *Checkpoint: `make lint` clean + full `go test ./pkg/...` green on the rescaled base; no behavior change but the
   125× credit magnitude.*
 
@@ -336,7 +337,7 @@ coupled — its three tasks land together and the system is only fully consisten
 - [ ] **T3.2 (F3b/F3b'/F3d) — ClusterQueueReconciler → NodeQueueReconciler + transformations.** Credits from RF
   `capacity` label (delete the Node-list block at `clusterqueue.go:297-382`); accel CQ advertises **only**
   `credits`, non-accel only CPU; `spec.cohortName` empty + `lendingLimit:0`
-  (empty cohortName = isolated, confirmed); notes incl `memory`/`unitStorage`; `instance-type-derived-from-node=false` (switch ③) skips auto-create.
+  (empty cohortName = isolated, confirmed); notes incl `memory`/`localStorage`; `instance-type-derived-from-node=false` (switch ③) skips auto-create.
   `apps_kueue.go:272-280` factors → `1,600,000/160,000/1`; **drain gate-2 resources via per-key `Replace→empty`**
   (preferred; confirm vs `excludeResourcePrefixes` at impl). **Accept:** CQ credits=`capacity×M`, no CPU/RAM/storage on
   accel, cohortName empty, gate-2 not counted. **Verify:** `go test ./pkg/worker/controllers/worker/...
