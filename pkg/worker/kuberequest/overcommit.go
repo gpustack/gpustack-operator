@@ -72,11 +72,11 @@ func ScaleToOvercommit(
 
 // ScaleBackOvercommit returns the limits-equivalent quantity for an
 // overcommit-shaped request value produced by ScaleToOvercommit. The canonical
-// caller is convertInstanceTypeFromClusterQueue in
-// pkg/worker/extensionapis/worker/instance_type.go, which scales the reserved
-// total reported by Kueue (which is in overcommit-request units) back to
-// limits units before subtracting it from capacity so that capacity,
-// remaining, and once-max-request all share the same units.
+// caller is the InstanceType CPU-view computation in the InstanceTypeReconciler,
+// which scales the reserved total reported by Kueue (which is in
+// overcommit-request units) back to limits units before subtracting it from
+// capacity so that capacity, remaining, and once-max-request all share the same
+// units.
 //
 // Inverse formulas — all use integer division, which is exact for sums of
 // whole-unit pod reservations because each pod contributes a clean multiple

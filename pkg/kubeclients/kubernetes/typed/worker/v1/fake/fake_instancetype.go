@@ -9,19 +9,20 @@ package fake
 
 import (
 	v1 "gpustack.ai/gpustack/api/worker/v1"
-	workerv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/worker/v1"
+	workerv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1"
+	typedworkerv1 "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/typed/worker/v1"
 	gentype "k8s.io/client-go/gentype"
 )
 
 // fakeInstanceTypes implements InstanceTypeInterface
 type fakeInstanceTypes struct {
-	*gentype.FakeClientWithList[*v1.InstanceType, *v1.InstanceTypeList]
+	*gentype.FakeClientWithListAndApply[*v1.InstanceType, *v1.InstanceTypeList, *workerv1.InstanceTypeApplyConfiguration]
 	Fake *FakeWorkerV1
 }
 
-func newFakeInstanceTypes(fake *FakeWorkerV1) workerv1.InstanceTypeInterface {
+func newFakeInstanceTypes(fake *FakeWorkerV1) typedworkerv1.InstanceTypeInterface {
 	return &fakeInstanceTypes{
-		gentype.NewFakeClientWithList[*v1.InstanceType, *v1.InstanceTypeList](
+		gentype.NewFakeClientWithListAndApply[*v1.InstanceType, *v1.InstanceTypeList, *workerv1.InstanceTypeApplyConfiguration](
 			fake.Fake,
 			"",
 			v1.SchemeGroupVersion.WithResource("instancetypes"),

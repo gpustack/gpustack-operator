@@ -31,7 +31,7 @@ const (
 	// claims; installKueue applies an AdmissionCheck object carrying it.
 	_NodeDevicesControllerName = "worker.gpustack.ai/node-devices"
 	// _NodeDevicesAdmissionCheckName is the name of that AdmissionCheck object, the
-	// reference NodeQueueReconciler adds to accelerated ClusterQueues.
+	// reference InstanceTypeReconciler adds to accelerated ClusterQueues.
 	_NodeDevicesAdmissionCheckName = "gpustack-node-devices"
 	// _NodeDevicesFieldOwner owns the AdmissionCheckState this controller patches.
 	_NodeDevicesFieldOwner = "gpustack-node-devices"

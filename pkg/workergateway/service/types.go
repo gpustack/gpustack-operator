@@ -4,11 +4,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
 type (
-	AggregatedInstanceTypeSpec     = worker.InstanceTypeSpec
-	AggregatedInstanceTypeResource = worker.InstanceTypeResource
+	AggregatedInstanceTypeSpec     = workercore.InstanceTypeSpec
+	AggregatedInstanceTypeResource = workercore.InstanceTypeResource
 )
 
 type AggregatedInstanceType struct {
@@ -23,7 +24,7 @@ type AggregatedInstanceTypeStatus struct {
 	//
 	// It is the resource bundle of the tier that wins on the primary dimension:
 	// Accelerator when Spec.Acceleratable is true, otherwise CPU.
-	// All four fields (Accelerator/CPU/RAM/LocalStorage) are taken from the same winning tier,
+	// All four fields (Accelerator/AcceleratorShared/AcceleratorSliced/CPU) are taken from the same winning tier,
 	// so the overview always represents a bundle achievable by some real candidate,
 	// not a per-dimension maximum across tiers.
 	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
@@ -47,17 +48,17 @@ type AggregatedInstanceTypeStatus struct {
 }
 
 type AggregatedInstanceTypeOverviewResource struct {
-	// Accelerator is the accelerator remaining resource of the AggregatedInstanceType, e.g. "1", "4".
+	// Accelerator is the allocatable-as-exclusive accelerator resource of the AggregatedInstanceType, e.g. "1", "4".
 	Accelerator resource.Quantity `json:"accelerator"`
+
+	// AcceleratorShared is the shareable accelerator resource of the AggregatedInstanceType, e.g. "10", "40".
+	AcceleratorShared resource.Quantity `json:"acceleratorShared"`
+
+	// AcceleratorSliced is the sliceable accelerator resource of the AggregatedInstanceType, e.g. "100", "400".
+	AcceleratorSliced resource.Quantity `json:"acceleratorSliced"`
 
 	// CPU is the CPU remaining resource of the AggregatedInstanceType, e.g. "4", "8".
 	CPU resource.Quantity `json:"cpu"`
-
-	// RAM is the RAM remaining resource of the AggregatedInstanceType, e.g. "40G", "16G".
-	RAM resource.Quantity `json:"ram"`
-
-	// LocalStorage is the local storage remaining resource of the AggregatedInstanceType, e.g. "100G", "500G".
-	LocalStorage resource.Quantity `json:"localStorage"`
 }
 
 type AggregatedInstanceTypeOnceMaxRequestTier struct {
@@ -78,7 +79,7 @@ type AggregatedInstanceTypeOnceMaxRequestTier struct {
 	// Candidates is the list of candidates of the tier.
 	//
 	// All candidates in the same tier share the same accelerator OnceMaxRequest,
-	// but may differ on CPU/RAM/LocalStorage.
+	// but may differ on AcceleratorShared/AcceleratorSliced/CPU.
 	Candidates []AggregatedInstanceTypeOnceMaxRequestCandidate `json:"candidates"`
 }
 
@@ -90,17 +91,17 @@ type AggregatedInstanceTypeOnceMaxRequestCandidate struct {
 	// Name is the instance type name of the candidate, e.g. "nvidia-a100-40g", "nvidia-v100-32g".
 	Name string `json:"name"`
 
-	// Accelerator is the accelerator resource of the AggregatedInstanceType, e.g. "1", "4".
+	// Accelerator is the allocatable-as-exclusive accelerator resource of the candidate, e.g. "1", "4".
 	Accelerator AggregatedInstanceTypeResource `json:"accelerator"`
+
+	// AcceleratorShared is the shareable accelerator resource of the candidate, e.g. "10", "40".
+	AcceleratorShared AggregatedInstanceTypeResource `json:"acceleratorShared"`
+
+	// AcceleratorSliced is the sliceable accelerator resource of the candidate, e.g. "100", "400".
+	AcceleratorSliced AggregatedInstanceTypeResource `json:"acceleratorSliced"`
 
 	// CPU is the CPU once max request resource of the candidate, e.g. "4", "8".
 	CPU AggregatedInstanceTypeResource `json:"cpu"`
-
-	// RAM is the RAM once max request resource of the candidate, e.g. "40G", "16G".
-	RAM AggregatedInstanceTypeResource `json:"ram"`
-
-	// LocalStorage is the local storage once max request resource of the candidate, e.g. "100G", "500G".
-	LocalStorage AggregatedInstanceTypeResource `json:"localStorage"`
 }
 
 type AggregatedInstanceTypeList struct {

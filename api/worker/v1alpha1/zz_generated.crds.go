@@ -16,8 +16,9 @@ import (
 
 func GetCustomResourceDefinitions() map[string]*v1.CustomResourceDefinition {
 	return map[string]*v1.CustomResourceDefinition{
-		"Devices":  crd_gpustack_api_worker_v1alpha1_Devices(),
-		"Instance": crd_gpustack_api_worker_v1alpha1_Instance(),
+		"Devices":      crd_gpustack_api_worker_v1alpha1_Devices(),
+		"Instance":     crd_gpustack_api_worker_v1alpha1_Instance(),
+		"InstanceType": crd_gpustack_api_worker_v1alpha1_InstanceType(),
 	}
 }
 
@@ -871,6 +872,454 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 												},
 											},
 											Nullable: true,
+										},
+									},
+								},
+							},
+						},
+					},
+					Subresources: &v1.CustomResourceSubresources{
+						Status: &v1.CustomResourceSubresourceStatus{},
+					},
+				},
+			},
+		},
+	}
+}
+
+func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinition {
+	return &v1.CustomResourceDefinition{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apiextensions.k8s.io/v1",
+			Kind:       "CustomResourceDefinition",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "instancetypes.worker.gpustack.ai",
+		},
+		Spec: v1.CustomResourceDefinitionSpec{
+			Group: "worker.gpustack.ai",
+			Names: v1.CustomResourceDefinitionNames{
+				Plural:   "instancetypes",
+				Singular: "instancetype",
+				ShortNames: []string{
+					"instype",
+				},
+				Kind:     "InstanceType",
+				ListKind: "InstanceTypeList",
+				Categories: []string{
+					"gpustack",
+				},
+			},
+			Scope: "Cluster",
+			Versions: []v1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1alpha1",
+					Served:  true,
+					Storage: true,
+					Schema: &v1.CustomResourceValidation{
+						OpenAPIV3Schema: &v1.JSONSchemaProps{
+							Description: "InstanceType is the schema for worker.gpustack.ai.\nUnderhood, an InstanceType is mapping to a Kueue ClusterQueue,\nand the InstanceType's name is the same as the ClusterQueue's name.",
+							Type:        "object",
+							Properties: map[string]v1.JSONSchemaProps{
+								"apiVersion": {
+									Type: "string",
+								},
+								"kind": {
+									Type: "string",
+								},
+								"metadata": {
+									Type: "object",
+								},
+								"spec": {
+									Type: "object",
+									Required: []string{
+										"group",
+										"acceleratable",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"acceleratable": {
+											Description: "Acceleratable indicates whether the InstanceType is acceleratable.",
+											Type:        "boolean",
+										},
+										"arch": {
+											Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".",
+											Type:        "string",
+										},
+										"cache": {
+											Description: "Cache describes the cache information of the CPU.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"l1d": {
+													Description: "L1D is the L1 data cache size in bytes of the CPU.",
+													Type:        "string",
+												},
+												"l1i": {
+													Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+													Type:        "string",
+												},
+												"l2": {
+													Description: "L2 is the L2 cache size in bytes of the CPU.",
+													Type:        "string",
+												},
+												"l3": {
+													Description: "L3 is the L3 cache size in bytes of the CPU.",
+													Type:        "string",
+												},
+											},
+										},
+										"cacheLine": {
+											Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+											Type:        "string",
+										},
+										"clockSpeed": {
+											Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+											Type:        "string",
+										},
+										"computeCapability": {
+											Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+											Type:        "string",
+										},
+										"cores": {
+											Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+											Type:        "string",
+										},
+										"cpu": {
+											Description: "CPU describes the CPU information of the accelerator.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"cache": {
+													Description: "Cache describes the cache information of the CPU.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"l1d": {
+															Description: "L1D is the L1 data cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l1i": {
+															Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l2": {
+															Description: "L2 is the L2 cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l3": {
+															Description: "L3 is the L3 cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+													},
+												},
+												"cacheLine": {
+													Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+													Type:        "string",
+												},
+												"clockSpeed": {
+													Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+													Type:        "string",
+												},
+												"family": {
+													Description: "Family is the family of the CPU.",
+													Type:        "string",
+												},
+												"logicalCores": {
+													Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+													Type:        "string",
+												},
+												"manufacturer": {
+													Description: "Manufacturer is the name of the CPU manufacturer, e.g. \"amd\", \"intel\".",
+													Type:        "string",
+												},
+												"maxClockSpeed": {
+													Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+													Type:        "string",
+												},
+												"physicalCores": {
+													Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+													Type:        "string",
+												},
+												"product": {
+													Description: "Product is the name of the CPU product.",
+													Type:        "string",
+												},
+												"stepping": {
+													Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+													Type:        "string",
+												},
+												"threadsPerPhysicalCore": {
+													Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+													Type:        "string",
+												},
+											},
+										},
+										"family": {
+											Description: "Family is the family of the InstanceType.",
+											Type:        "string",
+										},
+										"group": {
+											Description: "Group indicates the group of the InstanceType.",
+											Type:        "string",
+										},
+										"localStorage": {
+											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix; the\nbacking ClusterQueue note stores the bare Gi number.",
+											Type:        "string",
+										},
+										"logicalCores": {
+											Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+											Type:        "string",
+										},
+										"manufacturer": {
+											Description: "Manufacturer is the name of the InstanceType manufacturer.",
+											Type:        "string",
+										},
+										"maxClockSpeed": {
+											Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+											Type:        "string",
+										},
+										"memory": {
+											Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+											Type:        "string",
+										},
+										"os": {
+											Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".",
+											Type:        "string",
+										},
+										"physicalCores": {
+											Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+											Type:        "string",
+										},
+										"product": {
+											Description: "Product is the name of the InstanceType product.",
+											Type:        "string",
+										},
+										"sliceable": {
+											Description: "Sliceable indicates whether the accelerator can be sliced, i.e. its hardware\nreports a non-zero MaxPartitions. It is a capability flag, not a slice count.",
+											Type:        "boolean",
+										},
+										"stepping": {
+											Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+											Type:        "string",
+										},
+										"threadsPerPhysicalCore": {
+											Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+											Type:        "string",
+										},
+										"unitResources": {
+											Description: "UnitResources describes the unit resources of the InstanceType.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"cpu": {
+													Description: "CPU is the unit CPU resource(milli-cores) of the InstanceType.",
+													Type:        "string",
+												},
+												"ram": {
+													Description: "RAM is the unit RAM resource(Mi) of the InstanceType.",
+													Type:        "string",
+												},
+											},
+										},
+									},
+								},
+								"status": {
+									Type: "object",
+									Required: []string{
+										"phase",
+										"accelerator",
+										"acceleratorShared",
+										"acceleratorSliced",
+										"cpu",
+									},
+									Properties: map[string]v1.JSONSchemaProps{
+										"accelerator": {
+											Description: "Accelerator is the allocatable-as-exclusive view: whole cards that are\nentirely free, e.g. \"1\", \"4\".",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"acceleratorShared": {
+											Description: "AcceleratorShared is the shareable view: per-card ownership shares (up to\nSharedResourceMaxSize owners per card) summed over free and already-shared\ncards.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"acceleratorSliced": {
+											Description: "AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one\nhundred per card) summed over free and already-sliced cards.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"cpu": {
+											Description: "CPU is the CPU resource of the InstanceType, e.g. \"4\", \"8\".",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"entrance": {
+											Description: "Entrance is the name of the namespaced LocalQueue that fronts this\nInstanceType's backing ClusterQueue — the value a workload sets as its\n\"kueue.x-k8s.io/queue-name\" label to be admitted. It is derived from the\nInstanceType name (see nodefeature.FormatLocalQueueName).",
+											Type:        "string",
+										},
+										"phase": {
+											Description: "Phase is the summary of conditions.",
+											Type:        "string",
+										},
+										"phaseMessage": {
+											Description: "PhaseMessage is the message of the phase.",
+											Type:        "string",
 										},
 									},
 								},

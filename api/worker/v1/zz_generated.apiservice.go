@@ -295,3 +295,9 @@ func (*InstanceType) Categories() []string {
 		"gpustack",
 	}
 }
+
+var _ WithStatusSubResource = (*InstanceType)(nil)
+
+func (in *InstanceType) CopyStatusTo(out runtime.Object) {
+	out.(*InstanceType).Status = in.Status
+}

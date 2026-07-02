@@ -18,6 +18,7 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
@@ -64,7 +65,7 @@ const (
 	// the other and from the matching Nodes/Devices by a label selector: the flavor's
 	// feature key ("general."/"acceleratable." prefixed, value "true"), the well-known
 	// kubernetes.io/os and kubernetes.io/arch, and — on the ResourceFlavor only — the
-	// per-key ".count"/".capacity" siblings the NodeQueueReconciler reads to build the
+	// per-key ".count"/".capacity" siblings the InstanceTypeReconciler reads to build the
 	// queue without listing or watching Nodes (capacity = pooled nodes × count).
 	_ResourceFlavorCountLabelSuffix    = ".count"
 	_ResourceFlavorCapacityLabelSuffix = ".capacity"
@@ -172,6 +173,10 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	capacity := int64(len(contributors)) * flavor.Count
 	unitCPU, unitRAM, localStorage := nodefeature.DeriveNodeUnitSpec(minNode, flavor.Count, flavor.Acceleratable)
 
+	// An accelerated flavor is sliceable when its hardware reports a non-zero
+	// MaxPartitions, read off the most-constrained node's same-named Devices.
+	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, minNode.Name, flavor.Manufacturer)
+
 	keyLabel := featureKeyLabel(flavor.Acceleratable, flavor.Key)
 	eRf := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
@@ -201,6 +206,7 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"unitCPU":       unitCPU,
 		"unitRAM":       unitRAM,
 		"localStorage":  localStorage,
+		"sliceable":     strconv.FormatBool(sliceable),
 	}
 	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)
 	rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {
@@ -253,6 +259,27 @@ func matchNodeFlavor(nd *core.Node, flavorName string) *nodefeature.NodeFlavor {
 // umbrella "feature.gpustack.ai/acceleratable=true" label.
 func nodeIsAccelerated(nd *core.Node) bool {
 	return kubemeta.IsLabeled(nd, nodefeature.NodeAcceleratableLabelKey, "true")
+}
+
+// nodeFlavorSliceable reports whether the accelerator backing this flavor can be
+// sliced. It reads the node's same-named Devices object (one per node), finds the
+// device group of the flavor's manufacturer, and inspects its first accelerator's
+// hardware MaxPartitions: a non-zero value means the card supports partitioning.
+// A missing Devices object or group yields false; the flavor is rebuilt once the
+// node reports.
+func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName, manufacturer string) bool {
+	devs := new(workercore.Devices)
+	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs); err != nil {
+		return false
+	}
+	for i := range devs.Spec.Groups {
+		g := &devs.Spec.Groups[i]
+		if g.Manufacturer != manufacturer || len(g.Accelerators) == 0 {
+			continue
+		}
+		return g.Accelerators[0].Features.MaxPartitions != 0
+	}
+	return false
 }
 
 // lessConstrained reports whether node a is more constrained (smaller capacity)

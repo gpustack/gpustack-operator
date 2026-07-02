@@ -102,10 +102,10 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
 				}
 			}
-			// On a sliced InstanceType the slice is requested as memory/compute
+			// On a sliceable InstanceType the slice is requested as memory/compute
 			// percentages in [0,100] (0 disables slicing). The compute budget must
 			// not be smaller than the memory budget.
-			if instType.Spec.Sliced > 0 {
+			if instType.Spec.Sliceable {
 				memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
 				coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
 				memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
@@ -137,24 +137,20 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
 				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)))
 		}
+		// A negative RAM or local-storage request is rejected outright; a positive one
+		// must stay within the InstanceType's per-unit RAM entitlement and its local
+		// storage (validated against UnitResources / LocalStorage below).
 		if instRess.RAM.Sign() < 0 {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.ram"), instRess.RAM.String(),
 				"RAM request cannot be negative"))
-		} else if instRess.RAM.Cmp(instType.Status.RAM.OnceMaxRequest) > 0 {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.ram"), instRess.RAM.String(),
-				fmt.Sprintf("exceeds the maximum RAM request of instance type %s", instType.Name)))
 		}
 		if instRess.LocalStorage.Sign() < 0 {
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
 				"local storage request cannot be negative"))
-		} else if instRess.LocalStorage.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
-				fmt.Sprintf("exceeds the maximum local storage request of instance type %s", instType.Name)))
 		}
+		errs = append(errs, capResourcesToInstanceType(instType, instRess)...)
 	}
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
@@ -284,6 +280,11 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 					field.NewPath("spec.type"), inst.Spec.Type))
 			}
 		}
+		// Validate the resources that will take effect when starting against the
+		// InstanceType's per-unit RAM entitlement and its local storage.
+		if inst.Spec.Resources != nil {
+			errs = append(errs, capResourcesToInstanceType(instType, inst.Spec.Resources)...)
+		}
 	case stopping:
 		// Validate the instance is not starting when trying to stop it,
 		// to avoid the race condition between starting and stopping an instance.
@@ -359,10 +360,10 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			// and let later scheduling to block if it exceeds the instance type's CPU capacity.
 			instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
 		}
-		// On a sliced InstanceType, when only one of the memory/compute slice
+		// On a sliceable InstanceType, when only one of the memory/compute slice
 		// percentages is set, copy it to the other so a bare memory request yields
 		// an equal compute share (and vice versa).
-		if instType.Spec.Sliced > 0 {
+		if instType.Spec.Sliceable {
 			memPct := instRess.AcceleratorSlicedMemoryPercentage
 			coresPct := instRess.AcceleratorSlicedCoresPercentage
 			switch {
@@ -413,12 +414,51 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 	}
 	if instRess.LocalStorage.IsZero() {
-		stgQ := *resource.NewQuantity(15<<30, resource.BinarySI) // 15Gi
-		if stgQ.Cmp(instType.Status.LocalStorage.OnceMaxRequest) > 0 {
-			stgQ = instType.Status.LocalStorage.OnceMaxRequest.DeepCopy()
+		// Default a local-storage request to 15Gi, but never above the InstanceType's
+		// LocalStorage (the validating webhook caps an explicit request there too).
+		def := resource.NewQuantity(15<<30, resource.BinarySI) // 15Gi
+		if instType.Spec.LocalStorage != "" {
+			if maxStg, perr := resource.ParseQuantity(instType.Spec.LocalStorage); perr == nil && def.Cmp(maxStg) > 0 {
+				def = &maxStg
+			}
 		}
-		instRess.LocalStorage = stgQ
+		instRess.LocalStorage = *def
 	}
 
 	return nil
+}
+
+// capResourcesToInstanceType rejects an Instance whose RAM exceeds the InstanceType's
+// per-unit RAM entitlement (unitRAM x unit count) or whose local storage exceeds the
+// InstanceType's LocalStorage. The unit count mirrors the Default derivation: the
+// accelerator count for an acceleratable type, otherwise the CPU count.
+func capResourcesToInstanceType(
+	instType *worker.InstanceType, instRess *workercore.InstanceResources,
+) field.ErrorList {
+	var errs field.ErrorList
+
+	unitCount := int64(1)
+	if instType.Spec.Acceleratable {
+		if instRess.Accelerator != nil && instRess.Accelerator.Value() > 1 {
+			unitCount = instRess.Accelerator.Value()
+		}
+	} else if instRess.CPU.Value() > 1 {
+		unitCount = instRess.CPU.Value()
+	}
+
+	if maxRAM, err := quantityx.StringMultiply(instType.Spec.UnitResources.RAM, unitCount); err == nil &&
+		instRess.RAM.Cmp(maxRAM) > 0 {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec.resources.ram"), instRess.RAM.String(),
+			fmt.Sprintf("exceeds the maximum RAM %s of instance type %s", maxRAM.String(), instType.Name)))
+	}
+	if instType.Spec.LocalStorage != "" {
+		if maxStg, err := resource.ParseQuantity(instType.Spec.LocalStorage); err == nil &&
+			instRess.LocalStorage.Cmp(maxStg) > 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
+				fmt.Sprintf("exceeds the local storage %s of instance type %s", maxStg.String(), instType.Name)))
+		}
+	}
+	return errs
 }

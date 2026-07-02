@@ -17,6 +17,8 @@ type Interface interface {
 	Devices() DevicesInformer
 	// Instances returns a InstanceInformer.
 	Instances() InstanceInformer
+	// InstanceTypes returns a InstanceTypeInformer.
+	InstanceTypes() InstanceTypeInformer
 }
 
 type version struct {
@@ -38,4 +40,9 @@ func (v *version) Devices() DevicesInformer {
 // Instances returns a InstanceInformer.
 func (v *version) Instances() InstanceInformer {
 	return &instanceInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// InstanceTypes returns a InstanceTypeInformer.
+func (v *version) InstanceTypes() InstanceTypeInformer {
+	return &instanceTypeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

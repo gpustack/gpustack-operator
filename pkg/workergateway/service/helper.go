@@ -26,7 +26,7 @@ func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
 //
 // OnceMaxRequest is the resource bundle of the tier whose primary dimension is the largest.
 // The primary dimension is Accelerator when Spec.Acceleratable is true, otherwise CPU.
-// The whole bundle (Accelerator/CPU/RAM/LocalStorage) is copied from the winning tier
+// The whole bundle (Accelerator/CPU/AcceleratorShared/AcceleratorSliced) is copied from the winning tier
 // so the result corresponds to a real, achievable single allocation rather than a
 // per-dimension maximum across tiers.
 //
@@ -49,8 +49,8 @@ func (in *AggregatedInstanceType) Recompute() {
 
 		newRemaining.Accelerator.Add(tier.Remaining.Accelerator)
 		newRemaining.CPU.Add(tier.Remaining.CPU)
-		newRemaining.RAM.Add(tier.Remaining.RAM)
-		newRemaining.LocalStorage.Add(tier.Remaining.LocalStorage)
+		newRemaining.AcceleratorShared.Add(tier.Remaining.AcceleratorShared)
+		newRemaining.AcceleratorSliced.Add(tier.Remaining.AcceleratorSliced)
 	}
 
 	in.Status.OnceMaxRequest = newOnceMaxRequest
@@ -82,17 +82,17 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 		}
 		if wins {
 			newOnceMaxRequest = AggregatedInstanceTypeOverviewResource{
-				Accelerator:  candidate.Accelerator.OnceMaxRequest,
-				CPU:          candidate.CPU.OnceMaxRequest,
-				RAM:          candidate.RAM.OnceMaxRequest,
-				LocalStorage: candidate.LocalStorage.OnceMaxRequest,
+				Accelerator:       candidate.Accelerator.OnceMaxRequest,
+				CPU:               candidate.CPU.OnceMaxRequest,
+				AcceleratorShared: candidate.AcceleratorShared.OnceMaxRequest,
+				AcceleratorSliced: candidate.AcceleratorSliced.OnceMaxRequest,
 			}
 		}
 
 		newRemaining.Accelerator.Add(candidate.Accelerator.Remaining)
 		newRemaining.CPU.Add(candidate.CPU.Remaining)
-		newRemaining.RAM.Add(candidate.RAM.Remaining)
-		newRemaining.LocalStorage.Add(candidate.LocalStorage.Remaining)
+		newRemaining.AcceleratorShared.Add(candidate.AcceleratorShared.Remaining)
+		newRemaining.AcceleratorSliced.Add(candidate.AcceleratorSliced.Remaining)
 	}
 
 	in.OnceMaxRequest = newOnceMaxRequest
@@ -142,16 +142,16 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 		tierIndexer[tierIndexKey] = tierIndex
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-				Accelerator:  instType.Status.Accelerator.OnceMaxRequest,
-				CPU:          instType.Status.CPU.OnceMaxRequest,
-				RAM:          instType.Status.RAM.OnceMaxRequest,
-				LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
+				Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
+				CPU:               instType.Status.CPU.OnceMaxRequest,
+				AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
+				AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
 			},
 			Remaining: AggregatedInstanceTypeOverviewResource{
-				Accelerator:  instType.Status.Accelerator.Remaining,
-				CPU:          instType.Status.CPU.Remaining,
-				RAM:          instType.Status.RAM.Remaining,
-				LocalStorage: instType.Status.LocalStorage.Remaining,
+				Accelerator:       instType.Status.Accelerator.Remaining,
+				CPU:               instType.Status.CPU.Remaining,
+				AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
+				AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
 			},
 		}
 		item.Status.Tiers = append(item.Status.Tiers, tier)
@@ -159,12 +159,12 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 
 	tier := &item.Status.Tiers[tierIndex]
 	candidate := AggregatedInstanceTypeOnceMaxRequestCandidate{
-		Cluster:      cluster,
-		Name:         instType.Name,
-		Accelerator:  instType.Status.Accelerator,
-		CPU:          instType.Status.CPU,
-		RAM:          instType.Status.RAM,
-		LocalStorage: instType.Status.LocalStorage,
+		Cluster:           cluster,
+		Name:              instType.Name,
+		Accelerator:       instType.Status.Accelerator,
+		CPU:               instType.Status.CPU,
+		AcceleratorShared: instType.Status.AcceleratorShared,
+		AcceleratorSliced: instType.Status.AcceleratorSliced,
 	}
 	tier.Candidates = append(tier.Candidates, candidate)
 
@@ -351,12 +351,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			}
 
 			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
-				Cluster:      evt.Cluster,
-				Name:         instType.Name,
-				Accelerator:  instType.Status.Accelerator,
-				CPU:          instType.Status.CPU,
-				RAM:          instType.Status.RAM,
-				LocalStorage: instType.Status.LocalStorage,
+				Cluster:           evt.Cluster,
+				Name:              instType.Name,
+				Accelerator:       instType.Status.Accelerator,
+				CPU:               instType.Status.CPU,
+				AcceleratorShared: instType.Status.AcceleratorShared,
+				AcceleratorSliced: instType.Status.AcceleratorSliced,
 			}
 
 			if tier.OnceMaxRequest.Accelerator.Equal(candidate.Accelerator.OnceMaxRequest) {
@@ -397,16 +397,16 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers = append(item.Status.Tiers,
 						AggregatedInstanceTypeOnceMaxRequestTier{
 							OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-								Accelerator:  instType.Status.Accelerator.OnceMaxRequest,
-								CPU:          instType.Status.CPU.OnceMaxRequest,
-								RAM:          instType.Status.RAM.OnceMaxRequest,
-								LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
+								Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
+								CPU:               instType.Status.CPU.OnceMaxRequest,
+								AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
+								AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
 							},
 							Remaining: AggregatedInstanceTypeOverviewResource{
-								Accelerator:  instType.Status.Accelerator.Remaining,
-								CPU:          instType.Status.CPU.Remaining,
-								RAM:          instType.Status.RAM.Remaining,
-								LocalStorage: instType.Status.LocalStorage.Remaining,
+								Accelerator:       instType.Status.Accelerator.Remaining,
+								CPU:               instType.Status.CPU.Remaining,
+								AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
+								AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
 							},
 							Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
 						})
@@ -438,12 +438,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			tier := &item.Status.Tiers[index[1]]
 
 			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
-				Cluster:      evt.Cluster,
-				Name:         instType.Name,
-				Accelerator:  instType.Status.Accelerator,
-				CPU:          instType.Status.CPU,
-				RAM:          instType.Status.RAM,
-				LocalStorage: instType.Status.LocalStorage,
+				Cluster:           evt.Cluster,
+				Name:              instType.Name,
+				Accelerator:       instType.Status.Accelerator,
+				CPU:               instType.Status.CPU,
+				AcceleratorShared: instType.Status.AcceleratorShared,
+				AcceleratorSliced: instType.Status.AcceleratorSliced,
 			}
 
 			tier.Candidates = append(tier.Candidates, *candidate)
@@ -470,25 +470,25 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 	if evt.Type != manager.WorkerEventDeleted {
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-				Accelerator:  instType.Status.Accelerator.OnceMaxRequest,
-				CPU:          instType.Status.CPU.OnceMaxRequest,
-				RAM:          instType.Status.RAM.OnceMaxRequest,
-				LocalStorage: instType.Status.LocalStorage.OnceMaxRequest,
+				Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
+				CPU:               instType.Status.CPU.OnceMaxRequest,
+				AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
+				AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
 			},
 			Remaining: AggregatedInstanceTypeOverviewResource{
-				Accelerator:  instType.Status.Accelerator.Remaining,
-				CPU:          instType.Status.CPU.Remaining,
-				RAM:          instType.Status.RAM.Remaining,
-				LocalStorage: instType.Status.LocalStorage.Remaining,
+				Accelerator:       instType.Status.Accelerator.Remaining,
+				CPU:               instType.Status.CPU.Remaining,
+				AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
+				AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
 			},
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
-					Cluster:      evt.Cluster,
-					Name:         instType.Name,
-					Accelerator:  instType.Status.Accelerator,
-					CPU:          instType.Status.CPU,
-					RAM:          instType.Status.RAM,
-					LocalStorage: instType.Status.LocalStorage,
+					Cluster:           evt.Cluster,
+					Name:              instType.Name,
+					Accelerator:       instType.Status.Accelerator,
+					CPU:               instType.Status.CPU,
+					AcceleratorShared: instType.Status.AcceleratorShared,
+					AcceleratorSliced: instType.Status.AcceleratorSliced,
 				},
 			},
 		}

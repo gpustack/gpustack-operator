@@ -43,6 +43,7 @@ The work is split into shared phase scripts and numbered, self-contained cases:
 | 3 | Managed-toggle is an independent drain trigger | `pkg/worker/controllers/worker/{resourceflavor,cohort}.go` | `cases/case-3.sh` | yes (confirm) |
 | 4 | Accelerated chain & drain-recycle (approx.) | accelerated / drain paths (optional) | `cases/case-4.sh` | yes (confirm) |
 | 5 | Sliced accelerator: partitions=8 → 1/8 admits, 0.125 credit | `pkg/worker/controllers/worker/{clusterqueue,node,nodefeature}.go`, `pkg/worker/webhooks/worker/{nodefeature,instance}.go`, `pkg/worker/kuberess/apps_kueue.go`, `pkg/worker/extensionapis/worker/instance_type.go`, `pkg/nodefeature/{knowns,helper}.go`, `pkg/devicemanager/**`, `pkg/deviceplugin/**` | `cases/case-5.sh` | yes (confirm) |
+| 6 | Pooled three-view + watch freshness (Direction 2) | `pkg/worker/controllers/worker/instancetype.go`, `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/{instance_type,devices}.go` | `cases/case-6.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
@@ -76,7 +77,7 @@ Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `p
    bash .claude/skills/_e2e-lib/scripts/deploy.sh "$NS" "$TAG"
    ```
 
-5. **Run the selected cases.** CASE 1 is read-only (no prompt); CASE 2/3/4/5 mutate and self-recover, so
+5. **Run the selected cases.** CASE 1 is read-only (no prompt); CASE 2/3/4/5/6 mutate and self-recover, so
    confirm each before running. Each prints a PASS/FAIL table and exits non-zero on failure — read the
    table, do not re-derive from raw output.
 
@@ -88,6 +89,7 @@ Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `p
    bash .claude/skills/gpustack-operator-e2e/cases/case-3.sh "$NS"
    bash .claude/skills/gpustack-operator-e2e/cases/case-4.sh "$NS"
    bash .claude/skills/gpustack-operator-e2e/cases/case-5.sh "$NS"
+   bash .claude/skills/gpustack-operator-e2e/cases/case-6.sh "$NS"
    ```
 
    On a FAIL, diagnose the named stage (`kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=200`,
