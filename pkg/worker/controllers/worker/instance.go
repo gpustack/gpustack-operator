@@ -16,6 +16,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -212,42 +213,50 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
 
+	// Fetch the InstanceType that backs the Instance. It both sizes a new Pod and reports,
+	// via its phase, whether the type is still usable.
+	instType := new(worker.InstanceType)
+	err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
+		ctrlclix.WithoutQuorum)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			logger.Error(err, "fetch instance type")
+			return ctrl.Result{}, err
+		}
+		// Maybe the InstanceType is not cached yet,
+		// try to fetch directly from API server to avoid the cache staleness.
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
+			ctrlclix.WithoutQuorum)
+		if err != nil && !kerrors.IsNotFound(err) {
+			logger.Error(err, "fetch instance type")
+			return ctrl.Result{}, err
+		}
+	}
+	instTypeGone := kerrors.IsNotFound(err)
+
+	// Stop the Instance once its InstanceType is gone, being deleted, or Inactive, regardless of
+	// whether a Pod exists. Running before (re)creating the Pod means a drain that evicts a running
+	// Pod stops the Instance instead of recreating one the drained queue can never admit; keying off
+	// the InstanceType's own deletion timestamp (not only its phase) stops the Instance the moment
+	// its teardown begins, without waiting for the queue to drain the Pod. The InstanceType watch
+	// re-enqueues here so the stop stays level-based even when no Pod event fires.
+	if instTypeGone || instType.DeletionTimestamp != nil ||
+		instType.Status.Phase == InstanceTypePhaseInactive {
+		// Persist the stop intent first so the instance reliably stays stopped
+		// even if the status update below fails.
+		inst.Spec.Stop = ptr.To(true)
+		err = r.Client.Update(ctx, inst)
+		if err != nil {
+			logger.Error(err, "stop instance with inactive instance type")
+			return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+		}
+
+		logger.Info("stop instance as inactive instance type", "type", inst.Spec.Type)
+		return ctrl.Result{}, nil
+	}
+
 	// Create the Pod if not exists.
 	if pod == nil {
-		// Fetch the InstanceType that backs the Pod.
-		instType := new(worker.InstanceType)
-		err = r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
-			ctrlclix.WithoutQuorum)
-		if err != nil {
-			if !kerrors.IsNotFound(err) {
-				logger.Error(err, "fetch instance type")
-				return ctrl.Result{}, err
-			}
-			// Maybe the InstanceType is not cached yet,
-			// try to fetch directly from API server to avoid the cache staleness.
-			err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, instType,
-				ctrlclix.WithoutQuorum)
-			if err != nil && !kerrors.IsNotFound(err) {
-				logger.Error(err, "fetch instance type")
-				return ctrl.Result{}, err
-			}
-		}
-		instTypeGone := kerrors.IsNotFound(err)
-
-		if instTypeGone || instType.Status.Phase == InstanceTypePhaseInactive {
-			// Persist the stop intent first so the instance reliably stays stopped
-			// even if the status update below fails.
-			inst.Spec.Stop = ptr.To(true)
-			err = r.Client.Update(ctx, inst)
-			if err != nil {
-				logger.Error(err, "stop instance with inactive instance type")
-				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
-			}
-
-			logger.Info("stop instance as inactive instance type", "type", inst.Spec.Type)
-			return ctrl.Result{}, nil
-		}
-
 		// If the instance is marked as stopping/stopped/ready, mark it as starting first
 		// to avoid racing with other controllers or users to update the instance status.
 		if inst.Status.Phase == InstancePhaseStopping ||
@@ -690,6 +699,37 @@ func (r *InstanceReconciler) SetupController(_ context.Context, opts controller.
 				}),
 			),
 		).
+		Watches(
+			// Watch InstanceTypes and enqueue every Instance of that type, so a type that goes
+			// Inactive or is removed stops its running Instances promptly instead of only being
+			// caught at Pod-creation time.
+			&workercore.InstanceType{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+				3*time.Second,
+				dedupWindow,
+				r.enqueueInstancesWhenInstanceTypeChanged,
+			),
+			ctrlbuilder.WithPredicates(
+				// Only a phase transition (e.g. Active→Inactive on drain) or removal can require
+				// stopping an Instance; ignore the frequent three-view status churn driven by
+				// Devices changes, which never moves the phase.
+				ctrlpredicate.Funcs{
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
+						return false
+					},
+					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						oldInstType, newInstType := e.ObjectOld.(*workercore.InstanceType), e.ObjectNew.(*workercore.InstanceType)
+						if newInstType.DeletionTimestamp == nil {
+							return oldInstType.Status.Phase != newInstType.Status.Phase
+						}
+						if oldInstType.DeletionTimestamp == nil {
+							return true
+						}
+						return !oldInstType.DeletionTimestamp.Equal(newInstType.DeletionTimestamp)
+					},
+				},
+			),
+		).
 		Complete(r)
 }
 
@@ -732,6 +772,36 @@ func (r *InstanceReconciler) enqueuePodWhenServiceChanged(
 		},
 	}
 	logger.V(2).Info("enqueue instance from service", "requests", reqs)
+	return reqs
+}
+
+func (r *InstanceReconciler) enqueueInstancesWhenInstanceTypeChanged(
+	ctx context.Context,
+	obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	logger := ctrllog.FromContext(ctx).
+		WithValues("instancetype", obj.GetName())
+
+	instances := new(workercore.InstanceList)
+	if err := r.Client.List(ctx, instances); err != nil {
+		logger.Error(err, "list instances of instance type")
+		return nil
+	}
+
+	var reqs []ctrlreconcile.Request
+	for i := range instances.Items {
+		if instances.Items[i].Spec.Type != obj.GetName() {
+			continue
+		}
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKeyFromObject(&instances.Items[i]),
+		})
+	}
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue instances from instance type", "requests", reqs)
 	return reqs
 }
 

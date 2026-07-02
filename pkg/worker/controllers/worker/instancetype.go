@@ -545,6 +545,20 @@ func (r *InstanceTypeReconciler) teardownInstanceType(
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: it.Name}, cq, ctrlclix.WithoutQuorum)
 	switch {
 	case err == nil:
+		// Reflect the drain in the InstanceType status so consumers — and the Instance
+		// reconciler's stop check — see it go Inactive before the queue is deleted; the
+		// ClusterQueue's own Active condition lags the StopPolicy write, so set it from intent.
+		if it.Status.Phase != InstanceTypePhaseInactive {
+			it.Status = workercore.InstanceTypeStatus{
+				Phase:        InstanceTypePhaseInactive,
+				PhaseMessage: "instance type is draining",
+				Entrance:     nodefeature.FormatLocalQueueName(cq.Name),
+			}
+			if err = r.Client.Status().Update(ctx, it); err != nil {
+				logger.Error(err, "mark instance type inactive while draining")
+				return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
+			}
+		}
 		// Phase 1: ensure HoldAndDrain so Kueue evicts admitted workloads.
 		if ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.HoldAndDrain {
 			cq.Spec.StopPolicy = ptr.To(kueue.HoldAndDrain)

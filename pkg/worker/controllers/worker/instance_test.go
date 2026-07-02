@@ -18,6 +18,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
 // qty parses a quantity for terse fixture construction.
@@ -316,24 +317,63 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 		instType         string
 		withInstanceType bool
 		itPhase          string
+		itDeleting       bool
+		withPod          bool
 
 		wantStop bool
 	}{
 		{
 			// A Ready instance whose Pod is gone and whose InstanceType no longer
 			// exists (ClusterQueue drained and deleted) must be stopped, not recreated.
-			name:     "InstanceType removed stops instance",
+			name:     "removed type stops pod-less instance",
 			instType: "missing-type",
 			wantStop: true,
 		},
 		{
 			// A Ready instance whose Pod is gone while its InstanceType is Inactive
 			// (ClusterQueue in HoldAndDrain) must be stopped, not recreated.
-			name:             "InstanceType inactive stops instance",
+			name:             "inactive type stops pod-less instance",
 			instType:         "draining-type",
 			withInstanceType: true,
 			itPhase:          InstanceTypePhaseInactive,
 			wantStop:         true,
+		},
+		{
+			// The stop check also runs for a RUNNING instance (Pod present): an
+			// Inactive type stops it instead of leaving the Pod behind.
+			name:             "inactive type stops running instance",
+			instType:         "draining-type",
+			withInstanceType: true,
+			itPhase:          InstanceTypePhaseInactive,
+			withPod:          true,
+			wantStop:         true,
+		},
+		{
+			// A running instance whose type was removed is stopped, not recreated.
+			name:     "removed type stops running instance",
+			instType: "missing-type",
+			withPod:  true,
+			wantStop: true,
+		},
+		{
+			// A running instance whose type is being deleted (has a deletion
+			// timestamp, still Active) is stopped the moment teardown begins.
+			name:             "deleting type stops running instance",
+			instType:         "deleting-type",
+			withInstanceType: true,
+			itPhase:          "Active",
+			itDeleting:       true,
+			withPod:          true,
+			wantStop:         true,
+		},
+		{
+			// A healthy Active type must not stop a running instance.
+			name:             "active type keeps running instance",
+			instType:         "active-type",
+			withInstanceType: true,
+			itPhase:          "Active",
+			withPod:          true,
+			wantStop:         false,
 		},
 	}
 
@@ -342,11 +382,22 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			inst := newReadyInstance("default", "inst", c.instType)
 			objs := []ctrlcli.Object{inst}
+			if c.withPod {
+				objs = append(objs, &core.Pod{
+					ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+				})
+			}
 			if c.withInstanceType {
-				objs = append(objs, &worker.InstanceType{
+				it := &worker.InstanceType{
 					ObjectMeta: meta.ObjectMeta{Name: c.instType},
 					Status:     workercore.InstanceTypeStatus{Phase: c.itPhase},
-				})
+				}
+				if c.itDeleting {
+					now := meta.Now()
+					it.DeletionTimestamp = &now
+					it.Finalizers = []string{systemmeta.LockedResourceFinalizer}
+				}
+				objs = append(objs, it)
 			}
 			cli := buildInstanceClient(objs...)
 
