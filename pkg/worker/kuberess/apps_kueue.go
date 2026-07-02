@@ -127,6 +127,8 @@ managerConfig:
     featureGates:
       AssignQueueLabelsForPods: false
       TASBalancedPlacement: true
+      # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18).
+      QuotaCheckStrategy: true
     health:
       healthProbeBindAddress: :8081
     metrics:
@@ -197,8 +199,17 @@ managerConfig:
     #    cpu: 0    # if you want to completely ignore cpu usage
     #    memory: 0 # ignore completely memory usage
     #    example.com/gpu: 100 # and you care only about GPUs usage
-{{- if $.Manufacturers }}
     resources:
+      # Kueue is not the authoritative ledger in this operator — the Devices CR
+      # is. A ClusterQueue advertises exactly one coarse admission dimension (cpu
+      # for general pools, the manufacturer credits for accelerated pools), while a
+      # Workload still carries the Pod resources the queue does not cover: memory
+      # and ephemeral-storage on every pool, cpu on accelerated pools, and the
+      # node-level .sliced.* counters the scheduler/kubelet read. Check only the
+      # covered dimension and ignore the rest, instead of refusing to assign a
+      # flavor for an uncovered resource (which would mark the Workload inadmissible).
+      quotaCheckStrategy: IgnoreUndeclared
+{{- if $.Manufacturers }}
       # Credits are scored on the integer base B = D = 1600000 (one whole card = B
       # credits): exclusive→B, shared→B/10, sliced.units→B/D=1 (× multiplyBy
       # .sliced). Every per-mode value stays an integer, so Kueue's ResourceValue
@@ -215,13 +226,12 @@ managerConfig:
 {{- $manuSharedResName := getSharedResourceName $manu }}
 {{- $manuSlicedResName := getSlicedResourceName $manu }}
 {{- $manuSlicedUnitsResName := getSlicedUnitsResourceName $manu }}
-{{- $manuSlicedCoresPercentageResName := getSlicedCoresPercentageResourceName $manu }}
-{{- $manuSlicedMemoryPercentageResName := getSlicedMemoryPercentageResourceName $manu }}
-{{- $manuSlicedMemoryMibResName := getSlicedMemoryMibResourceName $manu }}
       # Multiply each manufacturer resource into a single credits resource, so that
       # the queue can be configured with a single credit budget. The multiplyBy
       # factor is the number of credits per unit of the input resource, so that
-      # the output credits resource is always an integer.
+      # the output credits resource is always an integer. The ".sliced" multiplyBy
+      # leaks through unconsumed and the node-level .sliced.* counters pass straight
+      # through; quotaCheckStrategy above lets Kueue ignore them.
       - input: {{ $manuExclusiveResName }}
         strategy: Replace
         outputs:
@@ -235,25 +245,6 @@ managerConfig:
         multiplyBy: {{ $manuSlicedResName }}
         outputs:
           {{ $manuCreditsResName }}: "{{ $slicedCreditsFactor }}"
-      # The resource ".sliced" is the multiplyBy above: Kueue does not consume a
-      # multiplyBy resource on Replace, so it would leak into the Pod request.
-      # Drain it with empty Outputs + Replace so Kueue ignores it.
-      - input: {{ $manuSlicedResName }}
-        strategy: Replace
-        outputs: {}
-      # These node-level resources (cores-percentage / memory-percentage /
-      # memory-mib) are read by the scheduler and kubelet to place a Pod on a node,
-      # never as Kueue credits. Drain each with empty Outputs + Replace so a Pod
-      # requesting them is not marked inadmissible against this credits-only queue.
-      - input: {{ $manuSlicedCoresPercentageResName }}
-        strategy: Replace
-        outputs: {}
-      - input: {{ $manuSlicedMemoryPercentageResName }}
-        strategy: Replace
-        outputs: {}
-      - input: {{ $manuSlicedMemoryMibResName }}
-        strategy: Replace
-        outputs: {}
 {{- end }}
 {{- end }}
     #objectRetentionPolicies:
@@ -301,27 +292,6 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
 			}
 			return string(nodefeature.GetAcceleratableSlicedUnitsResourceName(s))
-		},
-		"getSlicedCoresPercentageResourceName": func(v any) string {
-			s, ok := v.(string)
-			if !ok {
-				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
-			}
-			return string(nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(s))
-		},
-		"getSlicedMemoryPercentageResourceName": func(v any) string {
-			s, ok := v.(string)
-			if !ok {
-				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
-			}
-			return string(nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(s))
-		},
-		"getSlicedMemoryMibResourceName": func(v any) string {
-			s, ok := v.(string)
-			if !ok {
-				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
-			}
-			return string(nodefeature.GetAcceleratableSlicedMemoryMibResourceName(s))
 		},
 		"getCreditsResourceName": func(v any) string {
 			s, ok := v.(string)
