@@ -199,6 +199,56 @@ func TestInstanceWebhook_ValidateCreate_ResourceCaps(t *testing.T) {
 	}
 }
 
+// TestInstanceWebhook_ValidateCreate_AcceleratedCPU pins the accelerated-CPU contract. A real
+// accelerated InstanceType reports the three-view, not the CPU view, so its Status.CPU is zero —
+// capping the CPU request against Status.CPU.OnceMaxRequest would reject every accelerated Instance
+// (the real-cluster regression). Instead the CPU is bounded by unitResources.cpu × accelerator
+// count: accepted at the cap (what defaulting sets), rejected above it.
+func TestInstanceWebhook_ValidateCreate_AcceleratedCPU(t *testing.T) {
+	const typeName = "gpustack-nvidia-a10g-linux-amd64"
+
+	instType := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "2", RAM: "8Gi"},
+			LocalStorage:  "64Gi",
+		},
+		Status: workercore.InstanceTypeStatus{
+			// A real accelerated type reports the three-view; Status.CPU stays zero.
+			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+		},
+	}
+	w := newInstanceWebhook(instType)
+
+	cases := []struct {
+		name    string
+		cpu     string // request on a single-accelerator Instance; cap is unitCPU(2) × 1
+		wantErr bool
+	}{
+		{name: "cpu at unitCPU x count accepted", cpu: "2"},
+		{name: "cpu above unitCPU x count rejected", cpu: "3", wantErr: true},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst := webhookInstance("a", typeName)
+			inst.Spec.Resources = &workercore.InstanceResources{
+				CPU:          resource.MustParse(c.cpu),
+				RAM:          resource.MustParse("8Gi"),
+				LocalStorage: resource.MustParse("20Gi"),
+				Accelerator:  resource.NewQuantity(1, resource.DecimalSI),
+			}
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 	cases := []struct {
 		name string
