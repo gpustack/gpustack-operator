@@ -12,45 +12,6 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// TestPartitionedUnitGranularity guards the invariant that D divides evenly by the
-// maximum partition count, so a single sliced partition maps to a whole number of
-// units (1600000/512 = 3125). The sliced path no longer materializes these units in
-// the device plugin (counting moved to Patch Node), but the invariant must still hold
-// if the per-partition units math is reintroduced for real isolation later.
-func TestPartitionedUnitGranularity(t *testing.T) {
-	assert.Zerof(t, nodefeature.ResourceMaxUnits%nodefeature.SlicedResourceMaxSize,
-		"D=%d must divide evenly by max partitions %d", nodefeature.ResourceMaxUnits, nodefeature.SlicedResourceMaxSize)
-	assert.Equal(t, 3125, nodefeature.ResourceMaxUnits/nodefeature.SlicedResourceMaxSize, "units per smallest partition")
-}
-
-func TestPadSlicedUnits(t *testing.T) {
-	const d = nodefeature.ResourceMaxUnits // 1600000
-
-	cases := []struct {
-		name          string
-		units         int64
-		maxPartitions int64
-		want          int64
-	}{
-		{name: "rounds up to the next coarser slice", units: 250000, maxPartitions: 8, want: 400000}, // 1/4 card
-		{name: "exact slice boundary is unchanged", units: 200000, maxPartitions: 8, want: 200000},   // 1/8 card
-		{name: "finer than hardware rounds up to finest slice", units: 12500, maxPartitions: 8, want: 200000},
-		{name: "whole card or larger caps at D", units: 2500000, maxPartitions: 8, want: d},
-		{name: "exactly a whole card caps at D", units: d, maxPartitions: 8, want: d},
-		{name: "finest 1/512 slice", units: 3750, maxPartitions: 512, want: 6250}, // D/256
-		{name: "exact finest slice is unchanged", units: 3125, maxPartitions: 512, want: 3125},
-		{name: "no slicing capacity yields a whole card", units: 12500, maxPartitions: 1, want: d},
-		{name: "non-positive maxPartitions yields a whole card", units: 12500, maxPartitions: 0, want: d},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, PadSlicedUnits(c.units, c.maxPartitions))
-		})
-	}
-}
-
 func TestResource_GetDeviceIds(t *testing.T) {
 	res := Resource{Group: "grp-0", Device: "dev-0"}
 
@@ -110,58 +71,63 @@ func TestResource_GetDeviceIds(t *testing.T) {
 	}
 }
 
-func TestSliceRatio(t *testing.T) {
-	const unitsName core.ResourceName = "nvidia.com/gpu.sliced.units"
-
-	ctrWith := func(units int64) *core.Container {
-		return &core.Container{
-			Name: "main",
-			Resources: core.ResourceRequirements{
-				Limits: core.ResourceList{
-					unitsName: *resource.NewQuantity(units, resource.DecimalSI),
-				},
-			},
-		}
+func TestSlicedCoresPercent(t *testing.T) {
+	const coresName core.ResourceName = "nvidia.com/gpu.sliced.cores-percentage"
+	ctrWith := func(limits core.ResourceList) *core.Container {
+		return &core.Container{Name: "main", Resources: core.ResourceRequirements{Limits: limits}}
 	}
+	q := func(v int64) resource.Quantity { return *resource.NewQuantity(v, resource.DecimalSI) }
+
+	cases := []struct {
+		name string
+		ctr  *core.Container
+		want int
+	}{
+		{"explicit 10%", ctrWith(core.ResourceList{coresName: q(10)}), 10},
+		{"explicit 100%", ctrWith(core.ResourceList{coresName: q(100)}), 100},
+		{"absent defaults to 100", ctrWith(nil), 100},
+		{"non-positive defaults to 100", ctrWith(core.ResourceList{coresName: q(0)}), 100},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, SlicedCoresPercent(c.ctr, coresName))
+		})
+	}
+}
+
+func TestSlicedMemoryMib(t *testing.T) {
+	const (
+		pctName  core.ResourceName = "nvidia.com/gpu.sliced.memory-percentage"
+		mibName  core.ResourceName = "nvidia.com/gpu.sliced.memory-mib"
+		cardVRAM int64             = 24576 // 24Gi
+	)
+	ctrWith := func(limits core.ResourceList) *core.Container {
+		return &core.Container{Name: "main", Resources: core.ResourceRequirements{Limits: limits}}
+	}
+	q := func(v int64) resource.Quantity { return *resource.NewQuantity(v, resource.DecimalSI) }
 
 	cases := []struct {
 		name    string
 		ctr     *core.Container
-		wantR   float64
+		want    int64
 		wantErr bool
 	}{
-		{name: "1/8 card", ctr: ctrWith(200000), wantR: 0.125}, // 200000/1600000
-		{name: "1/4 card", ctr: ctrWith(400000), wantR: 0.25},  // 400000/1600000
-		{name: "finest 1/512 slice", ctr: ctrWith(3125), wantR: 0.001953125},
-		{name: "missing request errors", ctr: &core.Container{Name: "main"}, wantErr: true},
-		{name: "zero request errors", ctr: ctrWith(0), wantErr: true},
+		{"percentage of card VRAM", ctrWith(core.ResourceList{pctName: q(25)}), 6144, false},
+		{"percentage floors", ctrWith(core.ResourceList{pctName: q(33)}), 8110, false}, // floor(24576*33/100)
+		{"absolute mib", ctrWith(core.ResourceList{mibName: q(3072)}), 3072, false},
+		{"percentage wins over mib", ctrWith(core.ResourceList{pctName: q(50), mibName: q(1024)}), 12288, false},
+		{"mib capped at card VRAM", ctrWith(core.ResourceList{mibName: q(99999)}), cardVRAM, false},
+		{"neither set errors", ctrWith(nil), 0, true},
 	}
-
 	for _, c := range cases {
-		c := c
 		t.Run(c.name, func(t *testing.T) {
-			r, err := SliceRatio(c.ctr, unitsName)
+			got, err := SlicedMemoryMib(c.ctr, pctName, mibName, cardVRAM)
 			if c.wantErr {
 				require.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
-			assert.Equal(t, c.wantR, r)
+			assert.Equal(t, c.want, got)
 		})
-	}
-}
-
-func TestFloorPercent(t *testing.T) {
-	cases := []struct {
-		r    float64
-		want int
-	}{
-		{r: 0.125, want: 12}, // floor(12.5)
-		{r: 0.25, want: 25},
-		{r: 0.5, want: 50},
-		{r: 1, want: 100},
-	}
-	for _, c := range cases {
-		assert.Equal(t, c.want, FloorPercent(c.r))
 	}
 }

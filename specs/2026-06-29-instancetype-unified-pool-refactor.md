@@ -150,7 +150,7 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F1a | detector MaxPartitions sourcing | **SoftPartition only**: `MaxPartitions = SlicedResourceMaxSize` (512, `2⁹`, inlined — no trivial wrapper); `.sliced` node capacity = `cards × MaxPartitions` via the existing `GetDeviceIds(mode, MaxPartitions)` coupling. NVIDIA always soft-partitions; Ascend soft-partitions on family `910B`/`910C`/`950`. PhysicalPartition/VirtualPartition `MaxPartitions` sourcing is **deferred to the separate MIG/vNPU spec** (leave current behavior untouched). |
 | F1b | NodeCapacityReconciler emits 4 keys | For any node with `acceleratable.*`: `.sliced.units = count×M`, `.sliced.cores-percentage = count×51200` (`512×100`), `.sliced.memory-percentage = count×100`, `.sliced.memory-mib = count×VRAM`. Drops the `.sliced.partitions` opt-in gate (any acceleratable model counts); stale-cleanup recognizes all 4 suffixes. |
 | F1c | Manual node management (switch ①) | Setting `node-management-manual` (`GPUSTACK_NODE_MANAGEMENT_MANUAL`, default false), read per-reconcile: when true the operator does **not** auto-inject `gpustack.ai/managed=true`; toggling at runtime re-converges. |
-| F2 | DM allocator decouples cores/VRAM | `SliceRatio` splits: SM limit from `.sliced.cores-percentage`; VRAM limit from `.sliced.memory-mib` (or `memory-percentage × VRAM`). NVIDIA `getSlicedContainerAllocateResponse` + Ascend equivalent updated. `cores-percentage` unset defaults to 100. **Cleanup:** with the allocator no longer reading `.sliced.units` (it becomes Kueue-credits-counting-only), the old `.sliced.units`→R path is orphaned — delete `SliceRatio(units)`, the already-dead `PadSlicedUnits`, and their tests `TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity` so stale code does not mislead later readers. |
+| F2 | DM allocator decouples cores/VRAM | New `SlicedCoresPercent` (SM, from `.sliced.cores-percentage`, default 100) and `SlicedMemoryMib` (per-card VRAM) helpers replace the single `.sliced.units`→ratio. VRAM is `memory-percentage × cardVRAM` (**primary**, floored, capped at the card) or the absolute `.sliced.memory-mib` — percentage wins when both are set, matching the Pod webhook fold so credits and the real limit agree. NVIDIA `getSlicedContainerAllocateResponse` (T2.1) + Ascend (T2.2) updated; missing memory → error. **Cleanup (T2.2):** with both allocators off `.sliced.units` (it becomes Kueue-credits-counting-only), delete the orphaned `SliceRatio`, `FloorPercent`, the already-dead `PadSlicedUnits`, and their tests (`TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity`/`TestFloorPercent`). |
 | F3a | NodeFlavorReconciler rewrite | Label-indexed over nodes (not RF-driven). Names: `gpustack-${gKey}-${os}-${arch}-${cpu}c` (CPU) / `gpustack-${aKey}-${os}-${arch}-${device}d` (device). RF labels `schedule.gpustack.ai/{key,os,arch,count,capacity}` with `capacity = indexedNodes × count`. Index rules: deleting nodes count as present; `managed != true` excluded; `node.kubernetes.io/unreachable:NoSchedule` counts as absent; when `instance-type-mixed-on-node=false` (switch ②; default true = mixing allowed = current behavior) a GPU node drops its CPU-type index result. `spec.nodeLabels` explicitly pins `kubernetes.io/os` + `kubernetes.io/arch`. drain tombstone preserved. |
 | F3b | NodeQueueReconciler rewrite | Credits nominal from RF `schedule.gpustack.ai/capacity` (no Node list/watch). Accelerated CQ advertises **only** `credits` (no CPU/RAM/storage); non-accelerated CQ advertises only CPU (no RAM/storage). Notes (resType `instancetypes`) include `unitCPU/unitRAM/localStorage/memory`. When `instance-type-derived-from-node=false` (switch ③; default true = auto-derive = current behavior), skip auto CQ create (only RF), still update an existing CQ. |
 | F3b' | Auto-created CQ borrowing protection | Auto-created CQ is reconciled to keep `spec.cohortName` **empty** (manual edits reverted) **and** sets `lendingLimit: 0` on the credits quota — so it can never be pulled into a cohort and have its quota borrowed out by externally/manually managed queues. Skipped when `instance-type-derived-from-node=false` (admin owns the CQ). |
@@ -312,19 +312,21 @@ coupled — its three tasks land together and the system is only fully consisten
   the rescale.*
 
 **Phase 2 — Allocation (DeviceManager)**
-- [ ] **T2.1 (F2) — decouple cores/VRAM in the allocator.** `pkg/deviceplugin/helper.go:127` `SliceRatio` → two
-  paths: SM from `.sliced.cores-percentage` (default 100), VRAM from `.sliced.memory-mib` (or
-  `memory-percentage×VRAM`). `pkg/devicemanager/allocator/nvidia/deviceplugin.go:178-235`: `CUDA_DEVICE_SM_LIMIT`
-  ← cores-%, `CUDA_DEVICE_MEMORY_LIMIT_*` ← memory-mib. **Cleanup (orphan removal):** once the nvidia/ascend
-  allocators (`deviceplugin.go:188`/`:195`) stop calling `SliceRatio(.sliced.units)`, delete the old
-  `.sliced.units`→R path — `SliceRatio(units)` and the already-dead `PadSlicedUnits` in `helper.go`, plus the
-  tests `TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity` in `helper_test.go`. `.sliced.units`
-  then survives only as a Kueue-credits-counting / node-capacity key (`apps_kueue.go`, `nodecapacity.go`,
-  `clusterqueue.go`, `instance.go`). **Accept:** a sliced container gets independent SM and VRAM limits; no
-  remaining reference to `PadSlicedUnits`/`SliceRatio`. **Verify:** `go test ./pkg/deviceplugin/...
-  ./pkg/devicemanager/allocator/nvidia/...` + `grep -r 'PadSlicedUnits\|SliceRatio' pkg/` empty.
-- [ ] **T2.2 — Ascend allocator parity.** Mirror T2.1 in `pkg/devicemanager/allocator/ascend/deviceplugin.go:195`.
-  **Accept/Verify:** Ascend unit tests (or documented N/A if no soft-slicing path).
+- [x] **T2.1 (F2) — decouple cores/VRAM in the NVIDIA allocator.** Add `SlicedCoresPercent(ctr, coresRes)`
+  (default 100) and `SlicedMemoryMib(ctr, memPctRes, memMibRes, cardVRAMMib)` (memory-percentage primary over
+  memory-mib, floored, capped at card VRAM, errors when neither set) to `pkg/deviceplugin/helper.go`.
+  `nvidia/deviceplugin.go`: `CUDA_DEVICE_SM_LIMIT` ← `SlicedCoresPercent`, per-card `CUDA_DEVICE_MEMORY_LIMIT_*`
+  ← `SlicedMemoryMib(card VRAM)`. `SliceRatio`/`FloorPercent`/`PadSlicedUnits` stay until T2.2 (Ascend still uses
+  them). **Accept:** a sliced container gets independent SM and VRAM limits (test proves SM% ≠ VRAM%). **Verify:**
+  `go test ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/nvidia/...`.
+- [x] **T2.2 — Ascend allocator parity + orphan cleanup.** Mirror T2.1 in
+  `pkg/devicemanager/allocator/ascend/deviceplugin.go` (SoftPartition families read cores/memory the same way).
+  Then delete the now-orphaned `SliceRatio`, `FloorPercent`, the already-dead `PadSlicedUnits`, and their tests
+  (`TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity`/`TestFloorPercent`). `.sliced.units`
+  then survives only as a Kueue-credits / node-capacity key (`apps_kueue.go`, `nodecapacity.go`,
+  `clusterqueue.go`, `instance.go`). **Accept:** Ascend sliced container gets independent SM/VRAM;
+  `grep -r 'SliceRatio\|PadSlicedUnits\|FloorPercent' pkg/` empty. **Verify:**
+  `go test ./pkg/devicemanager/allocator/ascend/... ./pkg/deviceplugin/...`.
 - *Checkpoint: sliced containers carry decoupled SM/VRAM limits; optional `gpustack-operator-xbuild-and-verify`
   on real 4090 / 910B.*
 

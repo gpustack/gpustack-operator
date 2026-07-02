@@ -192,13 +192,19 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("sliced container %q allocated %d accelerators, but vcann-rt soft slicing is single-NPU", ctr.Name, len(accels))
 	}
 
-	ratio, err := deviceplugin.SliceRatio(ctr, nodefeature.GetAcceleratableSlicedUnitsResourceName(Manufacturer))
-	if err != nil {
-		return nil, fmt.Errorf("derive slice ratio: %w", err)
-	}
-
 	// vcann-rt is single-NPU; configure the first allocated card.
 	group, accel := accels[0].group, accels[0].accel
+
+	// SM (aicore) and VRAM are independent dimensions (no single ratio).
+	coresPct := deviceplugin.SlicedCoresPercent(ctr,
+		nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer))
+	memMib, err := deviceplugin.SlicedMemoryMib(ctr,
+		nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer),
+		nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer),
+		int64(group.Memory))
+	if err != nil {
+		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
+	}
 
 	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), ctr.Name)
 	if err = osx.MkdirAll(podWorkDir, 0o777); err != nil {
@@ -207,7 +213,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 
 	configHostPath := filepath.Join(podWorkDir, "etc/enpu/vcann-rt/npu_info.config")
 	vnpuID := lowestFreeVNPUID(deviceplugin.OperatorPodsDir, accel.Index, configHostPath)
-	cfg := renderNPUInfoConfig(accel.Index, vnpuID, ratio, group.Memory, accel.ID)
+	cfg := renderNPUInfoConfig(accel.Index, vnpuID, coresPct, memMib, accel.ID)
 	if err = osx.WriteFile(configHostPath, stringx.ToBytes(&cfg), 0o644); err != nil {
 		return nil, fmt.Errorf("write npu_info.config %q: %w", configHostPath, err)
 	}
@@ -257,16 +263,17 @@ func lowestFreeVNPUID(podsDir string, npuId uint32, selfConfigPath string) int {
 }
 
 // renderNPUInfoConfig builds the vcann-rt npu_info.config body. aicore-quota is the
-// floored compute percent; memory-quota is the floored MiB share; shm-id is the
-// accelerator ID with spaces replaced by '-' (the hyphen-joined VDie-ID form vcann-rt
-// expects); scheduling-policy is fixed to elastic (2).
-func renderNPUInfoConfig(npuId uint32, vnpuId int, ratio float64, memoryMiB uint64, acceleratorID string) string {
+// compute percent (.sliced.cores-percentage); memory-quota is the per-card VRAM MiB
+// (.sliced.memory-percentage/.sliced.memory-mib); shm-id is the accelerator ID with
+// spaces replaced by '-' (the hyphen-joined VDie-ID form vcann-rt expects);
+// scheduling-policy is fixed to elastic (2).
+func renderNPUInfoConfig(npuId uint32, vnpuId, aicoreQuota int, memoryQuotaMib int64, acceleratorID string) string {
 	shmID := strings.ReplaceAll(acceleratorID, " ", "-")
 	var b strings.Builder
 	_, _ = fmt.Fprintf(&b, "physical-npu-id=%d\n", npuId)
 	_, _ = fmt.Fprintf(&b, "virtual-npu-id=%d\n", vnpuId)
-	_, _ = fmt.Fprintf(&b, "aicore-quota=%d\n", deviceplugin.FloorPercent(ratio))
-	_, _ = fmt.Fprintf(&b, "memory-quota=%d\n", int64(float64(memoryMiB)*ratio))
+	_, _ = fmt.Fprintf(&b, "aicore-quota=%d\n", aicoreQuota)
+	_, _ = fmt.Fprintf(&b, "memory-quota=%d\n", memoryQuotaMib)
 	_, _ = fmt.Fprintf(&b, "shm-id=%s\n", shmID)
 	_, _ = fmt.Fprintf(&b, "scheduling-policy=%d\n", vcannSchedulingPolicy)
 	return b.String()

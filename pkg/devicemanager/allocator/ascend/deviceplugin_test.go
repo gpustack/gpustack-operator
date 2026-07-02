@@ -54,10 +54,12 @@ func ascendDevicesFixture() *workercore.Devices {
 	}
 }
 
-// slicedPod builds a pending pod whose container requests `units` of the Ascend
-// sliced.units resource.
-func slicedPod(uid, ctrName string, units int64) (*core.Pod, *core.Container) {
-	resName := nodefeature.GetAcceleratableSlicedUnitsResourceName(Manufacturer)
+// slicedPod builds a pending pod whose container requests the decoupled compute and
+// VRAM dimensions the allocator reads: ".sliced.cores-percentage" (aicore) and
+// ".sliced.memory-percentage" (per-card VRAM).
+func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, *core.Container) {
+	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
+	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
 	pod := &core.Pod{
 		ObjectMeta: meta.ObjectMeta{Name: ctrName + "-pod", UID: types.UID(uid)},
 		Spec: core.PodSpec{
@@ -65,7 +67,8 @@ func slicedPod(uid, ctrName string, units int64) (*core.Pod, *core.Container) {
 				Name: ctrName,
 				Resources: core.ResourceRequirements{
 					Limits: core.ResourceList{
-						resName: *resource.NewQuantity(units, resource.DecimalSI),
+						coresRes:  *resource.NewQuantity(coresPercent, resource.DecimalSI),
+						memPctRes: *resource.NewQuantity(memPercent, resource.DecimalSI),
 					},
 				},
 			}},
@@ -88,8 +91,8 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
-	// Allocate a 1/8 slice (units=200000, D=1600000 -> R=0.125) of accelerator index 0.
-	pod, ctr := slicedPod("pod-uid-1", "train", 200000)
+	// Allocate cores=10% aicore + memory=25% VRAM (independent dimensions) of accelerator index 0.
+	pod, ctr := slicedPod("pod-uid-1", "train", 10, 25)
 	allocated := map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1}
 
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
@@ -98,15 +101,15 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	// Env: the visible device index.
 	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"])
 
-	// npu_info.config content (R=0.125: aicore 12%, memory floor(65536*0.125)=8192MiB).
+	// npu_info.config: aicore 10% (.sliced.cores-percentage), memory floor(65536*25%)=16384MiB.
 	podWorkDir := deviceplugin.PodWorkDir("pod-uid-1", "train")
 	configPath := filepath.Join(podWorkDir, "etc/enpu/vcann-rt/npu_info.config")
 	body, err := os.ReadFile(configPath)
 	require.NoError(t, err)
 	want := "physical-npu-id=0\n" +
 		"virtual-npu-id=0\n" +
-		"aicore-quota=12\n" +
-		"memory-quota=8192\n" +
+		"aicore-quota=10\n" +
+		"memory-quota=16384\n" +
 		"shm-id=E0F4EE64-802061B1-6A691492-89528485-104301E3\n" +
 		"scheduling-policy=2\n"
 	assert.Equal(t, want, string(body))
@@ -156,21 +159,21 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 	}
 
 	// First slice on physical NPU 0 -> vnpu 0.
-	p1, c1 := slicedPod("uid-a", "train", 200000)
+	p1, c1 := slicedPod("uid-a", "train", 10, 25)
 	_, err := s.GetContainerAllocateResponse(context.Background(), p1, c1, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 	assert.Equal(t, 0, readVNPU("uid-a", "train"))
 
 	// Second slice on the SAME physical NPU 0 -> vnpu 1 (lowest free).
-	p2, c2 := slicedPod("uid-b", "train", 200000)
+	p2, c2 := slicedPod("uid-b", "train", 10, 25)
 	_, err = s.GetContainerAllocateResponse(context.Background(), p2, c2, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 	assert.Equal(t, 1, readVNPU("uid-b", "train"))
 
 	// Slice on a DIFFERENT physical NPU (index 1) -> vnpu 0 again.
-	p3, c3 := slicedPod("uid-c", "train", 200000)
+	p3, c3 := slicedPod("uid-c", "train", 10, 25)
 	_, err = s.GetContainerAllocateResponse(context.Background(), p3, c3, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID1}: 1})
 	require.NoError(t, err)
@@ -183,7 +186,9 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 	assert.Equal(t, 0, readVNPU("uid-a", "train"))
 }
 
-func TestGetSlicedContainerAllocateResponse_NoUnitsRequest(t *testing.T) {
+// A sliced container with no memory dimension (neither .sliced.memory-percentage nor
+// .sliced.memory-mib) must be rejected rather than silently given the whole card.
+func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	redirectSoftSliceDirs(t)
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
@@ -204,7 +209,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
-	pod, ctr := slicedPod("uid-multi", "train", 200000)
+	pod, ctr := slicedPod("uid-multi", "train", 10, 25)
 	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs,
 		map[deviceplugin.Resource]int32{
 			{Group: "910b2", Device: testAccelID0}: 1,
