@@ -24,7 +24,7 @@ See [Architecture](./docs/architecture.md) for the stage-by-stage detail, label/
 
 - [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
-- [Environment Variables](./docs/environment-variables.md) — every `GPUSTACK_*` knob, per-manufacturer overrides, and vendor toolkit paths.
+- [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
 
 ## License
 

@@ -71,4 +71,4 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 
 - Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
 - Scheduling chain, label tables, worked example → [architecture.md](../../../docs/architecture.md)
-- `GPUSTACK_*` configuration knobs → [environment-variables.md](../../../docs/environment-variables.md)
+- Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
