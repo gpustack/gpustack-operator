@@ -62,12 +62,14 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 	// +k8s:webhook-gen:validating:namespaceSelector=
 	// +k8s:webhook-gen:validating:objectSelector=
 	// +k8s:webhook-gen:validating:matchConditions=
+	// +k8s:webhook-gen:validating:namePrefix=
 	// +k8s:webhook-gen:mutating:group=,version=,resource=,scope=,failurePolicy=,sideEffects=,matchPolicy=,reinvocationPolicy=,timeoutSeconds=
 	// +k8s:webhook-gen:mutating:subResources=
 	// +k8s:webhook-gen:mutating:operations=
 	// +k8s:webhook-gen:mutating:namespaceSelector=
 	// +k8s:webhook-gen:mutating:objectSelector=
 	// +k8s:webhook-gen:mutating:matchConditions=
+	// +k8s:webhook-gen:mutating:namePrefix=
 	tm := map[string][]string{}
 	collectMarkers(t.SecondClosestCommentLines, tm)
 	collectMarkers(t.CommentLines, tm)
@@ -84,6 +86,8 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 		wh := &admreg.ValidatingWebhook{
 			AdmissionReviewVersions: []string{"v1"},
 		}
+
+		var namePrefix string
 
 		for _, webhook := range tm["validating"] {
 			for mk, mv := range utils.ParseMarker(webhook) {
@@ -244,6 +248,10 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 					case len(conditions) > 0:
 						wh.MatchConditions = conditions
 					}
+				case "namePrefix":
+					if err := json.Unmarshal([]byte(mv), &namePrefix); err != nil {
+						logger.Error(err, "unmarshal name prefix", "value", mv)
+					}
 				}
 			}
 		}
@@ -256,12 +264,20 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 			if len(wh.Rules[0].APIGroups) != 0 {
 				grp = wh.Rules[0].APIGroups[0]
 			}
+			if grp == "" {
+				// The empty APIGroup denotes the Kubernetes core API group;
+				// name it "core" so the webhook name has no empty segment.
+				grp = "core"
+			}
 			if len(wh.Rules[0].APIVersions) != 0 {
 				ver = wh.Rules[0].APIVersions[0]
 			}
 			sort.Strings(wh.Rules[0].Resources)
 			klow = strings.ToLower(stringx.Singularize(wh.Rules[0].Resources[0]))
 			wh.Name = fmt.Sprintf("%s.%s.%s.%s", pre, grp, ver, klow)
+			if namePrefix != "" {
+				wh.Name = namePrefix + "." + wh.Name
+			}
 			td.Validating = wh
 		}
 	}
@@ -272,6 +288,8 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 		wh := &admreg.MutatingWebhook{
 			AdmissionReviewVersions: []string{"v1"},
 		}
+
+		var namePrefix string
 
 		for _, webhook := range tm["mutating"] {
 			for mk, mv := range utils.ParseMarker(webhook) {
@@ -443,6 +461,10 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 					case len(conditions) > 0:
 						wh.MatchConditions = conditions
 					}
+				case "namePrefix":
+					if err := json.Unmarshal([]byte(mv), &namePrefix); err != nil {
+						logger.Error(err, "unmarshal name prefix", "value", mv)
+					}
 				}
 			}
 		}
@@ -455,12 +477,20 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 			if len(wh.Rules[0].APIGroups) != 0 {
 				grp = wh.Rules[0].APIGroups[0]
 			}
+			if grp == "" {
+				// The empty APIGroup denotes the Kubernetes core API group;
+				// name it "core" so the webhook name has no empty segment.
+				grp = "core"
+			}
 			if len(wh.Rules[0].APIVersions) != 0 {
 				ver = wh.Rules[0].APIVersions[0]
 			}
 			sort.Strings(wh.Rules[0].Resources)
 			klow = strings.ToLower(stringx.Singularize(wh.Rules[0].Resources[0]))
 			wh.Name = fmt.Sprintf("%s.%s.%s.%s", pre, grp, ver, klow)
+			if namePrefix != "" {
+				wh.Name = namePrefix + "." + wh.Name
+			}
 			td.Mutating = wh
 		}
 	}

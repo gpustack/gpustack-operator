@@ -26,28 +26,35 @@ import (
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
 )
 
-// LocalQueueReconciler reconciles kueue.LocalQueue objects driven by kueue.ClusterQueue
-// and Kubernetes Namespace changes to finish the following tasks:
+// NodeQueueEntranceReconciler reconciles kueue.LocalQueue objects driven by
+// kueue.ClusterQueue and Kubernetes Namespace changes to finish the following tasks:
 //   - When a ClusterQueue is created, or a Namespace is created,
 //     create a kueue.LocalQueue pointing to the ClusterQueue in every non-system Namespace.
+//   - Copy the ClusterQueue's descriptive notes (acceleratable/manufacturer/product/
+//     family/memory) onto each LocalQueue, so the per-card VRAM among them is readable
+//     from the namespaced LocalQueue co-located with the workload.
 //
 // The LocalQueue is named by the FNV-64a hash of the ClusterQueue name,
 // see nodefeature.FormatLocalQueueName, because the ClusterQueue name may
 // exceed the 63-character label value limit that the
 // "kueue.x-k8s.io/queue-name" label is subject to.
-type LocalQueueReconciler struct {
+type NodeQueueEntranceReconciler struct {
 	Client ctrlcli.Client
 }
 
-var _ ctrlreconcile.Reconciler = (*LocalQueueReconciler)(nil)
+var _ ctrlreconcile.Reconciler = (*NodeQueueEntranceReconciler)(nil)
 
 const (
 	// _LocalQueueClusterQueueNameAnnoKey is for the cluster queue name of a local queue,
 	// whose value records the full ClusterQueue name behind the hash-named LocalQueue.
 	_LocalQueueClusterQueueNameAnnoKey = ScheduleLabelPrefix + "queue"
+
+	// _NodeQueueEntranceResType is the systemmeta resource type carried by the
+	// LocalQueues this reconciler manages.
+	_NodeQueueEntranceResType = "instancetypeselectors"
 )
 
-func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
 	// Fetch.
@@ -63,6 +70,8 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		logger.V(3).Info("skip deleted cluster queue")
 		return ctrl.Result{}, nil
 	}
+
+	lqNotes := assembleLocalQueueNotes(cq)
 
 	// List Namespaces.
 	nsList := new(core.NamespaceList)
@@ -104,6 +113,7 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 				ClusterQueue: kueue.ClusterQueueReference(cq.Name),
 			},
 		}
+		systemmeta.NoteResource(lq, _NodeQueueEntranceResType, lqNotes)
 		kubemeta.ControlOnWithoutBlock(lq, cq, kueue.SchemeGroupVersion.WithKind("ClusterQueue"))
 		_, err = kubeclientset.UpdateWithCtrlClient(ctx, r.Client, lq,
 			kubeclientset.WithCreateIfNotExisted[*kueue.LocalQueue]())
@@ -117,11 +127,25 @@ func (r *LocalQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, multierr.Combine(errs...)
 }
 
-func (r *LocalQueueReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
+// assembleLocalQueueNotes copies the descriptive notes (including the per-card
+// VRAM) a workload selects an InstanceType by from the backing ClusterQueue, so
+// they are readable from the namespaced LocalQueue co-located with the workload.
+func assembleLocalQueueNotes(cq *kueue.ClusterQueue) map[string]string {
+	_, cqNotes := systemmeta.DescribeResource(cq)
+	return map[string]string{
+		"acceleratable": cqNotes["acceleratable"],
+		"manufacturer":  cqNotes["manufacturer"],
+		"product":       cqNotes["product"],
+		"family":        cqNotes["family"],
+		"memory":        cqNotes["memory"],
+	}
+}
+
+func (r *NodeQueueEntranceReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 
 	return ctrl.NewControllerManagedBy(opts.Manager).
-		Named("localqueue").
+		Named("nodequeueentrance").
 		For(
 			&kueue.ClusterQueue{},
 			ctrlbuilder.WithPredicates(
@@ -158,7 +182,7 @@ func (r *LocalQueueReconciler) SetupController(ctx context.Context, opts control
 		Complete(r)
 }
 
-func (r *LocalQueueReconciler) enqueueClusterQueueWhenNamespaceCreated(
+func (r *NodeQueueEntranceReconciler) enqueueClusterQueueWhenNamespaceCreated(
 	ctx context.Context,
 	obj ctrlcli.Object,
 ) []ctrlreconcile.Request {

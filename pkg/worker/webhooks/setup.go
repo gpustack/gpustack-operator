@@ -14,7 +14,7 @@ import (
 // setups is the list of all webhook handlers.
 var setups = []webhook.Setup{
 	new(worker.InstanceWebhook),
-	new(worker.NodeFeatureWebhook),
+	new(worker.PodWebhook),
 }
 
 // cfgGetters is the list of all webhook configuration getters.
@@ -29,5 +29,13 @@ func Setup(ctx context.Context, mgr ctrl.Manager, mux webhook.HTTPServeMux) erro
 
 // Install installs the webhook configurations to the Kubernetes cluster.
 func Install(ctx context.Context, cli kubernetes.Interface, cc admreg.WebhookClientConfig) error {
+	// The prefix becomes the webhook configuration object names,
+	// "<prefix>-mutation" and "<prefix>-validation". The API server runs mutating
+	// webhooks serially in lexicographic order of the configuration object name,
+	// so this prefix must sort before "kueue-mutating-webhook-configuration": our
+	// mutating webhook folds the sliced memory request into .sliced.units and
+	// Kueue's Pod webhook then hashes the container resources into a role
+	// annotation, so ours must run first. "gpustack-worker" sorts before "kueue-"
+	// ('g' < 'k'); a prefix at or after "kueue-" would silently reverse the order.
 	return webhook.InstallConfigurations(ctx, "gpustack-worker", cli, cc, cfgGetters)
 }

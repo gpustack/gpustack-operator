@@ -99,8 +99,10 @@ kube-scheduler binds (gate 2) → kubelet/device-plugin allocates and writes bac
    labels) and `ClusterQueueReconciler → NodeQueueReconciler` (credits from RF labels; accelerated queues stop
    advertising CPU/RAM/storage; non-accelerated stop advertising RAM/storage); **delete `CohortReconciler`**;
    rescale `apps_kueue.go` factors; wire `instance-type-derived-from-node` (switch ③).
-4. **Admission safety**: new Pod mutating webhook (memory% → units, reject when neither set) + new AdmissionCheck
-   (per-card feasibility from `Devices` CR).
+4. **Admission safety**: rework the Instance slice API (`AcceleratorUnits` → `AcceleratorSlicedMemoryPercentage`
+   + `AcceleratorSlicedCoresPercentage`, both 0–100) with the InstanceWebhook defaulting/validating them; add a
+   Pod webhook (mutating: memory% → `.sliced.units`, default cores-% = 100; validating: reject when memory is
+   unset or `cores-% < memory-%`) + a new AdmissionCheck (per-card feasibility from `Devices` CR).
 5. **API & display**: drop `InstanceTypeAccelerator.Sliced`; add three-view Status + `Sliced*Percentage`/`*Mib`
    fields; extension API computes the three views from the `Devices` CR (read) **and gains Create/Update/Delete**
    that write unit-spec fields back to the backing ClusterQueue labels/annotations (write).
@@ -123,10 +125,12 @@ sliceable N3" simultaneously and let me request any of the three, so that I no l
 type A, exclusive is type B" and the resource is not split into two pools.
 
 #### Story 3 — User requests a slice by memory %, units are computed for them
-As a workload user, I want to request `nvidia.com/gpu.sliced: 2` + `.sliced.cores-percentage: 10` +
-`.sliced.memory-percentage: 20` (or `.sliced.memory-mib: 512`), so that the webhook folds memory into
-`.sliced.units` for me and I never reason about normalized units; if I give neither memory field the request is
-rejected rather than silently given a full or minimal slice.
+As a workload user, I want to request `nvidia.com/gpu.sliced: 2` + `.sliced.memory-percentage: 20`
+(optionally raising `.sliced.cores-percentage` ≥ 20, or using `.sliced.memory-mib: 512` instead), so that the
+webhook folds memory into `.sliced.units` for me and I never reason about normalized units. If I give neither
+memory field the request is rejected rather than silently given a full or minimal slice; the compute budget may
+not be smaller than the memory budget (`cores-percentage ≥ memory-percentage`), and an omitted
+`.sliced.cores-percentage` defaults to 100.
 
 #### Story 4 — Exclusive over-admit is caught, not deferred to a stuck Pod
 As the platform, when 8 cards are each already 50%-sliced and a user asks for 5 exclusive cards, I want the
@@ -157,8 +161,10 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F3b' | Auto-created CQ borrowing protection | Auto-created CQ is reconciled to keep `spec.cohortName` **empty** (manual edits reverted) **and** sets `lendingLimit: 0` on the credits quota — so it can never be pulled into a cohort and have its quota borrowed out by externally/manually managed queues. Skipped when `instance-type-derived-from-node=false` (admin owns the CQ). |
 | F3c | Cohort removed | `CohortReconciler` deleted; `IndexingNodeByCohortProfile`, `z-cohort` label construction removed; no `Cohort` objects created. |
 | F3d | Transformations rescaled + gate-2 exclusion | `apps_kueue.go` factors `1,600,000 / 160,000 / 1` (derived from `M`); sliced rule keeps `multiplyBy .sliced` + `.sliced` empty-outputs drain. **Gate-2 node resources must not block Kueue admission**: `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` are drained via **per-key `Replace → empty` rules** (preferred — same mechanism as the `.sliced` drain; `excludeResourcePrefixes` is the fallback), so only `.sliced.units → credits` is counted and a Pod requesting these (uncovered) resources is never marked inadmissible. |
-| F4a | Pod mutating webhook (+ remove NFD webhook) | New `pods` CREATE webhook (objectSelector on `kueue.x-k8s.io/queue-name`): folds `.sliced.memory-percentage`(×16000) / `.sliced.memory-mib`(×`M/VRAM`, VRAM from CQ `note.gpustack.ai/memory`) into per-card `.sliced.units`. Both unset → **reject**; memory-percentage wins over memory-mib; only folds when `.sliced.units` is absent (no double-write vs Instance controller). `failurePolicy: Fail` (can't compute units → reject). **Ordering is inherent**: an API-admission mutating webhook runs **before the Pod is persisted**, while Kueue creates the Workload and folds credits **after persist** — so `.sliced.units` is always back-filled before Kueue admission (no race). **Remove `NodeFeatureWebhook`** (path no longer needed); webhook set becomes {InstanceWebhook, PodWebhook}. |
+| F4a | Pod webhook (mutating + validating) + remove NFD webhook | New `pods` CREATE webhook (objectSelector on `kueue.x-k8s.io/queue-name`, `namePrefix="gpustack-worker"`, `failurePolicy:Fail`). **Mutating**: per container + manufacturer, default an absent `.sliced.cores-percentage` to 100, and fold `.sliced.memory-percentage`(×16000) / `.sliced.memory-mib`(×`M/VRAM`) into per-card `.sliced.units` — only when `.sliced.units` is absent (no double-write vs Instance controller); memory-percentage wins over memory-mib. **Validating**: reject a `.sliced` request that has no memory (neither percentage nor mib, with or without a hand-set `.sliced.units`), sets **both** memory keys, carries any non-positive `.sliced.*` value, or has `memory-percentage > 0` with `cores-percentage < memory-percentage`; also enforce **mode exclusion** — a Pod may request only one of exclusive (`<base>`) / shared (`<base>.shared`) / sliced (`<base>.sliced`), the three cannot coexist in one Pod. **VRAM source** is the Pod's LocalQueue `note.gpustack.ai/memory` (NodeQueueEntranceReconciler copies it down from the CQ — see F4d), read with the cache-not-ready APIReader fallback. **Ordering** has two guarantees. Kueue builds the Workload — and its credit demand — in its *reconciler* from the **persisted** Pod (after admission), so `.sliced.units` is always present before Kueue accounts quota, independent of webhook order. But Kueue's Pod *mutating* webhook also reads container resources at admission (it hashes them into a role annotation), so our mutating webhook must run **before** Kueue's: the API server runs mutating webhooks serially in lexicographic order of the `MutatingWebhookConfiguration` object name, and `gpustack-worker-mutation` sorts before `kueue-mutating-webhook-configuration` (`g` < `k`). This ordering is **implicit in the name prefix** — a prefix at/after `kueue-` would silently flip it, so the invariant is pinned by a comment at the prefix in `webhooks/setup.go`. **Generator patch** (`webhook-gen`): a `namePrefix=` marker option + a core-group (`APIGroups[0]==""` → `core`) name segment so the Pod webhook gets a valid, collision-resistant name (`gpustack-worker.{mutate,validate}.core.v1.pod`). **Remove `NodeFeatureWebhook`**; webhook set becomes {InstanceWebhook, PodWebhook}. |
 | F4b | AdmissionCheck + ledger completeness | New AdmissionCheck controller: after quota reservation, reads `Devices` CR per-card; `Retry`/`Reject` requests that can't be placed (no clean whole card for exclusive / no single card fits). **Ledger completeness**: the device-plugin `Allocate` writes **every** allocation — Kueue-routed or not — into the `Devices` CR `AcceleratorAllocation`, so even Pods that bypass Kueue land in the unified ledger; the AdmissionCheck consults this complete ledger (closes the "non-Kueue bypass" gap). |
+| F4c | Instance slice API → memory/compute percentages | `InstanceResources` renames `AcceleratorUnits int32` → `AcceleratorSlicedMemoryPercentage int32` and adds `AcceleratorSlicedCoresPercentage int32` — both in `[0,100]`, where `0` disables slicing (the request becomes an exclusive whole-card request). **InstanceWebhook** defaults (mutating): when exactly one of the two percentages is `>0`, copy it to the other (a bare memory request yields an equal compute share); validates: each in `[0,100]`, and `cores-% > 0 && cores-% < memory-%` → reject. **InstanceReconciler** `getResourceRequirements`: the sliced branch (`Sliced > 0 && memory-% > 0`) emits `.sliced` + `.sliced.memory-percentage` + `.sliced.cores-percentage` (the Pod webhook folds memory-% into `.sliced.units`) instead of a pre-computed `.sliced.units`; a `0%` request falls through to exclusive whole-card emission. The `instType.Spec.Sliced > 0` gate stays until T5.1 reworks the InstanceType API. **Orphaned by this change (remove in the Phase 5 cleanup):** `nodefeature.QuantityToAlignedValue`/`QuantityToOriginalValue` (+ their tests) lose their last caller now that units are folded from memory by the Pod webhook. |
+| F4d | LocalQueueReconciler → NodeQueueEntranceReconciler | Rename the reconciler and its file. Each LocalQueue copies its ClusterQueue's `acceleratable`/`manufacturer`/`product`/`family`/`memory` notes (via `assembleLocalQueueNotes`, mirroring `assembleClusterQueueNotes`), so its systemmeta resourceType becomes `instancetypeselectors` and the per-card VRAM (`memory`) is readable from the namespaced LocalQueue co-located with the Pod — the Pod webhook's VRAM source. |
 | F5a | InstanceType API | Remove `InstanceTypeAccelerator.Sliced int64`. Add three-view Status (allocatable-as-exclusive / shareable / sliceable) + `SlicedCoresPercentage`/`SlicedMemoryPercentage`/`SlicedMemoryMib`. `make generate` regenerates deepcopy/protobuf/CRD/conversion/apiservice. |
 | F5b | Extension API three-view (read) | `convertInstanceTypeFromClusterQueue` computes the three views by aggregating the `Devices` CR per-card state (not credits fold-down); CQ stays the metadata/total source. |
 | F5c | InstanceType Extension APIService writable (Create/Update/Delete) | The aggregated InstanceType API gains **Create / Update / Delete** (today read-only). Create/Update translate InstanceType fields (unit spec `unitCPU`/`unitRAM`, plus the InstanceType's `localStorage`, + admin-set metadata) into write-backs on the backing ClusterQueue: `note.gpustack.ai/*` annotations + the schedule labels (feature key + `kubernetes.io/os|arch`). **Delete does not delete the CQ directly**: it sets `StopPolicy=HoldAndDrain` (delete intent) and lets NodeQueueReconciler evict the workloads and perform the actual deletion (and its LocalQueues) — see F3b. With `instance-type-derived-from-node=false`, Create is the admin's path to define a node-queue (operator then only aligns the ResourceFlavor). NodeQueueReconciler must treat admin-written unit-spec values as authoritative (level-based desired state) and not overwrite them. |
@@ -210,6 +216,10 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 - **AdmissionCheck verdict for transient infeasibility** → AdmissionCheck only validates (no preemption —
   shelved); return `Retry` (re-checked as capacity frees, bounded by Kueue backoff), not `Rejected`, for "no
   clean card right now".
+- **A CQ referencing a missing/inactive AdmissionCheck turns inactive** (its workloads become Inadmissible,
+  `cache/scheduler/clusterqueue.go:290-294`) → apply the AC object right after the operator installs Kueue, set its `status.Active=True`
+  with an operator reconciler, and gate the CQ `admissionChecksStrategy` ref on the AC being `Active`
+  (`NodeQueueReconciler` watches the AC to add the ref once active).
 
 ## Design Details
 ### Commands
@@ -227,16 +237,18 @@ bash .claude/skills/gpustack-operator-e2e/cases/<new-pooling-case>.sh gpustack-s
 pkg/nodefeature/knowns.go                          # F0a suffixes, F0b M=1,600,000, MaxPartitions consumers
 pkg/nodefeature/helper.go                          # gKey drops os/arch abbrev; ConstructNodeCapacityLabels; converters
 pkg/devicemanager/detector/nvidia/device.go        # F1a MaxPartitions: soft=512 (phys/virt deferred to MIG/vNPU spec)
+pkg/devicemanager/detector/detector.go             # F4b' stamp the feature-key + os/arch selector labels onto the Devices CR (NOT managed — synced by NodeDevicesReconciler)
 pkg/deviceplugin/helper.go, server.go              # F2 SliceRatio split (cores vs VRAM)
 pkg/devicemanager/allocator/nvidia/deviceplugin.go # F2 SM from cores-%, VRAM from memory-mib (Ascend equivalent)
 pkg/worker/controllers/worker/nodecapacity.go      # F1b NodeCapacityReconciler: 4 keys, drop partitions gate
 pkg/worker/controllers/worker/resourceflavor.go    # F3a → NodeFlavorReconciler (label-indexed, capacity labels)
-pkg/worker/controllers/worker/clusterqueue.go      # F3b → NodeQueueReconciler (credits from RF labels; no CPU/RAM/storage on accel)
+pkg/worker/controllers/worker/clusterqueue.go      # F3b → NodeQueueReconciler (credits from RF labels; no CPU/RAM/storage on accel); F4b admissionChecksStrategy ref
 pkg/worker/controllers/worker/cohort.go            # F3c DELETE CohortReconciler
-pkg/worker/controllers/worker/setup.go             # deregister cohort; register admissioncheck
-pkg/worker/kuberess/apps_kueue.go                  # F3d factors 1,600,000/160,000/1 + exclude gate-2 resources
+pkg/worker/controllers/worker/setup.go             # deregister cohort; register node-devices + admissioncheck reconcilers
+pkg/worker/kuberess/apps_kueue.go                  # F3d factors 1,600,000/160,000/1 + exclude gate-2 resources; F4b apply the AdmissionCheck object after the Kueue install
 pkg/worker/webhooks/worker/pod.go (new), setup.go  # F4a add PodWebhook, REMOVE NodeFeatureWebhook (→ {Instance, Pod})
-pkg/worker/controllers/worker/admissioncheck.go (new) # F4b per-card feasibility AdmissionCheck
+pkg/worker/controllers/worker/nodedevices.go (new)          # F4b' NodeDevicesReconciler: sync gpustack.ai/managed from Node onto the Devices CR
+pkg/worker/controllers/worker/nodedevicesadmission.go (new) # F4b NodeDevicesAdmission: per-card feasibility check + activate the AC object
 api/worker/v1/instance_type.go                     # F5a drop Sliced int64; three-view + Sliced*Percentage/Mib
 pkg/worker/extensionapis/worker/instance_type.go   # F5b three-view from Devices CR (read); F5c Create/Update/Delete → write back to CQ labels/annotations
 pkg/worker/settings/value.go                       # F0c three env switches
@@ -389,18 +401,63 @@ coupled — its three tasks land together and the system is only fully consisten
   objects**; the unit spec lives in CQ notes.*
 
 **Phase 4 — Admission safety layer**
-- [ ] **T4.1 (F4a) — Pod mutating webhook + remove NFD webhook.** *Verify-first: confirm the generator supports a
-  core `pods` target + `objectSelector` (else hand-write the config).* New `pkg/worker/webhooks/worker/pod.go`:
-  fold `.sliced.memory-percentage`/`.sliced.memory-mib`→`.sliced.units` (VRAM from CQ note), reject when neither,
-  `failurePolicy:Fail`, only when `.sliced.units` absent. `setup.go:15`: add `PodWebhook`, **remove
-  `NodeFeatureWebhook`**. `make generate`. **Accept:** memory-% Pod gets units; neither→rejected; webhook set
-  `{Instance,Pod}`. **Verify:** `go test ./pkg/worker/webhooks/...` + `make generate`.
-- [ ] **T4.2 (F4b) — AdmissionCheck + ledger write-back.** New `admissioncheck.go` reading the `Devices` CR
-  per-card; ensure the allocator writes `AcceleratorAllocation` on every `Allocate` (ledger completeness);
-  register in `setup.go`. AdmissionCheck is **check-only** (no preemption — shelved this round); return `Retry`
-  for transient per-card infeasibility (re-checked as capacity frees). **Accept:** on a fully-sliced 8-card node
-  the 5th exclusive is held by `Retry` (not admitted-then-stuck). **Verify:**
-  `go test ./pkg/worker/controllers/worker/...` + e2e.
+- [x] **T4.1 (F4a/F4c/F4d) — Pod webhook + Instance slice API + queue-entrance notes.**
+  (1) **Generator** (`webhook-gen/generators/helper.go`): add a `namePrefix=` marker option (validating + mutating)
+  and a core-group name fix (`APIGroups[0]==""` → `core`); names become `<prefix>.{mutate,validate}.<grp>.<ver>.<kind>`.
+  (2) **Instance API** (`api/worker/v1alpha1/instance.go`): rename `AcceleratorUnits` → `AcceleratorSlicedMemoryPercentage`,
+  add `AcceleratorSlicedCoresPercentage` (both `[0,100]`); `make generate`.
+  (3) **InstanceWebhook**: default-equate the two percentages; validate range + `cores-% ≥ memory-%`.
+  (4) **InstanceReconciler** `getResourceRequirements`: sliced branch emits `.sliced` + memory-%/cores-% (`0%` → exclusive).
+  (5) **PodWebhook** (`pkg/worker/webhooks/worker/pod.go`, new): mutating (default cores-%=100, fold memory→`.sliced.units`
+  when absent, memory-% wins) + validating (reject: only `.sliced`; `.sliced`+units w/o memory; both memory keys; any
+  non-positive `.sliced.*`; `memory-% > 0 && cores-% < memory-%`); VRAM from the LocalQueue note. `namePrefix="gpustack-worker"`,
+  objectSelector on `kueue.x-k8s.io/queue-name`, `failurePolicy:Fail`. (6) **NodeQueueEntranceReconciler**: rename
+  `LocalQueueReconciler`; copy CQ notes onto each LocalQueue (`instancetypeselectors`). (7) **setup.go**: add `PodWebhook`,
+  **remove `NodeFeatureWebhook`**; rename the controller in `controllers/setup.go`; pin the prefix ordering
+  invariant with a comment (the mutating config name must sort before `kueue-mutating-webhook-configuration`).
+  (8) `nodefeature.MemoryMibToUnits`.
+  **Accept:** memory-% Pod gets `.sliced.units`; no-memory `.sliced` Pod rejected; `cores-% < memory-%` rejected; an
+  Instance with `AcceleratorSlicedMemoryPercentage` produces a memory-% Pod the webhook folds; webhook set `{Instance,Pod}`.
+  **Verify:** `go test ./pkg/worker/... ./pkg/nodefeature/... ./gen/...` + `make generate` + `make lint`.
+- [x] **T4.2 (F4b) — `NodeDevicesAdmission` per-card AdmissionCheck + ledger completeness.**
+  (1) **`nodedevicesadmission.go`** (new): a `controllerName` const (`worker.gpustack.ai/node-devices`); a
+  **Workload controller** — `For(&kueue.Workload{})` (predicate: holds a quota reservation + carries admission
+  checks) — that skips Workloads without `workload.HasQuotaReservation` (or finished/inactive), selects our checks
+  via `admissioncheck.FilterForController`, computes per-card feasibility, and writes the verdict with
+  `workload.SetAdmissionCheckState` inside `workload.PatchStatus` (`Retry` carries a fixed `RequeueAfterSeconds`
+  backoff; self-heal happens when Kueue re-admits the Workload after that backoff and it is re-evaluated — the
+  worker manager does not cache `Devices`, so candidates are read uncached via `APIReader`, not a watch); plus an
+  **AdmissionCheck controller** — `For(&kueue.AdmissionCheck{})`
+  filtered to our `controllerName` — that keeps the AC object's `status.conditions[Active]=True`. The AC **object**
+  itself is applied by `installKueue` right after the Kueue Helm install (the gpustack chart cannot — Kueue's CRD is runtime-installed; `spec.controllerName=ours`, `parameters=nil`); the operator only activates it.
+  (2) **Feasibility** (floor; per-card, not bin-pack): read mode + card-count N + per-card units U from
+  `wl.Spec.PodSets[].Template`; locate candidate `Devices` with a single `List(MatchingLabels: flavor.spec.nodeLabels)`;
+  one unified rule `Remaining ≥ demand` per card (demand = a whole card for exclusive, `U` for sliced, an owner's
+  share for shared): need ≥ N cards meeting it; shortfall → `Retry`. The status ledger seeds every card at
+  `ResourceMaxUnits`, so any allocation drops a card below a whole card and exclusive is caught exactly.
+  (3) **Candidate-node labels (F4b')**: the DeviceManager Devices report path (`detector.go:305` `devsAlignFn`)
+  stamps an accelerator flavor's selector labels — the feature key `acceleratable.feature.gpustack.ai/${key}=true`
+  + `kubernetes.io/os|arch` — onto the `Devices` `metadata.labels`, but **not** `gpustack.ai/managed`: a new
+  `NodeDevicesReconciler` (`nodedevices.go`, `For(&Devices{})` + `Watches(&Node{})`) syncs the managed mark from
+  the Node onto the same-named Devices, so the device-manager never asserts a node-management decision it does not
+  own. gate-3 then lists candidates by `flavor.spec.nodeLabels` (managed + os/arch + feature key) instead of a
+  `Node→Devices` join.
+  (4) **CQ wiring**: `NodeQueueReconciler` (clusterqueue.go) adds `spec.admissionChecksStrategy.admissionChecks`
+  referencing our check with empty `onFlavors` (all flavors) — **only once the AC reports Active**, and it
+  `Watches(&kueue.AdmissionCheck{})` to add the ref when the AC activates (a CQ referencing a missing/inactive
+  AdmissionCheck goes inactive → its workloads turn Inadmissible, `cache/scheduler/clusterqueue.go:290-294`).
+  (5) **Ledger completeness = verify-only**: the device-plugin `Allocate` already writes every allocation via
+  `patchAllocatingPod` (`server.go:312→394`, Kueue-routed or not, below kubelet) — confirm no `Allocate` path skips
+  it; add a per-card `Remaining` aggregation unit test (no new write code).
+  (6) register in `controllers/setup.go`. **check-only** (no preemption; `Retry`, never `Rejected`). **RBAC**: none
+  (worker SA is `cluster-admin`).
+  **Verify-first:** gate-2 resources (`.sliced`, `.sliced.units`) still readable on the Workload PodSet template
+  after F3d transformations; compile-time API is kueue `v0.17.1` vs runtime chart `v0.18.x` (the v1beta2 AC contract
+  is stable — confirm the served CRD matches); selector labels present on the node at detect time (else level-based
+  reconcile back-fills).
+  **Accept:** on a fully-sliced 8-card node the 5th exclusive is held by `Retry` (not admitted-then-stuck);
+  table-driven feasibility (8×50% → exclusive=0; generic headroom but no clean card → exclusive `Retry`).
+  **Verify:** `go test ./pkg/worker/controllers/worker/...` + `make lint` + e2e (case-7).
 - *Checkpoint: the webhook back-fills units before Kueue admission; the AdmissionCheck blocks the over-admit.*
 
 **Phase 5 — API & display (read three-view + writable APIService)**
@@ -446,10 +503,10 @@ code solid enough prior to committing the changes necessary to implement this en
 Every added unit gets coverage; target ≥ existing, no regression. Per-package (date 2026-06-29):
 - `pkg/nodefeature`: new suffix constructors; `M` invariants (`%10`/`%512`/`%100`); `CardsToCredits`/`CreditsToCards` round-trips; gKey without os/arch abbrev.
 - `pkg/devicemanager/detector/nvidia`: **NEW** — SoftPartition `MaxPartitions=512`.
-- `pkg/worker/controllers/worker`: `nodecapacity_test` (4 sliced keys + stale-clean); `nodeflavor_test` (names + `capacity` label + index rules + nodeLabels os/arch pin); `nodequeue_test` (credits=`capacity×M`; accel has no CPU/RAM/storage; `cohortName` empty + `lendingLimit:0`); **DELETE** `cohort_test`.
+- `pkg/worker/controllers/worker`: `nodecapacity_test` (4 sliced keys + stale-clean); `nodeflavor_test` (names + `capacity` label + index rules + nodeLabels os/arch pin); `nodequeue_test` (credits=`capacity×M`; accel has no CPU/RAM/storage; `cohortName` empty + `lendingLimit:0`); **NEW** `nodedevices_test` (managed-label sync Node→Devices) + `nodedevicesadmission_test` (per-card feasibility: 8×50% → exclusive=0; clean-card shortage → `Retry`; Devices located by `flavor.spec.nodeLabels`); **DELETE** `cohort_test`.
 - `pkg/worker/kuberess`: `apps_kueue_test` (factors `1,600,000/160,000/1`, `multiplyBy`, gate-2 excluded/drained, `.sliced` drain).
 - `pkg/deviceplugin` + `pkg/devicemanager/allocator/nvidia`: `SliceRatio` split; `SM←cores-%`, `VRAM←memory-mib`; `cores-%` default 100.
-- `pkg/worker/webhooks/worker`: **NEW** `pod_test` — fold `memory-%`/`memory-mib`→`units`, reject when neither, `failurePolicy:Fail`, no double-write when `.sliced.units` present.
+- `pkg/worker/webhooks/worker`: **NEW** `pod_test` — fold `memory-%`/`memory-mib`→`units`, default cores-%=100, reject (no memory / both memory keys / non-positive / `cores-% < memory-%` / mixed exclusive+shared+sliced modes), no double-write when `.sliced.units` present; **updated** `instance_test` — percentage default-equate + range/`cores-% ≥ memory-%` validation; `instance` reconciler conversion to `.sliced.memory-percentage`/`.sliced.cores-percentage`.
 - `pkg/worker/extensionapis/worker`: `instance_type_test` — three views from the `Devices` CR; Create/Update write-back to CQ labels/annotations; Delete teardown.
 - `pkg/worker/settings`: **NEW** — the 3 settings map from their `GPUSTACK_*` vars with correct defaults (`node-management-manual`=false; `instance-type-mixed-on-node`/`instance-type-derived-from-node`=true) and are read per-reconcile via `ShouldValueBool(ctx)` (runtime-adjustable, no restart).
 
@@ -478,11 +535,16 @@ Under `.claude/skills/gpustack-operator-e2e/cases/`:
 ## Open Questions
 ### Resolved during spec review (2026-06-29)
 - **Webhook on core `pods` + admission ordering** → settled. Remove `NodeFeatureWebhook` (no longer needed); add
-  the Pod mutating webhook for sliced-unit control. Ordering is inherent: the API-admission mutating webhook
-  back-fills `.sliced.units` **before persist**, while Kueue builds the Workload and folds credits **after
-  persist**, so Kueue never admits a unit-less Pod (`failurePolicy: Fail`). The ClusterQueue/Configuration must
-  **exclude** the gate-2 node resources (`.sliced.cores-percentage`/`.memory-percentage`/`.memory-mib`) and the
-  multiplyBy-only `.sliced` from accounting, so only `.sliced.units → credits` is counted (F3d).
+  the Pod mutating webhook for sliced-unit control. Two ordering guarantees: (1) Kueue builds the Workload and
+  folds credits in its *reconciler* from the **persisted** Pod (after admission), so `.sliced.units` is always
+  back-filled before Kueue accounts quota — a unit-less Pod is never admitted (`failurePolicy: Fail` also closes
+  the fail-open gap); (2) Kueue's Pod *mutating* webhook reads container resources at admission (role-hash), so
+  ours must run first — the API server orders mutating webhooks by `MutatingWebhookConfiguration` name, and
+  `gpustack-worker-mutation` < `kueue-mutating-webhook-configuration`. **Watch out:** the ordering in (2) is
+  implicit in the name prefix; a prefix sorting at/after `kueue-` silently reverses it, so the invariant is
+  pinned by a comment in `webhooks/setup.go`. The ClusterQueue/Configuration must **exclude** the gate-2 node
+  resources (`.sliced.cores-percentage`/`.memory-percentage`/`.memory-mib`) and the multiplyBy-only `.sliced`
+  from accounting, so only `.sliced.units → credits` is counted (F3d).
 - **Non-Kueue Pods bypassing the ledger** → not a gap. The device-plugin `Allocate` records every allocation
   into the `Devices` CR `AcceleratorAllocation` (below Kueue), so the unified ledger is complete and the
   AdmissionCheck confirms against it (F4b).
@@ -502,6 +564,37 @@ Under `.claude/skills/gpustack-operator-e2e/cases/`:
 - **Empty `cohortName` is accepted/isolated** → a ClusterQueue with empty `spec.cohortName` is valid and isolated
   (no implicit shared cohort), so F3b' enforcement is safe; when `instance-type-derived-from-node=false` the
   enforcement is skipped (admin owns the CQ).
+
+### Resolved during plan review (2026-06-30, round 3 — T4.2 design)
+- **AdmissionCheck wiring (what makes gate-3 actually fire)** → a check is evaluated only when (a) an
+  `AdmissionCheck` object with our `controllerName` exists **and** is `Active`, and (b) the CQ lists it in
+  `spec.admissionChecksStrategy.admissionChecks` (v1beta2 has no plain `admissionChecks []string`). The AC
+  **object** is applied by `installKueue` right after the Kueue Helm install (the gpustack chart can't — Kueue's
+  CRD is runtime-installed); an operator `For(&AdmissionCheck{})` reconciler sets its
+  `status.Active=True`; `NodeQueueReconciler` adds the CQ ref **only after the AC is Active** (empty `onFlavors` =
+  all flavors) and watches the AC to add it on activation — a CQ must never reference a missing/inactive check or
+  the whole queue goes inactive. The external controller follows the Kueue contract (`provisioning`
+  controller as the template): `For(Workload)`, `FilterForController`, `SetAdmissionCheckState` inside
+  `PatchStatus` (Devices read uncached via `APIReader`, no watch); `Retry` releases quota + requeues on Kueue's backoff,
+  `Rejected` deactivates (we never use it).
+- **Candidate `Devices` lookup by label, not a Node join** → the DeviceManager stamps the feature-key + os/arch
+  selector labels onto each `Devices` CR (cluster-scoped, named by node) while `NodeDevicesReconciler` syncs the
+  `gpustack.ai/managed` mark from the Node, so gate-3 resolves candidates with one
+  `List(MatchingLabels: flavor.spec.nodeLabels)` — shorter than `flavor.nodeLabels → List Nodes → Get Devices/node`.
+  The managed mark is split out of the DeviceManager because node management is a control-plane decision the
+  per-node device-manager must not assert.
+- **File name `nodedevicesadmission.go`** (not the generic `admissioncheck.go`) → it admits by reading the
+  per-node `Devices` ledger; the name states that.
+- **Ledger completeness already holds** → device-plugin `Allocate` writes every allocation below kubelet
+  (`server.go:312 → patchAllocatingPod`), independent of Kueue routing; T4.2's ledger work is verification + a
+  per-card `Remaining` aggregation test, not new write code.
+- **Gate-3 is precise for exclusive, deliberately loose for sliced** → the ledger's per-card `Remaining` is exact
+  for whole-card occupancy (any allocation drops a card below `ResourceMaxUnits`, so an exclusive over-admit is
+  caught exactly), but the device-plugin records sliced `Allocated` as the injection-token count (`server.go:372`,
+  "bookkeeping only"), so a sliced card's `Remaining` overstates its free units. This is fine: the sliced *total*
+  budget is gate-1 `credits`' job (`.sliced.units → credits`); gate-3 only adds the per-card placement check that
+  exclusive needs. The unified `Remaining ≥ demand` rule stays safe for every mode (sliced stays permissive, yet
+  still catches cards fully held by exclusive/other consumers).
 
 ### Still open (confirm during implementation)
 - **Exclude vs drain for gate-2 resources (T3.2)** → **prefer per-key `Replace → empty` transformation rules**

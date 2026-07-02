@@ -55,8 +55,9 @@ func assertResourceList(t *testing.T, want, got core.ResourceList, label string)
 
 func TestGetResourceRequirements(t *testing.T) {
 	accNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	slicedUnitsNVIDIA := nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)
 	slicedCardNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+	slicedMemPctNVIDIA := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(nodefeature.ManufacturerNVIDIA)
+	slicedCoresPctNVIDIA := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(nodefeature.ManufacturerNVIDIA)
 
 	cases := []struct {
 		name string
@@ -64,7 +65,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		// Instance fixture.
 		cpu, ram, storage string
 		acc               *string // nil → pod did not request accelerator
-		units             int32   // AcceleratorUnits (U); 0 → unset
+		memPct, coresPct  int32   // AcceleratorSliced{Memory,Cores}Percentage; 0 → unset
 
 		// InstanceType fixture.
 		acceleratable bool
@@ -132,50 +133,48 @@ func TestGetResourceRequirements(t *testing.T) {
 			wantRequests:    core.ResourceList{accNVIDIA: qty("2")},
 		},
 		{
-			// Sliced 1/8: U=1, partitions=8 → .sliced.units = 1×D/8 = 200000 (per-card);
-			// the card count C=1 rides on the bare .sliced key.
-			name: "sliced accelerator — one card, one unit",
-			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), units: 1,
+			// memory 20% / cores 20% on a sliced type → emit the card count plus the
+			// per-card percentages; the Pod webhook later folds memory-% into .sliced.units.
+			name: "sliced accelerator — one card, 20% memory / 20% cores",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), memPct: 20, coresPct: 20,
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
-				slicedUnitsNVIDIA: qty("200000"),
-				slicedCardNVIDIA:  qty("1"),
+				slicedCardNVIDIA:     qty("1"),
+				slicedMemPctNVIDIA:   qty("20"),
+				slicedCoresPctNVIDIA: qty("20"),
 			},
 			wantRequests: core.ResourceList{
-				slicedUnitsNVIDIA: qty("200000"),
-				slicedCardNVIDIA:  qty("1"),
+				slicedCardNVIDIA:     qty("1"),
+				slicedMemPctNVIDIA:   qty("20"),
+				slicedCoresPctNVIDIA: qty("20"),
 			},
 		},
 		{
-			// U=2 on 8s → .sliced.units = 2×D/8 = 400000 (half a card per card).
-			name: "sliced accelerator — one card, two units",
-			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), units: 2,
+			// A larger compute share than memory share is allowed.
+			name: "sliced accelerator — two cards, 20% memory / 30% cores",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"), memPct: 20, coresPct: 30,
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
-				slicedUnitsNVIDIA: qty("400000"),
-				slicedCardNVIDIA:  qty("1"),
+				slicedCardNVIDIA:     qty("2"),
+				slicedMemPctNVIDIA:   qty("20"),
+				slicedCoresPctNVIDIA: qty("30"),
 			},
 			wantRequests: core.ResourceList{
-				slicedUnitsNVIDIA: qty("400000"),
-				slicedCardNVIDIA:  qty("1"),
+				slicedCardNVIDIA:     qty("2"),
+				slicedMemPctNVIDIA:   qty("20"),
+				slicedCoresPctNVIDIA: qty("30"),
 			},
 		},
 		{
-			// 2 cards × 1/8: .sliced.units stays per-card (200000), C=2 rides on .sliced.
-			name: "sliced accelerator — two cards, one unit (units stay per-card)",
-			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"), units: 1,
+			// A 0% memory request on a sliced type falls through to exclusive whole cards.
+			name: "sliced InstanceType but 0% request — exclusive whole card",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"), memPct: 0, coresPct: 0,
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
 			withAccelerator: true,
-			wantLimits: core.ResourceList{
-				slicedUnitsNVIDIA: qty("200000"),
-				slicedCardNVIDIA:  qty("2"),
-			},
-			wantRequests: core.ResourceList{
-				slicedUnitsNVIDIA: qty("200000"),
-				slicedCardNVIDIA:  qty("2"),
-			},
+			wantLimits:      core.ResourceList{accNVIDIA: qty("2")},
+			wantRequests:    core.ResourceList{accNVIDIA: qty("2")},
 		},
 		{
 			name: "combined — general + accelerator",
@@ -263,7 +262,8 @@ func TestGetResourceRequirements(t *testing.T) {
 				q := qty(*c.acc)
 				inst.Spec.Resources.Accelerator = &q
 			}
-			inst.Spec.Resources.AcceleratorUnits = c.units
+			inst.Spec.Resources.AcceleratorSlicedMemoryPercentage = c.memPct
+			inst.Spec.Resources.AcceleratorSlicedCoresPercentage = c.coresPct
 
 			instType := &worker.InstanceType{
 				Spec: worker.InstanceTypeSpec{

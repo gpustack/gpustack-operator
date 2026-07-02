@@ -31,7 +31,7 @@ func GetValidatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.V
 		},
 		Webhooks: []v1.ValidatingWebhook{
 			vwh_pkg_worker_webhooks_worker_InstanceWebhook(c),
-			vwh_pkg_worker_webhooks_worker_NodeFeatureWebhook(c),
+			vwh_pkg_worker_webhooks_worker_PodWebhook(c),
 		},
 	}
 }
@@ -47,6 +47,7 @@ func GetMutatingWebhookConfiguration(n string, c v1.WebhookClientConfig) *v1.Mut
 		},
 		Webhooks: []v1.MutatingWebhook{
 			mwh_pkg_worker_webhooks_worker_InstanceWebhook(c),
+			mwh_pkg_worker_webhooks_worker_PodWebhook(c),
 		},
 	}
 }
@@ -145,12 +146,12 @@ func mwh_pkg_worker_webhooks_worker_InstanceWebhook(c v1.WebhookClientConfig) v1
 	}
 }
 
-func (*NodeFeatureWebhook) ValidatePath() string {
-	return "/validate-nfd-k8s-sigs-io-v1alpha1-nodefeature"
+func (*PodWebhook) ValidatePath() string {
+	return "/gpustack-worker-validate-core-v1-pod"
 }
 
-func vwh_pkg_worker_webhooks_worker_NodeFeatureWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
-	path := "/validate-nfd-k8s-sigs-io-v1alpha1-nodefeature"
+func vwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
+	path := "/gpustack-worker-validate-core-v1-pod"
 
 	cc := c.DeepCopy()
 	if cc.Service != nil {
@@ -160,33 +161,89 @@ func vwh_pkg_worker_webhooks_worker_NodeFeatureWebhook(c v1.WebhookClientConfig)
 	}
 
 	return v1.ValidatingWebhook{
-		Name:         "validate.nfd.k8s-sigs.io.v1alpha1.nodefeature",
+		Name:         "gpustack-worker.validate.core.v1.pod",
 		ClientConfig: *cc,
 		Rules: []v1.RuleWithOperations{
 			{
 				Rule: v1.Rule{
 					APIGroups: []string{
-						"nfd.k8s-sigs.io",
+						"",
 					},
 					APIVersions: []string{
-						"v1alpha1",
+						"v1",
 					},
 					Resources: []string{
-						"nodefeatures",
+						"pods",
 					},
 					Scope: ptr.To[v1.ScopeType]("Namespaced"),
 				},
 				Operations: []v1.OperationType{
 					"CREATE",
-					"UPDATE",
 				},
 			},
 		},
 		FailurePolicy: ptr.To[v1.FailurePolicyType]("Fail"),
 		MatchPolicy:   ptr.To[v1.MatchPolicyType]("Equivalent"),
 		ObjectSelector: ptr.To(metav1.LabelSelector{
-			MatchLabels: map[string]string{
-				"app.kubernetes.io/part-of": "gpustack-operator-worker",
+			MatchExpressions: []metav1.LabelSelectorRequirement{
+				{
+					Key:      "kueue.x-k8s.io/queue-name",
+					Operator: metav1.LabelSelectorOperator("Exists"),
+				},
+			},
+		}),
+		SideEffects:    ptr.To[v1.SideEffectClass]("None"),
+		TimeoutSeconds: ptr.To[int32](10),
+		AdmissionReviewVersions: []string{
+			"v1",
+		},
+	}
+}
+
+func (*PodWebhook) DefaultPath() string {
+	return "/gpustack-worker-mutate-core-v1-pod"
+}
+
+func mwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.MutatingWebhook {
+	path := "/gpustack-worker-mutate-core-v1-pod"
+
+	cc := c.DeepCopy()
+	if cc.Service != nil {
+		cc.Service.Path = &path
+	} else if c.URL != nil {
+		cc.URL = ptr.To(*c.URL + path)
+	}
+
+	return v1.MutatingWebhook{
+		Name:         "gpustack-worker.mutate.core.v1.pod",
+		ClientConfig: *cc,
+		Rules: []v1.RuleWithOperations{
+			{
+				Rule: v1.Rule{
+					APIGroups: []string{
+						"",
+					},
+					APIVersions: []string{
+						"v1",
+					},
+					Resources: []string{
+						"pods",
+					},
+					Scope: ptr.To[v1.ScopeType]("Namespaced"),
+				},
+				Operations: []v1.OperationType{
+					"CREATE",
+				},
+			},
+		},
+		FailurePolicy: ptr.To[v1.FailurePolicyType]("Fail"),
+		MatchPolicy:   ptr.To[v1.MatchPolicyType]("Equivalent"),
+		ObjectSelector: ptr.To(metav1.LabelSelector{
+			MatchExpressions: []metav1.LabelSelectorRequirement{
+				{
+					Key:      "kueue.x-k8s.io/queue-name",
+					Operator: metav1.LabelSelectorOperator("Exists"),
+				},
 			},
 		}),
 		SideEffects:    ptr.To[v1.SideEffectClass]("None"),

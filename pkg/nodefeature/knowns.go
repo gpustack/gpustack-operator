@@ -323,6 +323,18 @@ func QuantityToAlignedValue(q resource.Quantity, sliced int64) resource.Quantity
 	return q
 }
 
+// MemoryMibToUnits converts an absolute per-card VRAM request in MiB to the
+// normalized per-card `.sliced.units` value: floor(mib / cardVRAMMib × D), where
+// D is ResourceMaxUnits. VRAM is the non-oversubscribable anchor, so the
+// conversion floors and never over-allocates. It returns 0 when cardVRAMMib is
+// non-positive (the caller treats that as "cannot compute").
+func MemoryMibToUnits(mib, cardVRAMMib int64) int64 {
+	if cardVRAMMib <= 0 {
+		return 0
+	}
+	return mib * ResourceMaxUnits / cardVRAMMib
+}
+
 // QuantityToOriginalValue converts a normalized per-card unit value back to the
 // original slice count: q / (D / sliced).
 func QuantityToOriginalValue(q resource.Quantity, sliced int64) resource.Quantity {

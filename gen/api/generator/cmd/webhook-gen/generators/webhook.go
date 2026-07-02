@@ -420,7 +420,7 @@ func (g *webhookGen) generateMutating(c *generator.Context, t *types.Type, w io.
 			sw.Do("},\n", nil)
 		}
 		if len(selector.MatchExpressions) != 0 {
-			sw.Do("MatchExpressions: []$.LabelSelectorRequirement|raw${\n", nil)
+			sw.Do("MatchExpressions: []$.LabelSelectorRequirement|raw${\n", args)
 			for _, expr := range selector.MatchExpressions {
 				sw.Do("{\n", nil)
 				sw.Do("Key: \"$.KEY$\",\n", generator.Args{"KEY": expr.Key})

@@ -102,32 +102,25 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
 				}
 			}
-			// On a sliced InstanceType the per-card unit count U must be a power of
-			// two, at most the OnceMaxRequest (partitions/2), and strictly less than
-			// the partition count (U == partitions would request a whole card).
+			// On a sliced InstanceType the slice is requested as memory/compute
+			// percentages in [0,100] (0 disables slicing). The compute budget must
+			// not be smaller than the memory budget.
 			if instType.Spec.Sliced > 0 {
-				u := int64(instRess.AcceleratorUnits)
-				// The field defaults to 1 and the controller treats <=0 as the
-				// smallest slice (1); normalize here so an explicit 0 (or an older
-				// client whose request skips defaulting) is not rejected by the
-				// power-of-two check below.
-				if u <= 0 {
-					u = 1
+				memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
+				coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
+				memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
+				coresPath := field.NewPath("spec.resources.acceleratorSlicedCoresPercentage")
+				if memPct < 0 || memPct > 100 {
+					errs = append(errs, field.Invalid(memPath, instRess.AcceleratorSlicedMemoryPercentage,
+						"must be between 0 and 100"))
 				}
-				fldPath := field.NewPath("spec.resources.acceleratorUnits")
-				onceMax := instType.Status.Accelerator.OnceMaxRequest.Value()
-				switch {
-				case u&(u-1) != 0:
-					errs = append(errs, field.Invalid(fldPath, instRess.AcceleratorUnits,
-						"must be a power of two"))
-				case u >= instType.Spec.Sliced:
-					errs = append(errs, field.Invalid(fldPath, instRess.AcceleratorUnits,
-						fmt.Sprintf("must be less than the partition count %d of instance type %s",
-							instType.Spec.Sliced, instType.Name)))
-				case onceMax > 0 && u > onceMax:
-					errs = append(errs, field.Invalid(fldPath, instRess.AcceleratorUnits,
-						fmt.Sprintf("exceeds the maximum units %d of instance type %s",
-							onceMax, instType.Name)))
+				if coresPct < 0 || coresPct > 100 {
+					errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
+						"must be between 0 and 100"))
+				}
+				if coresPct > 0 && coresPct < memPct {
+					errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
+						"must not be less than the memory percentage"))
 				}
 			}
 		} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
@@ -365,6 +358,19 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			// Default a request here,
 			// and let later scheduling to block if it exceeds the instance type's CPU capacity.
 			instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+		}
+		// On a sliced InstanceType, when only one of the memory/compute slice
+		// percentages is set, copy it to the other so a bare memory request yields
+		// an equal compute share (and vice versa).
+		if instType.Spec.Sliced > 0 {
+			memPct := instRess.AcceleratorSlicedMemoryPercentage
+			coresPct := instRess.AcceleratorSlicedCoresPercentage
+			switch {
+			case memPct > 0 && coresPct == 0:
+				instRess.AcceleratorSlicedCoresPercentage = memPct
+			case coresPct > 0 && memPct == 0:
+				instRess.AcceleratorSlicedMemoryPercentage = coresPct
+			}
 		}
 		// Allow zero accelerator request for acceleratable instance type,
 		// but treat it as 1 when calculating other resource requests by unit.

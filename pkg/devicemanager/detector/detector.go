@@ -19,6 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/datax"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
@@ -303,9 +304,29 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// Devices.
 
 	devsCli := lpCli.WorkerV1alpha1().Devices()
+	// Stamp the accelerator flavors' selector labels (os/arch + feature key) so the
+	// worker's AdmissionCheck locates this node's Devices by a flavor's nodeLabels with
+	// one List instead of a Node→Devices join. They appear on the node only once NFD
+	// applies the feature labels this same pass creates, so a freshly onboarded node is
+	// stamped on a later resync. The gpustack.ai/managed mark is intentionally NOT
+	// stamped here: NodeDevicesReconciler syncs it onto the Devices from the Node, so
+	// the device-manager does not assert a node-management decision it does not own.
+	devsLabels := map[string]string{}
+	for _, nf := range nodefeature.ExtractNodeFlavors(nd) {
+		if !nf.Acceleratable {
+			continue
+		}
+		for k, v := range nf.NodeLabels {
+			if k == systemname.ManagedLabelKey {
+				continue
+			}
+			devsLabels[k] = v
+		}
+	}
 	eDevs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{
-			Name: ndName,
+			Name:   ndName,
+			Labels: devsLabels,
 		},
 		Spec: workercore.DevicesSpec{
 			Groups: eGroups,
@@ -356,6 +377,16 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 			}
 			// Update groups.
 			aDevs.Spec.Groups = groups
+		}
+		// Update selector labels (they appear once NFD has applied the feature labels).
+		if len(devsLabels) > 0 && aDevs.Labels == nil {
+			aDevs.Labels = make(map[string]string)
+		}
+		for k, v := range devsLabels {
+			if aDevs.Labels[k] != v {
+				aDevs.Labels[k] = v
+				skip = false
+			}
 		}
 		// Update owner reference.
 		if !kubemeta.IsControlledBy(aDevs, aNf) {

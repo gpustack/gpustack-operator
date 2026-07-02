@@ -14,6 +14,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
+	"gpustack.ai/gpustack/pkg/system"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
@@ -80,44 +81,30 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 	}
 }
 
-// TestInstanceWebhook_ValidateCreate_SlicedUnits pins Task 12: on a sliced 8s
-// InstanceType the per-card unit count U must be a power of two, at most the
-// OnceMaxRequest (partitions/2 = 4), and strictly less than the partition count.
-func TestInstanceWebhook_ValidateCreate_SlicedUnits(t *testing.T) {
+// TestInstanceWebhook_ValidateCreate_SlicedPercentages pins the sliced request
+// contract: the memory/compute percentages must be in [0,100] and the compute
+// budget may not be smaller than the memory budget.
+func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 	const typeName = "sliced-8s"
 
 	cases := []struct {
-		name    string
-		units   int32
-		onceMax string // OnceMaxRequest; "" → 4 (fresh 8s)
-		wantErr bool
+		name             string
+		memPct, coresPct int32
+		wantErr          bool
 	}{
-		{name: "one unit is allowed", units: 1},
-		{name: "two units is allowed", units: 2},
-		{name: "four units (== OnceMaxRequest) is allowed", units: 4},
-		{name: "three units (not a power of two) is rejected", units: 3, wantErr: true},
-		{name: "zero units is normalized to one and allowed", units: 0},
-		{name: "units equal to partitions is rejected", units: 8, wantErr: true},
-		{name: "units above partitions is rejected", units: 16, wantErr: true},
-		{
-			// When capacity is low the dynamic ORM drops (Task 11), so U beyond it
-			// is rejected even though it is < partitions.
-			name:  "units above a shrunken OnceMaxRequest is rejected",
-			units: 4, onceMax: "2", wantErr: true,
-		},
-		{
-			name:  "units within a shrunken OnceMaxRequest is allowed",
-			units: 2, onceMax: "2",
-		},
+		{name: "equal budgets allowed", memPct: 20, coresPct: 20},
+		{name: "compute larger than memory allowed", memPct: 20, coresPct: 50},
+		{name: "whole-card slice allowed", memPct: 100, coresPct: 100},
+		{name: "no slice allowed", memPct: 0, coresPct: 0},
+		{name: "compute smaller than memory rejected", memPct: 50, coresPct: 20, wantErr: true},
+		{name: "memory above 100 rejected", memPct: 101, coresPct: 101, wantErr: true},
+		{name: "compute above 100 rejected", memPct: 20, coresPct: 101, wantErr: true},
+		{name: "negative memory rejected", memPct: -1, wantErr: true},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			onceMax := c.onceMax
-			if onceMax == "" {
-				onceMax = "4"
-			}
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: worker.InstanceTypeSpec{
@@ -126,7 +113,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedUnits(t *testing.T) {
 					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: 8},
 				},
 				Status: worker.InstanceTypeStatus{
-					Accelerator: worker.InstanceTypeResource{OnceMaxRequest: resource.MustParse(onceMax)},
+					Accelerator: worker.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
 				},
 			}
 			w := newInstanceWebhook(instType)
@@ -134,8 +121,9 @@ func TestInstanceWebhook_ValidateCreate_SlicedUnits(t *testing.T) {
 			inst := webhookInstance("a", typeName)
 			acc := resource.MustParse("1")
 			inst.Spec.Resources = &workercore.InstanceResources{
-				Accelerator:      &acc,
-				AcceleratorUnits: c.units,
+				Accelerator:                       &acc,
+				AcceleratorSlicedMemoryPercentage: c.memPct,
+				AcceleratorSlicedCoresPercentage:  c.coresPct,
 			}
 
 			_, err := w.ValidateCreate(context.Background(), inst)
@@ -254,6 +242,56 @@ func TestInstanceWebhook_Default(t *testing.T) {
 			} else {
 				assert.NoError(t, err)
 			}
+		})
+	}
+}
+
+// TestInstanceWebhook_Default_SlicedPercentages verifies the webhook copies a
+// lone memory/compute percentage to the other so they default to an equal share.
+func TestInstanceWebhook_Default_SlicedPercentages(t *testing.T) {
+	// Default reads a setting through the loopback client; point it at an empty
+	// fake cluster (configured once) so the setting falls back to its default.
+	system.LoopbackCtrlClient.Configure(ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+
+	const typeName = "sliced-8s"
+
+	cases := []struct {
+		name                     string
+		memPct, coresPct         int32
+		wantMemPct, wantCoresPct int32
+	}{
+		{name: "memory copied to cores", memPct: 20, coresPct: 0, wantMemPct: 20, wantCoresPct: 20},
+		{name: "cores copied to memory", memPct: 0, coresPct: 30, wantMemPct: 30, wantCoresPct: 30},
+		{name: "both set left unchanged", memPct: 20, coresPct: 40, wantMemPct: 20, wantCoresPct: 40},
+		{name: "both zero left unchanged", memPct: 0, coresPct: 0, wantMemPct: 0, wantCoresPct: 0},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: worker.InstanceTypeSpec{
+					Acceleratable:           true,
+					Manufacturer:            "nvidia",
+					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: 8},
+					UnitResources:           worker.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+				},
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			acc := resource.MustParse("1")
+			inst.Spec.Resources = &workercore.InstanceResources{
+				Accelerator:                       &acc,
+				AcceleratorSlicedMemoryPercentage: c.memPct,
+				AcceleratorSlicedCoresPercentage:  c.coresPct,
+			}
+
+			err := w.Default(context.Background(), inst)
+			assert.NoError(t, err)
+			assert.Equal(t, c.wantMemPct, inst.Spec.Resources.AcceleratorSlicedMemoryPercentage, "memory percentage")
+			assert.Equal(t, c.wantCoresPct, inst.Spec.Resources.AcceleratorSlicedCoresPercentage, "cores percentage")
 		})
 	}
 }

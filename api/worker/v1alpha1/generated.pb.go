@@ -879,7 +879,10 @@ func (m *InstanceResources) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorUnits))
+	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorSlicedCoresPercentage))
+	i--
+	dAtA[i] = 0x30
+	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorSlicedMemoryPercentage))
 	i--
 	dAtA[i] = 0x28
 	if m.Accelerator != nil {
@@ -1608,7 +1611,8 @@ func (m *InstanceResources) Size() (n int) {
 		l = m.Accelerator.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
-	n += 1 + sovGenerated(uint64(m.AcceleratorUnits))
+	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedMemoryPercentage))
+	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedCoresPercentage))
 	return n
 }
 
@@ -2008,7 +2012,8 @@ func (this *InstanceResources) String() string {
 		`RAM:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.RAM), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
 		`LocalStorage:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.LocalStorage), "Quantity", "resource.Quantity", 1), `&`, ``, 1) + `,`,
 		`Accelerator:` + strings.Replace(fmt.Sprintf("%v", this.Accelerator), "Quantity", "resource.Quantity", 1) + `,`,
-		`AcceleratorUnits:` + fmt.Sprintf("%v", this.AcceleratorUnits) + `,`,
+		`AcceleratorSlicedMemoryPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedMemoryPercentage) + `,`,
+		`AcceleratorSlicedCoresPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedCoresPercentage) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4839,9 +4844,9 @@ func (m *InstanceResources) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorUnits", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorSlicedMemoryPercentage", wireType)
 			}
-			m.AcceleratorUnits = 0
+			m.AcceleratorSlicedMemoryPercentage = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowGenerated
@@ -4851,7 +4856,26 @@ func (m *InstanceResources) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.AcceleratorUnits |= int32(b&0x7F) << shift
+				m.AcceleratorSlicedMemoryPercentage |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorSlicedCoresPercentage", wireType)
+			}
+			m.AcceleratorSlicedCoresPercentage = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.AcceleratorSlicedCoresPercentage |= int32(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
