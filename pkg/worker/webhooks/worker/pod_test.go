@@ -17,6 +17,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 const testLocalQueueName = "test-lq"
@@ -50,12 +51,18 @@ func slicedPod(requests map[core.ResourceName]string) *core.Pod {
 	}
 }
 
-func localQueueWithMemory(memory string) *kueue.LocalQueue {
-	lq := &kueue.LocalQueue{
-		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: testLocalQueueName},
+// clusterQueueWithEntrance builds the operator-owned ClusterQueue that fronts
+// testLocalQueueName, carrying the authoritative per-card VRAM note the webhook
+// reverse-looks-up by the queue-entrance label.
+func clusterQueueWithEntrance(memory string) *kueue.ClusterQueue {
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   "cq-" + testLocalQueueName,
+			Labels: map[string]string{workerctrl.QueueEntranceLabelKey: testLocalQueueName},
+		},
 	}
-	systemmeta.NoteResource(lq, "instancetypeselectors", map[string]string{"memory": memory})
-	return lq
+	systemmeta.NoteResource(cq, "instancetypes", map[string]string{"memory": memory})
+	return cq
 }
 
 func TestPodWebhook_Default(t *testing.T) {
@@ -65,7 +72,7 @@ func TestPodWebhook_Default(t *testing.T) {
 	cases := []struct {
 		name      string
 		requests  map[core.ResourceName]string
-		lqMemory  string // LocalQueue "memory" note; "" → no LocalQueue object
+		cqMemory  string // fronting ClusterQueue "memory" note; "" → no ClusterQueue object
 		wantUnits int64  // expected .sliced.units after Default; 0 → unset
 		wantCores int64  // expected .sliced.cores-percentage after Default; 0 → unchecked
 		wantErr   bool
@@ -77,9 +84,9 @@ func TestPodWebhook_Default(t *testing.T) {
 			wantCores: 100,
 		},
 		{
-			name:      "memory-mib folds to units using the LocalQueue VRAM note",
+			name:      "memory-mib folds to units using the ClusterQueue VRAM note",
 			requests:  map[core.ResourceName]string{names.card: "1", names.memMib: "4096"},
-			lqMemory:  "40960Mi", // 40Gi card; 4Gi req = 10% = 160000 units
+			cqMemory:  "40960Mi", // 40Gi card; 4Gi req = 10% = 160000 units
 			wantUnits: 160000,
 			wantCores: 100,
 		},
@@ -114,7 +121,7 @@ func TestPodWebhook_Default(t *testing.T) {
 		{
 			name:     "memory-mib over the per-card VRAM is rejected",
 			requests: map[core.ResourceName]string{names.card: "1", names.memMib: "81920"},
-			lqMemory: "40960Mi", // 40Gi card; a 80Gi request cannot fit one card
+			cqMemory: "40960Mi", // 40Gi card; a 80Gi request cannot fit one card
 			wantErr:  true,
 		},
 	}
@@ -123,8 +130,8 @@ func TestPodWebhook_Default(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			var objs []ctrlcli.Object
-			if c.lqMemory != "" {
-				objs = append(objs, localQueueWithMemory(c.lqMemory))
+			if c.cqMemory != "" {
+				objs = append(objs, clusterQueueWithEntrance(c.cqMemory))
 			}
 			w := newPodWebhook(objs...)
 			pod := slicedPod(c.requests)

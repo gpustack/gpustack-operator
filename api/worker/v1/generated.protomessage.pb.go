@@ -56,23 +56,7 @@ func (*InstanceSSHPublicKeySpec) ProtoMessage() {}
 
 func (*InstanceType) ProtoMessage() {}
 
-func (*InstanceTypeAccelerator) ProtoMessage() {}
-
-func (*InstanceTypeAcceleratorCPU) ProtoMessage() {}
-
-func (*InstanceTypeCPU) ProtoMessage() {}
-
-func (*InstanceTypeCPUCache) ProtoMessage() {}
-
 func (*InstanceTypeList) ProtoMessage() {}
-
-func (*InstanceTypeResource) ProtoMessage() {}
-
-func (*InstanceTypeSpec) ProtoMessage() {}
-
-func (*InstanceTypeStatus) ProtoMessage() {}
-
-func (*InstanceTypeUnitResources) ProtoMessage() {}
 
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}
 

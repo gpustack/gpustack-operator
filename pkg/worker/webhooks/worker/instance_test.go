@@ -107,13 +107,13 @@ func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
-				Spec: worker.InstanceTypeSpec{
+				Spec: workercore.InstanceTypeSpec{
 					Acceleratable:           true,
 					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: 8},
+					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
 				},
-				Status: worker.InstanceTypeStatus{
-					Accelerator: worker.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+				Status: workercore.InstanceTypeStatus{
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
 				},
 			}
 			w := newInstanceWebhook(instType)
@@ -125,6 +125,69 @@ func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 				AcceleratorSlicedMemoryPercentage: c.memPct,
 				AcceleratorSlicedCoresPercentage:  c.coresPct,
 			}
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_ResourceCaps pins that a Create is rejected when
+// the request exceeds the InstanceType's per-unit RAM (unitRAM × count) or its
+// LocalStorage, and accepted within those caps. The count is the accelerator request
+// for an acceleratable type, else the CPU request.
+func TestInstanceWebhook_ValidateCreate_ResourceCaps(t *testing.T) {
+	const typeName = "gpustack-generic-linux-amd64"
+
+	cases := []struct {
+		name          string
+		acceleratable bool
+		unitRAM       string
+		localCap      string
+		count         int64
+		ram           string
+		localStorage  string
+		wantErr       bool
+	}{
+		{name: "non-accel RAM within cap", unitRAM: "2Gi", localCap: "64Gi", count: 2, ram: "4Gi", localStorage: "32Gi"},
+		{name: "non-accel RAM over cap", unitRAM: "2Gi", localCap: "64Gi", count: 2, ram: "5Gi", localStorage: "32Gi", wantErr: true},
+		{name: "non-accel local storage over cap", unitRAM: "2Gi", localCap: "64Gi", count: 2, ram: "4Gi", localStorage: "100Gi", wantErr: true},
+		{name: "accel within caps", acceleratable: true, unitRAM: "4Gi", localCap: "128Gi", count: 2, ram: "8Gi", localStorage: "64Gi"},
+		{name: "accel RAM over cap", acceleratable: true, unitRAM: "4Gi", localCap: "128Gi", count: 2, ram: "16Gi", localStorage: "64Gi", wantErr: true},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: workercore.InstanceTypeSpec{
+					Acceleratable: c.acceleratable,
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: c.unitRAM},
+					LocalStorage:  c.localCap,
+				},
+				Status: workercore.InstanceTypeStatus{
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100")},
+					CPU:         workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100")},
+				},
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			ram := resource.MustParse(c.ram)
+			local := resource.MustParse(c.localStorage)
+			cnt := resource.NewQuantity(c.count, resource.DecimalSI)
+			res := &workercore.InstanceResources{RAM: ram, LocalStorage: local}
+			if c.acceleratable {
+				res.Accelerator = cnt
+			} else {
+				res.CPU = *cnt
+			}
+			inst.Spec.Resources = res
 
 			_, err := w.ValidateCreate(context.Background(), inst)
 			if c.wantErr {
@@ -271,11 +334,11 @@ func TestInstanceWebhook_Default_SlicedPercentages(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
-				Spec: worker.InstanceTypeSpec{
+				Spec: workercore.InstanceTypeSpec{
 					Acceleratable:           true,
 					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: 8},
-					UnitResources:           worker.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
+					UnitResources:           workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
 				},
 			}
 			w := newInstanceWebhook(instType)

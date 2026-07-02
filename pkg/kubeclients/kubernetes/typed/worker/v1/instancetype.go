@@ -11,8 +11,10 @@ import (
 	context "context"
 
 	workerv1 "gpustack.ai/gpustack/api/worker/v1"
+	applyconfigurationworkerv1 "gpustack.ai/gpustack/pkg/kubeclients/applyconfiguration/worker/v1"
 	scheme "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
 	gentype "k8s.io/client-go/gentype"
 )
@@ -25,21 +27,31 @@ type InstanceTypesGetter interface {
 
 // InstanceTypeInterface has methods to work with InstanceType resources.
 type InstanceTypeInterface interface {
+	Create(ctx context.Context, instanceType *workerv1.InstanceType, opts metav1.CreateOptions) (*workerv1.InstanceType, error)
+	Update(ctx context.Context, instanceType *workerv1.InstanceType, opts metav1.UpdateOptions) (*workerv1.InstanceType, error)
+	// Add a +genclient:noStatus comment above the type to avoid generating UpdateStatus().
+	UpdateStatus(ctx context.Context, instanceType *workerv1.InstanceType, opts metav1.UpdateOptions) (*workerv1.InstanceType, error)
+	Delete(ctx context.Context, name string, opts metav1.DeleteOptions) error
+	DeleteCollection(ctx context.Context, opts metav1.DeleteOptions, listOpts metav1.ListOptions) error
 	Get(ctx context.Context, name string, opts metav1.GetOptions) (*workerv1.InstanceType, error)
 	List(ctx context.Context, opts metav1.ListOptions) (*workerv1.InstanceTypeList, error)
 	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts metav1.PatchOptions, subresources ...string) (result *workerv1.InstanceType, err error)
+	Apply(ctx context.Context, instanceType *applyconfigurationworkerv1.InstanceTypeApplyConfiguration, opts metav1.ApplyOptions) (result *workerv1.InstanceType, err error)
+	// Add a +genclient:noStatus comment above the type to avoid generating ApplyStatus().
+	ApplyStatus(ctx context.Context, instanceType *applyconfigurationworkerv1.InstanceTypeApplyConfiguration, opts metav1.ApplyOptions) (result *workerv1.InstanceType, err error)
 	InstanceTypeExpansion
 }
 
 // instanceTypes implements InstanceTypeInterface
 type instanceTypes struct {
-	*gentype.ClientWithList[*workerv1.InstanceType, *workerv1.InstanceTypeList]
+	*gentype.ClientWithListAndApply[*workerv1.InstanceType, *workerv1.InstanceTypeList, *applyconfigurationworkerv1.InstanceTypeApplyConfiguration]
 }
 
 // newInstanceTypes returns a InstanceTypes
 func newInstanceTypes(c *WorkerV1Client) *instanceTypes {
 	return &instanceTypes{
-		gentype.NewClientWithList[*workerv1.InstanceType, *workerv1.InstanceTypeList](
+		gentype.NewClientWithListAndApply[*workerv1.InstanceType, *workerv1.InstanceTypeList, *applyconfigurationworkerv1.InstanceTypeApplyConfiguration](
 			"instancetypes",
 			c.RESTClient(),
 			scheme.ParameterCodec,

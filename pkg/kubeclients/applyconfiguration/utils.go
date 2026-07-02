@@ -1272,6 +1272,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeyApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("InstanceSSHPublicKeySpec"):
 		return &applyconfigurationworkerv1.InstanceSSHPublicKeySpecApplyConfiguration{}
+	case workerv1.SchemeGroupVersion.WithKind("InstanceType"):
+		return &applyconfigurationworkerv1.InstanceTypeApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("NFSInstancePersistentVolumeSource"):
 		return &applyconfigurationworkerv1.NFSInstancePersistentVolumeSourceApplyConfiguration{}
 	case workerv1.SchemeGroupVersion.WithKind("S3InstancePersistentVolumeSource"):
@@ -1318,6 +1320,24 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.InstanceStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTemplate"):
 		return &applyconfigurationworkerv1alpha1.InstanceTemplateApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceType"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAccelerator"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAcceleratorCPU"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorCPUApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeCPU"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeCPUCache"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUCacheApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeResource"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeResourceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeSpec"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeSpecApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeStatus"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeStatusApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeUnitResources"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeUnitResourcesApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceVolume"):
 		return &applyconfigurationworkerv1alpha1.InstanceVolumeApplyConfiguration{}
 

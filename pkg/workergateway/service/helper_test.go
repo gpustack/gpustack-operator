@@ -10,6 +10,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
@@ -112,70 +113,70 @@ func TestListAggregateInstanceTypes_Result(t *testing.T) {
 	}
 }
 
-func instTypeRes(once, remaining, capacity string) worker.InstanceTypeResource {
-	return worker.InstanceTypeResource{
+func instTypeRes(once, remaining, capacity string) workercore.InstanceTypeResource {
+	return workercore.InstanceTypeResource{
 		OnceMaxRequest: resource.MustParse(once),
 		Remaining:      resource.MustParse(remaining),
 		Capacity:       resource.MustParse(capacity),
 	}
 }
 
-func instSpecCPUOnly() worker.InstanceTypeSpec {
-	return worker.InstanceTypeSpec{
+func instSpecCPUOnly() workercore.InstanceTypeSpec {
+	return workercore.InstanceTypeSpec{
 		Group:         "gpustack-cpu-only",
 		Acceleratable: false,
 	}
 }
 
-func instSpecA10G() worker.InstanceTypeSpec {
-	return worker.InstanceTypeSpec{
+func instSpecA10G() workercore.InstanceTypeSpec {
+	return workercore.InstanceTypeSpec{
 		Group:         "gpustack-nvidia-a10g",
 		Acceleratable: true,
 		Manufacturer:  "nvidia",
 		Product:       "NVIDIA-A10G",
 		Family:        "Ampere",
-		InstanceTypeAccelerator: worker.InstanceTypeAccelerator{
+		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
 			Memory:            "23028Mi",
 			ComputeCapability: "8.6",
 		},
 	}
 }
 
-func instSpecTeslaT4() worker.InstanceTypeSpec {
-	return worker.InstanceTypeSpec{
+func instSpecTeslaT4() workercore.InstanceTypeSpec {
+	return workercore.InstanceTypeSpec{
 		Group:         "gpustack-nvidia-tesla-t4",
 		Acceleratable: true,
 		Manufacturer:  "nvidia",
 		Product:       "Tesla-T4",
 		Family:        "Turing",
-		InstanceTypeAccelerator: worker.InstanceTypeAccelerator{
+		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
 			Memory:            "15360Mi",
 			ComputeCapability: "7.5",
 		},
 	}
 }
 
-func instStatusCPU() worker.InstanceTypeStatus {
-	return worker.InstanceTypeStatus{
-		Phase:        "Active",
-		Accelerator:  instTypeRes("0", "0", "0"),
-		CPU:          instTypeRes("16", "16", "16"),
-		RAM:          instTypeRes("32135984Ki", "32135984Ki", "32135984Ki"),
-		LocalStorage: instTypeRes("104779756Ki", "104779756Ki", "104779756Ki"),
+func instStatusCPU() workercore.InstanceTypeStatus {
+	return workercore.InstanceTypeStatus{
+		Phase:             "Active",
+		Accelerator:       instTypeRes("0", "0", "0"),
+		CPU:               instTypeRes("16", "16", "16"),
+		AcceleratorShared: instTypeRes("32135984Ki", "32135984Ki", "32135984Ki"),
+		AcceleratorSliced: instTypeRes("104779756Ki", "104779756Ki", "104779756Ki"),
 	}
 }
 
-func instStatusGPU(acc string) worker.InstanceTypeStatus {
-	return worker.InstanceTypeStatus{
-		Phase:        "Active",
-		Accelerator:  instTypeRes(acc, acc, acc),
-		CPU:          instTypeRes("4", "4", "4"),
-		RAM:          instTypeRes("16164772Ki", "16164772Ki", "16164772Ki"),
-		LocalStorage: instTypeRes("104779756Ki", "104779756Ki", "104779756Ki"),
+func instStatusGPU(acc string) workercore.InstanceTypeStatus {
+	return workercore.InstanceTypeStatus{
+		Phase:             "Active",
+		Accelerator:       instTypeRes(acc, acc, acc),
+		CPU:               instTypeRes("4", "4", "4"),
+		AcceleratorShared: instTypeRes("16164772Ki", "16164772Ki", "16164772Ki"),
+		AcceleratorSliced: instTypeRes("104779756Ki", "104779756Ki", "104779756Ki"),
 	}
 }
 
-func newInstType(genName, name string, spec worker.InstanceTypeSpec, status worker.InstanceTypeStatus) *worker.InstanceType {
+func newInstType(genName, name string, spec workercore.InstanceTypeSpec, status workercore.InstanceTypeStatus) *worker.InstanceType {
 	return &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
 			Name:         name,
@@ -207,33 +208,33 @@ func teslaT4Inst(name, acc string) *worker.InstanceType {
 	return newInstType("gpustack-nvidia-tesla-t4-", name, instSpecTeslaT4(), instStatusGPU(acc))
 }
 
-// a10gInstCustom returns an A10G instance type whose CPU/RAM/storage can be overridden.
+// a10gInstCustom returns an A10G instance type whose CPU/AcceleratorShared/storage can be overridden.
 // Used to construct scenarios where per-dimension max diverges from bundle-from-winner.
 func a10gInstCustom(name, acc, cpu, ram, storage string) *worker.InstanceType {
 	if name == "" {
 		name = "gpustack-nvidia-a10g-hcjmv"
 	}
-	status := worker.InstanceTypeStatus{
-		Phase:        "Active",
-		Accelerator:  instTypeRes(acc, acc, acc),
-		CPU:          instTypeRes(cpu, cpu, cpu),
-		RAM:          instTypeRes(ram, ram, ram),
-		LocalStorage: instTypeRes(storage, storage, storage),
+	status := workercore.InstanceTypeStatus{
+		Phase:             "Active",
+		Accelerator:       instTypeRes(acc, acc, acc),
+		CPU:               instTypeRes(cpu, cpu, cpu),
+		AcceleratorShared: instTypeRes(ram, ram, ram),
+		AcceleratorSliced: instTypeRes(storage, storage, storage),
 	}
 	return newInstType("gpustack-nvidia-a10g-", name, instSpecA10G(), status)
 }
 
-// cpuOnlyInstCustom returns a CPU-only instance type whose CPU/RAM/storage can be overridden.
+// cpuOnlyInstCustom returns a CPU-only instance type whose CPU/AcceleratorShared/storage can be overridden.
 func cpuOnlyInstCustom(name, cpu, ram, storage string) *worker.InstanceType {
 	if name == "" {
 		name = "gpustack-cpu-only-h7vkb"
 	}
-	status := worker.InstanceTypeStatus{
-		Phase:        "Active",
-		Accelerator:  instTypeRes("0", "0", "0"),
-		CPU:          instTypeRes(cpu, cpu, cpu),
-		RAM:          instTypeRes(ram, ram, ram),
-		LocalStorage: instTypeRes(storage, storage, storage),
+	status := workercore.InstanceTypeStatus{
+		Phase:             "Active",
+		Accelerator:       instTypeRes("0", "0", "0"),
+		CPU:               instTypeRes(cpu, cpu, cpu),
+		AcceleratorShared: instTypeRes(ram, ram, ram),
+		AcceleratorSliced: instTypeRes(storage, storage, storage),
 	}
 	return newInstType("gpustack-cpu-only-", name, instSpecCPUOnly(), status)
 }
@@ -575,22 +576,22 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 // primary dimension, not a per-dimension max across tiers.
 func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 	t.Run("acceleratable: high-Acc tier wins even when another tier has higher CPU", func(t *testing.T) {
-		// Tier Acc=1 has the higher CPU/RAM, but tier Acc=4 wins on the primary dimension.
+		// Tier Acc=1 has the higher CPU/AcceleratorShared, but tier Acc=4 wins on the primary dimension.
 		item := AggregatedInstanceType{
 			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
 			Status: AggregatedInstanceTypeStatus{
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
 					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-						Accelerator:  resource.MustParse("1"),
-						CPU:          resource.MustParse("64"),
-						RAM:          resource.MustParse("256Gi"),
-						LocalStorage: resource.MustParse("2Ti"),
+						Accelerator:       resource.MustParse("1"),
+						CPU:               resource.MustParse("64"),
+						AcceleratorShared: resource.MustParse("256Gi"),
+						AcceleratorSliced: resource.MustParse("2Ti"),
 					}},
 					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-						Accelerator:  resource.MustParse("4"),
-						CPU:          resource.MustParse("8"),
-						RAM:          resource.MustParse("32Gi"),
-						LocalStorage: resource.MustParse("500Gi"),
+						Accelerator:       resource.MustParse("4"),
+						CPU:               resource.MustParse("8"),
+						AcceleratorShared: resource.MustParse("32Gi"),
+						AcceleratorSliced: resource.MustParse("500Gi"),
 					}},
 				},
 			},
@@ -602,13 +603,13 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 		assert.True(t, o.Accelerator.Equal(resource.MustParse("4")), "Accelerator must be the max")
 		assert.True(t, o.CPU.Equal(resource.MustParse("8")),
 			"CPU must come from the Acc=4 tier (8), not the per-dim max (64)")
-		assert.True(t, o.RAM.Equal(resource.MustParse("32Gi")),
-			"RAM must come from the Acc=4 tier (32Gi), not the per-dim max (256Gi)")
-		assert.True(t, o.LocalStorage.Equal(resource.MustParse("500Gi")),
-			"LocalStorage must come from the Acc=4 tier (500Gi), not the per-dim max (2Ti)")
+		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("32Gi")),
+			"AcceleratorShared must come from the Acc=4 tier (32Gi), not the per-dim max (256Gi)")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("500Gi")),
+			"AcceleratorSliced must come from the Acc=4 tier (500Gi), not the per-dim max (2Ti)")
 	})
 
-	t.Run("cpu-only: high-CPU tier wins even when another tier has higher RAM", func(t *testing.T) {
+	t.Run("cpu-only: high-CPU tier wins even when another tier has higher AcceleratorShared", func(t *testing.T) {
 		// Synthetic two-tier CPU-only item: in practice CPU-only items collapse to one tier,
 		// but the function must still produce a coherent bundle from the high-CPU tier.
 		item := AggregatedInstanceType{
@@ -616,14 +617,14 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 			Status: AggregatedInstanceTypeStatus{
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
 					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-						CPU:          resource.MustParse("8"),
-						RAM:          resource.MustParse("128Gi"),
-						LocalStorage: resource.MustParse("4Ti"),
+						CPU:               resource.MustParse("8"),
+						AcceleratorShared: resource.MustParse("128Gi"),
+						AcceleratorSliced: resource.MustParse("4Ti"),
 					}},
 					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-						CPU:          resource.MustParse("32"),
-						RAM:          resource.MustParse("16Gi"),
-						LocalStorage: resource.MustParse("200Gi"),
+						CPU:               resource.MustParse("32"),
+						AcceleratorShared: resource.MustParse("16Gi"),
+						AcceleratorSliced: resource.MustParse("200Gi"),
 					}},
 				},
 			},
@@ -633,10 +634,10 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.CPU.Equal(resource.MustParse("32")), "CPU must be the max")
-		assert.True(t, o.RAM.Equal(resource.MustParse("16Gi")),
-			"RAM must come from the high-CPU tier (16Gi), not the per-dim max (128Gi)")
-		assert.True(t, o.LocalStorage.Equal(resource.MustParse("200Gi")),
-			"LocalStorage must come from the high-CPU tier (200Gi), not the per-dim max (4Ti)")
+		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("16Gi")),
+			"AcceleratorShared must come from the high-CPU tier (16Gi), not the per-dim max (128Gi)")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("200Gi")),
+			"AcceleratorSliced must come from the high-CPU tier (200Gi), not the per-dim max (4Ti)")
 	})
 
 	t.Run("empty tiers leaves overview zeroed", func(t *testing.T) {
@@ -649,8 +650,8 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.Accelerator.IsZero())
 		assert.True(t, o.CPU.IsZero())
-		assert.True(t, o.RAM.IsZero())
-		assert.True(t, o.LocalStorage.IsZero())
+		assert.True(t, o.AcceleratorShared.IsZero())
+		assert.True(t, o.AcceleratorSliced.IsZero())
 	})
 }
 
@@ -658,22 +659,22 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 // rule that the tier-level OnceMaxRequest is the bundle of the candidate with the
 // largest primary dimension (Accelerator if acceleratable, otherwise CPU).
 func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *testing.T) {
-	t.Run("cpu-only: high-CPU candidate wins bundle even when another candidate has higher RAM", func(t *testing.T) {
+	t.Run("cpu-only: high-CPU candidate wins bundle even when another candidate has higher AcceleratorShared", func(t *testing.T) {
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
 					Cluster: "cluster-a", Name: "fat-ram",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti")},
 				},
 				{
 					Cluster: "cluster-b", Name: "fat-cpu",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi")},
 				},
 			},
 		}
@@ -682,10 +683,10 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 
 		o := tier.OnceMaxRequest
 		assert.True(t, o.CPU.Equal(resource.MustParse("64")), "CPU must be max")
-		assert.True(t, o.RAM.Equal(resource.MustParse("64Gi")),
-			"RAM must come from the high-CPU candidate (64Gi), not the per-dim max (512Gi)")
-		assert.True(t, o.LocalStorage.Equal(resource.MustParse("200Gi")),
-			"LocalStorage must come from the high-CPU candidate (200Gi), not the per-dim max (1Ti)")
+		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("64Gi")),
+			"AcceleratorShared must come from the high-CPU candidate (64Gi), not the per-dim max (512Gi)")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("200Gi")),
+			"AcceleratorSliced must come from the high-CPU candidate (200Gi), not the per-dim max (1Ti)")
 	})
 
 	t.Run("acceleratable: ties on Accelerator keep the first-seen candidate's bundle", func(t *testing.T) {
@@ -696,17 +697,17 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
 					Cluster: "cluster-a", Name: "first",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("2")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("500Gi")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("2")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("500Gi")},
 				},
 				{
 					Cluster: "cluster-b", Name: "second",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("2")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("2")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti")},
 				},
 			},
 		}
@@ -716,8 +717,8 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 		o := tier.OnceMaxRequest
 		assert.True(t, o.Accelerator.Equal(resource.MustParse("2")))
 		assert.True(t, o.CPU.Equal(resource.MustParse("8")), "ties keep first-seen candidate's CPU")
-		assert.True(t, o.RAM.Equal(resource.MustParse("32Gi")), "ties keep first-seen candidate's RAM")
-		assert.True(t, o.LocalStorage.Equal(resource.MustParse("500Gi")), "ties keep first-seen candidate's storage")
+		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("32Gi")), "ties keep first-seen candidate's AcceleratorShared")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("500Gi")), "ties keep first-seen candidate's storage")
 	})
 }
 
@@ -731,16 +732,16 @@ func TestAggregatedInstanceType_Recompute_RemainingSum(t *testing.T) {
 			Status: AggregatedInstanceTypeStatus{
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
 					{Remaining: AggregatedInstanceTypeOverviewResource{
-						Accelerator:  resource.MustParse("2"),
-						CPU:          resource.MustParse("16"),
-						RAM:          resource.MustParse("32Gi"),
-						LocalStorage: resource.MustParse("500Gi"),
+						Accelerator:       resource.MustParse("2"),
+						CPU:               resource.MustParse("16"),
+						AcceleratorShared: resource.MustParse("32Gi"),
+						AcceleratorSliced: resource.MustParse("500Gi"),
 					}},
 					{Remaining: AggregatedInstanceTypeOverviewResource{
-						Accelerator:  resource.MustParse("4"),
-						CPU:          resource.MustParse("48"),
-						RAM:          resource.MustParse("128Gi"),
-						LocalStorage: resource.MustParse("1Ti"),
+						Accelerator:       resource.MustParse("4"),
+						CPU:               resource.MustParse("48"),
+						AcceleratorShared: resource.MustParse("128Gi"),
+						AcceleratorSliced: resource.MustParse("1Ti"),
 					}},
 				},
 			},
@@ -751,8 +752,8 @@ func TestAggregatedInstanceType_Recompute_RemainingSum(t *testing.T) {
 		r := item.Status.Remaining
 		assert.True(t, r.Accelerator.Equal(resource.MustParse("6")), "Accelerator must be sum (2+4)")
 		assert.True(t, r.CPU.Equal(resource.MustParse("64")), "CPU must be sum (16+48)")
-		assert.True(t, r.RAM.Equal(resource.MustParse("160Gi")), "RAM must be sum (32Gi+128Gi)")
-		assert.True(t, r.LocalStorage.Equal(resource.MustParse("1524Gi")), "LocalStorage must be sum (500Gi+1Ti=500Gi+1024Gi)")
+		assert.True(t, r.AcceleratorShared.Equal(resource.MustParse("160Gi")), "AcceleratorShared must be sum (32Gi+128Gi)")
+		assert.True(t, r.AcceleratorSliced.Equal(resource.MustParse("1524Gi")), "AcceleratorSliced must be sum (500Gi+1Ti=500Gi+1024Gi)")
 	})
 
 	t.Run("empty tiers leaves Remaining zeroed", func(t *testing.T) {
@@ -765,8 +766,8 @@ func TestAggregatedInstanceType_Recompute_RemainingSum(t *testing.T) {
 		r := item.Status.Remaining
 		assert.True(t, r.Accelerator.IsZero())
 		assert.True(t, r.CPU.IsZero())
-		assert.True(t, r.RAM.IsZero())
-		assert.True(t, r.LocalStorage.IsZero())
+		assert.True(t, r.AcceleratorShared.IsZero())
+		assert.True(t, r.AcceleratorSliced.IsZero())
 	})
 }
 
@@ -779,17 +780,17 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
 					Cluster: "cluster-a", Name: "small",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("1")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("4")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16Gi"), Remaining: resource.MustParse("16Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("200Gi")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("1")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("4")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16Gi"), Remaining: resource.MustParse("16Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("200Gi")},
 				},
 				{
 					Cluster: "cluster-b", Name: "big",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("3")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8"), Remaining: resource.MustParse("12")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi"), Remaining: resource.MustParse("48Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("500Gi"), Remaining: resource.MustParse("800Gi")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("3")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8"), Remaining: resource.MustParse("12")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi"), Remaining: resource.MustParse("48Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("500Gi"), Remaining: resource.MustParse("800Gi")},
 				},
 			},
 		}
@@ -799,8 +800,8 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 		r := tier.Remaining
 		assert.True(t, r.Accelerator.Equal(resource.MustParse("4")), "Accelerator must be sum (1+3)")
 		assert.True(t, r.CPU.Equal(resource.MustParse("16")), "CPU must be sum (4+12)")
-		assert.True(t, r.RAM.Equal(resource.MustParse("64Gi")), "RAM must be sum (16Gi+48Gi)")
-		assert.True(t, r.LocalStorage.Equal(resource.MustParse("1000Gi")), "LocalStorage must be sum (200Gi+800Gi)")
+		assert.True(t, r.AcceleratorShared.Equal(resource.MustParse("64Gi")), "AcceleratorShared must be sum (16Gi+48Gi)")
+		assert.True(t, r.AcceleratorSliced.Equal(resource.MustParse("1000Gi")), "AcceleratorSliced must be sum (200Gi+800Gi)")
 	})
 
 	t.Run("Remaining is independent of OnceMaxRequest winner", func(t *testing.T) {
@@ -810,17 +811,17 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
 					Cluster: "cluster-a", Name: "fat-ram",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("10")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi"), Remaining: resource.MustParse("1Ti")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti"), Remaining: resource.MustParse("2Ti")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("10")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi"), Remaining: resource.MustParse("1Ti")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti"), Remaining: resource.MustParse("2Ti")},
 				},
 				{
 					Cluster: "cluster-b", Name: "fat-cpu",
-					Accelerator:  AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
-					CPU:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64"), Remaining: resource.MustParse("128")},
-					RAM:          AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi"), Remaining: resource.MustParse("256Gi")},
-					LocalStorage: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("400Gi")},
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64"), Remaining: resource.MustParse("128")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi"), Remaining: resource.MustParse("256Gi")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("400Gi")},
 				},
 			},
 		}
@@ -829,13 +830,13 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 
 		// OnceMaxRequest still picks fat-cpu's bundle (CPU is the primary dimension).
 		assert.True(t, tier.OnceMaxRequest.CPU.Equal(resource.MustParse("64")))
-		assert.True(t, tier.OnceMaxRequest.RAM.Equal(resource.MustParse("64Gi")))
+		assert.True(t, tier.OnceMaxRequest.AcceleratorShared.Equal(resource.MustParse("64Gi")))
 
 		// Remaining aggregates both candidates regardless of who won.
 		r := tier.Remaining
 		assert.True(t, r.CPU.Equal(resource.MustParse("138")), "CPU must be sum (10+128)")
-		assert.True(t, r.RAM.Equal(resource.MustParse("1280Gi")), "RAM must be sum (1Ti+256Gi)")
-		assert.True(t, r.LocalStorage.Equal(resource.MustParse("2448Gi")), "LocalStorage must be sum (2Ti+400Gi)")
+		assert.True(t, r.AcceleratorShared.Equal(resource.MustParse("1280Gi")), "AcceleratorShared must be sum (1Ti+256Gi)")
+		assert.True(t, r.AcceleratorSliced.Equal(resource.MustParse("2448Gi")), "AcceleratorSliced must be sum (2Ti+400Gi)")
 	})
 }
 
@@ -892,7 +893,7 @@ func TestAggregatedInstanceType_LessTierByPrimary(t *testing.T) {
 // candidate end-to-end.
 func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 	t.Run("acceleratable item picks bundle from the highest-Acc tier", func(t *testing.T) {
-		// Two A10G candidates: Acc=1 with fat CPU/RAM, Acc=4 with lean CPU/RAM.
+		// Two A10G candidates: Acc=1 with fat CPU/AcceleratorShared, Acc=4 with lean CPU/AcceleratorShared.
 		op := OpListAggregateInstanceTypes()
 		require.NoError(t, op.Next("cluster-a", a10gInstCustom("a10g-fat-1", "1", "64", "256Gi", "2Ti")))
 		require.NoError(t, op.Next("cluster-b", a10gInstCustom("a10g-lean-4", "4", "8", "32Gi", "500Gi")))
@@ -912,8 +913,8 @@ func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.Accelerator.Equal(resource.MustParse("4")))
 		assert.True(t, o.CPU.Equal(resource.MustParse("8")), "must not pull CPU=64 from the Acc=1 tier")
-		assert.True(t, o.RAM.Equal(resource.MustParse("32Gi")), "must not pull RAM=256Gi from the Acc=1 tier")
-		assert.True(t, o.LocalStorage.Equal(resource.MustParse("500Gi")), "must not pull storage=2Ti from the Acc=1 tier")
+		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("32Gi")), "must not pull AcceleratorShared=256Gi from the Acc=1 tier")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("500Gi")), "must not pull storage=2Ti from the Acc=1 tier")
 	})
 
 	t.Run("cpu-only item picks tier-level bundle from the highest-CPU candidate", func(t *testing.T) {
@@ -933,8 +934,8 @@ func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.CPU.Equal(resource.MustParse("64")))
-		assert.True(t, o.RAM.Equal(resource.MustParse("64Gi")), "must not pull RAM=512Gi from the lower-CPU candidate")
-		assert.True(t, o.LocalStorage.Equal(resource.MustParse("200Gi")), "must not pull storage=1Ti from the lower-CPU candidate")
+		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("64Gi")), "must not pull AcceleratorShared=512Gi from the lower-CPU candidate")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("200Gi")), "must not pull storage=1Ti from the lower-CPU candidate")
 	})
 
 	t.Run("Result sorts CPU-only items' tiers (degenerate single tier remains valid)", func(t *testing.T) {
@@ -976,14 +977,14 @@ func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
 		assert.True(t, tier1.Remaining.CPU.Equal(resource.MustParse("8")))
 		assert.True(t, tier4.Remaining.Accelerator.Equal(resource.MustParse("8")), "tier Acc=4 has two candidates with Acc.Remaining=4 each")
 		assert.True(t, tier4.Remaining.CPU.Equal(resource.MustParse("48")), "16+32")
-		assert.True(t, tier4.Remaining.RAM.Equal(resource.MustParse("192Gi")), "64Gi+128Gi")
-		assert.True(t, tier4.Remaining.LocalStorage.Equal(resource.MustParse("3Ti")), "1Ti+2Ti")
+		assert.True(t, tier4.Remaining.AcceleratorShared.Equal(resource.MustParse("192Gi")), "64Gi+128Gi")
+		assert.True(t, tier4.Remaining.AcceleratorSliced.Equal(resource.MustParse("3Ti")), "1Ti+2Ti")
 
 		// Item-level Remaining sums across both tiers.
 		r := item.Status.Remaining
 		assert.True(t, r.Accelerator.Equal(resource.MustParse("9")), "1 + (4+4)")
 		assert.True(t, r.CPU.Equal(resource.MustParse("56")), "8 + (16+32)")
-		assert.True(t, r.RAM.Equal(resource.MustParse("224Gi")), "32Gi + (64Gi+128Gi)")
+		assert.True(t, r.AcceleratorShared.Equal(resource.MustParse("224Gi")), "32Gi + (64Gi+128Gi)")
 	})
 
 	t.Run("cpu-only: item Remaining sums across candidates in single tier", func(t *testing.T) {
@@ -1000,12 +1001,12 @@ func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
 		r := item.Status.Remaining
 		assert.True(t, r.Accelerator.IsZero(), "CPU-only items have no accelerator")
 		assert.True(t, r.CPU.Equal(resource.MustParse("68")), "4+64")
-		assert.True(t, r.RAM.Equal(resource.MustParse("272Gi")), "16Gi+256Gi")
-		assert.True(t, r.LocalStorage.Equal(resource.MustParse("1224Gi")), "200Gi+1Ti")
+		assert.True(t, r.AcceleratorShared.Equal(resource.MustParse("272Gi")), "16Gi+256Gi")
+		assert.True(t, r.AcceleratorSliced.Equal(resource.MustParse("1224Gi")), "200Gi+1Ti")
 
 		// Tier-level Remaining matches item-level for the single tier.
 		assert.True(t, item.Status.Tiers[0].Remaining.CPU.Equal(r.CPU))
-		assert.True(t, item.Status.Tiers[0].Remaining.RAM.Equal(r.RAM))
-		assert.True(t, item.Status.Tiers[0].Remaining.LocalStorage.Equal(r.LocalStorage))
+		assert.True(t, item.Status.Tiers[0].Remaining.AcceleratorShared.Equal(r.AcceleratorShared))
+		assert.True(t, item.Status.Tiers[0].Remaining.AcceleratorSliced.Equal(r.AcceleratorSliced))
 	})
 }

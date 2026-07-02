@@ -25,6 +25,10 @@ func (c *FakeWorkerV1alpha1) Instances(namespace string) v1alpha1.InstanceInterf
 	return newFakeInstances(c, namespace)
 }
 
+func (c *FakeWorkerV1alpha1) InstanceTypes() v1alpha1.InstanceTypeInterface {
+	return newFakeInstanceTypes(c)
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeWorkerV1alpha1) RESTClient() rest.Interface {

@@ -60,7 +60,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 	// The gpustack chart cannot ship the node-devices AdmissionCheck: its CRD is
 	// installed here, at runtime. Apply it now that Kueue is up — the worker's
 	// NodeDevicesAdmissionCheckReconciler then marks it Active, and
-	// NodeQueueReconciler references it from accelerated ClusterQueues. Apply only
+	// InstanceTypeReconciler references it from accelerated ClusterQueues. Apply only
 	// sets spec, so it never clobbers the controller-owned Active condition.
 	return kubeappyaml.ApplyWithRestClientGetter(ctx, nodeDevicesAdmissionCheckYAML, helmCli.KubeRestClientGetter())
 }

@@ -70,7 +70,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		// InstanceType fixture.
 		acceleratable bool
 		manufacturer  string
-		sliced        int64 // partition count; 0 → not sliced
+		sliceable     bool // → Spec.Sliceable (true → the accelerator can be sliced)
 
 		// getResourceRequirements flags.
 		withGeneral, withGeneralOvercommit, withAccelerator bool
@@ -137,7 +137,7 @@ func TestGetResourceRequirements(t *testing.T) {
 			// per-card percentages; the Pod webhook later folds memory-% into .sliced.units.
 			name: "sliced accelerator — one card, 20% memory / 20% cores",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), memPct: 20, coresPct: 20,
-			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliceable: true,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
 				slicedCardNVIDIA:     qty("1"),
@@ -154,7 +154,7 @@ func TestGetResourceRequirements(t *testing.T) {
 			// A larger compute share than memory share is allowed.
 			name: "sliced accelerator — two cards, 20% memory / 30% cores",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"), memPct: 20, coresPct: 30,
-			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliceable: true,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
 				slicedCardNVIDIA:     qty("2"),
@@ -171,7 +171,7 @@ func TestGetResourceRequirements(t *testing.T) {
 			// A 0% memory request on a sliced type falls through to exclusive whole cards.
 			name: "sliced InstanceType but 0% request — exclusive whole card",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"), memPct: 0, coresPct: 0,
-			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliceable: true,
 			withAccelerator: true,
 			wantLimits:      core.ResourceList{accNVIDIA: qty("2")},
 			wantRequests:    core.ResourceList{accNVIDIA: qty("2")},
@@ -266,10 +266,10 @@ func TestGetResourceRequirements(t *testing.T) {
 			inst.Spec.Resources.AcceleratorSlicedCoresPercentage = c.coresPct
 
 			instType := &worker.InstanceType{
-				Spec: worker.InstanceTypeSpec{
+				Spec: workercore.InstanceTypeSpec{
 					Acceleratable:           c.acceleratable,
 					Manufacturer:            c.manufacturer,
-					InstanceTypeAccelerator: worker.InstanceTypeAccelerator{Sliced: c.sliced},
+					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: c.sliceable},
 				},
 			}
 
@@ -345,7 +345,7 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 			if c.withInstanceType {
 				objs = append(objs, &worker.InstanceType{
 					ObjectMeta: meta.ObjectMeta{Name: c.instType},
-					Status:     worker.InstanceTypeStatus{Phase: c.itPhase},
+					Status:     workercore.InstanceTypeStatus{Phase: c.itPhase},
 				})
 			}
 			cli := buildInstanceClient(objs...)

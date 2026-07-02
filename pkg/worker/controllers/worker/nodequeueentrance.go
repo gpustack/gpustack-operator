@@ -27,12 +27,14 @@ import (
 )
 
 // NodeQueueEntranceReconciler reconciles kueue.LocalQueue objects driven by
-// kueue.ClusterQueue and Kubernetes Namespace changes to finish the following tasks:
-//   - When a ClusterQueue is created, or a Namespace is created,
-//     create a kueue.LocalQueue pointing to the ClusterQueue in every non-system Namespace.
-//   - Copy the ClusterQueue's descriptive notes (acceleratable/manufacturer/product/
-//     family/memory) onto each LocalQueue, so the per-card VRAM among them is readable
-//     from the namespaced LocalQueue co-located with the workload.
+// kueue.ClusterQueue and Kubernetes Namespace changes: when a ClusterQueue is created,
+// or a Namespace is created, it creates a kueue.LocalQueue pointing to the ClusterQueue
+// in every non-system Namespace.
+//
+// The LocalQueue carries no authoritative note. The per-card VRAM lives only on the
+// operator-owned ClusterQueue, which the Pod webhook reverse-looks-up by the
+// InstanceTypeReconciler's queue-entrance label — a namespaced LocalQueue is
+// user-writable and must not be trusted as the VRAM source.
 //
 // The LocalQueue is named by the FNV-64a hash of the ClusterQueue name,
 // see nodefeature.FormatLocalQueueName, because the ClusterQueue name may
@@ -48,10 +50,6 @@ const (
 	// _LocalQueueClusterQueueNameAnnoKey is for the cluster queue name of a local queue,
 	// whose value records the full ClusterQueue name behind the hash-named LocalQueue.
 	_LocalQueueClusterQueueNameAnnoKey = ScheduleLabelPrefix + "queue"
-
-	// _NodeQueueEntranceResType is the systemmeta resource type carried by the
-	// LocalQueues this reconciler manages.
-	_NodeQueueEntranceResType = "instancetypeselectors"
 )
 
 func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -70,8 +68,6 @@ func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 		logger.V(3).Info("skip deleted cluster queue")
 		return ctrl.Result{}, nil
 	}
-
-	lqNotes := assembleLocalQueueNotes(cq)
 
 	// List Namespaces.
 	nsList := new(core.NamespaceList)
@@ -113,7 +109,6 @@ func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 				ClusterQueue: kueue.ClusterQueueReference(cq.Name),
 			},
 		}
-		systemmeta.NoteResource(lq, _NodeQueueEntranceResType, lqNotes)
 		kubemeta.ControlOnWithoutBlock(lq, cq, kueue.SchemeGroupVersion.WithKind("ClusterQueue"))
 		_, err = kubeclientset.UpdateWithCtrlClient(ctx, r.Client, lq,
 			kubeclientset.WithCreateIfNotExisted[*kueue.LocalQueue]())
@@ -125,20 +120,6 @@ func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Re
 	}
 
 	return ctrl.Result{}, multierr.Combine(errs...)
-}
-
-// assembleLocalQueueNotes copies the descriptive notes (including the per-card
-// VRAM) a workload selects an InstanceType by from the backing ClusterQueue, so
-// they are readable from the namespaced LocalQueue co-located with the workload.
-func assembleLocalQueueNotes(cq *kueue.ClusterQueue) map[string]string {
-	_, cqNotes := systemmeta.DescribeResource(cq)
-	return map[string]string{
-		"acceleratable": cqNotes["acceleratable"],
-		"manufacturer":  cqNotes["manufacturer"],
-		"product":       cqNotes["product"],
-		"family":        cqNotes["family"],
-		"memory":        cqNotes["memory"],
-	}
 }
 
 func (r *NodeQueueEntranceReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {

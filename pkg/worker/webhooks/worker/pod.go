@@ -21,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
+	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
 // PodWebhook hooks core Pods routed to a GPUStack queue (selected by the
@@ -221,41 +222,49 @@ func (r *PodWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	return nil
 }
 
-// cardVRAMMib reads the per-card VRAM (MiB) from the Pod's LocalQueue "memory"
-// note, falling back to a non-cached read when the controller cache is not yet
-// warm. It errors when the LocalQueue or its memory note is missing or
-// unparseable so an unfoldable memory-mib request is rejected.
+// cardVRAMMib reads the per-card VRAM (MiB) from the operator-owned ClusterQueue that
+// fronts the Pod's LocalQueue. The ClusterQueue is reverse-looked-up by the
+// queue-entrance label the InstanceTypeReconciler stamps with the LocalQueue name, so
+// the authoritative VRAM is never taken from the user-writable, namespaced LocalQueue.
+// It falls back to a non-cached read when the controller cache is not yet warm, and
+// errors when no (or more than one) ClusterQueue matches, or its memory note is missing
+// or unparseable, so an unfoldable memory-mib request is rejected.
 func (r *PodWebhook) cardVRAMMib(ctx context.Context, pod *core.Pod) (int64, error) {
 	lqName := pod.Labels[kueuectrlconst.QueueLabel]
 	if lqName == "" {
 		return 0, fmt.Errorf("pod has no %q label", kueuectrlconst.QueueLabel)
 	}
 
-	lq := new(kueue.LocalQueue)
-	key := ctrlcli.ObjectKey{Namespace: pod.Namespace, Name: lqName}
-	err := r.Client.Get(ctx, key, lq)
-	if err != nil {
-		if !kerrors.IsNotFound(err) {
-			return 0, fmt.Errorf("get local queue %s: %w", lqName, err)
-		}
-		err = r.APIReader.Get(ctx, key, lq, ctrlclix.WithoutQuorum)
-		if err != nil {
-			return 0, fmt.Errorf("get local queue %s: %w", lqName, err)
+	cqList := new(kueue.ClusterQueueList)
+	sel := ctrlcli.MatchingLabels{workerctrl.QueueEntranceLabelKey: lqName}
+	err := r.Client.List(ctx, cqList, sel)
+	if err != nil || len(cqList.Items) == 0 {
+		// The controller cache may not be warm yet; fall back to a direct read.
+		if err = r.APIReader.List(ctx, cqList, sel, ctrlclix.WithoutQuorum); err != nil {
+			return 0, fmt.Errorf("list cluster queues fronting local queue %s: %w", lqName, err)
 		}
 	}
+	switch len(cqList.Items) {
+	case 0:
+		return 0, fmt.Errorf("no cluster queue fronts local queue %s", lqName)
+	case 1:
+	default:
+		return 0, fmt.Errorf("more than one cluster queue fronts local queue %s", lqName)
+	}
+	cq := &cqList.Items[0]
 
-	_, notes := systemmeta.DescribeResource(lq)
+	_, notes := systemmeta.DescribeResource(cq)
 	memStr := notes["memory"]
 	if memStr == "" {
-		return 0, fmt.Errorf("local queue %s has no memory note", lqName)
+		return 0, fmt.Errorf("cluster queue %s has no memory note", cq.Name)
 	}
 	q, err := resource.ParseQuantity(memStr)
 	if err != nil {
-		return 0, fmt.Errorf("parse memory note %q of local queue %s: %w", memStr, lqName, err)
+		return 0, fmt.Errorf("parse memory note %q of cluster queue %s: %w", memStr, cq.Name, err)
 	}
 	mib := q.Value() / quantityx.Mi
 	if mib <= 0 {
-		return 0, fmt.Errorf("local queue %s has non-positive memory note %q", lqName, memStr)
+		return 0, fmt.Errorf("cluster queue %s has non-positive memory note %q", cq.Name, memStr)
 	}
 	return mib, nil
 }

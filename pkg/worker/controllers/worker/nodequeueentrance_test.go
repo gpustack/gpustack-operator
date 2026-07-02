@@ -18,11 +18,12 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
-// TestNodeQueueEntranceReconciler_CopiesNotes pins that a LocalQueue is created
-// in a non-reserved Namespace carrying the descriptive notes (including the
-// per-card VRAM) copied from its ClusterQueue and branded as a selector view; the
-// unit spec is not part of that view.
-func TestNodeQueueEntranceReconciler_CopiesNotes(t *testing.T) {
+// TestNodeQueueEntranceReconciler_CreatesLocalQueue pins that a LocalQueue is created
+// in a non-reserved Namespace pointing at its ClusterQueue and recording the full
+// ClusterQueue name, and that it carries no VRAM note: the per-card VRAM is
+// authoritative only on the operator-owned ClusterQueue, reverse-looked-up by the
+// Pod webhook, never trusted from the user-writable LocalQueue.
+func TestNodeQueueEntranceReconciler_CreatesLocalQueue(t *testing.T) {
 	const cqName = "gpustack-nvidia-ln-x64"
 	const ns = "team-a"
 
@@ -30,12 +31,7 @@ func TestNodeQueueEntranceReconciler_CopiesNotes(t *testing.T) {
 	systemmeta.NoteResource(cq, _ClusterQueueResType, map[string]string{
 		"acceleratable": "true",
 		"manufacturer":  "nvidia",
-		"product":       "h100",
-		"family":        "hopper",
 		"memory":        "81920Mi",
-		"unitCPU":       "8",
-		"unitRAM":       "64",
-		"localStorage":  "256",
 	})
 	namespace := &core.Namespace{ObjectMeta: meta.ObjectMeta{Name: ns}}
 
@@ -54,15 +50,10 @@ func TestNodeQueueEntranceReconciler_CopiesNotes(t *testing.T) {
 		ctrlcli.ObjectKey{Namespace: ns, Name: nodefeature.FormatLocalQueueName(cqName)}, lq))
 
 	assert.Equal(t, kueue.ClusterQueueReference(cqName), lq.Spec.ClusterQueue)
+	assert.Equal(t, cqName, lq.Annotations[_LocalQueueClusterQueueNameAnnoKey])
 
-	resType, notes := systemmeta.DescribeResource(lq)
-	assert.Equal(t, _NodeQueueEntranceResType, resType)
-	assert.Equal(t, "true", notes["acceleratable"])
-	assert.Equal(t, "nvidia", notes["manufacturer"])
-	assert.Equal(t, "h100", notes["product"])
-	assert.Equal(t, "hopper", notes["family"])
-	assert.Equal(t, "81920Mi", notes["memory"])
-	// The unit spec belongs to the queue, not the selector view it copies down.
-	assert.NotContains(t, notes, "unitCPU")
-	assert.NotContains(t, notes, "localStorage")
+	// The LocalQueue carries no VRAM note — the per-card VRAM lives only on the
+	// operator-owned ClusterQueue.
+	_, notes := systemmeta.DescribeResource(lq)
+	assert.NotContains(t, notes, "memory")
 }

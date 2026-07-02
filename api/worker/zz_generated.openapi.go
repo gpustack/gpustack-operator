@@ -44,15 +44,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceSSHPublicKeyList{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref),
 		v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref),
 		v1.InstanceType{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceType(ref),
-		v1.InstanceTypeAccelerator{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceTypeAccelerator(ref),
-		v1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName():            schema_gpustack_api_worker_v1_InstanceTypeAcceleratorCPU(ref),
-		v1.InstanceTypeCPU{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1_InstanceTypeCPU(ref),
-		v1.InstanceTypeCPUCache{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceTypeCPUCache(ref),
 		v1.InstanceTypeList{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeList(ref),
-		v1.InstanceTypeResource{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceTypeResource(ref),
-		v1.InstanceTypeSpec{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeSpec(ref),
-		v1.InstanceTypeStatus{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceTypeStatus(ref),
-		v1.InstanceTypeUnitResources{}.OpenAPIModelName():             schema_gpustack_api_worker_v1_InstanceTypeUnitResources(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():     schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
@@ -77,6 +69,16 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.InstanceSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref),
 		v1alpha1.InstanceStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceStatus(ref),
 		v1alpha1.InstanceTemplate{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref),
+		v1alpha1.InstanceType{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceType(ref),
+		v1alpha1.InstanceTypeAccelerator{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref),
+		v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName():      schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref),
+		v1alpha1.InstanceTypeCPU{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_InstanceTypeCPU(ref),
+		v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_InstanceTypeCPUCache(ref),
+		v1alpha1.InstanceTypeList{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref),
+		v1alpha1.InstanceTypeResource{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_InstanceTypeResource(ref),
+		v1alpha1.InstanceTypeSpec{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref),
+		v1alpha1.InstanceTypeStatus{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref),
+		v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_InstanceTypeUnitResources(ref),
 		v1alpha1.InstanceVolume{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceVolume(ref),
 		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():  schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
 		corev1.Affinity{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_Affinity(ref),
@@ -1411,274 +1413,20 @@ func schema_gpustack_api_worker_v1_InstanceType(ref common.ReferenceCallback) co
 					"spec": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
-							Ref:     ref(v1.InstanceTypeSpec{}.OpenAPIModelName()),
+							Ref:     ref(v1alpha1.InstanceTypeSpec{}.OpenAPIModelName()),
 						},
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
 							Default: map[string]interface{}{},
-							Ref:     ref(v1.InstanceTypeStatus{}.OpenAPIModelName()),
+							Ref:     ref(v1alpha1.InstanceTypeStatus{}.OpenAPIModelName()),
 						},
 					},
 				},
 			},
 		},
 		Dependencies: []string{
-			v1.InstanceTypeSpec{}.OpenAPIModelName(), v1.InstanceTypeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeAccelerator(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeAccelerator describes the information of the accelerator.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"memory": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"computeCapability": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"sliced": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Sliced indicates whether the accelerator is sliced. When Sliced is blank, that means the InstanceType is not sliced.",
-							Type:        []string{"integer"},
-							Format:      "int64",
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU describes the CPU information of the accelerator.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeAcceleratorCPU(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeAcceleratorCPU describes the CPU information of the accelerator.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"manufacturer": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Manufacturer is the name of the CPU manufacturer, e.g. \"amd\", \"intel\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"product": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Product is the name of the CPU product.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"family": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Family is the family of the CPU.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"physicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"threadsPerPhysicalCore": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"logicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"stepping": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"clockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"maxClockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cacheLine": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cache": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cache describes the cache information of the CPU.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeCPUCache{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceTypeCPUCache{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeCPU(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeCPU describes the information of the CPU.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"physicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"threadsPerPhysicalCore": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"logicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"stepping": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"clockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"maxClockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cacheLine": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cache": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cache describes the cache information of the CPU.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeCPUCache{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceTypeCPUCache{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeCPUCache(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeCPUCache describes the cache information of the CPU.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"l1i": {
-						SchemaProps: spec.SchemaProps{
-							Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"l1d": {
-						SchemaProps: spec.SchemaProps{
-							Description: "L1D is the L1 data cache size in bytes of the CPU.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"l2": {
-						SchemaProps: spec.SchemaProps{
-							Description: "L2 is the L2 cache size in bytes of the CPU.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"l3": {
-						SchemaProps: spec.SchemaProps{
-							Description: "L3 is the L3 cache size in bytes of the CPU.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-				},
-			},
-		},
+			v1alpha1.InstanceTypeSpec{}.OpenAPIModelName(), v1alpha1.InstanceTypeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
 	}
 }
 
@@ -1728,290 +1476,6 @@ func schema_gpustack_api_worker_v1_InstanceTypeList(ref common.ReferenceCallback
 		},
 		Dependencies: []string{
 			v1.InstanceType{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeResource(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeResource describes the resource of the InstanceType.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"onceMaxRequest": {
-						SchemaProps: spec.SchemaProps{
-							Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\n\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-					"remaining": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Remaining is the remaining requestable value of the resource.",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-					"capacity": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Capacity is the total value of the resource.",
-							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			resource.Quantity{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeSpec defines the desired spec of InstanceType.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"group": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Group indicates the group of the InstanceType.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"acceleratable": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Acceleratable indicates whether the InstanceType is acceleratable.",
-							Default:     false,
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"manufacturer": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Manufacturer is the name of the InstanceType manufacturer.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"product": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Product is the name of the InstanceType product.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"family": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Family is the family of the InstanceType.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"os": {
-						SchemaProps: spec.SchemaProps{
-							Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"arch": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"physicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"threadsPerPhysicalCore": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"logicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"stepping": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"clockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"maxClockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cacheLine": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cache": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cache describes the cache information of the CPU.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeCPUCache{}.OpenAPIModelName()),
-						},
-					},
-					"memory": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"computeCapability": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"sliced": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Sliced indicates whether the accelerator is sliced. When Sliced is blank, that means the InstanceType is not sliced.",
-							Type:        []string{"integer"},
-							Format:      "int64",
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU describes the CPU information of the accelerator.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
-						},
-					},
-					"unitResources": {
-						SchemaProps: spec.SchemaProps{
-							Description: "UnitResources describes the unit resources of the InstanceType.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeUnitResources{}.OpenAPIModelName()),
-						},
-					},
-				},
-				Required: []string{"group", "acceleratable"},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1.InstanceTypeCPUCache{}.OpenAPIModelName(), v1.InstanceTypeUnitResources{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeStatus describes the observed state of the InstanceType.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"phase": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Phase is the summary of conditions.",
-							Default:     "",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"phaseMessage": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhaseMessage is the message of the phase.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"accelerator": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Accelerator is the accelerator resource of the InstanceType, e.g. \"1\", \"4\".",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeResource{}.OpenAPIModelName()),
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU is the CPU resource of the InstanceType, e.g. \"4\", \"8\".",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeResource{}.OpenAPIModelName()),
-						},
-					},
-					"ram": {
-						SchemaProps: spec.SchemaProps{
-							Description: "RAM is the RAM resource of the InstanceType, e.g. \"40G\", \"16G\".",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeResource{}.OpenAPIModelName()),
-						},
-					},
-					"localStorage": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LocalStorage is the local storage resource of the InstanceType, e.g. \"100G\", \"500G\".",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1.InstanceTypeResource{}.OpenAPIModelName()),
-						},
-					},
-				},
-				Required: []string{"phase", "accelerator", "cpu", "ram", "localStorage"},
-			},
-		},
-		Dependencies: []string{
-			v1.InstanceTypeResource{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1_InstanceTypeUnitResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeUnitResources describes the unit resources of the InstanceType.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU is the unit CPU resource(milli-cores) of the InstanceType.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"ram": {
-						SchemaProps: spec.SchemaProps{
-							Description: "RAM is the unit RAM resource(Mi) of the InstanceType.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-				},
-			},
-		},
 	}
 }
 
@@ -3477,6 +2941,654 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref common.ReferenceCa
 		},
 		Dependencies: []string{
 			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceType(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceType is the schema for worker.gpustack.ai.\n\nUnderhood, an InstanceType is mapping to a Kueue ClusterQueue, and the InstanceType's name is the same as the ClusterQueue's name.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.InstanceTypeSpec{}.OpenAPIModelName()),
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1alpha1.InstanceTypeStatus{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceTypeSpec{}.OpenAPIModelName(), v1alpha1.InstanceTypeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeAccelerator describes the information of the accelerator.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"memory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"computeCapability": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sliceable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sliceable indicates whether the accelerator can be sliced, i.e. its hardware reports a non-zero MaxPartitions. It is a capability flag, not a slice count.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU describes the CPU information of the accelerator.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeAcceleratorCPU describes the CPU information of the accelerator.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"manufacturer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Manufacturer is the name of the CPU manufacturer, e.g. \"amd\", \"intel\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"product": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Product is the name of the CPU product.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"family": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Family is the family of the CPU.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"physicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"threadsPerPhysicalCore": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"logicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"stepping": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"clockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"maxClockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cacheLine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cache": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cache describes the cache information of the CPU.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeCPU(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeCPU describes the information of the CPU.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"physicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"threadsPerPhysicalCore": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"logicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"stepping": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"clockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"maxClockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cacheLine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cache": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cache describes the cache information of the CPU.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeCPUCache(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeCPUCache describes the cache information of the CPU.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"l1i": {
+						SchemaProps: spec.SchemaProps{
+							Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"l1d": {
+						SchemaProps: spec.SchemaProps{
+							Description: "L1D is the L1 data cache size in bytes of the CPU.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"l2": {
+						SchemaProps: spec.SchemaProps{
+							Description: "L2 is the L2 cache size in bytes of the CPU.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"l3": {
+						SchemaProps: spec.SchemaProps{
+							Description: "L3 is the L3 cache size in bytes of the CPU.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeList holds the list of InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceType{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceType{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeResource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeResource describes the resource of the InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"onceMaxRequest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\n\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"remaining": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Remaining is the remaining requestable value of the resource.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity is the total value of the resource.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeSpec defines the desired spec of InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"group": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Group indicates the group of the InstanceType.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"acceleratable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Acceleratable indicates whether the InstanceType is acceleratable.",
+							Default:     false,
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"manufacturer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Manufacturer is the name of the InstanceType manufacturer.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"product": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Product is the name of the InstanceType product.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"family": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Family is the family of the InstanceType.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"os": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"arch": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"physicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"threadsPerPhysicalCore": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"logicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"stepping": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"clockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"maxClockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cacheLine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cache": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cache describes the cache information of the CPU.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()),
+						},
+					},
+					"memory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"computeCapability": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sliceable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sliceable indicates whether the accelerator can be sliced, i.e. its hardware reports a non-zero MaxPartitions. It is a capability flag, not a slice count.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU describes the CPU information of the accelerator.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
+						},
+					},
+					"unitResources": {
+						SchemaProps: spec.SchemaProps{
+							Description: "UnitResources describes the unit resources of the InstanceType.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()),
+						},
+					},
+					"localStorage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix; the backing ClusterQueue note stores the bare Gi number.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"group", "acceleratable"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName(), v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeStatus describes the observed state of the InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"phase": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Phase is the summary of conditions.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"phaseMessage": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhaseMessage is the message of the phase.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"accelerator": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Accelerator is the allocatable-as-exclusive view: whole cards that are entirely free, e.g. \"1\", \"4\".",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorShared": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorShared is the shareable view: per-card ownership shares (up to SharedResourceMaxSize owners per card) summed over free and already-shared cards.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"acceleratorSliced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one hundred per card) summed over free and already-sliced cards.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU is the CPU resource of the InstanceType, e.g. \"4\", \"8\".",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
+					"entrance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Entrance is the name of the namespaced LocalQueue that fronts this InstanceType's backing ClusterQueue — the value a workload sets as its \"kueue.x-k8s.io/queue-name\" label to be admitted. It is derived from the InstanceType name (see nodefeature.FormatLocalQueueName).",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "cpu"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.InstanceTypeResource{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeUnitResources(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeUnitResources describes the unit resources of the InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU is the unit CPU resource(milli-cores) of the InstanceType.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"ram": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RAM is the unit RAM resource(Mi) of the InstanceType.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
