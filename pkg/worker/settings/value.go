@@ -90,4 +90,51 @@ var (
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
 	)
+
+	// Node / InstanceType management.
+	//
+	// These three switches are editable booleans, so an administrator can adjust
+	// them at runtime without restarting the operator. Consumers must read them
+	// per-reconcile via ShouldValueBool(ctx) (never cache a package-level value),
+	// so a flip re-converges on the next reconcile.
+
+	// NodeManagementManual indicates to skip auto-managing nodes.
+	// When false (default) the operator auto-injects `gpustack.ai/managed=true` to
+	// onboard discovered nodes; when true an administrator must label nodes manually.
+	NodeManagementManual = settings.NewEditable(
+		"node-management-manual",
+		"Indicates to skip auto-managing nodes. "+
+			"When false (default), the operator auto-onboards discovered nodes by injecting the managed label; "+
+			"when true, an administrator must opt nodes in manually.",
+		setting.InitializeFromEnv("false"),
+		setting.AllowBool(),
+	)
+
+	// InstanceTypeMixedOnNode indicates whether one node may surface both an
+	// accelerator (GPU) and a general (CPU-only) InstanceType.
+	// When true (default, current behavior) a node is summarized into every type it
+	// can serve; when false a node with accelerators is summarized only as a GPU
+	// InstanceType and a CPU-only node only as a general one.
+	InstanceTypeMixedOnNode = settings.NewEditable(
+		"instance-type-mixed-on-node",
+		"Indicates whether one node may surface both a GPU and a CPU-only InstanceType. "+
+			"When true (default), a node is summarized into every type it can serve; "+
+			"when false, a node with accelerators yields only a GPU InstanceType and a CPU-only node only a general one.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
+
+	// InstanceTypeDerivedFromNode indicates whether the operator auto-derives the
+	// InstanceType (and its backing ClusterQueue) from node hardware.
+	// When true (default, current behavior) the operator derives both; when false it
+	// only aligns the ResourceFlavor and the administrator defines the ClusterQueue
+	// via the InstanceType API.
+	InstanceTypeDerivedFromNode = settings.NewEditable(
+		"instance-type-derived-from-node",
+		"Indicates whether the operator auto-derives the InstanceType and its backing ClusterQueue from node hardware. "+
+			"When true (default), the operator derives both; "+
+			"when false, it only aligns the ResourceFlavor and the administrator defines the ClusterQueue via the InstanceType API.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
 )
