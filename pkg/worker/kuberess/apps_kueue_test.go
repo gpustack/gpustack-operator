@@ -46,9 +46,9 @@ type kueueTransformation struct {
 	Outputs    map[string]string `yaml:"outputs"`
 }
 
-// renderKueueTransformations renders the Kueue chart values for the given
-// manufacturers and returns the credits transformation rules keyed by input.
-func renderKueueTransformations(t *testing.T, manufacturers []string) map[string]kueueTransformation {
+// renderKueueConfigYAML renders the Kueue chart values for the given manufacturers
+// and returns the embedded controller-manager Configuration YAML.
+func renderKueueConfigYAML(t *testing.T, manufacturers []string) string {
 	t.Helper()
 
 	data := map[string]any{
@@ -67,13 +67,20 @@ func renderKueueTransformations(t *testing.T, manufacturers []string) map[string
 		} `yaml:"managerConfig"`
 	}
 	require.NoError(t, yaml.Unmarshal(funcx.MustNoError(yaml.Marshal(v)), &top))
+	return top.ManagerConfig.ControllerManagerConfigYaml
+}
+
+// renderKueueTransformations renders the Kueue chart values for the given
+// manufacturers and returns the credits transformation rules keyed by input.
+func renderKueueTransformations(t *testing.T, manufacturers []string) map[string]kueueTransformation {
+	t.Helper()
 
 	var cfg struct {
 		Resources struct {
 			Transformations []kueueTransformation `yaml:"transformations"`
 		} `yaml:"resources"`
 	}
-	require.NoError(t, yaml.Unmarshal([]byte(top.ManagerConfig.ControllerManagerConfigYaml), &cfg))
+	require.NoError(t, yaml.Unmarshal([]byte(renderKueueConfigYAML(t, manufacturers)), &cfg))
 
 	byInput := make(map[string]kueueTransformation, len(cfg.Resources.Transformations))
 	for _, tr := range cfg.Resources.Transformations {
@@ -139,12 +146,34 @@ func Test_kueueChartTransformations(t *testing.T) {
 		})
 	}
 
-	// The bare .sliced key appears as a transformation input only to be dropped:
-	// Kueue does not consume a multiplyBy resource on Replace, so without an
-	// explicit drop rule it leaks into the Workload's resource requirements and
-	// the CQ (which only covers credits/cpu/memory/storage) cannot admit it.
-	dropRule, ok := byInput[sliced]
-	require.True(t, ok, ".sliced must have a drop transformation input")
-	assert.Equal(t, "Replace", dropRule.Strategy, ".sliced drop rule strategy")
-	assert.Empty(t, dropRule.Outputs, ".sliced drop rule outputs must be empty")
+	// .sliced is the multiplyBy above; Kueue does not consume a multiplyBy resource
+	// on Replace, so it leaks into the Workload. It no longer needs a drop rule (nor
+	// do the node-level .sliced.* counters) — the queue's quotaCheckStrategy:
+	// IgnoreUndeclared ignores any resource the CQ does not cover, including this leak.
+	_, dropped := byInput[sliced]
+	assert.False(t, dropped, ".sliced must not carry a drop transformation (IgnoreUndeclared handles the leak)")
+	assert.Len(t, byInput, len(cases), "only the three credits rules remain")
+}
+
+// Test_kueueChartQuotaCheckStrategy pins the admission escape hatch that keeps
+// Instances admissible. A single-dimension ClusterQueue covers only cpu (general)
+// or credits (accelerated), yet every Instance's Workload also carries
+// cpu/memory/ephemeral-storage the queue does not cover; without IgnoreUndeclared
+// Kueue refuses to assign a flavor for those and the Workload never admits.
+func Test_kueueChartQuotaCheckStrategy(t *testing.T) {
+	// Assert on the no-manufacturer rendering: a CPU-only pool exists even with no
+	// accelerators, and it is where the memory/storage leak bites — so the strategy
+	// must be emitted unconditionally, not only under the manufacturers guard.
+	var cfg struct {
+		FeatureGates struct {
+			QuotaCheckStrategy bool `yaml:"QuotaCheckStrategy"`
+		} `yaml:"featureGates"`
+		Resources struct {
+			QuotaCheckStrategy string `yaml:"quotaCheckStrategy"`
+		} `yaml:"resources"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(renderKueueConfigYAML(t, nil)), &cfg))
+
+	assert.True(t, cfg.FeatureGates.QuotaCheckStrategy, "QuotaCheckStrategy feature gate must be enabled")
+	assert.Equal(t, "IgnoreUndeclared", cfg.Resources.QuotaCheckStrategy, "quotaCheckStrategy must be IgnoreUndeclared")
 }
