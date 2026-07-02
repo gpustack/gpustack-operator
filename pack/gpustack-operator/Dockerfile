@@ -410,7 +410,7 @@ ADD https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz "${GPUSTACK_CH
 ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-nfs-4.13.2.tgz"
 
 ## Kueue
-ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.1/kueue-0.18.1.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.18.1.tgz"
+ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.2/kueue-0.18.2.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.18.2.tgz"
 
 ## Node Features Discovery
 ADD https://thxcode.github.io/node-feature-discovery/charts/node-feature-discovery-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
