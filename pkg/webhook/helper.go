@@ -7,6 +7,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	admreg "k8s.io/api/admissionregistration/v1"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -25,6 +26,13 @@ type (
 	_ValidatorWebhookHandler interface {
 		ctrladmission.Validator[runtime.Object]
 		ValidatePath() string
+	}
+	// ReceiveDeletionUpdate opts a webhook out of the deletion guard. By default a
+	// handler's Default and ValidateUpdate are skipped for an object that carries a
+	// deletion timestamp, so a finalizer-clearing update is never rejected; a handler
+	// that implements this marker keeps receiving those calls during deletion.
+	ReceiveDeletionUpdate interface {
+		ReceiveDeletionUpdate()
 	}
 	ConfigurationsGetter func(string, admreg.WebhookClientConfig) (
 		*admreg.ValidatingWebhookConfiguration,
@@ -52,17 +60,72 @@ func ExecuteSetup(ctx context.Context, mgr ctrl.Manager, mux HTTPServeMux, setup
 			return fmt.Errorf("webhook setup: %s: %w", spew.Sdump(setups[i]), err)
 		}
 
+		// Guard defaulting/update-validation against deletion unless the handler opts out.
+		_, keepDeletionUpdate := setups[i].(ReceiveDeletionUpdate)
 		if d, ok := setups[i].(_DefaultWebhookHandler); ok {
-			dh := ctrladmission.WithCustomDefaulter(scheme, obj, d).WithRecoverPanic(true)
+			var defaulter ctrladmission.Defaulter[runtime.Object] = d
+			if !keepDeletionUpdate {
+				defaulter = deletionGuardedDefaulter{delegate: d}
+			}
+			dh := ctrladmission.WithCustomDefaulter(scheme, obj, defaulter).WithRecoverPanic(true)
 			mux.Handle(d.DefaultPath(), dh)
 		}
 		if v, ok := setups[i].(_ValidatorWebhookHandler); ok {
-			vh := ctrladmission.WithCustomValidator(scheme, obj, v).WithRecoverPanic(true)
+			var validator ctrladmission.Validator[runtime.Object] = v
+			if !keepDeletionUpdate {
+				validator = deletionGuardedValidator{delegate: v}
+			}
+			vh := ctrladmission.WithCustomValidator(scheme, obj, validator).WithRecoverPanic(true)
 			mux.Handle(v.ValidatePath(), vh)
 		}
 	}
 
 	return nil
+}
+
+// objectBeingDeleted reports whether obj carries a deletion timestamp.
+func objectBeingDeleted(obj runtime.Object) bool {
+	accessor, err := apimeta.Accessor(obj)
+	if err != nil {
+		return false
+	}
+	return accessor.GetDeletionTimestamp() != nil
+}
+
+// deletionGuardedDefaulter skips defaulting once the object is being deleted, so an
+// update that only clears a finalizer is never rejected by defaulting that depends on
+// state which may already be gone.
+type deletionGuardedDefaulter struct {
+	delegate ctrladmission.Defaulter[runtime.Object]
+}
+
+func (g deletionGuardedDefaulter) Default(ctx context.Context, obj runtime.Object) error {
+	if objectBeingDeleted(obj) {
+		return nil
+	}
+	return g.delegate.Default(ctx, obj)
+}
+
+// deletionGuardedValidator skips update validation once the object is being deleted, so
+// an update that only clears a finalizer is never rejected by update validation. Create
+// and delete validation are delegated unchanged.
+type deletionGuardedValidator struct {
+	delegate ctrladmission.Validator[runtime.Object]
+}
+
+func (g deletionGuardedValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (ctrladmission.Warnings, error) {
+	return g.delegate.ValidateCreate(ctx, obj)
+}
+
+func (g deletionGuardedValidator) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (ctrladmission.Warnings, error) {
+	if objectBeingDeleted(newObj) {
+		return nil, nil
+	}
+	return g.delegate.ValidateUpdate(ctx, oldObj, newObj)
+}
+
+func (g deletionGuardedValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (ctrladmission.Warnings, error) {
+	return g.delegate.ValidateDelete(ctx, obj)
 }
 
 // InstallConfigurations installs the webhook configurations.
