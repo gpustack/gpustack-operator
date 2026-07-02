@@ -304,25 +304,12 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// Devices.
 
 	devsCli := lpCli.WorkerV1alpha1().Devices()
-	// Stamp the accelerator flavors' selector labels (os/arch + feature key) so the
-	// worker's AdmissionCheck locates this node's Devices by a flavor's nodeLabels with
-	// one List instead of a Node→Devices join. They appear on the node only once NFD
-	// applies the feature labels this same pass creates, so a freshly onboarded node is
-	// stamped on a later resync. The gpustack.ai/managed mark is intentionally NOT
-	// stamped here: NodeDevicesReconciler syncs it onto the Devices from the Node, so
-	// the device-manager does not assert a node-management decision it does not own.
-	devsLabels := map[string]string{}
-	for _, nf := range nodefeature.ExtractNodeFlavors(nd) {
-		if !nf.Acceleratable {
-			continue
-		}
-		for k, v := range nf.NodeLabels {
-			if k == systemname.ManagedLabelKey {
-				continue
-			}
-			devsLabels[k] = v
-		}
-	}
+	// Stamp the accelerator flavors' selector labels (os/arch + feature key) so the worker
+	// locates this node's Devices by one List. Take the feature labels from the NodeFeature
+	// just applied, not read back off the node, which NFD merges only later — leaving a
+	// freshly onboarded node's Devices unstamped. gpustack.ai/managed is synced separately
+	// by NodeDevicesReconciler.
+	devsLabels := acceleratableDevicesSelectorLabels(nd, aNf.Spec.Labels)
 	eDevs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{
 			Name:   ndName,
@@ -403,4 +390,34 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	}
 
 	return nil
+}
+
+// acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object
+// (os/arch plus each acceleratable feature key, minus the managed mark) that let the worker locate
+// the node's Devices by a single List. The acceleratable feature keys are taken from the feature
+// labels being published this pass (publishedFeatureLabels, i.e. the NodeFeature's spec labels), NOT
+// read back off the node: NFD merges those labels onto the node only afterwards, so a freshly
+// onboarded node would otherwise yield no keys until an unrelated resync. os/arch are stable node
+// labels present from registration. gpustack.ai/managed is synced separately by NodeDevicesReconciler.
+func acceleratableDevicesSelectorLabels(node *core.Node, publishedFeatureLabels map[string]string) map[string]string {
+	src := &core.Node{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{
+		core.LabelOSStable:   node.Labels[core.LabelOSStable],
+		core.LabelArchStable: node.Labels[core.LabelArchStable],
+	}}}
+	for k, v := range publishedFeatureLabels {
+		src.Labels[k] = v
+	}
+	out := map[string]string{}
+	for _, nf := range nodefeature.ExtractNodeFlavors(src) {
+		if !nf.Acceleratable {
+			continue
+		}
+		for k, v := range nf.NodeLabels {
+			if k == systemname.ManagedLabelKey {
+				continue
+			}
+			out[k] = v
+		}
+	}
+	return out
 }
