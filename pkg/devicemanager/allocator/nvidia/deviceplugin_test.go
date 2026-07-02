@@ -88,9 +88,9 @@ func newSlicedServer() *server {
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	redirectSoftSliceDirs(t)
 	s := newSlicedServer()
-	// A10G-like: 24576 MiB. 1/8 slice (units=1600, D=12800 -> R=0.125).
+	// A10G-like: 24576 MiB. 1/8 slice (units=200000, D=1600000 -> R=0.125).
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
-	pod, ctr := slicedPod("pod-uid-1", "train", 1600)
+	pod, ctr := slicedPod("pod-uid-1", "train", 200000)
 	allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
 
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
@@ -142,7 +142,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 	redirectSoftSliceDirs(t)
 	s := newSlicedServer()
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0, testGPUUUID1)
-	pod, ctr := slicedPod("pod-uid-2", "train", 3200) // 1/4 slice -> R=0.25
+	pod, ctr := slicedPod("pod-uid-2", "train", 400000) // 1/4 slice -> R=0.25
 	allocated := map[deviceplugin.Resource]int32{
 		{Group: "a10g", Device: testGPUUUID0}: 1,
 		{Group: "a10g", Device: testGPUUUID1}: 1,
@@ -170,7 +170,7 @@ func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 	}
 	for _, c := range cases {
 		devs := nvidiaDevices(c.runtimeVersion, 24576, testGPUUUID0)
-		pod, ctr := slicedPod("uid-"+c.wantDir, "train", 1600)
+		pod, ctr := slicedPod("uid-"+c.wantDir, "train", 200000)
 		allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
 		resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
 		require.NoError(t, err)
@@ -213,7 +213,7 @@ func TestGetSlicedContainerAllocateResponse_MixedCUDAMajorRejected(t *testing.T)
 			},
 		},
 	}
-	pod, ctr := slicedPod("uid-mixed", "train", 3200) // 1/4 slice across both
+	pod, ctr := slicedPod("uid-mixed", "train", 400000) // 1/4 slice across both
 	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs,
 		map[deviceplugin.Resource]int32{
 			{Group: "a10g", Device: testGPUUUID0}: 1,

@@ -88,8 +88,8 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
-	// Allocate a 1/8 slice (units=1600, D=12800 -> R=0.125) of accelerator index 0.
-	pod, ctr := slicedPod("pod-uid-1", "train", 1600)
+	// Allocate a 1/8 slice (units=200000, D=1600000 -> R=0.125) of accelerator index 0.
+	pod, ctr := slicedPod("pod-uid-1", "train", 200000)
 	allocated := map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1}
 
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
@@ -156,21 +156,21 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 	}
 
 	// First slice on physical NPU 0 -> vnpu 0.
-	p1, c1 := slicedPod("uid-a", "train", 1600)
+	p1, c1 := slicedPod("uid-a", "train", 200000)
 	_, err := s.GetContainerAllocateResponse(context.Background(), p1, c1, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 	assert.Equal(t, 0, readVNPU("uid-a", "train"))
 
 	// Second slice on the SAME physical NPU 0 -> vnpu 1 (lowest free).
-	p2, c2 := slicedPod("uid-b", "train", 1600)
+	p2, c2 := slicedPod("uid-b", "train", 200000)
 	_, err = s.GetContainerAllocateResponse(context.Background(), p2, c2, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
 	require.NoError(t, err)
 	assert.Equal(t, 1, readVNPU("uid-b", "train"))
 
 	// Slice on a DIFFERENT physical NPU (index 1) -> vnpu 0 again.
-	p3, c3 := slicedPod("uid-c", "train", 1600)
+	p3, c3 := slicedPod("uid-c", "train", 200000)
 	_, err = s.GetContainerAllocateResponse(context.Background(), p3, c3, devs,
 		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID1}: 1})
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
-	pod, ctr := slicedPod("uid-multi", "train", 1600)
+	pod, ctr := slicedPod("uid-multi", "train", 200000)
 	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs,
 		map[deviceplugin.Resource]int32{
 			{Group: "910b2", Device: testAccelID0}: 1,

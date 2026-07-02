@@ -23,6 +23,16 @@ func TestAcceleratableResourceNames(t *testing.T) {
 		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced))
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.units"),
 		GetAcceleratableSlicedUnitsResourceName(ManufacturerNVIDIA))
+
+	// The three gate-2 node-level sliced budget keys are distinct fine-grained
+	// suffixes layered under ".sliced"; they must not collide with ".sliced.units"
+	// or with each other.
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.cores-percentage"),
+		GetAcceleratableSlicedCoresPercentageResourceName(ManufacturerNVIDIA))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.memory-percentage"),
+		GetAcceleratableSlicedMemoryPercentageResourceName(ManufacturerNVIDIA))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.memory-mib"),
+		GetAcceleratableSlicedMemoryMibResourceName(ManufacturerNVIDIA))
 }
 
 func TestIsKnownAcceleratableResourceName(t *testing.T) {
@@ -52,7 +62,7 @@ func TestIsKnownAcceleratableResourceName(t *testing.T) {
 // integers), and 1/D is representable cleanly in nano (so the Kueue credits
 // factor 1/D is exact).
 func TestSlicedResourceDenominatorInvariants(t *testing.T) {
-	assert.Equal(t, int64(12800), int64(ResourceMaxUnits), "D = 2^9 * 5^2")
+	assert.Equal(t, int64(1_600_000), int64(ResourceMaxUnits), "D = 2^9 * 5^5")
 	assert.Equal(t, int64(512), int64(SlicedResourceMaxSize), "max partitions")
 
 	// D must divide evenly by every per-mode max size so per-slice/per-ownership
@@ -62,11 +72,14 @@ func TestSlicedResourceDenominatorInvariants(t *testing.T) {
 		assert.Zerof(t, ResourceMaxUnits%size,
 			"D %% %d must be 0 for exact per-slice units", size)
 	}
+	// D must divide evenly by 100 so the memory-1% slice step D/100 is an exact
+	// integer for the per-card VRAM-percentage keys (the 5^5 factor provides this).
+	assert.Zero(t, ResourceMaxUnits%100, "D %% 100 must be 0 for integer memory-1% units")
 	assert.Zero(t, int64(1e9)%ResourceMaxUnits, "1/D must be nano-clean")
 }
 
 func TestCreditsPerCardInvariants(t *testing.T) {
-	assert.Equal(t, int64(12800), int64(CreditsPerCard), "B = D = 12800")
+	assert.Equal(t, int64(1_600_000), int64(CreditsPerCard), "B = D = 1600000")
 
 	// B must divide evenly by every per-mode max size so the per-mode credit
 	// magnitudes (shared B/10, sliced B/size) are exact integers and Kueue's
@@ -85,8 +98,8 @@ func TestCardsToCredits(t *testing.T) {
 		cards    string
 		expected string
 	}{
-		{name: "1 card", cards: "1", expected: "12800"},
-		{name: "4 cards", cards: "4", expected: "51200"},
+		{name: "1 card", cards: "1", expected: "1600k"},
+		{name: "4 cards", cards: "4", expected: "6400k"},
 		{name: "0 cards", cards: "0", expected: "0"},
 	}
 	for _, c := range cases {
@@ -105,16 +118,16 @@ func TestCreditsToCards(t *testing.T) {
 		credits  string
 		expected string
 	}{
-		{name: "whole card", credits: "12800", expected: "1"},
-		{name: "four cards", credits: "51200", expected: "4"},
-		{name: "1/8 slice", credits: "1600", expected: "125m"},
-		{name: "2/8 slice", credits: "3200", expected: "250m"},
-		{name: "29 1/8 slices", credits: "46400", expected: "3625m"},
-		{name: "smallest slice (1/512)", credits: "25", expected: "1953u"},
+		{name: "whole card", credits: "1600000", expected: "1"},
+		{name: "four cards", credits: "6400000", expected: "4"},
+		{name: "1/8 slice", credits: "200000", expected: "125m"},
+		{name: "2/8 slice", credits: "400000", expected: "250m"},
+		{name: "29 1/8 slices", credits: "5800000", expected: "3625m"},
+		{name: "smallest slice (1/512)", credits: "3125", expected: "1953u"},
 		{name: "zero", credits: "0", expected: "0"},
 		// Misconfigured fractional credit: Value() ceils like Kueue's ResourceValue
-		// (1599.5 → 1600) before the divide, so the card view stays consistent.
-		{name: "fractional credit ceils", credits: "1599500m", expected: "125m"},
+		// (199999.5 → 200000) before the divide, so the card view stays consistent.
+		{name: "fractional credit ceils", credits: "199999500m", expected: "125m"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -234,37 +247,37 @@ func TestQuantityToAlignedValue(t *testing.T) {
 			name:     "1.5: sliced 1",
 			quantity: "1.5",
 			sliced:   1,
-			expected: "19200",
+			expected: "2400k",
 		},
 		{
 			name:     "1: sliced 2",
 			quantity: "1",
 			sliced:   2,
-			expected: "6400",
+			expected: "800k",
 		},
 		{
 			name:     "1: sliced 4",
 			quantity: "1",
 			sliced:   4,
-			expected: "3200",
+			expected: "400k",
 		},
 		{
 			name:     "1: sliced 8",
 			quantity: "1",
 			sliced:   8,
-			expected: "1600",
+			expected: "200k",
 		},
 		{
 			name:     "1: sliced 16",
 			quantity: "1",
 			sliced:   16,
-			expected: "800",
+			expected: "100k",
 		},
 		{
 			name:     "1: sliced 512",
 			quantity: "1",
 			sliced:   512,
-			expected: "25",
+			expected: "3125",
 		},
 	}
 	for _, cs := range cases {
@@ -291,38 +304,38 @@ func TestQuantityToOriginalValue(t *testing.T) {
 			expected: "1",
 		},
 		{
-			name:     "19200: sliced 1",
-			quantity: "19200",
+			name:     "2400000: sliced 1",
+			quantity: "2400000",
 			sliced:   1,
 			expected: "1500m",
 		},
 		{
-			name:     "6400: sliced 2",
-			quantity: "6400",
+			name:     "800000: sliced 2",
+			quantity: "800000",
 			sliced:   2,
 			expected: "1",
 		},
 		{
-			name:     "3200: sliced 4",
-			quantity: "3200",
+			name:     "400000: sliced 4",
+			quantity: "400000",
 			sliced:   4,
 			expected: "1",
 		},
 		{
-			name:     "1600: sliced 8",
-			quantity: "1600",
+			name:     "200000: sliced 8",
+			quantity: "200000",
 			sliced:   8,
 			expected: "1",
 		},
 		{
-			name:     "800: sliced 16",
-			quantity: "800",
+			name:     "100000: sliced 16",
+			quantity: "100000",
 			sliced:   16,
 			expected: "1",
 		},
 		{
-			name:     "25: sliced 512",
-			quantity: "25",
+			name:     "3125: sliced 512",
+			quantity: "3125",
 			sliced:   512,
 			expected: "1",
 		},

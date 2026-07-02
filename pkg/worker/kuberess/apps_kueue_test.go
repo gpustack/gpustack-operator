@@ -83,7 +83,7 @@ func renderKueueTransformations(t *testing.T, manufacturers []string) map[string
 }
 
 // Test_kueueChartTransformations pins the three per-manufacturer credits rules on
-// the integer credit base B = D = 12800: exclusive→B, shared→B/10, and the sliced
+// the integer credit base B = D = 1600000: exclusive→B, shared→B/10, and the sliced
 // rule folds in the card count via multiplyBy: <.sliced> with factor B/D = 1, so
 // credits = B×C×U/partitions stays integer-valued and Kueue's ResourceValue int64
 // ceil never rounds a fractional credit up to 1.
@@ -108,17 +108,17 @@ func Test_kueueChartTransformations(t *testing.T) {
 		{
 			name:        "exclusive whole card is B credits",
 			input:       exclusive,
-			wantCredits: "12800",
+			wantCredits: "1600000",
 		},
 		{
 			name:        "shared ownership is B/10 credits",
 			input:       shared,
-			wantCredits: "1280",
+			wantCredits: "160000",
 		},
 		{
 			// credits = .sliced.units × (B/D) × .sliced = B×C×U/partitions, e.g.
-			// 1/8 single card → 1600, 2 cards ×1/8 → 3200, 1/4 single → 3200,
-			// 1/512 single → 25. With B=D the factor is exactly 1, so the
+			// 1/8 single card → 200000, 2 cards ×1/8 → 400000, 1/4 single → 400000,
+			// 1/512 single → 3125. With B=D the factor is exactly 1, so the
 			// .sliced.units value is itself the credit value. Kueue performs the
 			// multiplication; this test pins the wiring (multiplyBy + factor).
 			name:           "sliced unit folds the card count with factor B/D",

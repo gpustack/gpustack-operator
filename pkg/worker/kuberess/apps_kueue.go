@@ -179,7 +179,7 @@ managerConfig:
     #    example.com/gpu: 100 # and you care only about GPUs usage
 {{- if $.Manufacturers }}
     resources:
-      # Credits are scored on the integer base B = D = 12800 (one whole card = B
+      # Credits are scored on the integer base B = D = 1600000 (one whole card = B
       # credits): exclusive→B, shared→B/10, sliced.units→B/D=1 (× multiplyBy
       # .sliced). Every per-mode value stays an integer, so Kueue's ResourceValue
       # int64 quantization (q.Value(), which ceils non-CPU resources) never rounds
