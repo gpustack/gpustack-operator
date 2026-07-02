@@ -465,8 +465,10 @@ func assembleClusterQueueNotes(
 	}
 	// A non-accelerated InstanceType's unit is always a single CPU core; pin unitCPU to
 	// "1" so an admin edit to the general type's CPU unit is reset (unitRAM/localStorage
-	// stay admin-editable).
-	if !it.Spec.Acceleratable {
+	// stay admin-editable). Read acceleratable from the flavors (authoritative) as well
+	// as the spec, since a freshly authored derived InstanceType has not yet materialized
+	// spec.Acceleratable from its notes.
+	if notes["acceleratable"] != valueTrue && !it.Spec.Acceleratable {
 		notes["unitCPU"] = "1"
 	}
 	return notes
@@ -621,7 +623,10 @@ func (r *InstanceTypeReconciler) computeStatus(
 
 // applyDescriptorsFromClusterQueue overwrites the hardware-descriptor spec fields
 // (the ones the operator authors from the discovered hardware) from the queue notes,
-// leaving the admin-owned unit spec (UnitResources / LocalStorage / Group) untouched.
+// and initializes the unit spec (UnitResources / LocalStorage) from those notes when
+// the InstanceType carries none — a derived InstanceType is authored without one, yet
+// the Instance webhook and the table read the unit from the spec. An admin-set unit
+// spec, and the admin-owned Group, are left untouched.
 func applyDescriptorsFromClusterQueue(spec *workercore.InstanceTypeSpec, cq *kueue.ClusterQueue) {
 	_, notes := systemmeta.DescribeResource(cq)
 	acceleratable := notes["acceleratable"] == valueTrue
@@ -633,10 +638,27 @@ func applyDescriptorsFromClusterQueue(spec *workercore.InstanceTypeSpec, cq *kue
 	spec.OS = notes["os"]
 	spec.Arch = notes["arch"]
 
+	// Clear the accelerator descriptors before (re)deriving them below, so a type
+	// that is non-accelerated — or transitions to it — never keeps stale Memory /
+	// Sliceable from a prior accelerated state.
 	spec.InstanceTypeAccelerator = workercore.InstanceTypeAccelerator{}
 	if acceleratable {
 		spec.Memory = notes["memory"]
 		spec.Sliceable = notes["sliceable"] == valueTrue
+	}
+
+	// Initialize the unit spec from the queue notes when the InstanceType carries
+	// none (a derived one is authored without it). Written as a complete triple so
+	// the InstanceType validating webhook — which rejects a partial unit spec —
+	// accepts the reconciler's write; the notes store bare Gi numbers, so RAM and
+	// localStorage regain their "Gi" suffix.
+	if spec.UnitResources.CPU == "" && spec.UnitResources.RAM == "" && spec.LocalStorage == "" {
+		unitCPU, unitRAM, localStorage := notes["unitCPU"], notes["unitRAM"], notes["localStorage"]
+		if unitCPU != "" && unitRAM != "" && localStorage != "" {
+			spec.UnitResources.CPU = unitCPU
+			spec.UnitResources.RAM = unitRAM + "Gi"
+			spec.LocalStorage = localStorage + "Gi"
+		}
 	}
 }
 

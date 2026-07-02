@@ -794,6 +794,62 @@ func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
 	})
 }
 
+// TestInstanceTypeReconciler_DerivedInitializesUnitSpec pins that a derived
+// InstanceType — authored without a unit spec — has its spec.UnitResources /
+// spec.LocalStorage initialized from the backing queue notes, so the Instance
+// webhook and the table (both read the unit from the spec) observe the effective
+// unit. The notes store bare Gi numbers, so RAM/localStorage regain the "Gi" suffix.
+func TestInstanceTypeReconciler_DerivedInitializesUnitSpec(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	cases := []struct {
+		name   string
+		key    string
+		flavor *kueue.ResourceFlavor
+
+		wantCPU     string
+		wantRAM     string
+		wantStorage string
+	}{
+		{
+			name: "accelerated pool initializes the full unit triple from notes",
+			key:  "nvidia-a10g",
+			flavor: newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 4,
+				accelerated(nodefeature.ManufacturerNVIDIA), unitSpec("2", "16", "100")),
+			wantCPU:     "2",
+			wantRAM:     "16Gi",
+			wantStorage: "100Gi",
+		},
+		{
+			name: "cpu-only pool initializes unitCPU pinned to 1",
+			key:  "generic",
+			flavor: newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4,
+				unitSpec("8", "4", "32")),
+			wantCPU:     "1", // a non-accelerated unit is always a single CPU core
+			wantRAM:     "4Gi",
+			wantStorage: "32Gi",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			name := nodeQueueName(c.key)
+			cli := buildInstanceTypeClient(c.flavor)
+
+			// Author the derived InstanceType, create + align its queue, then
+			// initialize its unit spec and materialize status.
+			reconcileInstanceTypeN(t, cli, name, 5)
+
+			it := getInstanceType(t, cli, name)
+			require.Equal(t, valueTrue, it.Labels[_InstanceTypeDerivedFromNodeLabel], "authored derived")
+			assert.Equal(t, c.wantCPU, it.Spec.UnitResources.CPU, "unitCPU initialized from notes")
+			assert.Equal(t, c.wantRAM, it.Spec.UnitResources.RAM, "unitRAM initialized (Gi suffix)")
+			assert.Equal(t, c.wantStorage, it.Spec.LocalStorage, "localStorage initialized (Gi suffix)")
+		})
+	}
+}
+
 func TestHasReserved(t *testing.T) {
 	reserved := func(total, borrowed string) kueue.ClusterQueueStatus {
 		return kueue.ClusterQueueStatus{
