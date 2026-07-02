@@ -24,12 +24,16 @@
 set -uo pipefail
 
 NS="${1:?usage: case-2.sh <NS>}"
-NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-WORKER_NF="${NODE}-gpustack-worker"
-IT=$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[?(@.status.phase=="Active")].metadata.name}' | awk '{print $1}')
-[ -n "$IT" ] || { echo "no Active InstanceType found — run case-1 first to materialize the chain"; exit 1; }
-before=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}')
-echo "active InstanceType: ${IT} on node ${NODE} (managed=${before:-<unset>})"
+# Target the general (CPU) pool: it is non-accelerated (no GPU needed) and every managed node feeds
+# it, so this behaves the same on a 1-node local cluster and an N-node real one.
+IT=$(kubectl get instancetypes.worker.gpustack.ai \
+  -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
+[ -n "$IT" ] || { echo "no general InstanceType found — run case-1 first to materialize the chain"; exit 1; }
+# Every <node>-gpustack-worker NodeFeature: draining ALL of them is what removes a pool that spans
+# more than one node (de-managing a single node leaves the others' flavors behind).
+WORKER_NFS=$(kubectl -n "$NS" get nodefeatures -o name 2>/dev/null | grep -E -- '-gpustack-worker$')
+[ -n "$WORKER_NFS" ] || { echo "no <node>-gpustack-worker NodeFeatures found"; exit 1; }
+echo "general InstanceType: ${IT}; draining $(echo "$WORKER_NFS" | grep -c .) node(s)"
 
 # The derived general InstanceType carries no unit spec by default; the InstanceWebhook needs one
 # to size the Instance's Pod, so set it via the InstanceType API (this itself exercises the
@@ -49,9 +53,9 @@ done
 
 restore() {
   echo
-  echo "[case-2] restoring gpustack.ai/managed=${before:-true}, deleting test Instance, waiting for rebuild"
-  kubectl -n "$NS" patch nodefeature "$WORKER_NF" --type=merge \
-    -p "{\"spec\":{\"labels\":{\"gpustack.ai/managed\":\"${before:-true}\"}}}" 2>/dev/null || true
+  echo "[case-2] restoring gpustack.ai/managed=true on all nodes, deleting test Instance, waiting for rebuild"
+  echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
+    -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}' 2>/dev/null || true
   kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found 2>/dev/null || true
   for _ in $(seq 1 40); do
     [ "$(kubectl get instancetype "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Active" ] && break
@@ -95,8 +99,8 @@ stop0=$(kubectl -n default get instance gpustack-e2e-instance -o jsonpath='{.spe
 # 3. Drain: exclude the node from management so the general flavor is deleted and the derived
 #    InstanceType (the Instance's type) tears down. Toggle via the NodeFeature (NFD reverts a
 #    direct node label).
-echo "[case-2] draining: gpustack.ai/managed=false on ${WORKER_NF}"
-kubectl -n "$NS" patch nodefeature "$WORKER_NF" --type=merge \
+echo "[case-2] draining: gpustack.ai/managed=false on all worker NodeFeatures"
+echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
   -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
 
 # 4. The guaranteed drain effect: the pool's general ResourceFlavor is deleted (F3a — node-index

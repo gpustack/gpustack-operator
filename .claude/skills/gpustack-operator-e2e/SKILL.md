@@ -43,7 +43,12 @@ The work is split into shared phase scripts and numbered, self-contained cases:
 Each case maps to a User Story of the unified-pool refactor. On a GPU-less cluster the accelerated
 cases mock two inputs the DeviceManager would produce (a fake accelerator NodeFeature and a
 phantom-node `Devices` ledger); the derivation and the three-view/AdmissionCheck math are **not**
-mocked — that is the verification.
+mocked — that is the verification. CASE 4's mock uses a fake product key (`nvidia-e2emock`) that
+never collides with a real GPU's pool, so it is safe on a real-accelerator cluster too, not only
+GPU-less. CASE 7 exercises the general (CPU) pool and runs on any cluster. CASE 8 needs **real**
+accelerator hardware (the HAMI runtime cap cannot be mocked) and **auto-skips** with a message when
+no `*.sliced` resource is advertised. CASE 2/3 drain **every** node feeding the general pool, so they
+behave the same on a single-node local cluster and a multi-node real one.
 
 | Case | Title (Story) | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
@@ -53,6 +58,9 @@ mocked — that is the verification.
 | 4 | AdmissionCheck holds exclusive over-admit (Story 4) | `pkg/worker/controllers/worker/{nodedevicesadmission,nodedevices,instancetype}.go`, `pkg/worker/kuberess/apps_kueue.go` | `cases/case-4.sh` | yes (confirm) |
 | 5 | Pod webhook folds slice-by-memory-% into units (Story 3) | `pkg/worker/webhooks/worker/pod.go`, `pkg/nodefeature/knowns.go` | `cases/case-5.sh` | yes (confirm) |
 | 6 | Pooled three-view + watch freshness (Story 2/6) | `pkg/worker/controllers/worker/instancetype.go`, `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/{instance_type,devices}.go` | `cases/case-6.sh` | yes (confirm) |
+| 7 | Portless Instance reaches Ready, creates no Service | `pkg/worker/controllers/worker/instance.go` | `cases/case-7.sh` | yes (confirm) |
+| 8 | Real accelerator slicing runtime isolation (Story 1) | `pkg/deviceplugin/**`, `pkg/devicemanager/**`, `pkg/worker/webhooks/worker/pod.go` | `cases/case-8.sh` | yes (confirm) |
+| 9 | Instance lifecycle survives an InstanceType unit-spec change | `pkg/worker/webhooks/worker/instance.go` | `cases/case-9.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
@@ -108,6 +116,9 @@ Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `p
    bash .claude/skills/gpustack-operator-e2e/cases/case-4.sh "$NS"
    bash .claude/skills/gpustack-operator-e2e/cases/case-5.sh "$NS"
    bash .claude/skills/gpustack-operator-e2e/cases/case-6.sh "$NS"
+   bash .claude/skills/gpustack-operator-e2e/cases/case-7.sh "$NS"
+   bash .claude/skills/gpustack-operator-e2e/cases/case-8.sh "$NS"   # auto-skips without real accelerators
+   bash .claude/skills/gpustack-operator-e2e/cases/case-9.sh "$NS"
    ```
 
    On a FAIL, diagnose the named stage (`kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=200`,
