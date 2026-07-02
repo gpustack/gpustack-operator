@@ -23,7 +23,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 	// - pack/gpustack-operator/image/Dockerfile.
 
 	name := "kueue"
-	version := "0.18.1"
+	version := "0.18.2"
 	if disable.Has(name) {
 		return nil
 	}
