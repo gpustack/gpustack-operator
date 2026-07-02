@@ -60,15 +60,22 @@ func nvidiaDevices(runtimeVersion string, memoryMiB uint64, uuids ...string) *wo
 	}
 }
 
-func slicedPod(uid, ctrName string, units int64) (*core.Pod, *core.Container) {
-	resName := nodefeature.GetAcceleratableSlicedUnitsResourceName(Manufacturer)
+// slicedPod builds a sliced container requesting the decoupled compute and VRAM
+// dimensions the allocator now reads: ".sliced.cores-percentage" (SM) and
+// ".sliced.memory-percentage" (per-card VRAM).
+func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, *core.Container) {
+	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
+	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
 	pod := &core.Pod{
 		ObjectMeta: meta.ObjectMeta{Name: ctrName + "-pod", UID: types.UID(uid)},
 		Spec: core.PodSpec{
 			Containers: []core.Container{{
 				Name: ctrName,
 				Resources: core.ResourceRequirements{
-					Limits: core.ResourceList{resName: *resource.NewQuantity(units, resource.DecimalSI)},
+					Limits: core.ResourceList{
+						coresRes:  *resource.NewQuantity(coresPercent, resource.DecimalSI),
+						memPctRes: *resource.NewQuantity(memPercent, resource.DecimalSI),
+					},
 				},
 			}},
 		},
@@ -88,9 +95,9 @@ func newSlicedServer() *server {
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	redirectSoftSliceDirs(t)
 	s := newSlicedServer()
-	// A10G-like: 24576 MiB. 1/8 slice (units=200000, D=1600000 -> R=0.125).
+	// A10G-like: 24576 MiB. cores=10% SM, memory=25% VRAM (independent dimensions).
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
-	pod, ctr := slicedPod("pod-uid-1", "train", 200000)
+	pod, ctr := slicedPod("pod-uid-1", "train", 10, 25)
 	allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
 
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
@@ -98,10 +105,10 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 
 	// Envs.
 	assert.Equal(t, testGPUUUID0, resp.Envs["NVIDIA_VISIBLE_DEVICES"])
-	assert.Equal(t, "12", resp.Envs["CUDA_DEVICE_SM_LIMIT"]) // floor(0.125*100)
+	assert.Equal(t, "10", resp.Envs["CUDA_DEVICE_SM_LIMIT"]) // .sliced.cores-percentage
 	assert.Equal(t, "/tmp/vgpu/cudevshr.cache", resp.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"])
-	// floor(24576 MiB * 0.125) = 3072 MiB.
-	assert.Equal(t, "3072m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+	// floor(24576 MiB * 25%) = 6144 MiB.
+	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	_, hasSecond := resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_1"]
 	assert.False(t, hasSecond, "single card must not emit LIMIT_1")
 
@@ -142,7 +149,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 	redirectSoftSliceDirs(t)
 	s := newSlicedServer()
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0, testGPUUUID1)
-	pod, ctr := slicedPod("pod-uid-2", "train", 400000) // 1/4 slice -> R=0.25
+	pod, ctr := slicedPod("pod-uid-2", "train", 50, 25) // SM 50%, VRAM 25%
 	allocated := map[deviceplugin.Resource]int32{
 		{Group: "a10g", Device: testGPUUUID0}: 1,
 		{Group: "a10g", Device: testGPUUUID1}: 1,
@@ -152,8 +159,8 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, testGPUUUID0+","+testGPUUUID1, resp.Envs["NVIDIA_VISIBLE_DEVICES"])
-	assert.Equal(t, "25", resp.Envs["CUDA_DEVICE_SM_LIMIT"]) // floor(0.25*100)
-	// floor(24576 MiB * 0.25) = 6144 MiB, one entry per card.
+	assert.Equal(t, "50", resp.Envs["CUDA_DEVICE_SM_LIMIT"]) // .sliced.cores-percentage
+	// floor(24576 MiB * 25%) = 6144 MiB, one entry per card.
 	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_1"])
 }
@@ -170,7 +177,7 @@ func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 	}
 	for _, c := range cases {
 		devs := nvidiaDevices(c.runtimeVersion, 24576, testGPUUUID0)
-		pod, ctr := slicedPod("uid-"+c.wantDir, "train", 200000)
+		pod, ctr := slicedPod("uid-"+c.wantDir, "train", 10, 25)
 		allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
 		resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
 		require.NoError(t, err)
@@ -186,7 +193,9 @@ func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 	}
 }
 
-func TestGetSlicedContainerAllocateResponse_NoUnitsRequest(t *testing.T) {
+// A sliced container with no memory dimension (neither .sliced.memory-percentage nor
+// .sliced.memory-mib) must be rejected rather than silently given the whole card.
+func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	redirectSoftSliceDirs(t)
 	s := newSlicedServer()
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
@@ -213,7 +222,7 @@ func TestGetSlicedContainerAllocateResponse_MixedCUDAMajorRejected(t *testing.T)
 			},
 		},
 	}
-	pod, ctr := slicedPod("uid-mixed", "train", 400000) // 1/4 slice across both
+	pod, ctr := slicedPod("uid-mixed", "train", 50, 25) // both cards
 	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs,
 		map[deviceplugin.Resource]int32{
 			{Group: "a10g", Device: testGPUUUID0}: 1,

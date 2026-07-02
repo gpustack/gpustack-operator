@@ -87,60 +87,40 @@ func padIndex(idx uint64) string {
 	}
 }
 
-// PadSlicedUnits rounds a raw ".sliced.units" request up to the nearest whole-slice
-// boundary D/2^k that a card of maxPartitions can physically provide:
-//   - the result is the smallest D/2^k >= units, with 2^k in [1, maxPartitions];
-//   - a request finer than the hardware (units < D/maxPartitions) rounds up to the
-//     finest hardware slice D/maxPartitions;
-//   - a request of a whole card or larger caps at D.
-//
-// It lets the sliced injection allocator map an arbitrary, unvalidated raw-Pod
-// ".sliced.units" request onto a real partition without a Pod admission webhook.
-func PadSlicedUnits(units, maxPartitions int64) int64 {
-	const d = nodefeature.ResourceMaxUnits
-	if units >= d {
-		return d
-	}
-	// Floor maxPartitions to a power of two (the finest slice the hardware offers).
-	maxP := int64(1)
-	for maxP<<1 <= maxPartitions {
-		maxP <<= 1
-	}
-	if units <= d/maxP {
-		return d / maxP
-	}
-	// Walk slice sizes from finest (maxP) to whole card (1); the first boundary
-	// D/p that covers the request is the padded upper bound.
-	for p := maxP; p >= 1; p >>= 1 {
-		if v := d / p; v >= units {
-			return v
+// SlicedCoresPercent reads the per-card compute (SM) percent a sliced container asks
+// for from its ".sliced.cores-percentage" request, defaulting to 100 (a whole card's
+// compute) when absent or non-positive. Slices may oversubscribe compute, so each
+// slice may request up to 100%. It drives HAMi-core CUDA_DEVICE_SM_LIMIT / vcann-rt
+// aicore-quota directly (already a percent, no fraction conversion).
+func SlicedCoresPercent(ctr *core.Container, coresResName core.ResourceName) int {
+	if q, ok := ctr.Resources.Limits[coresResName]; ok {
+		if v := q.Value(); v > 0 {
+			return int(v)
 		}
 	}
-	return d
+	return 100
 }
 
-// SliceRatio derives the per-card fraction R = units / D from a container's
-// ".sliced.units" request, where D = nodefeature.ResourceMaxUnits. It is the single
-// source for every soft-slice quota (the compute percent and each per-card memory
-// limit). A missing or non-positive request is an error: a sliced allocate must fail
-// loudly rather than silently expose the whole card.
-func SliceRatio(ctr *core.Container, unitsResName core.ResourceName) (float64, error) {
-	q, ok := ctr.Resources.Limits[unitsResName]
-	if !ok {
-		return 0, fmt.Errorf("container %q has no %s request", ctr.Name, unitsResName)
+// SlicedMemoryMib derives the per-card VRAM limit (MiB) a sliced container asks for,
+// given the card's total VRAM (cardVRAMMib). ".sliced.memory-percentage" takes
+// precedence — floor(pct/100 * cardVRAMMib) — over the absolute ".sliced.memory-mib";
+// the result is capped at the card's VRAM. It errors when neither is set, so a sliced
+// allocate fails loudly rather than silently exposing the whole card's VRAM. Memory is
+// the non-oversubscribable anchor, so percentage wins here exactly as the Pod webhook
+// folds it into ".sliced.units" — keeping the credit accounting and the real limit
+// consistent.
+func SlicedMemoryMib(ctr *core.Container, memPctResName, memMibResName core.ResourceName, cardVRAMMib int64) (int64, error) {
+	if q, ok := ctr.Resources.Limits[memPctResName]; ok {
+		if pct := q.Value(); pct > 0 {
+			return min(cardVRAMMib*pct/100, cardVRAMMib), nil
+		}
 	}
-	units := q.Value()
-	if units <= 0 {
-		return 0, fmt.Errorf("container %q has non-positive %s request: %d", ctr.Name, unitsResName, units)
+	if q, ok := ctr.Resources.Limits[memMibResName]; ok {
+		if mib := q.Value(); mib > 0 {
+			return min(mib, cardVRAMMib), nil
+		}
 	}
-	return float64(units) / float64(nodefeature.ResourceMaxUnits), nil
-}
-
-// FloorPercent converts a per-card fraction R into the integer compute percent the
-// soft-slicing runtimes expect (HAMi-core CUDA_DEVICE_SM_LIMIT, vcann-rt aicore-quota),
-// rounding down: floor(R*100).
-func FloorPercent(r float64) int {
-	return int(r * 100)
+	return 0, fmt.Errorf("container %q has no %s or %s request", ctr.Name, memPctResName, memMibResName)
 }
 
 type ResourceUnit struct {

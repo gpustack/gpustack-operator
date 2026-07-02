@@ -171,9 +171,10 @@ const (
 var hostVgpuLockPath = "/tmp/vgpulock"
 
 // getSlicedContainerAllocateResponse renders the HAMi-core soft-slicing injection for
-// a sliced container: per-card VRAM limits and a compute (SM) limit derived from the
-// container's ".sliced.units" request, plus the mounts that preload libvgpu.so and
-// provide the shared lock/cache. The card stays visible via NVIDIA_VISIBLE_DEVICES;
+// a sliced container: a compute (SM) limit from the container's ".sliced.cores-percentage"
+// and a per-card VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib"
+// (independent dimensions, no single ratio), plus the mounts that preload libvgpu.so
+// and provide the shared lock/cache. The card stays visible via NVIDIA_VISIBLE_DEVICES;
 // HAMi-core (preloaded through /etc/ld.so.preload) enforces the limits at runtime.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
@@ -185,28 +186,31 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
 
-	ratio, err := deviceplugin.SliceRatio(ctr, nodefeature.GetAcceleratableSlicedUnitsResourceName(Manufacturer))
-	if err != nil {
-		return nil, fmt.Errorf("derive slice ratio: %w", err)
-	}
-
 	// Per-container working directories + the shared cross-process lock.
 	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), ctr.Name)
 	vgpuCacheDir := filepath.Join(podWorkDir, "tmp/vgpu")
 	for _, dir := range []string{hostVgpuLockPath, podWorkDir, vgpuCacheDir} {
-		if err = osx.MkdirAll(dir, 0o777); err != nil {
+		if err := osx.MkdirAll(dir, 0o777); err != nil {
 			return nil, fmt.Errorf("create %q: %w", dir, err)
 		}
 	}
 
-	// Envs: SM (compute) limit, per-card VRAM limit (MiB, scaled by R), shared cache.
+	// Envs: SM (compute) percent from .sliced.cores-percentage and a per-card VRAM
+	// limit (MiB) from .sliced.memory-percentage / .sliced.memory-mib (independent
+	// dimensions), plus the shared cache.
+	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
+	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
+	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
 	envs := map[string]string{
 		"NVIDIA_VISIBLE_DEVICES":          strings.Join(ids, ","),
-		"CUDA_DEVICE_SM_LIMIT":            strconv.Itoa(deviceplugin.FloorPercent(ratio)),
+		"CUDA_DEVICE_SM_LIMIT":            strconv.Itoa(deviceplugin.SlicedCoresPercent(ctr, coresRes)),
 		"CUDA_DEVICE_MEMORY_SHARED_CACHE": ctrVgpuSharedCache,
 	}
 	for i := range accels {
-		limit := int64(float64(accels[i].group.Memory) * ratio)
+		limit, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].group.Memory))
+		if err != nil {
+			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
+		}
 		envs["CUDA_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(limit, 10) + "m"
 	}
 
