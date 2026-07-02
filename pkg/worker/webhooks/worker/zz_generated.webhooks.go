@@ -195,11 +195,11 @@ func mwh_pkg_worker_webhooks_worker_InstanceWebhook(c v1.WebhookClientConfig) v1
 }
 
 func (*PodWebhook) ValidatePath() string {
-	return "/gpustack-worker-validate-core-v1-pod"
+	return "/validate-gpustack-worker-core-v1-pod"
 }
 
 func vwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.ValidatingWebhook {
-	path := "/gpustack-worker-validate-core-v1-pod"
+	path := "/validate-gpustack-worker-core-v1-pod"
 
 	cc := c.DeepCopy()
 	if cc.Service != nil {
@@ -209,7 +209,7 @@ func vwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.Vali
 	}
 
 	return v1.ValidatingWebhook{
-		Name:         "gpustack-worker.validate.core.v1.pod",
+		Name:         "validate.gpustack-worker.core.v1.pod",
 		ClientConfig: *cc,
 		Rules: []v1.RuleWithOperations{
 			{
@@ -249,11 +249,11 @@ func vwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.Vali
 }
 
 func (*PodWebhook) DefaultPath() string {
-	return "/gpustack-worker-mutate-core-v1-pod"
+	return "/mutate-gpustack-worker-core-v1-pod"
 }
 
 func mwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.MutatingWebhook {
-	path := "/gpustack-worker-mutate-core-v1-pod"
+	path := "/mutate-gpustack-worker-core-v1-pod"
 
 	cc := c.DeepCopy()
 	if cc.Service != nil {
@@ -263,7 +263,7 @@ func mwh_pkg_worker_webhooks_worker_PodWebhook(c v1.WebhookClientConfig) v1.Muta
 	}
 
 	return v1.MutatingWebhook{
-		Name:         "gpustack-worker.mutate.core.v1.pod",
+		Name:         "mutate.gpustack-worker.core.v1.pod",
 		ClientConfig: *cc,
 		Rules: []v1.RuleWithOperations{
 			{
