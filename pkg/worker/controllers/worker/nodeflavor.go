@@ -1,0 +1,438 @@
+package worker
+
+import (
+	"context"
+	"fmt"
+	"strconv"
+	"time"
+
+	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	ctrlbuilder "sigs.k8s.io/controller-runtime/pkg/builder"
+	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlevent "sigs.k8s.io/controller-runtime/pkg/event"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
+	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
+
+	"gpustack.ai/gpustack/pkg/controller"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
+	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/slicex"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
+	"gpustack.ai/gpustack/pkg/worker/settings"
+)
+
+// NodeFlavorReconciler reconciles kueue.ResourceFlavor objects keyed by their own
+// name, driven by both ResourceFlavor and Kubernetes Node changes:
+//   - When one or more Nodes contribute to the flavor's name, (re)build the
+//     ResourceFlavor — capacity = pooled nodes × per-node count, the default unit
+//     spec from the most-constrained pooled node.
+//   - When no Node contributes, delete the flavor; an unused flavor advertises
+//     stale capacity and a tombstone buys nothing once the ClusterQueue is rebuilt
+//     from ResourceFlavor labels.
+//
+// Unlike the legacy reconciler it no longer reads any per-node unit-spec label:
+// the flavor is identified by (key, os, arch, count) and the unit spec lives in the
+// flavor's notes, so changing a unit spec never touches a Node.
+//
+// Watching ResourceFlavor with For(...) means a full resync on start-up
+// re-evaluates every flavor, so orphans left behind by a key/count switch are
+// deleted even though no Node event would ever enqueue them.
+type NodeFlavorReconciler struct {
+	Client ctrlcli.Client
+}
+
+var _ ctrlreconcile.Reconciler = (*NodeFlavorReconciler)(nil)
+
+const (
+	// ScheduleLabelPrefix prefixes the operator's schedule.gpustack.ai/* annotation
+	// keys. The ResourceFlavor/ClusterQueue pool identity no longer uses this prefix
+	// — it is carried by feature labels (see featureKeyLabel).
+	ScheduleLabelPrefix = "schedule." + systemname.LabelPrefix
+
+	// The schedule labels are stamped on both the ResourceFlavor and its backing
+	// ClusterQueue in the node-feature vocabulary, so each is reverse-looked-up from
+	// the other and from the matching Nodes/Devices by a label selector: the flavor's
+	// feature key ("general."/"acceleratable." prefixed, value "true"), the well-known
+	// kubernetes.io/os and kubernetes.io/arch, and — on the ResourceFlavor only — the
+	// per-key ".count"/".capacity" siblings the NodeQueueReconciler reads to build the
+	// queue without listing or watching Nodes (capacity = pooled nodes × count).
+	_ResourceFlavorCountLabelSuffix    = ".count"
+	_ResourceFlavorCapacityLabelSuffix = ".capacity"
+)
+
+// featureKeyLabel returns the "<general.|acceleratable.>feature.gpustack.ai/<key>"
+// label key (value "true") identifying a flavor's pool: general for a CPU flavor,
+// acceleratable for a device flavor.
+func featureKeyLabel(acceleratable bool, key string) string {
+	if acceleratable {
+		return nodefeature.AcceleratableFeatureLabelPrefix + key
+	}
+	return nodefeature.GeneralFeatureLabelPrefix + key
+}
+
+// _ResourceFlavorResType is the systemmeta resource type carried by the
+// ResourceFlavors this reconciler owns.
+const _ResourceFlavorResType = "nodes"
+
+func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	logger := ctrllog.FromContext(ctx)
+
+	// Fetch.
+	rf := new(kueue.ResourceFlavor)
+	err := r.Client.Get(ctx, req.NamespacedName, rf)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			logger.Error(err, "fetch resource flavor")
+			return ctrl.Result{}, err
+		}
+		// Going to create a new flavor if needed.
+		rf = nil
+	}
+
+	// Skip if deleted.
+	if rf != nil && rf.DeletionTimestamp != nil {
+		logger.V(3).Info("skip deleted resource flavor")
+		return ctrl.Result{}, nil
+	}
+
+	// List the Nodes whose feature labels contribute to this flavor's name.
+	ndList := new(core.NodeList)
+	err = r.Client.List(ctx, ndList,
+		ctrlcli.MatchingFields{IndexingNodeByScheduleFlavor: req.Name},
+		ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil {
+		logger.Error(err, "list nodes by schedule flavor")
+		return ctrl.Result{}, err
+	}
+
+	// Read instance-type-mixed-on-node per-reconcile so a runtime flip applies
+	// without restart: when mixing is disabled an accelerated node does not
+	// contribute to a CPU flavor.
+	mixingAllowed := settings.InstanceTypeMixedOnNode.ShouldValueBool(ctx)
+
+	// Resolve each node's flavor matching this name and collect the contributors;
+	// the flavor identity is read back from the most-constrained one below.
+	var contributors []*core.Node
+	for i := range ndList.Items {
+		nd := &ndList.Items[i]
+		matched := matchNodeFlavor(nd, req.Name)
+		if matched == nil {
+			continue
+		}
+		if !mixingAllowed && !matched.Acceleratable && nodeIsAccelerated(nd) {
+			continue
+		}
+		contributors = append(contributors, nd)
+	}
+
+	if len(contributors) == 0 {
+		// No Node contributes: a flavor that does not exist yet is a no-op; an
+		// existing flavor is deleted so it stops advertising stale capacity.
+		if rf == nil {
+			logger.V(3).Info("resource flavor not found and unused, skip")
+			return ctrl.Result{}, nil
+		}
+		err = r.Client.Delete(ctx, rf)
+		if err != nil {
+			if kerrors.IsNotFound(err) {
+				return ctrl.Result{}, nil
+			}
+			logger.Error(err, "delete unused resource flavor")
+			return ctrl.Result{}, err
+		}
+		logger.V(2).Info("deleted unused resource flavor")
+		return ctrl.Result{}, nil
+	}
+
+	// Active: the unit spec is derived from the most-constrained pooled node so the
+	// pooled unit is feasible on every node; capacity = pooled nodes × count.
+	minNode := contributors[0]
+	for _, nd := range contributors[1:] {
+		if lessConstrained(nd, minNode) {
+			minNode = nd
+		}
+	}
+	// minNode is a contributor, so it matches req.Name; the flavor it yields carries
+	// the identity shared by the whole pool (key/os/arch/count + metadata).
+	flavor := matchNodeFlavor(minNode, req.Name)
+	if flavor == nil {
+		logger.V(3).Info("matched node no longer carries the flavor, skip")
+		return ctrl.Result{}, nil
+	}
+	capacity := int64(len(contributors)) * flavor.Count
+	unitCPU, unitRAM, localStorage := nodefeature.DeriveNodeUnitSpec(minNode, flavor.Count, flavor.Acceleratable)
+
+	keyLabel := featureKeyLabel(flavor.Acceleratable, flavor.Key)
+	eRf := &kueue.ResourceFlavor{
+		ObjectMeta: meta.ObjectMeta{
+			Name: req.Name,
+			Labels: map[string]string{
+				keyLabel:             "true",
+				core.LabelOSStable:   flavor.OS,
+				core.LabelArchStable: flavor.Arch,
+				keyLabel + _ResourceFlavorCountLabelSuffix:    strconvx.Itoa(flavor.Count),
+				keyLabel + _ResourceFlavorCapacityLabelSuffix: strconvx.Itoa(capacity),
+			},
+		},
+		Spec: kueue.ResourceFlavorSpec{
+			// Tolerate every taint so a workload routed here by quota is never held
+			// back by a node taint; node eligibility is governed by nodeLabels (the
+			// managed mark + feature key + os/arch), not by taints.
+			Tolerations: []core.Toleration{{Operator: core.TolerationOpExists}},
+			NodeLabels:  flavor.NodeLabels,
+		},
+	}
+	eNotes := map[string]string{
+		"acceleratable": strconv.FormatBool(flavor.Acceleratable),
+		"manufacturer":  flavor.Manufacturer,
+		"product":       flavor.Product,
+		"family":        flavor.Family,
+		"memory":        flavor.Memory,
+		"unitCPU":       unitCPU,
+		"unitRAM":       unitRAM,
+		"localStorage":  localStorage,
+	}
+	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)
+	rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {
+		skip = true
+		// Update schedule labels (capacity changes as nodes join or leave).
+		if !mapx.Contain(aRf.Labels, eRf.Labels) {
+			if aRf.Labels == nil {
+				aRf.Labels = make(map[string]string)
+			}
+			for k, v := range eRf.Labels {
+				aRf.Labels[k] = v
+			}
+			skip = false
+		}
+		// Update spec.
+		if !kubemeta.DeepEqual(aRf.Spec, eRf.Spec) {
+			aRf.Spec = eRf.Spec
+			skip = false
+		}
+		// Update notes.
+		if !systemmeta.EqualResourceTypeAndNotes(aRf, eRf) {
+			systemmeta.NoteResource(aRf, _ResourceFlavorResType, eNotes)
+			skip = false
+		}
+		return aRf, skip, nil
+	}
+	_, err = kubeclientset.CreateWithCtrlClient(ctx, r.Client, eRf,
+		kubeclientset.WithUpdateIfExisted(rfAlignFn))
+	if err != nil {
+		logger.Error(err, "sync resource flavor")
+		return ctrl.Result{}, err
+	}
+	logger.V(2).Info("synced resource flavor")
+	return ctrl.Result{}, nil
+}
+
+// matchNodeFlavor returns the node's flavor whose name equals flavorName, or nil
+// when the node contributes no such flavor.
+func matchNodeFlavor(nd *core.Node, flavorName string) *nodefeature.NodeFlavor {
+	for _, f := range nodefeature.ExtractNodeFlavors(nd) {
+		if f.Name == flavorName {
+			matched := f
+			return &matched
+		}
+	}
+	return nil
+}
+
+// nodeIsAccelerated reports whether the node carries any accelerator, via the
+// umbrella "feature.gpustack.ai/acceleratable=true" label.
+func nodeIsAccelerated(nd *core.Node) bool {
+	return kubemeta.IsLabeled(nd, nodefeature.NodeAcceleratableLabelKey, "true")
+}
+
+// lessConstrained reports whether node a is more constrained (smaller capacity)
+// than node b, comparing cpu → memory → ephemeral-storage. Non-positive values are
+// ignored: only strictly positive values are compared, so a node reporting no
+// value for an axis never wins the min on it.
+func lessConstrained(a, b *core.Node) bool {
+	for _, res := range []core.ResourceName{
+		core.ResourceCPU,
+		core.ResourceMemory,
+		core.ResourceEphemeralStorage,
+	} {
+		av, bv := capacityValue(a, res), capacityValue(b, res)
+		switch {
+		case av > 0 && bv > 0 && av != bv:
+			return av < bv
+		case av > 0 && bv <= 0:
+			return true
+		case av <= 0 && bv > 0:
+			return false
+		}
+	}
+	return false
+}
+
+// capacityValue returns the node's status capacity for res as an int64, copying
+// the quantity to a local first so the pointer-receiver Value() is callable.
+func capacityValue(nd *core.Node, res core.ResourceName) int64 {
+	q := nd.Status.Capacity[res]
+	return q.Value()
+}
+
+const (
+	// IndexingNodeByScheduleFlavor indexes managed Nodes by the ResourceFlavor names
+	// they contribute to (one CPU flavor plus one per device key). A node that is not
+	// managed drops out of the index, which is how the reconciler detects a flavor has
+	// no Node left (→ delete).
+	IndexingNodeByScheduleFlavor = "nodes.schedule.gpustack.ai/flavor"
+)
+
+// indexNodeByScheduleFlavor is the field-index extractor for
+// IndexingNodeByScheduleFlavor. A deleting node still counts as present (a brief
+// deletion must not churn the pool), but an unmanaged node is excluded so its
+// flavors are deleted.
+func indexNodeByScheduleFlavor(obj ctrlcli.Object) []string {
+	nd, ok := obj.(*core.Node)
+	if !ok || nd == nil {
+		return nil
+	}
+	if !kubemeta.IsLabeled(nd, systemname.ManagedLabelKey, "true") {
+		return nil
+	}
+	return slicex.Transform(nodefeature.ExtractNodeFlavors(nd),
+		func(f nodefeature.NodeFlavor) string {
+			return f.Name
+		})
+}
+
+func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
+	// Configure field indexer.
+	fi := opts.Manager.GetFieldIndexer()
+	err := fi.IndexField(ctx, &core.Node{}, IndexingNodeByScheduleFlavor, indexNodeByScheduleFlavor)
+	if err != nil {
+		return fmt.Errorf("index node '%s': %w", IndexingNodeByScheduleFlavor, err)
+	}
+
+	r.Client = opts.Manager.GetClient()
+
+	return ctrl.NewControllerManagedBy(opts.Manager).
+		Named("nodeflavor").
+		For(
+			// Reconcile relevant ResourceFlavor objects keyed by their own name.
+			// A full resync on start-up re-evaluates every flavor, so orphans left
+			// behind by a key/count switch get deleted even though no Node event
+			// would ever enqueue them.
+			&kueue.ResourceFlavor{},
+			ctrlbuilder.WithPredicates(
+				// Interested in relevant ResourceFlavor objects.
+				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
+					return systemmeta.MatchResource(obj, _ResourceFlavorResType)
+				}),
+				// Trigger reconciliation when a ResourceFlavor is:
+				// - created (incl. the start-up resync).
+				// - updated if its spec, schedule labels (incl. capacity) or notes
+				//   have changed.
+				// Never react to deletion: a Node event re-creates the flavor when a
+				// Node still contributes to it.
+				ctrlpredicate.Funcs{
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
+						return false
+					},
+					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						oldRf, newRf := e.ObjectOld.(*kueue.ResourceFlavor), e.ObjectNew.(*kueue.ResourceFlavor)
+						if newRf.DeletionTimestamp == nil {
+							// Fire when spec has changed.
+							if !kubemeta.DeepEqual(oldRf.Spec, newRf.Spec) {
+								return true
+							}
+							// Fire when schedule labels have changed.
+							if !mapx.EqualWithStringPrefix(oldRf.Labels, newRf.Labels,
+								nodefeature.GeneralFeatureLabelPrefix,
+								nodefeature.AcceleratableFeatureLabelPrefix,
+								core.LabelOSStable,
+								core.LabelArchStable) {
+								return true
+							}
+							// Fire when notes have changed.
+							if !systemmeta.EqualResourceTypeAndNotes(oldRf, newRf) {
+								return true
+							}
+						}
+						return false
+					},
+				},
+			),
+		).
+		Watches(
+			// Watch Nodes and enqueue the corresponding ResourceFlavor by name.
+			&core.Node{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
+				5*time.Second,
+				r.enqueueResourceFlavorWhenNodeChanged,
+			),
+			ctrlbuilder.WithPredicates(
+				// Trigger reconciliation when a Node is:
+				// - created.
+				// - deleted (so a flavor losing its last Node gets deleted).
+				// - updated if its managed mark or feature labels have changed (a
+				//   node leaving management deletes its orphaned flavors).
+				ctrlpredicate.Funcs{
+					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						oldNd, newNd := e.ObjectOld.(*core.Node), e.ObjectNew.(*core.Node)
+						if newNd.DeletionTimestamp == nil {
+							// Fire when the managed mark or feature labels have changed.
+							if !mapx.EqualWithStringPrefix(oldNd.Labels, newNd.Labels,
+								systemname.ManagedLabelKey,
+								nodefeature.FeatureLabelPrefix,
+								nodefeature.GeneralFeatureLabelPrefix,
+								nodefeature.AcceleratableFeatureLabelPrefix) {
+								return true
+							}
+						}
+						return false
+					},
+				},
+			),
+		).
+		Complete(r)
+}
+
+func (r *NodeFlavorReconciler) enqueueResourceFlavorWhenNodeChanged(
+	ctx context.Context,
+	obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	logger := ctrllog.FromContext(ctx).
+		WithValues("node", ctrlcli.ObjectKeyFromObject(obj))
+
+	nd := obj.(*core.Node)
+
+	flavors := nodefeature.ExtractNodeFlavors(nd)
+	if len(flavors) == 0 {
+		logger.V(2).Info("node has no flavor")
+		return nil
+	}
+
+	reqs := make([]ctrlreconcile.Request, 0, len(flavors))
+	for i := range flavors {
+		if flavors[i].Name == "" {
+			continue
+		}
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKey{
+				Name: flavors[i].Name,
+			},
+		})
+	}
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	logger.V(2).Info("enqueue resource flavor from node", "requests", reqs)
+	return reqs
+}

@@ -62,7 +62,6 @@ func (r *NodeFeatureReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		Spec: func() nfd.NodeFeatureSpec {
 			nfs := nfd.NewNodeFeatureSpec()
 			nfs.Labels = nodefeature.ConstructNodeCapacityLabels(nd,
-				nodefeature.OverrideGeneralRAMGiPerCPU(2),
 				// Read the switch per-reconcile so a runtime flip applies without restart.
 				nodefeature.WithManualNodeManagement(settings.NodeManagementManual.ShouldValueBool(ctx)))
 			return *nfs
