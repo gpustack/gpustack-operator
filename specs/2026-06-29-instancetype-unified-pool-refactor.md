@@ -179,8 +179,8 @@ and admission-checked capacity is fresh. This requires the three-view to live in
 | F3b | NodeQueueReconciler → merged into InstanceTypeReconciler | **Direction 3 (2026-07-01):** `NodeQueueReconciler` is **removed** — its CQ alignment (credits/quota from RF `.capacity` via `buildResourceGroups`), note assembly, node-devices AdmissionCheck wiring, and HoldAndDrain teardown all fold into `InstanceTypeReconciler` (F5d), now the **sole owner** of the CQ; `buildResourceGroups` runs inside ITR's `ensureClusterQueue`. The CQ **keeps** its `instancetypes` resourceType marker + descriptive notes (`acceleratable/manufacturer/product/family/memory/sliceable`) + admin unit notes (`unitCPU/unitRAM/localStorage`). The rest of this row describes that now-merged behavior. CQ name `gpustack-${key}-${os}-${arch}` (RF name minus the `-${count}{c\|d}` suffix) aggregates all RFs sharing (key,os,arch) regardless of count, each a flavor. Credits nominal from the RF's per-key `.capacity` label (no Node list/watch). The CQ also carries the same discriminator labels its flavors do — the feature key + `kubernetes.io/os|arch` — so its RFs (and, with `gpustack.ai/managed=true`, its Devices) are reverse-looked-up from the queue by selector. Accelerated CQ advertises **only** `credits` (no CPU/RAM/storage); non-accelerated CQ advertises only CPU (no RAM/storage). Notes (resType `instancetypes`) include `unitCPU/unitRAM/localStorage/memory`. **NQR never creates the CQ** (Direction 2, 2026-07-01) — the `InstanceTypeReconciler` (F5d) owns CQ existence, creating it from the InstanceType CR; NQR only **aligns** an existing CQ (credits/quota + descriptive notes) from its RFs and executes teardown. The former derived-mode CQ-create moved to ITR, which auto-creates the InstanceType from RFs when `instance-type-derived-from-node=true` (switch ③; default true = auto-derive). **Teardown via HoldAndDrain**: when no RF backs the CQ, **or** the CQ is already in `HoldAndDrain` (delete intent set by the ITR finalizer on InstanceType delete, F5c/F5d), NQR stops rebuilding/aligning it, ensures `StopPolicy=HoldAndDrain`, waits until all workloads are evicted (no reserved/admitted), then performs the delete itself. |
 | F3b' | Auto-created CQ borrowing protection | Auto-created CQ is reconciled to keep `spec.cohortName` **empty** (manual edits reverted) — an empty cohort is complete isolation: with no cohort there is no channel through which externally/manually managed queues could borrow the quota out. The quota carries **no** `borrowingLimit`/`lendingLimit`: **Kueue rejects any borrow/lend limit on a cohort-less ClusterQueue** (`borrowingLimit must be nil when cohort is empty`), and the empty cohort already makes such a limit meaningless. Skipped when `instance-type-derived-from-node=false` (admin owns the CQ). **(Corrected T5.4b, 2026-07-01, e2e finding: the earlier `lendingLimit: 0` was in fact coded as a `borrowingLimit: 0` and — either way — is invalid against a live Kueue API server, so it silently blocked every derived CQ from being created; only the empty cohort remains.)** |
 | F3c | Cohort removed | `CohortReconciler` deleted; `IndexingNodeByCohortProfile`, `z-cohort` label construction removed; no `Cohort` objects created. |
-| F3d | Transformations rescaled + gate-2 exclusion | `apps_kueue.go` factors `1,600,000 / 160,000 / 1` (derived from `M`); sliced rule keeps `multiplyBy .sliced` + `.sliced` empty-outputs drain. **Gate-2 node resources must not block Kueue admission**: `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` are drained via **per-key `Replace → empty` rules** (preferred — same mechanism as the `.sliced` drain; `excludeResourcePrefixes` is the fallback), so only `.sliced.units → credits` is counted and a Pod requesting these (uncovered) resources is never marked inadmissible. |
-| F4a | Pod webhook (mutating + validating) + remove NFD webhook | New `pods` CREATE webhook (objectSelector on `kueue.x-k8s.io/queue-name`, `namePrefix="gpustack-worker"`, `failurePolicy:Fail`). **Mutating**: per container + manufacturer, default an absent `.sliced.cores-percentage` to 100, and fold `.sliced.memory-percentage`(×16000) / `.sliced.memory-mib`(×`M/VRAM`) into per-card `.sliced.units` — only when `.sliced.units` is absent (no double-write vs Instance controller); memory-percentage wins over memory-mib. **Validating**: reject a `.sliced` request that has no memory (neither percentage nor mib, with or without a hand-set `.sliced.units`), sets **both** memory keys, carries any non-positive `.sliced.*` value, or has `memory-percentage > 0` with `cores-percentage < memory-percentage`; also enforce **mode exclusion** — a Pod may request only one of exclusive (`<base>`) / shared (`<base>.shared`) / sliced (`<base>.sliced`), the three cannot coexist in one Pod. **VRAM source** (**revised T5.4d, 2026-07-01**) is the operator-owned ClusterQueue's `note.gpustack.ai/memory`, reverse-looked-up by the `schedule.gpustack.ai/queue-entrance` label the InstanceTypeReconciler stamps with the fronting LocalQueue name, read with the cache-not-ready APIReader fallback — the namespaced LocalQueue is user-writable and must not be trusted as the VRAM divisor. **Ordering** has two guarantees. Kueue builds the Workload — and its credit demand — in its *reconciler* from the **persisted** Pod (after admission), so `.sliced.units` is always present before Kueue accounts quota, independent of webhook order. But Kueue's Pod *mutating* webhook also reads container resources at admission (it hashes them into a role annotation), so our mutating webhook must run **before** Kueue's: the API server runs mutating webhooks serially in lexicographic order of the `MutatingWebhookConfiguration` object name, and `gpustack-worker-mutation` sorts before `kueue-mutating-webhook-configuration` (`g` < `k`). This ordering is **implicit in the name prefix** — a prefix at/after `kueue-` would silently flip it, so the invariant is pinned by a comment at the prefix in `webhooks/setup.go`. **Generator patch** (`webhook-gen`): a `namePrefix=` marker option + a core-group (`APIGroups[0]==""` → `core`) name segment so the Pod webhook gets a valid, collision-resistant name (`gpustack-worker.{mutate,validate}.core.v1.pod`). **Remove `NodeFeatureWebhook`**; webhook set becomes {InstanceWebhook, PodWebhook}. |
+| F3d | Transformations rescaled + gate-2 exclusion | `apps_kueue.go` factors `1,600,000 / 160,000 / 1` (derived from `M`); the sliced rule keeps `multiplyBy .sliced`. **Gate-2 node resources — and every other Pod resource the single-dimension queue does not cover — must not block Kueue admission**: instead of per-key `Replace → empty` drains, the deployed Configuration sets `quotaCheckStrategy: IgnoreUndeclared` so each queue checks only its covered dimension (`credits`/`cpu`) and ignores `.sliced` / `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` (and `cpu`/`memory`/`ephemeral-storage` where uncovered). Only `.sliced.units → credits` is counted. See the resolved e2e finding below. |
+| F4a | Pod webhook (mutating + validating) + remove NFD webhook | New `pods` CREATE webhook (objectSelector on `kueue.x-k8s.io/queue-name`, `namePrefix="gpustack-worker"`, `failurePolicy:Fail`). **Mutating**: per container + manufacturer, default an absent `.sliced.cores-percentage` to 100, and fold `.sliced.memory-percentage`(×16000) / `.sliced.memory-mib`(×`M/VRAM`) into per-card `.sliced.units` — only when `.sliced.units` is absent (no double-write vs Instance controller); memory-percentage wins over memory-mib. **Validating**: reject a `.sliced` request that has no memory (neither percentage nor mib, with or without a hand-set `.sliced.units`), sets **both** memory keys, carries any non-positive `.sliced.*` value, or has `memory-percentage > 0` with `cores-percentage < memory-percentage`; also enforce **mode exclusion** — a Pod may request only one of exclusive (`<base>`) / shared (`<base>.shared`) / sliced (`<base>.sliced`), the three cannot coexist in one Pod. **VRAM source** (**revised T5.4d, 2026-07-01**) is the operator-owned ClusterQueue's `note.gpustack.ai/memory`, reverse-looked-up by the `schedule.gpustack.ai/queue-entrance` label the InstanceTypeReconciler stamps with the fronting LocalQueue name, read with the cache-not-ready APIReader fallback — the namespaced LocalQueue is user-writable and must not be trusted as the VRAM divisor. **Ordering** has two guarantees. Kueue builds the Workload — and its credit demand — in its *reconciler* from the **persisted** Pod (after admission), so `.sliced.units` is always present before Kueue accounts quota, independent of webhook order. But Kueue's Pod *mutating* webhook also reads container resources at admission (it hashes them into a role annotation), so our mutating webhook must run **before** Kueue's: the API server runs mutating webhooks serially in lexicographic order of the `MutatingWebhookConfiguration` object name, and `gpustack-worker-mutation` sorts before `kueue-mutating-webhook-configuration` (`g` < `k`). This ordering is **implicit in the name prefix** — a prefix at/after `kueue-` would silently flip it, so the invariant is pinned by a comment at the prefix in `webhooks/setup.go`. **Generator patch** (`webhook-gen`): a `namePrefix=` marker option + a core-group (`APIGroups[0]==""` → `core`) name segment so the Pod webhook gets a valid, collision-resistant name. **(Corrected T4.1, 2026-07-01, e2e finding:** the prefix is inserted **after** the `mutate`/`validate` segment — name `{mutate,validate}.gpustack-worker.core.v1.pod`, serving path `/{mutate,validate}-gpustack-worker-core-v1-pod`. The serving path is derived from the webhook name, and the aggregated apiserver authorizes only paths that start with `/mutate-`/`/validate-`; a **leading** `gpustack-worker` segment produced `/gpustack-worker-mutate-core-v1-pod`, which the server rejected as `anonymous cannot post path`, so under `failurePolicy: Fail` **every** queue-labeled Pod failed to create — the ordering-relevant name is the `MutatingWebhookConfiguration` object name `gpustack-worker-mutation`, unaffected by this reorder.**) **Remove `NodeFeatureWebhook`**; webhook set becomes {InstanceWebhook, PodWebhook}. |
 | F4b | AdmissionCheck + ledger completeness | New AdmissionCheck controller: after quota reservation, reads `Devices` CR per-card; `Retry`/`Reject` requests that can't be placed (no clean whole card for exclusive / no single card fits). **Ledger completeness**: the device-plugin `Allocate` writes **every** allocation — Kueue-routed or not — into the `Devices` CR `AcceleratorAllocation`, so even Pods that bypass Kueue land in the unified ledger; the AdmissionCheck consults this complete ledger (closes the "non-Kueue bypass" gap). |
 | F4c | Instance slice API → memory/compute percentages | `InstanceResources` renames `AcceleratorUnits int32` → `AcceleratorSlicedMemoryPercentage int32` and adds `AcceleratorSlicedCoresPercentage int32` — both in `[0,100]`, where `0` disables slicing (the request becomes an exclusive whole-card request). **InstanceWebhook** defaults (mutating): when exactly one of the two percentages is `>0`, copy it to the other (a bare memory request yields an equal compute share); validates: each in `[0,100]`, and `cores-% > 0 && cores-% < memory-%` → reject. **InstanceReconciler** `getResourceRequirements`: the sliced branch (`Sliced > 0 && memory-% > 0`) emits `.sliced` + `.sliced.memory-percentage` + `.sliced.cores-percentage` (the Pod webhook folds memory-% into `.sliced.units`) instead of a pre-computed `.sliced.units`; a `0%` request falls through to exclusive whole-card emission. The `instType.Spec.Sliced > 0` gate becomes `instType.Spec.Sliceable` once T5.1 reworks the InstanceType API. **Orphaned by this change (remove in the Phase 5 cleanup):** `nodefeature.QuantityToAlignedValue`/`QuantityToOriginalValue` (+ their tests) lose their last caller now that units are folded from memory by the Pod webhook. |
 | F4d | LocalQueueReconciler → NodeQueueEntranceReconciler | Rename the reconciler and its file; it creates one LocalQueue per non-system Namespace pointing at the ClusterQueue. **Revised T5.4d (2026-07-01):** the LocalQueue carries **no** descriptive note — the note-copy (`assembleLocalQueueNotes`) is removed. The per-card VRAM lives only on the operator-owned ClusterQueue, which the Pod webhook reverse-looks-up by the `schedule.gpustack.ai/queue-entrance` label (F5d); a namespaced LocalQueue is user-writable and cannot be trusted as the VRAM source. |
@@ -322,246 +322,94 @@ func MemoryMibToUnits(mib, cardVRAMMib int64) int64 // = floor(mib / cardVRAMMib
 //     non-positive-skipping, and compare bare numeric strings via stringx (no resource.Quantity).
 ```
 ### Implementation Plan
-Dependency order = the 6 phases of the Proposal. Each task is a **vertical slice** that leaves the tree building;
-work-state **checkpoints** sit between phases. Task IDs map to Core Features F0a–F7. The four still-open Open
-Questions appear as **verify-first** sub-steps, not blockers. Phase 3 (RF→CQ rewrite + Cohort delete) is tightly
-coupled — its three tasks land together and the system is only fully consistent again at the Phase-3 checkpoint.
+Dependency order = the six phases of the Proposal, consolidated for review into **seven feature commits**
+(one per phase, Phase 5 absorbing the Phase-6 Gateway sync) followed by the fixes and e2e work surfaced during
+the live run. Task IDs map to Core Features F0a–F7. Each entry is a vertical slice that leaves the tree
+building; a `make lint` + `go test ./pkg/...` checkpoint sits between phases.
 
-**Phase 0 — Foundation & contract (no runtime behavior change beyond the 125× credit rescale)**
-- [x] **T0.1 (F0a) — sliced resource-name suffixes.** Add `.sliced.cores-percentage` / `.sliced.memory-percentage`
-  / `.sliced.memory-mib` constants + `GetAcceleratable*ResourceName` in `pkg/nodefeature/knowns.go` (mirror the
-  `.sliced.units` constructor at `:224`). Pure addition, unused. **Accept:** constructors return the exact names.
-  **Verify:** `go test ./pkg/nodefeature/...`.
-- [x] **T0.2 (F0b) — migrate credit base `M = 1,600,000`.** Derive `CreditsPerCard`/`ResourceMaxUnits` so
-  `M = 1,600,000` (`2⁹×5⁵`); keep `CardsToCredits`/`CreditsToCards`. Rescale base-dependent fixtures — wider than
-  first scoped: `knowns_test`, `apps_kueue_test` (factors), `instance_type_test` (reservation inputs),
-  `controllers/worker/instance_test` (`.sliced.units` expectations), `deviceplugin/helper_test`
-  (`PadSlicedUnits`/`SliceRatio`/`PartitionedUnitGranularity`), `allocator/{nvidia,ascend}/deviceplugin_test`
-  (`slicedPod` units); plus fix the stale `B=12800` comment in the rendered Kueue transformations template
-  (`apps_kueue.go`). (`clusterqueue_test` was already base-relative via `cards × CreditsPerCard` — no change.)
-  All consumers derive from the constant, so the system scales consistently. **Accept:**
-  `M%10==0 && M%512==0 && M%100==0`; round-trips hold; full unit suite green. **Verify:** `go test ./pkg/...`.
-- [x] **T0.3 (F0c) — register 3 dynamic settings.** Add `node-management-manual` (`InitializeFromEnv("false")`),
-  `instance-type-mixed-on-node` (`InitializeFromEnv("true")`), `instance-type-derived-from-node`
-  (`InitializeFromEnv("true")`) to `pkg/worker/settings/value.go` (`AllowBool()`); auto-mapped to
-  `GPUSTACK_NODE_MANAGEMENT_MANUAL` / `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` / `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE`.
-  Registered but unconsumed; consumers (T1.3 / T3.1 / T3.2 / T5.3) **read per-reconcile via `ShouldValueBool(ctx)`**
-  (not a package var) so flips apply without restart. **Accept:** each resolves from its env var with the right
-  default (false / true / true). **Verify:** new `pkg/worker/settings/value_test.go`.
-- [x] **T0.4 (F0d) — note-key naming contract.** Settle `memory` (per-card VRAM) and `localStorage` as the
-  canonical NodeQueue note keys, unified with the ResourceFlavor note names. They are written as plain literals
-  where the RF/CQ notes are produced (T3.1/T3.2) — no dedicated constants/helper module — and the Pod webhook
-  reads the CQ VRAM note inline when it is built (T4.1). **Accept:** the naming is recorded; consumers use the
-  literals.
-- *Checkpoint: `make lint` clean + full `go test ./pkg/...` green on the rescaled base; no behavior change but the
-  125× credit magnitude.*
+- [x] **Commit 1 (Phase 0, F0a/F0b/F0c/F0d) — foundation & contract.** Rescale the credit base to
+  `M = 1,600,000` (`2⁹×5⁵`) so the memory-1% step `M/100 = 16000` is integral while `SlicedResourceMaxSize = 512`
+  still divides and the `M = D` identity keeps the `.sliced.units` credit factor at 1; add the
+  `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` resource-name constants +
+  constructors; register the three runtime switches (`node-management-manual`=false,
+  `instance-type-mixed-on-node`=true, `instance-type-derived-from-node`=true), read per-reconcile via
+  `ShouldValueBool`; settle `memory`/`localStorage` as the canonical RF/CQ note keys (plain literals, no
+  dedicated module). **Accept:** `M%10==0 && M%512==0 && M%100==0`, round-trips hold; each switch resolves from
+  its `GPUSTACK_*` var with the right default. **Verify:** `go test ./pkg/nodefeature/... ./pkg/worker/settings/...`.
+  *(Two commits: nodefeature rescale+keys, then settings+note-keys.)*
+- [x] **Commit 3 (Phase 1, F1a/F1b/F1c) — discovery.** SoftPartition `MaxPartitions = 512` (NVIDIA inlined,
+  Ascend 910B/910C/950), so `.sliced` node capacity = `cards×512`; `NodeCapacityReconciler` advertises the four
+  per-card capacities (`units=cards×M`, `cores-percentage=cards×51200`, `memory-percentage=cards×100`,
+  `memory-mib=Σ cards×VRAM`) and drops the `.sliced.partitions` opt-in gate; `node-management-manual` gates the
+  `gpustack.ai/managed=true` injection (honoring an explicit admin label), read per-reconcile. **Accept:** a GPU
+  node advertises all four `.sliced.*` capacities; switch ① applies without restart. **Verify:**
+  `go test ./pkg/worker/controllers/worker/... ./pkg/nodefeature/...`.
+- [x] **Commit 4 (Phase 2, F2) — allocation.** Decouple sliced SM from VRAM in both allocators:
+  `SlicedCoresPercent` drives `CUDA_DEVICE_SM_LIMIT` / the Ascend aicore-quota (default 100); `SlicedMemoryMib`
+  drives the per-card VRAM limit (memory-percentage over memory-mib, floored, capped, errors if neither); delete
+  the now-orphaned `SliceRatio`/`FloorPercent`/`PadSlicedUnits`. **Accept:** a sliced container gets independent
+  SM and VRAM limits (SM% ≠ VRAM%). **Verify:** `go test ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/...`.
+- [x] **Commit 5 (Phase 3, F3a/F3b/F3c/F3d) — pooling rewrite + delete Cohort (tightly coupled).**
+  `NodeFlavorReconciler` indexes managed nodes by flavor name and stamps the RF with node-feature labels (feature
+  key, full `kubernetes.io/os|arch`, per-key `.count`/`.capacity` = contributing nodes × count) + a blanket
+  `{Operator: Exists}` toleration + the derived unit spec / per-card VRAM in notes; a flavor with no contributing
+  node is deleted (no drain tombstone). `NodeQueueReconciler` aggregates flavors sharing `(key,os,arch)` into one
+  isolated ClusterQueue (empty `cohortName`); credits = `capacity×M` (accelerated) or `cpu = capacity` cores
+  (non-accelerated). `CohortReconciler` and the `z-cohort` machinery are removed. The unit spec derives via a
+  two-stage min-of-mins aggregation (Node→RF→CQ), skipping non-positive values, comparing bare numeric strings
+  via `stringx.CompareNumeric` (no `resource.Quantity`); the CQ notes are never clobbered when an admin unit spec
+  is present. **Accept:** RF/CQ names + labels per spec, credits correct, **zero Cohort objects**, unit spec =
+  min-across-flavors (or admin-set). **Verify:** `go test ./pkg/worker/controllers/worker/... ./pkg/worker/kuberess/...`.
+- [x] **Commit 6 (Phase 4, F4a/F4b/F4b'/F4c/F4d) — admission safety layer.** Add the `PodWebhook` (core Pods,
+  objectSelector on `kueue.x-k8s.io/queue-name`, `failurePolicy: Fail`): mutating defaults `cores-percentage=100`
+  and folds `memory-percentage`/`memory-mib` into `.sliced.units` when absent (memory-% wins); validating rejects
+  no-memory / both-memory-keys / non-positive `.sliced.*` / `cores-% < memory-%` / mixed modes. The Instance API
+  gains `AcceleratorSlicedCoresPercentage` + `AcceleratorSlicedMemoryPercentage`; the webhook set becomes
+  `{Instance, Pod}` and the mutating config name sorts before `kueue-mutating-webhook-configuration`.
+  `NodeDevicesAdmissionReconciler` adds a per-card feasibility AdmissionCheck (`Retry` when no node has a free
+  whole card — the ledger seeds every card at `ResourceMaxUnits`, so exclusive over-admit is caught exactly;
+  check-only, read uncached via `APIReader`); `installKueue` applies the AC object, its controller keeps it
+  `Active`, and the accelerated CQ references it only once Active. `NodeDevicesReconciler` syncs
+  `gpustack.ai/managed` from the Node onto the same-named `Devices`. **Accept:** a memory-% Pod gets
+  `.sliced.units`; a no-memory `.sliced` Pod is rejected; on a fully-sliced 8-card node the 5th exclusive is held
+  by `Retry`. **Verify:** `go test ./pkg/worker/... ./pkg/nodefeature/... ./gen/...` + `make generate` + `make lint`.
+- [x] **Commit 7 (Phase 5+6, F5a/F5b/F5c/F5d/F6) — materialize InstanceType as a CRD.** InstanceType becomes a
+  real `v1alpha1` CRD (status subresource) whose Spec carries the admin unit spec + `LocalStorage` and whose
+  Status carries the three views (`Accelerator`/`AcceleratorShared`/`AcceleratorSliced`, replacing the old
+  `Sliced int64`/`RAM`/`LocalStorage`); `api/worker/v1` is a proxy type + conversion and `InstanceTypeHandler` a
+  `WithCurdProxy`. `InstanceTypeReconciler` is the **sole owner** of the backing ClusterQueue: `ensureClusterQueue`
+  builds the resource groups from the pool's ResourceFlavors (admin unit spec wins, else derived), authors a
+  derived InstanceType under `instance-type-derived-from-node` (removing only its own derived ones when the RFs
+  vanish), materializes the three-view from the `Devices` per-card ledger (DeepEqual-guarded) and the CPU view
+  from the CQ, and its finalizer drives the CQ through `HoldAndDrain` → delete; `NodeQueueReconciler` is folded in
+  and removed. An `InstanceTypeWebhook` validates the all-or-nothing unit spec (`unitCPU` unitless +int,
+  `unitRAM`/`localStorage` case-sensitive `Gi`). The Pod-webhook VRAM divisor is anchored on the operator-owned CQ
+  via a `schedule.gpustack.ai/queue-entrance` label + `status.entrance` (no longer the user-writable LocalQueue).
+  The Worker Gateway tracks the three views. **Accept:** the five-step oracle reproduces `8/80/800 → … → 1/28/256`;
+  `kubectl get/create/edit/delete instancetype` is served by the CRD with a native watch; deleting drains then
+  removes both objects. **Verify:** `make generate` + `make lint` (0 issues) + `go test ./pkg/...`.
+- *Checkpoint (each phase): `make lint` clean + `go test ./pkg/...` green; e2e `case-1..6` pass on the rebuilt image.*
 
-**Phase 1 — Discovery**
-- [x] **T1.1 (F1a) — detector MaxPartitions (soft only).** NVIDIA `detector/nvidia/device.go`: SoftPartition →
-  `MaxPartitions = nodefeature.SlicedResourceMaxSize` inlined (drop the VRAM-derived power-of-two loop, no helper).
-  Ascend `detector/ascend/device.go`: families `910B`/`910C`/`950` also set `SoftPartition=true` +
-  `MaxPartitions = nodefeature.SlicedResourceMaxSize`. Physical/Virtual left untouched (separate spec). **Accept:**
-  a SoftPartition device reports `MaxPartitions=512`; `.sliced` node capacity = `cards×512`. **Verify:**
-  `go build ./pkg/devicemanager/detector/...` + `kubectl get node -o json` (no unit test — the assignment is a
-  constant; a trivial wrapper+test would be noise).
-- [x] **T1.2 (F1b) — NodeCapacityReconciler emits 4 keys.** `pkg/worker/controllers/worker/nodecapacity.go` (renamed from `node.go`): drop the
-  `.sliced.partitions` opt-in gate (`:93`); emit `units=count×M / cores-percentage=count×51200 /
-  memory-percentage=count×100 / memory-mib=count×VRAM` (VRAM from `acceleratable.<…>.memory`); extend
-  stale-cleanup (`:121,:144`) to all 4 suffixes. **Accept:** an acceleratable node shows all 4 capacities;
-  removing the model removes all 4. **Verify:** `go test ./pkg/worker/controllers/worker/...` (`nodecapacity_test.go`).
-- [x] **T1.3 (F1c) — wire `node-management-manual` (switch ①), read per-reconcile.** Gate the
-  `gpustack.ai/managed=true` injection (`pkg/nodefeature/helper.go:321`) on the setting, read at reconcile
-  (NodeFeatureReconciler passes the value into `ConstructNodeCapacityLabels` — **not** a package-level env var) so
-  a flip applies without restart. **Accept:** setting true → node not auto-managed; toggling at runtime
-  re-converges. **Verify:** `go test ./pkg/nodefeature/...` + manual.
-- *Checkpoint: a GPU node advertises 4 `.sliced.*` capacities; switch ① works; e2e `case-1..5` still pass after
-  the rescale.*
-
-**Phase 2 — Allocation (DeviceManager)**
-- [x] **T2.1 (F2) — decouple cores/VRAM in the NVIDIA allocator.** Add `SlicedCoresPercent(ctr, coresRes)`
-  (default 100) and `SlicedMemoryMib(ctr, memPctRes, memMibRes, cardVRAMMib)` (memory-percentage primary over
-  memory-mib, floored, capped at card VRAM, errors when neither set) to `pkg/deviceplugin/helper.go`.
-  `nvidia/deviceplugin.go`: `CUDA_DEVICE_SM_LIMIT` ← `SlicedCoresPercent`, per-card `CUDA_DEVICE_MEMORY_LIMIT_*`
-  ← `SlicedMemoryMib(card VRAM)`. `SliceRatio`/`FloorPercent`/`PadSlicedUnits` stay until T2.2 (Ascend still uses
-  them). **Accept:** a sliced container gets independent SM and VRAM limits (test proves SM% ≠ VRAM%). **Verify:**
-  `go test ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/nvidia/...`.
-- [x] **T2.2 — Ascend allocator parity + orphan cleanup.** Mirror T2.1 in
-  `pkg/devicemanager/allocator/ascend/deviceplugin.go` (SoftPartition families read cores/memory the same way).
-  Then delete the now-orphaned `SliceRatio`, `FloorPercent`, the already-dead `PadSlicedUnits`, and their tests
-  (`TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity`/`TestFloorPercent`). `.sliced.units`
-  then survives only as a Kueue-credits / node-capacity key (`apps_kueue.go`, `nodecapacity.go`,
-  `clusterqueue.go`, `instance.go`). **Accept:** Ascend sliced container gets independent SM/VRAM;
-  `grep -r 'SliceRatio\|PadSlicedUnits\|FloorPercent' pkg/` empty. **Verify:**
-  `go test ./pkg/devicemanager/allocator/ascend/... ./pkg/deviceplugin/...`.
-- *Checkpoint: sliced containers carry decoupled SM/VRAM limits; optional `gpustack-operator-xbuild-and-verify`
-  on real 4090 / 910B.*
-
-**Phase 3 — Pooling rewrite + delete Cohort (tightly coupled; land together)**
-- [x] **T3.1 (F3a) — ResourceFlavorReconciler → NodeFlavorReconciler.** `resourceflavor.go`: label-indexed over
-  nodes; names `gpustack-${gKey}-${os}-${arch}-${cpu}c` / `gpustack-${aKey}-${os}-${arch}-${device}d` (full os/arch);
-  RF labels in the node-feature vocabulary — the feature key `{general.|acceleratable.}feature.gpustack.ai/${key}=true`,
-  `kubernetes.io/os|arch` (full), per-key `.count`/`.capacity` (`capacity=indexedNodes×count`); `spec.nodeLabels`
-  explicitly pins `kubernetes.io/os`+`kubernetes.io/arch` (full values), **a blanket `{Operator: Exists}` toleration**
-  (eligibility is by nodeLabels, not taints); index rules (deleting=present, `managed!=true` skip, taints ignored;
-  the static index is permissive and switch ② `instance-type-mixed-on-node=false`,
-  read per-reconcile, drops a GPU node's CPU-flavor contribution in the reconciler); `nodeIsAccelerated` via the
-  `feature.gpustack.ai/acceleratable` umbrella label. **No node contributes → delete the flavor** (no drain tombstone).
-  **Unit-spec default → RF notes** (first stage of the Node→RF→CQ aggregation): from the indexed nodes pick the
-  min-capacity node — compare `status.capacity` `cpu`→`memory`→`ephemeral-storage`, **ignoring non-positive
-  values (only compare `>0`)**. Write `unitCPU`/`unitRAM` to RF notes: a **non-accelerated flavor takes the
-  factory default `1c-2g`** (`unitCPU=1`, `unitRAM=2` — the pre-refactor general-view setting, independent of the
-  node's actual cpu/ram), while an **accelerated flavor derives per device** from that node — `unitCPU = cpu/count`,
-  `unitRAM = ramGi/count` (RAM round-up-to-even). `localStorage` = `stgGi` (round-down-to-even, **not** ÷count —
-  total node storage, used for display and to cap a submission's `resource.localStorage`). Also carry `memory` (per-card VRAM) / `product` / `family` / `manufacturer` /
-  `acceleratable` in RF notes so NodeQueue needs no Node access. **Removed:** the old node-label capacity override
-  and the per-view zeroing opt-out (replaced by the InstanceType API + switches ①②).
-  **Accept:** RF naming + labels per spec; RF notes carry the derived unit spec. **Verify:**
-  `go test ./pkg/worker/controllers/worker/...` (rename `resourceflavor_test`→`nodeflavor_test`).
-- [x] **T3.2 (F3b/F3b'/F3d) — ClusterQueueReconciler → NodeQueueReconciler + transformations.** CQ name
-  `gpustack-${key}-${os}-${arch}` (RF name minus `-${count}{c|d}`) aggregates all RFs sharing (key,os,arch) over a
-  new RF→CQ index; drop the old sliced borrow/lend machinery (`stripSlicedQueueSuffix`, dual-indexing, the
-  exclusive/shared/sliced split). Credits from the RF's per-key `.capacity` label (delete the per-node Allocatable
-  summation); the CQ also carries its flavors' discriminator labels (feature key + `kubernetes.io/os|arch`) for
-  reverse lookup; accel CQ advertises **only** `credits`, non-accel only CPU; `spec.cohortName` empty + **no** borrow/lend limit (corrected T5.4b — Kueue forbids a limit on a cohort-less queue)
-  (empty cohortName = isolated, confirmed); notes incl `memory`/`localStorage`; `instance-type-derived-from-node=false` (switch ③) skips auto-create.
-  **Teardown via HoldAndDrain** (replaces the old `allDrained` path): no RF backs the CQ **or** it is already in
-  `HoldAndDrain` (delete intent from the Extension API Delete, F5c) → stop rebuilding, ensure `HoldAndDrain`, wait
-  for workloads to evict, then delete.
-  **Dead-code removed now:** `ExtractNodeProfiles`/`NodeProfile`, `ExtractNodeQueue`/`extractNodeQueue`/`NodeQueue`
-  (+ its `NodeResourceFlavorCPU/Accelerator…` subtypes)/`extractGeneralDetail`, `FormatNodeProfile`. **Kept (deferred
-  to T5.2):** `ParseNodeProfile` + `NodeProfileSpec` + `_NodeProfilePrefix`/`_NodeProfileSegmentSeparator`
-  (+ `splitNodeProfileSpec`/`isUnsignedDecimal`) — still used by `extensionapis/worker/instance_type.go` until F5b.
-  `apps_kueue.go:272-280` factors → `1,600,000/160,000/1`; **drain gate-2 resources via per-key `Replace→empty`**
-  (preferred; confirm vs `excludeResourcePrefixes` at impl).
-  **Unit-spec selection → CQ notes** (second aggregation stage): across the RFs feeding the CQ pick the min unit
-  spec — compare `unitCPU`→`unitRAM`→`localStorage`, **ignoring non-positive (only `>0`)**, via a new `stringx`
-  numeric-string compare (semver `compareInt` style — no `resource.Quantity`). **Skip entirely when the CQ notes
-  already carry the unit spec** (admin-set via the InstanceType API — never clobber). If no `>0` value exists,
-  leave it empty (the admin sets it; the goal is auto-usable without admin action). **Accept:** CQ credits=`capacity×M`,
-  no CPU/RAM/storage on accel, cohortName empty, gate-2 not counted, unit spec = min across RFs (or admin's).
-  **Verify:** `go test ./pkg/worker/controllers/worker/... ./pkg/worker/kuberess/...`.
-  **Superseded (2026-07-01, Direction 3): `NodeQueueReconciler` is removed in T5.4b — its align + teardown + AdmissionCheck wiring fold into `InstanceTypeReconciler`.**
-- [x] **T3.3 (F3c) — delete CohortReconciler.** Remove `cohort.go` + `cohort_test.go`,
-  `IndexingNodeByCohortProfile`, the `z-cohort` construction; deregister from `setup.go:14`. **Accept:** build
-  green; no `Cohort` created. **Verify:** `go test ./pkg/worker/...` + `grep -r CohortReconciler` empty.
-- *Checkpoint: e2e — NFD→Worker→Kueue materializes RF/CQ with new names + capacity labels, **zero Cohort
-  objects**; the unit spec lives in CQ notes.*
-
-**Phase 4 — Admission safety layer**
-- [x] **T4.1 (F4a/F4c/F4d) — Pod webhook + Instance slice API + queue-entrance notes.**
-  (1) **Generator** (`webhook-gen/generators/helper.go`): add a `namePrefix=` marker option (validating + mutating)
-  and a core-group name fix (`APIGroups[0]==""` → `core`); names become `<prefix>.{mutate,validate}.<grp>.<ver>.<kind>`.
-  (2) **Instance API** (`api/worker/v1alpha1/instance.go`): rename `AcceleratorUnits` → `AcceleratorSlicedMemoryPercentage`,
-  add `AcceleratorSlicedCoresPercentage` (both `[0,100]`); `make generate`.
-  (3) **InstanceWebhook**: default-equate the two percentages; validate range + `cores-% ≥ memory-%`.
-  (4) **InstanceReconciler** `getResourceRequirements`: sliced branch emits `.sliced` + memory-%/cores-% (`0%` → exclusive).
-  (5) **PodWebhook** (`pkg/worker/webhooks/worker/pod.go`, new): mutating (default cores-%=100, fold memory→`.sliced.units`
-  when absent, memory-% wins) + validating (reject: only `.sliced`; `.sliced`+units w/o memory; both memory keys; any
-  non-positive `.sliced.*`; `memory-% > 0 && cores-% < memory-%`); VRAM from the LocalQueue note *(revised T5.4d → from the operator-owned CQ via the `queue-entrance` reverse lookup)*. `namePrefix="gpustack-worker"`,
-  objectSelector on `kueue.x-k8s.io/queue-name`, `failurePolicy:Fail`. (6) **NodeQueueEntranceReconciler**: rename
-  `LocalQueueReconciler`; create one LocalQueue per Namespace pointing at the CQ *(revised T5.4d — the note-copy is removed; the webhook reads VRAM from the CQ directly)*. (7) **setup.go**: add `PodWebhook`,
-  **remove `NodeFeatureWebhook`**; rename the controller in `controllers/setup.go`; pin the prefix ordering
-  invariant with a comment (the mutating config name must sort before `kueue-mutating-webhook-configuration`).
-  (8) `nodefeature.MemoryMibToUnits`.
-  **Accept:** memory-% Pod gets `.sliced.units`; no-memory `.sliced` Pod rejected; `cores-% < memory-%` rejected; an
-  Instance with `AcceleratorSlicedMemoryPercentage` produces a memory-% Pod the webhook folds; webhook set `{Instance,Pod}`.
-  **Verify:** `go test ./pkg/worker/... ./pkg/nodefeature/... ./gen/...` + `make generate` + `make lint`.
-- [x] **T4.2 (F4b) — `NodeDevicesAdmission` per-card AdmissionCheck + ledger completeness.**
-  (1) **`nodedevicesadmission.go`** (new): a `controllerName` const (`worker.gpustack.ai/node-devices`); a
-  **Workload controller** — `For(&kueue.Workload{})` (predicate: holds a quota reservation + carries admission
-  checks) — that skips Workloads without `workload.HasQuotaReservation` (or finished/inactive), selects our checks
-  via `admissioncheck.FilterForController`, computes per-card feasibility, and writes the verdict with
-  `workload.SetAdmissionCheckState` inside `workload.PatchStatus` (`Retry` carries a fixed `RequeueAfterSeconds`
-  backoff; self-heal happens when Kueue re-admits the Workload after that backoff and it is re-evaluated — the
-  worker manager does not cache `Devices`, so candidates are read uncached via `APIReader`, not a watch); plus an
-  **AdmissionCheck controller** — `For(&kueue.AdmissionCheck{})`
-  filtered to our `controllerName` — that keeps the AC object's `status.conditions[Active]=True`. The AC **object**
-  itself is applied by `installKueue` right after the Kueue Helm install (the gpustack chart cannot — Kueue's CRD is runtime-installed; `spec.controllerName=ours`, `parameters=nil`); the operator only activates it.
-  (2) **Feasibility** (floor; per-card, not bin-pack): read mode + card-count N + per-card units U from
-  `wl.Spec.PodSets[].Template`; locate candidate `Devices` with a single `List(MatchingLabels: flavor.spec.nodeLabels)`;
-  one unified rule `Remaining ≥ demand` per card (demand = a whole card for exclusive, `U` for sliced, an owner's
-  share for shared): need ≥ N cards meeting it; shortfall → `Retry`. The status ledger seeds every card at
-  `ResourceMaxUnits`, so any allocation drops a card below a whole card and exclusive is caught exactly.
-  (3) **Candidate-node labels (F4b')**: the DeviceManager Devices report path (`detector.go:305` `devsAlignFn`)
-  stamps an accelerator flavor's selector labels — the feature key `acceleratable.feature.gpustack.ai/${key}=true`
-  + `kubernetes.io/os|arch` — onto the `Devices` `metadata.labels`, but **not** `gpustack.ai/managed`: a new
-  `NodeDevicesReconciler` (`nodedevices.go`, `For(&Devices{})` + `Watches(&Node{})`) syncs the managed mark from
-  the Node onto the same-named Devices, so the device-manager never asserts a node-management decision it does not
-  own. gate-3 then lists candidates by `flavor.spec.nodeLabels` (managed + os/arch + feature key) instead of a
-  `Node→Devices` join.
-  (4) **CQ wiring**: `NodeQueueReconciler` (clusterqueue.go) adds `spec.admissionChecksStrategy.admissionChecks`
-  referencing our check with empty `onFlavors` (all flavors) — **only once the AC reports Active**, and it
-  `Watches(&kueue.AdmissionCheck{})` to add the ref when the AC activates (a CQ referencing a missing/inactive
-  AdmissionCheck goes inactive → its workloads turn Inadmissible, `cache/scheduler/clusterqueue.go:290-294`).
-  (5) **Ledger completeness = verify-only**: the device-plugin `Allocate` already writes every allocation via
-  `patchAllocatingPod` (`server.go:312→394`, Kueue-routed or not, below kubelet) — confirm no `Allocate` path skips
-  it; add a per-card `Remaining` aggregation unit test (no new write code).
-  (6) register in `controllers/setup.go`. **check-only** (no preemption; `Retry`, never `Rejected`). **RBAC**: none
-  (worker SA is `cluster-admin`).
-  **Verify-first:** gate-2 resources (`.sliced`, `.sliced.units`) still readable on the Workload PodSet template
-  after F3d transformations; compile-time API is kueue `v0.17.1` vs runtime chart `v0.18.x` (the v1beta2 AC contract
-  is stable — confirm the served CRD matches); selector labels present on the node at detect time (else level-based
-  reconcile back-fills).
-  **Accept:** on a fully-sliced 8-card node the 5th exclusive is held by `Retry` (not admitted-then-stuck);
-  table-driven feasibility (8×50% → exclusive=0; generic headroom but no clean card → exclusive `Retry`).
-  **Verify:** `go test ./pkg/worker/controllers/worker/...` + `make lint` + e2e (case-7).
-- *Checkpoint: the webhook back-fills units before Kueue admission; the AdmissionCheck blocks the over-admit.*
-
-**Phase 5 — API & display (three-view + writable InstanceType CRD)**
-- [x] **T5.1 + T5.2 + T6.1 (F5a/F5b/F6) — three-view InstanceType, merged into one commit.** Removing
-  `Status.RAM`/`LocalStorage` forces the gateway (F6) and the InstanceWebhook downstream, so the API reshape, the
-  extension reader, and the gateway land together (per the user's single-commit choice). `api/worker/v1/instance_type.go`
-  replaces `Sliced int64` with `Sliceable bool` and reshapes Status to `Accelerator`/`AcceleratorShared`/`AcceleratorSliced`
-  (drops `RAM`/`LocalStorage`); NodeFlavorReconciler notes `sliceable` from the node's `Devices` `MaxPartitions` and
-  NodeQueueReconciler carries it onto the CQ; `convertInstanceTypeFromClusterQueue` aggregates the three views from the
-  `Devices` CR (reverse-looked-up by the queue's feature-key + `kubernetes.io/os\|arch` labels + `gpustack.ai/managed=true`)
-  and the CPU view from the CQ for non-accelerated types; the dead `ParseNodeProfile`/`NodeProfileSpec` (+ `isUnsignedDecimal`,
-  profile consts) are deleted; the InstanceWebhook/InstanceReconciler gates flip to `Spec.Sliceable` and the webhook drops the
-  RAM/local-storage caps; the Worker Gateway (`service/{types.go,helper.go}`) tracks the three views. **Accept:** the 5-step
-  oracle reproduces `8/80/800 → … → 1/28/256`; `grep -rn ParseNodeProfile pkg/` empty; `make generate` clean. **Verify:**
-  `make generate` + `make lint` (0 issues) + `go test ./pkg/...` (green).
-  **(Read path partially superseded 2026-07-01, Direction 2:** `convertInstanceTypeFromClusterQueue`'s live
-  projection is replaced by the `InstanceTypeReconciler` writing `.status` — T5.4; the API-type reshape + gateway
-  contract from this task stand.**)**
-- [x] **T5.3 (F5c) — writable extension APIService.** **⚠ Superseded 2026-07-01 (Direction 2 — promoted to a real CRD, T5.4/T5.5): the aggregated read/write described below is replaced by a CRD + webhook + reconciler (see the Risks entry + `.claude/reports/instancetype-onwatch-devices-staleness.md`); its `extractResourceNotes` validation migrates into the T5.4 webhook.** `InstanceTypeHandler` swaps `WithReadyOnly` for `WithCurd`
-  (Create/Update/Delete) and the `+genclient:onlyVerbs` restriction is lifted so the generated client/applyconfiguration
-  gain the write verbs. A new top-level `InstanceTypeSpec.LocalStorage` field is added (the unit spec had only
-  `unitCPU`/`unitRAM`); the read path fills it from the `localStorage` note (bare Gi → `…Gi`). **OnCreate** builds the CQ
-  from the InstanceType's own metadata (name + labels + annotations — the admin supplies the schedule labels there,
-  carried verbatim) and attaches only the validated resource notes; descriptive notes + quota are deferred to
-  NodeQueueReconciler (the CQ starts with an empty resource-group set + all-namespace selector). **OnUpdate** merges only
-  the admin-owned unit spec onto the CQ notes via `NoteResource` (operator-owned descriptive notes/quota untouched).
-  **OnDelete** sets `StopPolicy=HoldAndDrain` and lets NodeQueueReconciler drain + delete (no-op when already draining;
-  the storage layer confirms existence before calling it). **Input validation** (`extractResourceNotes`): all three are
-  required — `unitRAM`/`localStorage` carry a case-sensitive `Gi` suffix (stored bare); `unitCPU` is a unitless positive
-  integer. *Resolved: the reconciler-vs-write contract is presence-based (`assembleClusterQueueNotes` preserves a present
-  unit spec, derives only when absent) — no override marker; Delete drains regardless of the derived setting and is
-  permanent only under `instance-type-derived-from-node=false`.* **Accept:** `kubectl edit instancetype` persists to CQ
-  notes; reconcile doesn't clobber admin values. **Verify:** `go test ./pkg/worker/extensionapis/worker/...` (green) +
-  `make lint` (0 issues) + `make generate` (idempotent).
-- [x] **T5.4a (F5c) — InstanceType real CRD (v1alpha1) + v1 proxy; retire the CQ projection.** Add the real type at `api/worker/v1alpha1/instance_type.go` with `+k8s:crd-gen:resource:scope="Cluster",subResources=["status"],categories=["gpustack"],shortName=["instype"]` (Spec incl. the admin unit spec + `LocalStorage`; the three-view Status); make `api/worker/v1/instance_type.go` a proxy (`type InstanceType workercore.InstanceType` + conversion) keeping `+genclient`/`+k8s:apireg-gen`; reduce `InstanceTypeHandler` to a `WithCurdProxy` v1→v1alpha1 (mirroring `InstanceHandler`), deleting the CQ-projection logic (`convertInstanceTypeFromClusterQueue`, `getAcceleratorResources`, `getCPUResource`, `extractResourceNotes`, OnCreate/OnUpdate/OnDelete) — reborn in T5.4b/T5.4c; add `InstanceType`/`InstanceTypeList` to the v1alpha1 scheme + the CRD installer (`pkg/worker/apis/setup.go`). **Accept:** `kubectl get/create/edit/delete instancetype` served by the CRD (real etcd, native watch); `make generate` clean (CRD YAML + deepcopy + conversion + client regenerated). **Verify:** `make generate` + `make lint` (0 issues) + `go test ./pkg/...` (green). *(Status stays empty until T5.4b; create still persists the CR.)*
-- [x] **T5.4b (F5d/F3b) — InstanceTypeReconciler: existence authority + spec→CQ + status; demote NQR to align-only.** New `pkg/worker/controllers/worker/instancetype.go` (registered in `controllers/setup.go`): finalizer via `systemmeta.Lock/Unlock`; **For** InstanceType, **Watches** ResourceFlavor + ClusterQueue + Devices with label-mapped enqueue. Implements F5d's four parts — InstanceType→CQ create/sync (`NoteResource` merge); derived RF→InstanceType auto-create gated on `instance-type-derived-from-node=true` + a `derived` marker (only its own derived ones are deleted when RFs vanish); three-view → `.status` DeepEqual-guarded; finalizer HoldAndDrain teardown. **NQR merge (F3b, Direction 3 — 2026-07-01):** `NodeQueueReconciler` is **removed entirely**; ITR's `ensureClusterQueue` builds the resource groups + aligns credits/notes/labels/AdmissionCheck ref from the pool's RFs, and the finalizer teardown drains + deletes the CQ itself (both absorbed from NQR). The CQ keeps its `instancetypes` marker + descriptive + unit notes. Migrate the 5-step three-view oracle test onto the reconciler. **Accept:** creating an InstanceType creates the CQ; in derived mode an RF auto-creates its InstanceType; a pod alloc/free moves `.status` (`8/80/800 → … → 1/28/256`); deleting drains then removes both. **Verify:** `go test ./pkg/worker/controllers/worker/...` (green) + `make lint`.
-- [x] **T5.4c (F5c) — InstanceType validating webhook.** New `pkg/worker/webhooks/worker/instancetype.go` (registered in `webhooks/setup.go`) on the v1alpha1 CRD, migrating the `extractResourceNotes` rules — now all-or-nothing: an unset unit spec is accepted (derived pools leave it empty), a set one must have `unitCPU` unitless +int and `unitRAM`/`localStorage` case-sensitive `Gi`, stored bare. Validating-only (no defaulting needed). **Accept:** a bad unit spec is rejected at admission; `make generate` emits the webhook manifest. **Verify:** `go test ./pkg/worker/webhooks/worker/...` (green) + `make generate` + `make lint`.
-- [x] **T5.4d (F4a/F4d/F5d) — anchor the Pod-webhook VRAM on the operator-owned ClusterQueue.** *(Added 2026-07-01, from an end-of-build security finding: the webhook's per-card-VRAM fold divisor was read from the Pod's namespaced, user-writable LocalQueue note — a tenant with write on their LocalQueue could raise the divisor and forge under-counted `.sliced.units` credits.)* (1) **InstanceTypeReconciler** `ensureClusterQueue` stamps the backing CQ with `schedule.gpustack.ai/queue-entrance = FormatLocalQueueName(it.Name)` (the fronting LocalQueue name), and `computeStatus` sets the new `InstanceTypeStatus.Entrance`. (2) **NodeQueueEntranceReconciler** drops the note-copy (`assembleLocalQueueNotes` + the `instancetypeselectors` branding) — the LocalQueue carries no VRAM note. (3) **PodWebhook** `cardVRAMMib` reverse-looks-up the operator-owned CQ by the `queue-entrance` label (cached list + APIReader fallback; 0 or >1 match → reject) and reads its `memory` note — the divisor now comes only from the cluster-scoped, operator-writable CQ. (4) **Extension APIService** adds a first `Entrance` column (`{.status.entrance}`). New `InstanceTypeStatus.Entrance` field → `make generate`. **Accept:** a raw Pod cannot lower the VRAM divisor via its LocalQueue; `kubectl get instancetype` shows the entrance queue name. **Verify:** `go test ./pkg/worker/...` (green) + `make generate` + `make lint` (0 issues).
-- [x] **T5.5 (F5c/Story 6) — Finalizer drain ordering + watch-freshness verification.** The InstanceType finalizer holds the object until the `InstanceTypeReconciler` teardown has drained and removed the backing CQ (its LocalQueues cascade off the CQ owner reference), so the CQ is never orphaned and the InstanceType never vanishes before drain. Consumers now see fresh capacity: a pod alloc/free moves the `Devices` ledger and the reconcile that observes it rewrites `.status` (a native watch on the materialized CRD delivers the change; the old aggregated projection could not), while an unchanged ledger writes nothing (DeepEqual guard). **NQR merge (Direction 3 — 2026-07-01):** the drain/delete ordering already landed in T5.4b (teardown is a single ITR closed loop, covered by `TestInstanceTypeReconciler_Teardown{Finalizer,WaitsForDrain}`); this task adds `TestInstanceTypeReconciler_StatusFreshOnLedgerChange` (status moves on alloc/free, no-op writes nothing) and authors e2e `case-6` (five-step three-view progression + watch freshness + unit-spec→CQ-notes with no Node/NodeFeature touch + zero Cohort). **Accept:** deleting an InstanceType drains then deletes both objects in order; a pod alloc/free updates `.status` and a watch observes it. **Verify:** `go test ./pkg/worker/controllers/worker/...` (green) + e2e case-6 + `make lint`.
-- *Checkpoint: e2e — the 5-step pooling sequence shows the three-view progression exactly, and a pod alloc/free is observed via `instancetype` watch.*
-
-**Phase 6 — Worker Gateway**
-- [x] **T6.1 (F6) — gateway contract sync.** Merged into T5.1's commit (forced by dropping `Status.RAM`/`LocalStorage`):
-  `pkg/workergateway/service/{types.go,helper.go}` track the three-view contract (overview/candidate `RAM`/`LocalStorage`
-  → `AcceleratorShared`/`AcceleratorSliced`), same tier/bundle aggregation. **Verify:** `go test ./pkg/workergateway/...` (green).
-- *Final checkpoint: full `make lint` + `go test ./...` green; both e2e anchor cases (case-6, case-7) pass.*
+**Post-build consolidation — fixes surfaced during the live e2e run + test infra.** Five standalone fixes and
+the e2e redesign follow the seven feature commits, kept as their own commits for a clean review trail (detail in
+"Discovered during the live e2e run"):
+- `fix(chart)` — strip `instancetypes` finalizers during chart/e2e cleanup, so an InstanceType no longer hangs `Terminating` when the operator is already gone.
+- `fix(worker)` — keep the Pod webhook serving path standard-prefixed (`/{mutate,validate}-gpustack-worker-core-v1-pod`); a leading prefix was rejected by the aggregated apiserver.
+- `fix(worker)` — admit Instance Workloads via kueue `quotaCheckStrategy: IgnoreUndeclared`, so single-dimension queues no longer reject the Pod's other resources (subsumes the gate-2 drains).
+- `fix(webhook)` — skip defaulting + update-validation while an object is deleting (a `ReceiveDeletionUpdate` marker opts out), so a finalizer-clearing update is never denied and the object cannot deadlock `Terminating`.
+- `fix(worker)` — stop a running Instance when its type drains, evaluated on every reconcile before (re)creating the Pod, with an `InstanceType` watch enqueuing by `.spec.type`.
+- `test(e2e)` — redesign the six operator e2e cases around the user stories (see the Test Plan).
 
 ### Test Plan
 [ ] I/we understand the owners of the involved components may require updates to existing tests to make this
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
-- Rescale base-dependent fixtures for the `M=1,600,000` migration (T0.2), wider than first scoped: `knowns_test` /
+- Rescale base-dependent fixtures for the `M=1,600,000` migration (Commit 1), wider than first scoped: `knowns_test` /
   `apps_kueue_test` (factors) / `instance_type_test` (reservation inputs) / `controllers/worker/instance_test`
   (`.sliced.units`) / `deviceplugin/helper_test` (`PadSlicedUnits`/`SliceRatio`/`PartitionedUnitGranularity`) /
   `allocator/{nvidia,ascend}/deviceplugin_test` (`slicedPod` units). `clusterqueue_test` is already base-relative
-  (`cards × CreditsPerCard`). (The `deviceplugin/helper_test` trio is later deleted in T2.1 as orphan cleanup.)
+  (`cards × CreditsPerCard`). (The `deviceplugin/helper_test` trio is later deleted in Commit 4 as orphan cleanup.)
 - Add missing test files: `pkg/devicemanager/detector/nvidia` (none today) and `pkg/worker/settings` (none today).
 - Rescale `e2e case-5` credit assertions to the new base before reusing it.
 
@@ -570,10 +418,10 @@ Every added unit gets coverage; target ≥ existing, no regression. Per-package 
 - `pkg/nodefeature`: new suffix constructors; `M` invariants (`%10`/`%512`/`%100`); `CardsToCredits`/`CreditsToCards` round-trips; gKey without os/arch abbrev.
 - `pkg/devicemanager/detector/nvidia`: **NEW** — SoftPartition `MaxPartitions=512`.
 - `pkg/worker/controllers/worker`: `nodecapacity_test` (4 sliced keys + stale-clean); `nodeflavor_test` (names + `capacity` label + index rules + nodeLabels os/arch pin); `nodequeue_test` (credits=`capacity×M`; accel has no CPU/RAM/storage; `cohortName` empty + **no** borrow/lend limit — Kueue forbids one on a cohort-less queue); **NEW** `nodedevices_test` (managed-label sync Node→Devices) + `nodedevicesadmission_test` (per-card feasibility: 8×50% → exclusive=0; clean-card shortage → `Retry`; Devices located by `flavor.spec.nodeLabels`); **DELETE** `cohort_test`.
-- `pkg/worker/kuberess`: `apps_kueue_test` (factors `1,600,000/160,000/1`, `multiplyBy`, gate-2 excluded/drained, `.sliced` drain).
+- `pkg/worker/kuberess`: `apps_kueue_test` (factors `1,600,000/160,000/1`, `multiplyBy`, only the three credits rules remain, and `quotaCheckStrategy: IgnoreUndeclared` is set unconditionally — no gate-2 drains).
 - `pkg/deviceplugin` + `pkg/devicemanager/allocator/nvidia`: `SliceRatio` split; `SM←cores-%`, `VRAM←memory-mib`; `cores-%` default 100.
 - `pkg/worker/webhooks/worker`: **NEW** `pod_test` — fold `memory-%`/`memory-mib`→`units`, default cores-%=100, reject (no memory / both memory keys / non-positive / `cores-% < memory-%` / mixed exclusive+shared+sliced modes), no double-write when `.sliced.units` present; **updated** `instance_test` — percentage default-equate + range/`cores-% ≥ memory-%` validation; `instance` reconciler conversion to `.sliced.memory-percentage`/`.sliced.cores-percentage`.
-- `pkg/worker/controllers/worker`: **NEW** `instancetype_test` (Direction 2 — replaces the superseded `extensionapis/worker/instance_type_test`) — the 5-step three-view oracle from the `Devices` CR (`8/80/800 → … → 1/28/256`), per-node rollup (Remaining sums, OnceMaxRequest = largest node), CPU view from the CQ, `Sliceable`/`Memory` from notes, draining→zero, reverse-lookup selector; the DeepEqual-guarded `.status` write (a no-op change writes nothing); spec→CQ Create/Update `NoteResource` merge + Delete finalizer/HoldAndDrain ordering.
+- `pkg/worker/controllers/worker`: **NEW** `instancetype_test` — the 5-step three-view oracle from the `Devices` CR (`8/80/800 → … → 1/28/256`), per-node rollup (Remaining sums, OnceMaxRequest = largest node), CPU view from the CQ, `Sliceable`/`Memory` from notes, draining→zero, reverse-lookup selector; the DeepEqual-guarded `.status` write (a no-op change writes nothing); spec→CQ Create/Update `NoteResource` merge + Delete finalizer/HoldAndDrain ordering.
 - `pkg/worker/webhooks/worker`: **NEW** `instancetype_test` — unit-spec validation migrated from `extractResourceNotes` (all three required; `unitCPU` unitless +int; `unitRAM`/`localStorage` case-sensitive `Gi`, stored bare).
 - `pkg/worker/settings`: **NEW** — the 3 settings map from their `GPUSTACK_*` vars with correct defaults (`node-management-manual`=false; `instance-type-mixed-on-node`/`instance-type-derived-from-node`=true) and are read per-reconcile via `ShouldValueBool(ctx)` (runtime-adjustable, no restart).
 
@@ -582,10 +430,27 @@ Every added unit gets coverage; target ≥ existing, no regression. Per-package 
 - `AdmissionCheck` × `Devices` CR per-card feasibility, table-driven: clean-card shortage vs generic headroom (the 8×50%-sliced case yields exclusive=0).
 
 #### e2e tests
-Under `.claude/skills/gpustack-operator-e2e/cases/`:
-- **NEW `case-6`** — on an 8× A10G (24Gi) node, the five-step pooling sequence asserts the three-view progression `8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256`; asserts a unit-spec change via the InstanceType API writes CQ notes and touches **no** `Node`/NodeFeature; asserts **zero** `Cohort` objects; asserts **watch freshness** — a pod alloc/free moves the observed `.status` three-view via `kubectl get instancetype -w` (Direction 2).
-- **NEW `case-7`** — 8 cards each 50%-sliced; the 5th exclusive request is rejected/held by the `AdmissionCheck` (not admitted-then-unschedulable).
-- Reuse `case-1..5` (rescaled) as regression for the discovery→Kueue chain.
+Under `.claude/skills/gpustack-operator-e2e/cases/`, **one case per User Story** (accelerated cases run
+GPU-less by approximation — a fake accelerator NodeFeature + a phantom-node `Devices` ledger patched on
+the **v1alpha1** CRD `/status`):
+- **`case-1`** (Story 1/2 baseline) — the CPU-only chain materializes: ResourceFlavor → InstanceType
+  (`Active`, with an entrance LocalQueue) → one isolated ClusterQueue → LocalQueue, and **zero**
+  `Cohort` objects.
+- **`case-2`** — a running Instance whose InstanceType drains is **stopped** (`spec.stop=true`), not
+  recreated.
+- **`case-3`** (Story 5) — `gpustack.ai/managed=false` (via the NodeFeature) **deletes** the node's
+  ResourceFlavor (no drain tombstone) and tears down the derived InstanceType (backing CQ
+  `HoldAndDrain`/removed via the finalizer).
+- **`case-4`** (Story 4) — 8 cards each 50%-sliced; a 5-exclusive request passes coarse `credits` but
+  is held by the node-devices `AdmissionCheck` (`Retry`, not admitted-then-unschedulable); also asserts
+  the AC is `Active` and the accelerated CQ references it.
+- **`case-5`** (Story 3) — the Pod webhook folds `.sliced.memory-percentage` into `.sliced.units`
+  (`× M/100`) and defaults `.sliced.cores-percentage` to 100; a memoryless `.sliced` Pod is rejected by
+  the validating webhook.
+- **`case-6`** (Story 2/6) — on an 8× A10G (24Gi) node the five-step pooling sequence drives the
+  three-view `8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256`; asserts **watch
+  freshness** via `kubectl get instancetype -w`, a unit-spec change through the InstanceType API
+  reaching the CQ notes while touching **no** `Node`/NodeFeature, and **zero** `Cohort` objects.
 
 ## Alternatives
 - **What-if projection (three views from the credits scalar)** — rejected: a single credits value cannot
@@ -609,9 +474,10 @@ Under `.claude/skills/gpustack-operator-e2e/cases/`:
   ours must run first — the API server orders mutating webhooks by `MutatingWebhookConfiguration` name, and
   `gpustack-worker-mutation` < `kueue-mutating-webhook-configuration`. **Watch out:** the ordering in (2) is
   implicit in the name prefix; a prefix sorting at/after `kueue-` silently reverses it, so the invariant is
-  pinned by a comment in `webhooks/setup.go`. The ClusterQueue/Configuration must **exclude** the gate-2 node
-  resources (`.sliced.cores-percentage`/`.memory-percentage`/`.memory-mib`) and the multiplyBy-only `.sliced`
-  from accounting, so only `.sliced.units → credits` is counted (F3d).
+  pinned by a comment in `webhooks/setup.go`. The Configuration sets `quotaCheckStrategy: IgnoreUndeclared` so
+  each queue counts only its covered dimension and ignores the gate-2 node resources
+  (`.sliced.cores-percentage`/`.memory-percentage`/`.memory-mib`), the multiplyBy-only `.sliced`, and any other
+  uncovered resource; only `.sliced.units → credits` is counted (F3d).
 - **Non-Kueue Pods bypassing the ledger** → not a gap. The device-plugin `Allocate` records every allocation
   into the `Devices` CR `AcceleratorAllocation` (below Kueue), so the unified ledger is complete and the
   AdmissionCheck confirms against it (F4b).
@@ -663,11 +529,56 @@ Under `.claude/skills/gpustack-operator-e2e/cases/`:
   exclusive needs. The unified `Remaining ≥ demand` rule stays safe for every mode (sliced stays permissive, yet
   still catches cards fully held by exclusive/other consumers).
 
+### Discovered during the live e2e run (2026-07-01)
+- **Single-dimension ClusterQueues make Instance Workloads inadmissible for their other Pod resources —
+  RESOLVED (2026-07-01).** A ClusterQueue advertises exactly one coarse admission dimension — `cpu` for
+  general pools (F3b), the manufacturer credits for accelerated pools — but every Instance's Workload also
+  requests `cpu`/`memory`/`ephemeral-storage` (`instance.go` derives them from `unitResources`/`localStorage`).
+  Kueue refuses to assign a flavor for a resource the queue does not cover (`couldn't assign flavors … resource
+  memory`), so the Workload never reserves quota. This hit **both** pools: general (memory + ephemeral-storage
+  uncovered) and accelerated (cpu + memory + ephemeral-storage uncovered — `case-4`'s bare Pod requested only
+  the exclusive resource, so it slipped past). **Fix:** enable Kueue's `QuotaCheckStrategy` feature gate and set
+  `resources.quotaCheckStrategy: IgnoreUndeclared` in the deployed Configuration (`apps_kueue.go`), so each queue
+  checks only its covered dimension and ignores the rest — the native expression of "Kueue is not the ledger".
+  This **subsumes the gate-2 `.sliced.*` drains** (now redundant, removed) and needs no per-resource enumeration
+  or added CQ coverage. Available in the deployed Kueue v0.18.1 (alpha, off by default; the vendored `v0.17.1`
+  Go client is irrelevant — the Configuration is a raw YAML applied to the external Kueue). Verified live by
+  `case-2` (general admission). Fixed in a standalone `fix(worker)` commit.
+- **Instance deletion deadlocked when its InstanceType was gone — RESOLVED (2026-07-02).** The
+  InstanceReconciler clears its `gpustack.ai/controlled` finalizer with an Update, which runs the Instance
+  mutating + validating webhooks; those re-size the Pod from the InstanceType, so once the type was drained
+  (`spec.type: Not found`) or rebuilt with an empty unit spec the webhook denied the finalizer-clearing update
+  and the Instance was stuck `Terminating` forever (surfaced by `case-2`'s drain teardown). **Fix:** guard all
+  webhooks in `pkg/webhook/helper.go` to skip defaulting and update-validation once the object carries a
+  deletion timestamp (a handler may implement the `ReceiveDeletionUpdate` marker to opt out); the check is made
+  once at setup. Verified live by `case-2` (the test Instance now deletes cleanly on teardown). Fixed in a
+  standalone `fix(webhook)` commit.
+- **A running Instance was not stopped when its InstanceType drained — RESOLVED (2026-07-02).** The
+  stop-on-inactive/gone check in `instance.go` sat **inside the `pod == nil` branch** and the
+  `InstanceReconciler` did not watch `InstanceType`, so a *running* Instance whose type drained was never
+  re-evaluated. Worse, on a drain Kueue evicts the Pod → the reconcile sees `pod==nil` but the type still
+  looks `Active` for an instant → it **recreated** the Pod (left stuck `Pending`) instead of stopping
+  (traced live: `spec.stop` never flipped in 120s). **Fix:** evaluate the gone/`Inactive` type on every
+  reconcile, before (re)creating the Pod, and add an `InstanceType` watch that enqueues Instances by
+  `.spec.type`. Verified live by `case-2` (the running Instance reaches `spec.stop=true`/`Stopped` ~13s
+  after drain). Fixed in a standalone `fix(worker)` commit.
+
+### Follow-ups (seed for the next spec)
+Deferred items surfaced during this build, carried forward as the seed for a follow-up spec:
+- **The aggregated `v1` proxy's `/status` subresource write returns `ServiceUnavailable`.** Writing
+  `devices`/`instancetypes` status through the aggregated `worker.gpustack.ai/v1` proxy fails; only the real
+  `v1alpha1` CRD `/status` serves the write. Low production impact (the DeviceManager and reconcilers write
+  status via the typed `v1alpha1` client), but external/`kubectl` status writes to the proxy fail — the e2e
+  mocks target `devices.v1alpha1.worker.gpustack.ai` to work around it. Root-cause the proxy handler's empty
+  `srs` / status-subresource wiring (`DevicesHandler.SetupHandler`) so the aggregated `/status` path serves.
+
 ### Still open (confirm during implementation)
-- **Exclude vs drain for gate-2 resources (T3.2)** → **prefer per-key `Replace → empty` transformation rules**
-  (same mechanism as the existing `.sliced` drain — one consistent path, likely cheaper than a separate
-  `excludeResourcePrefixes` scan); confirm this holds at implementation. Either way the firm requirement stands:
-  `.sliced.cores-percentage`/`.memory-percentage`/`.memory-mib` must not be counted or block admission.
+- **Exclude vs drain for gate-2 resources (T3.2)** → **resolved: neither — `quotaCheckStrategy: IgnoreUndeclared`.**
+  The live e2e showed the drains were one instance of a broader problem (every uncovered Pod resource blocks
+  admission, not just gate-2), so instead of per-key `Replace → empty` drains or an `excludeResourcePrefixes` scan,
+  each queue checks only its covered dimension and ignores the rest. The firm requirement stands and is met:
+  `.sliced.cores-percentage`/`.memory-percentage`/`.memory-mib` (and `cpu`/`memory`/`ephemeral-storage`) are
+  neither counted nor block admission. See the resolved e2e finding above.
 - **Reconciler vs InstanceType-write contract (F5c, T5.3)** → **resolved (T5.3): presence-based preservation, no
   override marker.** `assembleClusterQueueNotes` leaves the CQ's unit spec untouched whenever one is already present
   (admin-written via Create/Update) and derives the min-across-flavors only when absent, so admin values are
