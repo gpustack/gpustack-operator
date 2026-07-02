@@ -1006,6 +1006,37 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	}
 }
 
+// TestConstructNodeCapacityLabels_ManualNodeManagement pins the node-management-manual
+// gate (switch ①): without it the managed label is auto-injected; with it the label
+// is only present when the admin set it explicitly on the node.
+func TestConstructNodeCapacityLabels_ManualNodeManagement(t *testing.T) {
+	base := func(labels map[string]string) *core.Node {
+		return &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-1", Labels: labels}}
+	}
+	managed := func(node *core.Node, opts ...ConstructNodeCapacityLabelsOption) (string, bool) {
+		v, ok := ConstructNodeCapacityLabels(node, opts...)[systemname.ManagedLabelKey]
+		return v, ok
+	}
+
+	// Auto (default): managed=true is injected.
+	v, ok := managed(base(nil))
+	assert.True(t, ok, "auto mode injects the managed label")
+	assert.Equal(t, "true", v)
+
+	// Manual: no auto-inject on a node without an explicit label.
+	_, ok = managed(base(nil), WithManualNodeManagement(true))
+	assert.False(t, ok, "manual mode must not auto-inject the managed label")
+
+	// Manual: an explicit admin opt-in/opt-out is still honored.
+	v, ok = managed(base(map[string]string{systemname.ManagedLabelKey: "true"}), WithManualNodeManagement(true))
+	assert.True(t, ok)
+	assert.Equal(t, "true", v, "explicit opt-in preserved under manual mode")
+
+	v, ok = managed(base(map[string]string{systemname.ManagedLabelKey: "false"}), WithManualNodeManagement(true))
+	assert.True(t, ok)
+	assert.Equal(t, "false", v, "explicit opt-out preserved under manual mode")
+}
+
 func TestExtractNodeResourceFlavors(t *testing.T) {
 	// Output shape:
 	//   ndfs[0]  = the CPU/general flavor, emitted only when the general(CPU)

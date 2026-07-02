@@ -24,8 +24,12 @@ var (
 )
 
 func init() {
-	generalNodeKeyWithCPUName = osx.Getenv("GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME") == "true"
+	generalNodeKeyWithCPUName = osx.Getenv("GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME") == valueTrue
 }
+
+// valueTrue is the canonical string value of a boolean feature label ("true"),
+// shared so the many label-value writes/checks below stay a single literal.
+const valueTrue = "true"
 
 const (
 	// FeatureLabelPrefix prefixes the node feature label/annotation keys.
@@ -89,12 +93,12 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 	}
 
 	// "${prefix}acceleratable=true"
-	labels[FeatureLabelPrefix+"acceleratable"] = "true"
+	labels[FeatureLabelPrefix+"acceleratable"] = valueTrue
 
 	manuKey := AcceleratableFeatureLabelPrefix + group.Manufacturer
 
 	// "acceleratable.${prefix}${manufacturer}=true"
-	labels[manuKey] = "true"
+	labels[manuKey] = valueTrue
 	// "acceleratable.${prefix}${manufacturer}.driver-version=${driverVersion}"
 	if v := group.DriverVersion; v != "" {
 		labels[manuKey+".driver-version"] = v
@@ -107,7 +111,7 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 	nodeKey := manuKey + "-" + group.ID
 
 	// "acceleratable.${prefix}${manufacturer}-${id}=true"
-	labels[nodeKey] = "true"
+	labels[nodeKey] = valueTrue
 	// "acceleratable.${prefix}${manufacturer}-${id}.product=${name}"
 	labels[nodeKey+".product"] = group.Name
 	// "acceleratable.${prefix}${manufacturer}-${id}.memory=${memory}"
@@ -136,7 +140,7 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 func ExtractAcceleratableNodeKeys(node *core.Node) []string {
 	return mapx.FilterSlice(node.Labels, func(k, v string) (string, bool) {
 		if strings.HasPrefix(k, AcceleratableFeatureLabelPrefix) {
-			if v == "true" {
+			if v == valueTrue {
 				v = strings.TrimPrefix(k, AcceleratableFeatureLabelPrefix)
 				manufacturer, _, found := strings.Cut(v, "-")
 				if found && IsKnownAcceleratableManufacturer(manufacturer) {
@@ -297,6 +301,9 @@ type (
 	ConstructNodeCapacityLabelsOptions struct {
 		// GeneralRAMGiPerCPU overrides the default RAM Gi per CPU used in the general view when constructing node capacity labels.
 		GeneralRAMGiPerCPU int64
+		// ManualNodeManagement, when true, skips auto-injecting the managed label so
+		// an administrator opts nodes in by hand (the node-management-manual setting).
+		ManualNodeManagement bool
 	}
 
 	ConstructNodeCapacityLabelsOption func(*ConstructNodeCapacityLabelsOptions)
@@ -311,6 +318,16 @@ func OverrideGeneralRAMGiPerCPU(v int64) ConstructNodeCapacityLabelsOption {
 	}
 }
 
+// WithManualNodeManagement skips auto-injecting the managed label when manual is
+// true, so the operator does not auto-onboard nodes. The caller passes the
+// node-management-manual setting value, read per-reconcile, so a runtime flip
+// applies on the next reconcile without a restart.
+func WithManualNodeManagement(manual bool) ConstructNodeCapacityLabelsOption {
+	return func(opts *ConstructNodeCapacityLabelsOptions) {
+		opts.ManualNodeManagement = manual
+	}
+}
+
 // ConstructNodeCapacityLabels constructs node capacity labels from the given node status and existing labels.
 func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLabelsOption) map[string]string {
 	var opts ConstructNodeCapacityLabelsOptions
@@ -318,8 +335,12 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		opt[i](&opts)
 	}
 
-	labels := map[string]string{
-		systemname.ManagedLabelKey: "true",
+	labels := map[string]string{}
+	// Auto-inject the managed label unless node management is manual. An explicit
+	// admin-set value always wins, so an admin can opt a node in or out by hand —
+	// the only path to management when manual mode is on.
+	if !opts.ManualNodeManagement {
+		labels[systemname.ManagedLabelKey] = valueTrue
 	}
 	if node.Labels != nil && node.Labels[systemname.ManagedLabelKey] != "" {
 		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
@@ -344,9 +365,9 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		gManu, _, _ := strings.Cut(gKey, "-")
 
 		// "general.${prefix}${manufacturer}=true"
-		labels[GeneralFeatureLabelPrefix+gManu] = "true"
+		labels[GeneralFeatureLabelPrefix+gManu] = valueTrue
 		// "general.${prefix}${manufacturer}-${id}=true"
-		labels[generalKey] = "true"
+		labels[generalKey] = valueTrue
 
 		// "general.${prefix}${manufacturer}-${id}.cpu=${cpu}"
 		cpuKey := generalKey + ".cpu"
@@ -593,7 +614,7 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 				ProfileFlavor: FormatNodeProfile(gKey, "", labels[profFlavorKey]),
 				Manufacturer:  manufacturer,
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey: "true",
+					systemname.ManagedLabelKey: valueTrue,
 					profQueueKey:               profQueue,
 				},
 				Tolerations: []core.Toleration{
@@ -630,12 +651,12 @@ func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
 		manufacturer, _, _ := strings.Cut(aKey, "-")
 
 		nodeLabels := map[string]string{
-			systemname.ManagedLabelKey: "true",
+			systemname.ManagedLabelKey: valueTrue,
 			profQueueKey:               profQueue,
 		}
 		// Pin the general(CPU) identity so that the flavor never
 		// matches a node with the same device but a different CPU.
-		nodeLabels[GeneralFeatureLabelPrefix+gKey] = "true"
+		nodeLabels[GeneralFeatureLabelPrefix+gKey] = valueTrue
 
 		ndf := NodeResourceFlavor{
 			ProfileCohort: FormatNodeProfile(gKey, aKey, labels[profCohortKey]),
@@ -814,7 +835,7 @@ func extractNodeQueue(node *core.Node, acceleratableNodeKey string, generalNodeK
 
 	// The acceleratable node key is non-blank, we are extracting the acceleratable queue with the given key.
 	label := AcceleratableFeatureLabelPrefix + acceleratableNodeKey
-	if node.Labels[label] != "true" {
+	if node.Labels[label] != valueTrue {
 		return NodeQueue{}, false
 	}
 	nq.Product = node.Labels[label+".product"]
