@@ -59,24 +59,10 @@ func (h *InstanceTypeHandler) SetupHandler(
 		},
 		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Accel.(Exclusive)",
+				Name: "Unit(CPU/RAM)/Storage",
 				Type: "string",
 			},
-			Template: "{.status.accelerator.onceMaxRequest}/{.status.accelerator.remaining}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Accel.(Shared)",
-				Type: "string",
-			},
-			Template: "{.status.acceleratorShared.onceMaxRequest}/{.status.acceleratorShared.remaining}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Accel.(Sliced)",
-				Type: "string",
-			},
-			Template: "{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining}",
+			Template: "{.spec.unitResources.cpu}/{.spec.unitResources.ram}/{.spec.localStorage}",
 		},
 		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
@@ -84,6 +70,18 @@ func (h *InstanceTypeHandler) SetupHandler(
 				Type: "string",
 			},
 			Template: "{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}",
+		},
+		extensionapi.JSONPathTemplateTableColumnDefinition{
+			TableColumnDefinition: meta.TableColumnDefinition{
+				Name: "Accelerator(E/S/Sliced)",
+				Type: "string",
+			},
+			// Fold the exclusive/shared/sliced three-view into one column: three
+			// space-separated onceMaxRequest/remaining groups, in the order named
+			// by the column header.
+			Template: "{.status.accelerator.onceMaxRequest}/{.status.accelerator.remaining} " +
+				"{.status.acceleratorShared.onceMaxRequest}/{.status.acceleratorShared.remaining} " +
+				"{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining}",
 		},
 		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
