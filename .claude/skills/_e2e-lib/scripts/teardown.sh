@@ -44,26 +44,41 @@ if command -v helm >/dev/null 2>&1; then
   done
 fi
 
-# 3. Strip finalizers that block deletion once the controllers above are gone.
-for k in workloads resourceflavors clusterqueues cohorts; do
-  kubectl get "${k}.kueue.x-k8s.io" -A -o name 2>/dev/null \
-    | xargs -r -I{} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
-done
-kubectl get instances.worker.gpustack.ai -A -o name 2>/dev/null \
-  | xargs -r -I{} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
-
-# 4. Delete the CRDs the worker / sub-releases installed (gpustack, kueue, nfd).
-#    Their CRs cascade-delete; the finalizer strip above keeps that from hanging.
-kubectl get crd -o name 2>/dev/null \
-  | grep -E '\.(worker\.)?gpustack\.ai$|\.kueue\.x-k8s\.io$|\.nfd\.k8s-sigs\.io$' \
-  | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
-
-# 5. Delete the aggregated APIServices and webhooks the worker registered at runtime.
+# 3. Delete the aggregated APIServices and admission webhooks the worker registered at runtime,
+#    BEFORE stripping finalizers or deleting CRDs. Once the worker is gone their backing Service
+#    is unreachable, so a finalizer-clearing patch (an update) would be rejected by the still-
+#    registered validating webhook (failurePolicy: Fail) and hang; and leaving the aggregated
+#    worker.gpustack.ai/v1 proxy registered makes an unversioned `kubectl get instancetypes`
+#    resolve to it and fail, silently skipping the strip below.
 for a in v1.gpustack.ai v1.worker.gpustack.ai; do
   kubectl delete apiservice "$a" --ignore-not-found 2>/dev/null || true
 done
 kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name 2>/dev/null \
   | grep -i gpustack \
+  | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
+
+# 4. Strip finalizers that block deletion once the controllers above are gone. Kueue pins
+#    workloads/flavors/queues AND admission checks with kueue.x-k8s.io/resource-in-use; the
+#    node-devices AdmissionCheck would otherwise hang the admissionchecks CRD delete below.
+for k in workloads resourceflavors clusterqueues admissionchecks; do
+  kubectl get "${k}.kueue.x-k8s.io" -A -o name 2>/dev/null \
+    | xargs -r -I{} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+done
+# The operator's own CRs carry gpustack.ai/controlled: Instances AND InstanceTypes. An
+# InstanceType also drives its backing ClusterQueue through HoldAndDrain, so without the operator
+# running its finalizer never clears and the CR hangs Terminating — strip it so the CRD delete
+# below does not block. Target the real v1alpha1 CRD explicitly: with the worker gone the
+# aggregated worker.gpustack.ai/v1 proxy is unreachable, so an unversioned get resolves to it and
+# silently returns nothing. (Cohorts are no longer created — nothing to strip.)
+for k in instances instancetypes; do
+  kubectl get "${k}.v1alpha1.worker.gpustack.ai" -A -o name 2>/dev/null \
+    | xargs -r -I{} kubectl patch {} --type=merge -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+done
+
+# 5. Delete the CRDs the worker / sub-releases installed (gpustack, kueue, nfd).
+#    Their CRs cascade-delete; the finalizer strip above keeps that from hanging.
+kubectl get crd -o name 2>/dev/null \
+  | grep -E '\.(worker\.)?gpustack\.ai$|\.kueue\.x-k8s\.io$|\.nfd\.k8s-sigs\.io$' \
   | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 
 echo "[teardown] done (namespace ${NS} kept on purpose)"
