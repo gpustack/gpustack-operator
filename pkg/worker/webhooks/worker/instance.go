@@ -132,7 +132,10 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
 				"CPU request cannot be negative"))
-		} else if instRess.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
+		} else if !instType.Spec.Acceleratable &&
+			instRess.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
+			// Only a non-accelerated type has a CPU capacity view; an accelerated type's
+			// Status.CPU is zero (its CPU derives from unitCPU × count, bounded elsewhere).
 			errs = append(errs, field.Invalid(
 				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
 				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)))
@@ -428,10 +431,13 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	return nil
 }
 
-// capResourcesToInstanceType rejects an Instance whose RAM exceeds the InstanceType's
-// per-unit RAM entitlement (unitRAM x unit count) or whose local storage exceeds the
-// InstanceType's LocalStorage. The unit count mirrors the Default derivation: the
-// accelerator count for an acceleratable type, otherwise the CPU count.
+// capResourcesToInstanceType rejects an Instance whose CPU or RAM exceeds the InstanceType's
+// per-unit entitlement (unitCPU/unitRAM x unit count) or whose local storage exceeds the
+// InstanceType's LocalStorage. The unit count mirrors the Default derivation: the accelerator
+// count for an acceleratable type, otherwise the CPU count. The CPU cap applies only to an
+// acceleratable type — a non-accelerated type's CPU is bounded by its ClusterQueue capacity
+// (Status.CPU) in ValidateCreate, and deriving its unit count from the CPU request itself would
+// make a unitCPU x count cap circular.
 func capResourcesToInstanceType(
 	instType *worker.InstanceType, instRess *workercore.InstanceResources,
 ) field.ErrorList {
@@ -446,6 +452,14 @@ func capResourcesToInstanceType(
 		unitCount = instRess.CPU.Value()
 	}
 
+	if instType.Spec.Acceleratable {
+		if maxCPU, err := quantityx.StringMultiply(instType.Spec.UnitResources.CPU, unitCount); err == nil &&
+			instRess.CPU.Cmp(maxCPU) > 0 {
+			errs = append(errs, field.Invalid(
+				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
+				fmt.Sprintf("exceeds the maximum CPU %s of instance type %s", maxCPU.String(), instType.Name)))
+		}
+	}
 	if maxRAM, err := quantityx.StringMultiply(instType.Spec.UnitResources.RAM, unitCount); err == nil &&
 		instRess.RAM.Cmp(maxRAM) > 0 {
 		errs = append(errs, field.Invalid(
