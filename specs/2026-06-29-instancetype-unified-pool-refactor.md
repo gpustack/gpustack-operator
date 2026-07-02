@@ -44,7 +44,8 @@ This spec builds on three shipped specs — `2026-06-21-accelerator-resource-mod
   integral); `1/M = 625 nano` stays clean. Transformation factors become `1,600,000 / 160,000 / 1` (+ sliced
   `multiplyBy .sliced`).
 - **Decouple RF/CQ reconcilers from Node.** Only `NodeFlavorReconciler` reads nodes; it pre-computes
-  `capacity = indexedNodes × count` into RF labels `schedule.gpustack.ai/{key,os,arch,count,capacity}`.
+  `capacity = indexedNodes × count` into RF labels in the node-feature vocabulary (the flavor's
+  `{general.|acceleratable.}feature.gpustack.ai/${key}=true`, `kubernetes.io/os|arch`, and per-key `.count`/`.capacity`).
   `NodeQueueReconciler` reads only RF labels (no Node list/watch).
 - **Three `pkg/worker/settings` switches** (env- and UI-configurable, **dynamically adjustable at runtime — no
   restart**; consumers read per-reconcile via `ShouldValueBool(ctx)`, never a package-level `osx.Getenv` cache):
@@ -113,7 +114,7 @@ have my unit-spec changes (RAM-per-CPU, CPU/RAM-per-device) take effect in one Q
 so that I never log into one or more nodes to edit `${NODE}-gpustack-worker` NodeFeature labels and spec
 governance is centralized and auditable. On Create/Update the APIService writes the changed fields back to the
 desired locations on the backing ClusterQueue — `note.gpustack.ai/*` annotations (unitCPU/unitRAM/localStorage/…)
-and `schedule.gpustack.ai/*` labels; on Delete it tears down the backing ClusterQueue. The NodeQueueReconciler
+and the schedule labels (the feature key + `kubernetes.io/os|arch`); on Delete it tears down the backing ClusterQueue. The NodeQueueReconciler
 treats these admin-written values as the authoritative desired state and does not clobber them on reconcile.
 
 #### Story 2 — User sees and requests all three modes from one InstanceType
@@ -151,8 +152,8 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F1b | NodeCapacityReconciler emits 4 keys | For any node with `acceleratable.*`: `.sliced.units = count×M`, `.sliced.cores-percentage = count×51200` (`512×100`), `.sliced.memory-percentage = count×100`, `.sliced.memory-mib = count×VRAM`. Drops the `.sliced.partitions` opt-in gate (any acceleratable model counts); stale-cleanup recognizes all 4 suffixes. |
 | F1c | Manual node management (switch ①) | Setting `node-management-manual` (`GPUSTACK_NODE_MANAGEMENT_MANUAL`, default false), read per-reconcile: when true the operator does **not** auto-inject `gpustack.ai/managed=true`; toggling at runtime re-converges. |
 | F2 | DM allocator decouples cores/VRAM | New `SlicedCoresPercent` (SM, from `.sliced.cores-percentage`, default 100) and `SlicedMemoryMib` (per-card VRAM) helpers replace the single `.sliced.units`→ratio. VRAM is `memory-percentage × cardVRAM` (**primary**, floored, capped at the card) or the absolute `.sliced.memory-mib` — percentage wins when both are set, matching the Pod webhook fold so credits and the real limit agree. NVIDIA `getSlicedContainerAllocateResponse` (T2.1) + Ascend (T2.2) updated; missing memory → error. **Cleanup (T2.2):** with both allocators off `.sliced.units` (it becomes Kueue-credits-counting-only), delete the orphaned `SliceRatio`, `FloorPercent`, the already-dead `PadSlicedUnits`, and their tests (`TestSliceRatio`/`TestPadSlicedUnits`/`TestPartitionedUnitGranularity`/`TestFloorPercent`). |
-| F3a | NodeFlavorReconciler rewrite | Label-indexed over nodes (not RF-driven). Names: `gpustack-${gKey}-${os}-${arch}-${cpu}c` (CPU) / `gpustack-${aKey}-${os}-${arch}-${device}d` (device). RF labels `schedule.gpustack.ai/{key,os,arch,count,capacity}` with `capacity = indexedNodes × count`. Index rules: deleting nodes count as present; `managed != true` excluded; `node.kubernetes.io/unreachable:NoSchedule` counts as absent; when `instance-type-mixed-on-node=false` (switch ②; default true = mixing allowed = current behavior) a GPU node drops its CPU-type index result. `spec.nodeLabels` explicitly pins `kubernetes.io/os` + `kubernetes.io/arch`. drain tombstone preserved. |
-| F3b | NodeQueueReconciler rewrite | Credits nominal from RF `schedule.gpustack.ai/capacity` (no Node list/watch). Accelerated CQ advertises **only** `credits` (no CPU/RAM/storage); non-accelerated CQ advertises only CPU (no RAM/storage). Notes (resType `instancetypes`) include `unitCPU/unitRAM/localStorage/memory`. When `instance-type-derived-from-node=false` (switch ③; default true = auto-derive = current behavior), skip auto CQ create (only RF), still update an existing CQ. |
+| F3a | NodeFlavorReconciler rewrite | Label-indexed over nodes (not RF-driven). Names: `gpustack-${gKey}-${os}-${arch}-${cpu}c` (CPU) / `gpustack-${aKey}-${os}-${arch}-${device}d` (device), full os/arch (name limit is 253, gKey ≤ 63). RF labels in the node-feature vocabulary so the flavor is reverse-looked-up from its CQ and matching Nodes/Devices: the feature key `{general.|acceleratable.}feature.gpustack.ai/${key}=true`, `kubernetes.io/os|arch` (full), and per-key `.count`/`.capacity` (`capacity = indexedNodes × count`). Index rules: deleting nodes count as present; `managed != true` excluded (taints are **not** consulted); when `instance-type-mixed-on-node=false` (switch ②; default true = mixing allowed = current behavior, read per-reconcile) a GPU node drops its CPU-type contribution. `spec.nodeLabels` explicitly pins `kubernetes.io/os` + `kubernetes.io/arch` (full values); **a blanket `{Operator: Exists}` toleration** so a quota-routed workload is never blocked by a node taint (eligibility is governed by nodeLabels). **When no Node contributes the flavor is deleted** (no drain tombstone — it buys nothing once the CQ is rebuilt from RF labels). |
+| F3b | NodeQueueReconciler rewrite | CQ name `gpustack-${key}-${os}-${arch}` (RF name minus the `-${count}{c\|d}` suffix) aggregates all RFs sharing (key,os,arch) regardless of count, each a flavor. Credits nominal from the RF's per-key `.capacity` label (no Node list/watch). The CQ also carries the same discriminator labels its flavors do — the feature key + `kubernetes.io/os|arch` — so its RFs (and, with `gpustack.ai/managed=true`, its Devices) are reverse-looked-up from the queue by selector. Accelerated CQ advertises **only** `credits` (no CPU/RAM/storage); non-accelerated CQ advertises only CPU (no RAM/storage). Notes (resType `instancetypes`) include `unitCPU/unitRAM/localStorage/memory`. When `instance-type-derived-from-node=false` (switch ③; default true = auto-derive = current behavior), skip auto CQ create (only RF), still update an existing CQ. **Teardown via HoldAndDrain**: when no RF backs the CQ, **or** the CQ is already in `HoldAndDrain` (delete intent set by the Extension API Delete, F5c), the reconciler stops rebuilding/aligning it, ensures `StopPolicy=HoldAndDrain`, waits until all workloads are evicted (no reserved/admitted), then performs the delete itself. |
 | F3b' | Auto-created CQ borrowing protection | Auto-created CQ is reconciled to keep `spec.cohortName` **empty** (manual edits reverted) **and** sets `lendingLimit: 0` on the credits quota — so it can never be pulled into a cohort and have its quota borrowed out by externally/manually managed queues. Skipped when `instance-type-derived-from-node=false` (admin owns the CQ). |
 | F3c | Cohort removed | `CohortReconciler` deleted; `IndexingNodeByCohortProfile`, `z-cohort` label construction removed; no `Cohort` objects created. |
 | F3d | Transformations rescaled + gate-2 exclusion | `apps_kueue.go` factors `1,600,000 / 160,000 / 1` (derived from `M`); sliced rule keeps `multiplyBy .sliced` + `.sliced` empty-outputs drain. **Gate-2 node resources must not block Kueue admission**: `.sliced.cores-percentage` / `.sliced.memory-percentage` / `.sliced.memory-mib` are drained via **per-key `Replace → empty` rules** (preferred — same mechanism as the `.sliced` drain; `excludeResourcePrefixes` is the fallback), so only `.sliced.units → credits` is counted and a Pod requesting these (uncovered) resources is never marked inadmissible. |
@@ -160,7 +161,7 @@ to supply my own ClusterQueue policy while the operator still aligns the Resourc
 | F4b | AdmissionCheck + ledger completeness | New AdmissionCheck controller: after quota reservation, reads `Devices` CR per-card; `Retry`/`Reject` requests that can't be placed (no clean whole card for exclusive / no single card fits). **Ledger completeness**: the device-plugin `Allocate` writes **every** allocation — Kueue-routed or not — into the `Devices` CR `AcceleratorAllocation`, so even Pods that bypass Kueue land in the unified ledger; the AdmissionCheck consults this complete ledger (closes the "non-Kueue bypass" gap). |
 | F5a | InstanceType API | Remove `InstanceTypeAccelerator.Sliced int64`. Add three-view Status (allocatable-as-exclusive / shareable / sliceable) + `SlicedCoresPercentage`/`SlicedMemoryPercentage`/`SlicedMemoryMib`. `make generate` regenerates deepcopy/protobuf/CRD/conversion/apiservice. |
 | F5b | Extension API three-view (read) | `convertInstanceTypeFromClusterQueue` computes the three views by aggregating the `Devices` CR per-card state (not credits fold-down); CQ stays the metadata/total source. |
-| F5c | InstanceType Extension APIService writable (Create/Update/Delete) | The aggregated InstanceType API gains **Create / Update / Delete** (today read-only). Create/Update translate InstanceType fields (unit spec `unitCPU`/`unitRAM`, plus the InstanceType's `localStorage`, + admin-set metadata) into write-backs on the backing ClusterQueue: `note.gpustack.ai/*` annotations + `schedule.gpustack.ai/*` labels. Delete tears down the backing ClusterQueue (and its LocalQueues). With `instance-type-derived-from-node=false`, Create is the admin's path to define a node-queue (operator then only aligns the ResourceFlavor). NodeQueueReconciler must treat admin-written unit-spec values as authoritative (level-based desired state) and not overwrite them. |
+| F5c | InstanceType Extension APIService writable (Create/Update/Delete) | The aggregated InstanceType API gains **Create / Update / Delete** (today read-only). Create/Update translate InstanceType fields (unit spec `unitCPU`/`unitRAM`, plus the InstanceType's `localStorage`, + admin-set metadata) into write-backs on the backing ClusterQueue: `note.gpustack.ai/*` annotations + the schedule labels (feature key + `kubernetes.io/os|arch`). **Delete does not delete the CQ directly**: it sets `StopPolicy=HoldAndDrain` (delete intent) and lets NodeQueueReconciler evict the workloads and perform the actual deletion (and its LocalQueues) — see F3b. With `instance-type-derived-from-node=false`, Create is the admin's path to define a node-queue (operator then only aligns the ResourceFlavor). NodeQueueReconciler must treat admin-written unit-spec values as authoritative (level-based desired state) and not overwrite them. |
 | F6 | Worker Gateway sync | `pkg/workergateway/service/types.go` aggregation types track the new InstanceType contract; no business-logic change. |
 | F7 | E2E acceptance | New e2e case: the 5-step pooling sequence reproduces the three-view progression exactly; a separate case proves AdmissionCheck rejects the 5th exclusive request on a fully-sliced 8-card node. |
 
@@ -254,6 +255,13 @@ func MemoryMibToUnits(mib, cardVRAMMib int64) int64 // = floor(mib / cardVRAMMib
 // Three-view display is a per-card bin-packing projection from the Devices CR ledger — NOT a credits fold-down.
 // exclusive = freeCards; shareable = freeCards*10 + Σ sharedCardRemainingOwners;
 // sliceable  = Σ over (free + sliced) cards of remaining memory-% (each card contributes ≤ 100).
+
+// Pooling is a two-stage min-of-mins aggregation, each stage integrating information:
+//   Node → ResourceFlavor: NodeFlavorReconciler picks the min-capacity node among the RF's indexed
+//     nodes and derives the default unit spec (unitCPU/unitRAM/localStorage) into RF notes.
+//   ResourceFlavor → ClusterQueue: NodeQueueReconciler picks the min unit spec among the RFs feeding
+//     the CQ (unless the admin already set it via the InstanceType API). Both stages compare
+//     non-positive-skipping, and compare bare numeric strings via stringx (no resource.Quantity).
 ```
 ### Implementation Plan
 Dependency order = the 6 phases of the Proposal. Each task is a **vertical slice** that leaves the tree building;
@@ -331,23 +339,50 @@ coupled — its three tasks land together and the system is only fully consisten
   on real 4090 / 910B.*
 
 **Phase 3 — Pooling rewrite + delete Cohort (tightly coupled; land together)**
-- [ ] **T3.1 (F3a) — ResourceFlavorReconciler → NodeFlavorReconciler.** `resourceflavor.go`: label-indexed over
-  nodes; names `gpustack-${gKey}-${os}-${arch}-${cpu}c` / `gpustack-${aKey}-${os}-${arch}-${device}d`; RF labels
-  `schedule.gpustack.ai/{key,os,arch,count,capacity}` (`capacity=indexedNodes×count`); `spec.nodeLabels`
-  explicitly pins `kubernetes.io/os`+`kubernetes.io/arch`; index rules (deleting=present, `managed!=true` skip,
-  `unreachable:NoSchedule`=absent; when `instance-type-mixed-on-node=false` (switch ②, read per-reconcile) a GPU
-  node drops its CPU-type index result); keep drain tombstone.
-  **Accept:** RF naming + labels per spec. **Verify:** `go test ./pkg/worker/controllers/worker/...` (rename
-  `resourceflavor_test`→`nodeflavor_test`).
-- [ ] **T3.2 (F3b/F3b'/F3d) — ClusterQueueReconciler → NodeQueueReconciler + transformations.** Credits from RF
-  `capacity` label (delete the Node-list block at `clusterqueue.go:297-382`); accel CQ advertises **only**
-  `credits`, non-accel only CPU; `spec.cohortName` empty + `lendingLimit:0`
+- [x] **T3.1 (F3a) — ResourceFlavorReconciler → NodeFlavorReconciler.** `resourceflavor.go`: label-indexed over
+  nodes; names `gpustack-${gKey}-${os}-${arch}-${cpu}c` / `gpustack-${aKey}-${os}-${arch}-${device}d` (full os/arch);
+  RF labels in the node-feature vocabulary — the feature key `{general.|acceleratable.}feature.gpustack.ai/${key}=true`,
+  `kubernetes.io/os|arch` (full), per-key `.count`/`.capacity` (`capacity=indexedNodes×count`); `spec.nodeLabels`
+  explicitly pins `kubernetes.io/os`+`kubernetes.io/arch` (full values), **a blanket `{Operator: Exists}` toleration**
+  (eligibility is by nodeLabels, not taints); index rules (deleting=present, `managed!=true` skip, taints ignored;
+  the static index is permissive and switch ② `instance-type-mixed-on-node=false`,
+  read per-reconcile, drops a GPU node's CPU-flavor contribution in the reconciler); `nodeIsAccelerated` via the
+  `feature.gpustack.ai/acceleratable` umbrella label. **No node contributes → delete the flavor** (no drain tombstone).
+  **Unit-spec default → RF notes** (first stage of the Node→RF→CQ aggregation): from the indexed nodes pick the
+  min-capacity node — compare `status.capacity` `cpu`→`memory`→`ephemeral-storage`, **ignoring non-positive
+  values (only compare `>0`)**. Write `unitCPU`/`unitRAM` to RF notes: a **non-accelerated flavor takes the
+  factory default `1c-2g`** (`unitCPU=1`, `unitRAM=2` — the pre-refactor general-view setting, independent of the
+  node's actual cpu/ram), while an **accelerated flavor derives per device** from that node — `unitCPU = cpu/count`,
+  `unitRAM = ramGi/count` (RAM round-up-to-even). `localStorage` = `stgGi` (round-down-to-even, **not** ÷count —
+  total node storage, used for display and to cap a submission's `resource.localStorage`). Also carry `memory` (per-card VRAM) / `product` / `family` / `manufacturer` /
+  `acceleratable` in RF notes so NodeQueue needs no Node access. **Removed:** the old node-label capacity override
+  and the per-view zeroing opt-out (replaced by the InstanceType API + switches ①②).
+  **Accept:** RF naming + labels per spec; RF notes carry the derived unit spec. **Verify:**
+  `go test ./pkg/worker/controllers/worker/...` (rename `resourceflavor_test`→`nodeflavor_test`).
+- [x] **T3.2 (F3b/F3b'/F3d) — ClusterQueueReconciler → NodeQueueReconciler + transformations.** CQ name
+  `gpustack-${key}-${os}-${arch}` (RF name minus `-${count}{c|d}`) aggregates all RFs sharing (key,os,arch) over a
+  new RF→CQ index; drop the old sliced borrow/lend machinery (`stripSlicedQueueSuffix`, dual-indexing, the
+  exclusive/shared/sliced split). Credits from the RF's per-key `.capacity` label (delete the per-node Allocatable
+  summation); the CQ also carries its flavors' discriminator labels (feature key + `kubernetes.io/os|arch`) for
+  reverse lookup; accel CQ advertises **only** `credits`, non-accel only CPU; `spec.cohortName` empty + `lendingLimit:0`
   (empty cohortName = isolated, confirmed); notes incl `memory`/`localStorage`; `instance-type-derived-from-node=false` (switch ③) skips auto-create.
+  **Teardown via HoldAndDrain** (replaces the old `allDrained` path): no RF backs the CQ **or** it is already in
+  `HoldAndDrain` (delete intent from the Extension API Delete, F5c) → stop rebuilding, ensure `HoldAndDrain`, wait
+  for workloads to evict, then delete.
+  **Dead-code removed now:** `ExtractNodeProfiles`/`NodeProfile`, `ExtractNodeQueue`/`extractNodeQueue`/`NodeQueue`
+  (+ its `NodeResourceFlavorCPU/Accelerator…` subtypes)/`extractGeneralDetail`, `FormatNodeProfile`. **Kept (deferred
+  to T5.2):** `ParseNodeProfile` + `NodeProfileSpec` + `_NodeProfilePrefix`/`_NodeProfileSegmentSeparator`
+  (+ `splitNodeProfileSpec`/`isUnsignedDecimal`) — still used by `extensionapis/worker/instance_type.go` until F5b.
   `apps_kueue.go:272-280` factors → `1,600,000/160,000/1`; **drain gate-2 resources via per-key `Replace→empty`**
-  (preferred; confirm vs `excludeResourcePrefixes` at impl). **Accept:** CQ credits=`capacity×M`, no CPU/RAM/storage on
-  accel, cohortName empty, gate-2 not counted. **Verify:** `go test ./pkg/worker/controllers/worker/...
-  ./pkg/worker/kuberess/...`.
-- [ ] **T3.3 (F3c) — delete CohortReconciler.** Remove `cohort.go` + `cohort_test.go`,
+  (preferred; confirm vs `excludeResourcePrefixes` at impl).
+  **Unit-spec selection → CQ notes** (second aggregation stage): across the RFs feeding the CQ pick the min unit
+  spec — compare `unitCPU`→`unitRAM`→`localStorage`, **ignoring non-positive (only `>0`)**, via a new `stringx`
+  numeric-string compare (semver `compareInt` style — no `resource.Quantity`). **Skip entirely when the CQ notes
+  already carry the unit spec** (admin-set via the InstanceType API — never clobber). If no `>0` value exists,
+  leave it empty (the admin sets it; the goal is auto-usable without admin action). **Accept:** CQ credits=`capacity×M`,
+  no CPU/RAM/storage on accel, cohortName empty, gate-2 not counted, unit spec = min across RFs (or admin's).
+  **Verify:** `go test ./pkg/worker/controllers/worker/... ./pkg/worker/kuberess/...`.
+- [x] **T3.3 (F3c) — delete CohortReconciler.** Remove `cohort.go` + `cohort_test.go`,
   `IndexingNodeByCohortProfile`, the `z-cohort` construction; deregister from `setup.go:14`. **Accept:** build
   green; no `Cohort` created. **Verify:** `go test ./pkg/worker/...` + `grep -r CohortReconciler` empty.
 - *Checkpoint: e2e — NFD→Worker→Kueue materializes RF/CQ with new names + capacity labels, **zero Cohort
@@ -373,10 +408,16 @@ coupled — its three tasks land together and the system is only fully consisten
   Status + `SlicedCoresPercentage`/`SlicedMemoryPercentage`/`SlicedMemoryMib`. **Accept:** types compile;
   CRD/proto/conversion regenerated. **Verify:** `make generate` + `go build ./...`.
 - [ ] **T5.2 (F5b) — extension API three-view (read).** `convertInstanceTypeFromClusterQueue` aggregates the
-  `Devices` CR per-card state into the three views (not credits fold-down). **Accept:** views match per-card
-  aggregation. **Verify:** `go test ./pkg/worker/extensionapis/worker/...`.
+  `Devices` CR per-card state into the three views (not credits fold-down); it stops parsing the old
+  `gpustack--…` profile from the CQ name. **Deferred cleanup (from T3.2):** once this reader no longer calls it,
+  delete the now-dead `ParseNodeProfile` + `NodeProfileSpec` + `_NodeProfilePrefix`/`_NodeProfileSegmentSeparator`
+  (and `splitNodeProfileSpec`/`isUnsignedDecimal` if orphaned) from `pkg/nodefeature/helper.go` — kept alive
+  through Phase 3–4 solely by this caller. **Accept:** views match per-card aggregation; `grep -rn ParseNodeProfile pkg/`
+  empty. **Verify:** `go test ./pkg/worker/extensionapis/worker/...`.
 - [ ] **T5.3 (F5c) — writable extension APIService.** Add Create/Update/Delete: write unit-spec fields → CQ
-  `note.gpustack.ai/*` + `schedule.gpustack.ai/*`; Delete tears down the CQ. *Verify-first: reconciler-vs-write
+  `note.gpustack.ai/*` + the schedule labels (feature key + `kubernetes.io/os|arch`); Delete tears down the CQ. **Input validation:** `unitRAM` and
+  `localStorage` inputs must carry the `Gi` suffix (case-sensitive — `Gi`, not `gi`/`GI`), since the notes store
+  bare Gi numbers; `unitCPU` is unitless. *Verify-first: reconciler-vs-write
   authority (override marker / per-field precedence) + Delete semantics under `instance-type-derived-from-node=false`.* **Accept:**
   `kubectl edit instancetype` persists to CQ notes; reconcile doesn't clobber admin values. **Verify:**
   `go test ./pkg/worker/extensionapis/worker/...` + e2e.

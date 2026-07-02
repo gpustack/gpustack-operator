@@ -10,7 +10,6 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemname"
-	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
@@ -42,6 +41,11 @@ const (
 	// AcceleratableFeatureLabelPrefix prefixes the acceleratable(device) feature label keys,
 	// e.g. "acceleratable.feature.gpustack.ai/nvidia-tesla-t4.product".
 	AcceleratableFeatureLabelPrefix = "acceleratable." + FeatureLabelPrefix
+
+	// NodeAcceleratableLabelKey is the umbrella label set on a node that carries any
+	// accelerator, e.g. "feature.gpustack.ai/acceleratable=true". It is the cheap
+	// "is this node accelerated?" check, set alongside the per-device keys.
+	NodeAcceleratableLabelKey = FeatureLabelPrefix + "acceleratable"
 
 	// SlicedPartitionsLabelSuffix is the suffix of the admin-authored slicing label
 	// that enables slicing on an accelerator model, e.g.
@@ -93,7 +97,7 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 	}
 
 	// "${prefix}acceleratable=true"
-	labels[FeatureLabelPrefix+"acceleratable"] = valueTrue
+	labels[NodeAcceleratableLabelKey] = valueTrue
 
 	manuKey := AcceleratableFeatureLabelPrefix + group.Manufacturer
 
@@ -158,31 +162,6 @@ const (
 	GeneralFeatureLabelPrefix = "general." + FeatureLabelPrefix
 )
 
-// generalOSAbbrev maps data-center GOOS values to compact codes; values
-// absent from the map pass through unchanged.
-var generalOSAbbrev = map[string]string{
-	"linux": "ln", "windows": "wn", "darwin": "dw", "freebsd": "fb",
-	"openbsd": "ob", "netbsd": "nb", "dragonfly": "df", "solaris": "so",
-	"illumos": "im", "aix": "ax", "zos": "zo",
-}
-
-// generalArchAbbrev maps 64-bit GOARCH values to compact codes; values absent
-// from the map (32-bit, wasm, ...) pass through unchanged.
-var generalArchAbbrev = map[string]string{
-	"amd64": "x64", "amd64p32": "x64p", "arm64": "a64", "arm64be": "a64b",
-	"ppc64": "p64", "ppc64le": "p64l", "mips64": "m64", "mips64le": "m64l",
-	"mips64p32": "m64p", "mips64p32le": "m64pl", "riscv64": "r64",
-	"s390x": "s64", "sparc64": "sp64", "loong64": "l64",
-}
-
-// abbreviate returns m[v] when present, otherwise v unchanged.
-func abbreviate(m map[string]string, v string) string {
-	if s, ok := m[v]; ok {
-		return s
-	}
-	return v
-}
-
 const (
 	_NFDCPUModelVendorIDLabelKey = "feature.node.kubernetes.io/cpu-model.vendor_id"
 	_NFDCPUModelFamilyLabelKey   = "feature.node.kubernetes.io/cpu-model.family"
@@ -193,12 +172,10 @@ const (
 // it always returns a non-empty key.
 // Unless the GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME environment variable is
 // truthy at startup, it returns "generic". Otherwise, the key is in the format
-// "${manufacturer}-${id}", e.g. "intel-xeon-platinum-8358-ln-x64":
-// the id leads with the sanitized "feature.gpustack.ai/cpu-name" annotation when reported,
-// or with the NFD cpu-model family and id labels otherwise, and trails with the
-// node's os and arch labels abbreviated via generalOSAbbrev/generalArchAbbrev.
-// It falls back to "generic" when neither the cpu-name annotation nor the
-// cpu-model labels are usable.
+// "${manufacturer}-${id}", e.g. "intel-xeon-platinum-8358": the id leads with
+// the sanitized "feature.gpustack.ai/cpu-name" annotation when reported, or with
+// the NFD cpu-model family and id labels otherwise. It falls back to "generic"
+// when neither the cpu-name annotation nor the cpu-model labels are usable.
 func ExtractGeneralNodeKey(node *core.Node) string {
 	return extractGeneralNodeKey(node, generalNodeKeyWithCPUName)
 }
@@ -206,30 +183,21 @@ func ExtractGeneralNodeKey(node *core.Node) string {
 // extractGeneralNodeKey is ExtractGeneralNodeKey with the CPU-name blending
 // toggle passed in explicitly, so tests can exercise both modes.
 //
-// The key always trails with the node's os and arch — the well-known
-// "kubernetes.io/os" and "kubernetes.io/arch" labels abbreviated via
-// generalOSAbbrev/generalArchAbbrev — so the "-ln-x64" tail is present
-// regardless of the toggle. The os/arch suffix is a correctness safeguard,
-// not cosmetic: the other key sources can collide across architectures. The
-// "generic" fallback carries no CPU identity at all, and the cpu-model family
-// and id labels are independent numbering spaces on x86 (CPUID) versus arm64
-// (MIDR), so a small value such as "25-1" can legitimately appear on both. Only
-// the sanitized cpu-name annotation tends to be arch-distinct in practice, and
-// even that is not guaranteed under virtualization (generic hypervisor brand
-// strings). Without the suffix, nodes of different ISAs could pool into one
-// Kueue flavor/queue/cohort, which is wrong — amd64 and arm64 binaries are not
-// interchangeable.
+// os/arch are not part of the key: the ResourceFlavor/ClusterQueue name carries
+// os/arch explicitly and spec.nodeLabels pins kubernetes.io/os|arch, so nodes of
+// different ISAs cannot pool into one flavor/queue even when the key collides
+// (the cpu-model family and id labels are independent numbering spaces on x86
+// versus arm64, so a small value such as "25-1" can legitimately appear on both).
 //
-// When generalNodeKeyWithCPUName is false, the key is "generic-${os}-${arch}":
-// every CPU pools together and only os/arch separate the pools.
+// When generalNodeKeyWithCPUName is false, the key is "generic": every CPU pools
+// together, separated only by the os/arch carried in the flavor/queue name.
 //
-// When it is true, the manufacturer (the lowercased NFD cpu-model vendor_id,
-// or "generic" when unknown) leads and a CPU identity is blended in between:
-// the sanitized "feature.gpustack.ai/cpu-name" annotation when reported
-// (e.g. "amd-epyc-7763-ln-x64"), the NFD cpu-model family and id labels as the
-// rare fallback when the annotation is absent (e.g. "amd-25-1-ln-x64"), or
-// nothing when no CPU identity is usable (e.g. "amd-ln-x64", or
-// "generic-ln-x64" when the vendor is unknown too).
+// When it is true, the manufacturer (the lowercased NFD cpu-model vendor_id, or
+// "generic" when unknown) leads and a CPU identity is blended in between: the
+// sanitized "feature.gpustack.ai/cpu-name" annotation when reported (e.g.
+// "amd-epyc-7763"), the NFD cpu-model family and id labels as the rare fallback
+// when the annotation is absent (e.g. "amd-25-1"), or nothing when no CPU
+// identity is usable (e.g. "amd", or "generic" when the vendor is unknown too).
 func extractGeneralNodeKey(node *core.Node, generalNodeKeyWithCPUName bool) string {
 	// If generalNodeKeyWithCPUName is enabled,
 	// the manufacturer part of the general node key is derived from the NFD cpu-model vendor_id label.
@@ -240,14 +208,10 @@ func extractGeneralNodeKey(node *core.Node, generalNodeKeyWithCPUName bool) stri
 		manu = GeneralManufacturerGeneric
 	}
 
-	// "kubernetes.io/os" and "kubernetes.io/arch" are the well-known labels for OS and architecture,
-	// they are always present and meaningful when the node information is properly collected.
-	var idSuffix string
-	{
-		idSuffix = abbreviate(generalOSAbbrev, node.Labels[core.LabelOSStable])
-		idSuffix += "-" + abbreviate(generalArchAbbrev, node.Labels[core.LabelArchStable])
-	}
-
+	// os/arch are no longer part of the key: the ResourceFlavor/ClusterQueue name
+	// carries os/arch explicitly and spec.nodeLabels pins kubernetes.io/os|arch, so
+	// cross-ISA pools cannot collide — the key need not also bake them in.
+	//
 	// When generalNodeKeyWithCPUName is enabled,
 	// try to blend the CPU name into the general node key for better readability and differentiation.
 	// The CPU name is reported by the NFD NodeFeatureRule with the "feature.gpustack.ai/cpu-name" annotation,
@@ -262,8 +226,8 @@ func extractGeneralNodeKey(node *core.Node, generalNodeKeyWithCPUName bool) stri
 	var idPrefix string
 	if generalNodeKeyWithCPUName {
 		if name := generalFeatureAnnotation(node, "name"); name != "" {
-			// "${manufacturer}-${idPrefix}-${idSuffix}", limit to 63 characters in total.
-			budget := 63 - len(manu) - len(idSuffix) - 2
+			// "${manufacturer}-${idPrefix}", limit the key to 63 characters in total.
+			budget := 63 - len(manu) - 1
 			idPrefix = device.NormalizeName(name, manu, budget, true)
 		} else {
 			family := node.Labels[_NFDCPUModelFamilyLabelKey]
@@ -274,13 +238,13 @@ func extractGeneralNodeKey(node *core.Node, generalNodeKeyWithCPUName bool) stri
 		}
 	}
 
-	// "${manufacturer}-${idSuffix}"
+	// "${manufacturer}"
 	if idPrefix == "" {
-		return manu + "-" + idSuffix
+		return manu
 	}
 
-	// "${manufacturer}-${idPrefix}-${idSuffix}"
-	return manu + "-" + idPrefix + "-" + idSuffix
+	// "${manufacturer}-${idPrefix}"
+	return manu + "-" + idPrefix
 }
 
 // extractGeneralNodeKeyManufacturer returns the manufacturer part of the general(CPU) node key of the given Node,
@@ -299,8 +263,6 @@ func extractGeneralNodeKeyManufacturer(node *core.Node) string {
 
 type (
 	ConstructNodeCapacityLabelsOptions struct {
-		// GeneralRAMGiPerCPU overrides the default RAM Gi per CPU used in the general view when constructing node capacity labels.
-		GeneralRAMGiPerCPU int64
 		// ManualNodeManagement, when true, skips auto-injecting the managed label so
 		// an administrator opts nodes in by hand (the node-management-manual setting).
 		ManualNodeManagement bool
@@ -308,15 +270,6 @@ type (
 
 	ConstructNodeCapacityLabelsOption func(*ConstructNodeCapacityLabelsOptions)
 )
-
-// OverrideGeneralRAMGiPerCPU overrides the default RAM Gi per CPU used in the general view when constructing node capacity labels.
-// By default, RAM Gi per CPU is discovered from node capacity and may be overridden by user-supplied labels;
-// this option allows an additional override that takes precedence at first discovery.
-func OverrideGeneralRAMGiPerCPU(v int64) ConstructNodeCapacityLabelsOption {
-	return func(opts *ConstructNodeCapacityLabelsOptions) {
-		opts.GeneralRAMGiPerCPU = v
-	}
-}
 
 // WithManualNodeManagement skips auto-injecting the managed label when manual is
 // true, so the operator does not auto-onboard nodes. The caller passes the
@@ -346,423 +299,193 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
 	}
 
-	// parseCapacityLabel parses a user-supplied capacity label value.
-	// An explicit non-positive value opts the view out of Kueue exposure:
-	// the value is echoed as-is and no .z-* labels are built for the view.
-	parseCapacityLabel := func(v string) (q resource.Quantity, zeroed bool) {
-		if v == "" {
-			return q, false
-		}
-		if p, err := resource.ParseQuantity(v); err == nil {
-			return p, p.Value() <= 0
-		}
-		return q, false
-	}
-
-	{
-		gKey := ExtractGeneralNodeKey(node)
-		generalKey := GeneralFeatureLabelPrefix + gKey
-		gManu, _, _ := strings.Cut(gKey, "-")
-
-		// "general.${prefix}${manufacturer}=true"
-		labels[GeneralFeatureLabelPrefix+gManu] = valueTrue
-		// "general.${prefix}${manufacturer}-${id}=true"
-		labels[generalKey] = valueTrue
-
-		// "general.${prefix}${manufacturer}-${id}.cpu=${cpu}"
-		cpuKey := generalKey + ".cpu"
-		cpuQ, cpuZeroed := parseCapacityLabel(node.Labels[cpuKey])
-		if cpuQ.Value() <= 0 {
-			cpuQ = node.Status.Capacity[core.ResourceCPU]
-		}
-		cpuC := cpuQ.Value()
-		if cpuC <= 0 {
-			cpuC = 1
-		}
-		if cpuZeroed {
-			labels[cpuKey] = node.Labels[cpuKey]
-		} else {
-			labels[cpuKey] = strconvx.Itoa(cpuC)
-		}
-
-		// "general.${prefix}${manufacturer}-${id}.ram=${ram}"
-		ramKey := generalKey + ".ram"
-		ramQ, ramZeroed := parseCapacityLabel(node.Labels[ramKey])
-		if ramQ.Value() <= 0 {
-			ramQ = node.Status.Capacity[core.ResourceMemory]
-		}
-		ramC := ramQ.Value() / quantityx.Gi
-		if ramC&1 != 0 {
-			ramC += 1
-		}
-		if ramC <= cpuC {
-			ramC = cpuC
-		}
-		generalRamC := ramC
-		if node.Labels[ramKey] == "" && opts.GeneralRAMGiPerCPU > 0 {
-			generalRamC = opts.GeneralRAMGiPerCPU * cpuC
-		}
-		if ramZeroed {
-			labels[ramKey] = node.Labels[ramKey]
-		} else {
-			labels[ramKey] = strconvx.Itoa(generalRamC) + "Gi"
-		}
-
-		// "general.${prefix}${manufacturer}-${id}.storage=${stg}"
-		stgKey := generalKey + ".storage"
-		stgQ, stgZeroed := parseCapacityLabel(node.Labels[stgKey])
-		if stgQ.Value() <= 0 {
-			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
-		}
-		stgC := stgQ.Value() / quantityx.Gi
-		if stgC&1 != 0 {
-			stgC -= 1
-		}
-		if stgC <= 0 {
-			stgC = 15 * cpuC
-		}
-		if stgZeroed {
-			labels[stgKey] = node.Labels[stgKey]
-		} else {
-			labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
-		}
-
-		// Skip the .z-* labels when any of cpu/ram/storage is explicitly
-		// zeroed, so the general view is not exposed to Kueue.
-		if !cpuZeroed && !ramZeroed && !stgZeroed {
-			// General has no sliced concept, so z-queue and z-cohort
-			// always carry the same per-unit value.
-			//
-			// "general.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g"
-			labels[generalKey+".z-flavor"] = fmt.Sprintf("%dc-%dg-%dg", cpuC, generalRamC, stgC)
-
-			// "general.${prefix}${manufacturer}-${id}.z-queue=1c-${ramUnit}g"
-			// "general.${prefix}${manufacturer}-${id}.z-cohort=1c-${ramUnit}g"
-			ramUnit := generalRamC / cpuC
-			generalUnit := fmt.Sprintf("1c-%dg", ramUnit)
-			labels[generalKey+".z-queue"] = generalUnit
-			labels[generalKey+".z-cohort"] = generalUnit
-		}
-	}
-
-	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
-		nodeKey := AcceleratableFeatureLabelPrefix + aKey
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.count=${accelerator}".
-		accKey := nodeKey + ".count"
-		var accQ resource.Quantity
-		if v := node.Labels[accKey]; v != "" {
-			accQ = funcx.NoError(resource.ParseQuantity(v))
-		}
-		if accQ.Value() <= 0 {
-			continue
-		}
-		accC := accQ.Value()
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.cpu=${cpu}"
-		cpuKey := nodeKey + ".cpu"
-		cpuQ, cpuZeroed := parseCapacityLabel(node.Labels[cpuKey])
-		if cpuQ.Value() <= 0 {
-			cpuQ = node.Status.Capacity[core.ResourceCPU]
-		}
-		cpuC := cpuQ.Value()
-		if cpuC < accC {
-			cpuC = accC
-		}
-		if cpuZeroed {
-			labels[cpuKey] = node.Labels[cpuKey]
-		} else {
-			labels[cpuKey] = strconvx.Itoa(cpuC)
-		}
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.ram=${ram}"
-		ramKey := nodeKey + ".ram"
-		ramQ, ramZeroed := parseCapacityLabel(node.Labels[ramKey])
-		if ramQ.Value() <= 0 {
-			ramQ = node.Status.Capacity[core.ResourceMemory]
-		}
-		ramC := ramQ.Value() / quantityx.Gi
-		if ramC&1 != 0 {
-			ramC += 1
-		}
-		if ramC < accC {
-			ramC = accC
-		}
-		if ramZeroed {
-			labels[ramKey] = node.Labels[ramKey]
-		} else {
-			labels[ramKey] = strconvx.Itoa(ramC) + "Gi"
-		}
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.storage=${stg}"
-		stgKey := nodeKey + ".storage"
-		stgQ, stgZeroed := parseCapacityLabel(node.Labels[stgKey])
-		if stgQ.Value() <= 0 {
-			stgQ = node.Status.Capacity[core.ResourceEphemeralStorage]
-		}
-		stgC := stgQ.Value() / quantityx.Gi
-		if stgC&1 != 0 {
-			stgC -= 1
-		}
-		if stgC <= 0 {
-			stgC = 15 * accC
-		}
-		if stgZeroed {
-			labels[stgKey] = node.Labels[stgKey]
-		} else {
-			labels[stgKey] = strconvx.Itoa(stgC) + "Gi"
-		}
-
-		// Skip the .z-* labels when any of cpu/ram/storage is explicitly
-		// zeroed, so the acceleratable view is not exposed to Kueue.
-		if cpuZeroed || ramZeroed || stgZeroed {
-			continue
-		}
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.sliced.partitions=${slicedC}" is a
-		// user-supplied input: when present and a valid partition count (a power of
-		// two in [2, SlicedResourceMaxSize]) it appends "-${slicedC}s" to z-flavor and
-		// z-queue. Invalid values are silently ignored here (the admission webhook
-		// rejects them at write time). z-cohort is the cohort-level per-unit view and
-		// never carries a sliced suffix — it is what cohort matching compares on.
-		slicedC := GetAcceleratableSlicedPartitions(node, aKey)
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.z-flavor=${cpu}c-${ram}g-${stg}g-${acc}d[-${sliced}s]"
-		profFlavor := fmt.Sprintf("%dc-%dg-%dg-%dd", cpuC, ramC, stgC, accC)
-		if slicedC > 0 {
-			profFlavor = fmt.Sprintf("%s-%ds", profFlavor, slicedC)
-		}
-		labels[nodeKey+".z-flavor"] = profFlavor
-
-		// "acceleratable.${prefix}${manufacturer}-${id}.z-queue=${cpuUnit}c-${ramUnit}g-1d[-${sliced}s]"
-		// "acceleratable.${prefix}${manufacturer}-${id}.z-cohort=${cpuUnit}c-${ramUnit}g-1d"
-		cpuUnit := cpuC / accC
-		ramUnit := ramC / accC
-		profCohort := fmt.Sprintf("%dc-%dg-1d", cpuUnit, ramUnit)
-		profQueue := profCohort
-		if slicedC > 0 {
-			profQueue = fmt.Sprintf("%s-%ds", profCohort, slicedC)
-		}
-		labels[nodeKey+".z-queue"] = profQueue
-		labels[nodeKey+".z-cohort"] = profCohort
-	}
+	// Record the general(CPU) key presence so the NodeFlavorReconciler can pool
+	// CPU-only nodes under it. The per-unit spec (cpu/ram/storage) and the .z-*
+	// profiles are no longer derived onto the node: NodeFlavorReconciler reads
+	// node status.capacity directly and writes the unit spec into ResourceFlavor
+	// notes, decoupling unit management from the Node.
+	gKey := ExtractGeneralNodeKey(node)
+	gManu, _, _ := strings.Cut(gKey, "-")
+	// "general.${prefix}${manufacturer}=true"
+	labels[GeneralFeatureLabelPrefix+gManu] = valueTrue
+	// "general.${prefix}${manufacturer}-${id}=true"
+	labels[GeneralFeatureLabelPrefix+gKey] = valueTrue
 
 	return labels
 }
 
-// NodeResourceFlavor represents the node resource flavor extracted from the labels of a node.
-type NodeResourceFlavor struct {
-	// ProfileCohort is the name of the Kueue Cohort that the flavor's queue belongs to.
-	// Shape: "gpustack--${general-key}-${cpuUnit}c-${ramUnit}g[--${acc-key}-${accUnit}d]",
-	// never carries a sliced suffix — it is the matching key at the cohort level.
-	ProfileCohort string
-	// ProfileQueue is the name of the Kueue ClusterQueue that the flavor belongs to.
-	// Shape: "gpustack--${general-key}-${cpuUnit}c-${ramUnit}g[--${acc-key}-${accUnit}d[-${sliced}s]]",
-	// identical to ProfileCohort when sliced is unset.
-	ProfileQueue string
-	// ProfileFlavor is the name of the Kueue ResourceFlavor.
-	// Shape: "gpustack--${general-key}-${cpu}c-${ram}g-${stg}g[--${acc-key}-${acc}d[-${sliced}s]]".
-	ProfileFlavor string
-	// Manufacturer is the device manufacturer for the acceleratable flavor,
-	// or the CPU manufacturer for the general(CPU-only) flavor.
-	Manufacturer string
+// NodeFlavor identifies one Kueue ResourceFlavor a node contributes to, derived
+// from the node's feature labels and status capacity. Every managed node yields
+// one CPU flavor (its general key, sized by CPU cores) plus one device flavor per
+// acceleratable key it carries (sized by device count).
+//
+// The NodeFlavorReconciler pools the nodes that share a Name: the flavor's
+// capacity is the count of pooled nodes times Count, and the default unit spec is
+// derived from the most-constrained pooled node (see DeriveNodeUnitSpec). Unit
+// specs therefore live on the ResourceFlavor, never on the node.
+type NodeFlavor struct {
+	// Name is the ResourceFlavor name:
+	// "gpustack-${key}-${os}-${arch}-${count}c" for a CPU flavor or
+	// "gpustack-${key}-${os}-${arch}-${count}d" for a device flavor, with full
+	// os/arch.
+	Name string
+	// Key is the general(CPU) node key or the acceleratable(device) node key.
+	Key string
+	// OS and Arch are the node's kubernetes.io/os and kubernetes.io/arch values
+	// (full, e.g. "linux"/"amd64"), carried verbatim into the Name and the
+	// schedule labels.
+	OS   string
+	Arch string
+	// Count is the node's CPU core count (CPU flavor) or device count (device flavor).
+	Count int64
 	// Acceleratable reports whether the flavor represents accelerated resources.
 	Acceleratable bool
-	// NodeLabels is the node labels for scheduling.
+	// Manufacturer is the device manufacturer (device flavor) or the CPU
+	// manufacturer (CPU flavor).
+	Manufacturer string
+	// Product and Family describe the device (device flavor); for a CPU flavor they
+	// are populated only when CPU-name blending is enabled, since the default
+	// "generic" key pools heterogeneous CPUs where one node's identity is misleading.
+	Product string
+	Family  string
+	// Memory is the per-card VRAM of a device flavor (e.g. "24576Mi"); empty for a
+	// CPU flavor. Carried into ResourceFlavor notes so the webhook can fold a
+	// memory-mib request without reading the node.
+	Memory string
+	// NodeLabels selects the pooled nodes: the managed mark, kubernetes.io/os and
+	// kubernetes.io/arch (full values), and the flavor's feature key label.
 	NodeLabels map[string]string
-	// Tolerations is the tolerations for scheduling.
-	Tolerations []core.Toleration
-
-	// Accelerator is the accelerator quantity of the node,
-	// empty for the general(CPU-only) flavor.
-	Accelerator string
-	// CPU is the CPU quantity of the node.
-	CPU string
-	// RAM is the RAM quantity of the node.
-	RAM string
-	// LocalStorage is the local storage quantity of the node.
-	LocalStorage string
 }
 
-// ExtractNodeResourceFlavors extracts the NodeResourceFlavor from given node.
-func ExtractNodeResourceFlavors(node *core.Node) (ndfs []NodeResourceFlavor) {
-	labels := node.Labels
-	if labels == nil {
+// ExtractNodeFlavors derives the ResourceFlavors a node contributes to from its
+// feature labels and status capacity: one CPU flavor keyed by the general node
+// key, plus one device flavor per acceleratable key. It returns nil when the node
+// carries no labels.
+func ExtractNodeFlavors(node *core.Node) (flavors []NodeFlavor) {
+	if node.Labels == nil {
 		return nil
 	}
 
+	os := node.Labels[core.LabelOSStable]
+	arch := node.Labels[core.LabelArchStable]
+
+	// CPU flavor: keyed by the general(CPU) node key, sized by the node's CPU cores.
 	gKey := ExtractGeneralNodeKey(node)
-
-	// Extract the general(CPU) node feature.
-	{
-		nodeKey := GeneralFeatureLabelPrefix + gKey
-
-		profFlavorKey := nodeKey + ".z-flavor"
-		profQueueKey := nodeKey + ".z-queue"
-		profCohortKey := nodeKey + ".z-cohort"
-		cpuKey := nodeKey + ".cpu"
-		ramKey := nodeKey + ".ram"
-		stgKey := nodeKey + ".storage"
-
-		if kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, cpuKey, ramKey, stgKey) {
-			profQueue := labels[profQueueKey]
-			manufacturer, _, _ := strings.Cut(gKey, "-")
-
-			ndf := NodeResourceFlavor{
-				ProfileCohort: FormatNodeProfile(gKey, "", labels[profCohortKey]),
-				ProfileQueue:  FormatNodeProfile(gKey, "", profQueue),
-				ProfileFlavor: FormatNodeProfile(gKey, "", labels[profFlavorKey]),
-				Manufacturer:  manufacturer,
-				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey: valueTrue,
-					profQueueKey:               profQueue,
-				},
-				Tolerations: []core.Toleration{
-					{
-						Operator: core.TolerationOpExists,
-					},
-				},
-				CPU:          labels[cpuKey],
-				RAM:          labels[ramKey],
-				LocalStorage: labels[stgKey],
-			}
-
-			ndfs = append(ndfs, ndf)
-		}
-	}
-
-	// Pair the acceleratable flavors with the general(CPU) key of the node.
-	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
-		nodeKey := AcceleratableFeatureLabelPrefix + aKey
-
-		profFlavorKey := nodeKey + ".z-flavor"
-		profQueueKey := nodeKey + ".z-queue"
-		profCohortKey := nodeKey + ".z-cohort"
-		accKey := nodeKey + ".count"
-		cpuKey := nodeKey + ".cpu"
-		ramKey := nodeKey + ".ram"
-		stgKey := nodeKey + ".storage"
-
-		if !kubemeta.HasLabels(node, profFlavorKey, profQueueKey, profCohortKey, accKey, cpuKey, ramKey, stgKey) {
-			continue
-		}
-
-		profQueue := labels[profQueueKey]
-		manufacturer, _, _ := strings.Cut(aKey, "-")
-
+	cpuQ := node.Status.Capacity[core.ResourceCPU]
+	if cpuCount := cpuQ.Value(); cpuCount > 0 {
+		manufacturer, _, _ := strings.Cut(gKey, "-")
 		nodeLabels := map[string]string{
 			systemname.ManagedLabelKey: valueTrue,
-			profQueueKey:               profQueue,
+			core.LabelOSStable:         os,
+			core.LabelArchStable:       arch,
 		}
-		// Pin the general(CPU) identity so that the flavor never
-		// matches a node with the same device but a different CPU.
 		nodeLabels[GeneralFeatureLabelPrefix+gKey] = valueTrue
 
-		ndf := NodeResourceFlavor{
-			ProfileCohort: FormatNodeProfile(gKey, aKey, labels[profCohortKey]),
-			ProfileQueue:  FormatNodeProfile(gKey, aKey, profQueue),
-			ProfileFlavor: FormatNodeProfile(gKey, aKey, labels[profFlavorKey]),
-			Manufacturer:  manufacturer,
-			Acceleratable: true,
-			NodeLabels:    nodeLabels,
-			Tolerations: []core.Toleration{
-				{
-					Operator: core.TolerationOpExists,
-				},
-			},
-			Accelerator:  labels[accKey],
-			CPU:          labels[cpuKey],
-			RAM:          labels[ramKey],
-			LocalStorage: labels[stgKey],
+		nf := NodeFlavor{
+			Name:         formatNodeFlavorName(gKey, os, arch, cpuCount, false),
+			Key:          gKey,
+			OS:           os,
+			Arch:         arch,
+			Count:        cpuCount,
+			Manufacturer: manufacturer,
+			NodeLabels:   nodeLabels,
+		}
+		// The default "generic" key pools heterogeneous CPUs, so a single node's
+		// CPU identity is only meaningful when CPU-name blending is enabled.
+		if generalNodeKeyWithCPUName {
+			nf.Product = generalFeatureAnnotation(node, "name")
+			nf.Family = generalFeatureAnnotation(node, "family")
 		}
 
-		ndfs = append(ndfs, ndf)
+		flavors = append(flavors, nf)
 	}
 
-	return ndfs
+	// Device flavors: one per acceleratable key, sized by its reported device count.
+	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
+		nodeKey := AcceleratableFeatureLabelPrefix + aKey
+		count, err := strconvx.Atoi[int64](node.Labels[nodeKey+".count"])
+		if err != nil || count <= 0 {
+			continue
+		}
+		manufacturer, _, _ := strings.Cut(aKey, "-")
+		nodeLabels := map[string]string{
+			systemname.ManagedLabelKey: valueTrue,
+			core.LabelOSStable:         os,
+			core.LabelArchStable:       arch,
+		}
+		nodeLabels[AcceleratableFeatureLabelPrefix+aKey] = valueTrue
+
+		flavors = append(flavors, NodeFlavor{
+			Name:          formatNodeFlavorName(aKey, os, arch, count, true),
+			Key:           aKey,
+			OS:            os,
+			Arch:          arch,
+			Count:         count,
+			Acceleratable: true,
+			Manufacturer:  manufacturer,
+			Product:       node.Labels[nodeKey+".product"],
+			Family:        node.Labels[nodeKey+".family"],
+			Memory:        node.Labels[nodeKey+".memory"],
+			NodeLabels:    nodeLabels,
+		})
+	}
+
+	return flavors
 }
 
-// NodeQueue represents the node queue extracted from the labels/annotations of a node.
-type NodeQueue struct {
-	// Product is the device product for the acceleratable queue,
-	// or the CPU model name for the general(CPU-only) queue.
-	Product string `json:"product,omitempty"`
-	// Family is the device family for the acceleratable queue,
-	// or the CPU model family for the general(CPU-only) queue.
-	Family string `json:"family,omitempty"`
-	// OS is the operating system of the node.
-	OS string `json:"os,omitempty"`
-	// Arch is the architecture of the node.
-	Arch string `json:"arch,omitempty"`
-	// NodeResourceFlavorCPU records the CPU details for the general(CPU-only) queue.
-	NodeResourceFlavorCPU `json:",inline"`
-	// NodeResourceFlavorAccelerator records the device details for the acceleratable queue.
-	NodeResourceFlavorAccelerator `json:",inline"`
+// formatNodeFlavorName builds a ResourceFlavor name from a node key, the node's
+// full os/arch and the per-node count. The suffix is "c" for a CPU flavor and "d"
+// for a device flavor.
+func formatNodeFlavorName(key, os, arch string, count int64, acceleratable bool) string {
+	suffix := "c"
+	if acceleratable {
+		suffix = "d"
+	}
+	return fmt.Sprintf("gpustack-%s-%s-%s-%d%s",
+		key, os, arch, count, suffix)
 }
 
-type (
-	// NodeResourceFlavorCPU records the CPU details reported by
-	// the "feature.gpustack.ai/cpu-*" annotations of a node.
-	NodeResourceFlavorCPU struct {
-		// PhysicalCores is the number of physical cores of the CPU.
-		PhysicalCores string `json:"physicalCores,omitempty"`
-		// ThreadsPerPhysicalCore is the number of threads per physical core of the CPU.
-		ThreadsPerPhysicalCore string `json:"threadsPerPhysicalCore,omitempty"`
-		// LogicalCores is the number of logical cores of the CPU.
-		LogicalCores string `json:"logicalCores,omitempty"`
-		// Stepping is the stepping of the CPU.
-		Stepping string `json:"stepping,omitempty"`
-		// ClockSpeed is the clock speed of the CPU in Hz.
-		ClockSpeed string `json:"clockSpeed,omitempty"`
-		// MaxClockSpeed is the max clock speed of the CPU in Hz.
-		MaxClockSpeed string `json:"maxClockSpeed,omitempty"`
-		// CacheLine is the cache line size of the CPU in bytes.
-		CacheLine string `json:"cacheLine,omitempty"`
-		// Cache records the CPU cache details of the CPU.
-		Cache NodeResourceFlavorCPUCache `json:"cache,omitempty"`
+// DeriveNodeUnitSpec derives a flavor's default per-unit spec from a node's status
+// capacity, to be written to ResourceFlavor notes. count is the flavor's Count
+// (CPU cores for a CPU flavor, device count for a device flavor).
+//
+// A non-accelerated flavor takes the factory default unit spec of 1 core / 2 Gi —
+// the general-view setting that held before unit specs moved onto the
+// ResourceFlavor — so only localStorage tracks the node. A device flavor's unit is
+// per device: unitCPU = cores/count and unitRAM = ramGi/count, with RAM rounded up
+// to an even Gi. localStorage is the node's total storage in Gi (rounded down to an
+// even Gi), never divided — it caps a submission rather than describing a unit. All
+// returned values are bare integers (Gi for unitRAM/localStorage).
+func DeriveNodeUnitSpec(node *core.Node, count int64, acceleratable bool) (unitCPU, unitRAM, localStorage string) {
+	if count <= 0 {
+		count = 1
 	}
 
-	// NodeResourceFlavorCPUCache records the CPU cache details reported by
-	// the "feature.gpustack.ai/cpu-cache-*" annotations of a node.
-	NodeResourceFlavorCPUCache struct {
-		// L1I is the L1 instruction cache size of the CPU in bytes.
-		L1I string `json:"l1i,omitempty"`
-		// L1D is the L1 data cache size of the CPU in bytes.
-		L1D string `json:"l1d,omitempty"`
-		// L2 is the L2 cache size of the CPU in bytes.
-		L2 string `json:"l2,omitempty"`
-		// L3 is the L3 cache size of the CPU in bytes.
-		L3 string `json:"l3,omitempty"`
+	stgQ := node.Status.Capacity[core.ResourceEphemeralStorage]
+	stgGi := stgQ.Value() / quantityx.Gi
+	if stgGi&1 != 0 {
+		stgGi--
 	}
-)
+	localStorage = strconvx.Itoa(max(stgGi, 0))
 
-type (
-	// NodeResourceFlavorAccelerator records the device details reported by
-	// the acceleratable feature labels of a node, paired with the CPU details.
-	NodeResourceFlavorAccelerator struct {
-		// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
-		Memory string `json:"memory,omitempty"`
-		// Cores is the number of cores of the accelerator, e.g. "128".
-		Cores string `json:"cores,omitempty"`
-		// ComputeCapability is the compute capability of the accelerator, e.g. "7.5".
-		ComputeCapability string `json:"computeCapability,omitempty"`
-		// CPU is the CPU details paired with the accelerator.
-		CPU NodeResourceFlavorAcceleratorCPU `json:"cpu,omitempty"`
+	if !acceleratable {
+		// Factory default for a non-accelerated flavor: 1 core / 2 Gi.
+		return "1", "2", localStorage
 	}
 
-	// NodeResourceFlavorAcceleratorCPU records the CPU details paired
-	// with an acceleratable queue.
-	NodeResourceFlavorAcceleratorCPU struct {
-		// Manufacturer is the CPU manufacturer of the node.
-		Manufacturer string `json:"manufacturer,omitempty"`
-		// Product is the CPU model name of the node.
-		Product string `json:"product,omitempty"`
-		// Family is the CPU model family of the node.
-		Family string `json:"family,omitempty"`
-		// Detail inlines the CPU details of the node.
-		NodeResourceFlavorCPU `json:",inline"`
+	cpuQ := node.Status.Capacity[core.ResourceCPU]
+	cpuCount := cpuQ.Value()
+
+	ramQ := node.Status.Capacity[core.ResourceMemory]
+	ramGi := ramQ.Value() / quantityx.Gi
+	if ramGi&1 != 0 {
+		ramGi++
 	}
-)
+
+	unitCPU = strconvx.Itoa(max(cpuCount/count, 1))
+	unitRAM = strconvx.Itoa(max(ramGi/count, 1))
+	return unitCPU, unitRAM, localStorage
+}
 
 // generalFeatureAnnotation returns the "feature.gpustack.ai/cpu-${name}"
 // annotation of the given Node, the shared accessor for every CPU attribute
@@ -776,136 +499,6 @@ func generalFeatureAnnotation(node *core.Node, name string) string {
 		return ""
 	}
 	return v
-}
-
-// extractGeneralDetail extracts the CPU details from the
-// "feature.gpustack.ai/cpu-*" annotations of the given node.
-func extractGeneralDetail(node *core.Node) NodeResourceFlavorCPU {
-	return NodeResourceFlavorCPU{
-		PhysicalCores:          generalFeatureAnnotation(node, "physical-cores"),
-		ThreadsPerPhysicalCore: generalFeatureAnnotation(node, "threads-per-core"),
-		LogicalCores:           generalFeatureAnnotation(node, "logical-cores"),
-		Stepping:               generalFeatureAnnotation(node, "stepping"),
-		ClockSpeed:             generalFeatureAnnotation(node, "hz"),
-		MaxClockSpeed:          generalFeatureAnnotation(node, "boost-freq"),
-		CacheLine:              generalFeatureAnnotation(node, "cache-line"),
-		Cache: NodeResourceFlavorCPUCache{
-			L1I: generalFeatureAnnotation(node, "cache-l1i"),
-			L1D: generalFeatureAnnotation(node, "cache-l1d"),
-			L2:  generalFeatureAnnotation(node, "cache-l2"),
-			L3:  generalFeatureAnnotation(node, "cache-l3"),
-		},
-	}
-}
-
-// ExtractNodeQueue extracts the NodeQueue from the given node.
-// If the acceleratableNodeKey is empty, it extracts the general(CPU-only) queue;
-// otherwise, it extracts the acceleratable queue with the given key, which
-// always carries the device product/family/memory/cores/comcap.
-// The node's os/arch are always recorded — they are part of the general node
-// key, so every node pooled under the same key shares them. Every CPU-related
-// field — the general queue's product/family/details and the acceleratable
-// queue's paired CPU — is reported only when the
-// GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME environment variable is truthy at
-// startup: the default "generic" general node key pools nodes with
-// heterogeneous CPUs, where a single node's CPU identity would be misleading.
-func ExtractNodeQueue(node *core.Node, acceleratableNodeKey string) (NodeQueue, bool) {
-	return extractNodeQueue(node, acceleratableNodeKey, generalNodeKeyWithCPUName)
-}
-
-// extractNodeQueue is ExtractNodeQueue with the CPU-name blending toggle passed
-// in explicitly, so tests can exercise both modes.
-func extractNodeQueue(node *core.Node, acceleratableNodeKey string, generalNodeKeyWithCPUName bool) (NodeQueue, bool) {
-	nq := NodeQueue{
-		OS:   node.Labels[core.LabelOSStable],
-		Arch: node.Labels[core.LabelArchStable],
-	}
-
-	// The acceleratable node key is blank, we are extracting the general(CPU-only) queue.
-	if acceleratableNodeKey == "" {
-		// Extract the CPU details for the general queue only
-		// when generalNodeKeyWithCPUName is enabled.
-		if generalNodeKeyWithCPUName {
-			nq.Product = generalFeatureAnnotation(node, "name")
-			nq.Family = generalFeatureAnnotation(node, "family")
-			nq.NodeResourceFlavorCPU = extractGeneralDetail(node)
-		}
-		return nq, true
-	}
-
-	// The acceleratable node key is non-blank, we are extracting the acceleratable queue with the given key.
-	label := AcceleratableFeatureLabelPrefix + acceleratableNodeKey
-	if node.Labels[label] != valueTrue {
-		return NodeQueue{}, false
-	}
-	nq.Product = node.Labels[label+".product"]
-	nq.Family = node.Labels[label+".family"]
-	nq.NodeResourceFlavorAccelerator = NodeResourceFlavorAccelerator{
-		Memory:            node.Labels[label+".memory"],
-		Cores:             node.Labels[label+".cores"],
-		ComputeCapability: node.Labels[label+".comcap"],
-	}
-	// Extract the paired CPU details for the acceleratable queue only
-	// when generalNodeKeyWithCPUName is enabled.
-	if generalNodeKeyWithCPUName {
-		nq.CPU = NodeResourceFlavorAcceleratorCPU{
-			Manufacturer:          extractGeneralNodeKeyManufacturer(node),
-			Product:               generalFeatureAnnotation(node, "name"),
-			Family:                generalFeatureAnnotation(node, "family"),
-			NodeResourceFlavorCPU: extractGeneralDetail(node),
-		}
-	}
-	return nq, true
-}
-
-// NodeProfile represents the node profile extracted from the node feature labels of a node.
-type NodeProfile struct {
-	// Flavor is the per-node profile used to name the Kueue ResourceFlavor.
-	// Shape: "gpustack--${general-key}-${cpu}c-${ram}g-${stg}g[--${acc-key}-${acc}d[-${sliced}s]]".
-	Flavor string
-	// Queue is the per-unit profile used to name the Kueue ClusterQueue.
-	// Shape: "gpustack--${general-key}-${cpuUnit}c-${ramUnit}g[--${acc-key}-${accUnit}d[-${sliced}s]]".
-	// Equals Cohort when sliced is unset.
-	Queue string
-	// Cohort is the per-unit profile used to name the Kueue Cohort.
-	// Shape: "gpustack--${general-key}-${cpuUnit}c-${ramUnit}g[--${acc-key}-${accUnit}d]".
-	// Never carries a sliced suffix.
-	Cohort string
-}
-
-// ExtractNodeProfiles extracts the node profiles from the given node.
-func ExtractNodeProfiles(node *core.Node) (profiles []NodeProfile) {
-	labels := node.Labels
-	if len(labels) == 0 {
-		return profiles
-	}
-
-	gKey := ExtractGeneralNodeKey(node)
-
-	emit := func(generalKey, accKey string) {
-		nodeKey := GeneralFeatureLabelPrefix + generalKey
-		if accKey != "" {
-			nodeKey = AcceleratableFeatureLabelPrefix + accKey
-		}
-		flavor := labels[nodeKey+".z-flavor"]
-		queue := labels[nodeKey+".z-queue"]
-		cohort := labels[nodeKey+".z-cohort"]
-		if flavor == "" || queue == "" || cohort == "" {
-			return
-		}
-		profiles = append(profiles, NodeProfile{
-			Flavor: FormatNodeProfile(generalKey, accKey, flavor),
-			Queue:  FormatNodeProfile(generalKey, accKey, queue),
-			Cohort: FormatNodeProfile(generalKey, accKey, cohort),
-		})
-	}
-
-	emit(gKey, "")
-	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
-		emit(gKey, aKey)
-	}
-
-	return profiles
 }
 
 const (
@@ -937,45 +530,6 @@ type NodeProfileSpec struct {
 	// SlicedAccelerator is the sliced count (segment "<digits>s"). Optional;
 	// only valid when Accelerator is also present.
 	SlicedAccelerator string
-}
-
-// FormatNodeProfile formats the profile string with the given general(CPU) key,
-// acceleratable(device) key and spec.
-//
-// The general(CPU-only) profile, i.e. accKey is empty, is formatted as:
-//
-//	"gpustack--${generalKey}-${spec}"
-//
-// The acceleratable profile splits the spec at its "${acc}d" segment, keeping
-// the host resources in the general segment and the device count(and the
-// optional sliced suffix) in the acceleratable segment:
-//
-//	"gpustack--${generalKey}-${cpu}c-${ram}g[-${stg}g]--${accKey}-${acc}d[-${sliced}s]"
-func FormatNodeProfile(generalKey, accKey, spec string) string {
-	if accKey == "" {
-		return _NodeProfilePrefix + generalKey + "-" + spec
-	}
-	hostSpec, devSpec := splitNodeProfileSpec(spec)
-	if devSpec == "" {
-		// No accelerator segment in the spec, fall back to the general format.
-		return _NodeProfilePrefix + generalKey + "-" + spec
-	}
-	return _NodeProfilePrefix + generalKey + "-" + hostSpec +
-		_NodeProfileSegmentSeparator + accKey + "-" + devSpec
-}
-
-// splitNodeProfileSpec splits "${cpu}c-${ram}g[-${stg}g]-${acc}d[-${sliced}s]"
-// into the host part "${cpu}c-${ram}g[-${stg}g]" and the device part
-// "${acc}d[-${sliced}s]". The device part is empty when the spec carries no
-// accelerator segment.
-func splitNodeProfileSpec(spec string) (host, dev string) {
-	parts := strings.Split(spec, "-")
-	for i := range parts {
-		if strings.HasSuffix(parts[i], "d") && isUnsignedDecimal(strings.TrimSuffix(parts[i], "d")) {
-			return strings.Join(parts[:i], "-"), strings.Join(parts[i:], "-")
-		}
-	}
-	return spec, ""
 }
 
 // ParseNodeProfile parses a node profile string into its general(CPU) key,

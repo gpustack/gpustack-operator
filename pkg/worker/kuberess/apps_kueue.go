@@ -185,6 +185,9 @@ managerConfig:
       # int64 quantization (q.Value(), which ceils non-CPU resources) never rounds
       # a fractional credit up to 1.
       transformations:
+{{- $exclusiveCreditsFactor := getExclusiveCreditsFactor }}
+{{- $sharedCreditsFactor := getSharedCreditsFactor }}
+{{- $slicedCreditsFactor := getSlicedCreditsFactor }}
 {{- range $.Manufacturers }}
 {{- $manu := . }}
 {{- $manuCreditsResName := getCreditsResourceName $manu }}
@@ -192,23 +195,43 @@ managerConfig:
 {{- $manuSharedResName := getSharedResourceName $manu }}
 {{- $manuSlicedResName := getSlicedResourceName $manu }}
 {{- $manuSlicedUnitsResName := getSlicedUnitsResourceName $manu }}
+{{- $manuSlicedCoresPercentageResName := getSlicedCoresPercentageResourceName $manu }}
+{{- $manuSlicedMemoryPercentageResName := getSlicedMemoryPercentageResourceName $manu }}
+{{- $manuSlicedMemoryMibResName := getSlicedMemoryMibResourceName $manu }}
+      # Multiply each manufacturer resource into a single credits resource, so that
+      # the queue can be configured with a single credit budget. The multiplyBy
+      # factor is the number of credits per unit of the input resource, so that
+      # the output credits resource is always an integer.
       - input: {{ $manuExclusiveResName }}
         strategy: Replace
         outputs:
-          {{ $manuCreditsResName }}: "{{ getExclusiveCreditsFactor }}"
+          {{ $manuCreditsResName }}: "{{ $exclusiveCreditsFactor }}"
       - input: {{ $manuSharedResName }}
         strategy: Replace
         outputs:
-          {{ $manuCreditsResName }}: "{{ getSharedCreditsFactor }}"
+          {{ $manuCreditsResName }}: "{{ $sharedCreditsFactor }}"
       - input: {{ $manuSlicedUnitsResName }}
         strategy: Replace
         multiplyBy: {{ $manuSlicedResName }}
         outputs:
-          {{ $manuCreditsResName }}: "{{ getSlicedCreditsFactor }}"
-      # nvidia.com/gpu.sliced is the multiplyBy above: Kueue does not consume a
+          {{ $manuCreditsResName }}: "{{ $slicedCreditsFactor }}"
+      # The resource ".sliced" is the multiplyBy above: Kueue does not consume a
       # multiplyBy resource on Replace, so it would leak into the Pod request.
       # Drain it with empty Outputs + Replace so Kueue ignores it.
       - input: {{ $manuSlicedResName }}
+        strategy: Replace
+        outputs: {}
+      # These node-level resources (cores-percentage / memory-percentage /
+      # memory-mib) are read by the scheduler and kubelet to place a Pod on a node,
+      # never as Kueue credits. Drain each with empty Outputs + Replace so a Pod
+      # requesting them is not marked inadmissible against this credits-only queue.
+      - input: {{ $manuSlicedCoresPercentageResName }}
+        strategy: Replace
+        outputs: {}
+      - input: {{ $manuSlicedMemoryPercentageResName }}
+        strategy: Replace
+        outputs: {}
+      - input: {{ $manuSlicedMemoryMibResName }}
         strategy: Replace
         outputs: {}
 {{- end }}
@@ -230,6 +253,7 @@ func getKueueChartTemplateValues(name string, data map[string]any, extendFuncMap
 
 func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 	return map[string]any{
+		// Resource name helpers for Kueue chart values template.
 		"getExclusiveResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
@@ -258,6 +282,27 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 			}
 			return string(nodefeature.GetAcceleratableSlicedUnitsResourceName(s))
 		},
+		"getSlicedCoresPercentageResourceName": func(v any) string {
+			s, ok := v.(string)
+			if !ok {
+				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
+			}
+			return string(nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(s))
+		},
+		"getSlicedMemoryPercentageResourceName": func(v any) string {
+			s, ok := v.(string)
+			if !ok {
+				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
+			}
+			return string(nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(s))
+		},
+		"getSlicedMemoryMibResourceName": func(v any) string {
+			s, ok := v.(string)
+			if !ok {
+				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
+			}
+			return string(nodefeature.GetAcceleratableSlicedMemoryMibResourceName(s))
+		},
 		"getCreditsResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
@@ -265,10 +310,7 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 			}
 			return string(nodefeature.GetAcceleratableCreditsResourceName(s))
 		},
-		// The credits transformation factors are derived from the integer credit
-		// base B = D so they cannot drift from the accounting constants: a whole
-		// exclusive card is worth B, a shared ownership B/SharedResourceMaxSize,
-		// and one normalized sliced unit B/D (=1, since B=D).
+		// Kueue credits factor helpers for Kueue chart values template.
 		"getExclusiveCreditsFactor": func() string {
 			return strconv.Itoa(nodefeature.CreditsPerCard)
 		},
@@ -278,6 +320,8 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 		"getSlicedCreditsFactor": func() string {
 			return strconv.Itoa(nodefeature.CreditsPerCard / nodefeature.ResourceMaxUnits)
 		},
+		// hasAPIResource is a placeholder function for Kueue chart values template.
+		// It will be overridden by the actual implementation in installKueue.
 		"hasAPIResource": func(apiversion, kind string) bool {
 			return false
 		},
