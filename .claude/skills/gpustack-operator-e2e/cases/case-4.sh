@@ -10,19 +10,21 @@
 # which reads the per-card `Devices` ledger — so it never becomes an admitted-then-unschedulable
 # workload. The check returns `Retry` (transient: re-checked as capacity frees), not `Rejected`.
 #
-# Runs on a GPU-LESS cluster BY APPROXIMATION (same mock recipe as CASE 6): a fake accelerator
+# Runs on ANY cluster BY APPROXIMATION (same mock recipe as CASE 6): a fake accelerator
 # NodeFeature (count=8) drives the real derivation of the accelerated ResourceFlavor →
 # ClusterQueue (which references the AdmissionCheck) → InstanceType, and a PHANTOM-node `Devices`
 # CR carries a mocked per-card ledger where all 8 cards are 50%-sliced — no clean whole card.
 # NOT mocked: the CQ→AdmissionCheck wiring, the Workload quota reservation, and the per-card
 # feasibility the real NodeDevicesAdmissionCheckReconciler computes over the mocked ledger.
+# The fake accelerator uses a mock product key (nvidia-e2emock) so it never collides with a real
+# GPU's derived pool/Devices — the case is safe on a real-accelerator cluster too, not only GPU-less.
 #
 # Self-recovering: deletes the test Instance, the mocked Devices, and the NodeFeature on exit.
 set -uo pipefail
 
 NS="${1:?usage: case-4.sh <NS>}"
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-AKEY=nvidia-a10g
+AKEY=nvidia-e2emock   # 'nvidia' is a known manufacturer (gates derivation); 'e2emock' never collides with a real product
 COUNT=8
 MEM_MIB=24576
 D=1600000
@@ -69,7 +71,7 @@ spec:
   labels:
     ${LABELPFX}: "true"
     ${LABELPFX}.count: "${COUNT}"
-    ${LABELPFX}.product: "A10G"
+    ${LABELPFX}.product: "E2E-Mock"
     ${LABELPFX}.memory: "24Gi"
     ${LABELPFX}.cores: "12"
   features: {}
@@ -128,7 +130,7 @@ spec:
   groups:
     - id: g0
       manufacturer: nvidia
-      name: A10G
+      name: E2E-Mock
       memory: ${MEM_MIB}
 EOF
 # Target the v1alpha1 CRD explicitly: the aggregated v1 proxy's /status subresource write

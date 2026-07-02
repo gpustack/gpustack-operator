@@ -25,24 +25,25 @@
 set -uo pipefail
 
 NS="${1:?usage: case-3.sh <NS>}"
-NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-WORKER_NF="${NODE}-gpustack-worker"
-before=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}')
-echo "node ${NODE}, current gpustack.ai/managed=${before:-<unset>}"
-
-# The general pool's ResourceFlavor + InstanceType (the CQ/IT name is the flavor name
-# without the trailing -${count}c). Captured before the toggle so we can watch them go.
-RF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -Eo 'gpustack-[a-z0-9-]+-[0-9]+c$' | head -1)
-IT="${RF%-*c}"; IT="${IT%-[0-9]*}"   # strip -${count}c → pool name (best-effort; recomputed below)
-IT=$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[?(@.status.phase=="Active")].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep 'gpustack-' | head -1)
+# Target the general (CPU) pool: non-accelerated (no GPU needed) and fed by every managed node, so
+# the case behaves the same on a 1-node local cluster and an N-node real one.
+IT=$(kubectl get instancetypes.worker.gpustack.ai \
+  -o jsonpath='{.items[?(@.spec.acceleratable==false)].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep -m1 'gpustack-')
+# One of the pool's CPU ResourceFlavors (named "${IT}-${count}c"), kept as a full type/name path so
+# `kubectl get "$RF"` works — watched so we see it deleted on de-manage.
+RF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -E "/${IT}-[0-9]+c$" | head -1)
 [ -n "$RF" ] && [ -n "$IT" ] || { echo "no general RF/InstanceType found — run case-1 first to materialize the chain"; exit 1; }
-echo "general ResourceFlavor: ${RF#*/}   derived InstanceType: ${IT}"
+# Every <node>-gpustack-worker NodeFeature: de-managing ALL of them removes a pool that spans more
+# than one node (a single node's toggle leaves the others' flavors behind).
+WORKER_NFS=$(kubectl -n "$NS" get nodefeatures -o name 2>/dev/null | grep -E -- '-gpustack-worker$')
+[ -n "$WORKER_NFS" ] || { echo "no <node>-gpustack-worker NodeFeatures found"; exit 1; }
+echo "general InstanceType: ${IT}  ResourceFlavor: ${RF#*/}  draining $(echo "$WORKER_NFS" | grep -c .) node(s)"
 
 restore() {
   echo
-  echo "[case-3] restoring gpustack.ai/managed=${before:-true} and waiting for the chain to rebuild"
-  kubectl -n "$NS" patch nodefeature "$WORKER_NF" --type=merge \
-    -p "{\"spec\":{\"labels\":{\"gpustack.ai/managed\":\"${before:-true}\"}}}" 2>/dev/null || true
+  echo "[case-3] restoring gpustack.ai/managed=true on all nodes and waiting for the chain to rebuild"
+  echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
+    -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}' 2>/dev/null || true
   for _ in $(seq 1 40); do
     p=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)
     [ "$p" = "Active" ] && break
@@ -56,8 +57,8 @@ ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 # Toggle out of management via the NodeFeature (NFD would revert a direct node label).
-echo "[case-3] toggling gpustack.ai/managed=false"
-kubectl -n "$NS" patch nodefeature "$WORKER_NF" --type=merge \
+echo "[case-3] toggling gpustack.ai/managed=false on all worker NodeFeatures"
+echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
   -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
 
 # --- Assertion A: the node's general ResourceFlavor is DELETED (no tombstone). ---
