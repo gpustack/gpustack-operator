@@ -88,7 +88,10 @@ print(json.dumps({"status": {"groups": [
 ]}}))
 PY
 )
-  kubectl patch devices.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge -p "$groups" >/dev/null
+  # Target the v1alpha1 CRD explicitly: the unversioned/v1 resource is the aggregated
+  # proxy, whose /status subresource write returns ServiceUnavailable — only the real
+  # v1alpha1 CRD serves the status subresource.
+  kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge -p "$groups" >/dev/null
 }
 
 # assert_view <label> <excl> <shared> <sliced> polls the InstanceType three-view until it
