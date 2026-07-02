@@ -1,159 +1,154 @@
-# Drain-recycle: why a real cluster, and how the cases work
+# Case rationale: why a real cluster, and how the accelerated cases are mocked
 
-Background for CASE 2 (Instance drain-recycle), CASE 3 (managed-toggle), and CASE 4
-(accelerated chain). Read this before running or debugging those cases.
+Background for CASE 2–6 of `specs/2026-06-29-instancetype-unified-pool-refactor.md`. Read this
+before running or debugging those cases.
 
-## CASE 2 — Instance ↔ InstanceType contract
+Post-refactor shape the cases assume: unit specs are **Queue/InstanceType-managed** (not on the
+node); all three modes fold into **one isolated ClusterQueue per pool** (**Cohort removed** — there
+is no borrow topology and **no `schedule.gpustack.ai/drain` tombstone** anymore); `InstanceType` is a
+**real CRD** whose `.status` three-view is materialized by `InstanceTypeReconciler`; teardown flows
+through the InstanceType **finalizer** (`HoldAndDrain` the backing CQ, then delete it).
 
-`pkg/worker/controllers/worker/instance.go` and `pkg/worker/webhooks/worker/instance.go`
-are not covered by CASE 1. Core behavior: when the `InstanceType` a *running* Instance
-references is drained — its backing `ClusterQueue` goes `HoldAndDrain` so the InstanceType
-reports `Inactive`, or the type is removed — the `InstanceReconciler` must **stop** the
-Instance (`spec.stop=true`), *not* recreate its Pod; it may restart only once a live
-InstanceType exists again.
+## Shared accelerated mock recipe (CASE 4 and CASE 6)
 
-Why a real cluster is required:
+A GPU-less node produces no accelerator labels and no `Devices` ledger, so two inputs are mocked; the
+derivation and the three-view / AdmissionCheck math are **not** mocked.
 
-- `InstanceType` is a live projection of a `ClusterQueue` (`instance_type.go`); its
-  `status.phase` comes from `apistatus.GetSummaryOfClusterQueue` — `Active` condition
-  `True`→`Active`, `False`→`Inactive`.
-- The Instance's Pod carries the Kueue `kueue.x-k8s.io/queue-name` label, so it is
-  admission-managed: `HoldAndDrain` evicts the Pod → `pod==nil` → the reconciler
-  re-evaluates and stops the Instance.
-- **Unit-test blind spot:** the fake client cannot store the aggregated `InstanceType`, so
-  `Get(InstanceType)` returns NotFound and the "Inactive" unit test silently degrades into
-  the "type gone" path. The `phase==Inactive` branch is exercised **only** here, on a real
-  cluster. A buggy `Phase != Inactive` condition would recreate the Pod instead of stopping
-  the Instance — that is the regression CASE 2 exists to catch.
+1. **A fake accelerator NodeFeature** — NFD merges its labels onto `Node.Labels`, and the Worker
+   derives the accelerated `ResourceFlavor` → `InstanceType` → `ClusterQueue`. Minimal set (validated
+   against `ConstructNodeCapacityLabels` in `pkg/nodefeature/helper.go`):
 
-**Drain injection (CPU-only, no accelerator):** bump the `ram` capacity label in the
-Worker-authored `<node>-gpustack-worker` NodeFeature. The node then matches a *new* general
-profile and the *old* profile (the one the Instance's InstanceType is built from) drains.
-This is stable: `ConstructNodeCapacityLabels` prefers the node's existing capacity label over
-`Status.Capacity` (`pkg/nodefeature/helper.go`), and `NodeFeatureReconciler` watches Node-label
-changes only (not the NodeFeature), so the edit is not reconciled away. The value must differ
-and be an even Gi.
+   ```
+   acceleratable.feature.gpustack.ai/<manu>-<id>        = "true"   # <manu> a known manufacturer, e.g. nvidia
+   acceleratable.feature.gpustack.ai/<manu>-<id>.count  = "8"      # > 0; GATES derivation (and sets card count)
+   ```
 
-> A harmless `create service … spec.ports: Required value` error appears because the test
-> Instance declares no ports; it is unrelated to the drain path.
+   `.product`/`.memory`/`.cores` add realism but are not the gate. The NodeFeature must carry
+   `metadata.labels."nfd.node.kubernetes.io/node-name": <node>` so NFD merges it onto that node.
 
-## CASE 3 — managed-toggle is a *different trigger on a different code path*
+2. **A phantom-node `Devices` CR** carrying the per-card ledger the `InstanceTypeReconciler` reads.
+   It is named for a node the DeviceManager DaemonSet never runs on (so `NodeDevicesReconciler` leaves
+   it untouched) and carries the pool's reverse-lookup labels — the feature key +
+   `kubernetes.io/os|arch` + `gpustack.ai/managed=true`. The per-card occupancy lives in its
+   **`.status`** (`status.groups[].accelerators[].{mode,remaining}`), so it must be written to the
+   `/status` subresource.
 
-Excluding a node from management (`gpustack.ai/managed=false`) must drain its single-node
-ResourceFlavors with the **same** chain as CASE 2. What is non-obvious:
+   > **Patch the `v1alpha1` CRD, not the unversioned/`v1` resource.** `devices` (no version) resolves
+   > to `worker.gpustack.ai/v1` — the aggregated proxy — whose `/status` subresource write currently
+   > returns `ServiceUnavailable`. Use `kubectl patch devices.v1alpha1.worker.gpustack.ai <name>
+   > --subresource=status …` to hit the real CRD. (The aggregated-proxy status write is a separate
+   > tracked bug; the DeviceManager writes the ledger via the typed v1alpha1 client, so production is
+   > unaffected.)
 
-- A CASE 2 capacity reshape changes a *feature label*, so any feature-prefix predicate fires.
-  **A managed toggle changes only `gpustack.ai/managed`** — no feature label — so it drains
-  **only if** the `ResourceFlavorReconciler`/`CohortReconciler` Node-watch `UpdateFunc`
-  predicates include `systemname.ManagedLabelKey` in their `mapx.EqualWithStringPrefix(...)`
-  (`pkg/worker/controllers/worker/{resourceflavor,cohort}.go`). Missing it is the historical
-  bug: the flavor is never enqueued or drained, while the ClusterQueue silently recomputes to
-  a misleading `0/-1` (Active but negative-remaining) quota and the Instance keeps running.
-- **Restart masks it.** The `For`-watch start-up resync re-reconciles every ResourceFlavor, so
-  a freshly (re)started operator drains the orphan regardless of the predicate. Verify against
-  a **continuously running** operator — do not restart between the toggle and the assertion.
-- Toggle via the NodeFeature, not the node (NFD reverts a direct node label). The unit cases
-  `unmanaged node drains flavor` / `unmanaged node deletes cohort` only guard the index filter,
-  **not** the predicate — so this live check is the only guard for the enqueue path.
+Card tokens the ledgers use: `mode` `0`=free, `1`=exclusive, `2`=shared, `3`=sliced; `remaining` in
+credit units out of `D = 1,600,000` per whole card (`50%` sliced ⇒ `remaining = 50 × D/100`).
 
-## CASE 4 — accelerated chain injection recipe (validated)
+## CASE 2 — Instance admits on its queue, then drain stops it (not recreate)
 
-The Worker derives accelerated profiles from the `acceleratable.feature.gpustack.ai/*` labels
-that NFD merges onto the node from the DM's `<node>-gpustack-device-manager` NodeFeature. CASE 4
-simulates this by creating a NodeFeature carrying those labels and letting NFD merge it — no real
-`Devices` CR or device-plugin allocation, so it validates the controller/label algebra, not
-physical device handling.
+`pkg/worker/controllers/worker/instance.go` + `pkg/worker/webhooks/worker/instance.go` +
+`pkg/worker/kuberess/apps_kueue.go`, not covered by CASE 1. Three verified facts:
 
-**Minimal label set** (validated against `ConstructNodeCapacityLabels` in `pkg/nodefeature/helper.go`):
+1. **Admission (finding #5).** A general Instance's Workload also requests `memory`/`ephemeral-storage`
+   the CPU-only ClusterQueue does not cover (it covers only `cpu`, F3b). Kueue would refuse to assign a
+   flavor for an uncovered resource (`couldn't assign flavors … resource memory`) and never admit —
+   unless the deployed Configuration sets `quotaCheckStrategy: IgnoreUndeclared` (F3d), which makes each
+   queue check only its covered dimension and ignore the rest. The case creates a running Instance and
+   asserts its Workload reaches `Admitted=True`.
+2. **Drain removes the pool.** Toggling `gpustack.ai/managed=false` on the `<node>-gpustack-worker`
+   NodeFeature drops the node from the flavor index, so the pool's general `ResourceFlavor` is deleted
+   (F3a — node-index-driven, immediate, independent of any running Instance/Workload). The old "bump the
+   general `ram` capacity label" injection no longer works: a general pool's capacity is the Node's CPU
+   count, not a bumpable label. NFD owns `gpustack.ai/managed` (it is in the node's
+   `nfd.node.kubernetes.io/feature-labels`), so the NodeFeature edit propagates to the node label.
+3. **The running Instance is stopped, not recreated.** As the pool drains, the derived InstanceType
+   tears down (`HoldAndDrain` → Kueue evicts the Pod → CQ deleted → IT removed). `instance.go` evaluates
+   the gone/`Inactive` type on every reconcile — before (re)creating the Pod — and sets `spec.stop=true`
+   (log `stop instance as inactive instance type`), which deletes the Pod and marks the Instance
+   `Stopped`. An `InstanceType` watch enqueues the Instance so the stop is prompt even when no Pod event
+   fires. This closed a pre-existing gap (`1afc5b5` on main) where the stop check sat inside the
+   `pod == nil` branch with no InstanceType watch: an evicted Pod was recreated (the type still looked
+   `Active` at that instant) and the running Instance was left with a stuck Pending Pod, never stopped.
 
-```
-acceleratable.feature.gpustack.ai/<manu>-<id>        = "true"   # <manu> must be a known
-                                                                # acceleratable manufacturer (e.g. nvidia)
-acceleratable.feature.gpustack.ai/<manu>-<id>.count  = "1"      # > 0; this is what GATES derivation
-```
+Why a real cluster: the Instance's Pod carries the `kueue.x-k8s.io/queue-name` label, so it is
+admission-managed; the admission decision, the eviction, and the managed-toggle drain propagation cannot
+be observed with the fake client.
 
-`ExtractAcceleratableNodeKeys` keys off `<manu>-<id>=true` with a known manufacturer (the
-top-level `feature.gpustack.ai/acceleratable` flag is *not* the gate). `.count > 0` is required;
-`.cpu`/`.ram`/`.storage` fall back to the node's `Status.Capacity`, so the Worker derives
-`.z-flavor=<cpu>c-<ram>g-<stg>g-<acc>d` (and `.z-queue`/`.z-cohort`). The `-<acc>d` segment is what
-the accelerated chain names carry (e.g. `gpustack--generic-ln-a64-10c-24g-680g--nvidia-t4-1d`).
+## CASE 3 — managed-toggle scopes node onboarding (Story 5)
 
-The NodeFeature must carry `metadata.labels: nfd.node.kubernetes.io/node-name: <node>` so NFD
-merges it onto that node. `case-4.sh` injects exactly this set (with extra product/memory/cores
-for realism, which are not consumed by the derivation) and removes it to drain.
+Excluding a node (`gpustack.ai/managed=false`, toggled via the NodeFeature — NFD reverts a direct node
+label) must remove its pool contribution. **What changed post-refactor:** there is **no drain
+tombstone** — `NodeFlavorReconciler` *deletes* the flavor when no node contributes (F3a), and the
+derived `InstanceType`'s finalizer then drives the CQ through `HoldAndDrain` and deletes it (F5d). So
+the case asserts the flavor is **deleted** and the derived InstanceType **tears down** (CQ
+`HoldAndDrain` or gone), *not* a `schedule.gpustack.ai/drain=true` annotation.
 
-Drain step: remove the injected NodeFeature so the profile no longer matches any node. The
-ResourceFlavor is **not** deleted — it becomes a draining, zero-quota tombstone
-(`schedule.gpustack.ai/drain=true`), which is the **durable** drain-recycle signal CASE 4 asserts.
-The ClusterQueue's `HoldAndDrain` is only a transient step on its way to removal (it is reclaimed
-once no reservation remains), so it is not a reliable post-drain assertion; the flavor tombstone is
-the contract. The Cohort is reclaimed only once no node AND no ClusterQueue still reference it.
+Non-obvious: a managed toggle changes only `gpustack.ai/managed` — no feature label — so it converges
+**only if** `NodeFlavorReconciler`'s Node-watch predicate includes `systemname.ManagedLabelKey`.
+**A restart masks a missing predicate** (the `For`-watch start-up resync re-lists everything), so
+verify against a **continuously running** operator.
 
-## CASE 5 — Sliced accelerator injection recipe (validated)
+## CASE 4 — AdmissionCheck holds exclusive over-admit (Story 4)
 
-CASE 5 implements the Final Checkpoint of `specs/accelerator-resource-modes-refactor.md`:
-`partitions=8` → sliced InstanceType **Capacity=32** → a 1/8 request **admits** and **consumes 0.125
-credit**. On a GPU-less cluster the whole sliced chain is driven by `DeviceManager`, which never runs
-without hardware, so its two outputs are mocked:
+Uses the shared accelerated mock (count=8) plus a ledger where **all 8 cards are 50%-sliced — no clean
+whole card**. A request for 5 exclusive cards passes coarse `credits` (gate 1: `5×M ≤ 8×M`) but the
+node-devices **AdmissionCheck** (gate 3) must hold it (`Retry`, not `Rejected` — transient) because no
+card can host a whole exclusive card.
 
-1. **Accelerator feature labels** (DeviceManager detector → `<node>-gpustack-device-manager`
-   NodeFeature → NFD merges onto `Node.Labels`): `acceleratable.feature.gpustack.ai/<aKey>=true` plus
-   `.count` / `.product` / `.memory` / `.cores`. Reuse the CASE 4 NodeFeature recipe; set
-   `.count=4` to reproduce the spec canonical node-5 A10G×4 case (Capacity = 4×8 = 32). `.count` is the
-   gate for `ConstructNodeCapacityLabels` — without it no `.z-flavor`/`.z-queue` is derived.
-2. **Admin `.sliced.partitions=8`** on the `${node}-gpustack-worker` NodeFeature. This is the T16
-   assertion: `NodeFeatureReconciler` must **merge** (not wholesale-overwrite) `Spec.Labels`, so the
-   admin slicing opt-in survives reconcile and reaches `Node.Labels` — the source every downstream
-   consumer (T13, RF/CQ/InstanceType) reads.
-3. **The bare device-plugin token `nvidia.com/gpu.sliced`** patched onto `Node.status.capacity`
-   (`kubectl patch node <n> --subresource=status --type=merge -p '{"capacity":{"nvidia.com/gpu.sliced":"1"}}'`).
-   A sliced Pod requests `.sliced=C` (the card count); the default scheduler's NodeResourcesFit needs
-   this on the node to place the Pod, so without the mock the Pod stays Pending and Kueue never admits.
+Wiring that must hold: `installKueue` applies the `gpustack-node-devices` AdmissionCheck object right
+after the Kueue install; `NodeDevicesAdmissionCheckReconciler` sets its `Active=True`; and
+`InstanceTypeReconciler.ensureClusterQueue` references it in `spec.admissionChecksStrategy` **only when
+`acceleratable && derived && the AC is Active`**. The Instance's Pod → Kueue `Workload` gets a quota
+reservation, then the AC reads the phantom ledger (uncached, via `APIReader`) and writes
+`admissionChecks[gpustack-node-devices].state = Retry`; the Workload never reaches `Admitted`.
 
-**Deliberately NOT mocked — `nvidia.com/gpu.sliced.units`.** It is auto-patched by the worker
-control-plane `NodeCapacityReconciler` (T13) from `gpustack.ai/managed=true` + `.count` +
-`.sliced.partitions`, yielding `count × D` (D=12800 → `4×12800 = 51200`). Mocking it would mask the T13
-verification; leaving it unmocked is itself the assertion (CASE 5 check C).
+## CASE 5 — Pod webhook folds slice-by-memory-% into units (Story 3)
 
-**Borrow topology.** The sliced ClusterQueue's sliced flavor carries `nominalQuota=0` (it borrows); the
-exclusive ClusterQueue lends the card count (4 credits) on that same sliced flavor (T6). A 1/8 request
-is `0.125` credits, borrowed from the exclusive side through the cohort.
+Pure GPU-less check of the `pods` CREATE webhook (objectSelector on `kueue.x-k8s.io/queue-name`,
+`failurePolicy: Fail`; webhook set is `{Instance, Pod}`). A `.sliced` Pod requesting
+`.sliced.memory-percentage: 20` must be **mutated** to `.sliced.units = 20 × M/100 = 320000` with
+`.sliced.cores-percentage` defaulted to `100`; a `.sliced` Pod with **no** memory (neither percentage
+nor mib) must be **rejected** by the validating webhook. The memory-**percentage** fold is a pure
+`×16000` computation, so it needs no card VRAM and no real accelerator — only the installed webhook.
+The Pods are never expected to schedule (the node has no `nvidia.com/gpu.sliced`); the webhook fires
+at CREATE, so the mutated/validated request is observable on the persisted Pod.
 
-**Observability (verified against the kueue v0.17.1 source — a correction to an earlier assumption).**
-`enableClusterQueueResources` commented out in `pkg/worker/kuberess/apps_kueue.go` gates **only
-Prometheus metrics** (consumed at `pkg/controller/core/core.go:81` as `cfg.Metrics.EnableClusterQueueResources`
-→ `metrics.ReportClusterQueueResourceUsage`). It does **not** affect status. `ClusterQueue.status.flavorsUsage`
-is a stable v1beta2 field (`apis/kueue/v1beta2/clusterqueue_types.go`); `ResourceUsage.Total` includes
-cohort borrows and `Borrowed = used − Nominal` (`pkg/cache/scheduler/cache.go` `getUsage`), written by
-`clusterqueue_controller.go`. So CASE 5 asserts credit consumption directly on the sliced CQ:
-`status.flavorsUsage[flavor].resources[credits.gpustack.ai/nvidia].total == 0.125` **and**
-`borrowed == 0.125` — `borrowed > 0` is the direct proof of the Story 1 borrow topology (sliced CQ
-nominal is 0). Admit is asserted via `status.admittedWorkloads >= 1` (cluster-level, no Workload-name
-coupling). There is no need to parse `Workload.status.admission`.
+Ordering invariant (pinned by a comment in `webhooks/setup.go`): our mutating configuration name
+`gpustack-worker-mutation` must sort before `kueue-mutating-webhook-configuration` (`g` < `k`) so our
+fold runs before Kueue hashes the container resources.
 
-**Capacity=32, not 8.** `count=4 × partitions=8`. On a single-card cluster (`.count=1`) it would be 8;
-CASE 5 mocks `.count=4` to match the spec canonical case.
+## CASE 6 — Pooled three-view + watch freshness (Story 2/6)
 
-**Cleanup nuance.** The bare `nvidia.com/gpu.sliced` must be **manually** patch-removed (`null`) in the
-trap — T13 only ever manages `.sliced.units` keys. `.sliced.units` is auto-reclaimed by T13 once the
-admin label drops (leave a short retry window; teardown covers any straggler).
+Uses the shared accelerated mock. Walks the five-step pooling sequence and asserts the InstanceType
+three-view (`.status.accelerator/.acceleratorShared/.acceleratorSliced`) matches the oracle exactly:
+`8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256`. Also asserts **watch freshness** (a
+native `kubectl get instancetype -w` observes the `.status` move as the ledger allocs/frees — the whole
+point of promoting InstanceType to a real CRD; the old aggregated projection could not emit
+`Devices`-driven changes), **unit-spec write** through the InstanceType API reaching the CQ notes
+(`note.gpustack.ai/unitCPU`) while touching **no** `Node`/NodeFeature, and **zero Cohort** objects.
 
-**Webhook tolerance.** `NodeFeatureWebhook` (`pkg/worker/webhooks/worker/nodefeature.go`) best-effort
-queries the `Devices` CR to bound `partitions ≤ MaxPartitions`; a lookup miss degrades to a pure
-power-of-two check, so `partitions=8` (a power of two) is accepted **without** mocking a Devices CR.
+The three-view is a per-card bin-packing projection the reconciler computes over the mocked ledger;
+because it reads `Devices.status`, the mock must be written to the **v1alpha1** `/status` subresource
+(see the shared recipe warning). A three-view stuck at `0/0/0` almost always means the status patch
+did not land (wrong API version) or the ledger's reverse-lookup labels do not match the pool's.
 
 ## Skill-specific troubleshooting
 
-- **CASE 2 ram edit reverts / old profile never drains** — the patch must land on the
-  `<node>-gpustack-worker` NodeFeature (Worker-authored), not on the Node directly (NFD
-  overwrites Node labels). Confirm NFD merged it: `kubectl get node <node> -o json | grep
-  '<gKey>.ram'` should show the new value. If a new profile never appears, the chosen value
-  matched the old one (must differ and be even Gi).
-- **CASE 2 Instance not stopped after drain** — check the Pod was actually admitted (held
-  quota) before the drain; an unadmitted/finished Workload leaves nothing for `HoldAndDrain`
-  to evict, so `pod==nil` may never recur. Keep the container alive (`sleep`). If the
-  InstanceType went straight to *gone* rather than *Inactive*, the `phase==Inactive` branch
-  was skipped — re-run and confirm `Inactive` is observed while the ClusterQueue is
-  `HoldAndDrain`.
-- **CASE 2 symptom of a stale image** — an orphaned `ResourceFlavor` getting *deleted* instead
-  of marked `schedule.gpustack.ai/drain=true` (pre-drain-recycle behavior). Rebuild from HEAD.
+- **CASE 2 pool ResourceFlavor never drains** — the `gpustack.ai/managed=false` patch must land on the
+  `<node>-gpustack-worker` NodeFeature (Worker-authored), not the Node directly (NFD owns and overwrites
+  the label). Confirm NFD merged it to the node
+  (`kubectl get node <n> -o jsonpath='{.metadata.labels.gpustack\.ai/managed}'`).
+- **CASE 2 instance not stopped after drain** — the running Instance must reach `spec.stop=true` /
+  `Stopped` when its InstanceType drains. Confirm the InstanceType went `Inactive`/gone (drain
+  propagated) and that the operator image includes the drain-stop fix — a stale image predating it
+  leaves the evicted Pod recreated and stuck `Pending`. Ground truth:
+  `kubectl -n <ns> logs deploy/gpustack-operator-worker | grep 'stop instance as inactive'`.
+- **CASE 3 nothing tears down** — confirm the operator was not restarted between the toggle and the
+  assertion (a restart's resync converges regardless of the predicate and masks a bug).
+- **CASE 4 workload never gets a check state** — confirm the AC is `Active` and the accelerated CQ
+  references it (`kubectl get cq <name> -o jsonpath='{.spec.admissionChecksStrategy}'`); confirm the
+  phantom Devices carries the pool's feature-key + `kubernetes.io/os|arch` + `gpustack.ai/managed=true`.
+- **CASE 6 three-view stuck at 0/0/0** — the ledger status patch did not land: target
+  `devices.v1alpha1.worker.gpustack.ai --subresource=status` (the `v1` proxy returns
+  `ServiceUnavailable`), and verify the phantom Devices' reverse-lookup labels match the InstanceType's.
+- **Accelerated InstanceType never materializes** — `instance-type-derived-from-node` must be on
+  (default true); confirm the fake accelerator NodeFeature merged onto `Node.Labels`.

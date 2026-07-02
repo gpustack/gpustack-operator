@@ -1,36 +1,53 @@
 #!/usr/bin/env bash
 #
-# CASE 3 — Managed-toggle is an independent drain trigger   (MUTATING, self-recovering)
+# CASE 3 — Managed-toggle scopes node onboarding (Story 5)   (MUTATING, self-recovering)
 #
 #   case-3.sh <NS>
 #
-# Excluding a node from management (gpustack.ai/managed=false) must drain its
-# single-node ResourceFlavors with the SAME chain as CASE 2 (flavor
-# schedule.gpustack.ai/drain=true -> ClusterQueue HoldAndDrain) — but via a
-# DIFFERENT trigger on a different code path. A managed toggle changes no feature
-# label, so it drains only if the ResourceFlavor/Cohort Node-watch UpdateFunc
-# predicates include systemname.ManagedLabelKey. See references/drain-recycle.md.
+# Story 5: an admin scopes which nodes are onboarded. Excluding a node from
+# management (gpustack.ai/managed=false) must remove its contribution from the
+# pool. Post-refactor there is NO drain tombstone on the ResourceFlavor anymore
+# (specs/2026-06-29-instancetype-unified-pool-refactor.md F3a: "no node contributes
+# → the flavor is deleted"); teardown flows through the InstanceType finalizer
+# (F5d): the derived InstanceType's pool loses its ResourceFlavor → the InstanceType
+# is deleted → its finalizer drives the backing ClusterQueue through HoldAndDrain
+# and removes it.
 #
-# IMPORTANT: verify against a CONTINUOUSLY RUNNING operator — a restart's For-watch
-# resync drains the orphan regardless of the predicate and masks the bug. Toggle
-# via the NodeFeature, not the node (NFD reverts a direct node label).
+# So this case asserts the NEW observable (not the old schedule.gpustack.ai/drain
+# annotation): after the toggle the node's general ResourceFlavor is DELETED and the
+# derived InstanceType tears down (backing CQ HoldAndDrain or gone).
 #
-# Self-recovering: restores the managed label on exit.
+# IMPORTANT: toggle via the NodeFeature, not the node directly (NFD reverts a direct
+# node label). Verify against a CONTINUOUSLY RUNNING operator.
 #
-# NOTE: toggling a node hosting a running Instance Stops that Instance. On a shared
-# cluster pick a node whose Instances you can disrupt (or one with none).
+# Self-recovering: restores gpustack.ai/managed on exit and waits for the chain to
+# rebuild so a following case still finds an Active InstanceType.
 set -uo pipefail
 
 NS="${1:?usage: case-3.sh <NS>}"
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
+WORKER_NF="${NODE}-gpustack-worker"
 before=$(kubectl get node "$NODE" -o jsonpath='{.metadata.labels.gpustack\.ai/managed}')
 echo "node ${NODE}, current gpustack.ai/managed=${before:-<unset>}"
 
+# The general pool's ResourceFlavor + InstanceType (the CQ/IT name is the flavor name
+# without the trailing -${count}c). Captured before the toggle so we can watch them go.
+RF=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -Eo 'gpustack-[a-z0-9-]+-[0-9]+c$' | head -1)
+IT="${RF%-*c}"; IT="${IT%-[0-9]*}"   # strip -${count}c → pool name (best-effort; recomputed below)
+IT=$(kubectl get instancetypes.worker.gpustack.ai -o jsonpath='{.items[?(@.status.phase=="Active")].metadata.name}' 2>/dev/null | tr ' ' '\n' | grep 'gpustack-' | head -1)
+[ -n "$RF" ] && [ -n "$IT" ] || { echo "no general RF/InstanceType found — run case-1 first to materialize the chain"; exit 1; }
+echo "general ResourceFlavor: ${RF#*/}   derived InstanceType: ${IT}"
+
 restore() {
   echo
-  echo "[case-3] restoring gpustack.ai/managed=${before:-true}"
-  kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
+  echo "[case-3] restoring gpustack.ai/managed=${before:-true} and waiting for the chain to rebuild"
+  kubectl -n "$NS" patch nodefeature "$WORKER_NF" --type=merge \
     -p "{\"spec\":{\"labels\":{\"gpustack.ai/managed\":\"${before:-true}\"}}}" 2>/dev/null || true
+  for _ in $(seq 1 40); do
+    p=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)
+    [ "$p" = "Active" ] && break
+    sleep 3
+  done
 }
 trap restore EXIT
 
@@ -40,32 +57,32 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 
 # Toggle out of management via the NodeFeature (NFD would revert a direct node label).
 echo "[case-3] toggling gpustack.ai/managed=false"
-kubectl -n "$NS" patch nodefeature "${NODE}-gpustack-worker" --type=merge \
+kubectl -n "$NS" patch nodefeature "$WORKER_NF" --type=merge \
   -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
 
-# Poll the drain chain: flavor annotated draining, ClusterQueue HoldAndDrain.
-drained=""
+# --- Assertion A: the node's general ResourceFlavor is DELETED (no tombstone). ---
+gone=""
 for _ in $(seq 1 30); do
-  d=$(kubectl get resourceflavors.kueue.x-k8s.io \
-        -o jsonpath='{range .items[*]}{.metadata.annotations.schedule\.gpustack\.ai/drain}{"\n"}{end}' 2>/dev/null | grep -m1 true)
-  [ -n "$d" ] && { drained=1; break; }
+  kubectl get "$RF" >/dev/null 2>&1 || { gone=1; break; }
   sleep 3
 done
-[ -n "$drained" ] && record PASS "flavor draining on toggle" "schedule.gpustack.ai/drain=true" \
-  || record FAIL "flavor draining on toggle" "no flavor drained — Node-watch predicate likely missing systemname.ManagedLabelKey"
+[ -n "$gone" ] && record PASS "flavor deleted on de-manage" "${RF#*/} gone (F3a: no drain tombstone)" \
+  || record FAIL "flavor deleted on de-manage" "${RF#*/} still present — NodeFlavorReconciler did not drop the unmanaged node"
 
-held=""
-for _ in $(seq 1 20); do
-  h=$(kubectl get clusterqueues.kueue.x-k8s.io \
-        -o jsonpath='{range .items[*]}{.spec.stopPolicy}{"\n"}{end}' 2>/dev/null | grep -m1 HoldAndDrain)
-  [ -n "$h" ] && { held=1; break; }
+# --- Assertion B: the derived InstanceType tears down (CQ HoldAndDrain, or IT/CQ gone). ---
+torn=""
+for _ in $(seq 1 40); do
+  sp=$(kubectl get clusterqueue "$IT" -o jsonpath='{.spec.stopPolicy}' 2>/dev/null)
+  exists=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o name 2>/dev/null)
+  cqexists=$(kubectl get clusterqueue "$IT" -o name 2>/dev/null)
+  if [ "$sp" = "HoldAndDrain" ] || [ -z "$exists" ] || [ -z "$cqexists" ]; then torn=1; break; fi
   sleep 3
 done
-[ -n "$held" ] && record PASS "ClusterQueue HoldAndDrain" "stopPolicy=HoldAndDrain" \
-  || record FAIL "ClusterQueue HoldAndDrain" "CQ never entered HoldAndDrain (may show a misleading 0/-1 quota instead)"
+[ -n "$torn" ] && record PASS "derived InstanceType tears down" "backing CQ HoldAndDrain or removed (F5d finalizer)" \
+  || record FAIL "derived InstanceType tears down" "InstanceType/CQ still Active — the derived pool did not tear down after its flavor vanished"
 
 echo
-echo "== CASE 3 — Managed-toggle is an independent drain trigger =="
+echo "== CASE 3 — Managed-toggle scopes node onboarding (Story 5) =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"
@@ -73,8 +90,9 @@ echo "== CASE 3 — Managed-toggle is an independent drain trigger =="
 
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s). Confirm the operator was NOT restarted between toggle and assertion"
-  echo "(a restart's resync masks a missing predicate). See references/drain-recycle.md."
+  echo "FAILED ${FAILS} check(s). Confirm the operator was NOT restarted between toggle and assertion."
+  echo "Post-refactor teardown is delete-based (F3a) + InstanceType-finalizer HoldAndDrain (F5d),"
+  echo "not the old schedule.gpustack.ai/drain tombstone. See references/drain-recycle.md."
   exit 1
 fi
 echo "CASE 3 PASS"
