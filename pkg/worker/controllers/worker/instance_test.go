@@ -132,48 +132,48 @@ func TestGetResourceRequirements(t *testing.T) {
 			wantRequests:    core.ResourceList{accNVIDIA: qty("2")},
 		},
 		{
-			// Sliced 1/8: U=1, partitions=8 → .sliced.units = 1×D/8 = 1600 (per-card);
+			// Sliced 1/8: U=1, partitions=8 → .sliced.units = 1×D/8 = 200000 (per-card);
 			// the card count C=1 rides on the bare .sliced key.
 			name: "sliced accelerator — one card, one unit",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), units: 1,
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
-				slicedUnitsNVIDIA: qty("1600"),
+				slicedUnitsNVIDIA: qty("200000"),
 				slicedCardNVIDIA:  qty("1"),
 			},
 			wantRequests: core.ResourceList{
-				slicedUnitsNVIDIA: qty("1600"),
+				slicedUnitsNVIDIA: qty("200000"),
 				slicedCardNVIDIA:  qty("1"),
 			},
 		},
 		{
-			// U=2 on 8s → .sliced.units = 2×D/8 = 3200 (half a card per card).
+			// U=2 on 8s → .sliced.units = 2×D/8 = 400000 (half a card per card).
 			name: "sliced accelerator — one card, two units",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), units: 2,
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
-				slicedUnitsNVIDIA: qty("3200"),
+				slicedUnitsNVIDIA: qty("400000"),
 				slicedCardNVIDIA:  qty("1"),
 			},
 			wantRequests: core.ResourceList{
-				slicedUnitsNVIDIA: qty("3200"),
+				slicedUnitsNVIDIA: qty("400000"),
 				slicedCardNVIDIA:  qty("1"),
 			},
 		},
 		{
-			// 2 cards × 1/8: .sliced.units stays per-card (1600), C=2 rides on .sliced.
+			// 2 cards × 1/8: .sliced.units stays per-card (200000), C=2 rides on .sliced.
 			name: "sliced accelerator — two cards, one unit (units stay per-card)",
 			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"), units: 1,
 			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliced: 8,
 			withAccelerator: true,
 			wantLimits: core.ResourceList{
-				slicedUnitsNVIDIA: qty("1600"),
+				slicedUnitsNVIDIA: qty("200000"),
 				slicedCardNVIDIA:  qty("2"),
 			},
 			wantRequests: core.ResourceList{
-				slicedUnitsNVIDIA: qty("1600"),
+				slicedUnitsNVIDIA: qty("200000"),
 				slicedCardNVIDIA:  qty("2"),
 			},
 		},

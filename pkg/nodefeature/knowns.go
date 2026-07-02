@@ -47,20 +47,37 @@ const (
 	// SlicedUnitsResourceNameSuffix is the fine-grained sliced counting key,
 	// reported per node via Patch Node and used for Kueue credits accounting.
 	SlicedUnitsResourceNameSuffix = ".sliced.units"
+	// SlicedCoresPercentageResourceNameSuffix is the per-card SM (compute) budget
+	// key for sliced allocations, reported per node as count*SlicedResourceMaxSize*100
+	// (slices may oversubscribe compute, so each of the MaxPartitions slots is worth
+	// 100%). It is a gate-2 node-level counting resource consumed by the default
+	// scheduler/kubelet and the device-plugin (CUDA_DEVICE_SM_LIMIT); it is never
+	// folded into Kueue credits.
+	SlicedCoresPercentageResourceNameSuffix = ".sliced.cores-percentage"
+	// SlicedMemoryPercentageResourceNameSuffix is the per-card VRAM-percentage budget
+	// key for sliced allocations, reported per node as count*100. Gate-2 node-level
+	// only (the webhook folds it into .sliced.units); never folded into Kueue credits.
+	SlicedMemoryPercentageResourceNameSuffix = ".sliced.memory-percentage"
+	// SlicedMemoryMibResourceNameSuffix is the per-card absolute VRAM budget key (MiB)
+	// for sliced allocations, reported per node as count*cardVRAMMib. Gate-2
+	// node-level only (drives CUDA_DEVICE_MEMORY_LIMIT_IN_BYTES; the webhook folds it
+	// into .sliced.units via floor(mib/cardVRAM*M)); never folded into Kueue credits.
+	SlicedMemoryMibResourceNameSuffix = ".sliced.memory-mib"
 )
 
 const (
-	// ResourceMaxUnits is the global denominator D = 2^9 * 5^2 = 12800 and the
+	// ResourceMaxUnits is the global denominator D = 2^9 * 5^5 = 1600000 and the
 	// single per-card unit basis shared by every allocation mode: one whole card is
 	// worth D normalized units, Shared yields D/10 per ownership, and a card sliced
-	// into N partitions yields D/N units per slice. D is chosen so that D/N is an
-	// exact integer for every per-mode max size below (SharedResourceMaxSize,
-	// SlicedResourceMaxSize). It is also the integer credit base B = CreditsPerCard
-	// (one whole card = D credits), so the .sliced.units→credits Kueue factor is
-	// B/D = 1 and every per-mode credit value stays integer-valued. It also seeds
-	// the device-plugin per-card unit grid and the Devices CR AcceleratorAllocation
-	// ruler.
-	ResourceMaxUnits = 12800
+	// into N partitions yields D/N units per slice. D keeps the 2^9 factor so every
+	// power-of-two partition size up to SlicedResourceMaxSize=512 divides it exactly,
+	// and the 5^5 factor (vs the former 12800 = 2^9 * 5^2) makes the memory-1% step
+	// D/100 = 16000 an integer for the per-card VRAM-percentage slice keys. It is also
+	// the integer credit base B = CreditsPerCard (one whole card = D credits), so the
+	// .sliced.units→credits Kueue factor is B/D = 1 and every per-mode credit value
+	// stays integer-valued. It also seeds the device-plugin per-card unit grid and the
+	// Devices CR AcceleratorAllocation ruler.
+	ResourceMaxUnits = 1_600_000
 	// SharedResourceMaxSize is the maximum number of owners a card can be shared among.
 	SharedResourceMaxSize = 10
 	// SlicedResourceMaxSize is the maximum number of partitions a card can be
@@ -225,6 +242,28 @@ func GetAcceleratableSlicedUnitsResourceName(manufacturer string) core.ResourceN
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedUnitsResourceNameSuffix
 }
 
+// GetAcceleratableSlicedCoresPercentageResourceName returns the per-card SM budget
+// key for the given manufacturer (e.g. "nvidia.com/gpu.sliced.cores-percentage").
+// It is a gate-2 node-level resource, distinct from the credits input returned by
+// GetAcceleratableSlicedUnitsResourceName.
+func GetAcceleratableSlicedCoresPercentageResourceName(manufacturer string) core.ResourceName {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedCoresPercentageResourceNameSuffix
+}
+
+// GetAcceleratableSlicedMemoryPercentageResourceName returns the per-card
+// VRAM-percentage budget key for the given manufacturer
+// (e.g. "nvidia.com/gpu.sliced.memory-percentage"). Gate-2 node-level resource.
+func GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer string) core.ResourceName {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMemoryPercentageResourceNameSuffix
+}
+
+// GetAcceleratableSlicedMemoryMibResourceName returns the per-card absolute VRAM
+// budget key in MiB for the given manufacturer
+// (e.g. "nvidia.com/gpu.sliced.memory-mib"). Gate-2 node-level resource.
+func GetAcceleratableSlicedMemoryMibResourceName(manufacturer string) core.ResourceName {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMemoryMibResourceNameSuffix
+}
+
 // IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
 func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	switch {
@@ -302,7 +341,7 @@ const (
 	// CreditsPerCard is the integer credit base B: one whole accelerator card is
 	// worth B credits. It equals the global denominator D (ResourceMaxUnits), so
 	// the finest sliced unit (1/SlicedResourceMaxSize of a card) maps to the
-	// integer B/SlicedResourceMaxSize (=25) and the ".sliced.units"→credits Kueue
+	// integer B/SlicedResourceMaxSize (=3125) and the ".sliced.units"→credits Kueue
 	// factor is exactly B/D=1. Scoring credits as B×card-fraction keeps every
 	// per-mode value an integer, so Kueue's ResourceValue int64 quantization
 	// (q.Value(), which ceils non-CPU resources) never rounds a fractional credit

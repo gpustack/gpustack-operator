@@ -14,17 +14,17 @@ import (
 
 // TestPartitionedUnitGranularity guards the invariant that D divides evenly by the
 // maximum partition count, so a single sliced partition maps to a whole number of
-// units (12800/512 = 25). The sliced path no longer materializes these units in the
-// device plugin (counting moved to Patch Node), but the invariant must still hold if
-// the per-partition units math is reintroduced for real isolation later.
+// units (1600000/512 = 3125). The sliced path no longer materializes these units in
+// the device plugin (counting moved to Patch Node), but the invariant must still hold
+// if the per-partition units math is reintroduced for real isolation later.
 func TestPartitionedUnitGranularity(t *testing.T) {
 	assert.Zerof(t, nodefeature.ResourceMaxUnits%nodefeature.SlicedResourceMaxSize,
 		"D=%d must divide evenly by max partitions %d", nodefeature.ResourceMaxUnits, nodefeature.SlicedResourceMaxSize)
-	assert.Equal(t, 25, nodefeature.ResourceMaxUnits/nodefeature.SlicedResourceMaxSize, "units per smallest partition")
+	assert.Equal(t, 3125, nodefeature.ResourceMaxUnits/nodefeature.SlicedResourceMaxSize, "units per smallest partition")
 }
 
 func TestPadSlicedUnits(t *testing.T) {
-	const d = nodefeature.ResourceMaxUnits // 12800
+	const d = nodefeature.ResourceMaxUnits // 1600000
 
 	cases := []struct {
 		name          string
@@ -32,15 +32,15 @@ func TestPadSlicedUnits(t *testing.T) {
 		maxPartitions int64
 		want          int64
 	}{
-		{name: "rounds up to the next coarser slice", units: 2000, maxPartitions: 8, want: 3200}, // 1/4 card
-		{name: "exact slice boundary is unchanged", units: 1600, maxPartitions: 8, want: 1600},   // 1/8 card
-		{name: "finer than hardware rounds up to finest slice", units: 100, maxPartitions: 8, want: 1600},
-		{name: "whole card or larger caps at D", units: 20000, maxPartitions: 8, want: d},
+		{name: "rounds up to the next coarser slice", units: 250000, maxPartitions: 8, want: 400000}, // 1/4 card
+		{name: "exact slice boundary is unchanged", units: 200000, maxPartitions: 8, want: 200000},   // 1/8 card
+		{name: "finer than hardware rounds up to finest slice", units: 12500, maxPartitions: 8, want: 200000},
+		{name: "whole card or larger caps at D", units: 2500000, maxPartitions: 8, want: d},
 		{name: "exactly a whole card caps at D", units: d, maxPartitions: 8, want: d},
-		{name: "finest 1/512 slice", units: 30, maxPartitions: 512, want: 50}, // D/256
-		{name: "exact finest slice is unchanged", units: 25, maxPartitions: 512, want: 25},
-		{name: "no slicing capacity yields a whole card", units: 100, maxPartitions: 1, want: d},
-		{name: "non-positive maxPartitions yields a whole card", units: 100, maxPartitions: 0, want: d},
+		{name: "finest 1/512 slice", units: 3750, maxPartitions: 512, want: 6250}, // D/256
+		{name: "exact finest slice is unchanged", units: 3125, maxPartitions: 512, want: 3125},
+		{name: "no slicing capacity yields a whole card", units: 12500, maxPartitions: 1, want: d},
+		{name: "non-positive maxPartitions yields a whole card", units: 12500, maxPartitions: 0, want: d},
 	}
 
 	for _, c := range cases {
@@ -130,9 +130,9 @@ func TestSliceRatio(t *testing.T) {
 		wantR   float64
 		wantErr bool
 	}{
-		{name: "1/8 card", ctr: ctrWith(1600), wantR: 0.125}, // 1600/12800
-		{name: "1/4 card", ctr: ctrWith(3200), wantR: 0.25},  // 3200/12800
-		{name: "finest 1/512 slice", ctr: ctrWith(25), wantR: 0.001953125},
+		{name: "1/8 card", ctr: ctrWith(200000), wantR: 0.125}, // 200000/1600000
+		{name: "1/4 card", ctr: ctrWith(400000), wantR: 0.25},  // 400000/1600000
+		{name: "finest 1/512 slice", ctr: ctrWith(3125), wantR: 0.001953125},
 		{name: "missing request errors", ctr: &core.Container{Name: "main"}, wantErr: true},
 		{name: "zero request errors", ctr: ctrWith(0), wantErr: true},
 	}
