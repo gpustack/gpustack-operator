@@ -276,7 +276,10 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 			klow = strings.ToLower(stringx.Singularize(wh.Rules[0].Resources[0]))
 			wh.Name = fmt.Sprintf("%s.%s.%s.%s", pre, grp, ver, klow)
 			if namePrefix != "" {
-				wh.Name = namePrefix + "." + wh.Name
+				// Insert the prefix after the leading "validate"/"mutate" segment, not before
+				// it: the serving path is derived from this name, and the aggregated apiserver
+				// only authorizes paths that start with "/validate-"/"/mutate-".
+				wh.Name = fmt.Sprintf("%s.%s.%s.%s.%s", pre, namePrefix, grp, ver, klow)
 			}
 			td.Validating = wh
 		}
@@ -489,7 +492,10 @@ func reflectType(t *types.Type) *WebhookTypeDefinition {
 			klow = strings.ToLower(stringx.Singularize(wh.Rules[0].Resources[0]))
 			wh.Name = fmt.Sprintf("%s.%s.%s.%s", pre, grp, ver, klow)
 			if namePrefix != "" {
-				wh.Name = namePrefix + "." + wh.Name
+				// Insert the prefix after the leading "validate"/"mutate" segment, not before
+				// it: the serving path is derived from this name, and the aggregated apiserver
+				// only authorizes paths that start with "/validate-"/"/mutate-".
+				wh.Name = fmt.Sprintf("%s.%s.%s.%s.%s", pre, namePrefix, grp, ver, klow)
 			}
 			td.Mutating = wh
 		}
