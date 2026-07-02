@@ -1,6 +1,6 @@
 # Spec: Instance Type Unified-Pool Refactor — Queue-Managed Unit Specs, Four-Gate Admission, Devices-CR Ledger
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary

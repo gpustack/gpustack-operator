@@ -1,8 +1,8 @@
 # Development
 
 Build, lint, test, code generation, and dependency management for GPUStack Operator. For the
-runtime architecture see [architecture.md](architecture.md); for the `GPUSTACK_*` knobs see
-[environment-variables.md](environment-variables.md).
+runtime architecture see [architecture.md](architecture.md); for settings and the `GPUSTACK_*`
+knobs see [settings.md](settings.md).
 
 ## Commands
 
