@@ -95,6 +95,9 @@ git log --no-merges --pretty='%h %s (%an)' "$LAST..$SHA"
 
 Compose `$RPT/notes.md`:
 
+- **Do not start the body with a title/heading that repeats the tag** (e.g. `## vX.Y.Z`) — GitHub already
+  renders the release name as the page title, so a leading title shows up as a duplicate. Start straight
+  with an optional one-line intro or the first section.
 - Sections **🚀 Features / 🐛 Fixes / ♻️ Refactor / 📚 Docs / Other**, concise bullets, imperative voice.
 - Keep the **highlights**; fold or drop noisy `chore`/`ci`/`build`/`test`/`style` unless notable.
 - Link PRs/issues: parse `(#NNN)` from subjects; for squash/merge commits without one, recover via
