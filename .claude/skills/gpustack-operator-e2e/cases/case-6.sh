@@ -163,6 +163,14 @@ print(l.get('kubernetes.io/os',''), l.get('kubernetes.io/arch',''))
 ")"
 [ -n "$OS" ] && [ -n "$ARCH" ] || { echo "[case-6] InstanceType is missing os/arch labels"; exit 1; }
 
+# The accelerated InstanceType also materializes spec.os/spec.arch from the backing ClusterQueue's
+# kubernetes.io/os|arch labels — os/arch live only as schedule labels, never in the CQ notes, so
+# they must be read from the labels, not blanked. They must match the schedule labels above.
+read -r SPEC_OS SPEC_ARCH <<<"$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.spec.os}{" "}{.spec.arch}')"
+[ "$SPEC_OS" = "$OS" ] && [ "$SPEC_ARCH" = "$ARCH" ] \
+  && record PASS "InstanceType materializes spec.os/arch" "spec os=${SPEC_OS} arch=${SPEC_ARCH} (from CQ labels)" \
+  || record FAIL "InstanceType materializes spec.os/arch" "spec os='${SPEC_OS:-}' arch='${SPEC_ARCH:-}' vs labels ${OS}/${ARCH} — must read from the CQ kubernetes.io/os|arch labels, not the notes"
+
 # 3. Create the phantom-node Devices CR carrying the mocked per-card ledger.
 echo "[case-6] creating mocked Devices ${MOCK_DEV} (os=${OS} arch=${ARCH})"
 cat <<EOF | kubectl apply -f -
