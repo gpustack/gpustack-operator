@@ -28,8 +28,11 @@ release once CI is green. Nothing gets the GitHub **Latest** badge until you pro
 
 - **Release only off the `origin/main` line.** Tag a commit that is an ancestor of `origin/main`; default
   to `origin/main` HEAD. Do not switch branches to do this — tag by SHA.
-- **Tag shape must match `v*.*.*`** — final `vX.Y.Z`, pre-release `vX.Y.ZrcN` (any tag containing `rc` stays
-  a pre-release and must not be promoted). The build's version derivation requires this shape.
+- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less
+  form like `v0.6.1rc1` is rejected (this is the Phase 1 regex). Any tag containing `rc` stays a
+  pre-release and must not be promoted. The `-rcN` **hyphen is required**: `ci-chart.yml` sets the Helm
+  chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less
+  pre-release like `0.6.1rc1`. The build's version derivation requires this shape too.
 - **Every mutating step is confirmed** — creating/pushing the tag, `gh release edit`, and any tag/release
   deletion prompt for approval. Read-only inspection (git log/status, `gh run list/watch`, `gh release
   view`) runs without prompting.
@@ -69,7 +72,8 @@ locally). If they differ and the user is on `main`, offer `git pull --ff-only`; 
 
 ### Phase 1 — Version + commit (confirm)
 
-- Validate `VER` against `^v[0-9]+\.[0-9]+\.[0-9]+(rc[0-9]+)?$`; reject if the tag already exists
+- Validate `VER` against `^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$` (pre-releases need the SemVer2 hyphen,
+  e.g. `v0.6.1-rc1`); reject if the tag already exists
   (`git tag -l "$VER"` must be empty); sanity-check it is greater than the previous tag.
 - Default target = `origin/main` HEAD (`SHA=$(git rev-parse origin/main)`).
 - If the user wants a different commit, list candidates and let them pick (`AskUserQuestion`):
