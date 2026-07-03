@@ -30,6 +30,11 @@ func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
 // so the result corresponds to a real, achievable single allocation rather than a
 // per-dimension maximum across tiers.
 //
+// The first tier seeds the bundle; a later tier replaces it only when it wins on the
+// primary dimension. Seeding guarantees a real bundle is picked even when the primary
+// dimension is zero (e.g. a fully-sliced accelerator whose whole-card OnceMaxRequest is
+// zero but AcceleratorSliced is not).
+//
 // Remaining is the per-dimension sum across all tiers, representing the total requestable
 // resources of the AggregatedInstanceType. It is an aggregate and may not be achievable
 // in a single allocation.
@@ -39,11 +44,15 @@ func (in *AggregatedInstanceType) Recompute() {
 	for i := range in.Status.Tiers {
 		tier := &in.Status.Tiers[i]
 
-		if in.Spec.Acceleratable {
-			if newOnceMaxRequest.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0 {
-				newOnceMaxRequest = tier.OnceMaxRequest
+		wins := i == 0
+		if !wins {
+			if in.Spec.Acceleratable {
+				wins = newOnceMaxRequest.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0
+			} else {
+				wins = newOnceMaxRequest.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0
 			}
-		} else if newOnceMaxRequest.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0 {
+		}
+		if wins {
 			newOnceMaxRequest = tier.OnceMaxRequest
 		}
 
@@ -65,6 +74,11 @@ func (in *AggregatedInstanceType) Recompute() {
 // acceleratable branch effectively picks the first candidate; the CPU branch is the
 // one that does real work for CPU-only items where the per-candidate CPU may vary.
 //
+// The first candidate seeds the bundle; a later candidate replaces it only when it wins
+// on the primary dimension. Seeding guarantees a real bundle is picked even when the
+// primary dimension is zero (e.g. a fully-sliced accelerator whose whole-card
+// OnceMaxRequest is zero but AcceleratorSliced is not).
+//
 // Remaining is the per-dimension sum across all candidates, representing the total
 // requestable resources of the tier. It is an aggregate and may not be achievable in
 // a single allocation.
@@ -74,11 +88,13 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 	for i := range in.Candidates {
 		candidate := &in.Candidates[i]
 
-		var wins bool
-		if acceleratable {
-			wins = newOnceMaxRequest.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0
-		} else {
-			wins = newOnceMaxRequest.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0
+		wins := i == 0
+		if !wins {
+			if acceleratable {
+				wins = newOnceMaxRequest.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0
+			} else {
+				wins = newOnceMaxRequest.CPU.Cmp(candidate.CPU.OnceMaxRequest) < 0
+			}
 		}
 		if wins {
 			newOnceMaxRequest = AggregatedInstanceTypeOverviewResource{

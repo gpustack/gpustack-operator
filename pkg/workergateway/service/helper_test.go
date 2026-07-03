@@ -640,6 +640,32 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 			"AcceleratorSliced must come from the high-CPU tier (200Gi), not the per-dim max (4Ti)")
 	})
 
+	t.Run("acceleratable: fully-sliced tier with zero Accelerator still yields its bundle", func(t *testing.T) {
+		// A sliceable accelerator whose whole card is fully sliced has Accelerator=0 but a
+		// non-zero AcceleratorSliced. The seeded first tier must still be picked so the
+		// AcceleratorSliced is not dropped to zero.
+		item := AggregatedInstanceType{
+			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
+			Status: AggregatedInstanceTypeStatus{
+				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
+					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+						Accelerator:       resource.MustParse("0"),
+						AcceleratorShared: resource.MustParse("0"),
+						AcceleratorSliced: resource.MustParse("50"),
+						CPU:               resource.MustParse("0"),
+					}},
+				},
+			},
+		}
+
+		item.Recompute()
+
+		o := item.Status.OnceMaxRequest
+		assert.True(t, o.Accelerator.IsZero())
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("50")),
+			"AcceleratorSliced must survive even though the primary dimension is zero")
+	})
+
 	t.Run("empty tiers leaves overview zeroed", func(t *testing.T) {
 		item := AggregatedInstanceType{
 			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
@@ -719,6 +745,30 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 		assert.True(t, o.CPU.Equal(resource.MustParse("8")), "ties keep first-seen candidate's CPU")
 		assert.True(t, o.AcceleratorShared.Equal(resource.MustParse("32Gi")), "ties keep first-seen candidate's AcceleratorShared")
 		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("500Gi")), "ties keep first-seen candidate's storage")
+	})
+
+	t.Run("acceleratable: single fully-sliced candidate with zero Accelerator keeps its bundle", func(t *testing.T) {
+		// The reported case: one A10g node whose single card is fully sliced. The whole-card
+		// Accelerator OnceMaxRequest is zero, but 50% is sliced out. The candidate must still
+		// seed the bundle so AcceleratorSliced=50 is not dropped to zero.
+		tier := AggregatedInstanceTypeOnceMaxRequestTier{
+			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
+				{
+					Cluster: "1", Name: "gpustack-nvidia-a10g-linux-amd64",
+					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
+					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
+					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
+					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("50")},
+				},
+			},
+		}
+
+		tier.Recompute(true)
+
+		o := tier.OnceMaxRequest
+		assert.True(t, o.Accelerator.IsZero())
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("50")),
+			"AcceleratorSliced must survive even though the primary dimension is zero")
 	})
 }
 
