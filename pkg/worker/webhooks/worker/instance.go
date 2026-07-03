@@ -89,71 +89,7 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 
 	var errs field.ErrorList
 	if instRess := inst.Spec.Resources; instType != nil && instRess != nil {
-		// Validate accelerator request first since it may determine the validation of other resource requests.
-		if instType.Spec.Acceleratable {
-			if instRess.Accelerator != nil {
-				if instRess.Accelerator.Sign() < 0 {
-					errs = append(errs, field.Invalid(
-						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-						"accelerator request cannot be negative"))
-				} else if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
-					errs = append(errs, field.Invalid(
-						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
-				}
-			}
-			// On a sliceable InstanceType the slice is requested as memory/compute
-			// percentages in [0,100] (0 disables slicing). The compute budget must
-			// not be smaller than the memory budget.
-			if instType.Spec.Sliceable {
-				memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
-				coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
-				memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
-				coresPath := field.NewPath("spec.resources.acceleratorSlicedCoresPercentage")
-				if memPct < 0 || memPct > 100 {
-					errs = append(errs, field.Invalid(memPath, instRess.AcceleratorSlicedMemoryPercentage,
-						"must be between 0 and 100"))
-				}
-				if coresPct < 0 || coresPct > 100 {
-					errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
-						"must be between 0 and 100"))
-				}
-				if coresPct > 0 && coresPct < memPct {
-					errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
-						"must not be less than the memory percentage"))
-				}
-			}
-		} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-				"accelerator request must not specified for non-acceleratable instance type"))
-		}
-		if instRess.CPU.Sign() < 0 {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
-				"CPU request cannot be negative"))
-		} else if !instType.Spec.Acceleratable &&
-			instRess.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
-			// Only a non-accelerated type has a CPU capacity view; an accelerated type's
-			// Status.CPU is zero (its CPU derives from unitCPU × count, bounded elsewhere).
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
-				fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)))
-		}
-		// A negative RAM or local-storage request is rejected outright; a positive one
-		// must stay within the InstanceType's per-unit RAM entitlement and its local
-		// storage (validated against UnitResources / LocalStorage below).
-		if instRess.RAM.Sign() < 0 {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.ram"), instRess.RAM.String(),
-				"RAM request cannot be negative"))
-		}
-		if instRess.LocalStorage.Sign() < 0 {
-			errs = append(errs, field.Invalid(
-				field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
-				"local storage request cannot be negative"))
-		}
-		errs = append(errs, capResourcesToInstanceType(instType, instRess)...)
+		errs = append(errs, validateResourceRequests(instType, instRess)...)
 	}
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
@@ -283,10 +219,12 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 					field.NewPath("spec.type"), inst.Spec.Type))
 			}
 		}
-		// Validate the resources that will take effect when starting against the
-		// InstanceType's per-unit RAM entitlement and its local storage.
+		// Re-validate the resources that will take effect on start with the SAME checks
+		// ValidateCreate applies (sign, accelerator/CPU caps, slice-percentage ranges, and
+		// per-unit RAM / local storage), not just the upper caps — a stopped Instance may have
+		// had its resources edited while stopped, when the immutability guard above is skipped.
 		if inst.Spec.Resources != nil {
-			errs = append(errs, capResourcesToInstanceType(instType, inst.Spec.Resources)...)
+			errs = append(errs, validateResourceRequests(instType, inst.Spec.Resources)...)
 		}
 	case stopping:
 		// Validate the instance is not starting when trying to stop it,
@@ -429,6 +367,83 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	}
 
 	return nil
+}
+
+// validateResourceRequests checks an Instance's resource requests against its InstanceType's
+// entitlements: sign, the accelerator/CPU caps, the sliced-percentage ranges, and (via
+// capResourcesToInstanceType) the per-unit RAM / local-storage limits. Shared by ValidateCreate and
+// the start (resume) path of ValidateUpdate, so a stopped Instance whose resources were edited
+// cannot be started with a request that create would have rejected — the start path previously
+// re-checked only the upper caps (capResourcesToInstanceType), letting negative / over-max /
+// out-of-range slice requests through.
+func validateResourceRequests(instType *worker.InstanceType, instRess *workercore.InstanceResources) field.ErrorList {
+	var errs field.ErrorList
+	// Validate accelerator request first since it may determine the validation of other resource requests.
+	if instType.Spec.Acceleratable {
+		if instRess.Accelerator != nil {
+			if instRess.Accelerator.Sign() < 0 {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+					"accelerator request cannot be negative"))
+			} else if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+				errs = append(errs, field.Invalid(
+					field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+					fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
+			}
+		}
+		// On a sliceable InstanceType the slice is requested as memory/compute
+		// percentages in [0,100] (0 disables slicing). The compute budget must
+		// not be smaller than the memory budget.
+		if instType.Spec.Sliceable {
+			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
+			coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
+			memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
+			coresPath := field.NewPath("spec.resources.acceleratorSlicedCoresPercentage")
+			if memPct < 0 || memPct > 100 {
+				errs = append(errs, field.Invalid(memPath, instRess.AcceleratorSlicedMemoryPercentage,
+					"must be between 0 and 100"))
+			}
+			if coresPct < 0 || coresPct > 100 {
+				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
+					"must be between 0 and 100"))
+			}
+			if coresPct > 0 && coresPct < memPct {
+				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
+					"must not be less than the memory percentage"))
+			}
+		}
+	} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+			"accelerator request must not be specified for non-acceleratable instance type"))
+	}
+	if instRess.CPU.Sign() < 0 {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
+			"CPU request cannot be negative"))
+	} else if !instType.Spec.Acceleratable &&
+		instRess.CPU.Cmp(instType.Status.CPU.OnceMaxRequest) > 0 {
+		// Only a non-accelerated type has a CPU capacity view; an accelerated type's
+		// Status.CPU is zero (its CPU derives from unitCPU × count, bounded elsewhere).
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
+			fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)))
+	}
+	// A negative RAM or local-storage request is rejected outright; a positive one
+	// must stay within the InstanceType's per-unit RAM entitlement and its local
+	// storage (validated against UnitResources / LocalStorage below).
+	if instRess.RAM.Sign() < 0 {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec.resources.ram"), instRess.RAM.String(),
+			"RAM request cannot be negative"))
+	}
+	if instRess.LocalStorage.Sign() < 0 {
+		errs = append(errs, field.Invalid(
+			field.NewPath("spec.resources.localStorage"), instRess.LocalStorage.String(),
+			"local storage request cannot be negative"))
+	}
+	errs = append(errs, capResourcesToInstanceType(instType, instRess)...)
+	return errs
 }
 
 // capResourcesToInstanceType rejects an Instance whose CPU or RAM exceeds the InstanceType's
