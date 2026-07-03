@@ -89,8 +89,10 @@ Confirm the final **(version, commit)** pair before proceeding.
 Read the range since the previous release and group by Conventional-Commit type.
 
 ```bash
-LAST=$(git tag -l 'v*' --sort=-creatordate | head -n1)
-git log --no-merges --pretty='%h %s (%an)' "$LAST..$SHA"
+# previous *stable* release — skip -rcN pre-releases so the range spans from the last GA, not an rc
+LAST=$(git tag -l 'v*' --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+# no prior stable tag (brand-new repo): fall back to the full history up to $SHA
+git log --no-merges --pretty='%h %s (%an)' ${LAST:+"$LAST.."}"$SHA"
 ```
 
 Compose `$RPT/notes.md`:
