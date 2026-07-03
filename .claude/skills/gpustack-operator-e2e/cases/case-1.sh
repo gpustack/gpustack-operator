@@ -51,6 +51,30 @@ itActive=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{range .items[?(@.status.phase=="Active")]}{.metadata.name}{" entrance="}{.status.entrance}{"\n"}{end}' 2>/dev/null | grep 'gpustack-')
 assert_nonempty "InstanceType Active (+entrance)" "$itActive"
 
+# The general InstanceType materializes spec.os/spec.arch from the backing ClusterQueue's
+# kubernetes.io/os|arch labels: those live only as schedule labels, never in the CQ notes, so
+# reading them from the notes used to blank spec.os/spec.arch on every reconcile. Assert the
+# derived spec matches the InstanceType's OWN schedule labels — not a node's, since a
+# heterogeneous cluster hosts several os/arch pools and the first node need not be this pool.
+osarch=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
+import json,sys
+for it in json.load(sys.stdin).get('items',[]):
+    s=it.get('spec',{}); l=it.get('metadata',{}).get('labels',{}); n=it['metadata']['name']
+    if not n.startswith('gpustack-') or s.get('acceleratable'): continue
+    los,larch=l.get('kubernetes.io/os',''),l.get('kubernetes.io/arch','')
+    sos,sarch=s.get('os',''),s.get('arch','')
+    ok=sos!='' and sarch!='' and sos==los and sarch==larch
+    print(('PASS' if ok else 'FAIL')+'|'+'%s spec=%s/%s label=%s/%s'%(n,sos or '<empty>',sarch or '<empty>',los or '<empty>',larch or '<empty>'))
+    break
+else:
+    print('FAIL|no general InstanceType found')
+" 2>/dev/null)
+if [ "${osarch%%|*}" = "PASS" ]; then
+  record PASS "InstanceType materializes spec.os/arch" "${osarch#*|} (from CQ labels, not notes)"
+else
+  record FAIL "InstanceType materializes spec.os/arch" "${osarch#*|} — spec.os/arch must equal the CQ kubernetes.io/os|arch labels, not be blanked"
+fi
+
 # Zero Cohort objects — Cohort was removed entirely; one isolated CQ per pool (F3c).
 cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep -c . || true)
 [ "${cohorts:-0}" = "0" ] && record PASS "zero Cohort objects" "no cohorts.kueue.x-k8s.io" \
