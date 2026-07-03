@@ -746,8 +746,10 @@ func poolDevicesSelector(cqLabels map[string]string) map[string]string {
 //   - sliced:    over free and Sliced cards, Remaining/(D/100) VRAM-percent units.
 //
 // Capacity is the whole pool seen as that mode (cards, cards×10, cards×100), Remaining
-// sums each node's availability, and OnceMaxRequest is the largest single node's
-// availability since one allocation lands on one node.
+// sums each node's availability. OnceMaxRequest is the largest single allocation: the
+// largest single node's availability for exclusive/shared (one allocation can span a
+// node's cards), but the freest single card's percent for sliced (a slice targets one
+// card — VRAM is per-card — so a single sliced request is at most 100).
 func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, sliced workercore.InstanceTypeResource) {
 	const (
 		d         = int64(nodefeature.ResourceMaxUnits)
@@ -778,7 +780,13 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 					nodeShared += rem / sharedUnit
 				}
 				if free || a.Mode == workercore.DeviceAllocationModeSliced {
-					nodeSliced += rem / slicedUnit
+					cardSliced := rem / slicedUnit
+					nodeSliced += cardSliced
+					// A sliced request targets a single card (VRAM is the per-card,
+					// non-oversubscribable anchor), so the largest single sliced request is the
+					// freest card's percent (≤100), not a node's card-sum — unlike exclusive and
+					// shared, whose one request can span a node's cards.
+					ormSliced = max(ormSliced, cardSliced)
 				}
 			}
 		}
@@ -790,7 +798,7 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 		remSliced += nodeSliced
 		ormExcl = max(ormExcl, nodeExcl)
 		ormShared = max(ormShared, nodeShared)
-		ormSliced = max(ormSliced, nodeSliced)
+		// ormSliced is tracked per-card in the loop above (a slice is single-card), not per-node.
 	}
 
 	mk := func(orm, rem, total int64) workercore.InstanceTypeResource {

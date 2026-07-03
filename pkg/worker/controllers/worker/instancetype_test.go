@@ -90,8 +90,9 @@ func wantView(t *testing.T, v workercore.InstanceTypeResource, orm, rem, capacit
 
 // TestAcceleratorThreeViews is the end-to-end acceptance oracle: the five-step
 // pooling sequence on an 8× A10G node must reproduce the three-view progression
-// exactly. A single node means OnceMaxRequest == Remaining for every view, while
-// Capacity stays the whole pool (8 cards / ×10 / ×100) throughout.
+// exactly. On a single node OnceMaxRequest == Remaining for the exclusive and shared
+// views; the sliced OnceMaxRequest is per-card (the freest card's percent), so it stays
+// 100 while any card is free. Capacity stays the whole pool (8 / ×10 / ×100) throughout.
 func TestAcceleratorThreeViews(t *testing.T) {
 	cases := []struct {
 		name                 string
@@ -137,14 +138,15 @@ func TestAcceleratorThreeViews(t *testing.T) {
 			excl, shared, sliced := getAcceleratorResources(devices)
 			wantView(t, excl, c.excl, c.excl, 8, "exclusive")
 			wantView(t, shared, c.shared, c.shared, 80, "shared")
-			wantView(t, sliced, c.sliced, c.sliced, 800, "sliced")
+			// Every step above leaves at least one free card, so the freest-card sliced OnceMaxRequest is 100.
+			wantView(t, sliced, 100, c.sliced, 800, "sliced")
 		})
 	}
 }
 
-// TestAcceleratorThreeViews_MultiNode pins the per-node rollup: Remaining sums across
-// nodes while OnceMaxRequest is the largest single node (one allocation lands on one
-// node).
+// TestAcceleratorThreeViews_MultiNode pins the per-node rollup: Remaining sums across nodes;
+// exclusive/shared OnceMaxRequest is the largest single node (one allocation can span a node's
+// cards), while sliced OnceMaxRequest is per-card (the freest card — 100 here, all free).
 func TestAcceleratorThreeViews_MultiNode(t *testing.T) {
 	devices := []workercore.Devices{
 		nodeDevices("a", nil, repeatCard(4, cardFree())...),
@@ -153,7 +155,18 @@ func TestAcceleratorThreeViews_MultiNode(t *testing.T) {
 	excl, shared, sliced := getAcceleratorResources(devices)
 	wantView(t, excl, 4, 6, 6, "exclusive")
 	wantView(t, shared, 40, 60, 60, "shared")
-	wantView(t, sliced, 400, 600, 600, "sliced")
+	wantView(t, sliced, 100, 600, 600, "sliced")
+}
+
+// TestAcceleratorThreeViews_SlicedOnceMaxIsPerCard pins that the sliced OnceMaxRequest is the
+// freest single card's percent — not a node's card-sum. With no free card it is the largest
+// per-card remainder (40 here, not 40+30+20), while Remaining still sums the whole pool.
+func TestAcceleratorThreeViews_SlicedOnceMaxIsPerCard(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevices("a", nil, cardSliced(40), cardSliced(30), cardSliced(20)),
+	}
+	_, _, sliced := getAcceleratorResources(devices)
+	wantView(t, sliced, 40, 90, 300, "sliced")
 }
 
 // TestAcceleratorThreeViews_Empty pins that a pool with no Devices yields zeroed views
