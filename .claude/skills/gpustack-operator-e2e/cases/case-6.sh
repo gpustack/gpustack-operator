@@ -40,8 +40,10 @@ set -uo pipefail
 
 NS="${1:?usage: case-6.sh <NS>}"
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
-AKEY=nvidia-a10g                                   # manufacturer 'nvidia' is a known acceleratable manufacturer
-COUNT=8                                             # 8× A10G (the canonical Story-6 node)
+AKEY=nvidia-e2emock                                # non-colliding fake key (never a real product) so the mocked pool
+                                                   # stays isolated on a real-accelerator cluster — mirrors case-4;
+                                                   # manufacturer 'nvidia' still makes it acceleratable + sliceable.
+COUNT=8                                             # 8× A10G-like card (the canonical Story-6 node)
 MEM_MIB=24576                                       # 24Gi per card
 D=1600000                                           # ResourceMaxUnits (credit base M)
 ACCEL_NF="${NODE}-gpustack-e2e-accel"               # fake accelerator NodeFeature (case-4/5 style)
@@ -195,14 +197,18 @@ set_ledger "e e e s9 s9 l78 l78 f"; assert_view "step 5: +1 exclusive"          
 echo "[case-6] asserting watch freshness over kubectl get -w"
 set_ledger "f f f f f f f f"; assert_view "watch precondition: back to 8 free" 8 80 800 >/dev/null
 watchlog=$(mktemp)
-( timeout 35 kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -w \
+# Watch the NATIVE v1alpha1 CRD, not the unversioned name — the latter resolves to the aggregated
+# worker.gpustack.ai/v1 apiservice (a proxy), whose watch re-projects/coalesces and drops intermediate
+# .status transitions. Direction 2 is precisely that the real CRD delivers them via a native watch;
+# mirrors set_ledger targeting devices.v1alpha1 for the same aggregated-proxy reason.
+( timeout 60 kubectl get instancetypes.v1alpha1.worker.gpustack.ai "$ITNAME" -w \
     -o "jsonpath={.status.accelerator.remaining}{'\n'}" >"$watchlog" 2>/dev/null ) &
 wpid=$!
 sleep 2
 set_ledger "e e s9 s9 f f f f"          # alloc → exclusive drops to 4
-sleep 8
+sleep 20                                # dwell long enough for a remote cluster's reconcile+watch to surface the drop
 set_ledger "f f f f f f f f"            # free → exclusive recovers to 8
-sleep 8
+sleep 15
 wait "$wpid" 2>/dev/null || true
 if grep -qx 4 "$watchlog" && grep -qx 8 "$watchlog"; then
   record PASS "watch freshness (kubectl get -w)" "observed exclusive 8→4→8 via native watch"
