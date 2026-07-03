@@ -1,6 +1,6 @@
 module gpustack.ai/gpustack
 
-go 1.25.8
+go 1.26.4
 
 // This is a workaround to support generating proto from base external packages.
 // If we bump the version of the base external packages, we need to update the staging.
