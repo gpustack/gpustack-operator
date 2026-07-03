@@ -314,6 +314,104 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 	}
 }
 
+// TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources pins that starting a stopped
+// Instance re-validates the resources that will take effect with the SAME checks as create — not
+// just the upper caps. A stopped Instance's resources are mutable (the immutability guard is
+// skipped while stopped), so without this a request create would reject (CPU over the non-accel
+// cap, a negative quantity, an out-of-range slice percentage) could be slipped in while stopped
+// and then started.
+func TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources(t *testing.T) {
+	const genType = "gpustack-generic-linux-amd64"
+	const sliceType = "gpustack-nvidia-a10g-linux-amd64"
+
+	generic := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: genType},
+		Spec: workercore.InstanceTypeSpec{
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+			LocalStorage:  "64Gi",
+		},
+		Status: workercore.InstanceTypeStatus{
+			CPU: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("48")},
+		},
+	}
+	sliceable := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: sliceType},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable:           true,
+			Manufacturer:            "nvidia",
+			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
+			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "2", RAM: "8Gi"},
+			LocalStorage:            "64Gi",
+		},
+		Status: workercore.InstanceTypeStatus{
+			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("1")},
+		},
+	}
+
+	cases := []struct {
+		name     string
+		instType string
+		res      *workercore.InstanceResources
+		wantErr  bool
+	}{
+		{
+			name:     "start within caps allowed",
+			instType: genType,
+			res: &workercore.InstanceResources{
+				CPU: resource.MustParse("1"), RAM: resource.MustParse("2Gi"), LocalStorage: resource.MustParse("10Gi"),
+			},
+		},
+		{
+			name:     "start with non-accel cpu over cap rejected",
+			instType: genType,
+			res: &workercore.InstanceResources{
+				CPU: resource.MustParse("999"), RAM: resource.MustParse("2Gi"), LocalStorage: resource.MustParse("10Gi"),
+			},
+			wantErr: true,
+		},
+		{
+			name:     "start with negative ram rejected",
+			instType: genType,
+			res: &workercore.InstanceResources{
+				CPU: resource.MustParse("1"), RAM: resource.MustParse("-2Gi"), LocalStorage: resource.MustParse("10Gi"),
+			},
+			wantErr: true,
+		},
+		{
+			name:     "start with out-of-range slice percentage rejected",
+			instType: sliceType,
+			res: &workercore.InstanceResources{
+				Accelerator:                       resource.NewQuantity(1, resource.DecimalSI),
+				AcceleratorSlicedMemoryPercentage: 200,
+				AcceleratorSlicedCoresPercentage:  200,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook(generic, sliceable)
+
+			old := webhookInstance("a", c.instType)
+			old.Spec.Stop = ptr.To(true)
+			old.Status.Phase = workerctrl.InstancePhaseStopped
+			neu := webhookInstance("a", c.instType)
+			neu.Spec.Stop = ptr.To(false)
+			neu.Status.Phase = workerctrl.InstancePhaseStopped
+			neu.Spec.Resources = c.res
+
+			_, err := w.ValidateUpdate(context.Background(), old, neu)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
 func TestInstanceWebhook_Default(t *testing.T) {
 	cases := []struct {
 		name string
