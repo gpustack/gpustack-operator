@@ -198,7 +198,7 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	ctrReq *ContainerPreferredAllocationRequest,
 	pod *core.Pod,
-	_ *core.Container,
+	ctr *core.Container,
 	devs *workercore.Devices,
 ) (*ContainerPreferredAllocationResponse, error) {
 	availableDeviceIDs := ctrReq.GetAvailableDeviceIDs()
@@ -227,6 +227,18 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	preferredDeviceIDsSet := extractPreferredAcceleratorIDsFromPod(pod, devs)
 	remainingSize := allocationSize
 
+	// For sliced, each selected card must still have this container's per-card ".sliced.units"
+	// (the memory budget the Pod webhook folded in) free, so slices spread across cards instead of
+	// stacking on one and over-committing its VRAM. The ledger records sliced allocations in real
+	// units, so a card carrying a slice reports Remaining below a fresh card. Zero → no per-card
+	// bin-fit (a Pod the webhook did not shape); the loop then behaves as before.
+	slicedUnits := int32(0)
+	if s.AllocationMode == workercore.DeviceAllocationModeSliced && ctr != nil {
+		if q, ok := ctr.Resources.Limits[nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)]; ok {
+			slicedUnits = int32(min(q.Value(), int64(nodefeature.ResourceMaxUnits)))
+		}
+	}
+
 	selectedResUnits := make([]ResourceUnit, 0, allocationSize)
 	var unselectedResUnits []ResourceUnit // Only used if provided preferred device IDs.
 	for i := range devs.Spec.Groups {
@@ -253,6 +265,21 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 			}
 			if mode != workercore.DeviceAllocationModeNone && mode != s.AllocationMode {
 				continue
+			}
+
+			// Sliced spreads across cards: defer a card that cannot fit this slice's per-card
+			// units without over-committing it (its ledger Remaining is below the request) to
+			// unselectedResUnits, so it is used only as a last resort when no card fits. Stacking
+			// slices on one card is what drove runtime per-card VRAM overcommit.
+			if slicedUnits > 0 {
+				remaining := int32(nodefeature.ResourceMaxUnits)
+				if len(devs.Status.Groups) > i && len(devs.Status.Groups[i].Accelerators) > j {
+					remaining = devs.Status.Groups[i].Accelerators[j].Remaining
+				}
+				if remaining < slicedUnits {
+					unselectedResUnits = append(unselectedResUnits, resUnits[0])
+					continue
+				}
 			}
 
 			// Exclusive, shared and sliced all select one device unit (token) per
@@ -342,6 +369,20 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for allocation: %v", err)
 	}
 
+	// For a sliced allocation each token placed on a card commits the container's per-card
+	// ".sliced.units" — the normalized units the Pod webhook folds the memory budget into.
+	// Recording that real cost (not the loose injection-token count) keeps the per-card ledger
+	// honest, so the node-devices admission check refuses a card whose committed units would
+	// exceed capacity and the InstanceType sliced view reports the true remaining. Fall back to
+	// the token count when the units request is absent (a sliced Pod the webhook did not shape).
+	slicedUnitsPerToken := int64(1)
+	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
+		unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)
+		if q, ok := ctr.Resources.Limits[unitsResName]; ok && q.Value() > 0 {
+			slicedUnitsPerToken = q.Value()
+		}
+	}
+
 	var (
 		allocatedStatus     workercore.DevicesStatus
 		allocatedAllocation = make(map[Resource]int32)
@@ -368,8 +409,11 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 			case workercore.DeviceAllocationModeShared:
 				allocated = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize // units per owner
 			case workercore.DeviceAllocationModeSliced:
-				// Bookkeeping only: the loose injection-token count (no isolation).
-				allocated = int32(len(resUnits))
+				// Real per-card units this container's slices commit on the card, so the
+				// ledger reflects capacity (not the loose injection-token count); the
+				// node-devices admission check then refuses a card whose committed units
+				// would exceed capacity, and the InstanceType sliced view reports true remaining.
+				allocated = int32(min(slicedUnitsPerToken*int64(len(resUnits)), int64(nodefeature.ResourceMaxUnits)))
 			}
 			if allocated > nodefeature.ResourceMaxUnits {
 				allocated = nodefeature.ResourceMaxUnits
