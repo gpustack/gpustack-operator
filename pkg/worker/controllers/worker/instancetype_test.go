@@ -863,6 +863,49 @@ func TestInstanceTypeReconciler_DerivedInitializesUnitSpec(t *testing.T) {
 	}
 }
 
+// TestInstanceTypeReconciler_RefreshesOSArch pins that the descriptor refresh writes
+// the InstanceType's spec.OS / spec.Arch. A derived InstanceType is authored carrying
+// os/arch only as schedule labels, yet the Instance webhook and the table read them
+// from the spec, so the reconcile must materialize them there.
+func TestInstanceTypeReconciler_RefreshesOSArch(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	cases := []struct {
+		name   string
+		key    string
+		flavor *kueue.ResourceFlavor
+	}{
+		{
+			name: "accelerated pool",
+			key:  "nvidia-a10g",
+			flavor: newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 4,
+				accelerated(nodefeature.ManufacturerNVIDIA)),
+		},
+		{
+			name:   "cpu-only pool",
+			key:    "generic",
+			flavor: newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4),
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			name := nodeQueueName(c.key)
+			cli := buildInstanceTypeClient(c.flavor)
+
+			// Author the derived InstanceType, create + align its queue, then refresh
+			// its descriptor spec from the pool.
+			reconcileInstanceTypeN(t, cli, name, 5)
+
+			it := getInstanceType(t, cli, name)
+			require.Equal(t, valueTrue, it.Labels[_InstanceTypeDerivedFromNodeLabel], "authored derived")
+			assert.Equal(t, "linux", it.Spec.OS, "spec.OS refreshed from the pool")
+			assert.Equal(t, "amd64", it.Spec.Arch, "spec.Arch refreshed from the pool")
+		})
+	}
+}
+
 func TestHasReserved(t *testing.T) {
 	reserved := func(total, borrowed string) kueue.ClusterQueueStatus {
 		return kueue.ClusterQueueStatus{
