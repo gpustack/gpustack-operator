@@ -361,10 +361,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
+      - name: Build Changelog
+        id: changelog
+        uses: mikepenz/release-changelog-builder-action@v5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          mode: COMMIT
+          configurationJson: |
+            {
+              "template": "#{{CHANGELOG}}",
+              "categories": [
+                { "title": "## 🚀 Features",    "labels": ["feat"] },
+                { "title": "## 🐛 Fixes",       "labels": ["fix"] },
+                { "title": "## ♻️ Refactor",    "labels": ["refactor"] },
+                { "title": "## 📚 Docs",        "labels": ["docs"] },
+                { "title": "## 🔧 Maintenance", "labels": ["chore","ci","build","test","perf","style"] },
+                { "title": "## Other",          "labels": [] }
+              ],
+              "label_extractor": [
+                { "pattern": "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([\\w\\-\\./]+\\))?(!)?: .+",
+                  "on_property": "title", "target": "$1" }
+              ]
+            }
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "${{ github.ref_name }}"
-          prerelease: ${{ contains(github.ref, 'rc') }}
+          prerelease: true
+          body: ${{ steps.changelog.outputs.changelog }}
