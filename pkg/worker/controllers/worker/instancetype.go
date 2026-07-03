@@ -635,8 +635,10 @@ func applyDescriptorsFromClusterQueue(spec *workercore.InstanceTypeSpec, cq *kue
 	spec.Manufacturer = notes["manufacturer"]
 	spec.Product = notes["product"]
 	spec.Family = notes["family"]
-	spec.OS = notes["os"]
-	spec.Arch = notes["arch"]
+	// os/arch live only as schedule labels (the reverse-lookup discriminators), never
+	// in the notes; read them from there so the spec surfaces them.
+	spec.OS = cq.Labels[core.LabelOSStable]
+	spec.Arch = cq.Labels[core.LabelArchStable]
 
 	// Clear the accelerator descriptors before (re)deriving them below, so a type
 	// that is non-accelerated — or transitions to it — never keeps stale Memory /
