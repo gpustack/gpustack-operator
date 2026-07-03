@@ -73,6 +73,8 @@ behave the same on a single-node local cluster and a multi-node real one.
 | 7 | Portless Instance reaches Ready, creates no Service | `pkg/worker/controllers/worker/instance.go` | `cases/case-7.sh` | yes (confirm) |
 | 8 | Real accelerator slicing runtime isolation (Story 1) | `pkg/deviceplugin/**`, `pkg/devicemanager/**`, `pkg/worker/webhooks/worker/pod.go` | `cases/case-8.sh` | yes (confirm) |
 | 9 | Instance lifecycle survives an InstanceType unit-spec change | `pkg/worker/webhooks/worker/instance.go` | `cases/case-9.sh` | yes (confirm) |
+| 10 | Start re-validates a resized-while-stopped Instance (no create-check bypass) | `pkg/worker/webhooks/worker/instance.go` | `cases/case-10.sh` | yes (confirm) |
+| 11 | Sliced per-card accounting: three-view + per-card OnceMax (spread observed best-effort) | `pkg/deviceplugin/server.go`, `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go` | `cases/case-11.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
