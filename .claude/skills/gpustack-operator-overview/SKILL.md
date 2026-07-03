@@ -16,11 +16,11 @@ stages:
 
 1. **Bootstrap** — the `worker` installs NFD and per-manufacturer Device Manager DaemonSets.
 2. **Device discovery** — the Device Manager detects accelerators and writes `acceleratable.feature.gpustack.ai/*` labels.
-3. **Capacity profiling** — the worker's `NodeFeatureReconciler` derives `general.`/`acceleratable.` capacity & profile labels, keyed by the node's CPU identity.
-4. **Queue construction** — four worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue` objects.
+3. **Capacity profiling** — the worker's `NodeFeatureReconciler` stamps the `gpustack.ai/managed` marker and `NodeCapacityReconciler` derives `general.`/`acceleratable.` per-card capacity labels (CPU cores + the four `.sliced.*` accelerator capacities). The general(CPU) key defaults to `generic` and does not encode os/arch.
+4. **Queue construction & admission** — worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no Cohort) plus a materialized `InstanceType` CRD, fronted by a per-namespace `LocalQueue` and gated per-card by a `gpustack-node-devices` AdmissionCheck.
 
 `pkg/nodefeature` is the heart of the label algebra (construct/extract of node keys, flavors,
-queues, cohorts). Full stage-by-stage detail and a worked example live in
+queues, credits). Full stage-by-stage detail and a worked example live in
 [architecture.md](../../../docs/architecture.md).
 
 ## Key directories
@@ -30,20 +30,20 @@ cmd/gpustack-operator/            single binary entrypoint (3 cobra subcommands)
 pkg/
   worker/                         control-plane process (worker subcommand)
     worker.go                     Prepare → Start lifecycle (startup ordering)
-    controllers/worker/           the 4 scheduling-chain reconcilers
-    extensionapis/                aggregated extension-API handlers (Instance, Devices, …)
+    controllers/worker/           the scheduling-chain reconcilers
+    extensionapis/                aggregated extension-API handlers (Instance, Devices, InstanceType, …)
     webhooks/worker/              admission webhooks (generated + hand-written)
     kuberess/                     installs NFD / Kueue / Device-Manager / CSI apps
   workergateway/                  worker-gateway subcommand (upstream aggregation)
   devicemanager/                  device-manager subcommand (per-node DaemonSet)
     detector/<mfr>/               per-manufacturer accelerator detection
     allocator/<mfr>/              per-manufacturer device-plugin allocation
-  nodefeature/                    label algebra (node keys, flavors, queues, cohorts)
+  nodefeature/                    label algebra (node keys, flavors, queues, credits)
   extensionapi/                   generic aggregated-apiserver storage plumbing
 api/
   v1/                             gpustack.ai/v1 extension API (settings, status)
   worker/v1/                      worker.gpustack.ai/v1 extension API
-  worker/v1alpha1/                worker.gpustack.ai/v1alpha1 CRDs (Instance, Devices)
+  worker/v1alpha1/                worker.gpustack.ai/v1alpha1 CRDs (Instance, Devices, InstanceType)
 binding/<runtime>/                generated CGO bindings (nvml, rsmi, cndev, dcmi, …)
 gen/
   api/generator/                  custom code generators (apireg-gen, crd-gen, webhook-gen)
@@ -60,9 +60,9 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 
 ## Naming conventions
 
-- **Kueue object names**: `gpustack--${gKey}-…[--${aKey}-…]` — general(CPU) segment first, then the device segment, joined by `--`.
+- **Kueue object names**: `gpustack-${key}-${os}-${arch}-${count}{c|d}` for a `ResourceFlavor` (`c` = CPU cores, `d` = devices); `gpustack-${key}-${os}-${arch}` for the `ClusterQueue` / `InstanceType` — single dash, CPU and device pools split (not composite), os/arch in full.
 - **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue name goes in the `schedule.gpustack.ai/cluster-queue` annotation).
-- **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models), `general.feature.gpustack.ai/` (CPU-only capacity), `schedule.gpustack.ai/` (long names as annotations).
+- **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models + `.sliced.*` capacities), `general.feature.gpustack.ai/` (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/` + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and `gpustack.ai/controlled` mark node onboarding and queue teardown.
 - **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.
 - **Generated files**: anything matching `zz_generated.*`, `generated.pb.go`, `generated.proto` is generated — never hand-edit; edit the source types and run the `gpustack-operator-generate` skill.
