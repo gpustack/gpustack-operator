@@ -3,6 +3,7 @@
 package quantityx
 
 import (
+	"math/big"
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -132,6 +133,45 @@ func StringMultiply(quantityStr string, multiplier int64) (resource.Quantity, er
 		return resource.Quantity{}, err
 	}
 	return Multiply(q, multiplier), nil
+}
+
+// PercentMultiply scales quantity by percent/100, flooring the result to an integer
+// in the quantity's base unit, with a floor of 1 so a positive quantity never scales
+// down to zero. percent is clamped to [0,100]; percent >= 100 returns quantity unchanged
+// and a zero quantity stays zero. The input is not modified. Like Divide, it floors the
+// base-unit value, so it is intended for integer/count quantities (e.g. CPU cores, Gi of
+// RAM).
+//
+// A percent of 0 does not yield 0: a positive quantity still floors to 1, so a caller that
+// treats 0 as "no scaling" (the full quantity) must map it to 100 (or any value >= 100).
+func PercentMultiply(quantity resource.Quantity, percent int64) resource.Quantity {
+	if percent >= 100 {
+		return quantity
+	}
+	if percent < 0 {
+		percent = 0
+	}
+	v := quantity.Value()
+	// v*percent can overflow int64 for very large quantities, so scale through big.Int
+	// (truncating toward zero, like integer division); the floored result is always <= |v|,
+	// so it always fits back into int64.
+	scaled := new(big.Int).Mul(big.NewInt(v), big.NewInt(percent))
+	scaled.Quo(scaled, big.NewInt(100))
+	s := scaled.Int64()
+	if s < 1 && v > 0 {
+		s = 1
+	}
+	return *resource.NewQuantity(s, quantity.Format)
+}
+
+// StringPercentMultiply scales q by percent/100 and returns the result.
+// The input q is a string, which will be parsed into a resource.Quantity.
+func StringPercentMultiply(quantityStr string, percent int64) (resource.Quantity, error) {
+	q, err := resource.ParseQuantity(quantityStr)
+	if err != nil {
+		return resource.Quantity{}, err
+	}
+	return PercentMultiply(q, percent), nil
 }
 
 // Divide divides quantity by divisor, rounding the result DOWN, and returns it as

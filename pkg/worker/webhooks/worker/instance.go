@@ -301,10 +301,10 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			// and let later scheduling to block if it exceeds the instance type's CPU capacity.
 			instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
 		}
-		// On a sliceable InstanceType, when only one of the memory/compute slice
-		// percentages is set, copy it to the other so a bare memory request yields
-		// an equal compute share (and vice versa).
 		if instType.Spec.Sliceable {
+			// On a sliceable InstanceType, when only one of the memory/compute slice
+			// percentages is set, copy it to the other so a bare memory request yields
+			// an equal compute share (and vice versa).
 			memPct := instRess.AcceleratorSlicedMemoryPercentage
 			coresPct := instRess.AcceleratorSlicedCoresPercentage
 			switch {
@@ -313,27 +313,55 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			case coresPct > 0 && memPct == 0:
 				instRess.AcceleratorSlicedMemoryPercentage = coresPct
 			}
-		}
-		// Allow zero accelerator request for acceleratable instance type,
-		// but treat it as 1 when calculating other resource requests by unit.
-		accC := instRess.Accelerator.Value()
-		if accC == 0 {
-			accC = 1
-		}
-		if withGeneralOvercommit || instRess.CPU.IsZero() {
-			instRess.CPU, err = quantityx.StringMultiply(instType.Spec.UnitResources.CPU, accC)
-			if err != nil {
-				return field.InternalError(
-					field.NewPath("spec.resources.cpu"),
-					fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+			// A sliceable request is a fraction of ONE card (its accelerator count is pinned
+			// to 1 by validation), so scale the per-card unit CPU/RAM by the slice percentages:
+			// the compute percentage sizes CPU, the memory percentage sizes RAM. A zero
+			// percentage means the whole card, i.e. the full unit resource.
+			cpuPct, ramPct := int64(instRess.AcceleratorSlicedCoresPercentage), int64(instRess.AcceleratorSlicedMemoryPercentage)
+			if cpuPct == 0 {
+				cpuPct = 100
 			}
-		}
-		if withGeneralOvercommit || instRess.RAM.IsZero() {
-			instRess.RAM, err = quantityx.StringMultiply(instType.Spec.UnitResources.RAM, accC)
-			if err != nil {
-				return field.InternalError(
-					field.NewPath("spec.resources.ram"),
-					fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+			if ramPct == 0 {
+				ramPct = 100
+			}
+			if withGeneralOvercommit || instRess.CPU.IsZero() {
+				instRess.CPU, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.CPU, cpuPct)
+				if err != nil {
+					return field.InternalError(
+						field.NewPath("spec.resources.cpu"),
+						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+				}
+			}
+			if withGeneralOvercommit || instRess.RAM.IsZero() {
+				instRess.RAM, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.RAM, ramPct)
+				if err != nil {
+					return field.InternalError(
+						field.NewPath("spec.resources.ram"),
+						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+				}
+			}
+		} else {
+			// Allow zero accelerator request for acceleratable instance type,
+			// but treat it as 1 when calculating other resource requests by unit.
+			accC := instRess.Accelerator.Value()
+			if accC == 0 {
+				accC = 1
+			}
+			if withGeneralOvercommit || instRess.CPU.IsZero() {
+				instRess.CPU, err = quantityx.StringMultiply(instType.Spec.UnitResources.CPU, accC)
+				if err != nil {
+					return field.InternalError(
+						field.NewPath("spec.resources.cpu"),
+						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+				}
+			}
+			if withGeneralOvercommit || instRess.RAM.IsZero() {
+				instRess.RAM, err = quantityx.StringMultiply(instType.Spec.UnitResources.RAM, accC)
+				if err != nil {
+					return field.InternalError(
+						field.NewPath("spec.resources.ram"),
+						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+				}
 			}
 		}
 	} else {
@@ -380,21 +408,24 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	var errs field.ErrorList
 	// Validate accelerator request first since it may determine the validation of other resource requests.
 	if instType.Spec.Acceleratable {
-		if instRess.Accelerator != nil {
-			if instRess.Accelerator.Sign() < 0 {
+		switch {
+		case instType.Spec.Sliceable:
+			// A sliceable accelerator is always requested as a single card; the slice is
+			// expressed through the memory/compute percentages, so the accelerator count
+			// must be exactly 1. Compare with Cmp (not Value(), which rounds a fractional
+			// quantity like "1m" up to 1) so only a true 1 passes.
+			one := resource.NewQuantity(1, resource.DecimalSI)
+			if instRess.Accelerator == nil || instRess.Accelerator.Cmp(*one) != 0 {
+				got := "0"
+				if instRess.Accelerator != nil {
+					got = instRess.Accelerator.String()
+				}
 				errs = append(errs, field.Invalid(
-					field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-					"accelerator request cannot be negative"))
-			} else if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
-				errs = append(errs, field.Invalid(
-					field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-					fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
+					field.NewPath("spec.resources.accelerator"), got,
+					"accelerator request must be exactly 1 for sliceable instance type"))
 			}
-		}
-		// On a sliceable InstanceType the slice is requested as memory/compute
-		// percentages in [0,100] (0 disables slicing). The compute budget must
-		// not be smaller than the memory budget.
-		if instType.Spec.Sliceable {
+			// The slice is requested as memory/compute percentages in [0,100] (0 disables
+			// slicing). The compute budget must not be smaller than the memory budget.
 			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
 			coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
 			memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
@@ -410,6 +441,18 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 			if coresPct > 0 && coresPct < memPct {
 				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
 					"must not be less than the memory percentage"))
+			}
+		default:
+			if instRess.Accelerator != nil {
+				if instRess.Accelerator.Sign() < 0 {
+					errs = append(errs, field.Invalid(
+						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+						"accelerator request cannot be negative"))
+				} else if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+					errs = append(errs, field.Invalid(
+						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
+				}
 			}
 		}
 	} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {

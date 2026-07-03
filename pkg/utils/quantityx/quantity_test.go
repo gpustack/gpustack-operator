@@ -190,6 +190,45 @@ func TestFormat(t *testing.T) {
 	}
 }
 
+func TestPercentMultiply(t *testing.T) {
+	cases := []struct {
+		name    string
+		q       string
+		percent int64
+		want    string
+	}{
+		{"full percent is unchanged", "16", 100, "16"},
+		{"above full is clamped to unchanged", "16", 200, "16"},
+		{"half", "16", 50, "8"},
+		{"quarter", "16", 25, "4"},
+		{"round down decimal", "16", 20, "3"},
+		{"positive floors to one", "2", 20, "1"},
+		{"zero percent floors to one", "2", 0, "1"},
+		{"negative percent floors to one", "2", -5, "1"},
+		{"zero quantity stays zero", "0", 50, "0"},
+		{"binary SI half preserves unit", "32Gi", 50, "16Gi"},
+		{"binary SI round down", "10Gi", 25, "2560Mi"},
+		// v*percent overflows int64 (100Pi bytes × 99 > math.MaxInt64); big.Int keeps it exact.
+		{"large value does not overflow", "100Pi", 99, "99Pi"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got := PercentMultiply(resource.MustParse(c.q), c.percent)
+			assert.Equal(t, c.want, got.String(), "PercentMultiply(%s, %d)", c.q, c.percent)
+		})
+	}
+}
+
+func TestStringPercentMultiply(t *testing.T) {
+	got, err := StringPercentMultiply("16", 25)
+	assert.NoError(t, err)
+	assert.Equal(t, "4", got.String())
+
+	_, err = StringPercentMultiply("not-a-quantity", 25)
+	assert.Error(t, err)
+}
+
 func TestDivide(t *testing.T) {
 	cases := []struct {
 		name    string

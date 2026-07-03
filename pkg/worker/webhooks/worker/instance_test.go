@@ -506,3 +506,114 @@ func TestInstanceWebhook_Default_SlicedPercentages(t *testing.T) {
 		})
 	}
 }
+
+// TestInstanceWebhook_Default_SlicedUnitScaling pins that on a sliceable InstanceType the
+// defaulted CPU/RAM are scaled to the slice percentages of ONE card's unit resources — the
+// compute percentage sizes CPU, the memory percentage sizes RAM — flooring fractions and never
+// dropping below one, while a zero (no-slice) percentage takes the whole card's unit.
+func TestInstanceWebhook_Default_SlicedUnitScaling(t *testing.T) {
+	// Default reads the overcommit setting through the loopback client; point it at an empty
+	// fake cluster so it falls back to its default (which recomputes CPU/RAM regardless).
+	system.LoopbackCtrlClient.Configure(ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+
+	const typeName = "sliced-a10g"
+	const unitCPU = "16"
+	const unitRAM = "40Gi"
+
+	cases := []struct {
+		name             string
+		memPct, coresPct int32
+		wantCPU          int64 // cores
+		wantRAMGi        int64
+	}{
+		{name: "half slice", memPct: 50, coresPct: 50, wantCPU: 8, wantRAMGi: 20},
+		{name: "quarter slice", memPct: 25, coresPct: 25, wantCPU: 4, wantRAMGi: 10},
+		{name: "cores rounds down", memPct: 20, coresPct: 20, wantCPU: 3, wantRAMGi: 8},
+		{name: "separate memory and compute shares", memPct: 20, coresPct: 50, wantCPU: 8, wantRAMGi: 8},
+		{name: "tiny slice floors cpu to one", memPct: 5, coresPct: 5, wantCPU: 1, wantRAMGi: 2},
+		{name: "no slice takes the whole card", memPct: 0, coresPct: 0, wantCPU: 16, wantRAMGi: 40},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: workercore.InstanceTypeSpec{
+					Acceleratable:           true,
+					Manufacturer:            "nvidia",
+					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
+					UnitResources:           workercore.InstanceTypeUnitResources{CPU: unitCPU, RAM: unitRAM},
+				},
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			inst.Spec.Resources = &workercore.InstanceResources{
+				AcceleratorSlicedMemoryPercentage: c.memPct,
+				AcceleratorSlicedCoresPercentage:  c.coresPct,
+			}
+
+			err := w.Default(context.Background(), inst)
+			assert.NoError(t, err)
+			assert.Equal(t, int64(1), inst.Spec.Resources.Accelerator.Value(), "accelerator defaults to 1")
+			assert.Equal(t, c.wantCPU, inst.Spec.Resources.CPU.Value(), "cpu cores")
+			assert.Equal(t, c.wantRAMGi<<30, inst.Spec.Resources.RAM.Value(), "ram bytes")
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_SlicedAccelerator pins that a sliceable InstanceType
+// accepts only a single-card request: the accelerator count must be exactly 1 (the slice is
+// expressed through the memory/compute percentages, not the card count).
+func TestInstanceWebhook_ValidateCreate_SlicedAccelerator(t *testing.T) {
+	const typeName = "sliced-8s"
+
+	cases := []struct {
+		name    string
+		acc     string // "" → accelerator left unset
+		wantErr bool
+	}{
+		{name: "one accepted", acc: "1"},
+		{name: "two rejected", acc: "2", wantErr: true},
+		{name: "zero rejected", acc: "0", wantErr: true},
+		{name: "fractional rejected", acc: "1m", wantErr: true}, // Value() rounds "1m" up to 1
+		{name: "unset rejected", acc: "", wantErr: true},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: workercore.InstanceTypeSpec{
+					Acceleratable:           true,
+					Manufacturer:            "nvidia",
+					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
+				},
+				Status: workercore.InstanceTypeStatus{
+					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
+				},
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			res := &workercore.InstanceResources{
+				AcceleratorSlicedMemoryPercentage: 50,
+				AcceleratorSlicedCoresPercentage:  50,
+			}
+			if c.acc != "" {
+				q := resource.MustParse(c.acc)
+				res.Accelerator = &q
+			}
+			inst.Spec.Resources = res
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
