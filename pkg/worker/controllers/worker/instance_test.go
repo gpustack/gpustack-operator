@@ -411,3 +411,59 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 		})
 	}
 }
+
+// TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain asserts that an
+// SSH-enabled sliced Instance renders the accelerator resource on the workload
+// container (main), not the sshd sidecar, so the device-plugin injects the slicing
+// artifacts (preload file, interception library, limit env) where the workload
+// actually runs. The sidecar carries no accelerator resource; its narrow device
+// permission is granted separately.
+func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T) {
+	cli := buildInstanceClient()
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+	slicedCard := nodefeature.GetAcceleratableResourceName(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+
+	acc := qty("1")
+	inst := &workercore.Instance{
+		ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+		Spec: workercore.InstanceSpec{
+			Type: "gpu-type",
+			InstanceTemplate: workercore.InstanceTemplate{
+				Image: "vllm/vllm-openai:latest",
+				Resources: &workercore.InstanceResources{
+					CPU:                               qty("4"),
+					RAM:                               qty("16Gi"),
+					LocalStorage:                      qty("32Gi"),
+					Accelerator:                       &acc,
+					AcceleratorSlicedMemoryPercentage: 60,
+					AcceleratorSlicedCoresPercentage:  100,
+				},
+			},
+			SSHPublicKey: &core.LocalObjectReference{Name: "inst-ssh-key"},
+			Volume: workercore.InstanceVolume{
+				Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+			},
+		},
+	}
+	instType := &worker.InstanceType{
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable:           true,
+			Manufacturer:            nodefeature.ManufacturerNVIDIA,
+			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
+		},
+	}
+
+	pod := r.convertPodFromInstance(context.Background(), inst, instType)
+
+	require.Len(t, pod.Spec.Containers, 2, "SSH-enabled Instance renders main + sshd")
+	main, sshd := &pod.Spec.Containers[0], &pod.Spec.Containers[1]
+	require.Equal(t, "main", main.Name, "main precedes sshd")
+	require.Equal(t, "sshd", sshd.Name)
+
+	_, mainHas := main.Resources.Limits[slicedCard]
+	assert.True(t, mainHas, "the sliced accelerator must land on main (the workload container)")
+	_, sshdHas := sshd.Resources.Limits[slicedCard]
+	assert.False(t, sshdHas, "sshd must not carry the sliced accelerator resource")
+}

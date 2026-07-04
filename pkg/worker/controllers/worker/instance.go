@@ -442,7 +442,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				}
 				return sc
 			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, false),
+			Resources: getResourceRequirements(inst, instType, true, overcommit, true),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          getPortName(p),
@@ -489,7 +489,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 					},
 				},
 			},
-			Resources: getResourceRequirements(inst, instType, false, false, true),
+			Resources: getResourceRequirements(inst, instType, false, false, false),
 			Env: []core.EnvVar{
 				{
 					Name:  "VOLUME_MOUNT_PATH",
@@ -832,7 +832,8 @@ func getPortName(port workercore.InstancePort) string {
 // The three flags map to the three container shapes the controller emits in
 // convertPodFromInstance:
 //
-//	main + sshd: main has general only, sshd has accelerator only
+//	main + sshd: main has general + accelerator; sshd has neither (its narrow
+//	             device permission is granted separately, not via a resource request)
 //	main alone : main has general + accelerator
 //
 // For general resources the limit is always the user-facing quantity, and the
