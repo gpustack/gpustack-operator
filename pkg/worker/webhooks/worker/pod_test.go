@@ -259,3 +259,51 @@ func TestPodWebhook_ValidateCreate(t *testing.T) {
 		})
 	}
 }
+
+// slicedPodWithSidecar builds the two-container shape the InstanceReconciler emits
+// for an SSH-enabled sliced Instance once the accelerator is colocated on `main`:
+// the sliced request lives on `main`, and the `sshd` sidecar carries no accelerator
+// resource. The webhook iterates all containers, so it must still default and admit
+// the sliced request wherever it lands.
+func slicedPodWithSidecar(requests map[core.ResourceName]string) *core.Pod {
+	rl := core.ResourceList{}
+	for n, v := range requests {
+		rl[n] = resource.MustParse(v)
+	}
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default",
+			Name:      "p",
+			Labels:    map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+		},
+		Spec: core.PodSpec{
+			Containers: []core.Container{
+				{Name: "main", Resources: core.ResourceRequirements{Requests: rl, Limits: rl.DeepCopy()}},
+				{Name: "sshd"},
+			},
+		},
+	}
+}
+
+// TestPodWebhook_SlicedRequestOnMainWithSidecar guards that after the accelerator is
+// colocated on `main`, the Pod webhook still folds .sliced.units on `main` and admits
+// the main(sliced) + sshd(no accelerator) Pod — the sidecar contributes no accelerator
+// mode, so podAcceleratorModes stays at one mode.
+func TestPodWebhook_SlicedRequestOnMainWithSidecar(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := slicedResourceNamesForBase(nvidiaBase)
+
+	pod := slicedPodWithSidecar(map[core.ResourceName]string{names.card: "1", names.memPct: "60"})
+	w := newPodWebhook()
+
+	// Default folds units onto main (the request holder) and leaves sshd untouched.
+	assert.NoError(t, w.Default(context.Background(), pod))
+	main, sshd := &pod.Spec.Containers[0], &pod.Spec.Containers[1]
+	units := main.Resources.Requests[names.units]
+	assert.Equal(t, int64(960000), units.Value(), "units folded on main (60 × M/100)")
+	assert.Empty(t, sshd.Resources.Requests, "sshd sidecar carries no resources")
+
+	// ValidateCreate admits: only one accelerator mode (sliced) across the Pod.
+	_, err := w.ValidateCreate(context.Background(), pod)
+	assert.NoError(t, err)
+}

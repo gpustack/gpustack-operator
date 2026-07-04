@@ -284,7 +284,7 @@ image (pack/ssh-server), [t]=tests. Difficulty noted per task. Every phase leave
       Pod places `.sliced*` on `main`; device-plugin injects `/etc/ld.so.preload` + `libvgpu.so` +
       `CUDA_DEVICE_*` into `main`. Verify: create a sliced SSH Instance; `kubectl exec -c main -- cat
       /etc/ld.so.preload` present; `kubectl exec -c main -- nvidia-smi` reports the slice.
-- [ ] 1.2 [op] Confirm/adjust the Pod webhook (`pkg/worker/webhooks/worker/pod.go`) sliced defaulting +
+- [x] 1.2 [op] Confirm/adjust the Pod webhook (`pkg/worker/webhooks/worker/pod.go`) sliced defaulting +
       validation still fire with the request on `main` (it keys on the `kueue.x-k8s.io/queue-name` label,
       container-agnostic). Difficulty: low. AC: `.sliced.units`/cores defaulting unchanged; admission passes.
       Verify: webhook unit test with the sliced request on `main`; e2e admission succeeds.
