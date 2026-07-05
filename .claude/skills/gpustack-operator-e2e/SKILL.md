@@ -68,9 +68,9 @@ one — not as a standalone case. CASE 13, like CASE 8, needs **real** accelerat
 **auto-skips** when no `*.sliced` resource is advertised (also skips when the runner has no `ssh`
 client); it renders a real SSH-enabled sliced Instance and asserts, through a real SSH login, that the
 slice is visible in both `main` and the SSH shell and that the shell is capability-stripped (host
-`mknod` denied). It uses a 40% slice to stay clear of the pre-existing > 50% single-card self-eviction
-in the node-devices feasibility ledger (`nodeDevicesFeasibility` counts a workload's own allocation
-against itself).
+`mknod` denied). It uses a 60% slice (Story 1's canonical ~9830 MiB of a 16Gi T4); a > 50% single-card
+slice also exercises the node-devices AdmissionCheck fix that stops it from counting a Workload's own
+allocation against itself (which previously self-evicted such slices in a recreate loop).
 
 | Case | Title (Story) | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
