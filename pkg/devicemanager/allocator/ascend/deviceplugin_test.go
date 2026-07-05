@@ -219,6 +219,30 @@ func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
 	assert.Contains(t, err.Error(), "single-NPU")
 }
 
+// TestGetContainerAllocateResponse_Visibility verifies the visibility-mode responder emits
+// only ASCEND_VISIBLE_DEVICES with the exact allocated index(es) — the same plain
+// device-visibility response as exclusive/shared, and never `all` (Ascend has no wildcard)
+// — with no vcann-rt soft-slicing env or mounts.
+func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeVisibility,
+		},
+	}
+	devs := ascendDevicesFixture()
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "sshd-pod", UID: types.UID("uid-vis")}}
+	// Only the first NPU is reserved to the workload; visibility must scope to exactly its index.
+	allocated := map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1}
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs, allocated)
+	require.NoError(t, err)
+
+	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"], "exact allocated index, never `all`")
+	assert.Len(t, resp.Envs, 1, "visibility emits only ASCEND_VISIBLE_DEVICES")
+	assert.Empty(t, resp.Mounts, "no vcann-rt preload/lib mounts")
+}
+
 func Test_ascendCANNDir(t *testing.T) {
 	cases := []struct {
 		ver, family, want string

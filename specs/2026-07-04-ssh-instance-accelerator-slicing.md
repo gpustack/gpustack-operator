@@ -368,14 +368,16 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
 - Checkpoint: **Story 4 passes**; slicing unaffected.
 
 #### Phase 4 — [op+dp] Ascend parity
-- [ ] 4.1 Apply resource-on-`main` + `sshd` device-only co-allocation to Ascend; ensure `ASCEND_VISIBLE_DEVICES`
+- [x] 4.1 Apply resource-on-`main` + `sshd` device-only co-allocation to Ascend; ensure `ASCEND_VISIBLE_DEVICES`
       carries the **exact allocated index** to `sshd` (no `all`); `main` (resource holder) gets `libvruntime.so`
-      + `npu_info.config` + runtime-injected `libdcmi`/CANN. Difficulty: MEDIUM — the in-process reservation
-      (Phase 2.2) is the same mechanism as NVIDIA (the index is recorded at `main`'s Allocate and reused for
-      `sshd`); the only Ascend-specific extra is that even the single-accelerator case needs an explicit index
-      (no `all` shortcut), so Phase 2.1's env shortcut does not apply. AC: an Ascend sliced SSH Instance enforces
-      its NPU quota for the `main` process and the SSH session. Verify: Ascend e2e where hardware exists; else
-      unit tests on the ascend allocator co-allocation + a documented manual runbook.
+      + `npu_info.config` + runtime-injected `libdcmi`/CANN. Difficulty: MEDIUM — but the operator side (2.4,
+      manufacturer-agnostic via `GetAcceleratableResourceName`), the in-process reservation (2.2) and the
+      visibility Allocate (2.3, delegating to the Responder) already generalized, so this reduced to
+      **registering the Ascend visibility server in `ascend.New()`**: the responder already emits only
+      `ASCEND_VISIBLE_DEVICES=<indexes>` (exact index, no `all`, no vcann-rt artifacts) for every non-sliced
+      mode, so the reserved index flows straight through. AC: an Ascend sliced SSH Instance enforces its NPU
+      quota for the `main` process and the SSH session. Verify: Ascend e2e where hardware exists; else unit tests
+      on the ascend allocator visibility response + a documented manual runbook.
 - Checkpoint: **Story 5 passes** (backend parity).
 
 #### Phase 5 — [t] Regression + edge coverage
