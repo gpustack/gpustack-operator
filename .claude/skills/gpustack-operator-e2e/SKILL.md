@@ -64,7 +64,13 @@ behave the same on a single-node local cluster and a multi-node real one. CASE 1
 accelerated pool like CASE 6 and asserts only the Instance admission result (persisted spec.resources
 / rejection), so it needs no real hardware. The `spec.os`/`spec.arch` materialization from the backing
 ClusterQueue labels is asserted inline — in CASE 1 for the cpu-only pool and CASE 6 for the accelerated
-one — not as a standalone case.
+one — not as a standalone case. CASE 13, like CASE 8, needs **real** accelerator hardware and
+**auto-skips** when no `*.sliced` resource is advertised (also skips when the runner has no `ssh`
+client); it renders a real SSH-enabled sliced Instance and asserts, through a real SSH login, that the
+slice is visible in both `main` and the SSH shell and that the shell is capability-stripped (host
+`mknod` denied). It uses a 40% slice to stay clear of the pre-existing > 50% single-card self-eviction
+in the node-devices feasibility ledger (`nodeDevicesFeasibility` counts a workload's own allocation
+against itself).
 
 | Case | Title (Story) | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
@@ -80,6 +86,7 @@ one — not as a standalone case.
 | 10 | Start re-validates a resized-while-stopped Instance (no create-check bypass) | `pkg/worker/webhooks/worker/instance.go` | `cases/case-10.sh` | yes (confirm) |
 | 11 | Sliced per-card accounting: three-view + per-card OnceMax (spread observed best-effort) | `pkg/deviceplugin/server.go`, `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go` | `cases/case-11.sh` | yes (confirm) |
 | 12 | Sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1 | `pkg/worker/webhooks/worker/instance.go`, `pkg/utils/quantityx/quantity.go` | `cases/case-12.sh` | yes (confirm) |
+| 13 | SSH-enabled sliced Instance: slice visible over SSH + confined shell (Stories 1/4) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh`, `pkg/deviceplugin/**`, `pkg/devicemanager/allocator/**` | `cases/case-13.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
