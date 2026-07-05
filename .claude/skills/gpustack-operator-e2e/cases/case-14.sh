@@ -9,7 +9,9 @@
 # combined per-card memory percentage is <= 100 both admit and run on the same physical card, while a
 # third slice that would push the card over 100% is held (SchedulingGated / not Running) rather than
 # over-admitted. This exercises the sliced credits quota + the node-devices AdmissionCheck end to end
-# on REAL accelerator hardware; it AUTO-SKIPS when no `*.sliced` resource is advertised.
+# on REAL accelerator hardware; it AUTO-SKIPS when no `*.sliced` resource is advertised. It also checks
+# that the two admitted slices stay Running after a sibling's (rejected) admission attempt re-triggers
+# their own AdmissionCheck reconcile — a node-devices-self-eviction (8b3eba2) regression guard.
 #
 # Self-recovering: deletes the three test Instances on exit.
 set -uo pipefail
@@ -107,6 +109,19 @@ if [ "$held" = 1 ]; then
   record PASS "over-budget slice is held (not over-admitted)" "${INST_C} not Running (phase='${ph:-<no pod>}'; 120% > one card)"
 else
   record FAIL "over-budget slice is held (not over-admitted)" "${INST_C} Running — three 40% slices over-admitted one card"
+fi
+
+# 3. A and B must still be Running after C's (rejected) admission attempt re-triggers their own
+# AdmissionCheck reconcile — this is the self-eviction regression (8b3eba2): a pre-fix reconciler
+# could count a Workload's own already-admitted allocation against itself and flip it to Retry,
+# evicting a stable slice purely because a sibling Workload's admission was (re-)evaluated.
+sleep 10
+ra=$(kubectl -n default get pod "$INST_A" -o jsonpath='{.status.phase}' 2>/dev/null)
+rb=$(kubectl -n default get pod "$INST_B" -o jsonpath='{.status.phase}' 2>/dev/null)
+if [ "$ra" = "Running" ] && [ "$rb" = "Running" ]; then
+  record PASS "A and B stay admitted after C's rejection" "${INST_A}=${ra} ${INST_B}=${rb} — no self-eviction on sibling re-evaluation"
+else
+  record FAIL "A and B stay admitted after C's rejection" "${INST_A}=${ra:-?} ${INST_B}=${rb:-?} — a sibling's admission attempt evicted an already-running slice"
 fi
 
 echo
