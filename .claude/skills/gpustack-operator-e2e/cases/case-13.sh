@@ -173,7 +173,7 @@ fi
 kubectl -n default port-forward "pod/$POD" "${LOCAL_PORT}:22" >/dev/null 2>&1 &
 PF_PID=$!
 for _ in $(seq 1 20); do (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") 2>/dev/null && { exec 3>&- 3<&-; break; }; sleep 1; done
-ssh_out=$(ssh -T -p "$LOCAL_PORT" -i "$KEYDIR/id" \
+ssh_out=$(ssh -T -p "$LOCAL_PORT" -i "$KEYDIR/id" -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15 \
   root@127.0.0.1 2>/dev/null <<'CMDS'
 echo "CAPEFF=$(grep CapEff /proc/self/status | awk '{print $2}')"
