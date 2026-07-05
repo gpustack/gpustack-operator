@@ -40,6 +40,14 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModeSliced),
 		)
 	}
+	// The visibility server co-allocates the SSH sidecar to the same physical NPU(s) its
+	// workload container was granted; for any non-sliced mode the responder emits only
+	// ASCEND_VISIBLE_DEVICES with the exact allocated index(es) — Ascend has no `all`
+	// wildcard — which is exactly what the sidecar needs (device-cgroup access, no
+	// vcann-rt soft-slicing artifacts).
+	servers = append(servers,
+		newServer(logger, workercore.DeviceAllocationModeVisibility),
+	)
 
 	return aggregated{
 		logger:     logger,
