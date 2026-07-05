@@ -344,7 +344,8 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
       already returns `NVIDIA_VISIBLE_DEVICES=<ids>` only, so the reserved device ids flow straight through.
       Register the visibility server in `nvidia.New()`. Difficulty: medium. AC: the response points `sshd` at
       exactly `main`'s device(s); no HAMi artifacts; no ledger unit consumed; each card advertises
-      `SlicedResourceMaxSize` visibility tokens; an empty reservation fails closed. Verify:
+      `SlicedResourceMaxSize` visibility tokens; a **missing or stale** reservation (the reserved device no
+      longer in the node inventory) fails closed — never delegating an empty visible-devices env. Verify:
       `pkg/deviceplugin` + `pkg/devicemanager/allocator/nvidia` unit tests on the visibility ListAndWatch/Allocate
       + fail-closed + response shape; multi-GPU e2e. (Ascend registers its visibility server in Phase 4.)
 - [x] 2.4 [op] In `convertPodFromInstance`, make `sshd` request the visibility resource
@@ -352,6 +353,15 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
       (replacing the "device-only (Phase 2)" placeholder from 1.1). Difficulty: low. AC: rendered `sshd` carries
       the visibility resource with quantity = `main`'s card count; the webhook admits the mixed Pod (2.1); `main`
       still carries the `.sliced` request. Verify: `instance_test.go` unit test; e2e admission.
+- [x] 2.5 [dp] Register the visibility server in **every** accelerator backend's `New()`, not only NVIDIA/Ascend
+      (review-driven). The operator emits `device.gpustack.ai/<manufacturer>.visibility` for *any* acceleratable
+      manufacturer (2.4 is gated only on `requestAccelerator`), so a backend that does not advertise it would
+      leave its SSH accelerator Instances permanently `Pending`. The visibility server is manufacturer-agnostic
+      (its Allocate reuses `main`'s reservation and delegates to the backend Responder, whose non-sliced path
+      already emits the plain device-visibility response — vendor env for NVIDIA/Ascend/AMD/Cambricon/Iluvatar/
+      MThreads, device nodes for Hygon/MetaX/THead). Difficulty: low. AC: `amd`, `cambricon`, `hygon`, `iluvatar`,
+      `metax`, `mthreads`, `thead` each register `DeviceAllocationModeVisibility`; an SSH exclusive Instance on any
+      backend schedules. Verify: `go build`; existing allocator tests stay green.
 - Checkpoint: **Story 1 passes** on single- and multi-accelerator nodes (hardware e2e). Out of scope — the
       *separate*, pre-existing identity problem (two **distinct but identical** Instances pending on the node at
       once, where `getAllocatingPod`'s oldest-quantity-match heuristic can misattribute) is orthogonal to this
@@ -491,6 +501,11 @@ Three approaches were built/evaluated on EKS:
   `SlicedResourceMaxSize` tokens mapping to no real device selection, so it never gates scheduling and consumes
   no `.sliced` ledger units; its anonymous Allocate is correlated by the same in-process, same-pod-window
   reservation and returns only `<vendor>_VISIBLE_DEVICES` for `main`'s device(s).
+- Maintenance invariant (no automated guard): every accelerator backend registered in
+  `supportedAllocatorCreators` must also register the `Visibility` server in its `New()`, because the operator
+  emits the visibility resource for all acceleratable manufacturers. The `device.Allocator`/`Server` interfaces
+  expose no resource-name enumeration, so this is not unit-testable without new production API; a future central
+  registration helper (or an interface method) would make the omission impossible rather than merely conventional.
 - Whether `HostIPC: true` can be dropped to a pod-level IPC namespace (the `nsenter --ipc` path only needs
   `main`'s IPC namespace); if it must stay, document the host SysV IPC / `/dev/shm` exposure in the threat model.
 - Upgrade/rollback of already-running SSH Instances when the container-assignment + co-allocation change ships
