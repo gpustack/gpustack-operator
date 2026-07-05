@@ -70,7 +70,11 @@ client); it renders a real SSH-enabled sliced Instance and asserts, through a re
 slice is visible in both `main` and the SSH shell and that the shell is capability-stripped (host
 `mknod` denied). It uses a 60% slice (Story 1's canonical ~9830 MiB of a 16Gi T4); a > 50% single-card
 slice also exercises the node-devices AdmissionCheck fix that stops it from counting a Workload's own
-allocation against itself (which previously self-evicted such slices in a recreate loop).
+allocation against itself (which previously self-evicted such slices in a recreate loop). CASE 14
+(Story 6) and CASE 15 (exclusive/whole-card SSH regression) likewise need **real** accelerator hardware
+and **auto-skip** when none is advertised (CASE 15 also needs an `ssh` client); CASE 14 asserts two
+in-budget slices coexist on one card while an over-budget third is held, and CASE 15 asserts the
+non-sliced SSH path still sees the whole card through a capability-stripped shell.
 
 | Case | Title (Story) | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
@@ -87,6 +91,8 @@ allocation against itself (which previously self-evicted such slices in a recrea
 | 11 | Sliced per-card accounting: three-view + per-card OnceMax (spread observed best-effort) | `pkg/deviceplugin/server.go`, `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go` | `cases/case-11.sh` | yes (confirm) |
 | 12 | Sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1 | `pkg/worker/webhooks/worker/instance.go`, `pkg/utils/quantityx/quantity.go` | `cases/case-12.sh` | yes (confirm) |
 | 13 | SSH-enabled sliced Instance: slice visible over SSH + confined shell (Stories 1/4) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh`, `pkg/deviceplugin/**`, `pkg/devicemanager/allocator/**` | `cases/case-13.sh` | yes (confirm) |
+| 14 | Multiple slices coexist on one physical card within budget (Story 6) | `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go`, `pkg/deviceplugin/**` | `cases/case-14.sh` | yes (confirm) |
+| 15 | Exclusive whole-card SSH Instance still works (regression) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh` | `cases/case-15.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
