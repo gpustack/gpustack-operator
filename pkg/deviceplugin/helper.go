@@ -58,6 +58,19 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartiti
 		return devIDs
 	}
 
+	if mode == workercore.DeviceAllocationModeVisibility {
+		// Visibility advertises, per card, a flat pool sized to SlicedResourceMaxSize — the
+		// most slices (hence sidecars) a card can host — so a sidecar can always co-allocate
+		// visibility to the card its workload was placed on. The tokens are interchangeable:
+		// the visibility Allocate ignores which token kubelet picked and reads the pod's
+		// reserved device instead, so this never gates scheduling and consumes no ledger unit.
+		devIDs := make([]string, nodefeature.SlicedResourceMaxSize)
+		for i := 0; i < nodefeature.SlicedResourceMaxSize; i++ {
+			devIDs[i] = str + padIndex(uint64(i))
+		}
+		return devIDs
+	}
+
 	// Sliced advertises a coarse, loose injection-token pool sized by the card's
 	// hardware MaxPartitions. It only needs to be >= the real max concurrency (the
 	// admin partition count N, which the Webhook bounds to <= MaxPartitions) so it
