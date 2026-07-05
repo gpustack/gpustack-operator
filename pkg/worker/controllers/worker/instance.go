@@ -442,7 +442,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				}
 				return sc
 			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, true),
+			Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          getPortName(p),
@@ -489,7 +489,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 					},
 				},
 			},
-			Resources: getResourceRequirements(inst, instType, false, false, false),
+			Resources: getResourceRequirements(inst, instType, false, false, false, true),
 			Env: []core.EnvVar{
 				{
 					Name:  "VOLUME_MOUNT_PATH",
@@ -525,7 +525,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				}
 				return sc
 			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, true),
+			Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
 			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
 				return core.ContainerPort{
 					Name:          getPortName(p),
@@ -828,12 +828,18 @@ func getPortName(port workercore.InstancePort) string {
 //	withAccelerator      — write the accelerator entry (Limits == Requests),
 //	                        gated by instType.Spec.Acceleratable AND the
 //	                        pod actually asking for Accelerator > 0
+//	withVisibility       — write the sidecar visibility entry
+//	                        (device.gpustack.ai/<manufacturer>.visibility) with
+//	                        main's card count, so the device-plugin co-allocates
+//	                        the SSH sidecar the same physical device(s) as main;
+//	                        same accelerator gate. Mutually exclusive with
+//	                        withAccelerator.
 //
-// The three flags map to the three container shapes the controller emits in
+// The flags map to the container shapes the controller emits in
 // convertPodFromInstance:
 //
-//	main + sshd: main has general + accelerator; sshd has neither (its narrow
-//	             device permission is granted separately, not via a resource request)
+//	main + sshd: main has general + accelerator; sshd has the device-only
+//	             visibility resource (main's card count), resolved on the node
 //	main alone : main has general + accelerator
 //
 // For general resources the limit is always the user-facing quantity, and the
@@ -853,6 +859,7 @@ func getResourceRequirements(
 	instType *worker.InstanceType,
 	withGeneral, withGeneralOvercommit bool,
 	withAccelerator bool,
+	withVisibility bool,
 ) core.ResourceRequirements {
 	rr := core.ResourceRequirements{
 		Limits:   core.ResourceList{},
@@ -878,8 +885,9 @@ func getResourceRequirements(
 		inst.Spec.Resources.Accelerator != nil &&
 		inst.Spec.Resources.Accelerator.Sign() > 0
 	if requestAccelerator {
-		if withAccelerator {
-			cardQ := *inst.Spec.Resources.Accelerator
+		cardQ := *inst.Spec.Resources.Accelerator
+		switch {
+		case withAccelerator:
 			if instType.Spec.Sliceable && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
 				// A sliced request emits the bare card count C (.sliced, which Kueue
 				// folds into credits via multiplyBy) plus the per-card memory/compute
@@ -903,6 +911,14 @@ func getResourceRequirements(
 				rr.Limits[resName] = cardQ
 				rr.Requests[resName] = cardQ
 			}
+		case withVisibility:
+			// The SSH sidecar requests the internal visibility resource with main's
+			// card count (never the slice percentages — it grants device access, not a
+			// slice). The device-plugin resolves it to main's already-allocated
+			// device(s) on the node, giving the sidecar a narrow device-cgroup grant.
+			visResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeVisibility)
+			rr.Limits[visResName] = cardQ
+			rr.Requests[visResName] = cardQ
 		}
 	}
 
