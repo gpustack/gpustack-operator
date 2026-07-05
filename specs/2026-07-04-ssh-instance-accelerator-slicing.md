@@ -1,6 +1,6 @@
 # Spec: Colocate Sliced Accelerator Resources With the Instance Workload (SSH-Enabled Instances)
 
-Status: Built
+Status: Shipped
 Type: Bug fix
 
 ## Summary
