@@ -345,7 +345,7 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
       `SlicedResourceMaxSize` visibility tokens; an empty reservation fails closed. Verify:
       `pkg/deviceplugin` + `pkg/devicemanager/allocator/nvidia` unit tests on the visibility ListAndWatch/Allocate
       + fail-closed + response shape; multi-GPU e2e. (Ascend registers its visibility server in Phase 4.)
-- [ ] 2.4 [op] In `convertPodFromInstance`, make `sshd` request the visibility resource
+- [x] 2.4 [op] In `convertPodFromInstance`, make `sshd` request the visibility resource
       `device.gpustack.ai/<manufacturer>.visibility` with the **same quantity as `main`'s accelerator card count**
       (replacing the "device-only (Phase 2)" placeholder from 1.1). Difficulty: low. AC: rendered `sshd` carries
       the visibility resource with quantity = `main`'s card count; the webhook admits the mixed Pod (2.1); `main`

@@ -59,6 +59,7 @@ func TestGetResourceRequirements(t *testing.T) {
 	slicedCardNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
 	slicedMemPctNVIDIA := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(nodefeature.ManufacturerNVIDIA)
 	slicedCoresPctNVIDIA := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(nodefeature.ManufacturerNVIDIA)
+	visNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	cases := []struct {
 		name string
@@ -74,7 +75,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		sliceable     bool // → Spec.Sliceable (true → the accelerator can be sliced)
 
 		// getResourceRequirements flags.
-		withGeneral, withGeneralOvercommit, withAccelerator bool
+		withGeneral, withGeneralOvercommit, withAccelerator, withVisibility bool
 
 		wantLimits   core.ResourceList
 		wantRequests core.ResourceList
@@ -249,6 +250,34 @@ func TestGetResourceRequirements(t *testing.T) {
 			wantLimits:   core.ResourceList{},
 			wantRequests: core.ResourceList{},
 		},
+		{
+			// The SSH sidecar requests the internal visibility resource with main's
+			// card count, so the device-plugin co-allocates the same physical card(s).
+			name: "visibility only — sidecar carries main's card count",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("2"),
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
+			withVisibility: true,
+			wantLimits:     core.ResourceList{visNVIDIA: qty("2")},
+			wantRequests:   core.ResourceList{visNVIDIA: qty("2")},
+		},
+		{
+			// On a sliced type the sidecar visibility is still just the card count:
+			// no slice percentage keys, since it grants device access, not a slice.
+			name: "visibility on a sliced type — just the card count, no slice keys",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), memPct: 60, coresPct: 100,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliceable: true,
+			withVisibility: true,
+			wantLimits:     core.ResourceList{visNVIDIA: qty("1")},
+			wantRequests:   core.ResourceList{visNVIDIA: qty("1")},
+		},
+		{
+			name: "visibility requested but pod did not request accelerator — empty",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: nil,
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
+			withVisibility: true,
+			wantLimits:     core.ResourceList{},
+			wantRequests:   core.ResourceList{},
+		},
 	}
 
 	for _, c := range cases {
@@ -275,7 +304,7 @@ func TestGetResourceRequirements(t *testing.T) {
 			}
 
 			rr := getResourceRequirements(inst, instType,
-				c.withGeneral, c.withGeneralOvercommit, c.withAccelerator)
+				c.withGeneral, c.withGeneralOvercommit, c.withAccelerator, c.withVisibility)
 
 			assert.NotNil(t, rr.Limits, "limits map should be initialized")
 			assert.NotNil(t, rr.Requests, "requests map should be initialized")
@@ -416,14 +445,17 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 // SSH-enabled sliced Instance renders the accelerator resource on the workload
 // container (main), not the sshd sidecar, so the device-plugin injects the slicing
 // artifacts (preload file, interception library, limit env) where the workload
-// actually runs. The sidecar carries no accelerator resource; its narrow device
-// permission is granted separately.
+// actually runs. The sidecar carries no accelerator resource; instead it requests
+// the internal visibility resource with main's card count, so the device-plugin
+// co-allocates the same physical device(s) as a narrow device-cgroup grant.
 func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T) {
 	cli := buildInstanceClient()
 	r := &InstanceReconciler{Client: cli, APIReader: cli}
 
 	slicedCard := nodefeature.GetAcceleratableResourceName(
 		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+	visRes := nodefeature.GetAcceleratableResourceName(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	acc := qty("1")
 	inst := &workercore.Instance{
@@ -466,4 +498,12 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 	assert.True(t, mainHas, "the sliced accelerator must land on main (the workload container)")
 	_, sshdHas := sshd.Resources.Limits[slicedCard]
 	assert.False(t, sshdHas, "sshd must not carry the sliced accelerator resource")
+
+	// The sidecar carries the device-only visibility resource with main's card count
+	// (1 here), which the device-plugin resolves to main's device(s) on the node.
+	_, mainHasVis := main.Resources.Limits[visRes]
+	assert.False(t, mainHasVis, "main must not carry the sidecar visibility resource")
+	visQ, sshdHasVis := sshd.Resources.Limits[visRes]
+	assert.True(t, sshdHasVis, "sshd must carry the device-only visibility resource")
+	assert.Equal(t, "1", visQ.String(), "sidecar visibility quantity equals main's card count")
 }
