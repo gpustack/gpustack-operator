@@ -33,6 +33,11 @@ func TestAcceleratableResourceNames(t *testing.T) {
 		GetAcceleratableSlicedMemoryPercentageResourceName(ManufacturerNVIDIA))
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.memory-mib"),
 		GetAcceleratableSlicedMemoryMibResourceName(ManufacturerNVIDIA))
+
+	// The SSH sidecar's device-only visibility resource lives under a distinct domain,
+	// outside the accelerator families, so admission does not read it as a mode.
+	assert.Equal(t, core.ResourceName("device.gpustack.ai/nvidia.visibility"),
+		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility))
 }
 
 func TestIsKnownAcceleratableResourceName(t *testing.T) {
@@ -48,6 +53,7 @@ func TestIsKnownAcceleratableResourceName(t *testing.T) {
 		{"amd exclusive", "amd.com/gpu", true},
 		{"unknown", "example.com/foo", false},
 		{"credits is not a device resource", "credits.gpustack.ai/nvidia", false},
+		{"sidecar visibility is not an accelerator mode", "device.gpustack.ai/nvidia.visibility", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

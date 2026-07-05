@@ -139,6 +139,12 @@ const (
 	// DeviceAllocationModeSliced indicates that the device is allocated to multiple consumers,
 	// and the resources are partitioned among them.
 	DeviceAllocationModeSliced
+	// DeviceAllocationModeVisibility is an internal-only mode: it grants a container
+	// device-cgroup visibility to the physical device(s) another container in the same Pod
+	// was allocated (used by the SSH sidecar to reach main's accelerator), without a real
+	// device selection or any resource accounting. It is never advertised on an InstanceType
+	// and never written to Devices status.
+	DeviceAllocationModeVisibility
 )
 
 func (in DeviceAllocationMode) String() string {
@@ -149,6 +155,8 @@ func (in DeviceAllocationMode) String() string {
 		return "Shared"
 	case DeviceAllocationModeSliced:
 		return "Sliced"
+	case DeviceAllocationModeVisibility:
+		return "Visibility"
 	default:
 		return "None"
 	}

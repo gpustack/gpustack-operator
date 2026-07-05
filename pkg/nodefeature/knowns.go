@@ -63,6 +63,16 @@ const (
 	// node-level only (drives CUDA_DEVICE_MEMORY_LIMIT_IN_BYTES; the webhook folds it
 	// into .sliced.units via floor(mib/cardVRAM*M)); never folded into Kueue credits.
 	SlicedMemoryMibResourceNameSuffix = ".sliced.memory-mib"
+
+	// VisibilityResourceNamePrefix and VisibilityResourceNameSuffix compose the device-only
+	// "visibility" resource the SSH sidecar requests to co-allocate the same physical
+	// accelerator(s) its workload container (main) was granted, e.g.
+	// "device.gpustack.ai/nvidia.visibility". It is deliberately outside the accelerator
+	// resource families ("<vendor>/<device>[.shared|.sliced…]") so the Pod webhook's
+	// one-mode check ignores it, and the device-plugin serves it as a virtual resource that
+	// injects only device visibility (no slice, no ledger unit).
+	VisibilityResourceNamePrefix = "device.gpustack.ai/"
+	VisibilityResourceNameSuffix = ".visibility"
 )
 
 const (
@@ -218,9 +228,15 @@ func GetAcceleratablePciVendorIDs() []string {
 	return ids
 }
 
-// GetAcceleratableResourceName returns the accelerator resource name advertised
-// by the device-plugin to the kubelet for the given manufacturer and allocation
-// mode (e.g. "nvidia.com/gpu", "nvidia.com/gpu.shared", "nvidia.com/gpu.sliced").
+// GetAcceleratableResourceName returns the resource name advertised by the device-plugin
+// to the kubelet for the given manufacturer and allocation mode:
+//   - Exclusive → "nvidia.com/gpu", Shared → "nvidia.com/gpu.shared",
+//     Sliced → "nvidia.com/gpu.sliced" (the accelerator families).
+//   - Visibility → "device.gpustack.ai/nvidia.visibility": the device-only resource the SSH
+//     sidecar requests (with the SAME quantity its workload container asks of the real
+//     accelerator) to co-allocate visibility to the same physical device(s). It is
+//     deliberately outside the accelerator families, so IsKnownAcceleratableResourceName is
+//     false for it and admission does not read it as an allocation mode.
 func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAllocationMode) core.ResourceName {
 	resName := _ManufacturerAcceleratableResourceNameMap[manufacturer]
 	switch mode {
@@ -230,6 +246,8 @@ func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAll
 		return resName + SharedResourceNameSuffix
 	case workercore.DeviceAllocationModeSliced:
 		return resName + SlicedResourceNameSuffix
+	case workercore.DeviceAllocationModeVisibility:
+		return core.ResourceName(VisibilityResourceNamePrefix + manufacturer + VisibilityResourceNameSuffix)
 	}
 }
 
