@@ -178,6 +178,18 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil
 	}
 
+	// Once the Workload is admitted its placement is settled and its own device
+	// allocation is already subtracted from the per-card ledger. Re-checking would count
+	// that allocation against itself — a slice larger than half a card leaves the card
+	// with Remaining below the demand it just satisfied — and flip the check to Retry,
+	// evicting a healthy running Workload in a recreate loop. The gate only needs to hold
+	// before admission (it holds Retry until a card frees); after admission there is
+	// nothing left to gate, so leave the settled verdict untouched.
+	if kueueworkload.IsAdmitted(wl) {
+		logger.V(3).Info("skip already-admitted workload; placement settled")
+		return ctrl.Result{}, nil
+	}
+
 	// Limit to the checks this controller owns.
 	checks, err := kueueadmissioncheck.FilterForController(ctx, r.Client, wl.Status.AdmissionChecks, _NodeDevicesControllerName)
 	if err != nil {

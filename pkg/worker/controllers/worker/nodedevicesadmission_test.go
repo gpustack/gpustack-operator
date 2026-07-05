@@ -297,3 +297,91 @@ func TestNodeDevicesAdmissionCheckReconciler(t *testing.T) {
 	assert.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: "foreign"}, gotForeign))
 	assert.Empty(t, gotForeign.Status.Conditions)
 }
+
+// TestNodeDevicesAdmission_AdmittedWorkloadNotSelfEvicted guards the > 50% single-card
+// self-eviction: once a Workload is admitted, its own slice is already subtracted from the
+// per-card ledger, so re-checking must not count that allocation against itself and flip the
+// check to Retry (which would evict the running Workload in a recreate loop). A not-yet-admitted
+// Workload with the same ledger must still be held (Retry) — the gate only fires before admission.
+func TestNodeDevicesAdmission_AdmittedWorkloadNotSelfEvicted(t *testing.T) {
+	base := string(nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive))
+	slicedCard := core.ResourceName(base + nodefeature.SlicedResourceNameSuffix)
+	slicedUnits := core.ResourceName(base + nodefeature.SlicedUnitsResourceNameSuffix)
+	poolLabels := map[string]string{"feature.gpustack.ai/nvidia": "true"}
+
+	newWorkload := func(admitted bool) *kueue.Workload {
+		conds := []meta.Condition{{
+			Type: kueue.WorkloadQuotaReserved, Status: meta.ConditionTrue,
+			Reason: "QuotaReserved", Message: "quota reserved", LastTransitionTime: meta.Now(),
+		}}
+		if admitted {
+			conds = append(conds, meta.Condition{
+				Type: kueue.WorkloadAdmitted, Status: meta.ConditionTrue,
+				Reason: "Admitted", Message: "admitted", LastTransitionTime: meta.Now(),
+			})
+		}
+		return &kueue.Workload{
+			ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "w"},
+			Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+				Name: "main", Count: 1,
+				Template: core.PodTemplateSpec{Spec: core.PodSpec{Containers: []core.Container{{
+					Name: "c",
+					Resources: core.ResourceRequirements{Requests: core.ResourceList{
+						slicedCard:  resource.MustParse("1"),
+						slicedUnits: resource.MustParse("960000"),
+					}},
+				}}}},
+			}}},
+			Status: kueue.WorkloadStatus{
+				Conditions: conds,
+				Admission: &kueue.Admission{PodSetAssignments: []kueue.PodSetAssignment{{
+					Flavors: map[core.ResourceName]kueue.ResourceFlavorReference{"credits": "gpu-pool"},
+				}}},
+				AdmissionChecks: []kueue.AdmissionCheckState{{
+					Name: _NodeDevicesAdmissionCheckName, State: kueue.CheckStateReady,
+				}},
+			},
+		}
+	}
+
+	// The card has only 640k free: the 960k this slice needs no longer fits because the
+	// workload's own allocation is already subtracted — a naive re-check flips to Retry.
+	setup := func(wl *kueue.Workload) (*NodeDevicesAdmissionReconciler, ctrlcli.Client) {
+		rf := &kueue.ResourceFlavor{ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"}, Spec: kueue.ResourceFlavorSpec{NodeLabels: poolLabels}}
+		check := &kueue.AdmissionCheck{ObjectMeta: meta.ObjectMeta{Name: _NodeDevicesAdmissionCheckName}, Spec: kueue.AdmissionCheckSpec{ControllerName: _NodeDevicesControllerName}}
+		devs := devicesWithRemaining(640000)
+		devs.ObjectMeta = meta.ObjectMeta{Name: "node-a", Labels: poolLabels}
+		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
+			WithObjects(rf, check, &devs, wl).
+			WithStatusSubresource(&kueue.Workload{}).
+			Build()
+		return &NodeDevicesAdmissionReconciler{Client: cli, APIReader: cli}, cli
+	}
+
+	stateOf := func(cli ctrlcli.Client) kueue.CheckState {
+		got := new(kueue.Workload)
+		assert.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "default", Name: "w"}, got))
+		for _, cs := range got.Status.AdmissionChecks {
+			if cs.Name == _NodeDevicesAdmissionCheckName {
+				return cs.State
+			}
+		}
+		return ""
+	}
+
+	t.Run("admitted workload is not self-evicted", func(t *testing.T) {
+		wl := newWorkload(true)
+		r, cli := setup(wl)
+		_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "default", Name: "w"}})
+		assert.NoError(t, err)
+		assert.Equal(t, kueue.CheckStateReady, stateOf(cli), "admitted workload's check must stay Ready, not flip to Retry")
+	})
+
+	t.Run("not-yet-admitted workload is still gated", func(t *testing.T) {
+		wl := newWorkload(false)
+		r, cli := setup(wl)
+		_, err := r.Reconcile(context.Background(), ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Namespace: "default", Name: "w"}})
+		assert.NoError(t, err)
+		assert.Equal(t, kueue.CheckStateRetry, stateOf(cli), "before admission the gate must hold Retry when the slice cannot fit")
+	})
+}
