@@ -441,6 +441,11 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 	}
 
+	// Record the allocation in-process so the SSH sidecar's visibility Allocate (same pod,
+	// later in this admission window) can co-allocate the same physical device without
+	// racing the annotation's cache propagation.
+	s.Reconciler.reserveDevices(pod.UID, allocatedStatus)
+
 	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
 	if err != nil {
 		s.Logger.Error(err, "get container allocate response")
