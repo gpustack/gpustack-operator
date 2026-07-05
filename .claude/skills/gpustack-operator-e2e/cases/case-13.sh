@@ -20,10 +20,10 @@
 # Like CASE 8 it needs REAL accelerator hardware (the HAMI runtime cap cannot be mocked) and AUTO-SKIPS
 # with a message when no `*.sliced` resource is advertised. It requires an ssh client on the runner.
 #
-# The slice is intentionally 40% (memory): the node-devices AdmissionCheck's whole-card feasibility
-# ledger currently counts a workload's own allocation against itself, so a > 50% single-card slice
-# periodically self-evicts (a pre-existing issue in nodeDevicesFeasibility, independent of this fix).
-# 40% stays comfortably within one card's budget so the Pod is stable for the assertions.
+# The slice is 60% (memory) — Story 1's canonical example (~9830 MiB of a 16Gi T4). Because a > 50%
+# single-card slice keeps the card busy across its own admission, the Pod's stability here also guards
+# the node-devices AdmissionCheck fix that stops it from counting a Workload's own allocation against
+# itself (which previously self-evicted > 50% slices in a recreate loop).
 #
 # Self-recovering: deletes the test Instance, its SSH secret, and the port-forward on exit.
 set -uo pipefail
@@ -31,7 +31,7 @@ set -uo pipefail
 NS="${1:?usage: case-13.sh <NS>}"
 INST=gpustack-e2e-ssh-slice
 SECRET=gpustack-e2e-ssh-slice-key
-MEM_PCT=40
+MEM_PCT=60
 LOCAL_PORT=22022
 KEYDIR="$(mktemp -d)"
 
