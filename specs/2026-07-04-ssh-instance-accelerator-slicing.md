@@ -294,36 +294,67 @@ image (pack/ssh-server), [t]=tests. Difficulty noted per task. Every phase leave
       intermediate state on the feature branch (main-process GPU access works for both), not a shippable point —
       1.1 → 2.x land together before merge. The non-SSH (main-alone) path is unaffected.
 
-#### Phase 2 — [op+dp] Grant `sshd` a narrow device permission for `main`'s physical device
-- [ ] 2.1 (single-accelerator node — first cut, low risk) Give `sshd` device-cgroup access to the node's sole
-      accelerator via the vendor visible-devices env scoped to that specific device (NVIDIA: the node's GPU
-      UUID; Ascend: index `0`; never `all`, never privileged). No plugin correlation needed (the device is
-      unambiguous). Difficulty: medium. AC: on a 1-accelerator node the SSH shell reports the slice; a negative
-      control without the grant fails device init. Verify: Phase 0 e2e turns GREEN on a 1-GPU node; run the
-      negative control (expect NVML/NPU init error).
-- [ ] 2.2 (multi-accelerator node) Add same-physical-device co-allocation so `sshd` is authorized for exactly
-      the device `main` received. The kubelet Allocate RPC is anonymous, but for **this Pod's two containers**
-      the correlation is tractable *in-process, without any distributed lock*: `pkg/devicemanager/controllers/setup.go`
-      registers a single `DevicesReconciler` that is **both** the on-node pod-watcher and the device-plugin
-      `Allocate` handler (one process), and kubelet issues Allocate **per-container, sequentially, in Pod spec
-      order, and non-interleaved across pods** — so within one Pod's admission window `main` is allocated, then
-      `sshd` back-to-back with no other pod interleaved. Mechanism: `main`'s Allocate records the chosen physical
-      device in an **in-process, pod-keyed reservation** (node-local memory on the singleton reconciler); `sshd`'s
-      **device-only** Allocate, arriving in the same window, reads that reservation and injects visible-devices +
-      device nodes + device-cgroup for exactly `main`'s device (NO HAMi preload/limit). Writing the reservation
-      *inside* `main`'s Allocate (not from an external watcher) is what removes any watcher→Allocate race; crash
-      recovery rides the persisted `device.gpustack.ai/accelerator.allocated` annotation, not a lock. Give `sshd`
-      a device-only resource whose name is **outside the known-acceleratable families** (see Risks — the Pod
-      webhook forbids a Pod that mixes accelerator *modes*), so its Allocate neither collides with `.sliced`
-      matching nor trips `podAcceleratorModes`. Difficulty: MEDIUM. AC: on a multi-accelerator node `main` and
-      `sshd` resolve to the same device; SSH shell reports `main`'s slice; the webhook admits the mixed
-      `main`(sliced)/`sshd`(device-only) Pod. Verify: multi-GPU e2e + unit tests on the in-process
-      reservation/correlation and on webhook admission.
-      Out of scope — the *separate*, pre-existing identity problem (two **distinct but identical** Instances
-      pending on the node at once, where `getAllocatingPod`'s oldest-quantity-match heuristic can misattribute)
-      is orthogonal to this two-container co-allocation and is **not addressed by this fix** (tracked in Open
-      Questions; a `coordination.k8s.io` Lease is the candidate hardening only if it becomes load-bearing).
-- Checkpoint: **Story 1 passes** on single- and multi-accelerator nodes.
+#### Phase 2 — [op+dp] Grant `sshd` a narrow device permission for `main`'s physical device (unified device-plugin co-allocation)
+Design (decided over the earlier single-card/multi-card split): the operator cannot scope the sidecar to a
+specific device at Pod-render time — the Pod is not scheduled yet, so no node/UUID/index is known, and Ascend
+has no `all` wildcard — so the scoping must happen on-node in the device-plugin `Allocate`, which is the only
+place the selected device is known. `sshd` requests a new device-only **visibility** resource
+`device.gpustack.ai/<manufacturer>.visibility`, with the **same quantity** `main` asks of the real accelerator
+resource (its card count — the value of `<vendor>/<device>[.shared|.sliced]`), so the sidecar is co-allocated
+visibility to the same physical device(s). The name is **outside the known-acceleratable families** (so the Pod
+webhook's one-mode check ignores it — see Risks). It is served by the **existing `ResourceServer`** running under a
+new **internal-only** `DeviceAllocationMode` (`Visibility`) — not a separate server type — advertised (via
+`Resource.GetDeviceIds`) as a **per-card pool of `SlicedResourceMaxSize` tokens** mapping to no real device
+selection, so it never gates scheduling. Its device-plugin `Allocate` does not select a fresh device: it reads the physical device(s) `main` was already
+allocated and returns **only the vendor visible-devices env pointing at those devices** (`NVIDIA_VISIBLE_DEVICES=<main's device ids>`;
+Ascend `ASCEND_VISIBLE_DEVICES=<indexes>`) — no HAMi preload/limit, no slice consumed. The container runtime
+derives the device nodes + device-cgroup from that env exactly as it does for the existing exclusive/shared
+response (which is itself just a visible-devices env). `main` is always allocated before `sshd` (Phase 1.1 order
++ kubelet per-container, sequential, non-interleaved, spec-order Allocate), so `main`'s device is known when
+`sshd`'s Allocate runs. This unified path covers single- and multi-accelerator nodes and both backends; it
+needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/devicemanager/controllers/setup.go`).
+- [x] 2.1 [dp] Add the internal-only `DeviceAllocationMode` (`Visibility`, appended after `Sliced`) and map its
+      resource name **through the single `GetAcceleratableResourceName(manufacturer, mode)`** (no separate
+      helper): `Visibility` → `device.gpustack.ai/<manufacturer>.visibility`, deliberately **outside** the
+      known-acceleratable families so `IsKnownAcceleratableResourceName` returns false for it. The mode is never
+      advertised on an InstanceType and never written to Devices status. Difficulty: low. AC:
+      `IsKnownAcceleratableResourceName(visibilityName)` is false and the Pod webhook's
+      `acceleratorMode(visibilityName)` returns `""` (a `main`(sliced) + `sshd`(visibility) Pod stays
+      single-mode). Verify: unit tests in `pkg/nodefeature` and `pkg/worker/webhooks/worker`.
+- [ ] 2.2 [dp] Add an **in-process, pod-keyed reservation** on the singleton `DevicesReconciler`: `main`'s
+      Allocate records its allocated `DevicesStatus` (device ID + Index) keyed by pod UID; the visibility
+      Allocate reads it. Evict **on pod delete** via the existing `Reconcile` live-pod-UID sweep (not on consume,
+      so a kubelet Allocate retry still resolves); a no-op for an empty UID/allocation, so it cannot leak. Writing
+      the reservation *inside* `main`'s Allocate removes any watcher→Allocate race; the persisted
+      `device.gpustack.ai/accelerator.allocated` annotation remains the durable/crash-recovery read fallback.
+      Difficulty: medium. AC: record→read→prune behave under table-driven tests; `main`'s Allocate records the
+      reservation; concurrent-pod safety via the reconciler mutex. Verify: `pkg/deviceplugin` unit tests.
+- [ ] 2.3 [dp] Serve the visibility resource from the **existing `ResourceServer`** under the internal
+      `Visibility` mode (2.1). No new server type. Touch points, all keyed on `AllocationMode == Visibility`:
+      (a) `GetResourceName` needs no branch — it already delegates to `GetAcceleratableResourceName`, which maps
+      `Visibility`; (b) advertising folds into `Resource.GetDeviceIds` → a per-card pool of `SlicedResourceMaxSize`
+      tokens (the most slices, hence sidecars, a card can host), not tied to a real device selection, so it never
+      gates scheduling and consumes no `.sliced` ledger units; (c) `GetPreferredAllocation` → no preference (skip
+      the sliced bin-fit); (d) `Allocate` → identify the pod (`getAllocatingPod`, quantity = `main`'s card count),
+      read `main`'s device(s) from the reservation (2.2), and **fail closed** if the reservation is empty (error,
+      never emit an empty visible-devices env a runtime could read as "all"); it skips `patchAllocatingPod`/ledger
+      and delegates to the Responder. The NVIDIA Responder needs **no change**: for any non-`Sliced` mode it
+      already returns `NVIDIA_VISIBLE_DEVICES=<ids>` only, so the reserved device ids flow straight through.
+      Register the visibility server in `nvidia.New()`. Difficulty: medium. AC: the response points `sshd` at
+      exactly `main`'s device(s); no HAMi artifacts; no ledger unit consumed; each card advertises
+      `SlicedResourceMaxSize` visibility tokens; an empty reservation fails closed. Verify:
+      `pkg/deviceplugin` + `pkg/devicemanager/allocator/nvidia` unit tests on the visibility ListAndWatch/Allocate
+      + fail-closed + response shape; multi-GPU e2e. (Ascend registers its visibility server in Phase 4.)
+- [ ] 2.4 [op] In `convertPodFromInstance`, make `sshd` request the visibility resource
+      `device.gpustack.ai/<manufacturer>.visibility` with the **same quantity as `main`'s accelerator card count**
+      (replacing the "device-only (Phase 2)" placeholder from 1.1). Difficulty: low. AC: rendered `sshd` carries
+      the visibility resource with quantity = `main`'s card count; the webhook admits the mixed Pod (2.1); `main`
+      still carries the `.sliced` request. Verify: `instance_test.go` unit test; e2e admission.
+- Checkpoint: **Story 1 passes** on single- and multi-accelerator nodes (hardware e2e). Out of scope — the
+      *separate*, pre-existing identity problem (two **distinct but identical** Instances pending on the node at
+      once, where `getAllocatingPod`'s oldest-quantity-match heuristic can misattribute) is orthogonal to this
+      two-container co-allocation and is **not addressed by this fix** (tracked in Open Questions; a
+      `coordination.k8s.io` Lease is the candidate hardening only if it becomes load-bearing).
 
 #### Phase 3 — [img] Capability hardening of the SSH entry path (independent; PoC-verified)
 - [ ] 3.1 In `pack/ssh-server/rootfs/chroot.sh`, drop excess capabilities at the final exec of the user shell
@@ -448,12 +479,13 @@ Three approaches were built/evaluated on EKS:
   hook exists in the Kueue + default-scheduler flow — a scheduling gate/webhook vs the on-node device-manager
   watching pods bound to its node), **namespace/naming** (a GPUStack namespace, not `kube-node-lease`), and RBAC.
   Not implemented in this fix.
-- Whether the sidecar carries a formal distinct "device-only" resource (cleaner matching) vs. an operator-set
-  visible-devices env (simpler, single-accelerator only). If a formal resource: it must be named **outside** the
-  known-acceleratable families (or the Pod webhook taught to exempt it) so `podAcceleratorModes` does not reject
-  the mixed `main`(sliced) + `sshd`(device-only) Pod; define its `ListAndWatch` advertising/capacity (≈ one token
-  per physical device, must not create Kueue/scheduling pressure); and confirm its own anonymous Allocate is
-  correlated by the same in-process, same-pod-window reservation.
+- Resolved: the sidecar carries a **formal device-only visibility resource**
+  `device.gpustack.ai/<manufacturer>.visibility` (outside the known-acceleratable families, so admission reads
+  one mode), requested with quantity = `main`'s card count. It is served by the existing `ResourceServer` under
+  an internal `Visibility` allocation mode (no separate server type) and advertised per card as a pool of
+  `SlicedResourceMaxSize` tokens mapping to no real device selection, so it never gates scheduling and consumes
+  no `.sliced` ledger units; its anonymous Allocate is correlated by the same in-process, same-pod-window
+  reservation and returns only `<vendor>_VISIBLE_DEVICES` for `main`'s device(s).
 - Whether `HostIPC: true` can be dropped to a pod-level IPC namespace (the `nsenter --ipc` path only needs
   `main`'s IPC namespace); if it must stay, document the host SysV IPC / `/dev/shm` exposure in the threat model.
 - Upgrade/rollback of already-running SSH Instances when the container-assignment + co-allocation change ships

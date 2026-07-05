@@ -307,3 +307,26 @@ func TestPodWebhook_SlicedRequestOnMainWithSidecar(t *testing.T) {
 	_, err := w.ValidateCreate(context.Background(), pod)
 	assert.NoError(t, err)
 }
+
+// TestPodWebhook_VisibilityResourceIsNotAMode guards that the SSH sidecar's device-only
+// visibility resource is outside the known-acceleratable families, so a Pod that requests a
+// real sliced accelerator on `main` and the visibility resource on `sshd` still reads as a
+// single accelerator mode and admits (a known-family name here would make
+// podAcceleratorModes see two modes and reject the Pod).
+func TestPodWebhook_VisibilityResourceIsNotAMode(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := slicedResourceNamesForBase(nvidiaBase)
+	visibility := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
+
+	pod := slicedPodWithSidecar(map[core.ResourceName]string{names.card: "1", names.memPct: "60"})
+	// sshd requests the visibility resource with the same quantity as main's card count.
+	cards := resource.MustParse("1")
+	pod.Spec.Containers[1].Resources = core.ResourceRequirements{
+		Requests: core.ResourceList{visibility: cards},
+		Limits:   core.ResourceList{visibility: cards.DeepCopy()},
+	}
+	w := newPodWebhook()
+
+	_, err := w.ValidateCreate(context.Background(), pod)
+	assert.NoError(t, err, "main(sliced) + sshd(visibility) is a single accelerator mode")
+}
