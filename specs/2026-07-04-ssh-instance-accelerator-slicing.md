@@ -233,6 +233,13 @@ As an operator, I want two slices of one physical accelerator to run within the 
   user shell.
 - Regression in the exclusive/whole-card SSH path → keep the two-container arch; change only where the
   accelerator resource + device permission land; keep the exclusive path under e2e.
+- Pre-existing node-devices AdmissionCheck self-eviction (surfaced by this fix's NVIDIA e2e) →
+  `nodeDevicesFeasibility` re-checks an already-admitted Workload against a per-card ledger that has
+  already subtracted the Workload's own slice, so a **> 50% single-card slice** (e.g. Story 1's 60%)
+  flips the check to Retry and Kueue evicts the running workload in a recreate loop. Mitigation: skip
+  feasibility re-evaluation once the Workload is admitted (the gate only needs to hold pre-admission).
+  Independent of the SSH path (it hits any > 50% sliced Instance) but **required for Story 1 to be
+  stable at 60%**, so fixed on this branch.
 
 ## Design Details
 ### Commands
