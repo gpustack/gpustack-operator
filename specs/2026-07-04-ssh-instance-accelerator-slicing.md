@@ -321,7 +321,7 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
       `IsKnownAcceleratableResourceName(visibilityName)` is false and the Pod webhook's
       `acceleratorMode(visibilityName)` returns `""` (a `main`(sliced) + `sshd`(visibility) Pod stays
       single-mode). Verify: unit tests in `pkg/nodefeature` and `pkg/worker/webhooks/worker`.
-- [ ] 2.2 [dp] Add an **in-process, pod-keyed reservation** on the singleton `DevicesReconciler`: `main`'s
+- [x] 2.2 [dp] Add an **in-process, pod-keyed reservation** on the singleton `DevicesReconciler`: `main`'s
       Allocate records its allocated `DevicesStatus` (device ID + Index) keyed by pod UID; the visibility
       Allocate reads it. Evict **on pod delete** via the existing `Reconcile` live-pod-UID sweep (not on consume,
       so a kubelet Allocate retry still resolves); a no-op for an empty UID/allocation, so it cannot leak. Writing

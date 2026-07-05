@@ -201,3 +201,109 @@ func TestResourceServer_Allocate_Sliced_RecordsUnits(t *testing.T) {
 	assert.Equal(t, workercore.DeviceAllocationModeSliced, acc.Mode)
 	assert.Equal(t, wantUnits, acc.Allocated, "real per-card committed units, not the token count")
 }
+
+// TestDevicesReconciler_Reservation verifies the in-process, pod-keyed reservation the
+// workload Allocate records for the sidecar's visibility Allocate to reuse: reserve→read,
+// empty inputs are no-ops, and pruning drops reservations whose pod is no longer live.
+func TestDevicesReconciler_Reservation(t *testing.T) {
+	statusFor := func(dev string) workercore.DevicesStatus {
+		return workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.AcceleratorAllocation{
+					{ID: dev, Mode: workercore.DeviceAllocationModeSliced},
+				},
+			}},
+		}
+	}
+
+	r := &DevicesReconciler{}
+
+	// An empty UID or an empty allocation is a no-op.
+	r.reserveDevices("", statusFor("dev-0"))
+	r.reserveDevices("p1", workercore.DevicesStatus{})
+	_, ok := r.reservedDevices("p1")
+	assert.False(t, ok, "empty allocation must not be reserved")
+
+	// Reserve then read.
+	r.reserveDevices("p1", statusFor("dev-0"))
+	got, ok := r.reservedDevices("p1")
+	require.True(t, ok)
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Accelerators, 1)
+	assert.Equal(t, "dev-0", got.Groups[0].Accelerators[0].ID)
+
+	// A second pod coexists; pruning to a live set keeps it and drops the gone pod.
+	r.reserveDevices("p2", statusFor("dev-1"))
+	r.pruneReservations([]string{"p2"})
+	_, ok = r.reservedDevices("p1")
+	assert.False(t, ok, "p1 must be pruned when no longer live")
+	got2, ok := r.reservedDevices("p2")
+	require.True(t, ok, "p2 must survive the prune")
+	assert.Equal(t, "dev-1", got2.Groups[0].Accelerators[0].ID)
+}
+
+// TestResourceServer_Allocate_RecordsReservation verifies the workload Allocate records an
+// in-process reservation keyed by the pod UID, carrying the allocated device (ID + Index),
+// so the sidecar's visibility Allocate can co-allocate the same physical device.
+func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
+	const nodeName = "node-7"
+	resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+
+	devs := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{{
+					ID:       "dev-0",
+					Index:    0,
+					Features: workercore.AcceleratorFeatures{MaxPartitions: 8},
+				}},
+			}},
+		},
+	}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-7"},
+		Spec: core.PodSpec{
+			NodeName: nodeName,
+			Containers: []core.Container{{
+				Name: "main",
+				Resources: core.ResourceRequirements{
+					Limits: core.ResourceList{resName: resource.MustParse("1")},
+				},
+			}},
+		},
+	}
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, pod).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+		Reconciler:     rec,
+		Responder:      stubResponder{},
+	}
+
+	_, err := s.Allocate(context.Background(), &AllocateRequest{
+		ContainerRequests: []*ContainerAllocateRequest{{
+			DevicesIds: []string{"grp-0:dev-0:0000"},
+		}},
+	})
+	require.NoError(t, err)
+
+	got, ok := rec.reservedDevices("pod-uid-7")
+	require.True(t, ok, "workload Allocate must record an in-process reservation")
+	require.Len(t, got.Groups, 1)
+	require.Len(t, got.Groups[0].Accelerators, 1)
+	assert.Equal(t, "dev-0", got.Groups[0].Accelerators[0].ID)
+}

@@ -50,6 +50,14 @@ type (
 
 		notifiersMutex sync.RWMutex
 		notifiers      []_DevicesNotifier
+
+		// reservations records, keyed by pod UID, the accelerator devices a pod's
+		// workload container was allocated, so the SSH sidecar's visibility Allocate
+		// (same pod, same node, later in the same admission window) can co-allocate the
+		// same physical devices without re-selecting them or racing the annotation's
+		// cache propagation.
+		reservationsMutex sync.RWMutex
+		reservations      map[types.UID]workercore.DevicesStatus
 	}
 )
 
@@ -133,6 +141,9 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 		}
 	}
+
+	// Drop reservations whose pod is gone (same live set the sliced working-dir GC uses).
+	r.pruneReservations(livePodUIDs)
 
 	r.notifiersMutex.RLock()
 	if len(r.notifiers) > 0 {
@@ -275,6 +286,51 @@ func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices
 			},
 		})
 	return devs, err
+}
+
+// reserveDevices records the accelerator devices a pod's workload container was
+// allocated, keyed by pod UID. It mirrors the AllocatedAcceleratorAnnoKey annotation the
+// workload Allocate persists (which stays the durable read fallback), giving the sidecar's
+// visibility Allocate a race-free in-process source for the same-pod, same-window
+// co-allocation. A no-op for an empty UID or an empty allocation.
+func (r *DevicesReconciler) reserveDevices(podUID types.UID, allocated workercore.DevicesStatus) {
+	if podUID == "" || len(allocated.Groups) == 0 {
+		return
+	}
+	r.reservationsMutex.Lock()
+	defer r.reservationsMutex.Unlock()
+	if r.reservations == nil {
+		r.reservations = make(map[types.UID]workercore.DevicesStatus)
+	}
+	r.reservations[podUID] = allocated
+}
+
+// reservedDevices returns the devices recorded for a pod by reserveDevices and whether a
+// reservation exists.
+func (r *DevicesReconciler) reservedDevices(podUID types.UID) (workercore.DevicesStatus, bool) {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	got, ok := r.reservations[podUID]
+	return got, ok
+}
+
+// pruneReservations drops reservations for pods no longer in the live set, so a
+// reservation cannot outlive its pod. It piggybacks the Reconcile live-pod-UID sweep.
+func (r *DevicesReconciler) pruneReservations(livePodUIDs []string) {
+	r.reservationsMutex.Lock()
+	defer r.reservationsMutex.Unlock()
+	if len(r.reservations) == 0 {
+		return
+	}
+	live := sets.New[types.UID]()
+	for i := range livePodUIDs {
+		live.Insert(types.UID(livePodUIDs[i]))
+	}
+	for uid := range r.reservations {
+		if !live.Has(uid) {
+			delete(r.reservations, uid)
+		}
+	}
 }
 
 const (
