@@ -54,6 +54,15 @@ func TestResource_GetDeviceIds(t *testing.T) {
 			wantFirst:     "grp-0:dev-0:0000",
 			wantLast:      "grp-0:dev-0:0000",
 		},
+		{
+			// Visibility advertises a fixed per-card pool sized to SlicedResourceMaxSize,
+			// independent of MaxPartitions.
+			name:      "visibility advertises SlicedResourceMaxSize tokens per card",
+			mode:      workercore.DeviceAllocationModeVisibility,
+			wantLen:   nodefeature.SlicedResourceMaxSize,
+			wantFirst: "grp-0:dev-0:0000",
+			wantLast:  "grp-0:dev-0:0511",
+		},
 	}
 
 	for _, c := range cases {

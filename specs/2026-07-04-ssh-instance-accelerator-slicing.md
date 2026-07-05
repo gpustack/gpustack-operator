@@ -329,7 +329,7 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
       `device.gpustack.ai/accelerator.allocated` annotation remains the durable/crash-recovery read fallback.
       Difficulty: medium. AC: record→read→prune behave under table-driven tests; `main`'s Allocate records the
       reservation; concurrent-pod safety via the reconciler mutex. Verify: `pkg/deviceplugin` unit tests.
-- [ ] 2.3 [dp] Serve the visibility resource from the **existing `ResourceServer`** under the internal
+- [x] 2.3 [dp] Serve the visibility resource from the **existing `ResourceServer`** under the internal
       `Visibility` mode (2.1). No new server type. Touch points, all keyed on `AllocationMode == Visibility`:
       (a) `GetResourceName` needs no branch — it already delegates to `GetAcceleratableResourceName`, which maps
       `Visibility`; (b) advertising folds into `Resource.GetDeviceIds` → a per-card pool of `SlicedResourceMaxSize`

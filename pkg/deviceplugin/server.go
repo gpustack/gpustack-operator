@@ -45,8 +45,10 @@ type ResourceServer struct {
 
 // GetResourceName returns the resource name to be registered to the Device Manager based on the kind and name.
 func (s *ResourceServer) GetResourceName() core.ResourceName {
-	// For sliced this is the bare ".sliced" injection-token key; the ".sliced.units"
-	// counting key is reported separately via Patch Node, not the device-plugin.
+	// GetAcceleratableResourceName maps every mode, including the internal Visibility mode
+	// (the device-only "device.gpustack.ai/<manufacturer>.visibility" resource). For sliced
+	// this is the bare ".sliced" injection-token key; the ".sliced.units" counting key is
+	// reported separately via Patch Node, not the device-plugin.
 	return nodefeature.GetAcceleratableResourceName(s.Manufacturer, s.AllocationMode)
 }
 
@@ -166,6 +168,16 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 // The resulting preferred allocation is not guaranteed to be the allocation ultimately performed by the Device Manager.
 // It is only designed to help the Device Manager make a more informed allocation decision when possible.
 func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *PreferredAllocationRequest) (*PreferredAllocationResponse, error) {
+	// The visibility token pool is flat and interchangeable — every token resolves to the
+	// same reserved device at Allocate time — so there is no preference to express. Return an
+	// empty response (kubelet picks freely) rather than run the sliced per-card bin-fit, which
+	// assumes tokens map to real devices.
+	if s.AllocationMode == workercore.DeviceAllocationModeVisibility {
+		return &PreferredAllocationResponse{
+			ContainerResponses: []*ContainerPreferredAllocationResponse{{}},
+		}, nil
+	}
+
 	ctrReq := req.GetContainerRequests()[0]
 
 	resName := s.GetResourceName()
@@ -341,6 +353,10 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "unconfigured responder")
 	}
 
+	if s.AllocationMode == workercore.DeviceAllocationModeVisibility {
+		return s.allocateVisibility(ctx, req)
+	}
+
 	ctrReq := req.GetContainerRequests()[0]
 
 	allocatedDeviceIDs := ctrReq.GetDevicesIds()
@@ -456,6 +472,98 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		ContainerResponses: []*ContainerAllocateResponse{ctrResp},
 	}
 	s.Logger.Info("allocate response",
+		"pod", kubemeta.GetNamespacedNameKey(pod),
+		"response", resp)
+	return resp, nil
+}
+
+// allocateVisibility serves the SSH sidecar's visibility request: it does not select a
+// device but reuses the physical device(s) the workload container (main) was already
+// allocated, recorded in the in-process reservation. It returns only the vendor
+// visible-devices env (via the Responder), consuming no ledger units and writing no
+// allocation status. It fails closed when no reservation exists, rather than emitting an
+// empty visible-devices env a runtime could interpret as "all devices".
+func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRequest) (*AllocateResponse, error) {
+	ctrReq := req.GetContainerRequests()[0]
+
+	resName := s.GetResourceName()
+	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
+	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity)
+	if err != nil {
+		s.Logger.Error(err, "get allocating pod for visibility allocation")
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
+	}
+
+	reserved, ok := s.Reconciler.reservedDevices(pod.UID)
+	if !ok || len(reserved.Groups) == 0 {
+		// Fail closed: the workload container's allocation has not been recorded yet (or was
+		// pruned). Returning an error rejects this admission rather than emitting an empty
+		// visible-devices env a runtime could read as "all devices". Because main is always
+		// allocated before sshd in the same pod, this path should not occur in practice; if it
+		// ever does, recovery is the controller recreating the Pod.
+		err = fmt.Errorf("no reserved devices for pod %s; refusing to grant visibility", kubemeta.GetNamespacedNameKey(pod))
+		s.Logger.Error(err, "visibility allocation without reservation")
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
+	}
+
+	devs, err := s.Reconciler.getDevices(ctx)
+	if err != nil {
+		s.Logger.Error(err, "get devices for visibility allocation")
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for visibility allocation: %v", err)
+	}
+
+	// Devices currently present on the node, so a stale reservation (a reserved device no
+	// longer in the inventory) fails closed below instead of yielding an empty
+	// visible-devices env from the Responder.
+	present := make(map[Resource]struct{})
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			present[Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}] = struct{}{}
+		}
+	}
+
+	// Reuse main's reserved devices as the "allocated" set so the Responder emits the vendor
+	// visible-devices env for exactly those devices; no HAMi mounts/limit, since this server
+	// is not the sliced mode. No patchAllocatingPod/reserveDevices: visibility consumes no
+	// ledger units and holds no reservation of its own.
+	reservedCount := 0
+	allocated := make(map[Resource]int32)
+	for i := range reserved.Groups {
+		grp := &reserved.Groups[i]
+		for j := range grp.Accelerators {
+			reservedCount++
+			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
+			if _, ok := present[res]; !ok {
+				continue
+			}
+			allocated[res] = grp.Accelerators[j].Allocated
+		}
+	}
+	// Fail closed unless every reserved device is still present AND the reservation matches the
+	// visibility request exactly. A partial/stale reservation (a reserved device gone from the
+	// inventory) or a request that does not match the reserved device count would otherwise grant
+	// the sidecar a different device set than the workload holds; refuse rather than emit a
+	// degraded (or empty) visible-devices env a runtime could misread.
+	requestCount := len(ctrReq.GetDevicesIds())
+	if len(allocated) != reservedCount || reservedCount != requestCount {
+		err = fmt.Errorf("visibility reservation for pod %s does not match the request "+
+			"(reserved=%d, present=%d, requested=%d); refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), reservedCount, len(allocated), requestCount)
+		s.Logger.Error(err, "visibility allocation with mismatched or stale reservation")
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
+	}
+
+	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocated)
+	if err != nil {
+		s.Logger.Error(err, "get container visibility allocate response")
+		return nil, err
+	}
+
+	resp := &AllocateResponse{
+		ContainerResponses: []*ContainerAllocateResponse{ctrResp},
+	}
+	s.Logger.Info("visibility allocate response",
 		"pod", kubemeta.GetNamespacedNameKey(pod),
 		"response", resp)
 	return resp, nil

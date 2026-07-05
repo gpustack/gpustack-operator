@@ -237,3 +237,28 @@ func Test_nvidiaCUDADir(t *testing.T) {
 	assert.Equal(t, "cuda-13", nvidiaCUDADir("13.0"))
 	assert.Equal(t, "cuda-12", nvidiaCUDADir("")) // empty major defaults to cuda-12
 }
+
+// TestGetContainerAllocateResponse_Visibility verifies the visibility-mode responder emits
+// only NVIDIA_VISIBLE_DEVICES for the allocated device(s) — the same plain device-visibility
+// response as exclusive/shared — with no HAMi soft-slicing env or mounts.
+func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeVisibility,
+		},
+	}
+	devs := nvidiaDevices("12.4", 24576, testGPUUUID0, testGPUUUID1)
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "sshd-pod", UID: types.UID("uid-vis")}}
+	// Only the first card is reserved to the workload; visibility must scope to exactly it.
+	allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs, allocated)
+	require.NoError(t, err)
+
+	assert.Equal(t, testGPUUUID0, resp.Envs["NVIDIA_VISIBLE_DEVICES"])
+	assert.Len(t, resp.Envs, 1, "visibility emits only NVIDIA_VISIBLE_DEVICES")
+	_, hasSM := resp.Envs["CUDA_DEVICE_SM_LIMIT"]
+	assert.False(t, hasSM, "no HAMi compute limit")
+	assert.Empty(t, resp.Mounts, "no HAMi preload/lib mounts")
+}
