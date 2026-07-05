@@ -60,8 +60,8 @@ restore() {
   echo
   echo "[case-15] cleanup"
   [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
-  kubectl -n "$NS" delete instance "$INST" --ignore-not-found --wait=false 2>/dev/null || true
-  kubectl -n "$NS" delete secret "$SECRET" --ignore-not-found 2>/dev/null || true
+  kubectl -n default delete instance "$INST" --ignore-not-found --wait=false 2>/dev/null || true
+  kubectl -n default delete secret "$SECRET" --ignore-not-found 2>/dev/null || true
   rm -rf "$KEYDIR"
 }
 trap restore EXIT
@@ -79,7 +79,7 @@ print_and_exit() {
   } | column -t -s '|'
   if [ "$FAILS" -ne 0 ]; then
     echo
-    echo "FAILED ${FAILS} check(s). Diagnose: kubectl -n ${NS} describe pod ${INST}"
+    echo "FAILED ${FAILS} check(s). Diagnose: kubectl -n default describe pod ${INST}"
     exit 1
   fi
   echo "CASE 15 PASS"
@@ -88,13 +88,13 @@ print_and_exit() {
 
 # 1. SSH key + secret, then an exclusive (no slice %) SSH-enabled Instance.
 ssh-keygen -t ed25519 -f "$KEYDIR/id" -N "" -q
-kubectl -n "$NS" delete secret "$SECRET" --ignore-not-found >/dev/null 2>&1
-kubectl -n "$NS" create secret generic "$SECRET" --from-file=authorized_keys="$KEYDIR/id.pub" >/dev/null
+kubectl -n default delete secret "$SECRET" --ignore-not-found >/dev/null 2>&1
+kubectl -n default create secret generic "$SECRET" --from-file=authorized_keys="$KEYDIR/id.pub" >/dev/null
 echo "[case-15] creating exclusive whole-card SSH Instance ${INST} on ${IT}"
 cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: Instance
-metadata: { name: ${INST}, namespace: ${NS} }
+metadata: { name: ${INST}, namespace: default }
 spec:
   type: ${IT}
   image: ubuntu:24.04
@@ -112,8 +112,8 @@ EOF
 POD="$INST"
 ready=""
 for _ in $(seq 1 40); do
-  phase=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null)
-  readies=$(kubectl -n "$NS" get pod "$POD" -o jsonpath='{range .status.containerStatuses[*]}{.ready} {end}' 2>/dev/null)
+  phase=$(kubectl -n default get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null)
+  readies=$(kubectl -n default get pod "$POD" -o jsonpath='{range .status.containerStatuses[*]}{.ready} {end}' 2>/dev/null)
   if [ "$phase" = "Running" ] && [ "$readies" = "true true " ]; then ready=1; break; fi
   sleep 5
 done
@@ -124,7 +124,7 @@ fi
 record PASS "exclusive SSH Instance reaches 2/2 Running" "${POD} main+sshd Running"
 
 # 2. Shape: main carries the exclusive whole-card resource (not .sliced); sshd carries only .visibility.
-shape=$(kubectl -n "$NS" get pod "$POD" -o json 2>/dev/null | python3 -c "
+shape=$(kubectl -n default get pod "$POD" -o json 2>/dev/null | python3 -c "
 import json,sys
 p=json.load(sys.stdin)
 main=sshd=None
@@ -143,7 +143,7 @@ case "$shape" in
 esac
 
 # 3. SSH login: the shell sees the WHOLE card (not a slice) and is capability-stripped.
-kubectl -n "$NS" port-forward "pod/$POD" "${LOCAL_PORT}:22" >/dev/null 2>&1 &
+kubectl -n default port-forward "pod/$POD" "${LOCAL_PORT}:22" >/dev/null 2>&1 &
 PF_PID=$!
 for _ in $(seq 1 20); do (exec 3<>"/dev/tcp/127.0.0.1/${LOCAL_PORT}") 2>/dev/null && { exec 3>&- 3<&-; break; }; sleep 1; done
 ssh_out=$(ssh -T -p "$LOCAL_PORT" -i "$KEYDIR/id" \

@@ -48,7 +48,7 @@ echo "[case-14] sliceable InstanceType ${IT}"
 restore() {
   echo
   echo "[case-14] cleanup: deleting test Instances"
-  kubectl -n "$NS" delete instance "$INST_A" "$INST_B" "$INST_C" --ignore-not-found --wait=false 2>/dev/null || true
+  kubectl -n default delete instance "$INST_A" "$INST_B" "$INST_C" --ignore-not-found --wait=false 2>/dev/null || true
 }
 trap restore EXIT
 
@@ -60,7 +60,7 @@ mkslice() { # mkslice <name> <mem-pct>
   cat <<EOF | kubectl apply -f - >/dev/null
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: Instance
-metadata: { name: $1, namespace: ${NS} }
+metadata: { name: $1, namespace: default }
 spec:
   type: ${IT}
   image: ubuntu:24.04
@@ -77,7 +77,7 @@ spec:
 EOF
 }
 
-running() { [ "$(kubectl -n "$NS" get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ]; }
+running() { [ "$(kubectl -n default get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ]; }
 wait_running() { for _ in $(seq 1 40); do running "$1" && return 0; sleep 3; done; return 1; }
 
 # 1. Two 40% slices (combined 80% <= 100%): both must run on the same card.
@@ -87,8 +87,8 @@ mkslice "$INST_B" 40
 a_ok=1; wait_running "$INST_A" || a_ok=0
 b_ok=1; wait_running "$INST_B" || b_ok=0
 if [ "$a_ok" = 1 ] && [ "$b_ok" = 1 ]; then
-  na=$(kubectl -n "$NS" get pod "$INST_A" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
-  nb=$(kubectl -n "$NS" get pod "$INST_B" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+  na=$(kubectl -n default get pod "$INST_A" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
+  nb=$(kubectl -n default get pod "$INST_B" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
   record PASS "two 40% slices coexist" "${INST_A}@${na} + ${INST_B}@${nb} both Running (combined 80% <= 100%)"
 else
   record FAIL "two 40% slices coexist" "A running=${a_ok} B running=${b_ok} — both should admit within one card"
@@ -103,7 +103,7 @@ for _ in $(seq 1 8); do
   sleep 3
 done
 if [ "$held" = 1 ]; then
-  ph=$(kubectl -n "$NS" get pod "$INST_C" -o jsonpath='{.status.phase}' 2>/dev/null)
+  ph=$(kubectl -n default get pod "$INST_C" -o jsonpath='{.status.phase}' 2>/dev/null)
   record PASS "over-budget slice is held (not over-admitted)" "${INST_C} not Running (phase='${ph:-<no pod>}'; 120% > one card)"
 else
   record FAIL "over-budget slice is held (not over-admitted)" "${INST_C} Running — three 40% slices over-admitted one card"
@@ -117,8 +117,8 @@ echo "== CASE 14 — Multiple slices coexist on one physical card within budget 
 } | column -t -s '|'
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s). Diagnose: kubectl -n ${NS} get instances,pods;"
-  echo "kubectl -n ${NS} get workloads -o wide"
+  echo "FAILED ${FAILS} check(s). Diagnose: kubectl -n default get instances,pods;"
+  echo "kubectl -n default get workloads -o wide"
   exit 1
 fi
 echo "CASE 14 PASS"
