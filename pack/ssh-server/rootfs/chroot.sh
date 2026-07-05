@@ -289,9 +289,14 @@ print_banner() {
   ip_info="$(get_ip_info)"
 
   if [ -r "$TARGET_ROOT/etc/os-release" ]; then
-    . "$TARGET_ROOT/etc/os-release" 2>/dev/null
-    if [ -n "$PRETTY_NAME" ]; then
-      echo "Welcome to ${PRETTY_NAME}" >&2
+    # Parse PRETTY_NAME as data — never `.`/source it: os-release lives in the target
+    # (user-controlled) image, and sourcing would execute arbitrary shell here in the
+    # sidecar while it still holds SYS_ADMIN/SYS_PTRACE, before the shell's caps are
+    # dropped below. awk reads the value only; echo prints it without re-evaluation.
+    pretty_name="$(awk -F= '$1=="PRETTY_NAME"{sub(/^"/,"",$2);sub(/"$/,"",$2);print $2;exit}' \
+      "$TARGET_ROOT/etc/os-release" 2>/dev/null)"
+    if [ -n "$pretty_name" ]; then
+      echo "Welcome to ${pretty_name}" >&2
     fi
     echo >&2
   fi
@@ -358,6 +363,12 @@ nsenter_bin="$(command -v nsenter)"
 chroot_bin="$(command -v chroot)"
 setpriv_bin="$(command -v setpriv)"
 
+# Enter the target namespaces (nsenter needs the sidecar's caps), then drop all
+# capabilities before handing control to the interactive shell: --bounding-set=-all
+# prevents any capability from ever being regained and --inh-caps=-all clears the
+# inheritable set, so the login shell runs with an empty effective set. Device
+# access and GPU slicing still work (they come from the device-cgroup grant, not a
+# capability), while host escapes such as mknod are denied.
 exec "$nsenter_bin" \
   --target "$TARGET_PID" \
   --mount \
@@ -368,4 +379,5 @@ exec "$nsenter_bin" \
   -- \
   "$chroot_bin" "$TARGET_ROOT" \
   "$setpriv_bin" --clear-groups \
+    --bounding-set=-all --inh-caps=-all \
   "$TARGET_SHELL" -l

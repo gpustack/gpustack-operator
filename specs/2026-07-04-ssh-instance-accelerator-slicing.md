@@ -225,8 +225,10 @@ As an operator, I want two slices of one physical accelerator to run within the 
 - Pod webhook may assume the `.sliced` request is on a specific container → confirm `pkg/worker/webhooks/worker/pod.go`
   triggers on the `kueue.x-k8s.io/queue-name` label (container-agnostic) and add a unit test with the request
   on `main`.
-- Dropping all caps could break a workload needing a specific cap (e.g. `CAP_IPC_LOCK`) → retained-cap set is a
-  small, documented, configurable allowlist; default empty.
+- Dropping all caps could break a workload needing a specific cap (e.g. `CAP_IPC_LOCK`) → GPU/NPU access needs
+  no capability (it comes from the device-cgroup grant), so the SSH shell drops all caps by default; a
+  configurable retained-cap allowlist was considered and deferred as unneeded — revisit only if a real workload
+  proves it needs a specific cap.
 - The `nsenter` step needs `CAP_SYS_ADMIN` → keep caps only through `nsenter`; drop at the final exec of the
   user shell.
 - Regression in the exclusive/whole-card SSH path → keep the two-container arch; change only where the
@@ -357,11 +359,12 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
       `coordination.k8s.io` Lease is the candidate hardening only if it becomes load-bearing).
 
 #### Phase 3 — [img] Capability hardening of the SSH entry path (independent; PoC-verified)
-- [ ] 3.1 In `pack/ssh-server/rootfs/chroot.sh`, drop excess capabilities at the final exec of the user shell
-      (after `nsenter`): `setpriv --clear-groups --bounding-set=-all --inh-caps=-all …`, with a small,
-      documented, configurable retained-cap allowlist (default empty). Difficulty: low. AC: SSH shell `CapEff`
-      empty; device access + slicing still work; host `mknod` denied. Verify: SSH in → `grep CapEff` (empty) +
-      `nvidia-smi` (slice) + `mknod` host dev (EPERM). Build/push the image; set `instance-ssh-server-image`.
+- [x] 3.1 In `pack/ssh-server/rootfs/chroot.sh`, drop all capabilities at the final exec of the user shell
+      (after `nsenter`): `setpriv --clear-groups --bounding-set=-all --inh-caps=-all` (no retained-cap
+      allowlist — device access + slicing come from the device-cgroup grant, not a capability). Difficulty: low.
+      AC: SSH shell `CapEff` empty; device access + slicing still work; host `mknod` denied. Verify: SSH in →
+      `grep CapEff` (empty) + `nvidia-smi` (slice) + `mknod` host dev (EPERM). Build/push the image; set
+      `instance-ssh-server-image`.
 - Checkpoint: **Story 4 passes**; slicing unaffected.
 
 #### Phase 4 — [op+dp] Ascend parity
@@ -490,7 +493,9 @@ Three approaches were built/evaluated on EKS:
   `main`'s IPC namespace); if it must stay, document the host SysV IPC / `/dev/shm` exposure in the threat model.
 - Upgrade/rollback of already-running SSH Instances when the container-assignment + co-allocation change ships
   (Pods rendered under the old accelerator-on-`sshd` split): recreate the Instance's Pod vs. tolerate both shapes.
-- Whether to expose a configurable retained-capability allowlist, and its default (proposed: empty).
+- Resolved: no configurable retained-capability allowlist — chroot.sh drops all capabilities
+  (`--bounding-set=-all --inh-caps=-all`); GPU/NPU access needs none (it comes from the device-cgroup grant).
+  Revisit only if a real workload proves it needs a specific capability.
 - Cores/compute-throttle verification (only the memory slice was empirically verified; cores=100% did not
   exercise throttling).
 - Whether F3 (capability hardening) ships in the same change or as a separately reviewable security fix.
