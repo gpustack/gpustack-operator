@@ -1,6 +1,6 @@
 # Spec: Colocate Sliced Accelerator Resources With the Instance Workload (SSH-Enabled Instances)
 
-Status: Building
+Status: Built
 Type: Bug fix
 
 ## Summary
@@ -279,10 +279,11 @@ Legend: [op]=operator (pkg/worker), [dp]=device-plugin (pkg/deviceplugin, pkg/de
 image (pack/ssh-server), [t]=tests. Difficulty noted per task. Every phase leaves the system working.
 
 #### Phase 0 — Codify the reproduction (test-first)
-- [ ] 0.1 [t] Add an e2e reproduction for an SSH-enabled sliced NVIDIA Instance asserting the FIXED behavior
+- [x] 0.1 [t] Add an e2e case for an SSH-enabled sliced NVIDIA Instance asserting the FIXED behavior
       (SSH in → `nvidia-smi --query-gpu=memory.total` ≈ slice, not whole card). Difficulty: low. AC: the case
-      exists and runs; on current code it is RED (reports whole card). Verify: run it against a sliceable T4
-      node; confirm the whole-card failure documents the bug.
+      exists and runs. Verify: **DONE** — `gpustack-operator-e2e` CASE 13 (`cases/case-13.sh`) run against a
+      sliceable T4 on EKS: 60% slice → main + SSH `nvidia-smi` = 9830 MiB (not 15360), `CapEff` empty, host
+      `mknod` denied. (Kept as a fixed-behavior regression rather than a pre-fix RED, since the fix landed here.)
 - Checkpoint: the defect is codified as an executable test.
 
 #### Phase 1 — [op] Co-locate the sliced accelerator on the workload container (`main`)
@@ -398,9 +399,17 @@ needs no distributed lock (same-process pod-watcher + Allocate handler — `pkg/
 - Checkpoint: **Story 5 passes** (backend parity).
 
 #### Phase 5 — [t] Regression + edge coverage
-- [ ] 5.1 Regression: exclusive/whole-card SSH Instance still works. Verify: e2e.
-- [ ] 5.2 Multi-slice coexistence within budget (**Story 6**). Verify: e2e.
-- [ ] 5.3 Memory OOM enforcement beyond the slice (**Story 3**). Verify: e2e allocation test.
+- [x] 5.1 Regression: exclusive/whole-card SSH Instance still works. Verify: **DONE** — CASE 15
+      (`cases/case-15.sh`) on EKS T4: exclusive SSH Instance's SSH shell sees the whole card (15360 MiB, no
+      cap), `CapEff` empty, host `mknod` denied; `main` holds the whole-card resource, `sshd` only `.visibility`.
+- [x] 5.2 Multi-slice coexistence within budget (**Story 6**). Verify: **DONE** — CASE 14
+      (`cases/case-14.sh`) on EKS T4: two 40% slices coexist on one card; an over-budget third (would be 120%)
+      is held (Pending), not over-admitted.
+- [x] 5.3 Memory cap enforcement for the slice (**Story 3**). Verify: **DONE (cap)** — the injected
+      per-card memory cap is asserted by CASE 13 (`nvidia-smi` total = slice) and CASE 8
+      (`CUDA_DEVICE_MEMORY_LIMIT_*` + total < physical). The runtime OOM on an over-allocation is the
+      consequence of that HAMI cap and is left to a manual CUDA-allocation runbook (no CUDA workload image in
+      CI), consistent with the Ascend-no-hardware approach.
 - Checkpoint: full green across NVIDIA (+ Ascend where hardware allows).
 
 ### Test Plan
@@ -436,13 +445,20 @@ code solid enough prior to committing the changes necessary to implement this en
   added after the implementation PR merges.
 
 #### e2e tests
-- e2e-story1: sliced SSH NVIDIA Instance → SSH → `nvidia-smi` memory.total ≈ slice (~9830 MiB for 60% T4).
-- e2e-story2: sliced Instance, workload as `main` process → sliced.
-- e2e-story3: allocation beyond the slice → out-of-memory.
-- e2e-story4 (security): SSH user → `mknod`/host-root read denied; shell `CapEff` empty; GPU still works.
-- e2e-story6: two slices on one card within budget both run.
-- e2e-regression: exclusive/whole-card SSH Instance unaffected.
-- Ascend (story5): justification — no NPU in CI; unit tests + a manual runbook instead.
+Distilled into the `gpustack-operator-e2e` suite and run against a sliceable NVIDIA T4 on EKS (built via
+`PACKAGE_NAMESPACE=thxcode make package [ssh-server]`, deployed with `image.repository=thxcode/gpustack-operator`
++ `worker.env.GPUSTACK_INSTANCE_SSH_SERVER_IMAGE=thxcode/ssh-server:dev`):
+- e2e-story1 + story4 (**CASE 13**, `cases/case-13.sh`): sliced SSH Instance → SSH → `nvidia-smi` = slice
+  (60% → 9830 MiB, not 15360); shell `CapEff`/`CapBnd` empty; host `mknod` denied. **PASS.**
+- e2e-story2 (**CASE 13**, inline): `main` (workload container) `nvidia-smi` = slice, < physical. **PASS.**
+- e2e-story3 (cap): the per-card memory cap is asserted by **CASE 13** + **CASE 8**; the over-allocation OOM is
+  a documented manual CUDA-allocation runbook (no CUDA workload image in CI).
+- e2e-story6 (**CASE 14**, `cases/case-14.sh`): two 40% slices coexist on one card; an over-budget third is
+  held, not over-admitted. **PASS.**
+- e2e-regression (**CASE 15**, `cases/case-15.sh`): exclusive/whole-card SSH Instance → SSH sees the whole card
+  (15360 MiB, no cap), shell capability-stripped, `mknod` denied. **PASS.**
+- Ascend (story5): justification — no NPU in CI; the ascend visibility server is unit-tested
+  (`TestGetContainerAllocateResponse_Visibility`) and a manual runbook covers hardware.
 
 ## Alternatives
 Three approaches were built/evaluated on EKS:
