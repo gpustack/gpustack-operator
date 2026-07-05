@@ -1,30 +1,95 @@
 # GPUStack Operator
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/gpustack/gpustack-operator)](https://goreportcard.com/report/github.com/gpustack/gpustack-operator)
 [![CI](https://img.shields.io/github/actions/workflow/status/gpustack/gpustack-operator/ci.yml?label=ci&branch=main)](https://github.com/gpustack/gpustack-operator/actions)
 [![License](https://img.shields.io/github/license/gpustack/gpustack-operator?label=license)](https://github.com/gpustack/gpustack-operator#license)
 [![Docker Pulls](https://img.shields.io/docker/pulls/gpustack/gpustack-operator)](https://hub.docker.com/r/gpustack/gpustack-operator)
 
-GPUStack Operator provides a fantastic way to manage accelerator resources in Kubernetes.
+**Turn raw accelerator hardware into a ready-to-use, quota-managed scheduling chain — automatically.**
 
-Built on top of [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) and [Kueue](https://github.com/kubernetes-sigs/kueue), it discovers accelerators (GPU/NPU/TPU) on every node, profiles node capacity into normalized per-device units, and materializes the results into a Kueue-based scheduling chain (`ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue`).
+GPUStack Operator is a Kubernetes operator that discovers accelerators on every node, profiles their
+capacity into normalized per-device units, and materializes them into a Kueue-based scheduling chain your
+workloads can queue against. It supports **9 accelerator vendors** across GPU / NPU / MLU / DCU / PPU, and
+adds **soft-slicing** so a single card can be safely shared by multiple workloads with independent compute
+and memory budgets.
+
+Built on top of [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery)
+and [Kueue](https://github.com/kubernetes-sigs/kueue) — you install one chart, and the operator brings up
+the rest.
+
+## Features
+
+- **Multi-vendor discovery** — auto-detects accelerators from 9 vendors (see [Supported Accelerators](#supported-accelerators)) and profiles each node's CPU / RAM / storage and per-card capacity, with no per-node configuration.
+- **Soft-slicing with decoupled compute + memory isolation** — share one physical card among workloads, capping compute (SM / aicore %) independently of VRAM. Runtime isolation is enforced by a vendor preload library (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`), not just by accounting.
+- **Per-card over-admission protection** — a four-gate admission model (Kueue credits → scheduler/kubelet → per-card `AdmissionCheck` → the `Devices` ledger) catches the fragmentation cases a coarse quota total can't see, so a request never lands on a card that has no room.
+- **Live capacity, as a real resource** — each pool surfaces as a materialized `InstanceType` CRD whose `.status` carries a three-view (free whole cards / shareable slots / sliceable VRAM units). `kubectl get instancetype -w` shows capacity move as workloads allocate and free.
+- **SSH-enabled Instances** — launch a workload with an SSH sidecar that shares the same sliced card through a capability-stripped shell, for interactive development on a slice.
+- **Multi-cluster aggregation** — the `worker-gateway` aggregates InstanceTypes and capacity across upstream clusters into a single view.
+
+## Supported Accelerators
+
+| Vendor | Kubernetes resource | Class |
+|--------|---------------------|-------|
+| NVIDIA | `nvidia.com/gpu` | GPU |
+| AMD | `amd.com/gpu` | GPU |
+| Huawei Ascend | `huawei.com/npu` | NPU |
+| Cambricon | `cambricon.com/mlu` | MLU |
+| Hygon | `hygon.com/dcu` | DCU |
+| Iluvatar | `iluvatar.com/gpu` | GPU |
+| MetaX | `metax-tech.com/gpu` | GPU |
+| Moore Threads | `mthreads.com/gpu` | GPU |
+| T-Head | `alibabacloud.com/ppu` | PPU |
+
+Each vendor's PCI vendor ID, resource name, and runtime class can be overridden via `GPUSTACK_*` environment
+variables — see [Settings & Environment Variables](./docs/settings.md#per-manufacturer-overrides).
+
+## Quick Start
+
+**Prerequisites:** Kubernetes `>= 1.29` (required by the bundled Kueue), Helm `3.8+`, and cluster-admin.
+cert-manager is optional — with the default `worker.certmanager.enabled=auto`, its resources are created only
+when cert-manager is detected; otherwise the worker self-signs.
+
+Install the chart:
+
+```bash
+helm install gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+  --namespace gpustack-system --create-namespace
+```
+
+Check the worker rollout:
+
+```bash
+kubectl -n gpustack-system rollout status deployment/gpustack-operator-worker
+```
+
+Uninstall (add `--set cleanupOnUninstall=true` at install time, or see the
+[migration guide](./docs/migration/v0.5-to-v0.6.md), to also remove runtime-installed leftovers):
+
+```bash
+helm uninstall gpustack-operator --namespace gpustack-system
+```
+
+> Node Feature Discovery, Kueue, and the CSI drivers are bundled into the operator image and installed by
+> the worker at runtime — there is nothing else to deploy.
 
 ## How It Works
 
-A single `gpustack-operator` binary exposes three subcommands — `worker` (control plane), `worker-gateway` (cross-cluster aggregation), and `device-manager` (per-node DaemonSet) — that drive a four-stage chain:
+A single `gpustack-operator` binary exposes three subcommands — `worker` (control plane), `worker-gateway`
+(cross-cluster aggregation), and `device-manager` (per-node DaemonSet) — that drive a four-stage chain:
 
 1. **Bootstrap** — the Worker installs the NFD and Device Manager DaemonSets.
-2. **Device discovery** — Node Feature Discovery labels nodes by PCI vendor and CPU identity; the Device Manager then detects accelerators and reports per-device feature labels.
+2. **Device discovery** — Node Feature Discovery labels nodes by PCI vendor and CPU identity; the Device Manager then detects accelerators, reports per-device feature labels, and maintains a per-card `Devices` ledger.
 3. **Capacity profiling** — the Worker normalizes each node's CPU/RAM/storage and per-accelerator capacity into profile labels, keyed by the node's CPU identity.
-4. **Queue construction** — four Worker controllers materialize the labels into Kueue `ResourceFlavor`, `Cohort`, `ClusterQueue`, and `LocalQueue` objects.
+4. **Queue construction & admission** — four Worker controllers (`NodeFlavorReconciler`, `InstanceTypeReconciler`, `NodeQueueEntranceReconciler`, `NodeDevicesAdmissionReconciler`) materialize the labels into a Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, **no Cohort**) → `LocalQueue`, a materialized `InstanceType` CRD, and a per-card `gpustack-node-devices` `AdmissionCheck`.
 
-See [Architecture](./docs/architecture.md) for the stage-by-stage detail, label/naming conventions, and a worked example cluster.
+See [Architecture](./docs/architecture.md) for the stage-by-stage detail, label/naming conventions, and a
+worked example cluster.
 
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
 - [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
+- [Migration v0.5 → v0.6](./docs/migration/v0.5-to-v0.6.md) — upgrading an existing install across the scheduling-chain refactor.
 
 ## License
 
