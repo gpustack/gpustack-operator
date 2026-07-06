@@ -39,18 +39,14 @@ func (r *InstanceTypeWebhook) ValidateDelete(_ context.Context, _ runtime.Object
 	return nil, nil
 }
 
-// validateInstanceTypeUnitSpec enforces the admin-writable unit spec. It is
-// all-or-nothing: an entirely unset unit spec is accepted (a derived InstanceType
-// leaves it empty and the operator derives it from the backing flavors), but once any
-// field is set all three must be set and well-formed — unitCPU a unitless positive
-// integer, unitRAM and localStorage a positive integer with a case-sensitive "Gi"
-// suffix. InstanceTypeReconciler preserves the triple as a unit, so a partial spec is
-// rejected here.
+// validateInstanceTypeUnitSpec enforces the unit spec: all three fields must be set and
+// well-formed — unitCPU a unitless positive integer, unitRAM and localStorage a positive
+// integer with a case-sensitive "Gi" suffix. The operator stamps this complete triple on
+// every derived InstanceType at creation, and an admin must provide it, so the reconciler
+// never fills it and an InstanceType always carries a complete unit spec (an empty or
+// partial spec is rejected here).
 func validateInstanceTypeUnitSpec(it *workercore.InstanceType) error {
 	cpu, ram, localStg := it.Spec.UnitResources.CPU, it.Spec.UnitResources.RAM, it.Spec.LocalStorage
-	if cpu == "" && ram == "" && localStg == "" {
-		return nil
-	}
 
 	var errs field.ErrorList
 	if extractPositiveNumberFromString(cpu) == "" {

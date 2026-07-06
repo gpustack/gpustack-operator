@@ -21,16 +21,16 @@ func newInstanceType(cpu, ram, localStorage string) *workercore.InstanceType {
 	}
 }
 
-// TestInstanceTypeWebhook_ValidateUnitSpec pins the all-or-nothing unit-spec rule: an
-// unset unit spec is accepted (derived pools leave it empty), but a set one must have
-// all three fields well-formed.
+// TestInstanceTypeWebhook_ValidateUnitSpec pins the unit-spec rule: all three fields must
+// be set and well-formed. An empty or partial spec is rejected — a derived type is stamped
+// with the fixed default at creation and an admin must supply the full triple.
 func TestInstanceTypeWebhook_ValidateUnitSpec(t *testing.T) {
 	cases := []struct {
 		name                   string
 		cpu, ram, localStorage string
 		wantErr                bool
 	}{
-		{"unset is accepted (derived)", "", "", "", false},
+		{"empty is rejected (must supply the full triple)", "", "", "", true},
 		{"all three valid", "12", "48Gi", "100Gi", false},
 		{"partial: only cpu", "12", "", "", true},
 		{"partial: missing localStorage", "12", "48Gi", "", true},
