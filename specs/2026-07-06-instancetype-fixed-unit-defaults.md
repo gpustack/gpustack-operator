@@ -224,7 +224,7 @@ is docs/e2e; Task 5 is package + verification on a reachable Kubernetes cluster.
       remains; flavor identity + capacity unchanged.
     - Verify: `go test ./pkg/worker/controllers/worker/...` + `make lint` (unused guard).
 
-[ ] **Task 4 — Docs + e2e alignment.**
+[x] **Task 4 — Docs + e2e alignment.**
     - `docs/architecture.md` L178/215/216/227/247: fixed default, single home on InstanceType, no node
       derivation, no RF/CQ unit notes; example shows accel 4c-16g / non-accel 1c-2g / 100Gi.
     - `case-6.sh` (item 3, L16-18/228-254): assert the admin edit persists on `it.spec.unitResources.cpu`

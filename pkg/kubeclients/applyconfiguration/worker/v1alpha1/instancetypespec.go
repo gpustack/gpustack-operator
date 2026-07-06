@@ -29,8 +29,8 @@ type InstanceTypeSpecApplyConfiguration struct {
 	UnitResources *InstanceTypeUnitResourcesApplyConfiguration `json:"unitResources,omitempty"`
 	// LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
 	//
-	// It is an admin-writable input carrying a case-sensitive "Gi" suffix; the
-	// backing ClusterQueue note stores the bare Gi number.
+	// It is an admin-writable input carrying a case-sensitive "Gi" suffix, required by
+	// the validating webhook; a derived InstanceType is stamped with the fixed default.
 	LocalStorage *string `json:"localStorage,omitempty"`
 }
 

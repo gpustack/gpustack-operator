@@ -123,8 +123,9 @@ three-view (`.status.accelerator/.acceleratorShared/.acceleratorSliced`) matches
 `8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256`. Also asserts **watch freshness** (a
 native `kubectl get instancetype -w` observes the `.status` move as the ledger allocs/frees — the whole
 point of promoting InstanceType to a real CRD; the old aggregated projection could not emit
-`Devices`-driven changes), **unit-spec write** through the InstanceType API reaching the CQ notes
-(`note.gpustack.ai/unitCPU`) while touching **no** `Node`/NodeFeature, and **zero Cohort** objects.
+`Devices`-driven changes), **unit-spec edit** through the InstanceType API persisting on the
+InstanceType spec (`spec.unitResources.cpu`) — never a CQ note or a `Node`/NodeFeature — and **zero
+Cohort** objects.
 
 The three-view is a per-card bin-packing projection the reconciler computes over the mocked ledger;
 because it reads `Devices.status`, the mock must be written to the **v1alpha1** `/status` subresource

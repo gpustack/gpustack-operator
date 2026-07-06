@@ -14,8 +14,9 @@
 #      seen live over `kubectl get instancetype -w` (the whole point of promoting InstanceType
 #      to a real CRD: a native watch delivers the .status change, the old aggregated
 #      projection could not).
-#   3. Changing the unit spec through the InstanceType API writes the backing ClusterQueue's
-#      notes and touches NO Node / NodeFeature (the spec flows down to the CQ, not back up).
+#   3. Changing the unit spec through the InstanceType API persists on the InstanceType spec
+#      (the unit spec lives only there — never a ClusterQueue note or a Node) and touches NO
+#      Node / NodeFeature.
 #   4. Zero Cohort objects exist (Cohort was removed entirely: one isolated CQ per pool).
 #
 # Runs on a GPU-LESS cluster BY APPROXIMATION, in the same spirit as CASE 5. The three-view
@@ -225,7 +226,9 @@ else
 fi
 rm -f "$watchlog"
 
-# 6. Changing the unit spec through the InstanceType API writes CQ notes, touches no NodeFeature.
+# 6. Changing the unit spec through the InstanceType API persists on the InstanceType spec,
+#    never leaks into a CQ note, and touches no NodeFeature. (AKEY is accelerated, so unitCPU
+#    is admin-editable — not pinned to 1 like a non-accelerated type.)
 echo "[case-6] patching InstanceType unit spec (cpu=2 ram=8Gi localStorage=64Gi)"
 nfBefore=$(kubectl -n "$NS" get nodefeature "$WORKER_NF" -o json 2>/dev/null | python3 -c "
 import json,sys
@@ -234,17 +237,22 @@ print(json.dumps(json.load(sys.stdin).get('spec',{}).get('labels',{}),sort_keys=
 kubectl patch instancetypes.worker.gpustack.ai "$ITNAME" --type=merge \
   -p '{"spec":{"unitResources":{"cpu":"2","ram":"8Gi"},"localStorage":"64Gi"}}' >/dev/null 2>&1
 
-note=""
+ucpu=""
 for _ in $(seq 1 20); do
-  note=$(kubectl get clusterqueue "$ITNAME" -o json 2>/dev/null | python3 -c "
-import json,sys
-print(json.load(sys.stdin).get('metadata',{}).get('annotations',{}).get('note.gpustack.ai/unitCPU',''))
-" 2>/dev/null)
-  [ "$note" = "2" ] && break
-  note=""; sleep 3
+  ucpu=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.spec.unitResources.cpu}' 2>/dev/null)
+  [ "$ucpu" = "2" ] && break
+  ucpu=""; sleep 3
 done
-[ "$note" = "2" ] && record PASS "unit-spec write reaches CQ notes" "note.gpustack.ai/unitCPU=2 on ${ITNAME}" \
-  || record FAIL "unit-spec write reaches CQ notes" "got '${note:-<unset>}', want 2 — InstanceType→CQ NoteResource merge (T5.4b)"
+[ "$ucpu" = "2" ] && record PASS "unit-spec edit persists on the InstanceType" "spec.unitResources.cpu=2 on ${ITNAME}" \
+  || record FAIL "unit-spec edit persists on the InstanceType" "got '${ucpu:-<unset>}', want 2 — accelerated unitCPU is admin-editable"
+
+# The unit spec must NOT flow into the ClusterQueue notes — it lives only on the InstanceType.
+cqnote=$(kubectl get clusterqueue "$ITNAME" -o json 2>/dev/null | python3 -c "
+import json,sys
+print(json.load(sys.stdin).get('metadata',{}).get('annotations',{}).get('note.gpustack.ai/unitCPU','<absent>'))
+" 2>/dev/null)
+[ "$cqnote" = "<absent>" ] && record PASS "unit spec is not a ClusterQueue note" "no note.gpustack.ai/unitCPU on ${ITNAME}" \
+  || record FAIL "unit spec is not a ClusterQueue note" "found note.gpustack.ai/unitCPU='${cqnote}' — unit spec leaked into CQ notes"
 
 nfAfter=$(kubectl -n "$NS" get nodefeature "$WORKER_NF" -o json 2>/dev/null | python3 -c "
 import json,sys

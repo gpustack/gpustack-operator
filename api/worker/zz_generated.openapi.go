@@ -3485,7 +3485,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 					},
 					"localStorage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix; the backing ClusterQueue note stores the bare Gi number.",
+							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix, required by the validating webhook; a derived InstanceType is stamped with the fixed default.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
