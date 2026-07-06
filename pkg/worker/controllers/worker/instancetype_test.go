@@ -305,9 +305,9 @@ func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 	assert.Equal(t, nodefeature.FormatLocalQueueName(name), cq.Labels[QueueEntranceLabelKey],
 		"queue advertises its entrance LocalQueue name")
 	_, notes := systemmeta.DescribeResource(cq)
-	assert.Equal(t, "1", notes["unitCPU"], "non-accel unitCPU is 1")
-	assert.Equal(t, "8", notes["unitRAM"], "admin unitRAM synced (bare Gi)")
-	assert.Equal(t, "64", notes["localStorage"], "admin localStorage synced (bare Gi)")
+	assert.NotContains(t, notes, "unitCPU", "unit spec is not a queue note")
+	assert.NotContains(t, notes, "unitRAM", "unit spec is not a queue note")
+	assert.NotContains(t, notes, "localStorage", "unit spec is not a queue note")
 
 	got := new(workercore.InstanceType)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, got))
@@ -543,9 +543,6 @@ func newNodesFlavor(name, key string, count, capacity int64, opts ...flavorOpt) 
 		"product":       "",
 		"family":        "",
 		"memory":        "",
-		"unitCPU":       "1",
-		"unitRAM":       "4",
-		"localStorage":  "32",
 	}
 	for _, o := range opts {
 		o(notes)
@@ -700,12 +697,16 @@ func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
 			assert.Nil(t, rq.BorrowingLimit, "no borrowingLimit on a cohort-less queue")
 			assert.Nil(t, rq.LendingLimit, "no lendingLimit on a cohort-less queue")
 
-			// Notes carry the descriptive fields + the unit spec under "instancetypes".
+			// Notes carry the descriptive device fields under "instancetypes"; the unit
+			// spec is not a queue note (it lives on the InstanceType).
 			resType, notes := systemmeta.DescribeResource(cq)
 			assert.Equal(t, _ClusterQueueResType, resType, "resType")
-			for _, k := range []string{"unitCPU", "unitRAM", "localStorage", "manufacturer", "acceleratable"} {
+			for _, k := range []string{"manufacturer", "acceleratable"} {
 				_, ok := notes[k]
 				assert.Truef(t, ok, "note %q present", k)
+			}
+			for _, k := range []string{"unitCPU", "unitRAM", "localStorage"} {
+				assert.NotContainsf(t, notes, k, "unit spec is not a queue note (%q)", k)
 			}
 		})
 	}

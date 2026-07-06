@@ -211,18 +211,15 @@ func TestNodeFlavorReconciler_ActiveShape(t *testing.T) {
 	require.Len(t, rf.Spec.Tolerations, 1, "blanket toleration set")
 	assert.Equal(t, core.TolerationOpExists, rf.Spec.Tolerations[0].Operator, "tolerates any taint")
 
-	// Notes carry the unit spec and descriptive fields under resType "nodes".
+	// Notes carry the descriptive device fields under resType "nodes"; the unit spec is
+	// no longer a flavor note (it is a fixed default on the InstanceType).
 	resType, notes := systemmeta.DescribeResource(rf)
 	assert.Equal(t, _ResourceFlavorResType, resType, "resType")
 	assert.Equal(t, "false", notes["acceleratable"], "acceleratable note")
 	assert.Equal(t, "generic", notes["manufacturer"], "manufacturer note")
-	assert.Equal(t, "1", notes["unitCPU"], "unitCPU note (CPU flavor is always 1)")
-	// unitRAM/localStorage are always populated; product/family/memory are empty for
-	// a CPU flavor and empty note values are not round-tripped (dropped on encode).
-	for _, k := range []string{"unitRAM", "localStorage"} {
-		_, ok := notes[k]
-		assert.Truef(t, ok, "note %q present", k)
-	}
+	assert.NotContains(t, notes, "unitCPU", "no unit spec in flavor notes")
+	assert.NotContains(t, notes, "unitRAM", "no unit spec in flavor notes")
+	assert.NotContains(t, notes, "localStorage", "no unit spec in flavor notes")
 }
 
 // TestNodeFlavorReconciler_ActiveShapeAccelerated pins a device flavor's notes: it

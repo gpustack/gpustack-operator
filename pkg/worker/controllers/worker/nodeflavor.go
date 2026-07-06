@@ -35,15 +35,14 @@ import (
 // NodeFlavorReconciler reconciles kueue.ResourceFlavor objects keyed by their own
 // name, driven by both ResourceFlavor and Kubernetes Node changes:
 //   - When one or more Nodes contribute to the flavor's name, (re)build the
-//     ResourceFlavor — capacity = pooled nodes × per-node count, the default unit
-//     spec from the most-constrained pooled node.
+//     ResourceFlavor — capacity = pooled nodes × per-node count.
 //   - When no Node contributes, delete the flavor; an unused flavor advertises
 //     stale capacity and a tombstone buys nothing once the ClusterQueue is rebuilt
 //     from ResourceFlavor labels.
 //
-// Unlike the legacy reconciler it no longer reads any per-node unit-spec label:
-// the flavor is identified by (key, os, arch, count) and the unit spec lives in the
-// flavor's notes, so changing a unit spec never touches a Node.
+// The flavor is identified by (key, os, arch, count) and its notes carry only device
+// information — never a unit spec. The unit spec is no longer node-derived; it is a
+// fixed default stamped on the InstanceType.
 //
 // Watching ResourceFlavor with For(...) means a full resync on start-up
 // re-evaluates every flavor, so orphans left behind by a key/count switch are
@@ -155,8 +154,8 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	// Active: the unit spec is derived from the most-constrained pooled node so the
-	// pooled unit is feasible on every node; capacity = pooled nodes × count.
+	// Active: capacity = pooled nodes × count. The flavor identity is read back from a
+	// pooled node below — it is shared by every contributor to this name.
 	minNode := contributors[0]
 	for _, nd := range contributors[1:] {
 		if lessConstrained(nd, minNode) {
@@ -171,7 +170,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 	capacity := int64(len(contributors)) * flavor.Count
-	unitCPU, unitRAM, localStorage := nodefeature.DeriveNodeUnitSpec(minNode, flavor.Count, flavor.Acceleratable)
 
 	// An accelerated flavor is sliceable when its hardware reports a non-zero
 	// MaxPartitions, read off the most-constrained node's same-named Devices.
@@ -203,9 +201,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"product":       flavor.Product,
 		"family":        flavor.Family,
 		"memory":        flavor.Memory,
-		"unitCPU":       unitCPU,
-		"unitRAM":       unitRAM,
-		"localStorage":  localStorage,
 		"sliceable":     strconv.FormatBool(sliceable),
 	}
 	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)

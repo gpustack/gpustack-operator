@@ -405,8 +405,8 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// .z-queue/.z-cohort) labels onto the node. It now emits only the managed
 	// mark plus general(CPU) key presence — the manufacturer label and the full
 	// key label — so the NodeFlavorReconciler can pool CPU-only nodes. The
-	// unit spec moved onto the ResourceFlavor (see DeriveNodeUnitSpec) and the
-	// flavor derivation moved to ExtractNodeFlavors.
+	// flavor derivation moved to ExtractNodeFlavors; the unit spec is a fixed
+	// default on the InstanceType, no longer derived here.
 	//
 	// With CPU-name blending enabled, the cpu-model labels of an AMD family 25
 	// model 1 CPU derive the general key "amd-25-1" (no os/arch tail anymore).
@@ -752,128 +752,6 @@ func TestExtractNodeFlavors(t *testing.T) {
 				return
 			}
 			assert.ElementsMatch(t, cs.wantDevices, got, "unexpected device flavors")
-		})
-	}
-}
-
-func TestDeriveNodeUnitSpec(t *testing.T) {
-	// newNode builds a node carrying only the resources named in capacity, so a
-	// case can omit memory/storage to exercise the absent-resource paths.
-	newNode := func(cpu, mem, storage string) *core.Node {
-		capacity := core.ResourceList{}
-		if cpu != "" {
-			capacity[core.ResourceCPU] = resource.MustParse(cpu)
-		}
-		if mem != "" {
-			capacity[core.ResourceMemory] = resource.MustParse(mem)
-		}
-		if storage != "" {
-			capacity[core.ResourceEphemeralStorage] = resource.MustParse(storage)
-		}
-		return &core.Node{Status: core.NodeStatus{Capacity: capacity}}
-	}
-
-	cases := []struct {
-		name             string
-		node             *core.Node
-		count            int64
-		acceleratable    bool
-		wantCPU          string
-		wantRAM          string
-		wantLocalStorage string
-	}{
-		{
-			// Accelerated: unitCPU = cpu/count, unitRAM = ramGi/count, storage
-			// is the node total (never divided).
-			name:             "accelerated divides cpu and ram by device count",
-			node:             newNode("8", "32Gi", "100Gi"),
-			count:            4,
-			acceleratable:    true,
-			wantCPU:          "2",
-			wantRAM:          "8",
-			wantLocalStorage: "100",
-		},
-		{
-			// Non-accelerated flavor: the factory default unit spec is a fixed
-			// 1 core / 2 Gi regardless of the node's cpu/ram; storage is the node total.
-			name:             "non-accelerated flavor uses the factory 1c-2g default",
-			node:             newNode("8", "32Gi", "100Gi"),
-			count:            8,
-			acceleratable:    false,
-			wantCPU:          "1",
-			wantRAM:          "2",
-			wantLocalStorage: "100",
-		},
-		{
-			// RAM rounds up to an even Gi (31 -> 32). Storage absent -> 0.
-			name:             "ram rounds up to even and absent storage is zero",
-			node:             newNode("4", "31Gi", ""),
-			count:            4,
-			acceleratable:    true,
-			wantCPU:          "1",
-			wantRAM:          "8",
-			wantLocalStorage: "0",
-		},
-		{
-			// Storage rounds down to an even Gi (101 -> 100).
-			name:             "storage rounds down to even",
-			node:             newNode("8", "32Gi", "101Gi"),
-			count:            4,
-			acceleratable:    true,
-			wantCPU:          "2",
-			wantRAM:          "8",
-			wantLocalStorage: "100",
-		},
-		{
-			// localStorage is never divided by count: 200Gi stays 200, not 25.
-			name:             "local storage is not divided by count",
-			node:             newNode("8", "64Gi", "200Gi"),
-			count:            8,
-			acceleratable:    true,
-			wantCPU:          "1",
-			wantRAM:          "8",
-			wantLocalStorage: "200",
-		},
-		{
-			// max(...,1) guards: cpu/count and ram/count both floor to 0 but are
-			// clamped to 1.
-			name:             "unit cpu and ram floor to one",
-			node:             newNode("2", "4Gi", "10Gi"),
-			count:            8,
-			acceleratable:    true,
-			wantCPU:          "1",
-			wantRAM:          "1",
-			wantLocalStorage: "10",
-		},
-		{
-			// count <= 0 is treated as 1, so nothing is divided.
-			name:             "non-positive count is treated as one",
-			node:             newNode("8", "32Gi", "100Gi"),
-			count:            0,
-			acceleratable:    true,
-			wantCPU:          "8",
-			wantRAM:          "32",
-			wantLocalStorage: "100",
-		},
-		{
-			// CPU flavor keeps unitCPU=1 regardless of count, and a 1Gi storage
-			// rounds down to 0 (covering the max(stgGi,0) guard).
-			name:             "cpu flavor with tiny storage clamps to zero",
-			node:             newNode("1", "1Gi", "1Gi"),
-			count:            1,
-			acceleratable:    false,
-			wantCPU:          "1",
-			wantRAM:          "2",
-			wantLocalStorage: "0",
-		},
-	}
-
-	for _, cs := range cases {
-		t.Run(cs.name, func(t *testing.T) {
-			unitCPU, unitRAM, localStorage := DeriveNodeUnitSpec(cs.node, cs.count, cs.acceleratable)
-			assert.Equal(t, cs.wantCPU, unitCPU, "unexpected unit cpu")
-			assert.Equal(t, cs.wantRAM, unitRAM, "unexpected unit ram")
-			assert.Equal(t, cs.wantLocalStorage, localStorage, "unexpected local storage")
 		})
 	}
 }
