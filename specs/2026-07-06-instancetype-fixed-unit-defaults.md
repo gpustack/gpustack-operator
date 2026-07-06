@@ -1,6 +1,6 @@
 # Spec: InstanceType Fixed Unit-Resource Defaults
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
