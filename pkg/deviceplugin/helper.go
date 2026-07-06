@@ -136,6 +136,18 @@ func SlicedMemoryMib(ctr *core.Container, memPctResName, memMibResName core.Reso
 	return 0, fmt.Errorf("container %q has no %s or %s request", ctr.Name, memPctResName, memMibResName)
 }
 
+// ContainerEnvDeclared reports whether the container explicitly declares an env var named
+// name in its Env list, so a caller can skip injecting a default and leave that value
+// authoritative. Only explicit Env entries are checked; EnvFrom-sourced variables are not.
+func ContainerEnvDeclared(ctr *core.Container, name string) bool {
+	for i := range ctr.Env {
+		if ctr.Env[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 type ResourceUnit struct {
 	Resource
 
