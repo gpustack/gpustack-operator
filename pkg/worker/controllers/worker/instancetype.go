@@ -160,10 +160,26 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return r.syncInstanceType(ctx, it, cq)
 }
 
+// defaultUnitLocalStorage is the fixed local-storage cap of a derived InstanceType's unit
+// spec, the same for accelerated and non-accelerated types. Admins override it per
+// InstanceType through its API.
+const defaultUnitLocalStorage = "100Gi"
+
+// defaultUnitResources returns the fixed per-unit CPU/RAM for an InstanceType, chosen by
+// acceleratable-ness: a non-accelerated unit is 1 CPU / 2Gi, an accelerated unit (one whole
+// card) is 4 CPU / 16Gi. Admins override these per InstanceType through its API.
+func defaultUnitResources(acceleratable bool) (cpu, ram string) {
+	if acceleratable {
+		return "4", "16Gi"
+	}
+	return "1", "2Gi"
+}
+
 // createDerivedInstanceType authors an operator-owned InstanceType for a pool that
 // has ResourceFlavors but no InstanceType yet. It carries the pool's schedule labels
 // (so the backing queue and its Devices are reverse-looked-up) plus the derived
-// marker; the descriptor spec and unit spec are filled by the subsequent reconcile.
+// marker, and is stamped with the fixed default unit spec for its acceleratable-ness;
+// the descriptor spec is filled by the subsequent reconcile.
 func (r *InstanceTypeReconciler) createDerivedInstanceType(
 	ctx context.Context, name string, rfList *kueue.ResourceFlavorList,
 ) (ctrl.Result, error) {
@@ -177,6 +193,7 @@ func (r *InstanceTypeReconciler) createDerivedInstanceType(
 	_, notes := systemmeta.DescribeResource(rf)
 	acceleratable := notes["acceleratable"] == valueTrue
 
+	cpu, ram := defaultUnitResources(acceleratable)
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
 			Name: name,
@@ -186,6 +203,10 @@ func (r *InstanceTypeReconciler) createDerivedInstanceType(
 				core.LabelArchStable:                arch,
 				_InstanceTypeDerivedFromNodeLabel:   valueTrue,
 			},
+		},
+		Spec: workercore.InstanceTypeSpec{
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: cpu, RAM: ram},
+			LocalStorage:  defaultUnitLocalStorage,
 		},
 	}
 	if err := r.Client.Create(ctx, it); err != nil && !kerrors.IsAlreadyExists(err) {
@@ -621,12 +642,13 @@ func (r *InstanceTypeReconciler) computeStatus(
 	return st
 }
 
-// applyDescriptorsFromClusterQueue overwrites the hardware-descriptor spec fields
-// (the ones the operator authors from the discovered hardware) from the queue notes,
-// and initializes the unit spec (UnitResources / LocalStorage) from those notes when
-// the InstanceType carries none — a derived InstanceType is authored without one, yet
-// the Instance webhook and the table read the unit from the spec. An admin-set unit
-// spec, and the admin-owned Group, are left untouched.
+// applyDescriptorsFromClusterQueue overwrites the hardware-descriptor spec fields — the
+// device information the operator authors from the discovered hardware (acceleratable,
+// manufacturer, product, family, per-card VRAM, sliceable, os/arch) — from the queue
+// notes. It does NOT touch the unit spec: the ResourceFlavor → ClusterQueue → InstanceType
+// chain carries only device information, while the unit spec is stamped on a derived
+// InstanceType at creation and required on an admin-created one by the validating webhook.
+// The admin-owned Group is left untouched.
 func applyDescriptorsFromClusterQueue(spec *workercore.InstanceTypeSpec, cq *kueue.ClusterQueue) {
 	_, notes := systemmeta.DescribeResource(cq)
 	acceleratable := notes["acceleratable"] == valueTrue
@@ -647,20 +669,6 @@ func applyDescriptorsFromClusterQueue(spec *workercore.InstanceTypeSpec, cq *kue
 	if acceleratable {
 		spec.Memory = notes["memory"]
 		spec.Sliceable = notes["sliceable"] == valueTrue
-	}
-
-	// Initialize the unit spec from the queue notes when the InstanceType carries
-	// none (a derived one is authored without it). Written as a complete triple so
-	// the InstanceType validating webhook — which rejects a partial unit spec —
-	// accepts the reconciler's write; the notes store bare Gi numbers, so RAM and
-	// localStorage regain their "Gi" suffix.
-	if spec.UnitResources.CPU == "" && spec.UnitResources.RAM == "" && spec.LocalStorage == "" {
-		unitCPU, unitRAM, localStorage := notes["unitCPU"], notes["unitRAM"], notes["localStorage"]
-		if unitCPU != "" && unitRAM != "" && localStorage != "" {
-			spec.UnitResources.CPU = unitCPU
-			spec.UnitResources.RAM = unitRAM + "Gi"
-			spec.LocalStorage = localStorage + "Gi"
-		}
 	}
 }
 

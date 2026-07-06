@@ -531,14 +531,6 @@ func accelerated(manufacturer string) flavorOpt {
 	}
 }
 
-func unitSpec(unitCPU, unitRAM, localStorage string) flavorOpt {
-	return func(notes map[string]string) {
-		notes["unitCPU"] = unitCPU
-		notes["unitRAM"] = unitRAM
-		notes["localStorage"] = localStorage
-	}
-}
-
 // newNodesFlavor builds a "nodes" ResourceFlavor carrying the schedule labels the
 // reconciler reads (the feature key, kubernetes.io/os|arch, and the key's
 // .count/.capacity siblings) and the per-flavor notes. Its name is
@@ -750,29 +742,33 @@ func TestInstanceTypeReconciler_AggregatesCapacity(t *testing.T) {
 // TestInstanceTypeReconciler_UnitSpecDerivation pins the unit-spec source: a derived
 // pool takes the min positive across its flavors, while an admin unit spec set on the
 // InstanceType wins over the flavors.
+// TestInstanceTypeReconciler_UnitSpecDerivation pins the non-accelerated unit spec on the
+// InstanceType: a derived type gets the fixed 1c/2Gi/100Gi default regardless of the node
+// hardware behind its flavors, and an admin override wins on RAM/localStorage while unitCPU
+// is pinned to 1 (a non-accelerated unit is always a single CPU core).
 func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
 	key := "generic"
 	name := nodeQueueName(key)
 
+	// Two CPU flavors of differing size feed the pool; their per-node notes must not leak
+	// into the unit spec — it is a fixed default, not node-derived.
 	mkFlavors := func() []ctrlcli.Object {
 		return []ctrlcli.Object{
-			newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4, unitSpec("1", "8", "64")),
-			newNodesFlavor("gpustack-generic-linux-amd64-8c", key, 8, 8, unitSpec("1", "4", "32")),
+			newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4),
+			newNodesFlavor("gpustack-generic-linux-amd64-8c", key, 8, 8),
 		}
 	}
 
-	t.Run("derives min positive across flavors", func(t *testing.T) {
+	t.Run("derived type gets the fixed 1c/2Gi/100Gi default", func(t *testing.T) {
 		enableInstanceTypeDerivedFromNode(t)
 		cli := buildInstanceTypeClient(mkFlavors()...)
 
-		reconcileInstanceTypeN(t, cli, name, 4)
+		reconcileInstanceTypeN(t, cli, name, 5)
 
-		cq, err := getClusterQueue(t, cli, name)
-		require.NoError(t, err)
-		_, notes := systemmeta.DescribeResource(cq)
-		assert.Equal(t, "1", notes["unitCPU"], "min unitCPU")
-		assert.Equal(t, "4", notes["unitRAM"], "min unitRAM")
-		assert.Equal(t, "32", notes["localStorage"], "min localStorage")
+		it := getInstanceType(t, cli, name)
+		assert.Equal(t, "1", it.Spec.UnitResources.CPU, "fixed default unitCPU")
+		assert.Equal(t, "2Gi", it.Spec.UnitResources.RAM, "fixed default unitRAM")
+		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "fixed default localStorage")
 	})
 
 	t.Run("admin unit spec wins except non-accel unitCPU is pinned to 1", func(t *testing.T) {
@@ -794,24 +790,18 @@ func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
 
 		reconcileInstanceTypeN(t, cli, name, 4)
 
-		cq, err := getClusterQueue(t, cli, name)
-		require.NoError(t, err)
-		_, notes := systemmeta.DescribeResource(cq)
-		assert.Equal(t, "1", notes["unitCPU"], "non-accel unitCPU pinned to 1, not the admin's 2")
-		assert.Equal(t, "16", notes["unitRAM"], "admin unitRAM wins")
-		assert.Equal(t, "128", notes["localStorage"], "admin localStorage wins")
-
-		// The admin's non-1 unitCPU is reset on the InstanceType spec too.
-		assert.Equal(t, "1", getInstanceType(t, cli, name).Spec.UnitResources.CPU,
-			"non-accel unitCPU reset to 1 on the spec")
+		got := getInstanceType(t, cli, name)
+		assert.Equal(t, "1", got.Spec.UnitResources.CPU, "non-accel unitCPU pinned to 1, not the admin's 2")
+		assert.Equal(t, "16Gi", got.Spec.UnitResources.RAM, "admin unitRAM wins")
+		assert.Equal(t, "128Gi", got.Spec.LocalStorage, "admin localStorage wins")
 	})
 }
 
 // TestInstanceTypeReconciler_DerivedInitializesUnitSpec pins that a derived
-// InstanceType — authored without a unit spec — has its spec.UnitResources /
-// spec.LocalStorage initialized from the backing queue notes, so the Instance
-// webhook and the table (both read the unit from the spec) observe the effective
-// unit. The notes store bare Gi numbers, so RAM/localStorage regain the "Gi" suffix.
+// InstanceType — authored without an admin unit spec — carries the fixed default
+// unit spec chosen by acceleratable-ness (accelerated 4/16Gi/100Gi, non-accelerated
+// 1/2Gi/100Gi), independent of the node hardware behind the flavor. The Instance
+// webhook and the table read the unit from the spec, so the derived type must carry it.
 func TestInstanceTypeReconciler_DerivedInitializesUnitSpec(t *testing.T) {
 	enableInstanceTypeDerivedFromNode(t)
 
@@ -825,22 +815,21 @@ func TestInstanceTypeReconciler_DerivedInitializesUnitSpec(t *testing.T) {
 		wantStorage string
 	}{
 		{
-			name: "accelerated pool initializes the full unit triple from notes",
+			name: "accelerated pool gets the fixed 4c/16Gi/100Gi default",
 			key:  "nvidia-a10g",
 			flavor: newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 4,
-				accelerated(nodefeature.ManufacturerNVIDIA), unitSpec("2", "16", "100")),
-			wantCPU:     "2",
+				accelerated(nodefeature.ManufacturerNVIDIA)),
+			wantCPU:     "4",
 			wantRAM:     "16Gi",
 			wantStorage: "100Gi",
 		},
 		{
-			name: "cpu-only pool initializes unitCPU pinned to 1",
-			key:  "generic",
-			flavor: newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4,
-				unitSpec("8", "4", "32")),
+			name:        "cpu-only pool gets the fixed 1c/2Gi/100Gi default",
+			key:         "generic",
+			flavor:      newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4),
 			wantCPU:     "1", // a non-accelerated unit is always a single CPU core
-			wantRAM:     "4Gi",
-			wantStorage: "32Gi",
+			wantRAM:     "2Gi",
+			wantStorage: "100Gi",
 		},
 	}
 
@@ -850,15 +839,15 @@ func TestInstanceTypeReconciler_DerivedInitializesUnitSpec(t *testing.T) {
 			name := nodeQueueName(c.key)
 			cli := buildInstanceTypeClient(c.flavor)
 
-			// Author the derived InstanceType, create + align its queue, then
-			// initialize its unit spec and materialize status.
+			// Author the derived InstanceType (stamped with the fixed unit spec),
+			// create + align its queue, then materialize status.
 			reconcileInstanceTypeN(t, cli, name, 5)
 
 			it := getInstanceType(t, cli, name)
 			require.Equal(t, valueTrue, it.Labels[_InstanceTypeDerivedFromNodeLabel], "authored derived")
-			assert.Equal(t, c.wantCPU, it.Spec.UnitResources.CPU, "unitCPU initialized from notes")
-			assert.Equal(t, c.wantRAM, it.Spec.UnitResources.RAM, "unitRAM initialized (Gi suffix)")
-			assert.Equal(t, c.wantStorage, it.Spec.LocalStorage, "localStorage initialized (Gi suffix)")
+			assert.Equal(t, c.wantCPU, it.Spec.UnitResources.CPU, "fixed default unitCPU")
+			assert.Equal(t, c.wantRAM, it.Spec.UnitResources.RAM, "fixed default unitRAM (Gi suffix)")
+			assert.Equal(t, c.wantStorage, it.Spec.LocalStorage, "fixed default localStorage (Gi suffix)")
 		})
 	}
 }
