@@ -209,7 +209,7 @@ is docs/e2e; Task 5 is package + verification on a reachable Kubernetes cluster.
     - Verify: `make lint` (unused guard) + `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/...`.
     - **Checkpoint:** full `make test` + `make lint` green.
 
-[ ] **Task 3 — Simplify the node-selection call sites now that the unit spec is not node-derived.**
+[x] **Task 3 — Simplify the node-selection call sites now that the unit spec is not node-derived.**
     - `nodeflavor.go`: the flavor identity (key/os/arch/count/manufacturer/product/family/memory) and capacity
       (`len(contributors) × Count`) are shared by every contributor to a flavor name, so the most-constrained-node
       pick is no longer needed — take `contributors[0]` for `matchNodeFlavor` and `nodeFlavorSliceable`. Delete
