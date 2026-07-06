@@ -1060,7 +1060,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "string",
 										},
 										"localStorage": {
-											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix; the\nbacking ClusterQueue note stores the bare Gi number.",
+											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix, required by\nthe validating webhook; a derived InstanceType is stamped with the fixed default.",
 											Type:        "string",
 										},
 										"logicalCores": {
