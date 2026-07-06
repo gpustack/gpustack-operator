@@ -32,7 +32,6 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -260,7 +259,7 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 	}
 
 	eResGroups := buildResourceGroups(rfList, acceleratable, manufacturer)
-	eNotes := assembleClusterQueueNotes(it, cq, rfList, firstNotes)
+	eNotes := assembleClusterQueueNotes(cq, rfList, firstNotes)
 	eLabels := instanceTypeScheduleLabels(it)
 	// Advertise the entrance LocalQueue name so the Pod webhook reverse-looks-up this
 	// operator-owned queue for the authoritative per-card VRAM.
@@ -435,28 +434,19 @@ func buildResourceGroups(rfList *kueue.ResourceFlavorList, acceleratable bool, m
 	return groups
 }
 
-// assembleClusterQueueNotes builds the backing queue's "instancetypes" notes. The
-// descriptive fields always reflect the current flavors. The unit spec is
-// authoritative from the InstanceType when the admin set it there (all-or-nothing,
-// guarded by the webhook); otherwise a unit spec already on the queue is preserved
-// (admin-set earlier or previously derived), and only a queue carrying none derives
-// the min across the feeding flavors.
+// assembleClusterQueueNotes builds the backing queue's "instancetypes" notes — the
+// descriptive device fields only (acceleratable/manufacturer/product/family/VRAM/
+// sliceable). They reflect the current flavors; with none, whatever the queue already
+// carries is preserved (the type's identity outlives a transient node drain). The unit
+// spec is not a queue note — it lives on the InstanceType.
 func assembleClusterQueueNotes(
-	it *workercore.InstanceType, cq *kueue.ClusterQueue, rfList *kueue.ResourceFlavorList, firstNotes map[string]string,
+	cq *kueue.ClusterQueue, rfList *kueue.ResourceFlavorList, firstNotes map[string]string,
 ) map[string]string {
-	var cqNotes map[string]string
-	if cq != nil {
-		_, cqNotes = systemmeta.DescribeResource(cq)
-	}
-
-	// The descriptive fields come from the feeding flavors; with none there is nothing
-	// to derive, so whatever the queue already carries is preserved (the type's
-	// identity outlives a transient node drain).
 	descriptive := firstNotes
-	if len(rfList.Items) == 0 {
-		descriptive = cqNotes
+	if len(rfList.Items) == 0 && cq != nil {
+		_, descriptive = systemmeta.DescribeResource(cq)
 	}
-	notes := map[string]string{
+	return map[string]string{
 		"acceleratable": descriptive["acceleratable"],
 		"manufacturer":  descriptive["manufacturer"],
 		"product":       descriptive["product"],
@@ -464,48 +454,6 @@ func assembleClusterQueueNotes(
 		"memory":        descriptive["memory"],
 		"sliceable":     descriptive["sliceable"],
 	}
-
-	// The unit spec is authoritative from the InstanceType when the admin set it there
-	// (all-or-nothing, guarded by the webhook); otherwise a unit spec already on the
-	// queue is preserved (admin-set earlier or previously derived), and only a queue
-	// carrying none derives the min positive across the feeding flavors.
-	switch admin := adminUnitNotes(it); {
-	case admin["unitCPU"] != "":
-		notes["unitCPU"], notes["unitRAM"], notes["localStorage"] = admin["unitCPU"], admin["unitRAM"], admin["localStorage"]
-	case cqNotes["unitCPU"] != "":
-		notes["unitCPU"], notes["unitRAM"], notes["localStorage"] = cqNotes["unitCPU"], cqNotes["unitRAM"], cqNotes["localStorage"]
-	default:
-		var unitCPU, unitRAM, localStorage string
-		for i := range rfList.Items {
-			_, n := systemmeta.DescribeResource(&rfList.Items[i])
-			unitCPU = minPositiveNumeric(unitCPU, n["unitCPU"])
-			unitRAM = minPositiveNumeric(unitRAM, n["unitRAM"])
-			localStorage = minPositiveNumeric(localStorage, n["localStorage"])
-		}
-		notes["unitCPU"], notes["unitRAM"], notes["localStorage"] = unitCPU, unitRAM, localStorage
-	}
-	// A non-accelerated InstanceType's unit is always a single CPU core; pin unitCPU to
-	// "1" so an admin edit to the general type's CPU unit is reset (unitRAM/localStorage
-	// stay admin-editable). Read acceleratable from the flavors (authoritative) as well
-	// as the spec, since a freshly authored derived InstanceType has not yet materialized
-	// spec.Acceleratable from its notes.
-	if notes["acceleratable"] != valueTrue && !it.Spec.Acceleratable {
-		notes["unitCPU"] = "1"
-	}
-	return notes
-}
-
-// minPositiveNumeric returns the smaller of cur and v compared as numeric strings,
-// ignoring non-positive candidates (so a flavor reporting no value never lowers the
-// min). cur is the running min ("" until the first positive value).
-func minPositiveNumeric(cur, v string) string {
-	if stringx.CompareNumeric(v, "0") <= 0 {
-		return cur
-	}
-	if cur == "" || stringx.CompareNumeric(v, cur) < 0 {
-		return v
-	}
-	return cur
 }
 
 // syncInstanceType refreshes the InstanceType's hardware-descriptor spec from the
@@ -670,23 +618,6 @@ func applyDescriptorsFromClusterQueue(spec *workercore.InstanceTypeSpec, cq *kue
 		spec.Memory = notes["memory"]
 		spec.Sliceable = notes["sliceable"] == valueTrue
 	}
-}
-
-// adminUnitNotes extracts the admin-owned unit spec from the InstanceType as bare
-// note values (unitCPU/unitRAM/localStorage). Only present values are returned, so
-// an unset unit spec leaves the operator to derive it from the flavors.
-func adminUnitNotes(it *workercore.InstanceType) map[string]string {
-	notes := make(map[string]string, 3)
-	if v := extractPositiveNumberFromString(it.Spec.UnitResources.CPU); v != "" {
-		notes["unitCPU"] = v
-	}
-	if v := extractPositiveNumberFromQuantity(it.Spec.UnitResources.RAM, "Gi"); v != "" {
-		notes["unitRAM"] = v
-	}
-	if v := extractPositiveNumberFromQuantity(it.Spec.LocalStorage, "Gi"); v != "" {
-		notes["localStorage"] = v
-	}
-	return notes
 }
 
 // instanceTypeScheduleLabels copies the schedule discriminator labels (the feature
@@ -892,27 +823,6 @@ func parseNodeFlavorCount(name string) int64 {
 		}
 	}
 	return 0
-}
-
-// extractPositiveNumberFromString returns v unchanged when it is a positive integer
-// carrying no unit suffix, and "" otherwise (including empty input).
-func extractPositiveNumberFromString(v string) string {
-	n, err := strconvx.ParseInt[int32](v, 10, 32)
-	if err == nil && n > 0 {
-		return v
-	}
-	return ""
-}
-
-// extractPositiveNumberFromQuantity strips the given suffix and returns the bare
-// positive integer, or "" when the suffix is absent or the remainder is not a positive
-// integer (including empty input).
-func extractPositiveNumberFromQuantity(v, suffix string) string {
-	b, ok := strings.CutSuffix(v, suffix)
-	if ok {
-		return extractPositiveNumberFromString(b)
-	}
-	return ""
 }
 
 // instanceTypeNameFromScheduleLabels returns the pool's InstanceType/ClusterQueue name

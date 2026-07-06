@@ -194,7 +194,7 @@ is docs/e2e; Task 5 is package + verification on a reachable Kubernetes cluster.
       an empty/partial unit spec is rejected; `applyDescriptorsFromClusterQueue` touches no unit field.
     - Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/controllers/worker/... ./pkg/worker/webhooks/worker/...` + `make lint`.
 
-[ ] **Task 2 — Stop recording unit spec in RF/CQ notes; remove derivation + orphans.**
+[x] **Task 2 — Stop recording unit spec in RF/CQ notes; remove derivation + orphans.**
     - `nodeflavor.go`: drop the `DeriveNodeUnitSpec` call and `unitCPU/unitRAM/localStorage` from `eNotes`;
       fix the reconciler doc comments.
     - `instancetype.go`: `assembleClusterQueueNotes` drops the unit `switch`, the non-accel pin, and its `it`

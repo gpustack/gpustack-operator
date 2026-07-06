@@ -319,10 +319,9 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 // one CPU flavor (its general key, sized by CPU cores) plus one device flavor per
 // acceleratable key it carries (sized by device count).
 //
-// The NodeFlavorReconciler pools the nodes that share a Name: the flavor's
-// capacity is the count of pooled nodes times Count, and the default unit spec is
-// derived from the most-constrained pooled node (see DeriveNodeUnitSpec). Unit
-// specs therefore live on the ResourceFlavor, never on the node.
+// The NodeFlavorReconciler pools the nodes that share a Name: the flavor's capacity
+// is the count of pooled nodes times Count. The unit spec is not derived here — it is
+// a fixed default on the InstanceType.
 type NodeFlavor struct {
 	// Name is the ResourceFlavor name:
 	// "gpustack-${key}-${os}-${arch}-${count}c" for a CPU flavor or
@@ -443,48 +442,6 @@ func formatNodeFlavorName(key, os, arch string, count int64, acceleratable bool)
 	}
 	return fmt.Sprintf("gpustack-%s-%s-%s-%d%s",
 		key, os, arch, count, suffix)
-}
-
-// DeriveNodeUnitSpec derives a flavor's default per-unit spec from a node's status
-// capacity, to be written to ResourceFlavor notes. count is the flavor's Count
-// (CPU cores for a CPU flavor, device count for a device flavor).
-//
-// A non-accelerated flavor takes the factory default unit spec of 1 core / 2 Gi —
-// the general-view setting that held before unit specs moved onto the
-// ResourceFlavor — so only localStorage tracks the node. A device flavor's unit is
-// per device: unitCPU = cores/count and unitRAM = ramGi/count, with RAM rounded up
-// to an even Gi. localStorage is the node's total storage in Gi (rounded down to an
-// even Gi), never divided — it caps a submission rather than describing a unit. All
-// returned values are bare integers (Gi for unitRAM/localStorage).
-func DeriveNodeUnitSpec(node *core.Node, count int64, acceleratable bool) (unitCPU, unitRAM, localStorage string) {
-	if count <= 0 {
-		count = 1
-	}
-
-	stgQ := node.Status.Capacity[core.ResourceEphemeralStorage]
-	stgGi := stgQ.Value() / quantityx.Gi
-	if stgGi&1 != 0 {
-		stgGi--
-	}
-	localStorage = strconvx.Itoa(max(stgGi, 0))
-
-	if !acceleratable {
-		// Factory default for a non-accelerated flavor: 1 core / 2 Gi.
-		return "1", "2", localStorage
-	}
-
-	cpuQ := node.Status.Capacity[core.ResourceCPU]
-	cpuCount := cpuQ.Value()
-
-	ramQ := node.Status.Capacity[core.ResourceMemory]
-	ramGi := ramQ.Value() / quantityx.Gi
-	if ramGi&1 != 0 {
-		ramGi++
-	}
-
-	unitCPU = strconvx.Itoa(max(cpuCount/count, 1))
-	unitRAM = strconvx.Itoa(max(ramGi/count, 1))
-	return unitCPU, unitRAM, localStorage
 }
 
 // generalFeatureAnnotation returns the "feature.gpustack.ai/cpu-${name}"
