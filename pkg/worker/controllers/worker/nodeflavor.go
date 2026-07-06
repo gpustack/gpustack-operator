@@ -121,7 +121,7 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	mixingAllowed := settings.InstanceTypeMixedOnNode.ShouldValueBool(ctx)
 
 	// Resolve each node's flavor matching this name and collect the contributors;
-	// the flavor identity is read back from the most-constrained one below.
+	// the flavor identity is read back from the first one below.
 	var contributors []*core.Node
 	for i := range ndList.Items {
 		nd := &ndList.Items[i]
@@ -154,17 +154,11 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, nil
 	}
 
-	// Active: capacity = pooled nodes × count. The flavor identity is read back from a
-	// pooled node below — it is shared by every contributor to this name.
-	minNode := contributors[0]
-	for _, nd := range contributors[1:] {
-		if lessConstrained(nd, minNode) {
-			minNode = nd
-		}
-	}
-	// minNode is a contributor, so it matches req.Name; the flavor it yields carries
-	// the identity shared by the whole pool (key/os/arch/count + metadata).
-	flavor := matchNodeFlavor(minNode, req.Name)
+	// Active: capacity = pooled nodes × count. Every contributor to this name yields
+	// the same flavor identity (key/os/arch/count + metadata), so read it back from the
+	// first — the unit spec is no longer node-derived, so there is no min to pick.
+	node := contributors[0]
+	flavor := matchNodeFlavor(node, req.Name)
 	if flavor == nil {
 		logger.V(3).Info("matched node no longer carries the flavor, skip")
 		return ctrl.Result{}, nil
@@ -172,8 +166,8 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	capacity := int64(len(contributors)) * flavor.Count
 
 	// An accelerated flavor is sliceable when its hardware reports a non-zero
-	// MaxPartitions, read off the most-constrained node's same-named Devices.
-	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, minNode.Name, flavor.Manufacturer)
+	// MaxPartitions, read off the contributor's same-named Devices.
+	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, node.Name, flavor.Manufacturer)
 
 	keyLabel := featureKeyLabel(flavor.Acceleratable, flavor.Key)
 	eRf := &kueue.ResourceFlavor{
@@ -275,36 +269,6 @@ func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName
 		return g.Accelerators[0].Features.MaxPartitions != 0
 	}
 	return false
-}
-
-// lessConstrained reports whether node a is more constrained (smaller capacity)
-// than node b, comparing cpu → memory → ephemeral-storage. Non-positive values are
-// ignored: only strictly positive values are compared, so a node reporting no
-// value for an axis never wins the min on it.
-func lessConstrained(a, b *core.Node) bool {
-	for _, res := range []core.ResourceName{
-		core.ResourceCPU,
-		core.ResourceMemory,
-		core.ResourceEphemeralStorage,
-	} {
-		av, bv := capacityValue(a, res), capacityValue(b, res)
-		switch {
-		case av > 0 && bv > 0 && av != bv:
-			return av < bv
-		case av > 0 && bv <= 0:
-			return true
-		case av <= 0 && bv > 0:
-			return false
-		}
-	}
-	return false
-}
-
-// capacityValue returns the node's status capacity for res as an int64, copying
-// the quantity to a local first so the pointer-receiver Value() is callable.
-func capacityValue(nd *core.Node, res core.ResourceName) int64 {
-	q := nd.Status.Capacity[res]
-	return q.Value()
 }
 
 const (
