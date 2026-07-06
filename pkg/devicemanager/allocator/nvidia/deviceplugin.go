@@ -221,6 +221,14 @@ func (s *server) getSlicedContainerAllocateResponse(
 		envs["CUDA_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(limit, 10) + "m"
 	}
 
+	// Quiet HAMi-core's per-call interception logging by default: its LIBCUDA_LOG_LEVEL
+	// defaults to 1, which prints [HAMI-core Msg ...] init/cleanup lines on every intercepted
+	// call. A container that sets LIBCUDA_LOG_LEVEL itself keeps its value — the debugging
+	// escape hatch — so only inject the quiet default when the workload has not declared one.
+	if !deviceplugin.ContainerEnvDeclared(ctr, "LIBCUDA_LOG_LEVEL") {
+		envs["LIBCUDA_LOG_LEVEL"] = "0"
+	}
+
 	// libvgpu.so is mounted at a single fixed container path, so every allocated GPU
 	// must share the same CUDA runtime major; reject a mix (e.g. GPUs from groups with
 	// different CUDA majors) rather than mounting a libvgpu incompatible with some.

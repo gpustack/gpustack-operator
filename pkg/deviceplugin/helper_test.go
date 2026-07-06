@@ -140,3 +140,24 @@ func TestSlicedMemoryMib(t *testing.T) {
 		})
 	}
 }
+
+func TestContainerEnvDeclared(t *testing.T) {
+	ctrWith := func(env ...core.EnvVar) *core.Container {
+		return &core.Container{Name: "main", Env: env}
+	}
+	cases := []struct {
+		name string
+		ctr  *core.Container
+		key  string
+		want bool
+	}{
+		{"declared", ctrWith(core.EnvVar{Name: "LIBCUDA_LOG_LEVEL", Value: "3"}), "LIBCUDA_LOG_LEVEL", true},
+		{"absent among others", ctrWith(core.EnvVar{Name: "FOO", Value: "1"}), "LIBCUDA_LOG_LEVEL", false},
+		{"empty env", ctrWith(), "LIBCUDA_LOG_LEVEL", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, ContainerEnvDeclared(c.ctr, c.key))
+		})
+	}
+}

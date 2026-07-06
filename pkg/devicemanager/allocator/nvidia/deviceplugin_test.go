@@ -107,6 +107,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	assert.Equal(t, testGPUUUID0, resp.Envs["NVIDIA_VISIBLE_DEVICES"])
 	assert.Equal(t, "10", resp.Envs["CUDA_DEVICE_SM_LIMIT"]) // .sliced.cores-percentage
 	assert.Equal(t, "/tmp/vgpu/cudevshr.cache", resp.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"])
+	assert.Equal(t, "0", resp.Envs["LIBCUDA_LOG_LEVEL"]) // quiet HAMi-core by default
 	// floor(24576 MiB * 25%) = 6144 MiB.
 	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	_, hasSecond := resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_1"]
@@ -142,6 +143,23 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 		assert.Equalf(t, c.hostPath, m.HostPath, "host path for %s", c.ctrPath)
 		assert.Equalf(t, c.readOnly, m.ReadOnly, "readOnly for %s", c.ctrPath)
 	}
+}
+
+// A sliced container that declares LIBCUDA_LOG_LEVEL keeps its own value: the allocator
+// must not inject the quiet default over it (the debugging escape hatch).
+func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing.T) {
+	redirectSoftSliceDirs(t)
+	s := newSlicedServer()
+	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
+	pod, ctr := slicedPod("pod-uid-loglevel", "train", 10, 25)
+	ctr.Env = []core.EnvVar{{Name: "LIBCUDA_LOG_LEVEL", Value: "3"}}
+	allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
+	require.NoError(t, err)
+
+	_, injected := resp.Envs["LIBCUDA_LOG_LEVEL"]
+	assert.False(t, injected, "must not override a container-declared LIBCUDA_LOG_LEVEL")
 }
 
 // One CUDA_DEVICE_MEMORY_LIMIT_<i> per allocated card (.sliced card count).
