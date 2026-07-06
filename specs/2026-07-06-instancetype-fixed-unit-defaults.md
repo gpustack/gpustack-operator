@@ -1,6 +1,6 @@
 # Spec: InstanceType Fixed Unit-Resource Defaults
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -233,7 +233,7 @@ is docs/e2e; Task 5 is package + verification on a reachable Kubernetes cluster.
     - `references/drain-recycle.md` L126-127: point at the InstanceType spec, not CQ notes.
     - Acceptance: docs/e2e read consistently; no dangling CQ-note-unit references.
 
-[ ] **Task 5 — Package + deploy + verify on a Kubernetes cluster.**
+[x] **Task 5 — Package + deploy + verify on a Kubernetes cluster.**
     - On the amd64 builder host: `PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`.
     - Helm-install the built chart/image on a reachable Kubernetes cluster the environment provides (the
       distro/provider is irrelevant — only that it is reachable and can be verified against).
