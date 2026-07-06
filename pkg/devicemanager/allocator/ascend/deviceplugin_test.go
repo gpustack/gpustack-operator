@@ -100,6 +100,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 
 	// Env: the visible device index.
 	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"])
+	assert.Equal(t, "1", resp.Envs["ENPU_LOG_LEVEL"]) // quiet vcann-rt by default
 
 	// npu_info.config: aicore 10% (.sliced.cores-percentage), memory floor(65536*25%)=16384MiB.
 	podWorkDir := deviceplugin.PodWorkDir("pod-uid-1", "train")
@@ -142,6 +143,23 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 		assert.Equalf(t, c.hostPath, m.HostPath, "host path for %s", c.ctrPath)
 		assert.Equalf(t, c.readOnly, m.ReadOnly, "readOnly for %s", c.ctrPath)
 	}
+}
+
+// A sliced container that declares ENPU_LOG_LEVEL keeps its own value: the allocator
+// must not inject the quiet default over it (the debugging escape hatch).
+func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing.T) {
+	redirectSoftSliceDirs(t)
+	s := newSlicedServer()
+	devs := ascendDevicesFixture()
+	pod, ctr := slicedPod("uid-loglevel", "train", 10, 25)
+	ctr.Env = []core.EnvVar{{Name: "ENPU_LOG_LEVEL", Value: "3"}}
+	allocated := map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1}
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
+	require.NoError(t, err)
+
+	_, injected := resp.Envs["ENPU_LOG_LEVEL"]
+	assert.False(t, injected, "must not override a container-declared ENPU_LOG_LEVEL")
 }
 
 // Two concurrent slices on the same physical NPU must get distinct virtual-npu-ids;

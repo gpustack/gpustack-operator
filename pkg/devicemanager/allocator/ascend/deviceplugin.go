@@ -236,10 +236,20 @@ func (s *server) getSlicedContainerAllocateResponse(
 		{ContainerPath: ctrDevShmPath, HostPath: ctrDevShmPath, ReadOnly: false},
 	}
 
+	envs := map[string]string{
+		"ASCEND_VISIBLE_DEVICES": strings.Join(indexes, ","),
+	}
+
+	// Quiet vcann-rt's per-call interception logging by default: its ENPU_LOG_LEVEL
+	// defaults to 3 (verbose info). A container that sets ENPU_LOG_LEVEL itself keeps its
+	// value — the debugging escape hatch — so only inject the quiet default when the
+	// workload has not declared one.
+	if !deviceplugin.ContainerEnvDeclared(ctr, "ENPU_LOG_LEVEL") {
+		envs["ENPU_LOG_LEVEL"] = "1"
+	}
+
 	return &deviceplugin.ContainerAllocateResponse{
-		Envs: map[string]string{
-			"ASCEND_VISIBLE_DEVICES": strings.Join(indexes, ","),
-		},
+		Envs:   envs,
 		Mounts: mounts,
 	}, nil
 }
