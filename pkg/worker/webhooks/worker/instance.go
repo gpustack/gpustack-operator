@@ -301,31 +301,33 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			// and let later scheduling to block if it exceeds the instance type's CPU capacity.
 			instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
 		}
-		if instType.Spec.Sliceable {
+		memPct := instRess.AcceleratorSlicedMemoryPercentage
+		coresPct := instRess.AcceleratorSlicedCoresPercentage
+		if instType.Spec.Sliceable && (memPct > 0 || coresPct > 0) {
+			// A slice is a fraction of ONE card, so default an absent or explicitly zero
+			// accelerator count to 1 (nil was already defaulted above); otherwise
+			// validation would reject it for not being exactly 1.
+			if instRess.Accelerator.Value() == 0 {
+				instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+			}
 			// On a sliceable InstanceType, when only one of the memory/compute slice
 			// percentages is set, copy it to the other so a bare memory request yields
 			// an equal compute share (and vice versa).
-			memPct := instRess.AcceleratorSlicedMemoryPercentage
-			coresPct := instRess.AcceleratorSlicedCoresPercentage
 			switch {
 			case memPct > 0 && coresPct == 0:
 				instRess.AcceleratorSlicedCoresPercentage = memPct
 			case coresPct > 0 && memPct == 0:
 				instRess.AcceleratorSlicedMemoryPercentage = coresPct
 			}
-			// A sliceable request is a fraction of ONE card (its accelerator count is pinned
-			// to 1 by validation), so scale the per-card unit CPU/RAM by the slice percentages:
-			// the compute percentage sizes CPU, the memory percentage sizes RAM. A zero
-			// percentage means the whole card, i.e. the full unit resource.
-			cpuPct, ramPct := int64(instRess.AcceleratorSlicedCoresPercentage), int64(instRess.AcceleratorSlicedMemoryPercentage)
-			if cpuPct == 0 {
-				cpuPct = 100
-			}
-			if ramPct == 0 {
-				ramPct = 100
-			}
+			// A sliced request holds a fraction of ONE card (its accelerator count is
+			// pinned to 1 by validation). UnitResources sizes a whole card, so size the
+			// host CPU/RAM by the memory percentage — the fraction of the card actually
+			// reserved. The compute percentage only throttles GPU cores, not host
+			// resources. The memory percentage is non-zero here (copy-filled above when
+			// only the compute percentage was set).
+			unitPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
 			if withGeneralOvercommit || instRess.CPU.IsZero() {
-				instRess.CPU, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.CPU, cpuPct)
+				instRess.CPU, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.CPU, unitPct)
 				if err != nil {
 					return field.InternalError(
 						field.NewPath("spec.resources.cpu"),
@@ -333,7 +335,7 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 				}
 			}
 			if withGeneralOvercommit || instRess.RAM.IsZero() {
-				instRess.RAM, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.RAM, ramPct)
+				instRess.RAM, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.RAM, unitPct)
 				if err != nil {
 					return field.InternalError(
 						field.NewPath("spec.resources.ram"),
@@ -341,8 +343,9 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 				}
 			}
 		} else {
-			// Allow zero accelerator request for acceleratable instance type,
-			// but treat it as 1 when calculating other resource requests by unit.
+			// A whole-card request — a non-sliceable type, or a zero-percentage request on a
+			// sliceable type — scales the unit CPU/RAM by the accelerator count. Allow a
+			// zero/absent count, but treat it as 1 when calculating other resource requests.
 			accC := instRess.Accelerator.Value()
 			if accC == 0 {
 				accC = 1
@@ -410,20 +413,6 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	if instType.Spec.Acceleratable {
 		switch {
 		case instType.Spec.Sliceable:
-			// A sliceable accelerator is always requested as a single card; the slice is
-			// expressed through the memory/compute percentages, so the accelerator count
-			// must be exactly 1. Compare with Cmp (not Value(), which rounds a fractional
-			// quantity like "1m" up to 1) so only a true 1 passes.
-			one := resource.NewQuantity(1, resource.DecimalSI)
-			if instRess.Accelerator == nil || instRess.Accelerator.Cmp(*one) != 0 {
-				got := "0"
-				if instRess.Accelerator != nil {
-					got = instRess.Accelerator.String()
-				}
-				errs = append(errs, field.Invalid(
-					field.NewPath("spec.resources.accelerator"), got,
-					"accelerator request must be exactly 1 for sliceable instance type"))
-			}
 			// The slice is requested as memory/compute percentages in [0,100] (0 disables
 			// slicing). The compute budget must not be smaller than the memory budget.
 			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
@@ -442,18 +431,29 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
 					"must not be less than the memory percentage"))
 			}
-		default:
-			if instRess.Accelerator != nil {
-				if instRess.Accelerator.Sign() < 0 {
+			if memPct > 0 || coresPct > 0 {
+				// A sliced request (a non-zero percentage) is a fraction of ONE card: the
+				// slice is expressed through the percentages, not the card count, so the
+				// accelerator count must be exactly 1. Compare with Cmp (not Value(), which
+				// rounds a fractional quantity like "1m" up to 1) so only a true 1 passes.
+				one := resource.NewQuantity(1, resource.DecimalSI)
+				if instRess.Accelerator == nil || instRess.Accelerator.Cmp(*one) != 0 {
+					got := "0"
+					if instRess.Accelerator != nil {
+						got = instRess.Accelerator.String()
+					}
 					errs = append(errs, field.Invalid(
-						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-						"accelerator request cannot be negative"))
-				} else if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
-					errs = append(errs, field.Invalid(
-						field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
-						fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name)))
+						field.NewPath("spec.resources.accelerator"), got,
+						"accelerator request must be exactly 1 for a sliced request"))
 				}
+			} else {
+				// A zero-percentage request on a sliceable type is a whole-card exclusive
+				// request, which may span multiple cards and is bounded like a non-sliceable
+				// type.
+				errs = append(errs, validateExclusiveAcceleratorRequest(instType, instRess)...)
 			}
+		default:
+			errs = append(errs, validateExclusiveAcceleratorRequest(instType, instRess)...)
 		}
 	} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
 		errs = append(errs, field.Invalid(
@@ -487,6 +487,37 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	}
 	errs = append(errs, capResourcesToInstanceType(instType, instRess)...)
 	return errs
+}
+
+// validateExclusiveAcceleratorRequest checks a whole-card (exclusive) accelerator request:
+// it may not be negative, must be a whole number of cards, and may not exceed the
+// InstanceType's whole-card OnceMaxRequest. A nil request is left to defaulting. It is shared
+// by a non-sliceable type and by a zero-percentage (whole-card) request on a sliceable type.
+func validateExclusiveAcceleratorRequest(
+	instType *worker.InstanceType, instRess *workercore.InstanceResources,
+) field.ErrorList {
+	if instRess.Accelerator == nil {
+		return nil
+	}
+	if instRess.Accelerator.Sign() < 0 {
+		return field.ErrorList{field.Invalid(
+			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+			"accelerator request cannot be negative")}
+	}
+	// A whole-card request is emitted verbatim as a Pod extended-resource quantity, which
+	// Kubernetes requires to be an integer, so reject a fractional count (e.g. "1m") here
+	// rather than letting it fail later at Pod admission.
+	if _, ok := instRess.Accelerator.AsInt64(); !ok {
+		return field.ErrorList{field.Invalid(
+			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+			"accelerator request must be a whole number of cards")}
+	}
+	if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
+		return field.ErrorList{field.Invalid(
+			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
+			fmt.Sprintf("exceeds the maximum accelerator request of instance type %s", instType.Name))}
+	}
+	return nil
 }
 
 // capResourcesToInstanceType rejects an Instance whose CPU or RAM exceeds the InstanceType's
