@@ -14,9 +14,9 @@
 #      seen live over `kubectl get instancetype -w` (the whole point of promoting InstanceType
 #      to a real CRD: a native watch delivers the .status change, the old aggregated
 #      projection could not).
-#   3. Changing the unit spec through the InstanceType API persists on the InstanceType spec
-#      (the unit spec lives only there — never a ClusterQueue note or a Node) and touches NO
-#      Node / NodeFeature.
+#   3. The unit spec is frozen after create (unitResources / localStorage immutable on update): an
+#      edit is rejected by the validating webhook. The unit spec lives only on the InstanceType —
+#      never a ClusterQueue note or a Node — and its write path touches NO Node / NodeFeature.
 #   4. Zero Cohort objects exist (Cohort was removed entirely: one isolated CQ per pool).
 #
 # Runs on a GPU-LESS cluster BY APPROXIMATION, in the same spirit as CASE 5. The three-view
@@ -226,25 +226,22 @@ else
 fi
 rm -f "$watchlog"
 
-# 6. Changing the unit spec through the InstanceType API persists on the InstanceType spec,
-#    never leaks into a CQ note, and touches no NodeFeature. (AKEY is accelerated, so unitCPU
-#    is admin-editable — not pinned to 1 like a non-accelerated type.)
-echo "[case-6] patching InstanceType unit spec (cpu=2 ram=8Gi localStorage=64Gi)"
+# 6. The unit spec is FROZEN after create (declarative-management: unitResources / localStorage are
+#    immutable on update), lives only on the InstanceType (never a CQ note), and its write path never
+#    touches the NodeFeature. Editing the accelerated type's unit spec must be REJECTED by the
+#    validating webhook and leave the stored spec unchanged.
+echo "[case-6] attempting to edit InstanceType unit spec (must be rejected — immutable)"
 nfBefore=$(kubectl -n "$NS" get nodefeature "$WORKER_NF" -o json 2>/dev/null | python3 -c "
 import json,sys
 print(json.dumps(json.load(sys.stdin).get('spec',{}).get('labels',{}),sort_keys=True))
 " 2>/dev/null)
-kubectl patch instancetypes.worker.gpustack.ai "$ITNAME" --type=merge \
-  -p '{"spec":{"unitResources":{"cpu":"2","ram":"8Gi"},"localStorage":"64Gi"}}' >/dev/null 2>&1
-
-ucpu=""
-for _ in $(seq 1 20); do
-  ucpu=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.spec.unitResources.cpu}' 2>/dev/null)
-  [ "$ucpu" = "2" ] && break
-  ucpu=""; sleep 3
-done
-[ "$ucpu" = "2" ] && record PASS "unit-spec edit persists on the InstanceType" "spec.unitResources.cpu=2 on ${ITNAME}" \
-  || record FAIL "unit-spec edit persists on the InstanceType" "got '${ucpu:-<unset>}', want 2 — accelerated unitCPU is admin-editable"
+cpuBefore=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.spec.unitResources.cpu}' 2>/dev/null)
+errEdit=$(kubectl patch instancetypes.worker.gpustack.ai "$ITNAME" --type=merge \
+  -p '{"spec":{"unitResources":{"cpu":"2","ram":"8Gi"},"localStorage":"64Gi"}}' 2>&1)
+cpuAfter=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.spec.unitResources.cpu}' 2>/dev/null)
+{ echo "$errEdit" | grep -qiE 'immutable' && [ -n "$cpuAfter" ] && [ "$cpuAfter" = "$cpuBefore" ]; } \
+  && record PASS "unit-spec edit is rejected (immutable)" "unitResources frozen; spec.unitResources.cpu stayed ${cpuBefore}" \
+  || record FAIL "unit-spec edit is rejected (immutable)" "err='${errEdit:0:70}' cpu ${cpuBefore}->${cpuAfter} — the unit spec must be immutable after create"
 
 # The unit spec must NOT flow into the ClusterQueue notes — it lives only on the InstanceType.
 cqnote=$(kubectl get clusterqueue "$ITNAME" -o json 2>/dev/null | python3 -c "

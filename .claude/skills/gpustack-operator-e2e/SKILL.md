@@ -74,7 +74,14 @@ allocation against itself (which previously self-evicted such slices in a recrea
 (Story 6) and CASE 15 (exclusive/whole-card SSH regression) likewise need **real** accelerator hardware
 and **auto-skip** when none is advertised (CASE 15 also needs an `ssh` client); CASE 14 asserts two
 in-budget slices coexist on one card while an over-budget third is held, and CASE 15 asserts the
-non-sliced SSH path still sees the whole card through a capability-stripped shell.
+non-sliced SSH path still sees the whole card through a capability-stripped shell. CASE 16 and CASE 17
+cover the queue-ownership split (declarative InstanceType management) on the general (CPU) pool, so
+they run on any cluster: CASE 16 asserts the aggregated InstanceTypeFlavor catalog, self-heal on an
+accidental ClusterQueue delete, and delete-then-wait teardown of an admin type; CASE 17 asserts the
+admission contract (required inputs; unit spec frozen on a REAL update — server dry-run does not
+reliably exercise update admission for a merge patch; Default stamps the schedule + entrance labels).
+Under this split CASE 3's observable changed: draining a pool no longer deletes the InstanceType — the
+flavor is deleted but the type SURVIVES with its queue emptied, and it reactivates when nodes return.
 
 | Case | Title (Story) | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
@@ -93,6 +100,8 @@ non-sliced SSH path still sees the whole card through a capability-stripped shel
 | 13 | SSH-enabled sliced Instance: slice visible over SSH + confined shell (Stories 1/4) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh`, `pkg/deviceplugin/**`, `pkg/devicemanager/allocator/**` | `cases/case-13.sh` | yes (confirm) |
 | 14 | Multiple slices coexist on one physical card within budget (Story 6) | `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go`, `pkg/deviceplugin/**` | `cases/case-14.sh` | yes (confirm) |
 | 15 | Exclusive whole-card SSH Instance still works (regression) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh` | `cases/case-15.sh` | yes (confirm) |
+| 16 | InstanceTypeFlavor catalog + declarative queue ownership (recreate-on-delete, delete-then-wait teardown) | `pkg/worker/controllers/worker/{instancetype,nodequeue,nodeflavor}.go`, `pkg/worker/extensionapis/worker/instance_type_flavor.go`, `pkg/worker/settings/value.go` | `cases/case-16.sh` | yes (confirm) |
+| 17 | InstanceType declarative admission (require + freeze inputs; Default stamps schedule + entrance labels) | `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/instance_type.go` | `cases/case-17.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
