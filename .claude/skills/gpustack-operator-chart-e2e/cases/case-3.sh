@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 #
-# CASE 3 — Release version survives a warm build cache   (OPTIONAL, MUTATING)
+# CASE 3 — Release version survives a warm build cache   (OPTIONAL, MUTATING; local build only)
 #
 #   case-3.sh
 #
-# The chart version is only as trustworthy as the build. This forces a release-like
-# version with the build cache already warm and confirms the version reaches BOTH
-# the binary and the bundled chart tgz. `make package` passes the resolved version
-# as the GPUSTACK_GIT_VERSION build-arg, which the builder stamps and folds into its
-# cache key — so a version change forces a rebuild. See references/version-contract.md.
-#
-# Builds a local image tagged dev-rel; never pushes. Run §1 build once first so the
-# cache is warm.
+# Goal:        A release-like version forced with the build cache already warm reaches BOTH the
+#              binary and the bundled chart tgz — proving a version change busts the build cache key.
+#              `make package` passes the resolved version as the GPUSTACK_GIT_VERSION build-arg, which
+#              the builder stamps and folds into its cache key. See references/version-contract.md.
+# Environment: A local Docker builder (docker + `make package`). No cluster and no GPU needed. Builds
+#              a local image tagged dev-rel and never pushes. Run the install build once first so the
+#              cache is warm (otherwise a clean build passes trivially).
+# Inputs:      All real, nothing mocked — VERSION=v9.9.9 PACKAGE_TAG=dev-rel make package (a forced
+#              release version over an already-warm cache).
+# Expected:    - the built binary reports version v9.9.9 (the cache did not serve a stale binary);
+#              - the bundled tgz is gpustack-operator-9.9.9.tgz (not 0.0.0 from a stale cache).
+# Cleanup:     Nothing on a cluster — leaves only the local dev-rel image (never pushed).
 set -uo pipefail
 
 IMG=gpustack/gpustack-operator:dev-rel

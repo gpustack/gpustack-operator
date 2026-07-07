@@ -4,19 +4,27 @@
 #
 #   case-16.sh <NS>
 #
-# The queue-ownership split (InstanceTypeReconciler owns the CQ's existence + schedule labels +
-# teardown; NodeQueueReconciler owns its quota/StopPolicy; NodeFlavorReconciler authors the derived
-# type) on the general (CPU) pool — environment-agnostic, no GPU needed:
-#   A — the aggregated, list-only InstanceTypeFlavor resource projects the fleet's pools; the
-#       generic (CPU-only) pool appears with acceleratable=false.
-#   B — accidental-delete self-heal: deleting the backing ClusterQueue while its InstanceType still
-#       lives has the InstanceTypeReconciler recreate it (a NEW uid), the chain never staying down.
-#   C — delete-then-wait teardown: deleting an InstanceType holds its finalizer until the operator
-#       has deleted the backing ClusterQueue and Kueue has actually removed it — then the type goes.
-#       (Uses a throwaway admin type so the derived chain is untouched.)
-#
-# Self-recovering: force-cleans the throwaway type and waits for the derived general InstanceType to
-# return to Active so a following case still finds a healthy chain.
+# Goal:        On the general pool, prove the queue-ownership split (InstanceTypeReconciler owns the
+#              CQ's existence + schedule labels + teardown; NodeQueueReconciler owns its quota /
+#              StopPolicy; NodeFlavorReconciler authors the derived type) —
+#              A: the aggregated, list-only InstanceTypeFlavor resource projects the fleet's pools, the
+#                 generic (CPU-only) pool appearing with acceleratable=false;
+#              B: deleting a backing ClusterQueue while its InstanceType still lives self-heals — the
+#                 reconciler recreates it (a NEW uid) and the chain never stays down;
+#              C: deleting an admin InstanceType holds its finalizer until the operator has deleted the
+#                 backing ClusterQueue and Kueue has actually removed it (delete-then-wait), then releases.
+# Environment: Any cluster with a materialized general pool. No GPU. Uses a throwaway admin type for the
+#              teardown probe so the derived chain is untouched.
+# Inputs:      All real, nothing mocked —
+#              - reads the InstanceTypeFlavor catalog;
+#              - deletes the derived general pool's backing ClusterQueue, then lets it self-heal;
+#              - creates + deletes a throwaway admin InstanceType e2e-case16-teardown (group e2e16td).
+# Expected:    - A — >=1 InstanceTypeFlavor row, and a generic (acceleratable=false) one;
+#              - B — the ClusterQueue is recreated with a NEW uid while the InstanceType survives;
+#              - C — the throwaway's backing ClusterQueue is created, then both it and the InstanceType
+#                are removed on delete.
+# Cleanup:     Trap force-strips the throwaway's finalizer if stuck, deletes the throwaway type + its
+#              ClusterQueue, and waits for the derived general InstanceType to return to Active.
 set -uo pipefail
 
 NS="${1:?usage: case-16.sh <NS>}"

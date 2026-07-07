@@ -1,23 +1,24 @@
 #!/usr/bin/env bash
 #
-# CASE 5 — Pod webhook folds slice-by-memory-% into units (Story 3)   (MUTATING, self-recovering)
+# CASE 5 — Pod webhook folds slice-by-memory-% into units   (MUTATING, self-recovering)
 #
 #   case-5.sh <NS>
 #
-# Story 3 (specs/2026-06-29-instancetype-unified-pool-refactor.md, F4a): a user requests a
-# slice by memory percentage and never reasons about normalized units. The Pod mutating
-# webhook (objectSelector on kueue.x-k8s.io/queue-name, failurePolicy Fail) must, per
-# container:
-#   - default an absent .sliced.cores-percentage to 100, and
-#   - fold .sliced.memory-percentage into per-card .sliced.units (× M/100 = ×16000),
-# and the validating webhook must REJECT a .sliced request that carries no memory at all.
-#
-# Runs GPU-LESS: the memory-PERCENTAGE fold is a pure ×16000 computation (M=1,600,000), so it
-# needs no card VRAM and no real accelerator — only the webhook, which the operator installs.
-# The Pods are never expected to schedule (the node has no nvidia.com/gpu.sliced); the webhook
-# fires at CREATE, so the mutated/validated request is observable on the persisted Pod.
-#
-# Self-recovering: deletes the test Pods on exit.
+# Goal:        The Pod mutating webhook (objectSelector on kueue.x-k8s.io/queue-name, failurePolicy
+#              Fail) folds a per-container .sliced.memory-percentage into per-card .sliced.units
+#              (× M/100 = ×16000) and defaults an absent .sliced.cores-percentage to 100; the
+#              validating webhook REJECTS a .sliced request that carries no memory at all.
+# Environment: Any cluster, GPU-less — the memory-% fold is a pure ×16000 computation (M=1,600,000)
+#              needing no card VRAM. Only the operator-installed Pod webhooks must be up; the Pods are
+#              never expected to schedule (the webhook fires at CREATE, so the result is observable on
+#              the persisted Pod).
+# Inputs:      Real Pods, nothing mocked (the queue-name is a made-up label the objectSelector matches
+#              on; the fold needs no ClusterQueue lookup) —
+#              - POD_OK: .sliced=1 + memory-percentage=20 (expects the fold);
+#              - POD_BAD: .sliced=1 with no memory at all (expects rejection).
+# Expected:    - POD_OK persists .sliced.units=320000 (=20 × 16000) and .sliced.cores-percentage=100;
+#              - POD_BAD is denied at CREATE by the validating webhook.
+# Cleanup:     Trap deletes both test Pods.
 set -uo pipefail
 
 NS="${1:?usage: case-5.sh <NS>}"
@@ -78,9 +79,9 @@ m={'k':1000,'M':1000000,'G':1000000000}
 print(int(float(v[:-1])*m[v[-1]]) if v and v[-1] in m else (int(v) if v else ''))
 " 2>/dev/null)
 [ "$unitsN" = "320000" ] && record PASS "memory-% folded to units" "${UNITS}=${units} (=320000 = 20 × M/100)" \
-  || record FAIL "memory-% folded to units" "got ${UNITS}=${units:-<unset>} (=${unitsN:-?}), want 320000 — mutating webhook fold (F4a)"
+  || record FAIL "memory-% folded to units" "got ${UNITS}=${units:-<unset>} (=${unitsN:-?}), want 320000 — mutating webhook fold"
 [ "$cores" = "100" ] && record PASS "cores-% defaulted to 100" "${CORESPCT}=${cores}" \
-  || record FAIL "cores-% defaulted to 100" "got ${CORESPCT}=${cores:-<unset>}, want 100 — mutating webhook default (F4a)"
+  || record FAIL "cores-% defaulted to 100" "got ${CORESPCT}=${cores:-<unset>}, want 100 — mutating webhook default"
 
 # 2. A .sliced Pod with NO memory (neither percentage nor mib) must be REJECTED at CREATE by
 #    the validating webhook (failurePolicy Fail), rather than silently given a full/min slice.
@@ -112,11 +113,11 @@ if [ $rc -ne 0 ] && echo "$err" | grep -qiE "denied|memory|admission|webhook"; t
 else
   # If it slipped through, clean it up and fail.
   kubectl -n default delete pod "$POD_BAD" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true
-  record FAIL "memoryless .sliced rejected" "Pod was admitted (rc=${rc}) — validating webhook must reject a .sliced request with no memory (F4a)"
+  record FAIL "memoryless .sliced rejected" "Pod was admitted (rc=${rc}) — validating webhook must reject a .sliced request with no memory"
 fi
 
 echo
-echo "== CASE 5 — Pod webhook folds slice-by-memory-% into units (Story 3) =="
+echo "== CASE 5 — Pod webhook folds slice-by-memory-% into units =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"

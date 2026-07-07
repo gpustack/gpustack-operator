@@ -52,10 +52,11 @@ The work is split into shared phase scripts and numbered, self-contained cases:
 
 ## Cases (locked titles)
 
-Each case maps to a User Story of the unified-pool refactor. On a GPU-less cluster the accelerated
-cases mock two inputs the DeviceManager would produce (a fake accelerator NodeFeature and a
-phantom-node `Devices` ledger); the derivation and the three-view/AdmissionCheck math are **not**
-mocked — that is the verification. CASE 4's mock uses a fake product key (`nvidia-e2emock`) that
+Each case is a self-contained scenario; its header (see the **Case header contract** below) states the
+goal, environment (incl. auto-skip), inputs (MOCKED vs real), expected assertions, and cleanup. On a
+GPU-less cluster the accelerated cases mock two inputs the DeviceManager would produce (a fake
+accelerator NodeFeature and a phantom-node `Devices` ledger); the derivation and the
+three-view/AdmissionCheck math are **not** mocked — that is the verification. CASE 4's mock uses a fake product key (`nvidia-e2emock`) that
 never collides with a real GPU's pool, so it is safe on a real-accelerator cluster too, not only
 GPU-less. CASE 7 exercises the general (CPU) pool and runs on any cluster. CASE 8 needs **real**
 accelerator hardware (the HAMI runtime cap cannot be mocked) and **auto-skips** with a message when
@@ -83,28 +84,61 @@ reliably exercise update admission for a merge patch; Default stamps the schedul
 Under this split CASE 3's observable changed: draining a pool no longer deletes the InstanceType — the
 flavor is deleted but the type SURVIVES with its queue emptied, and it reactivates when nodes return.
 
-| Case | Title (Story) | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
+| Case | Title | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
-| 1 | CPU-only scheduling chain materializes — zero Cohort, InstanceType Active (Story 1/2 baseline) | always (mandatory) | `cases/case-1.sh` | no |
+| 1 | CPU-only scheduling chain materializes — zero Cohort, InstanceType Active | always (mandatory) | `cases/case-1.sh` | no |
 | 2 | Running Instance admits, then drain stops it (not recreate) | `pkg/worker/controllers/worker/instance.go`, `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/kuberess/apps_kueue.go` | `cases/case-2.sh` | yes (confirm) |
-| 3 | Managed-toggle scopes node onboarding (Story 5) | `pkg/worker/controllers/worker/{nodeflavor,instancetype}.go`, `pkg/nodefeature/helper.go` | `cases/case-3.sh` | yes (confirm) |
-| 4 | AdmissionCheck holds exclusive over-admit (Story 4) | `pkg/worker/controllers/worker/{nodedevicesadmission,nodedevices,instancetype}.go`, `pkg/worker/kuberess/apps_kueue.go` | `cases/case-4.sh` | yes (confirm) |
-| 5 | Pod webhook folds slice-by-memory-% into units (Story 3) | `pkg/worker/webhooks/worker/pod.go`, `pkg/nodefeature/knowns.go` | `cases/case-5.sh` | yes (confirm) |
-| 6 | Pooled three-view + watch freshness (Story 2/6) | `pkg/worker/controllers/worker/instancetype.go`, `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/{instance_type,devices}.go` | `cases/case-6.sh` | yes (confirm) |
+| 3 | Managed-toggle scopes node onboarding | `pkg/worker/controllers/worker/{nodeflavor,instancetype}.go`, `pkg/nodefeature/helper.go` | `cases/case-3.sh` | yes (confirm) |
+| 4 | AdmissionCheck holds exclusive over-admit | `pkg/worker/controllers/worker/{nodedevicesadmission,nodedevices,instancetype}.go`, `pkg/worker/kuberess/apps_kueue.go` | `cases/case-4.sh` | yes (confirm) |
+| 5 | Pod webhook folds slice-by-memory-% into units | `pkg/worker/webhooks/worker/pod.go`, `pkg/nodefeature/knowns.go` | `cases/case-5.sh` | yes (confirm) |
+| 6 | Pooled three-view + watch freshness | `pkg/worker/controllers/worker/instancetype.go`, `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/{instance_type,devices}.go` | `cases/case-6.sh` | yes (confirm) |
 | 7 | Portless Instance reaches Ready, creates no Service | `pkg/worker/controllers/worker/instance.go` | `cases/case-7.sh` | yes (confirm) |
-| 8 | Real accelerator slicing runtime isolation (Story 1) | `pkg/deviceplugin/**`, `pkg/devicemanager/**`, `pkg/worker/webhooks/worker/pod.go` | `cases/case-8.sh` | yes (confirm) |
+| 8 | Real accelerator slicing runtime isolation | `pkg/deviceplugin/**`, `pkg/devicemanager/**`, `pkg/worker/webhooks/worker/pod.go` | `cases/case-8.sh` | yes (confirm) |
 | 9 | Instance lifecycle survives an InstanceType unit-spec change | `pkg/worker/webhooks/worker/instance.go` | `cases/case-9.sh` | yes (confirm) |
 | 10 | Start re-validates a resized-while-stopped Instance (no create-check bypass) | `pkg/worker/webhooks/worker/instance.go` | `cases/case-10.sh` | yes (confirm) |
 | 11 | Sliced per-card accounting: three-view + per-card OnceMax (spread observed best-effort) | `pkg/deviceplugin/server.go`, `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go` | `cases/case-11.sh` | yes (confirm) |
 | 12 | Sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1 | `pkg/worker/webhooks/worker/instance.go`, `pkg/utils/quantityx/quantity.go` | `cases/case-12.sh` | yes (confirm) |
-| 13 | SSH-enabled sliced Instance: slice visible over SSH + confined shell (Stories 1/4) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh`, `pkg/deviceplugin/**`, `pkg/devicemanager/allocator/**` | `cases/case-13.sh` | yes (confirm) |
-| 14 | Multiple slices coexist on one physical card within budget (Story 6) | `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go`, `pkg/deviceplugin/**` | `cases/case-14.sh` | yes (confirm) |
+| 13 | SSH-enabled sliced Instance: slice visible over SSH + confined shell | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh`, `pkg/deviceplugin/**`, `pkg/devicemanager/allocator/**` | `cases/case-13.sh` | yes (confirm) |
+| 14 | Multiple slices coexist on one physical card within budget | `pkg/worker/controllers/worker/{nodedevicesadmission,instancetype}.go`, `pkg/deviceplugin/**` | `cases/case-14.sh` | yes (confirm) |
 | 15 | Exclusive whole-card SSH Instance still works (regression) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh` | `cases/case-15.sh` | yes (confirm) |
 | 16 | InstanceTypeFlavor catalog + declarative queue ownership (recreate-on-delete, delete-then-wait teardown) | `pkg/worker/controllers/worker/{instancetype,nodequeue,nodeflavor}.go`, `pkg/worker/extensionapis/worker/instance_type_flavor.go`, `pkg/worker/settings/value.go` | `cases/case-16.sh` | yes (confirm) |
 | 17 | InstanceType declarative admission (require + freeze inputs; Default stamps schedule + entrance labels) | `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/instance_type.go` | `cases/case-17.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
+
+## Case header contract
+
+Every `cases/case-N.sh` opens with a header comment block that describes the case **on its own terms**,
+with **no spec anchors** — no Story/Task numbers, no F-codes, no `specs/*.md` paths, no commit hashes. A
+reader (human or tool) must understand what the case does, needs, and asserts from the header alone. New
+or edited cases follow this six-field template:
+
+```
+# CASE N — <one-line behavior title>   (<mutation posture>)
+#
+#   case-N.sh <NS>
+#
+# Goal:        <the one contract/behavior this case proves>
+# Environment: <what the cluster must provide + when it AUTO-SKIPS>
+# Inputs:      <what the case creates / injects / toggles; mark MOCKED inputs vs the real thing verified>
+# Expected:    <the PASS assertions — the observable final state>
+# Cleanup:     <what the trap restores; idempotent + safe to re-run>
+```
+
+- **Mutation posture** rides the title line: `READ-ONLY` (asserts existing state, no trap) or
+  `MUTATING, self-recovering` (writes, then a trap restores). Append `AUTO-SKIPS without <requirement>`
+  when the case skips itself (real hardware, an `ssh` client, ≥2 sliced cards, …).
+- **Environment** always names the auto-skip condition when there is one, so the run/skip decision is
+  readable without executing the case.
+- **Inputs** must distinguish **MOCKED** inputs (a fake accelerator NodeFeature, a phantom-node `Devices`
+  ledger) from the **real** objects under test — the mock recipe is a fixture, never the verification.
+- Describe behavior in **plain terms** (e.g. "the node-devices AdmissionCheck holds it as Retry"), not by
+  spec reference. The case↔code mapping lives in the case table's "Run when these change" column; the
+  case↔spec mapping, if ever needed, is traced from the spec, never baked into the script.
+
+The same contract governs the runtime output: the results banner, `record` messages, and the FAIL-footer
+diagnostics stay spec-anchor-free and self-explanatory.
 
 ## Flow
 

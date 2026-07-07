@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 #
-# CASE 8 — Real accelerator slicing runtime isolation (Story 1)   (MUTATING, self-recovering)
+# CASE 8 — Real accelerator slicing runtime isolation   (MUTATING, self-recovering; AUTO-SKIPS without real sliced hardware)
 #
 #   case-8.sh <NS>
 #
-# Regression for specs/2026-06-25-accelerator-soft-slicing-runtime-isolation Story 1: a sliced
-# workload must be capped at runtime to its share of a real card — by memory percentage, by memory
-# MiB, and by compute (SM) percentage. Unlike the other cases this needs REAL accelerator hardware
-# (the HAMI libvgpu runtime does the capping); there is nothing to mock. It AUTO-SKIPS on a cluster
-# with no sliced accelerator advertised, printing why (never a FAIL).
-#
-# What it drives end to end on a real GPU node:
-#   - the Pod webhook folds .sliced.memory-percentage / .sliced.memory-mib into .sliced.units;
-#   - Kueue admits the Workload and the node-devices AdmissionCheck reads the real Devices ledger;
-#   - the device plugin allocates a real card and injects the HAMI cap (CUDA_DEVICE_MEMORY_LIMIT_*,
-#     CUDA_DEVICE_SM_LIMIT), so nvidia-smi inside the container reports the capped memory.
-#
-# Self-recovering: deletes the test Pods on exit.
+# Goal:        A sliced workload is capped at runtime to its share of a real card — by memory
+#              percentage, by memory MiB, and by compute (SM) percentage — via the HAMI libvgpu
+#              runtime. End to end this drives: the Pod webhook folds .sliced.memory-percentage /
+#              .sliced.memory-mib into .sliced.units; Kueue admits and the node-devices AdmissionCheck
+#              reads the real Devices ledger; the device plugin allocates a real card and injects the
+#              HAMI cap (CUDA_DEVICE_MEMORY_LIMIT_*, CUDA_DEVICE_SM_LIMIT).
+# Environment: Needs REAL accelerator hardware advertising a *.sliced resource (the HAMI runtime cap
+#              cannot be mocked). AUTO-SKIPS (exit 0, prints why) when none is advertised.
+# Inputs:      All real, nothing mocked —
+#              - POD_PCT: .sliced=1 + memory-%=50 + cores-%=50 on the sliceable pool's entrance LocalQueue;
+#              - POD_MIB: .sliced=1 + memory-mib=4096 on the same queue.
+# Expected:    - both Pods reach Running (webhook fold → Kueue → AdmissionCheck → schedule → device plugin);
+#              - POD_PCT: CUDA_DEVICE_SM_LIMIT=50 and nvidia-smi total memory < physical card;
+#              - POD_MIB: the injected memory cap / nvidia-smi total == 4096 MiB.
+# Cleanup:     Trap deletes both test Pods.
 set -uo pipefail
 
 NS="${1:?usage: case-8.sh <NS>}"
@@ -40,7 +42,7 @@ for n in json.load(sys.stdin).get('items',[]):
 if [ -z "$sliced_node" ]; then
   echo "== CASE 8 — SKIPPED =="
   echo "No node advertises a *.sliced accelerator resource — this case needs real accelerator hardware"
-  echo "(the HAMI runtime cap cannot be mocked). Run it on a GPU cluster to exercise Story 1."
+  echo "(the HAMI runtime cap cannot be mocked). Run it on a GPU cluster to exercise real slicing isolation."
   exit 0
 fi
 echo "[case-8] real sliced accelerator found on ${sliced_node}"
@@ -145,7 +147,7 @@ else
 fi
 
 echo
-echo "== CASE 8 — Real accelerator slicing runtime isolation (Story 1) =="
+echo "== CASE 8 — Real accelerator slicing runtime isolation =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"

@@ -1,31 +1,29 @@
 #!/usr/bin/env bash
 #
-# CASE 13 — SSH-enabled sliced Instance: slice visible over SSH + confined shell (Stories 1/4)
-#   (MUTATING, self-recovering)
+# CASE 13 — SSH-enabled sliced Instance: slice visible over SSH + confined shell
+#   (MUTATING, self-recovering; AUTO-SKIPS without real sliced hardware or an ssh client)
 #
 #   case-13.sh <NS>
 #
-# Regression for specs/2026-07-04-ssh-instance-accelerator-slicing: an SSH-enabled Instance renders a
-# two-container Pod (main = workload, sshd = Alpine sidecar that nsenter+chroots into main). The fix
-# co-locates the sliced accelerator + HAMI artifacts + workload on `main`, gives `sshd` only the
-# device-only `device.gpustack.ai/<manufacturer>.visibility` resource (quantity = main's card count),
-# and drops all capabilities before the interactive shell. This case proves, on REAL accelerator
-# hardware, that:
-#   - the rendered Pod places `.sliced*` on `main` and `.visibility` (not the sliced resource) on `sshd`;
-#   - `main` (the workload container) sees the slice: nvidia-smi total < physical card;
-#   - an interactive SSH login sees the SAME slice (the interception library is preloaded in main's
-#     namespace — the bug was the whole card showing here); and
-#   - the SSH shell is confined: empty effective/bounding capability set, host `mknod` denied.
-#
-# Like CASE 8 it needs REAL accelerator hardware (the HAMI runtime cap cannot be mocked) and AUTO-SKIPS
-# with a message when no `*.sliced` resource is advertised. It requires an ssh client on the runner.
-#
-# The slice is 60% (memory) — Story 1's canonical example (~9830 MiB of a 16Gi T4). Because a > 50%
-# single-card slice keeps the card busy across its own admission, the Pod's stability here also guards
-# the node-devices AdmissionCheck fix that stops it from counting a Workload's own allocation against
-# itself (which previously self-evicted > 50% slices in a recreate loop).
-#
-# Self-recovering: deletes the test Instance, its SSH secret, and the port-forward on exit.
+# Goal:        A sliced SSH-enabled Instance renders a two-container Pod (main = workload, sshd = Alpine
+#              sidecar that nsenter+chroots into main) that co-locates the sliced accelerator + HAMI
+#              artifacts + workload on `main` and gives `sshd` only the device-only
+#              `device.gpustack.ai/<manufacturer>.visibility` resource (quantity = main's card count),
+#              dropping all capabilities before the interactive shell. The slice is visible in both
+#              `main` and a real SSH login, and the SSH shell is capability-stripped. The 60% slice
+#              (>50% single-card) also guards the AdmissionCheck fix that stops it counting a Workload's
+#              own allocation against itself (which previously self-evicted >50% slices in a recreate loop).
+# Environment: Needs REAL accelerator hardware advertising a *.sliced resource (the HAMI cap cannot be
+#              mocked) AND an ssh client on the runner. AUTO-SKIPS (exit 0) when either is missing.
+# Inputs:      All real, nothing mocked — an SSH key + secret; a 60%-memory-slice SSH-enabled Instance
+#              (ubuntu, accelerator=1, cores%=100) on the sliceable pool; a port-forward + real SSH login.
+# Expected:    - the Pod reaches 2/2 Running (main + sshd);
+#              - main carries `.sliced`, sshd carries only `.visibility` (not the sliced resource);
+#              - main nvidia-smi total < physical card;
+#              - the SSH session sees the SAME slice (nvidia-smi total < physical);
+#              - the SSH shell has empty CapEff/CapBnd and host `mknod` is denied.
+# Cleanup:     Trap kills the port-forward, deletes the test Instance and its SSH secret, removes the
+#              temp key dir.
 set -uo pipefail
 
 NS="${1:?usage: case-13.sh <NS>}"
@@ -86,7 +84,7 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 
 print_and_exit() {
   echo
-  echo "== CASE 13 — SSH-enabled sliced Instance: slice visible over SSH + confined shell (Stories 1/4) =="
+  echo "== CASE 13 — SSH-enabled sliced Instance: slice visible over SSH + confined shell =="
   {
     echo "STATUS|CHECK|OBJECT"
     printf '%s\n' "${ROWS[@]}"

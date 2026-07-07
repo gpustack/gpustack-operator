@@ -4,15 +4,23 @@
 #
 #   case-10.sh <NS>
 #
-# Guards the regression where a stopped Instance's resources are mutable (the running-instance
-# immutability guard is skipped while stopped), but the start path only re-checked the upper caps
-# (capResourcesToInstanceType) — not the full create-time contract. So a request that ValidateCreate
-# rejects (CPU over the non-accel cap, a negative quantity, an out-of-range slice %) could be slipped
-# in while stopped and then started. The fix runs the SAME validation on start as on create.
-#
-# Environment-agnostic: uses the general (CPU) pool, so it runs on any cluster (no GPU needed). The
-# fake client cannot reproduce the stop→edit→start sequence across a real API server; needs a real
-# cluster. Self-recovering: deletes the test Instance and restores the unit spec on exit.
+# Goal:        Starting a stopped Instance re-runs the SAME validation as create (not just the upper
+#              caps), so an over-cap request slipped in while stopped is rejected on start, while a
+#              valid in-cap resize still starts. Guards the regression where a stopped Instance's
+#              resources are mutable but the start path only re-checked the upper caps, letting a
+#              request ValidateCreate would reject (CPU over the cap, a negative quantity, an
+#              out-of-range slice %) be slipped in while stopped and then started.
+# Environment: Any cluster with a materialized general pool; needs a real cluster (the
+#              stop → edit → start sequence across a real API server cannot be faked). No GPU.
+# Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; a control Instance
+#              created over-cap at CREATE (expects reject); INST created valid (cpu=1), stopped,
+#              patched over-cap while stopped, then started.
+# Expected:    - create rejects an over-cap CPU request;
+#              - resources are mutable while stopped (the over-cap edit sticks);
+#              - starting the over-cap Instance is REJECTED with the same "exceeds the maximum CPU"
+#                error as create;
+#              - a valid in-cap resize (cpu=1) still starts (the guard does not over-reject).
+# Cleanup:     Trap deletes the test Instance.
 set -uo pipefail
 
 NS="${1:?usage: case-10.sh <NS>}"

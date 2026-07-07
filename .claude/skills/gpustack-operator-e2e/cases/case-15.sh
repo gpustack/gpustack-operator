@@ -1,17 +1,24 @@
 #!/usr/bin/env bash
 #
 # CASE 15 — Exclusive whole-card SSH Instance still works (regression)
-#   (MUTATING, self-recovering)
+#   (MUTATING, self-recovering; AUTO-SKIPS without a real accelerator or an ssh client)
 #
 #   case-15.sh <NS>
 #
-# Regression for specs/2026-07-04-ssh-instance-accelerator-slicing: the co-location + capability-drop
-# change must not break the non-sliced SSH path. An exclusive (whole-card) SSH-enabled Instance places
-# the accelerator on `main` and the device-only `.visibility` resource on `sshd`; through a real SSH
-# login the shell sees the WHOLE card (no HAMI cap) and is still capability-stripped (host mknod denied).
-# Needs REAL accelerator hardware and an ssh client; AUTO-SKIPS otherwise.
-#
-# Self-recovering: deletes the test Instance, its SSH secret, and the port-forward on exit.
+# Goal:        The co-location + capability-drop change must not break the non-sliced SSH path — an
+#              exclusive (whole-card) SSH-enabled Instance places the accelerator on `main` and the
+#              device-only `.visibility` resource on `sshd`, and through a real SSH login the shell sees
+#              the WHOLE card (no HAMI cap) and is still capability-stripped.
+# Environment: Needs REAL accelerator hardware advertising a whole-card (.../gpu) resource AND an ssh
+#              client on the runner. AUTO-SKIPS (exit 0) when either is missing.
+# Inputs:      All real, nothing mocked — an SSH key + secret; an exclusive (no slice %) SSH-enabled
+#              Instance (ubuntu, accelerator=1) on the acceleratable pool; a port-forward + real SSH login.
+# Expected:    - the Pod reaches 2/2 Running (main + sshd);
+#              - main carries the whole-card .../gpu resource (not `.sliced`); sshd carries only `.visibility`;
+#              - the SSH session sees the whole card (nvidia-smi total >= 90% of physical, no slice cap);
+#              - the SSH shell has empty CapEff and host `mknod` is denied.
+# Cleanup:     Trap kills the port-forward, deletes the test Instance and its SSH secret, removes the
+#              temp key dir.
 set -uo pipefail
 
 NS="${1:?usage: case-15.sh <NS>}"

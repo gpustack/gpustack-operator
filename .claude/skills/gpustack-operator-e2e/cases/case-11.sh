@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 #
-# CASE 11 — Sliced allocations spread across cards; per-card VRAM is not over-committed   (MUTATING, self-recovering)
+# CASE 11 — Sliced allocations spread across cards; per-card VRAM is not over-committed   (MUTATING, self-recovering; AUTO-SKIPS without >=2 sliced cards)
 #
 #   case-11.sh <NS>
 #
-# ASSERTS the deterministic part of the soft-slicing per-card fix (specs/2026-06-25-accelerator-soft-slicing-runtime-isolation.md):
-#   - the per-card ledger records REAL units, so the InstanceType sliced three-view remaining drops to
-#     reflect the committed percent (it used to stay ~full regardless of the slice size);
-#   - the sliced OnceMaxRequest is per-card (<=100), not a node card-sum.
-#
-# OBSERVES (best-effort, NOT asserted) the per-card spread: the device plugin bin-fits sliced by the
-# real per-card ".sliced.units" so slices tend to spread across a node's cards instead of stacking. But
-# GetPreferredAllocation is an advisory hint, the ledger updates asynchronously, and the node-devices
-# AdmissionCheck is check-only (does not reserve), so spread is best-effort — a HARD per-card VRAM
-# guarantee needs gate-3 reservation (a separate, larger change). This case logs the observed spread so
-# a gross regression (all slices stacked on one card) stays visible, without failing on best-effort
-# variance.
-#
-# Needs REAL accelerator hardware with >=2 sliced cards on one node; AUTO-SKIPS otherwise (never a FAIL).
-# Self-recovering: deletes the test Pods on exit.
+# Goal:        ASSERTS the deterministic part of per-card sliced accounting — the per-card ledger
+#              records REAL units, so the sliced three-view remaining drops below capacity (it used to
+#              stay ~full regardless of slice size), and the sliced OnceMaxRequest is per-card (<=100),
+#              not a node card-sum. OBSERVES (best-effort, NOT asserted) that slices spread across a
+#              node's cards: placement is an advisory hint over an async ledger and the AdmissionCheck
+#              is check-only (does not reserve), so a HARD per-card VRAM guarantee is out of scope here;
+#              the observed spread is only logged so a gross regression (all slices stacked) stays visible.
+# Environment: Needs REAL accelerator hardware with >=2 nvidia sliced cards on one node. AUTO-SKIPS
+#              (exit 0) otherwise. Picks the InstanceType whose pool the target node belongs to.
+# Inputs:      All real, nothing mocked — up to 4 sequential 60% (memory + cores) slices pinned to the
+#              target node's entrance LocalQueue (60% so two slices cannot share one card's VRAM).
+# Expected:    Asserted —
+#              - acceleratorSliced.remaining < acceleratorSliced.capacity (ledger is units-accurate);
+#              - acceleratorSliced.onceMaxRequest <= 100 (per-card, not a node card-sum).
+#              Observed only (logged, never fails the case) — the distinct-card spread and any per-card
+#              VRAM over-commit (advisory placement + non-reserving check → best-effort variance).
+# Cleanup:     Trap deletes the test Pods.
 set -uo pipefail
 
 NS="${1:?usage: case-11.sh <NS>}"

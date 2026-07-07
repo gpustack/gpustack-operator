@@ -4,19 +4,22 @@
 #
 #   case-12.sh <NS>
 #
-# Asserts the Instance admission webhooks on a SLICEABLE accelerated InstanceType
-# (pkg/worker/webhooks/worker/instance.go + pkg/utils/quantityx/quantity.go):
-#   Q1 — Default scales the per-card unit CPU/RAM to the slice percentages (compute % sizes CPU,
-#        memory % sizes RAM), flooring fractions and never below 1, and pins the accelerator to 1.
-#   Q2 — a lone memory percentage is mirrored to the compute percentage (a bare memory request →
-#        equal compute share), so CPU is sized from it too.
-#   Q3 — Validate rejects a sliceable request whose accelerator count is not 1 (the slice is
-#        expressed through the percentages, not the card count).
-#
-# Runs on a GPU-LESS cluster BY APPROXIMATION (same fake-accelerator mock as case-6): the injected
-# NodeFeature derives the sliceable InstanceType. The Instances never schedule (no real card) —
-# only the ADMISSION result (persisted spec.resources / rejection) is asserted, so no accelerator
-# hardware is needed. Self-recovering: deletes the test Instances and the injected NodeFeature on exit.
+# Goal:        On a SLICEABLE accelerated InstanceType, assert the Instance admission webhooks —
+#              Q1: Default scales the per-card unit CPU/RAM to the slice percentages (compute % sizes
+#                  CPU, memory % sizes RAM), floors fractions, never below 1, and pins the accelerator to 1;
+#              Q2: a lone memory percentage is mirrored to the compute percentage, so CPU is sized too;
+#              Q3: Validate rejects a sliceable request whose accelerator count is not 1 (the slice is
+#                  expressed through the percentages, not the card count).
+# Environment: Any cluster BY APPROXIMATION (same fake-accelerator mock as CASE 6). The Instances never
+#              schedule (no real card) — only the admission result is asserted. No real hardware.
+# Inputs:      - MOCKED: a fake accelerator NodeFeature (nvidia-e2emock, count=8) → the derived sliceable
+#                InstanceType, whose unit resources are pinned (cpu=16, ram=40Gi) for deterministic math;
+#              - real probes: INST_OK (mem%=25, cores%=25), INST_MEMONLY (mem%=50, cores unset),
+#                INST_BAD (mem%=25, cores%=25, accelerator=2).
+# Expected:    - Q1 — INST_OK persists accelerator=1, cpu=4, ram=10Gi (16 / 40Gi × 25%);
+#              - Q2 — INST_MEMONLY mirrors cores%=50 and sizes cpu=8, ram=20Gi;
+#              - Q3 — INST_BAD is REJECTED (a sliceable accelerator must be 1).
+# Cleanup:     Trap deletes the three test Instances and the injected NodeFeature.
 set -uo pipefail
 
 NS="${1:?usage: case-12.sh <NS>}"

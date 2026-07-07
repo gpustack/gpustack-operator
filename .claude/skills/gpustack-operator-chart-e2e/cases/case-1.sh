@@ -4,12 +4,21 @@
 #
 #   case-1.sh <NS> [EXPECTED_TAG]
 #
-# Asserts the chart installs and runs (operator core via assert-core.sh) AND that
-# the three version views agree: the running binary is built from HEAD, the chart
-# tgz bundled in the image matches the binary version, and the deployed image tag
-# is the one built. A tgz mismatch is the version it computes via
-# deviceManagerChartVersion() — a release/cache bug, not cosmetic. See
-# references/version-contract.md. Level-based and safe to re-run.
+# Goal:        The chart installs and runs (operator core healthy) and the three version views
+#              agree — the running binary is built from HEAD, the chart tgz bundled in the image
+#              matches the binary version, and the deployed image tag is the one built. A tgz
+#              mismatch is a release/cache bug (the version deviceManagerChartVersion() computes),
+#              not cosmetic. See references/version-contract.md.
+# Environment: Any reachable cluster with the chart already installed (operator core up). No GPU.
+#              Read-only, level-based, safe to re-run.
+# Inputs:      None injected — reads live cluster state only (operator-core health delegated to
+#              assert-core.sh). Nothing mocked. Optional 2nd arg EXPECTED_TAG (the tag just built)
+#              enables the deployed-image-tag assertion.
+# Expected:    - assert-core.sh passes (rollout / running revision == HEAD / apiservices / CRDs /
+#                sub-releases);
+#              - the running binary version equals the bundled chart tgz version;
+#              - when EXPECTED_TAG is passed, the deployed image tag equals it.
+# Cleanup:     None — read-only, no trap.
 set -uo pipefail
 
 NS="${1:?usage: case-1.sh <NS> [EXPECTED_TAG]}"
