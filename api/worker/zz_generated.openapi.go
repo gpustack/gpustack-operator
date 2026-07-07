@@ -3537,14 +3537,16 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 					},
 					"os": {
 						SchemaProps: spec.SchemaProps{
-							Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".",
+							Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".\n\nIt is a required admin-writable input, enforced by the validating webhook.",
+							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"arch": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".",
+							Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".\n\nIt is a required admin-writable input, enforced by the validating webhook.",
+							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -3642,20 +3644,21 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 					},
 					"unitResources": {
 						SchemaProps: spec.SchemaProps{
-							Description: "UnitResources describes the unit resources of the InstanceType.",
+							Description: "UnitResources describes the unit resources of the InstanceType.\n\nIt is a required admin-writable input, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with the fixed default.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()),
 						},
 					},
 					"localStorage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix, required by the validating webhook; a derived InstanceType is stamped with the fixed default.",
+							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with the fixed default.",
+							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 				},
-				Required: []string{"group", "acceleratable"},
+				Required: []string{"group", "acceleratable", "os", "arch", "unitResources", "localStorage"},
 			},
 		},
 		Dependencies: []string{

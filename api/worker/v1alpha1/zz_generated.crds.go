@@ -935,6 +935,10 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 									Required: []string{
 										"group",
 										"acceleratable",
+										"os",
+										"arch",
+										"unitResources",
+										"localStorage",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"acceleratable": {
@@ -942,7 +946,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "boolean",
 										},
 										"arch": {
-											Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".",
+											Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".\nIt is a required admin-writable input, enforced by the validating webhook.",
 											Type:        "string",
 										},
 										"cache": {
@@ -1060,7 +1064,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "string",
 										},
 										"localStorage": {
-											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is an admin-writable input carrying a case-sensitive \"Gi\" suffix, required by\nthe validating webhook; a derived InstanceType is stamped with the fixed default.",
+											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced\nby the validating webhook, and is immutable after creation; a derived InstanceType is\nstamped with the fixed default.",
 											Type:        "string",
 										},
 										"logicalCores": {
@@ -1080,7 +1084,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "string",
 										},
 										"os": {
-											Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".",
+											Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".\nIt is a required admin-writable input, enforced by the validating webhook.",
 											Type:        "string",
 										},
 										"physicalCores": {
@@ -1104,7 +1108,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "string",
 										},
 										"unitResources": {
-											Description: "UnitResources describes the unit resources of the InstanceType.",
+											Description: "UnitResources describes the unit resources of the InstanceType.\nIt is a required admin-writable input, enforced by the validating webhook, and is\nimmutable after creation; a derived InstanceType is stamped with the fixed default.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"cpu": {

@@ -740,13 +740,10 @@ func TestInstanceTypeReconciler_AggregatesCapacity(t *testing.T) {
 	assert.Equal(t, want.Value(), total, "summed credits nominal = (2+4) cards × M")
 }
 
-// TestInstanceTypeReconciler_UnitSpecDerivation pins the unit-spec source: a derived
-// pool takes the min positive across its flavors, while an admin unit spec set on the
-// InstanceType wins over the flavors.
 // TestInstanceTypeReconciler_UnitSpecDerivation pins the non-accelerated unit spec on the
 // InstanceType: a derived type gets the fixed 1c/2Gi/100Gi default regardless of the node
-// hardware behind its flavors, and an admin override wins on RAM/localStorage while unitCPU
-// is pinned to 1 (a non-accelerated unit is always a single CPU core).
+// hardware behind its flavors, and an admin's unit spec is preserved in full (it is
+// admin-authored and immutable, no longer pinned to a single CPU core).
 func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
 	key := "generic"
 	name := nodeQueueName(key)
@@ -772,7 +769,7 @@ func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
 		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "fixed default localStorage")
 	})
 
-	t.Run("admin unit spec wins except non-accel unitCPU is pinned to 1", func(t *testing.T) {
+	t.Run("admin unit spec wins in full", func(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{
 				Name: name,
@@ -792,7 +789,7 @@ func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
 		reconcileInstanceTypeN(t, cli, name, 4)
 
 		got := getInstanceType(t, cli, name)
-		assert.Equal(t, "1", got.Spec.UnitResources.CPU, "non-accel unitCPU pinned to 1, not the admin's 2")
+		assert.Equal(t, "2", got.Spec.UnitResources.CPU, "admin unitCPU wins (no longer pinned)")
 		assert.Equal(t, "16Gi", got.Spec.UnitResources.RAM, "admin unitRAM wins")
 		assert.Equal(t, "128Gi", got.Spec.LocalStorage, "admin localStorage wins")
 	})

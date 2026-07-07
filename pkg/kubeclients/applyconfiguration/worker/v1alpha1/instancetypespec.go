@@ -18,19 +18,27 @@ type InstanceTypeSpecApplyConfiguration struct {
 	// Family is the family of the InstanceType.
 	Family *string `json:"family,omitempty"`
 	// OS is the operating system of the InstanceType, e.g. "linux", "windows".
+	//
+	// It is a required admin-writable input, enforced by the validating webhook.
 	OS *string `json:"os,omitempty"`
 	// Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
+	//
+	// It is a required admin-writable input, enforced by the validating webhook.
 	Arch *string `json:"arch,omitempty"`
 	// CPU describes the CPU information of the InstanceType.
 	InstanceTypeCPUApplyConfiguration `json:",inline"`
 	// Accelerator describes the accelerator information of the InstanceType.
 	InstanceTypeAcceleratorApplyConfiguration `json:",inline"`
 	// UnitResources describes the unit resources of the InstanceType.
+	//
+	// It is a required admin-writable input, enforced by the validating webhook, and is
+	// immutable after creation; a derived InstanceType is stamped with the fixed default.
 	UnitResources *InstanceTypeUnitResourcesApplyConfiguration `json:"unitResources,omitempty"`
 	// LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
 	//
-	// It is an admin-writable input carrying a case-sensitive "Gi" suffix, required by
-	// the validating webhook; a derived InstanceType is stamped with the fixed default.
+	// It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
+	// by the validating webhook, and is immutable after creation; a derived InstanceType is
+	// stamped with the fixed default.
 	LocalStorage *string `json:"localStorage,omitempty"`
 }
 

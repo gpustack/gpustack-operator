@@ -566,9 +566,13 @@ message InstanceTypeSpec {
   optional string family = 5;
 
   // OS is the operating system of the InstanceType, e.g. "linux", "windows".
+  //
+  // It is a required admin-writable input, enforced by the validating webhook.
   optional string os = 6;
 
   // Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
+  //
+  // It is a required admin-writable input, enforced by the validating webhook.
   optional string arch = 7;
 
   // CPU describes the CPU information of the InstanceType.
@@ -578,12 +582,16 @@ message InstanceTypeSpec {
   optional InstanceTypeAccelerator accelerator = 9;
 
   // UnitResources describes the unit resources of the InstanceType.
+  //
+  // It is a required admin-writable input, enforced by the validating webhook, and is
+  // immutable after creation; a derived InstanceType is stamped with the fixed default.
   optional InstanceTypeUnitResources unitResources = 10;
 
   // LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
   //
-  // It is an admin-writable input carrying a case-sensitive "Gi" suffix, required by
-  // the validating webhook; a derived InstanceType is stamped with the fixed default.
+  // It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
+  // by the validating webhook, and is immutable after creation; a derived InstanceType is
+  // stamped with the fixed default.
   optional string localStorage = 11;
 }
 

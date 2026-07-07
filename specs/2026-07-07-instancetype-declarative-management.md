@@ -81,12 +81,14 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
    `spec.localStorage` (still enforcing the required/well-formed checks). *Accept:* patching either
    is denied with an "immutable" message; patching a mutable field (e.g. a label) succeeds.
 3. **Defaulting webhook enrichment.** A new mutating (defaulting) webhook runs on Create/Update: when
-   `spec.group` is non-empty, it builds a label selector — `(acceleratable, group)→featureKeyLabel`,
+   `spec.group` is non-empty and the descriptors are still empty, it builds a label selector — the
+   operator-owned (`nodes`) resource-type label plus `(acceleratable, group)→featureKeyLabel`,
    `(os)→kubernetes.io/os`, `(arch)→kubernetes.io/arch` — lists `ResourceFlavor`s, takes one, and
    fills the remaining descriptor spec fields (manufacturer, product, family, and — when accelerated
-   — memory, cores) from its notes. When `spec.group` is empty or no `ResourceFlavor` matches, it is
-   a no-op. *Accept:* an `InstanceType` created with only the required inputs comes back with its
-   descriptor fields populated when a matching flavor exists; unchanged when none does.
+   — memory, cores, sliceable) from its notes. It is a no-op when `spec.group` is empty, no
+   `ResourceFlavor` matches, or the descriptors are already populated (enrich-once). *Accept:* an
+   `InstanceType` created with only the required inputs comes back with its descriptor fields
+   populated when a matching flavor exists; unchanged when none does or when already populated.
 4. **NodeFlavor notes + node `.count` label.**
    - The `ResourceFlavor` notes gain `group=${flavor.key}` and `cores=${flavor.cores}` (cores empty
      for a non-accelerated flavor).
@@ -132,8 +134,10 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
   in the build).
 - The defaulting webhook follows the existing `Default(...)` precedent (`webhooks/worker/pod.go`,
   `instance.go`); it needs a cached reader to list `ResourceFlavor`s.
-- Descriptor enrichment is a **snapshot at admission** (Create/Update). If the underlying hardware
-  changes, an admin re-applies/edits the `InstanceType` to refresh; the reconciler will not.
+- Descriptor enrichment is a **one-time snapshot**: the defaulting webhook fills the descriptors only
+  while they are empty (typically at create). Neither the reconciler nor a later re-apply refreshes
+  them — the enrich-once guard skips an already-populated spec — so to re-derive, clear the descriptor
+  fields or recreate the `InstanceType`.
 - The `InstanceType` CRD is `v1alpha1` (storage, webhook target); the aggregated `v1` type is a
   proxy alias. `InstanceTypeFlavor` is added under aggregated `v1` only (peerless → conversion-gen
   skips it, list-only, no CRD, no controller), mirroring the `InstanceTypeHandler` pattern.
@@ -250,17 +254,18 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
     pool shows `acceleratable=false` with empty memory/cores; the list is sorted and deduplicated.
   - *Verify:* aggregation unit test; `make generate` clean; `make lint`.
 
-- [ ] **Task 3 — InstanceType webhooks (required create / immutable update / defaulting enrichment) + derived stamping.**
+- [x] **Task 3 — InstanceType webhooks (required create / immutable update / defaulting enrichment) + derived stamping.**
   - `api/worker/v1alpha1/instance_type.go`: mark Group/Acceleratable/OS/Arch/UnitResources/LocalStorage
     required (drop `omitempty` + required markers); `make generate`.
   - `pkg/worker/webhooks/worker/instancetype.go`: add Client/APIReader fields wired in `SetupWebhook`
-    (like `InstanceWebhook`); add `Default` — when `spec.group != ""`, build a selector
-    `featureKeyLabel(acceleratable, group)` + `kubernetes.io/os` + `kubernetes.io/arch`, list
-    `ResourceFlavor`s, take one, fill Manufacturer/Product/Family and (when accelerated) Memory/Cores
-    from its notes; no-op when group is empty or no flavor matches. `ValidateCreate` requires
-    group/os/arch non-empty + a well-formed unit spec; `ValidateUpdate` rejects any
-    `unitResources`/`localStorage` change (plus the required checks). Add the mutating webhook-gen
-    marker.
+    (like `InstanceWebhook`); add `Default` — when `spec.group != ""` and the descriptors are still
+    empty, build a selector from the operator-owned (`nodes`) resource-type label plus
+    `featureKeyLabel(acceleratable, group)` + `kubernetes.io/os` + `kubernetes.io/arch`, list one
+    `ResourceFlavor`, fill Manufacturer/Product/Family and (when accelerated) Memory/Cores/Sliceable
+    from its notes; no-op when group is empty, no flavor matches, or the descriptors are already
+    populated (enrich-once). `ValidateCreate` requires group/os/arch non-empty + a well-formed unit
+    spec; `ValidateUpdate` rejects any `unitResources`/`localStorage` change (plus the required
+    checks). Add the mutating webhook-gen marker.
   - `pkg/worker/controllers/worker/instancetype.go`: `createDerivedInstanceType` stamps
     `spec.group/acceleratable/os/arch` (+ unit spec) so its own `Create` passes validation and the
     defaulting webhook enriches it; keep only the derived-marker label.
