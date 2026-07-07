@@ -115,11 +115,12 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 7. **InstanceTypeReconciler (lifecycle owner), narrowed.** It only creates the backing `ClusterQueue`
    filling labels (not resource groups), keeps the queue's schedule labels — derived from the
    `InstanceType` spec identity (group/acceleratable/os/arch) plus the entrance label — converged,
-   drives the queue through drain-then-delete on `InstanceType` deletion, and syncs the Devices ledger
-   into `InstanceType.status`. It no longer refreshes descriptor spec fields (snapshot
-   at admission) and no longer deletes a derived type for lack of flavors. *Accept:* a queue is
-   created with labels only; deleting an `InstanceType` drains then removes its queue; status still
-   reflects Devices.
+   stamps a `memory` annotation on the queue sourced from the enriched `InstanceType.spec.memory` (the
+   per-card VRAM the Pod webhook reads), drives the queue through drain-then-delete on `InstanceType`
+   deletion, and syncs the Devices ledger into `InstanceType.status`. It no longer refreshes descriptor
+   spec fields (snapshot at admission) and no longer deletes a derived type for lack of flavors.
+   *Accept:* a queue is created with labels + the memory annotation (no resource groups); deleting an
+   `InstanceType` drains then removes its queue; status still reflects Devices.
 8. **InstanceTypeFlavor catalog.** A new list-only aggregated resource (`instypeflavor`, cluster-scoped) pulls
    the operator-owned `ResourceFlavor`s (by resource-type label), extracts notes into a spec ordered like `InstanceTypeSpec` — Group,
    Acceleratable, Manufacturer, Product, Family, Memory, Cores, Sliceable — deduplicates identical
@@ -149,18 +150,22 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
   regenerate API/CRD/openapi via `make generate` after type/marker/webhook edits; sign every commit
   (`-s`); keep the Pod webhook's per-card VRAM lookup working.
 - **Ask first:** any change to the credit/CPU quota math, the accelerator status three-view, or the
-  Instance/Pod admission paths beyond the VRAM-source move; renaming `NodeQueueReconciler`.
+  Instance/Pod admission paths; renaming `NodeQueueReconciler`.
 - **Never:** delete an `InstanceType` (derived or admin) merely because its pool lost all flavors;
   let a `ClusterQueue`'s reservation counters go negative; trust a user-writable `LocalQueue` as the
-  VRAM source; write descriptor content or resource groups from the `InstanceTypeReconciler`.
+  VRAM source; write resource groups from the `InstanceTypeReconciler` — the only descriptor it may
+  stamp on the queue is the per-card `memory` annotation (sourced from `it.Spec.Memory`) the Pod
+  webhook depends on.
 
 ### Risks and Mitigations
-- **Pod webhook VRAM source → the CQ carries "only labels" now, but `cardVRAMMib` reads the CQ's
-  `memory` note.** → *Resolved (Task 4):* repoint the Pod webhook to read per-card VRAM from the
-  enriched `InstanceType.spec.memory` (the operator CQ is still resolved by the entrance label; the
-  co-named `InstanceType` is fetched and its `spec.memory` read). Single source of truth; the CQ note
-  is dropped in Task 5, and Task 4 lands the source move first so the sliced memory-mib fold path
-  never breaks between commits. Regression-tested in `pod_test.go`.
+- **Pod webhook VRAM source → the narrowed CQ must still expose per-card VRAM.** → *Resolved (Task 4):*
+  the CQ keeps a `memory` annotation, and the `InstanceTypeReconciler` sources it from the enriched
+  `InstanceType.spec.memory` — so the InstanceType is the source of truth while the Pod webhook stays
+  unchanged (resolve the CQ by the entrance label, read its `memory` annotation; no
+  `LocalQueue → CQ → InstanceType` lookup). Sourcing the annotation from `it.Spec.Memory` is done in
+  the same task that drops `applyDescriptorsFromClusterQueue`, since keeping both would form a circular
+  memory flow (CQ→spec and spec→CQ); doing it earlier breaks the derived-type memory in unit tests
+  (the enriching webhook does not run there).
 - **Two controllers write the same `ClusterQueue` (`InstanceTypeReconciler` owns labels + teardown
   StopPolicy; `NodeQueueReconciler` owns resource groups + StopPolicy).** → Partition StopPolicy
   ownership: `NodeQueueReconciler` must ignore a queue whose `InstanceType` is being deleted (has a
@@ -194,8 +199,9 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 - `pkg/nodefeature/helper.go` — `.count` general label, `NodeFlavor.Cores`, `ExtractNodeFlavors`
   count-from-label + `.count` in `NodeLabels`.
 - `pkg/worker/controllers/worker/nodeflavor.go` — `group`/`cores` notes.
-- `pkg/worker/controllers/worker/instancetype.go` — narrow to lifecycle + labels + Devices→status;
-  drop descriptor refresh and the delete-on-no-flavors branch; stamp identity on derived types.
+- `pkg/worker/controllers/worker/instancetype.go` — narrow to lifecycle + labels + a `memory`
+  annotation from `it.Spec.Memory` + Devices→status; drop descriptor refresh and the
+  delete-on-no-flavors branch; stamp identity on derived types.
 - `pkg/worker/controllers/worker/nodequeue.go` — new `NodeQueueReconciler` (quota owner).
 - `pkg/worker/extensionapis/worker/instancetypeflavor.go` + `extensionapis/setup.go` — new handler.
 - `pkg/worker/settings/value.go` — `InstanceTypeDrainWhenNoFlavors`.
@@ -275,17 +281,7 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
   - *Verify:* webhook unit tests (create-required, update-immutable, default-enriches with a fake RF);
     `make generate` clean; `make lint`. *(The reconciler still fills quota here — a harmless overlap.)*
 
-- [ ] **Task 4 — Pod webhook per-card VRAM → the enriched InstanceType.**
-  - `pkg/worker/webhooks/worker/pod.go`: `cardVRAMMib` resolves the operator `ClusterQueue` by the
-    entrance label as today, then reads per-card VRAM from the co-named `InstanceType.spec.memory`
-    (Get by `cq.Name`) instead of the CQ `memory` note, keeping the same reject contract
-    (missing/unparseable/non-positive → reject).
-  - *Acceptance:* a sliced memory-mib request still folds to the correct units; unchanged rejection
-    behavior.
-  - *Verify:* `go test ./pkg/worker/webhooks/worker/... -run Pod`; `make lint`. *(Safe pre-move: the IT
-    is enriched from Task 3, and the CQ note still exists until Task 5.)*
-
-- [ ] **Task 5 — Split queue ownership: `NodeQueueReconciler` (quota) + narrowed `InstanceTypeReconciler` (lifecycle) + setting.**
+- [ ] **Task 4 — Split queue ownership: `NodeQueueReconciler` (quota) + narrowed `InstanceTypeReconciler` (lifecycle) + setting; feed the CQ memory annotation from the InstanceType.**
   - `pkg/worker/settings/value.go`: add `InstanceTypeDrainWhenNoFlavors` (editable bool, default
     `true`), read per-reconcile.
   - `pkg/worker/controllers/worker/nodequeue.go` (new `NodeQueueReconciler`): `For(ClusterQueue)`
@@ -300,32 +296,37 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
     all reservations are zero → clear the resource groups (empty). All writes `DeepEqual`-guarded.
   - `pkg/worker/controllers/worker/instancetype.go`: `ensureClusterQueue` creates/aligns the CQ with
     **schedule labels built from `it.Spec`** (`featureKeyLabel(it.Spec.Acceleratable, it.Spec.Group)`,
-    os, arch) + the entrance label only — no resource groups, no descriptor notes, and StopPolicy no
-    longer converged post-create (owned by NodeQueue + teardown). Drop `applyDescriptorsFromClusterQueue`
-    (snapshot-at-admission) and the `len(rfList)==0 && derived → Delete` branch. Keep the derived
-    isolation policy (empty cohort, preemption, fungibility, node-devices AdmissionCheck ref),
-    Devices→status (`computeStatus` reads acceleratable from `it.Spec`), and teardown drain-then-delete.
-    Move the flavor-quota helpers to `nodequeue.go`.
+    os, arch) + the entrance label + **a `memory` annotation sourced from `it.Spec.Memory`** (the
+    InstanceType, enriched by the Default webhook, feeds the per-card VRAM the Pod webhook reads) — no
+    resource groups, StopPolicy no longer converged post-create (owned by NodeQueue + teardown). Drop
+    `applyDescriptorsFromClusterQueue` (snapshot-at-admission; removing it is what makes sourcing the CQ
+    memory from `it.Spec.Memory` non-circular — the reconciler no longer reads descriptors back from the
+    CQ) and the `len(rfList)==0 && derived → Delete` branch. Keep the derived isolation policy (empty
+    cohort, preemption, fungibility, node-devices AdmissionCheck ref), Devices→status (`computeStatus`
+    reads acceleratable from `it.Spec`), and teardown drain-then-delete. Move the flavor-quota helpers
+    to `nodequeue.go`. The **Pod webhook is unchanged** — it still resolves the operator CQ by the
+    entrance label and reads its `memory` annotation (no `LocalQueue → CQ → InstanceType` lookup).
   - `pkg/worker/controllers/setup.go`: register `NodeQueueReconciler`.
-  - *Acceptance:* creating an IT yields a labels-only CQ; NodeQueue fills the quota smallest-count
-    first; losing all flavors drains-then-empties with no negative counters and reactivates when
-    flavors return; deleting an IT drains then deletes its CQ; status still tracks Devices; toggling
-    the setting flips drain-vs-wait.
-  - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue'`, then the full suite + build;
+  - *Acceptance:* creating an IT yields a labels + memory-annotation CQ; NodeQueue fills the quota
+    smallest-count first; losing all flavors drains-then-empties with no negative counters and
+    reactivates when flavors return; deleting an IT drains then deletes its CQ; status still tracks
+    Devices; toggling the setting flips drain-vs-wait; a sliced memory-mib Pod still folds from the CQ
+    memory annotation.
+  - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|Pod'`, then the full suite + build;
     `make lint`. **Checkpoint: run the entire test suite and build before continuing.**
 
-- [ ] **Task 6 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
+- [ ] **Task 5 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
   pinning, group/cores notes, the queue-ownership split, drain-then-empty + reactivate,
   InstanceTypeFlavor), `docs/settings.md` (new setting row), `docs/development.md` (InstanceTypeFlavor
   in the inventory), `README.md` (declarative InstanceType + catalog). *Verify:* links resolve, wording
   matches the shipped behavior.
 
-- [ ] **Task 7 — E2E cases.** Via the `gpustack-operator-e2e` skill: required-field rejection on
+- [ ] **Task 6 — E2E cases.** Via the `gpustack-operator-e2e` skill: required-field rejection on
   create; enrichment fills descriptors on create; immutable unit/storage rejection on update;
   drain-then-empty + reactivate on flavor loss; `InstanceTypeFlavor` catalog list; derived restore on
   delete. Update `SKILL.md` + references. *Verify:* `bash -n` each case; `chmod +x` new cases.
 
-- [ ] **Task 8 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
+- [ ] **Task 7 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
   builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`), Helm-deploy
   to a reachable Kubernetes cluster, and run the e2e verifications (InstanceTypeFlavor list; admin
   InstanceType create + enrich + admit; required-field + immutability rejection; drain-then-empty +
@@ -346,8 +347,8 @@ Every added unit has table-driven coverage. Per-package targets (`2026-07-07`):
   `NodeLabels`; `NodeFlavor.Cores`).
 - `pkg/worker/controllers/worker`: `2026-07-07` - ~80% (new `nodequeue_test.go`; narrowed
   `instancetype_test.go`; `nodeflavor_test.go` group/cores notes).
-- `pkg/worker/webhooks/worker`: `2026-07-07` - ~85% (default-enriches; require-on-create;
-  immutable-unit/storage; Pod VRAM from InstanceType).
+- `pkg/worker/webhooks/worker`: `2026-07-07` - ~85% (default-enriches incl. the enrich-once +
+  accel-memory guard; require-on-create; immutable-unit/storage).
 - `pkg/worker/extensionapis/worker`: `2026-07-07` - ~80% (InstanceTypeFlavor aggregation: dedup, sort,
   acceleratable=false for generic).
 
@@ -357,8 +358,10 @@ Fake-client controller tests (post-merge names):
   `_DrainThenEmptyRespectsReservations`, `_DrainSettingToggle`, `_SkipsDeletingInstanceType`.
 - `TestInstanceTypeReconciler_CreatesLabelsOnlyQueue`, `_TeardownDrainsThenDeletes`,
   `_NoDeleteOnFlavorLoss`, `_StatusTracksDevices`.
-- `TestInstanceTypeWebhook_DefaultEnriches`, `_RequireOnCreate`, `_ImmutableUnitAndStorage`.
-- `TestPodWebhook_VRAMFromInstanceType`.
+- `TestInstanceTypeWebhook_DefaultEnriches` (incl. the accel-memory guard), `_RequireOnCreate`,
+  `_ImmutableUnitAndStorage`.
+- `TestInstanceTypeReconciler_QueueCarriesMemoryAnnotation` (fed from `it.Spec.Memory`);
+  `TestPodWebhook_Default` still folds a sliced memory-mib request from the CQ memory annotation.
 
 #### e2e tests
 Via the `gpustack-operator-e2e` skill on a reachable cluster: required-field rejection; enrichment on
@@ -378,11 +381,13 @@ confirmed at the Kueue v0.17.1 source level (no separate e2e gate needed).
 
 ## Open Questions
 Both prior questions were resolved during planning:
-- **Pod webhook VRAM source** → reads the enriched `InstanceType.spec.memory` (Task 4). See Risks.
+- **Pod webhook VRAM source** → the CQ keeps a `memory` annotation fed from the enriched
+  `InstanceType.spec.memory`; the Pod webhook reads that annotation unchanged (no InstanceType
+  lookup). Wired in Task 4. See Risks.
 - **NodeQueueReconciler flavor lookup** → a **label selector** (feature-key + os + arch), not the
   pool-name index (`IndexingResourceFlavorByNodeQueue`): admin-created `InstanceType` names are
   arbitrary, so only derived types are named `gpustack-${key}-${os}-${arch}` and the name index cannot
   resolve an admin pool. This also makes the CQ's schedule labels **derived from `it.Spec`**
-  (group/acceleratable/os/arch), not copied from `it.Labels` (Task 5).
+  (group/acceleratable/os/arch), not copied from `it.Labels` (Task 4).
 
 None remaining.
