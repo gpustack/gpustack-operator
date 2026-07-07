@@ -43,10 +43,14 @@ type InstanceTypeSpec struct {
 	Family string `json:"family,omitempty" protobuf:"bytes,5,opt,name=family"`
 
 	// OS is the operating system of the InstanceType, e.g. "linux", "windows".
-	OS string `json:"os,omitempty" protobuf:"bytes,6,opt,name=os"`
+	//
+	// It is a required admin-writable input, enforced by the validating webhook.
+	OS string `json:"os" protobuf:"bytes,6,opt,name=os"`
 
 	// Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
-	Arch string `json:"arch,omitempty" protobuf:"bytes,7,opt,name=arch"`
+	//
+	// It is a required admin-writable input, enforced by the validating webhook.
+	Arch string `json:"arch" protobuf:"bytes,7,opt,name=arch"`
 
 	// CPU describes the CPU information of the InstanceType.
 	InstanceTypeCPU `json:",inline" protobuf:"bytes,8,opt,name=cpu"`
@@ -55,13 +59,17 @@ type InstanceTypeSpec struct {
 	InstanceTypeAccelerator `json:",inline" protobuf:"bytes,9,opt,name=accelerator"`
 
 	// UnitResources describes the unit resources of the InstanceType.
-	UnitResources InstanceTypeUnitResources `json:"unitResources,omitempty" protobuf:"bytes,10,opt,name=unitResources"`
+	//
+	// It is a required admin-writable input, enforced by the validating webhook, and is
+	// immutable after creation; a derived InstanceType is stamped with the fixed default.
+	UnitResources InstanceTypeUnitResources `json:"unitResources" protobuf:"bytes,10,opt,name=unitResources"`
 
 	// LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
 	//
-	// It is an admin-writable input carrying a case-sensitive "Gi" suffix, required by
-	// the validating webhook; a derived InstanceType is stamped with the fixed default.
-	LocalStorage string `json:"localStorage,omitempty" protobuf:"bytes,11,opt,name=localStorage"`
+	// It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
+	// by the validating webhook, and is immutable after creation; a derived InstanceType is
+	// stamped with the fixed default.
+	LocalStorage string `json:"localStorage" protobuf:"bytes,11,opt,name=localStorage"`
 }
 
 // InstanceTypeCPU describes the information of the CPU.

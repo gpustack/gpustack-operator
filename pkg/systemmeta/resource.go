@@ -217,6 +217,13 @@ func GetResourcesLabelSelectorOfType(resType string) labels.Selector {
 	})
 }
 
+// GetResourcesLabelSetOfType returns a label set for the resources of the specified type.
+func GetResourcesLabelSetOfType[T ~map[string]string](resType string) T {
+	return map[string]string{
+		ResourceTypeLabel: resType,
+	}
+}
+
 // FilterResourceListByNotes returns a list of resources that matched by notes.
 func FilterResourceListByNotes[T MetaObjectList](objList T, noteKey, noteValue string, noteKeyAndValues ...string) T {
 	items, err := kmeta.ExtractList(objList)

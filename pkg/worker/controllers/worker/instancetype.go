@@ -204,6 +204,10 @@ func (r *InstanceTypeReconciler) createDerivedInstanceType(
 			},
 		},
 		Spec: workercore.InstanceTypeSpec{
+			Group:         key,
+			Acceleratable: acceleratable,
+			OS:            os,
+			Arch:          arch,
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: cpu, RAM: ram},
 			LocalStorage:  defaultUnitLocalStorage,
 		},
@@ -467,13 +471,6 @@ func (r *InstanceTypeReconciler) syncInstanceType(
 
 	desiredSpec := it.Spec
 	applyDescriptorsFromClusterQueue(&desiredSpec, cq)
-	// A non-accelerated InstanceType's unit is always a single CPU core; reset an admin
-	// edit that set its CPU unit to anything but "1" (unitRAM/localStorage stay editable).
-	// An unset value is left alone so a derived type does not churn.
-	if !desiredSpec.Acceleratable &&
-		desiredSpec.UnitResources.CPU != "" && desiredSpec.UnitResources.CPU != "1" {
-		desiredSpec.UnitResources.CPU = "1"
-	}
 	if !kubemeta.DeepEqual(desiredSpec, it.Spec) {
 		it.Spec = desiredSpec
 		err := r.Client.Update(ctx, it)
