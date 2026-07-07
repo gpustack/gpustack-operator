@@ -46,6 +46,9 @@ func newManagedCPUNode(name string, cpu, memGi, stgGi int64) *core.Node {
 	// key label, mirroring what the NodeFeature reconciler writes onto the node.
 	gKey := nodefeature.ExtractGeneralNodeKey(nd)
 	nd.Labels[nodefeature.GeneralFeatureLabelPrefix+gKey] = "true"
+	// The general .count label ConstructNodeCapacityLabels stamps; ExtractNodeFlavors
+	// reads the CPU flavor size from it, so the fixture must carry it.
+	nd.Labels[nodefeature.GeneralFeatureLabelPrefix+gKey+".count"] = itoa(cpu)
 	return nd
 }
 
@@ -63,6 +66,7 @@ func newManagedAccelNode(name string, count int64) *core.Node {
 	nd.Labels[p+".product"] = "NVIDIA A10G"
 	nd.Labels[p+".memory"] = "24Gi"
 	nd.Labels[p+".family"] = "ampere"
+	nd.Labels[p+".cores"] = "9216"
 	return nd
 }
 
@@ -208,6 +212,7 @@ func TestNodeFlavorReconciler_ActiveShape(t *testing.T) {
 	assert.Equal(t, "linux", rf.Spec.NodeLabels[core.LabelOSStable], "os pinned (full)")
 	assert.Equal(t, "amd64", rf.Spec.NodeLabels[core.LabelArchStable], "arch pinned (full)")
 	assert.Equal(t, "true", rf.Spec.NodeLabels[gKey], "feature key pinned")
+	assert.Equal(t, "4", rf.Spec.NodeLabels[gKey+_ResourceFlavorCountLabelSuffix], "count pinned in nodeLabels")
 	require.Len(t, rf.Spec.Tolerations, 1, "blanket toleration set")
 	assert.Equal(t, core.TolerationOpExists, rf.Spec.Tolerations[0].Operator, "tolerates any taint")
 
@@ -217,6 +222,8 @@ func TestNodeFlavorReconciler_ActiveShape(t *testing.T) {
 	assert.Equal(t, _ResourceFlavorResType, resType, "resType")
 	assert.Equal(t, "false", notes["acceleratable"], "acceleratable note")
 	assert.Equal(t, "generic", notes["manufacturer"], "manufacturer note")
+	assert.Equal(t, "generic", notes["group"], "group note")
+	assert.Empty(t, notes["cores"], "no cores for a cpu flavor")
 	assert.NotContains(t, notes, "unitCPU", "no unit spec in flavor notes")
 	assert.NotContains(t, notes, "unitRAM", "no unit spec in flavor notes")
 	assert.NotContains(t, notes, "localStorage", "no unit spec in flavor notes")
@@ -243,9 +250,11 @@ func TestNodeFlavorReconciler_ActiveShapeAccelerated(t *testing.T) {
 	_, notes := systemmeta.DescribeResource(rf)
 	assert.Equal(t, "true", notes["acceleratable"], "acceleratable note")
 	assert.Equal(t, "nvidia", notes["manufacturer"], "manufacturer note")
+	assert.Equal(t, "nvidia-a10g", notes["group"], "group note")
 	assert.Equal(t, "NVIDIA A10G", notes["product"], "product note")
 	assert.Equal(t, "ampere", notes["family"], "family note")
 	assert.Equal(t, "24Gi", notes["memory"], "per-card VRAM note")
+	assert.Equal(t, "9216", notes["cores"], "per-card cores note")
 }
 
 // TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode pins the

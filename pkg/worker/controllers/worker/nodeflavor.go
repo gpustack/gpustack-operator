@@ -191,10 +191,12 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	eNotes := map[string]string{
 		"acceleratable": strconv.FormatBool(flavor.Acceleratable),
+		"group":         flavor.Key,
 		"manufacturer":  flavor.Manufacturer,
 		"product":       flavor.Product,
 		"family":        flavor.Family,
 		"memory":        flavor.Memory,
+		"cores":         flavor.Cores,
 		"sliceable":     strconv.FormatBool(sliceable),
 	}
 	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)
