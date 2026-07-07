@@ -55,8 +55,8 @@ GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKe
 | Path | Group / Version | Kind |
 |------|-----------------|------|
 | `api/v1` | `gpustack.ai/v1` | Extension API (settings, status) |
-| `api/worker/v1` | `worker.gpustack.ai/v1` | Extension API (Instance, Devices, InstanceType, …) served by the aggregated apiserver |
-| `api/worker/v1alpha1` | `worker.gpustack.ai/v1alpha1` | CRDs (Instance, Devices) |
+| `api/worker/v1` | `worker.gpustack.ai/v1` | Extension API served by the aggregated apiserver: a proxy/conversion over the v1alpha1 CRDs plus the list-only `InstanceTypeFlavor` catalog |
+| `api/worker/v1alpha1` | `worker.gpustack.ai/v1alpha1` | CRDs (Instance, Devices, InstanceType) |
 
 `gen/api/main.go` configures which packages are CRDs vs extension APIs and drives custom generators
 in `gen/api/generator` (apireg-gen, crd-gen, webhook-gen). **Never hand-edit generated files**

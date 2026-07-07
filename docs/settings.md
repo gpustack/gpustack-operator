@@ -51,11 +51,12 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `instance-access-wildcard-dns` | `GPUSTACK_INSTANCE_ACCESS_WILDCARD_DNS` | *(blank)* | Wildcard DNS for all Instances (e.g. `traefik.me`), used to build a per-Instance domain `<instance-host-ip>.<wildcard-dns>`. Only effective when `instance-access-static-address` is not set. |
 | `node-management-manual` | `GPUSTACK_NODE_MANAGEMENT_MANUAL` | `false` | Skip auto-managing nodes. When `false`, the operator auto-onboards discovered nodes by injecting the `gpustack.ai/managed=true` label; when `true`, an administrator must opt nodes in manually. Read per-reconcile. |
 | `instance-type-mixed-on-node` | `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` | `true` | Whether one node may surface both a GPU and a CPU-only InstanceType. When `true`, a node is summarized into every type it can serve; when `false`, a node with accelerators yields only a GPU InstanceType and a CPU-only node only a general one. Read per-reconcile. |
-| `instance-type-derived-from-node` | `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE` | `true` | Whether the operator auto-derives the InstanceType and its backing ClusterQueue from node hardware. When `true`, the operator derives both; when `false`, it only aligns the ResourceFlavor and the administrator defines the ClusterQueue via the InstanceType API. Read per-reconcile. |
+| `instance-type-derived-from-node` | `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE` | `true` | Whether the operator auto-derives the InstanceType (and its backing ClusterQueue) from node hardware. When `true`, the `NodeFlavorReconciler` authors the derived InstanceType (create-only); when `false`, it only aligns the ResourceFlavor and the administrator defines the InstanceType via the API. Read per-reconcile. |
+| `instance-type-drain-when-no-flavors` | `GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS` | `true` | Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (`HoldAndDrain`, so Kueue evicts admitted workloads) before its resource groups are emptied. When `true`, the queue is drained first; when `false`, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue's counters never go negative. Read per-reconcile. |
 
-The last three (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`)
-are read **per-reconcile** (`ShouldValueBool(ctx)`), so flipping one re-converges the scheduling chain on the
-next reconcile without restarting the operator.
+The last four (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
+`instance-type-drain-when-no-flavors`) are read **per-reconcile** (`ShouldValueBool(ctx)`), so flipping one
+re-converges the scheduling chain on the next reconcile without restarting the operator.
 
 ## Deploy-Time Environment Variables
 
