@@ -365,6 +365,64 @@ message InstanceType {
   optional .gpustack.ai.gpustack.api.worker.v1alpha1.InstanceTypeStatus status = 3;
 }
 
+// InstanceTypeFlavor is an aggregated, read-only projection over the operator-owned Kueue
+// ResourceFlavors — the catalog of hardware groups an InstanceType can be built on. Each
+// distinct pool (accelerated or generic CPU-only) surfaces as one InstanceTypeFlavor, parsed
+// from the flavor's note.gpustack.ai/* annotations, deduplicated, and sorted. It is served
+// list-only by the aggregated apiserver: there is no backing CRD and no controller, so an
+// administrator can discover the group + descriptor fields needed to author an InstanceType.
+//
+// +genclient
+// +genclient:nonNamespaced
+// +genclient:onlyVerbs=list
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["instypeflavor"]
+message InstanceTypeFlavor {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  optional InstanceTypeFlavorSpec spec = 2;
+}
+
+// InstanceTypeFlavorList holds the list of InstanceTypeFlavor.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message InstanceTypeFlavorList {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ListMeta metadata = 1;
+
+  repeated InstanceTypeFlavor items = 2;
+}
+
+// InstanceTypeFlavorSpec describes one pool aggregated from the ResourceFlavor notes. Its
+// fields mirror the InstanceTypeSpec descriptor ordering — group + acceleratable +
+// manufacturer/product/family + memory/cores — so the catalog and an InstanceType read
+// consistently.
+message InstanceTypeFlavorSpec {
+  // Group is the pool key (the InstanceType group), e.g. "nvidia-a10g", "generic".
+  optional string group = 1;
+
+  // Acceleratable reports whether the pool represents accelerated hardware; a generic
+  // (CPU-only) pool is false. It delimits generic from accelerated flavors.
+  optional bool acceleratable = 2;
+
+  // Manufacturer is the device (or CPU) manufacturer, e.g. "nvidia", "generic".
+  optional string manufacturer = 3;
+
+  // Product is the product name, e.g. "NVIDIA A10G"; empty for a generic pool.
+  optional string product = 4;
+
+  // Family is the product family, e.g. "ampere"; empty for a generic pool.
+  optional string family = 5;
+
+  // Memory is the per-card VRAM, e.g. "24576Mi"; empty for a generic pool.
+  optional string memory = 6;
+
+  // Cores is the per-card accelerator core count, e.g. "9216"; empty for a generic pool.
+  optional string cores = 7;
+
+  // Sliceable reports whether the accelerator can be sliced; false for a generic pool.
+  optional bool sliceable = 8;
+}
+
 // InstanceTypeList holds the list of InstanceType.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

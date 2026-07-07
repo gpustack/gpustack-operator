@@ -118,11 +118,12 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
    at admission) and no longer deletes a derived type for lack of flavors. *Accept:* a queue is
    created with labels only; deleting an `InstanceType` drains then removes its queue; status still
    reflects Devices.
-8. **InstanceTypeFlavor catalog.** A new list-only aggregated resource (`itf`, cluster-scoped) pulls
-   all `ResourceFlavor`s, extracts notes into a spec ordered like `InstanceTypeSpec` — Group,
-   Acceleratable, Manufacturer, Product, Family, Memory, Cores — deduplicates identical entries, and
-   sorts by manufacturer → product → memory. *Accept:* `kubectl get instancetypeflavors` lists one
-   row per distinct pool, generic pools showing `acceleratable=false` with empty memory/cores.
+8. **InstanceTypeFlavor catalog.** A new list-only aggregated resource (`instypeflavor`, cluster-scoped) pulls
+   the operator-owned `ResourceFlavor`s (by resource-type label), extracts notes into a spec ordered like `InstanceTypeSpec` — Group,
+   Acceleratable, Manufacturer, Product, Family, Memory, Cores, Sliceable — deduplicates identical
+   entries, and sorts by manufacturer → product → memory. *Accept:* `kubectl get instancetypeflavors`
+   lists one row per distinct pool, generic pools showing `acceleratable=false` with empty
+   memory/cores/sliceable.
 
 ### Notes / Constraints / Caveats
 - Go + controller-runtime; Kueue **v0.17.1** (`sigs.k8s.io/kueue/apis/kueue/v1beta2`). Empty
@@ -233,11 +234,11 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
     capacity read from the label.
   - *Verify:* `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/... -run 'NodeFlavor|Extract|ConstructNodeCapacity'`; `make lint`.
 
-- [ ] **Task 2 — `InstanceTypeFlavor` list-only aggregated resource.**
+- [x] **Task 2 — `InstanceTypeFlavor` list-only aggregated resource.**
   - `api/worker/v1/instancetypeflavor.go`: peerless type + `InstanceTypeFlavorSpec` ordered like
-    `InstanceTypeSpec` — Group, Acceleratable, Manufacturer, Product, Family, Memory, Cores — with
-    markers (`+genclient`, `+genclient:nonNamespaced`, `+genclient:onlyVerbs=get,list,watch`,
-    deepcopy, `+k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["itf"]`)
+    `InstanceTypeSpec` — Group, Acceleratable, Manufacturer, Product, Family, Memory, Cores,
+    Sliceable — with markers (`+genclient`, `+genclient:nonNamespaced`, `+genclient:onlyVerbs=list`,
+    deepcopy, `+k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["instypeflavor"]`)
     and a `List` type.
   - `pkg/worker/extensionapis/worker/instancetypeflavor.go`: `InstanceTypeFlavorHandler`
     (`extensionapi.ObjectInfo` + `WithList`/`ListOperation`); `OnList` lists `ResourceFlavor`s
@@ -369,9 +370,6 @@ confirmed at the Kueue v0.17.1 source level (no separate e2e gate needed).
   lifecycle.
 - **Empty the resource groups immediately on flavor loss.** Rejected: emptying while reservations are
   outstanding drives Kueue's counters negative — the drain/wait gate exists to prevent that.
-- **Add `sliceable` to `InstanceTypeFlavor`.** Rejected for now: the field set is Group, Acceleratable,
-  Manufacturer, Product, Family, Memory, Cores (per decision); `sliceable` can be added later if the
-  catalog needs it.
 
 ## Open Questions
 Both prior questions were resolved during planning:

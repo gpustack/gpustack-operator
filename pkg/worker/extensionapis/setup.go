@@ -21,6 +21,7 @@ var setups = []extensionapi.Setup{
 	new(worker.InstancePersistentVolumeTypeHandler),
 	new(worker.InstanceSSHPublicKeyHandler),
 	new(worker.InstanceTypeHandler),
+	new(worker.InstanceTypeFlavorHandler),
 }
 
 // Setup installs the extension api handlers.

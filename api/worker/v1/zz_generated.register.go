@@ -83,6 +83,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&InstanceSSHPublicKey{},
 		&InstanceSSHPublicKeyList{},
 		&InstanceType{},
+		&InstanceTypeFlavor{},
+		&InstanceTypeFlavorList{},
 		&InstanceTypeList{},
 	)
 	// AddToGroupVersion allows the serialization of client types like ListOptions.

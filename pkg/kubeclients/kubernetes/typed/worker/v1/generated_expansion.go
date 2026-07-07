@@ -20,3 +20,5 @@ type InstancePersistentVolumeTypeExpansion interface{}
 type InstanceSSHPublicKeyExpansion interface{}
 
 type InstanceTypeExpansion interface{}
+
+type InstanceTypeFlavorExpansion interface{}
