@@ -15,10 +15,18 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/webhook"
 )
+
+// QueueEntranceLabelKey, on an InstanceType, records the name of the namespaced LocalQueue that
+// fronts its backing ClusterQueue (a workload's "kueue.x-k8s.io/queue-name" value). The Pod
+// webhook reverse-looks-up the InstanceType by this label to read the authoritative per-card VRAM
+// (spec.memory), never trusting the user-writable LocalQueue. The Default webhook stamps it with
+// nodefeature.FormatLocalQueueName(<InstanceType name>).
+const QueueEntranceLabelKey = "schedule." + systemname.LabelPrefix + "queue-entrance"
 
 // InstanceTypeWebhook defaults and validates a v1alpha1.InstanceType.
 //
@@ -73,13 +81,16 @@ func (r *InstanceTypeWebhook) ValidateDelete(_ context.Context, _ runtime.Object
 	return nil, nil
 }
 
-// Default enriches the InstanceType's descriptor spec from a matching ResourceFlavor, so a
-// stored InstanceType is spec-clear from day one. When spec.group is set it builds the
-// pool's schedule labels — the (acceleratable, group) feature key plus kubernetes.io/os|arch
-// — lists the ResourceFlavors, takes the first, and fills manufacturer/product/family (and,
-// when accelerated, memory/cores/sliceable) from its notes. It is a no-op when group is
-// empty or no flavor matches, leaving the admin's spec intact. Descriptor enrichment is a
-// snapshot at admission; the reconciler does not refresh it as hardware changes.
+// Default stamps the InstanceType's metadata labels and enriches its descriptor spec from a
+// matching ResourceFlavor, so a stored InstanceType is spec-clear and selectable from day one.
+// From the spec identity it derives the (acceleratable, group) feature key and, with
+// kubernetes.io/os|arch, stamps the schedule discriminators the pool's Devices and ResourceFlavors
+// carry (pruning a stale feature key left by a group/acceleratable change), plus the entrance
+// label (nodefeature.FormatLocalQueueName(name)) the Pod webhook reverse-looks-up for the per-card
+// VRAM. It then lists the ResourceFlavors by those discriminators, takes the first, and fills
+// manufacturer/product/family (and, when accelerated, memory/cores/sliceable) from its notes.
+// Labels are stamped whenever group is set; descriptor enrichment is a snapshot at admission
+// (skipped once populated) and the reconciler does not refresh it as hardware changes.
 func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	it := obj.(*workercore.InstanceType)
 
@@ -89,16 +100,43 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 		return nil
 	}
 
+	// The pool's feature key from the spec identity.
+	featureKey := nodefeature.GeneralFeatureLabelPrefix + it.Spec.Group
+	if it.Spec.Acceleratable {
+		featureKey = nodefeature.AcceleratableFeatureLabelPrefix + it.Spec.Group
+	}
+
+	// Stamp the pool's schedule labels on the InstanceType so it is selectable by the same
+	// (feature-key, os, arch) discriminators its Devices and ResourceFlavors carry. Drop a stale
+	// feature key left by a group/acceleratable change — its key varies, while os/arch keys are
+	// fixed and simply overwritten.
+	if it.Labels == nil {
+		it.Labels = make(map[string]string)
+	}
+	for k := range it.Labels {
+		if k != featureKey &&
+			(strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) ||
+				strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix)) {
+			delete(it.Labels, k)
+		}
+	}
+	it.Labels[featureKey] = "true"
+	if it.Spec.OS != "" {
+		it.Labels[core.LabelOSStable] = it.Spec.OS
+	}
+	if it.Spec.Arch != "" {
+		it.Labels[core.LabelArchStable] = it.Spec.Arch
+	}
+	// Advertise the fronting LocalQueue name so the Pod webhook reverse-looks-up this
+	// InstanceType for the authoritative per-card VRAM (spec.memory).
+	it.Labels[QueueEntranceLabelKey] = nodefeature.FormatLocalQueueName(it.Name)
+
 	// Default the descriptors only while manufacturer and product are still empty; for an
 	// accelerated type the per-card memory counts too (it feeds the ClusterQueue annotation
 	// the Pod webhook reads), so a type already carrying its VRAM is treated as populated.
 	if it.Spec.Manufacturer == "" && it.Spec.Product == "" && (!it.Spec.Acceleratable || it.Spec.Memory == "") {
 		lbs := systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels]("nodes")
-		if it.Spec.Acceleratable {
-			lbs[nodefeature.AcceleratableFeatureLabelPrefix+it.Spec.Group] = "true"
-		} else {
-			lbs[nodefeature.GeneralFeatureLabelPrefix+it.Spec.Group] = "true"
-		}
+		lbs[featureKey] = "true"
 		if it.Spec.OS != "" {
 			lbs[core.LabelOSStable] = it.Spec.OS
 		}

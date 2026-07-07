@@ -21,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/worker/kuberess"
@@ -49,7 +50,7 @@ var _ ctrlreconcile.Reconciler = (*NodeQueueEntranceReconciler)(nil)
 const (
 	// _LocalQueueClusterQueueNameAnnoKey is for the cluster queue name of a local queue,
 	// whose value records the full ClusterQueue name behind the hash-named LocalQueue.
-	_LocalQueueClusterQueueNameAnnoKey = ScheduleLabelPrefix + "queue"
+	_LocalQueueClusterQueueNameAnnoKey = "schedule." + systemname.LabelPrefix + "queue"
 )
 
 func (r *NodeQueueEntranceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

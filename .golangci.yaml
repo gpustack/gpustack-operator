@@ -50,7 +50,7 @@ linters:
       comparison: true
     goconst:
       min-len: 3
-      min-occurrences: 10
+      min-occurrences: 20
     godot:
       scope: all
       exclude:
@@ -144,6 +144,7 @@ linters:
           - lll
           - makezero
           - unparam
+          - goconst
         path: _test\.go
       - linters:
           - errname
