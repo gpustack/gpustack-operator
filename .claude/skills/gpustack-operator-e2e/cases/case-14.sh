@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 #
-# CASE 14 — Multiple slices coexist on one physical card within budget (Story 6)
-#   (MUTATING, self-recovering)
+# CASE 14 — Multiple slices coexist on one physical card within budget
+#   (MUTATING, self-recovering; AUTO-SKIPS without real sliced hardware)
 #
 #   case-14.sh <NS>
 #
-# Regression for specs/2026-07-04-ssh-instance-accelerator-slicing Story 6: two sliced Instances whose
-# combined per-card memory percentage is <= 100 both admit and run on the same physical card, while a
-# third slice that would push the card over 100% is held (SchedulingGated / not Running) rather than
-# over-admitted. This exercises the sliced credits quota + the node-devices AdmissionCheck end to end
-# on REAL accelerator hardware; it AUTO-SKIPS when no `*.sliced` resource is advertised. It also checks
-# that the two admitted slices stay Running after a sibling's (rejected) admission attempt re-triggers
-# their own AdmissionCheck reconcile — a node-devices-self-eviction (8b3eba2) regression guard.
-#
-# Self-recovering: deletes the three test Instances on exit.
+# Goal:        Two sliced Instances whose combined per-card memory <= 100% both admit and run on the
+#              same physical card, a third slice that would push the card over 100% is held (not
+#              over-admitted), and the two admitted slices stay Running after the third's rejected
+#              admission attempt re-triggers their own AdmissionCheck reconcile (a self-eviction
+#              regression guard: a pre-fix reconciler could count a Workload's own already-admitted
+#              allocation against itself and evict a stable slice). Exercises the sliced credits quota +
+#              the node-devices AdmissionCheck end to end.
+# Environment: Needs REAL accelerator hardware advertising a *.sliced resource. AUTO-SKIPS (exit 0) otherwise.
+# Inputs:      All real, nothing mocked — INST_A + INST_B (each a 40% memory slice, cores%=100), then
+#              INST_C (a third 40% slice = 120% over one card), on the sliceable pool.
+# Expected:    - both 40% slices reach Running (combined 80% <= 100%);
+#              - the over-budget third is held (not Running);
+#              - A and B stay Running after C's rejected admission (no self-eviction on sibling re-evaluation).
+# Cleanup:     Trap deletes the three test Instances.
 set -uo pipefail
 
 NS="${1:?usage: case-14.sh <NS>}"
@@ -112,9 +117,9 @@ else
 fi
 
 # 3. A and B must still be Running after C's (rejected) admission attempt re-triggers their own
-# AdmissionCheck reconcile — this is the self-eviction regression (8b3eba2): a pre-fix reconciler
-# could count a Workload's own already-admitted allocation against itself and flip it to Retry,
-# evicting a stable slice purely because a sibling Workload's admission was (re-)evaluated.
+# AdmissionCheck reconcile — this is the self-eviction regression: a pre-fix reconciler could count a
+# Workload's own already-admitted allocation against itself and flip it to Retry, evicting a stable
+# slice purely because a sibling Workload's admission was (re-)evaluated.
 sleep 10
 ra=$(kubectl -n default get pod "$INST_A" -o jsonpath='{.status.phase}' 2>/dev/null)
 rb=$(kubectl -n default get pod "$INST_B" -o jsonpath='{.status.phase}' 2>/dev/null)
@@ -125,7 +130,7 @@ else
 fi
 
 echo
-echo "== CASE 14 — Multiple slices coexist on one physical card within budget (Story 6) =="
+echo "== CASE 14 — Multiple slices coexist on one physical card within budget =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"

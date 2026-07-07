@@ -4,20 +4,28 @@
 #
 #   case-17.sh <NS>
 #
-# The InstanceType admission contract introduced by the declarative-management change
-# (require + freeze the admin inputs; the Default webhook stamps the schedule discriminators):
-#   A — required inputs are enforced on CREATE: an InstanceType missing spec.group, or missing
-#       its unit spec (unitResources / localStorage), is rejected by the validating webhook.
-#   B — the Default (mutating) webhook stamps, from the spec identity, the feature-key +
-#       kubernetes.io/os|arch schedule labels AND the queue-entrance label, so a stored type is
-#       selectable and reverse-lookup-able (the Pod webhook reads per-card VRAM off it) from day one.
-#   C — the unit spec is frozen on UPDATE: changing spec.unitResources / spec.localStorage is
-#       rejected, while spec.group (a schedule discriminator) stays mutable and persists.
-#
-# A/B use server-side dry-run (nothing persisted). C uses REAL patches against a throwaway type:
-# server-side dry-run does NOT reliably exercise update admission for a merge patch (it does for
-# create), so the freeze must be probed with a real update — the throwaway is cleaned up on exit.
-# Env-agnostic (CPU pool); run CASE 1 first so the webhook chain is up.
+# Goal:        The InstanceType admission contract —
+#              A: required inputs are enforced on CREATE (an InstanceType missing spec.group, or its
+#                 unit spec unitResources / localStorage, is rejected by the validating webhook);
+#              B: the Default (mutating) webhook stamps, from the spec identity, the feature-key +
+#                 kubernetes.io/os|arch schedule labels AND the queue-entrance label, so a stored type is
+#                 selectable and reverse-lookup-able (the Pod webhook reads per-card VRAM off it) from day one;
+#              C: the unit spec is frozen on UPDATE (changing unitResources / localStorage is rejected),
+#                 while spec.group (a schedule discriminator) stays mutable and persists.
+# Environment: Any cluster with a materialized general pool (the webhook chain must be up). No GPU.
+#              A/B use server-side dry-run (nothing persisted); C uses REAL patches on a throwaway type,
+#              because server-side dry-run does not reliably exercise update admission for a merge patch.
+# Inputs:      Nothing mocked —
+#              - A/B: dry-run InstanceType manifests (missing group; missing unit spec; a valid one);
+#              - C: a real throwaway InstanceType e2e-case17-upd (group e2e17upd) patched three ways —
+#                unitResources.cpu, localStorage, and group.
+# Expected:    - A — CREATE rejects the missing-group and missing-unit-spec manifests;
+#              - B — the Default webhook stamps feature-key=true + os=linux + arch=amd64 + a gpustack-
+#                queue-entrance label;
+#              - C — the unitResources and localStorage patches are REJECTED (immutable) and do not
+#                persist, while the group patch is accepted and persists.
+# Cleanup:     Trap force-strips the throwaway's finalizer if present, deletes the throwaway type + its
+#              ClusterQueue.
 set -uo pipefail
 
 NS="${1:?usage: case-17.sh <NS>}"

@@ -1,26 +1,28 @@
 #!/usr/bin/env bash
 #
-# CASE 3 — Managed-toggle scopes node onboarding (Story 5)   (MUTATING, self-recovering)
+# CASE 3 — Managed-toggle scopes node onboarding   (MUTATING, self-recovering)
 #
 #   case-3.sh <NS>
 #
-# Story 5: an admin scopes which nodes are onboarded. Excluding a node from
-# management (gpustack.ai/managed=false) must remove its contribution from the pool.
-# Under the queue-ownership split (specs/2026-07-07-instancetype-declarative-management.md):
-#   - a pool that loses its last node has its ResourceFlavor DELETED (NodeFlavorReconciler);
-#   - the InstanceType is NOT deleted for lack of flavors — the NodeQueueReconciler empties the
-#     backing ClusterQueue's resource groups instead (drain-when-no-flavors; an idle pool has no
-#     reservations, so the quota is emptied directly and StopPolicy stays None), keeping identity;
-#   - restoring the nodes refills the queue and the InstanceType returns to Active.
-#
-# So this case asserts the NEW observable: after the toggle the general ResourceFlavor is DELETED,
-# the derived InstanceType SURVIVES with its queue emptied, and it reactivates when nodes return.
-#
-# IMPORTANT: toggle via the NodeFeature, not the node directly (NFD reverts a direct
-# node label). Verify against a CONTINUOUSLY RUNNING operator.
-#
-# Self-recovering: restores gpustack.ai/managed on exit and waits for the chain to
-# rebuild so a following case still finds an Active InstanceType.
+# Goal:        De-managing every node feeding a pool DELETES its ResourceFlavor but keeps the
+#              InstanceType alive with its backing ClusterQueue's resource groups emptied
+#              (drain-when-no-flavors), and restoring the nodes refills the queue and reactivates
+#              the type. Under the queue-ownership split, NodeFlavorReconciler drops the flavor and
+#              NodeQueueReconciler empties the quota — the InstanceType is never deleted for lack of
+#              flavors (an idle pool has no reservations, so quota is emptied directly, StopPolicy
+#              stays None, and identity is kept).
+# Environment: A real cluster with a materialized general pool and a CONTINUOUSLY RUNNING operator
+#              (must NOT be restarted between toggle and assertion). No GPU. Targets the general
+#              (CPU) pool fed by every managed node — same on a 1-node or an N-node cluster.
+# Inputs:      All real, nothing mocked — toggles gpustack.ai/managed=false, then back to true, on
+#              every <node>-gpustack-worker NodeFeature (toggle via the NodeFeature, not the node
+#              directly: NFD reverts a direct node label).
+# Expected:    - A — the pool's general ResourceFlavor is DELETED (no drain tombstone);
+#              - B — the InstanceType SURVIVES and its ClusterQueue's spec.resourceGroups is emptied
+#                (length 0);
+#              - C — restoring the nodes refills resourceGroups and the InstanceType returns to Active.
+# Cleanup:     Trap restores gpustack.ai/managed=true on all nodes and waits for the InstanceType to
+#              return to Active so a following case still finds a healthy chain.
 set -uo pipefail
 
 NS="${1:?usage: case-3.sh <NS>}"
@@ -68,7 +70,7 @@ for _ in $(seq 1 90); do
   kubectl get "$RF" >/dev/null 2>&1 || { gone=1; break; }
   sleep 3
 done
-[ -n "$gone" ] && record PASS "flavor deleted on de-manage" "${RF#*/} gone (F3a: no drain tombstone)" \
+[ -n "$gone" ] && record PASS "flavor deleted on de-manage" "${RF#*/} gone (no drain tombstone)" \
   || record FAIL "flavor deleted on de-manage" "${RF#*/} still present — NodeFlavorReconciler did not drop the unmanaged node"
 
 # --- Assertion B: the InstanceType SURVIVES (not deleted); its backing queue's quota is emptied. ---
@@ -102,7 +104,7 @@ done
   || record FAIL "pool reactivates when nodes return" "phase='${p:-?}' resourceGroups='${rg:-0}' — the pool must refill and reactivate"
 
 echo
-echo "== CASE 3 — Managed-toggle scopes node onboarding (Story 5) =="
+echo "== CASE 3 — Managed-toggle scopes node onboarding =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"

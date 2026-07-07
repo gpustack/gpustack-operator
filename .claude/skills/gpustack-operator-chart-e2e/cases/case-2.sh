@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 #
-# CASE 2 — Uninstall leaves zero leftovers   (MUTATING)
+# CASE 2 — Uninstall leaves zero leftovers   (MUTATING; run LAST)
 #
 #   case-2.sh <NS>
 #
-# Runs the shared teardown (helm uninstall + the runtime leftovers helm does not
-# manage: worker-installed sub-releases, their CRDs, finalizers, runtime
-# APIServices/webhooks), then asserts the cluster is clean. The gpustack-system
-# namespace is intentionally KEPT. This DELETES the operator deployment — only
-# run it as the final step.
+# Goal:        The shared teardown (helm uninstall + the runtime leftovers helm does not manage)
+#              leaves the cluster clean — no leftover releases, CRDs, apiservices, or
+#              clusterrolebindings — while the gpustack-system namespace is intentionally kept.
+# Environment: Any reachable cluster with the chart installed. No GPU. DELETES the operator
+#              deployment + worker-installed sub-releases — run ONLY as the final step.
+# Inputs:      All real, nothing mocked — runs teardown.sh (helm uninstall; worker-installed
+#              sub-releases, their CRDs, finalizers, and runtime APIServices/webhooks).
+# Expected:    After teardown, zero leftover: helm releases (gpustack/kueue/nfd/csi), CRDs
+#              (gpustack.ai / kueue.x-k8s.io / nfd.k8s-sigs.io), gpustack apiservices, and gpustack
+#              clusterrolebindings.
+# Cleanup:     This case IS the cleanup (teardown is idempotent, safe to re-run); the
+#              gpustack-system namespace is kept on purpose.
 set -uo pipefail
 
 NS="${1:?usage: case-2.sh <NS>}"

@@ -4,18 +4,24 @@
 #
 #   case-1.sh <NS>
 #
-# Asserts the general (CPU-only) chain end to end: the operator core is healthy
-# (delegated to assert-core.sh), NFD labels the node with CPU identity, the
-# Worker derives general capacity labels, and the pooling chain materializes the
-# general ResourceFlavor → InstanceType (Active) → its backing ClusterQueue →
-# LocalQueue. On a GPU-less cluster the device-manager DaemonSets schedule zero
-# pods — expected; this case covers the general chain only.
-#
-# Post-refactor (specs/2026-06-29-instancetype-unified-pool-refactor.md): there is
-# exactly ONE isolated ClusterQueue per pool and NO Cohort — this case asserts zero
-# Cohort objects. Names are gpustack-${gKey}-${os}-${arch}[-${count}c] with full
-# os/arch (the gKey is non-empty, e.g. "generic"), so the chain is matched by the
-# "gpustack-" prefix, not a legacy empty-key "gpustack--". Level-based, safe to re-run.
+# Goal:        Prove the general (CPU-only) scheduling chain materializes end to end and
+#              that NO Cohort is created — exactly one isolated ClusterQueue per pool.
+# Environment: Any cluster with a materialized general pool (operator core healthy, NFD +
+#              Worker running). No GPU — device-manager DaemonSets scheduling zero pods on a
+#              GPU-less node is expected. Read-only, level-based, safe to re-run.
+# Inputs:      None injected — reads live cluster state only (operator-core health delegated
+#              to assert-core.sh). Nothing mocked.
+# Expected:    - assert-core.sh passes (rollout / running revision == HEAD / apiservices /
+#                CRDs / sub-releases);
+#              - NFD stamps feature.gpustack.ai/cpu-* + acceleratable labels;
+#              - the Worker derives general.feature.gpustack.ai/* capacity labels;
+#              - the general ResourceFlavor (name ...-<count>c), its ClusterQueue, its
+#                InstanceType (Active + entrance LocalQueue), and its LocalQueue all exist
+#                under the "gpustack-" prefix;
+#              - the general InstanceType's spec.os/spec.arch equal its ClusterQueue's
+#                kubernetes.io/os|arch schedule labels (read from labels, never blanked);
+#              - zero Cohort objects exist.
+# Cleanup:     None — read-only, no trap.
 set -uo pipefail
 
 NS="${1:?usage: case-1.sh <NS>}"
@@ -45,8 +51,8 @@ assert_nonempty "ResourceFlavor (general)" "$(kubectl get resourceflavors.kueue.
 assert_nonempty "ClusterQueue (general)"   "$(kubectl get clusterqueues.kueue.x-k8s.io   -o name | grep 'gpustack-')"
 assert_nonempty "LocalQueue (general)"     "$(kubectl get localqueues.kueue.x-k8s.io -A  -o name | grep 'gpustack-fnv64-')"
 
-# The InstanceType materialized and reports Active with an entrance LocalQueue (Story 1/2/6:
-# the pool surfaces as a real CRD whose .status the reconciler writes).
+# The InstanceType materialized and reports Active with an entrance LocalQueue (the pool
+# surfaces as a real CRD whose .status the reconciler writes).
 itActive=$(kubectl get instancetypes.worker.gpustack.ai \
   -o jsonpath='{range .items[?(@.status.phase=="Active")]}{.metadata.name}{" entrance="}{.status.entrance}{"\n"}{end}' 2>/dev/null | grep 'gpustack-')
 assert_nonempty "InstanceType Active (+entrance)" "$itActive"
@@ -75,10 +81,10 @@ else
   record FAIL "InstanceType materializes spec.os/arch" "${osarch#*|} — spec.os/arch must equal the CQ kubernetes.io/os|arch labels, not be blanked"
 fi
 
-# Zero Cohort objects — Cohort was removed entirely; one isolated CQ per pool (F3c).
+# Zero Cohort objects — Cohort was removed entirely; one isolated CQ per pool.
 cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep -c . || true)
 [ "${cohorts:-0}" = "0" ] && record PASS "zero Cohort objects" "no cohorts.kueue.x-k8s.io" \
-  || record FAIL "zero Cohort objects" "${cohorts} Cohort(s) present — CohortReconciler should be gone (F3c)"
+  || record FAIL "zero Cohort objects" "${cohorts} Cohort(s) present — CohortReconciler should be gone"
 
 echo
 echo "== CASE 1 — CPU-only scheduling chain materializes =="

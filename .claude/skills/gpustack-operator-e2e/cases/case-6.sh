@@ -1,42 +1,33 @@
 #!/usr/bin/env bash
 #
-# CASE 6 — Pooled three-view + watch freshness (Direction 2)   (MUTATING, self-recovering)
+# CASE 6 — Pooled three-view + watch freshness   (MUTATING, self-recovering)
 #
 #   case-6.sh <NS>
 #
-# Verifies the materialized-InstanceType refactor
-# (specs/2026-06-29-instancetype-unified-pool-refactor.md, T5.1/T5.4/T5.5):
-#
-#   1. The five-step pooling sequence on an 8× A10G (24Gi) pool drives the InstanceType
-#      three-view (.status.accelerator / .acceleratorShared / .acceleratorSliced) exactly
-#      through 8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256.
-#   2. Watch freshness — a pod alloc/free moves the observed three-view within a reconcile,
-#      seen live over `kubectl get instancetype -w` (the whole point of promoting InstanceType
-#      to a real CRD: a native watch delivers the .status change, the old aggregated
-#      projection could not).
-#   3. The unit spec is frozen after create (unitResources / localStorage immutable on update): an
-#      edit is rejected by the validating webhook. The unit spec lives only on the InstanceType —
-#      never a ClusterQueue note or a Node — and its write path touches NO Node / NodeFeature.
-#   4. Zero Cohort objects exist (Cohort was removed entirely: one isolated CQ per pool).
-#
-# Runs on a GPU-LESS cluster BY APPROXIMATION, in the same spirit as CASE 5. The three-view
-# is computed by InstanceTypeReconciler from the per-card `Devices` CR ledger
-# (status.groups[].accelerators[].{mode,remaining}), which a real per-node DeviceManager
-# writes from real accelerators. A GPU-less node has none, so two inputs are mocked:
-#   1. The accelerator feature labels (fake NodeFeature → NFD merge → Node.Labels), so the
-#      real Worker derives the accelerated ResourceFlavor → ClusterQueue → InstanceType.
-#   2. A per-card `Devices` CR ledger. It is created under a PHANTOM node name the
-#      DeviceManager DaemonSet never runs on (and NodeDevicesReconciler leaves a Devices with
-#      no matching Node untouched), so our mocked status.groups is stable and never fought.
-#      It carries the pool's feature-key + kubernetes.io/os|arch + gpustack.ai/managed=true
-#      labels so the reconciler reverse-looks-it-up (poolDevicesSelector).
-# NOT mocked on purpose — that IS the verification: the flavor/CQ/InstanceType derivation
-# (real NodeFlavor/InstanceType reconcilers) and the three-view bin-packing math the real
-# InstanceTypeReconciler runs over our mocked ledger.
-#
-# Self-recovering: deletes the mocked Devices CR and the injected NodeFeature on exit (trap);
-# removing the NodeFeature drains the derived flavor, so the InstanceType + CQ tear down
-# themselves.
+# Goal:        The materialized InstanceType's three-view (.status.accelerator / acceleratorShared /
+#              acceleratorSliced) tracks a per-card Devices ledger through a five-step pooling
+#              sequence and moves live over a native watch; the unit spec is immutable after create,
+#              lives only on the InstanceType (never a ClusterQueue note or a Node), and its write
+#              touches no Node/NodeFeature; zero Cohort objects exist.
+# Environment: Any cluster BY APPROXIMATION (same recipe as CASE 4) — the non-colliding nvidia-e2emock
+#              key keeps the mocked pool isolated on a real-accelerator cluster too. No real hardware.
+# Inputs:      - MOCKED: a fake accelerator NodeFeature (nvidia-e2emock, count=8, 24Gi A10G-like) →
+#                real derivation of the accelerated ResourceFlavor → ClusterQueue → InstanceType; a
+#                phantom-node Devices CR ledger stepped through 6 states (created under a node the
+#                DeviceManager never runs on, so the mocked status.groups is stable and never fought);
+#              - real probe: a patch editing the InstanceType's unit spec (expects rejection);
+#              - NOT mocked (the verification): the flavor/CQ/InstanceType derivation and the
+#                three-view bin-packing math the reconciler runs over the ledger.
+# Expected:    - the derived accelerated InstanceType materializes; its spec.os/spec.arch equal its
+#                ClusterQueue's kubernetes.io/os|arch schedule labels;
+#              - the three-view matches the oracle at each step of
+#                8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256;
+#              - a native watch observes the exclusive count move 8 → 4 → 8;
+#              - the unit-spec edit is REJECTED (immutable) and the stored value is unchanged;
+#              - no unit-spec note lands on the ClusterQueue; the worker NodeFeature labels are unchanged;
+#              - zero Cohort objects exist.
+# Cleanup:     Trap deletes the mocked Devices CR and the injected NodeFeature; removing the accelerator
+#              drains the derived flavor, so the InstanceType + ClusterQueue self-tear-down.
 set -uo pipefail
 
 NS="${1:?usage: case-6.sh <NS>}"
@@ -111,7 +102,7 @@ assert_view() {
   if [ "$e" = "$wE" ] && [ "$s" = "$wS" ] && [ "$l" = "$wL" ]; then
     record PASS "$label" "three-view ${e}/${s}/${l}"
   else
-    record FAIL "$label" "got ${e:-?}/${s:-?}/${l:-?}, want ${wE}/${wS}/${wL} — three-view math (T5.4b) or ledger reverse-lookup"
+    record FAIL "$label" "got ${e:-?}/${s:-?}/${l:-?}, want ${wE}/${wS}/${wL} — three-view math or ledger reverse-lookup"
   fi
 }
 
@@ -208,8 +199,8 @@ set_ledger "f f f f f f f f"; assert_view "watch precondition: back to 8 free" 8
 watchlog=$(mktemp)
 # Watch the NATIVE v1alpha1 CRD, not the unversioned name — the latter resolves to the aggregated
 # worker.gpustack.ai/v1 apiservice (a proxy), whose watch re-projects/coalesces and drops intermediate
-# .status transitions. Direction 2 is precisely that the real CRD delivers them via a native watch;
-# mirrors set_ledger targeting devices.v1alpha1 for the same aggregated-proxy reason.
+# .status transitions. Promoting InstanceType to a real CRD is precisely what lets a native watch
+# deliver them; mirrors set_ledger targeting devices.v1alpha1 for the same aggregated-proxy reason.
 ( timeout 60 kubectl get instancetypes.v1alpha1.worker.gpustack.ai "$ITNAME" -w \
     -o "jsonpath={.status.accelerator.remaining}{'\n'}" >"$watchlog" 2>/dev/null ) &
 wpid=$!
@@ -222,7 +213,7 @@ wait "$wpid" 2>/dev/null || true
 if grep -qx 4 "$watchlog" && grep -qx 8 "$watchlog"; then
   record PASS "watch freshness (kubectl get -w)" "observed exclusive 8→4→8 via native watch"
 else
-  record FAIL "watch freshness (kubectl get -w)" "watch missed a transition: [$(tr '\n' ' ' <"$watchlog")] — native watch on .status (Direction 2)"
+  record FAIL "watch freshness (kubectl get -w)" "watch missed a transition: [$(tr '\n' ' ' <"$watchlog")] — native watch on .status"
 fi
 rm -f "$watchlog"
 
@@ -264,7 +255,7 @@ cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep 
   || record FAIL "zero Cohort objects" "${cohorts} Cohort(s) present — CohortReconciler should be gone"
 
 echo
-echo "== CASE 6 — Pooled three-view + watch freshness (Direction 2) =="
+echo "== CASE 6 — Pooled three-view + watch freshness =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"
@@ -272,9 +263,9 @@ echo "== CASE 6 — Pooled three-view + watch freshness (Direction 2) =="
 
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s). See specs/2026-06-29-instancetype-unified-pool-refactor.md (Test Plan, e2e case-6)."
-  echo "Map a FAIL to its Task: three-view→T5.4b, watch freshness→T5.5, unit-spec→T5.4b/T5.4c, Cohort→F3b."
-  echo "Diagnose: kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200"
+  echo "FAILED ${FAILS} check(s). The three-view must track the ledger, a native watch must surface"
+  echo "its transitions, the unit spec must be immutable + off the ClusterQueue/NodeFeature, and no"
+  echo "Cohort may exist. Diagnose: kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200"
   exit 1
 fi
 echo "CASE 6 PASS"

@@ -4,23 +4,25 @@
 #
 #   case-2.sh <NS>
 #
-# Verifies the Instance ↔ InstanceType ↔ pool contract on a real cluster (the fake client cannot —
-# see references/drain-recycle.md):
-#   1. A RUNNING general Instance's Workload is ADMITTED on the CPU-only ClusterQueue even though it
-#      also requests memory/ephemeral-storage the queue does not cover — the queue's
-#      quotaCheckStrategy: IgnoreUndeclared checks only the covered `cpu` dimension and ignores the
-#      rest, instead of refusing to assign a flavor for the uncovered resources (F3b/F3d).
-#   2. Draining the pool — toggling gpustack.ai/managed=false on the worker NodeFeature (the old
-#      "bump the ram capacity label" no longer works; a general pool's capacity is Node CPU count,
-#      not a bumpable label) — removes the pool's general ResourceFlavor (F3a, node-index-driven).
-#   3. The RUNNING Instance whose type just drained is STOPPED (spec.stop=true), not recreated: on a
-#      drain the queue evicts the Pod, and instance.go now evaluates the gone/Inactive type before
-#      recreating a Pod, with an InstanceType watch re-enqueuing the Instance. This closed a
-#      pre-existing gap where the stop check sat behind `pod == nil` with no InstanceType watch, so a
-#      running Instance was left with a stuck Pending Pod, never stopped.
-#
-# Self-recovering: restores gpustack.ai/managed, deletes the test Instance, and waits for the
-# chain to rebuild on exit (trap).
+# Goal:        A running general Instance's Workload admits on the CPU-only queue despite requesting
+#              resources the queue does not cover, and when its pool is drained the Instance is
+#              STOPPED (spec.stop=true) — not recreated with a stuck Pending Pod.
+# Environment: A real cluster with a materialized general pool (the fake client cannot reproduce
+#              Kueue admission + eviction). No GPU. Targets the general (CPU) pool fed by every
+#              managed node, so it behaves the same on a 1-node or an N-node cluster.
+# Inputs:      All real, nothing mocked —
+#              - sets the general InstanceType unit spec (cpu=1, ram=2Gi, localStorage=10Gi);
+#              - a running Instance gpustack-e2e-instance (alpine sleep + ephemeral volume) in ns default;
+#              - drains the pool by toggling gpustack.ai/managed=false on every <node>-gpustack-worker
+#                NodeFeature (a general pool's capacity is Node CPU count, not a bumpable label).
+# Expected:    - the Workload reaches Admitted=True on the cpu-only queue (quotaCheckStrategy checks
+#                only the covered cpu dimension and ignores the uncovered memory/ephemeral-storage);
+#              - the Instance is running (spec.stop unset) before the drain;
+#              - the drain deletes the pool's general ResourceFlavor;
+#              - the Instance flips to spec.stop=true (STOPPED, not recreated);
+#              - the worker log shows the stop-on-inactive/gone-type branch ran.
+# Cleanup:     Trap restores gpustack.ai/managed=true on all nodes, deletes the test Instance, and
+#              waits for the InstanceType to return to Active so a following case finds a healthy chain.
 set -uo pipefail
 
 NS="${1:?usage: case-2.sh <NS>}"
@@ -103,16 +105,16 @@ echo "[case-2] draining: gpustack.ai/managed=false on all worker NodeFeatures"
 echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
   -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
 
-# 4. The guaranteed drain effect: the pool's general ResourceFlavor is deleted (F3a — node-index
-#    driven, independent of the running Instance/Workload). This confirms the managed-toggle
-#    propagated; the fuller teardown (derived InstanceType removal) is CASE 3.
+# 4. The guaranteed drain effect: the pool's general ResourceFlavor is deleted (node-index driven,
+#    independent of the running Instance/Workload). This confirms the managed-toggle propagated;
+#    the fuller teardown (InstanceType survival + queue emptying) is CASE 3.
 rf_gone=""
 for _ in $(seq 1 40); do
   n=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -c "${IT}-")
   [ "${n:-0}" -eq 0 ] && { rf_gone=1; break; }
   sleep 3
 done
-[ -n "$rf_gone" ] && record PASS "drain removes the pool ResourceFlavor" "no ${IT}-* flavor (F3a)" \
+[ -n "$rf_gone" ] && record PASS "drain removes the pool ResourceFlavor" "no ${IT}-* flavor" \
   || record FAIL "drain removes the pool ResourceFlavor" "a ${IT}-* flavor persists — managed-toggle did not propagate"
 
 # 5. THE assertion: the Instance whose InstanceType is now gone/Inactive gets STOPPED, not recreated.

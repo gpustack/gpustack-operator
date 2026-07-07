@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
 #
-# CASE 4 — AdmissionCheck holds exclusive over-admit (Story 4)   (MUTATING, self-recovering)
+# CASE 4 — AdmissionCheck holds exclusive over-admit   (MUTATING, self-recovering)
 #
 #   case-4.sh <NS>
 #
-# Story 4 / success-criterion 2 (specs/2026-06-29-instancetype-unified-pool-refactor.md):
-# when every card is already sliced, a request for whole exclusive cards passes the coarse
-# Kueue `credits` gate (gate 1) but must be HELD by the node-devices AdmissionCheck (gate 3),
-# which reads the per-card `Devices` ledger — so it never becomes an admitted-then-unschedulable
-# workload. The check returns `Retry` (transient: re-checked as capacity frees), not `Rejected`.
-#
-# Runs on ANY cluster BY APPROXIMATION (same mock recipe as CASE 6): a fake accelerator
-# NodeFeature (count=8) drives the real derivation of the accelerated ResourceFlavor →
-# ClusterQueue (which references the AdmissionCheck) → InstanceType, and a PHANTOM-node `Devices`
-# CR carries a mocked per-card ledger where all 8 cards are 50%-sliced — no clean whole card.
-# NOT mocked: the CQ→AdmissionCheck wiring, the Workload quota reservation, and the per-card
-# feasibility the real NodeDevicesAdmissionCheckReconciler computes over the mocked ledger.
-# The fake accelerator uses a mock product key (nvidia-e2emock) so it never collides with a real
-# GPU's derived pool/Devices — the case is safe on a real-accelerator cluster too, not only GPU-less.
-#
-# Self-recovering: deletes the test Instance, the mocked Devices, and the NodeFeature on exit.
+# Goal:        When every card is already sliced, a request for whole exclusive cards passes the
+#              coarse Kueue credits gate but is HELD by the node-devices AdmissionCheck reading the
+#              per-card Devices ledger — so it never becomes an admitted-then-unschedulable Workload.
+#              The check returns Retry (transient, re-checked as capacity frees), not Rejected.
+# Environment: Any cluster BY APPROXIMATION — the fake product key nvidia-e2emock never collides with
+#              a real GPU's derived pool/Devices, so it is safe on a real-accelerator cluster too.
+#              No real hardware needed.
+# Inputs:      - MOCKED: a fake accelerator NodeFeature (nvidia-e2emock, count=8, 24Gi/card) that
+#                drives real derivation of the accelerated ResourceFlavor → ClusterQueue → InstanceType;
+#                a phantom-node Devices ledger where all 8 cards are 50%-sliced (no clean whole card);
+#              - real: a raw Pod requesting 5 exclusive nvidia.com/gpu cards on the pool's entrance
+#                LocalQueue (a raw Pod, not an Instance, keeps this independent of the Instance webhook);
+#              - NOT mocked (the verification): the CQ→AdmissionCheck wiring, the Workload quota
+#                reservation, and the per-card feasibility the reconciler computes over the ledger.
+# Expected:    - the gpustack-node-devices AdmissionCheck is Active;
+#              - the derived accelerated InstanceType materializes;
+#              - its backing ClusterQueue references the AdmissionCheck;
+#              - the Workload's AdmissionCheck state is Retry and it is NOT Admitted (held, not rejected).
+# Cleanup:     Trap deletes the test Pod, the mocked Devices, and the injected NodeFeature.
 set -uo pipefail
 
 NS="${1:?usage: case-4.sh <NS>}"
@@ -188,7 +191,7 @@ else
 fi
 
 echo
-echo "== CASE 4 — AdmissionCheck holds exclusive over-admit (Story 4) =="
+echo "== CASE 4 — AdmissionCheck holds exclusive over-admit =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"
@@ -196,7 +199,8 @@ echo "== CASE 4 — AdmissionCheck holds exclusive over-admit (Story 4) =="
 
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s). Map a FAIL to its Task: AC Active→T4.2, CQ ref→T4.2/F5d, Retry verdict→T4.2."
+  echo "FAILED ${FAILS} check(s). Confirm the AdmissionCheck is Active, the backing CQ references it,"
+  echo "and the over-request Workload's check state is Retry (held), not Rejected and not Admitted."
   echo "Diagnose: kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200 | grep -i admission"
   exit 1
 fi

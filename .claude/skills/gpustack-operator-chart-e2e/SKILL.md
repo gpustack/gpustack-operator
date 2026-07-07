@@ -55,6 +55,38 @@ The work is split into shared phase scripts and numbered, self-contained cases:
 | 2 | Uninstall leaves zero leftovers | `deploy/gpustack-operator/chart/**`, `pkg/worker/kuberess/**` | `cases/case-2.sh` | yes (confirm) |
 | 3 | Release version survives a warm build cache | `pack/gpustack-operator/Dockerfile`, `hack/package.sh` (optional) | `cases/case-3.sh` | yes (confirm) |
 
+## Case header contract
+
+Every `cases/case-N.sh` opens with a header comment block that describes the case **on its own terms**,
+with **no spec anchors** — no Story/Task numbers, no F-codes, no `specs/*.md` paths, no commit hashes. A
+reader (human or tool) must understand what the case does, needs, and asserts from the header alone. New
+or edited cases follow this six-field template:
+
+```
+# CASE N — <one-line behavior title>   (<mutation posture>)
+#
+#   case-N.sh <args>
+#
+# Goal:        <the one contract/behavior this case proves>
+# Environment: <what the cluster/builder must provide + when it AUTO-SKIPS or is OPTIONAL>
+# Inputs:      <what the case runs / installs / builds; mark any MOCKED inputs vs the real thing verified>
+# Expected:    <the PASS assertions — the observable final state>
+# Cleanup:     <what the trap / teardown restores; idempotent + safe to re-run>
+```
+
+- **Mutation posture** rides the title line: `READ-ONLY` (asserts existing state, no trap) or `MUTATING`
+  (writes). Append the running constraint when there is one — `run LAST` (teardown), `OPTIONAL`, or
+  `local build only` (no cluster).
+- **Environment** always names the constraint (cluster with the chart installed, a local Docker builder,
+  a warm cache prerequisite) so the run/skip decision is readable without executing the case.
+- **Inputs** distinguish any **MOCKED** inputs from the **real** objects under test — these chart-contract
+  cases mock nothing, so they state "nothing mocked".
+- Describe behavior in **plain terms** (e.g. "the running binary version equals the bundled tgz"), not by
+  spec reference. The case↔code mapping lives in the case table's "Run when these change" column.
+
+The same contract governs the runtime output: the results banner, `record` messages, and the FAIL-footer
+diagnostics stay spec-anchor-free and self-explanatory.
+
 ## Flow
 
 The lead drives these phases; the shared protocol

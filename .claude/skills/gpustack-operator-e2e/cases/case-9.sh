@@ -4,22 +4,23 @@
 #
 #   case-9.sh <NS>
 #
-# Two admin scenarios on the general (CPU) pool (environment-agnostic — no GPU needed):
-#   Q1 — a RUNNING Instance whose InstanceType unit spec is shrunk can still be STOPPED and DELETED.
-#        Stop only guards against the start/stop race and Delete is unvalidated, so neither
-#        re-checks the (now oversized) resources against the shrunk unit spec.
-#   Q2 — a STOPPED Instance is (re)started after its InstanceType unit spec is shrunk. The outcome
-#        depends on the instance-general-resources-overcommit setting, so this case reads it and
-#        asserts the matching behavior:
-#          - overcommit ON (the default): the start re-derives CPU/RAM from the CURRENT unit spec
-#            (Default webhook, value.go: `withGeneralOvercommit || IsZero()`), so the Instance is
-#            resized down and starts — a shrink never blocks a restart.
-#          - overcommit OFF: the retained (non-zero) resources are kept and the start-time cap
-#            rejects them for exceeding the shrunk per-unit entitlement.
-#        (Whether the overcommit auto-resize-on-start is the desired semantics is a separate product
-#        question; this case pins the behavior as it stands.)
-#
-# Self-recovering: deletes the test Instances and restores the unit spec on exit.
+# Goal:        Two admin scenarios on the general pool —
+#              Q1: a RUNNING Instance whose InstanceType unit spec was shrunk can still be STOPPED and
+#                  DELETED (stop only guards the start/stop race and delete is unvalidated, so neither
+#                  re-checks the now-oversized resources against the shrunk unit spec).
+#              Q2: (re)starting a STOPPED Instance after the shrink follows the
+#                  instance-general-resources-overcommit setting — ON (default) re-derives CPU/RAM
+#                  from the current unit spec and resizes-and-starts; OFF keeps the retained resources
+#                  and the start-time cap rejects them. (Whether resize-on-start is the desired
+#                  semantics is a separate product question; this case pins the behavior as it stands.)
+# Environment: Any cluster with a materialized general pool. No GPU. Reads the overcommit setting from
+#              the settings Secret and asserts the matching branch.
+# Inputs:      All real, nothing mocked — the general InstanceType unit spec set to ram=2Gi then shrunk
+#              to 1Gi; INST_A (running) and INST_B (running → stopped), both alpine on the general pool.
+# Expected:    - Q1a — INST_A stops after the shrink; Q1b — INST_A deletes after the shrink;
+#              - Q2 (overcommit ON) — INST_B starts and its spec.resources.ram re-derives to 1Gi;
+#                Q2 (overcommit OFF) — the start is rejected for exceeding the shrunk per-unit cap.
+# Cleanup:     Trap deletes both test Instances and restores the unit spec to ram=2Gi.
 set -uo pipefail
 
 NS="${1:?usage: case-9.sh <NS>}"

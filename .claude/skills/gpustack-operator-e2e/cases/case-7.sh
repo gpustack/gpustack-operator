@@ -4,14 +4,19 @@
 #
 #   case-7.sh <NS>
 #
-# Guards the regression where an Instance with no ports made the controller create a NodePort
-# Service with no ports — rejected by the API ("spec.ports: Required value") — which failed every
-# reconcile before the status was written, so the Pod ran but the Instance status stayed empty. A
-# portless Instance must instead skip the Service and still get its status written.
-#
-# Environment-agnostic: uses the general (CPU) pool, so it runs on any cluster (no GPU needed). The
-# fake client cannot reproduce this — the API-server Service validation is what rejects a portless
-# Service — so it needs a real cluster. Self-recovering: deletes the test Instance on exit.
+# Goal:        A portless Instance skips Service creation and still gets its status written. Guards
+#              the regression where a portless Instance made the controller create a NodePort Service
+#              with no ports — rejected by the API ("spec.ports: Required value") — which failed every
+#              reconcile before the status block, so the Pod ran but the Instance status stayed empty.
+# Environment: Any cluster with a materialized general pool; needs a real cluster (the API-server
+#              Service validation is what rejects a portless Service — the fake client cannot). No GPU.
+# Inputs:      All real, nothing mocked — sets the general InstanceType unit spec; a portless Instance
+#              gpustack-e2e-portless (no spec.ports, alpine sleep + ephemeral volume) on the general pool.
+# Expected:    - the Instance status is written (phase reaches Ready, or at least a non-empty,
+#                non-stuck phase);
+#              - no Service named after the Instance is created;
+#              - no "spec.ports: Required value" reconcile error appears for it in the worker log.
+# Cleanup:     Trap deletes the test Instance.
 set -uo pipefail
 
 NS="${1:?usage: case-7.sh <NS>}"
