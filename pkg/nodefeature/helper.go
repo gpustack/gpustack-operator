@@ -23,12 +23,8 @@ var (
 )
 
 func init() {
-	generalNodeKeyWithCPUName = osx.Getenv("GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME") == valueTrue
+	generalNodeKeyWithCPUName = osx.Getenv("GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME") == "true"
 }
-
-// valueTrue is the canonical string value of a boolean feature label ("true"),
-// shared so the many label-value writes/checks below stay a single literal.
-const valueTrue = "true"
 
 const (
 	// FeatureLabelPrefix prefixes the node feature label/annotation keys.
@@ -97,12 +93,12 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 	}
 
 	// "${prefix}acceleratable=true"
-	labels[NodeAcceleratableLabelKey] = valueTrue
+	labels[NodeAcceleratableLabelKey] = "true"
 
 	manuKey := AcceleratableFeatureLabelPrefix + group.Manufacturer
 
 	// "acceleratable.${prefix}${manufacturer}=true"
-	labels[manuKey] = valueTrue
+	labels[manuKey] = "true"
 	// "acceleratable.${prefix}${manufacturer}.driver-version=${driverVersion}"
 	if v := group.DriverVersion; v != "" {
 		labels[manuKey+".driver-version"] = v
@@ -115,7 +111,7 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 	nodeKey := manuKey + "-" + group.ID
 
 	// "acceleratable.${prefix}${manufacturer}-${id}=true"
-	labels[nodeKey] = valueTrue
+	labels[nodeKey] = "true"
 	// "acceleratable.${prefix}${manufacturer}-${id}.product=${name}"
 	labels[nodeKey+".product"] = group.Name
 	// "acceleratable.${prefix}${manufacturer}-${id}.memory=${memory}"
@@ -144,7 +140,7 @@ func applyAcceleratorLabels(labels map[string]string, group device.DevicesGroup)
 func ExtractAcceleratableNodeKeys(node *core.Node) []string {
 	return mapx.FilterSlice(node.Labels, func(k, v string) (string, bool) {
 		if strings.HasPrefix(k, AcceleratableFeatureLabelPrefix) {
-			if v == valueTrue {
+			if v == "true" {
 				v = strings.TrimPrefix(k, AcceleratableFeatureLabelPrefix)
 				manufacturer, _, found := strings.Cut(v, "-")
 				if found && IsKnownAcceleratableManufacturer(manufacturer) {
@@ -293,7 +289,7 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 	// admin-set value always wins, so an admin can opt a node in or out by hand —
 	// the only path to management when manual mode is on.
 	if !opts.ManualNodeManagement {
-		labels[systemname.ManagedLabelKey] = valueTrue
+		labels[systemname.ManagedLabelKey] = "true"
 	}
 	if node.Labels != nil && node.Labels[systemname.ManagedLabelKey] != "" {
 		labels[systemname.ManagedLabelKey] = node.Labels[systemname.ManagedLabelKey]
@@ -307,9 +303,17 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 	gKey := ExtractGeneralNodeKey(node)
 	gManu, _, _ := strings.Cut(gKey, "-")
 	// "general.${prefix}${manufacturer}=true"
-	labels[GeneralFeatureLabelPrefix+gManu] = valueTrue
+	labels[GeneralFeatureLabelPrefix+gManu] = "true"
 	// "general.${prefix}${manufacturer}-${id}=true"
-	labels[GeneralFeatureLabelPrefix+gKey] = valueTrue
+	labels[GeneralFeatureLabelPrefix+gKey] = "true"
+	// "general.${prefix}${manufacturer}-${id}.count=${count}", the node's CPU core
+	// count rounded up. ExtractNodeFlavors reads the CPU flavor size from here, and the
+	// flavor's node selector pins to this label, so a reserved CPU flavor lands on one
+	// homogeneous batch of same-sized nodes.
+	cpuQ := node.Status.Capacity[core.ResourceCPU]
+	if count := cpuQ.Value(); count > 0 {
+		labels[GeneralFeatureLabelPrefix+gKey+".count"] = strconvx.Itoa(count)
+	}
 
 	return labels
 }
@@ -351,8 +355,12 @@ type NodeFlavor struct {
 	// CPU flavor. Carried into ResourceFlavor notes so the webhook can fold a
 	// memory-mib request without reading the node.
 	Memory string
+	// Cores is the per-card accelerator core count of a device flavor (e.g. "9216");
+	// empty for a CPU flavor. Carried into the ResourceFlavor notes.
+	Cores string
 	// NodeLabels selects the pooled nodes: the managed mark, kubernetes.io/os and
-	// kubernetes.io/arch (full values), and the flavor's feature key label.
+	// kubernetes.io/arch (full values), the flavor's feature key label, and its
+	// per-node .count sibling so a reserved flavor binds one homogeneous batch of nodes.
 	NodeLabels map[string]string
 }
 
@@ -368,17 +376,23 @@ func ExtractNodeFlavors(node *core.Node) (flavors []NodeFlavor) {
 	os := node.Labels[core.LabelOSStable]
 	arch := node.Labels[core.LabelArchStable]
 
-	// CPU flavor: keyed by the general(CPU) node key, sized by the node's CPU cores.
+	// CPU flavor: keyed by the general(CPU) node key, sized by the node's CPU count.
+	// The count is read from the ".count" label ConstructNodeCapacityLabels stamped
+	// (the rounded-up CPU capacity), not from status.capacity directly, so the flavor
+	// name and its node selector agree on one canonical value.
 	gKey := ExtractGeneralNodeKey(node)
-	cpuQ := node.Status.Capacity[core.ResourceCPU]
-	if cpuCount := cpuQ.Value(); cpuCount > 0 {
+	gNodeKey := GeneralFeatureLabelPrefix + gKey
+	gCountKey := gNodeKey + ".count"
+	if cpuCount, err := strconvx.Atoi[int64](node.Labels[gCountKey]); err == nil && cpuCount > 0 {
 		manufacturer, _, _ := strings.Cut(gKey, "-")
 		nodeLabels := map[string]string{
-			systemname.ManagedLabelKey: valueTrue,
+			systemname.ManagedLabelKey: "true",
 			core.LabelOSStable:         os,
 			core.LabelArchStable:       arch,
+			gNodeKey:                   "true",
+			// Pin to same-count nodes so a reserved flavor stays on one homogeneous batch.
+			gCountKey: node.Labels[gCountKey],
 		}
-		nodeLabels[GeneralFeatureLabelPrefix+gKey] = valueTrue
 
 		nf := NodeFlavor{
 			Name:         formatNodeFlavorName(gKey, os, arch, cpuCount, false),
@@ -401,18 +415,21 @@ func ExtractNodeFlavors(node *core.Node) (flavors []NodeFlavor) {
 
 	// Device flavors: one per acceleratable key, sized by its reported device count.
 	for _, aKey := range ExtractAcceleratableNodeKeys(node) {
-		nodeKey := AcceleratableFeatureLabelPrefix + aKey
-		count, err := strconvx.Atoi[int64](node.Labels[nodeKey+".count"])
+		aNodeKey := AcceleratableFeatureLabelPrefix + aKey
+		aCountKey := aNodeKey + ".count"
+		count, err := strconvx.Atoi[int64](node.Labels[aCountKey])
 		if err != nil || count <= 0 {
 			continue
 		}
 		manufacturer, _, _ := strings.Cut(aKey, "-")
 		nodeLabels := map[string]string{
-			systemname.ManagedLabelKey: valueTrue,
+			systemname.ManagedLabelKey: "true",
 			core.LabelOSStable:         os,
 			core.LabelArchStable:       arch,
+			aNodeKey:                   "true",
+			// Pin to same-count nodes so a reserved flavor stays on one homogeneous batch.
+			aCountKey: node.Labels[aCountKey],
 		}
-		nodeLabels[AcceleratableFeatureLabelPrefix+aKey] = valueTrue
 
 		flavors = append(flavors, NodeFlavor{
 			Name:          formatNodeFlavorName(aKey, os, arch, count, true),
@@ -422,9 +439,10 @@ func ExtractNodeFlavors(node *core.Node) (flavors []NodeFlavor) {
 			Count:         count,
 			Acceleratable: true,
 			Manufacturer:  manufacturer,
-			Product:       node.Labels[nodeKey+".product"],
-			Family:        node.Labels[nodeKey+".family"],
-			Memory:        node.Labels[nodeKey+".memory"],
+			Product:       node.Labels[aNodeKey+".product"],
+			Family:        node.Labels[aNodeKey+".family"],
+			Memory:        node.Labels[aNodeKey+".memory"],
+			Cores:         node.Labels[aNodeKey+".cores"],
 			NodeLabels:    nodeLabels,
 		})
 	}

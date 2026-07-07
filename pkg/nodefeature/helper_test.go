@@ -1,6 +1,7 @@
 package nodefeature
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -403,10 +404,11 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// ConstructNodeCapacityLabels has been gutted: it no longer derives any
 	// per-unit capacity (.cpu/.ram/.storage) or Kueue-profile (.z-flavor/
 	// .z-queue/.z-cohort) labels onto the node. It now emits only the managed
-	// mark plus general(CPU) key presence — the manufacturer label and the full
-	// key label — so the NodeFlavorReconciler can pool CPU-only nodes. The
-	// flavor derivation moved to ExtractNodeFlavors; the unit spec is a fixed
-	// default on the InstanceType, no longer derived here.
+	// mark plus general(CPU) key presence — the manufacturer label, the full key
+	// label, and the full key's .count sibling (the rounded-up CPU capacity) — so
+	// the NodeFlavorReconciler can pool CPU-only nodes and pin a flavor to
+	// same-sized nodes. The flavor derivation moved to ExtractNodeFlavors; the unit
+	// spec is a fixed default on the InstanceType, no longer derived here.
 	//
 	// With CPU-name blending enabled, the cpu-model labels of an AMD family 25
 	// model 1 CPU derive the general key "amd-25-1" (no os/arch tail anymore).
@@ -454,9 +456,10 @@ func TestConstructNodeCapacityLabels(t *testing.T) {
 	// now emits: the managed mark plus the manufacturer/key presence labels.
 	generalPresence := func(manu, key string) map[string]string {
 		return map[string]string{
-			systemname.ManagedLabelKey:       "true",
-			GeneralFeatureLabelPrefix + manu: "true",
-			GeneralFeatureLabelPrefix + key:  "true",
+			systemname.ManagedLabelKey:                 "true",
+			GeneralFeatureLabelPrefix + manu:           "true",
+			GeneralFeatureLabelPrefix + key:            "true",
+			GeneralFeatureLabelPrefix + key + ".count": "16",
 		}
 	}
 
@@ -666,10 +669,11 @@ func TestExtractNodeFlavors(t *testing.T) {
 				Count:        8,
 				Manufacturer: "generic",
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:            "true",
-					core.LabelOSStable:                    "linux",
-					core.LabelArchStable:                  "amd64",
-					GeneralFeatureLabelPrefix + "generic": "true",
+					systemname.ManagedLabelKey:                       "true",
+					core.LabelOSStable:                               "linux",
+					core.LabelArchStable:                             "amd64",
+					GeneralFeatureLabelPrefix + "generic":            "true",
+					GeneralFeatureLabelPrefix + "generic" + ".count": "8",
 				},
 			},
 		},
@@ -698,10 +702,11 @@ func TestExtractNodeFlavors(t *testing.T) {
 				Product:      "AMD EPYC 7763 64-Core Processor",
 				Family:       "25",
 				NodeLabels: map[string]string{
-					systemname.ManagedLabelKey:                  "true",
-					core.LabelOSStable:                          "linux",
-					core.LabelArchStable:                        "amd64",
-					GeneralFeatureLabelPrefix + "amd-epyc-7763": "true",
+					systemname.ManagedLabelKey:                             "true",
+					core.LabelOSStable:                                     "linux",
+					core.LabelArchStable:                                   "amd64",
+					GeneralFeatureLabelPrefix + "amd-epyc-7763":            "true",
+					GeneralFeatureLabelPrefix + "amd-epyc-7763" + ".count": "8",
 				},
 			},
 			wantDevices: []NodeFlavor{
@@ -716,11 +721,13 @@ func TestExtractNodeFlavors(t *testing.T) {
 					Product:       "Tesla-T4",
 					Family:        "Turing",
 					Memory:        "15Gi",
+					Cores:         "0",
 					NodeLabels: map[string]string{
-						systemname.ManagedLabelKey:                          "true",
-						core.LabelOSStable:                                  "linux",
-						core.LabelArchStable:                                "amd64",
-						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4": "true",
+						systemname.ManagedLabelKey:                                     "true",
+						core.LabelOSStable:                                             "linux",
+						core.LabelArchStable:                                           "amd64",
+						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4":            "true",
+						AcceleratableFeatureLabelPrefix + "nvidia-tesla-t4" + ".count": "2",
 					},
 				},
 			},
@@ -738,6 +745,11 @@ func TestExtractNodeFlavors(t *testing.T) {
 	for _, cs := range cases {
 		t.Run(cs.name, func(t *testing.T) {
 			generalNodeKeyWithCPUName = cs.withCPUName
+			// Stamp the general .count label ConstructNodeCapacityLabels writes in
+			// production, so ExtractNodeFlavors can read the CPU flavor size from it.
+			if cs.wantCPU != nil {
+				cs.node.Labels[GeneralFeatureLabelPrefix+cs.wantCPU.Key+".count"] = strconv.FormatInt(cs.wantCPU.Count, 10)
+			}
 			got := ExtractNodeFlavors(cs.node)
 			if cs.wantEmpty {
 				assert.Empty(t, got, "expected no flavors")
