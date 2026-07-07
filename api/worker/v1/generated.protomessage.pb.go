@@ -56,6 +56,12 @@ func (*InstanceSSHPublicKeySpec) ProtoMessage() {}
 
 func (*InstanceType) ProtoMessage() {}
 
+func (*InstanceTypeFlavor) ProtoMessage() {}
+
+func (*InstanceTypeFlavorList) ProtoMessage() {}
+
+func (*InstanceTypeFlavorSpec) ProtoMessage() {}
+
 func (*InstanceTypeList) ProtoMessage() {}
 
 func (*NFSInstancePersistentVolumeSource) ProtoMessage() {}

@@ -44,6 +44,9 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceSSHPublicKeyList{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref),
 		v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref),
 		v1.InstanceType{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceType(ref),
+		v1.InstanceTypeFlavor{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceTypeFlavor(ref),
+		v1.InstanceTypeFlavorList{}.OpenAPIModelName():                schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref),
+		v1.InstanceTypeFlavorSpec{}.OpenAPIModelName():                schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref),
 		v1.InstanceTypeList{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeList(ref),
 		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():     schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
@@ -1427,6 +1430,167 @@ func schema_gpustack_api_worker_v1_InstanceType(ref common.ReferenceCallback) co
 		},
 		Dependencies: []string{
 			v1alpha1.InstanceTypeSpec{}.OpenAPIModelName(), v1alpha1.InstanceTypeStatus{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceTypeFlavor(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeFlavor is an aggregated, read-only projection over the operator-owned Kueue ResourceFlavors — the catalog of hardware groups an InstanceType can be built on. Each distinct pool (accelerated or generic CPU-only) surfaces as one InstanceTypeFlavor, parsed from the flavor's note.gpustack.ai/* annotations, deduplicated, and sorted. It is served list-only by the aggregated apiserver: there is no backing CRD and no controller, so an administrator can discover the group + descriptor fields needed to author an InstanceType.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"spec": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(v1.InstanceTypeFlavorSpec{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1.InstanceTypeFlavorSpec{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeFlavorList holds the list of InstanceTypeFlavor.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ListMeta{}.OpenAPIModelName()),
+						},
+					},
+					"items": {
+						SchemaProps: spec.SchemaProps{
+							Type: []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.InstanceTypeFlavor{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"items"},
+			},
+		},
+		Dependencies: []string{
+			v1.InstanceTypeFlavor{}.OpenAPIModelName(), metav1.ListMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeFlavorSpec describes one pool aggregated from the ResourceFlavor notes. Its fields mirror the InstanceTypeSpec descriptor ordering — group + acceleratable + manufacturer/product/family + memory/cores — so the catalog and an InstanceType read consistently.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"group": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Group is the pool key (the InstanceType group), e.g. \"nvidia-a10g\", \"generic\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"acceleratable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Acceleratable reports whether the pool represents accelerated hardware; a generic (CPU-only) pool is false. It delimits generic from accelerated flavors.",
+							Default:     false,
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"manufacturer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Manufacturer is the device (or CPU) manufacturer, e.g. \"nvidia\", \"generic\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"product": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Product is the product name, e.g. \"NVIDIA A10G\"; empty for a generic pool.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"family": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Family is the product family, e.g. \"ampere\"; empty for a generic pool.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"memory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Memory is the per-card VRAM, e.g. \"24576Mi\"; empty for a generic pool.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cores is the per-card accelerator core count, e.g. \"9216\"; empty for a generic pool.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"sliceable": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sliceable reports whether the accelerator can be sliced; false for a generic pool.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"acceleratable"},
+			},
+		},
 	}
 }
 

@@ -45,6 +45,10 @@ func (c *FakeWorkerV1) InstanceTypes() v1.InstanceTypeInterface {
 	return newFakeInstanceTypes(c)
 }
 
+func (c *FakeWorkerV1) InstanceTypeFlavors() v1.InstanceTypeFlavorInterface {
+	return newFakeInstanceTypeFlavors(c)
+}
+
 // RESTClient returns a RESTClient that is used to communicate
 // with API server by this client implementation.
 func (c *FakeWorkerV1) RESTClient() rest.Interface {

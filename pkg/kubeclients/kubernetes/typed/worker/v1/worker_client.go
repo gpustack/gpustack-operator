@@ -24,6 +24,7 @@ type WorkerV1Interface interface {
 	InstancePersistentVolumeTypesGetter
 	InstanceSSHPublicKeysGetter
 	InstanceTypesGetter
+	InstanceTypeFlavorsGetter
 }
 
 // WorkerV1Client is used to interact with features provided by the worker.gpustack.ai group.
@@ -57,6 +58,10 @@ func (c *WorkerV1Client) InstanceSSHPublicKeys(namespace string) InstanceSSHPubl
 
 func (c *WorkerV1Client) InstanceTypes() InstanceTypeInterface {
 	return newInstanceTypes(c)
+}
+
+func (c *WorkerV1Client) InstanceTypeFlavors() InstanceTypeFlavorInterface {
+	return newInstanceTypeFlavors(c)
 }
 
 // NewForConfig creates a new WorkerV1Client for the given config.

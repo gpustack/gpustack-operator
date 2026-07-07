@@ -301,3 +301,37 @@ var _ WithStatusSubResource = (*InstanceType)(nil)
 func (in *InstanceType) CopyStatusTo(out runtime.Object) {
 	out.(*InstanceType).Status = in.Status
 }
+
+var _ rest.Scoper = (*InstanceTypeFlavor)(nil)
+
+func (*InstanceTypeFlavor) NamespaceScoped() bool {
+	return false
+}
+
+var _ rest.KindProvider = (*InstanceTypeFlavor)(nil)
+
+func (*InstanceTypeFlavor) Kind() string {
+	return "InstanceTypeFlavor"
+}
+
+var _ rest.SingularNameProvider = (*InstanceTypeFlavor)(nil)
+
+func (*InstanceTypeFlavor) GetSingularName() string {
+	return "instancetypeflavor"
+}
+
+var _ rest.ShortNamesProvider = (*InstanceTypeFlavor)(nil)
+
+func (*InstanceTypeFlavor) ShortNames() []string {
+	return []string{
+		"instypeflavor",
+	}
+}
+
+var _ rest.CategoriesProvider = (*InstanceTypeFlavor)(nil)
+
+func (*InstanceTypeFlavor) Categories() []string {
+	return []string{
+		"gpustack",
+	}
+}

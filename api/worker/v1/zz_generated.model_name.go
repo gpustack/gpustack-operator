@@ -121,6 +121,21 @@ func (in InstanceType) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeFlavor) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeFlavor"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeFlavorList) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeFlavorList"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypeFlavorSpec) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceTypeFlavorSpec"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceTypeList) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceTypeList"
 }
