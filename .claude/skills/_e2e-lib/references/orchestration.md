@@ -169,11 +169,14 @@ Mirrors the EKS run (`.claude/reports/2026-07-02-eks-e2e/run-log.md`, phases 6�
    awaiting-owner observations) and confirms with the user (`AskUserQuestion`) whether to fix now.
 2. On confirmation, ask again: **local packaging** vs **remote (SSH/RSYNC) packaging**. For remote,
    **record the user's connection info** in the report (host, repo path, `PACKAGE_NAMESPACE`, tag — e.g.
-   `frank@192.168.50.17:/home/frank/gpustack.ai/gpustack`, `PACKAGE_NAMESPACE=thxcode`).
+   `<user>@<builder-host>:<repo-path>`, `PACKAGE_NAMESPACE=<ns>`). **Run the remote build in a login
+   shell**: a non-interactive `ssh host '<cmd>'` does not source the profile, so `go`/the toolchain are
+   off PATH (`go: command not found`, `make package` exits 127/2) — wrap it as
+   `ssh host 'bash -lc "cd <repo> && … make package"'`.
 3. Fix loop, each step confirmed: edit code → `make lint` → commit with **`--signoff`** (conventional
    commit; fold fixes into their originating commit rather than a follow-up; add a test only when it guards
    a real regression, per the project's testing conventions) → package (local `build-load.sh`, or remote
-   SSH `make package PACKAGE_PUSH=true`) → deploy (`helm upgrade --reuse-values --set image.tag=…` +
+   SSH login shell `bash -lc "… make package PACKAGE_PUSH=true"`) → deploy (`helm upgrade --reuse-values --set image.tag=…` +
    `rollout restart`) → retest the affected cases → append results to the report's fix-and-retest section.
 4. SSH / RSYNC / `git commit` / image push are outward-facing; none are on the allow-list, so each prompts.
    Only run teardown (Phase 8) after the loop ends.

@@ -5,17 +5,16 @@
 #   case-3.sh <NS>
 #
 # Story 5: an admin scopes which nodes are onboarded. Excluding a node from
-# management (gpustack.ai/managed=false) must remove its contribution from the
-# pool. Post-refactor there is NO drain tombstone on the ResourceFlavor anymore
-# (specs/2026-06-29-instancetype-unified-pool-refactor.md F3a: "no node contributes
-# → the flavor is deleted"); teardown flows through the InstanceType finalizer
-# (F5d): the derived InstanceType's pool loses its ResourceFlavor → the InstanceType
-# is deleted → its finalizer drives the backing ClusterQueue through HoldAndDrain
-# and removes it.
+# management (gpustack.ai/managed=false) must remove its contribution from the pool.
+# Under the queue-ownership split (specs/2026-07-07-instancetype-declarative-management.md):
+#   - a pool that loses its last node has its ResourceFlavor DELETED (NodeFlavorReconciler);
+#   - the InstanceType is NOT deleted for lack of flavors — the NodeQueueReconciler empties the
+#     backing ClusterQueue's resource groups instead (drain-when-no-flavors; an idle pool has no
+#     reservations, so the quota is emptied directly and StopPolicy stays None), keeping identity;
+#   - restoring the nodes refills the queue and the InstanceType returns to Active.
 #
-# So this case asserts the NEW observable (not the old schedule.gpustack.ai/drain
-# annotation): after the toggle the node's general ResourceFlavor is DELETED and the
-# derived InstanceType tears down (backing CQ HoldAndDrain or gone).
+# So this case asserts the NEW observable: after the toggle the general ResourceFlavor is DELETED,
+# the derived InstanceType SURVIVES with its queue emptied, and it reactivates when nodes return.
 #
 # IMPORTANT: toggle via the NodeFeature, not the node directly (NFD reverts a direct
 # node label). Verify against a CONTINUOUSLY RUNNING operator.
@@ -44,7 +43,7 @@ restore() {
   echo "[case-3] restoring gpustack.ai/managed=true on all nodes and waiting for the chain to rebuild"
   echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
     -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}' 2>/dev/null || true
-  for _ in $(seq 1 40); do
+  for _ in $(seq 1 90); do
     p=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)
     [ "$p" = "Active" ] && break
     sleep 3
@@ -62,25 +61,45 @@ echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
   -p '{"spec":{"labels":{"gpustack.ai/managed":"false"}}}'
 
 # --- Assertion A: the node's general ResourceFlavor is DELETED (no tombstone). ---
+# NFD can take a few minutes to propagate a NodeFeature label change to the Node object on a busy
+# cluster, and the flavor deletion only follows once the Node is seen unmanaged — wait generously.
 gone=""
-for _ in $(seq 1 30); do
+for _ in $(seq 1 90); do
   kubectl get "$RF" >/dev/null 2>&1 || { gone=1; break; }
   sleep 3
 done
 [ -n "$gone" ] && record PASS "flavor deleted on de-manage" "${RF#*/} gone (F3a: no drain tombstone)" \
   || record FAIL "flavor deleted on de-manage" "${RF#*/} still present — NodeFlavorReconciler did not drop the unmanaged node"
 
-# --- Assertion B: the derived InstanceType tears down (CQ HoldAndDrain, or IT/CQ gone). ---
-torn=""
-for _ in $(seq 1 40); do
-  sp=$(kubectl get clusterqueue "$IT" -o jsonpath='{.spec.stopPolicy}' 2>/dev/null)
+# --- Assertion B: the InstanceType SURVIVES (not deleted); its backing queue's quota is emptied. ---
+survived=""
+for _ in $(seq 1 60); do
   exists=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o name 2>/dev/null)
   cqexists=$(kubectl get clusterqueue "$IT" -o name 2>/dev/null)
-  if [ "$sp" = "HoldAndDrain" ] || [ -z "$exists" ] || [ -z "$cqexists" ]; then torn=1; break; fi
+  rg=$(kubectl get clusterqueue "$IT" -o json 2>/dev/null | python3 -c "import json,sys
+try: print(len(json.load(sys.stdin).get('spec',{}).get('resourceGroups') or []))
+except Exception: print(-1)" 2>/dev/null)
+  if [ -n "$exists" ] && [ -n "$cqexists" ] && [ "$rg" = "0" ]; then survived=1; break; fi
   sleep 3
 done
-[ -n "$torn" ] && record PASS "derived InstanceType tears down" "backing CQ HoldAndDrain or removed (F5d finalizer)" \
-  || record FAIL "derived InstanceType tears down" "InstanceType/CQ still Active — the derived pool did not tear down after its flavor vanished"
+[ -n "$survived" ] && record PASS "InstanceType survives flavor loss; queue emptied" "${IT} kept, resourceGroups=0 (drain-when-no-flavors, idle)" \
+  || record FAIL "InstanceType survives flavor loss; queue emptied" "exists='${exists:-gone}' cqexists='${cqexists:-gone}' resourceGroups='${rg}' — the type must survive with its queue emptied, not tear down"
+
+# --- Assertion C: restoring the nodes refills the queue and the InstanceType reactivates. ---
+echo "[case-3] restoring gpustack.ai/managed=true; expecting the pool to refill and reactivate"
+echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
+  -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}' >/dev/null 2>&1
+reactivated=""
+for _ in $(seq 1 90); do
+  p=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)
+  rg=$(kubectl get clusterqueue "$IT" -o json 2>/dev/null | python3 -c "import json,sys
+try: print(len(json.load(sys.stdin).get('spec',{}).get('resourceGroups') or []))
+except Exception: print(0)" 2>/dev/null)
+  if [ "$p" = "Active" ] && [ "${rg:-0}" -gt 0 ]; then reactivated=1; break; fi
+  sleep 3
+done
+[ -n "$reactivated" ] && record PASS "pool reactivates when nodes return" "${IT} Active, resourceGroups refilled" \
+  || record FAIL "pool reactivates when nodes return" "phase='${p:-?}' resourceGroups='${rg:-0}' — the pool must refill and reactivate"
 
 echo
 echo "== CASE 3 — Managed-toggle scopes node onboarding (Story 5) =="
@@ -92,8 +111,8 @@ echo "== CASE 3 — Managed-toggle scopes node onboarding (Story 5) =="
 if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Confirm the operator was NOT restarted between toggle and assertion."
-  echo "Post-refactor teardown is delete-based (F3a) + InstanceType-finalizer HoldAndDrain (F5d),"
-  echo "not the old schedule.gpustack.ai/drain tombstone. See references/drain-recycle.md."
+  echo "Under the queue-ownership split the flavor is deleted but the InstanceType survives — the"
+  echo "NodeQueueReconciler empties/drains the queue (never deletes the type). See references/drain-recycle.md."
   exit 1
 fi
 echo "CASE 3 PASS"
