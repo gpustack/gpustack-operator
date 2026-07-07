@@ -1,6 +1,6 @@
 # Spec: InstanceType Declarative Management
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -115,8 +115,11 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 5. **NodeQueueReconciler (quota + admission owner).** A new controller reconciles the operator-owned
    `ClusterQueue`, driven by `ClusterQueue`, `ResourceFlavor`, and node-devices `AdmissionCheck`
    changes. It is `InstanceType`-agnostic — it converges the queue from the flavors alone and never
-   looks at the owning `InstanceType`. It lists the pool's `ResourceFlavor`s by the queue's labels,
-   then:
+   looks at the owning `InstanceType`. It lists the pool's `ResourceFlavor`s by the queue's labels —
+   **treating a flavor Kueue is still finalizing (`DeletionTimestamp` set) as absent**, so a drained
+   pool's queue empties and Kueue can release the flavor's `resource-in-use` finalizer instead of
+   deadlocking (a workload still admitted on a dropped partial-pool flavor is evicted + re-admitted by
+   Kueue; its node has left the pool) — then:
    - **Being deleted (`DeletionTimestamp` set):** drive `StopPolicy = HoldAndDrain` unconditionally so
      Kueue evicts the admitted workloads (Kueue never evicts on delete by itself), then Kueue's own
      `ResourceInUse` finalizer drops once the queue is empty and it is removed. Covers both an admin's
@@ -199,8 +202,8 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
   webhook stamps the `queue-entrance` label on the InstanceType, and the Pod webhook reverse-looks-up
   the InstanceType by that label (`FormatLocalQueueName` of the workload's `queue-name`) and reads
   `spec.memory` directly — never trusting the user-writable, namespaced `LocalQueue`, and no
-  `LocalQueue → CQ → InstanceType` hop. (The `ClusterQueue` still carries a `memory` annotation for
-  reference, but nothing reads it.)
+  `LocalQueue → CQ → InstanceType` hop. The `ClusterQueue` carries no `memory` annotation — the
+  `InstanceType` spec is the sole VRAM source.
 - **Two controllers write the same `ClusterQueue` (`InstanceTypeReconciler` owns existence + labels +
   isolation; `NodeQueueReconciler` owns resource groups + StopPolicy + AdmissionCheck).** → Partition
   by field, not by ownership checks: `NodeQueueReconciler` is `InstanceType`-agnostic. On an
@@ -237,17 +240,16 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 
 ### Project Structure
 - `api/worker/v1alpha1/instance_type.go` — required-field markers on `InstanceTypeSpec` (regenerate).
-- `api/worker/v1/instancetypeflavor.go` — new list-only aggregated type (peerless).
+- `api/worker/v1/instance_type_flavor.go` — new list-only aggregated type (peerless).
 - `pkg/worker/webhooks/worker/instancetype.go` — add the defaulting webhook (enrichment) + update the
   validating webhook (required on create, immutable unit/storage on update).
 - `pkg/nodefeature/helper.go` — `.count` general label, `NodeFlavor.Cores`, `ExtractNodeFlavors`
   count-from-label + `.count` in `NodeLabels`.
 - `pkg/worker/controllers/worker/nodeflavor.go` — `group`/`cores` notes.
-- `pkg/worker/controllers/worker/instancetype.go` — narrow to lifecycle + labels + a `memory`
-  annotation from `it.Spec.Memory` + Devices→status; drop descriptor refresh and the
-  delete-on-no-flavors branch; stamp identity on derived types.
+- `pkg/worker/controllers/worker/instancetype.go` — narrow to lifecycle + labels + Devices→status;
+  drop descriptor refresh, the CQ `memory` note, and the delete-on-no-flavors branch.
 - `pkg/worker/controllers/worker/nodequeue.go` — new `NodeQueueReconciler` (quota owner).
-- `pkg/worker/extensionapis/worker/instancetypeflavor.go` + `extensionapis/setup.go` — new handler.
+- `pkg/worker/extensionapis/worker/instance_type_flavor.go` + `extensionapis/setup.go` — new handler.
 - `pkg/worker/settings/value.go` — `InstanceTypeDrainWhenNoFlavors`.
 - `pkg/worker/controllers/setup.go` — register `NodeQueueReconciler`.
 - `docs/architecture.md`, `docs/settings.md`, `docs/development.md`, `README.md`, e2e cases — updated.
@@ -289,12 +291,12 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
   - *Verify:* `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/... -run 'NodeFlavor|Extract|ConstructNodeCapacity'`; `make lint`.
 
 - [x] **Task 2 — `InstanceTypeFlavor` list-only aggregated resource.**
-  - `api/worker/v1/instancetypeflavor.go`: peerless type + `InstanceTypeFlavorSpec` ordered like
+  - `api/worker/v1/instance_type_flavor.go`: peerless type + `InstanceTypeFlavorSpec` ordered like
     `InstanceTypeSpec` — Group, Acceleratable, Manufacturer, Product, Family, Memory, Cores,
     Sliceable — with markers (`+genclient`, `+genclient:nonNamespaced`, `+genclient:onlyVerbs=list`,
     deepcopy, `+k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["instypeflavor"]`)
     and a `List` type.
-  - `pkg/worker/extensionapis/worker/instancetypeflavor.go`: `InstanceTypeFlavorHandler`
+  - `pkg/worker/extensionapis/worker/instance_type_flavor.go`: `InstanceTypeFlavorHandler`
     (`extensionapi.ObjectInfo` + `WithList`/`ListOperation`); `OnList` lists `ResourceFlavor`s
     (`_ResourceFlavorResType`), builds one flavor per RF from the notes
     (group/acceleratable/manufacturer/product/family/memory/cores), deduplicates by full spec, sorts
@@ -360,7 +362,7 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
     holds the finalizer until it is gone** (NodeQueue drains it) — no HoldAndDrain here. It authors no
     InstanceTypes and never deletes for lack of flavors. `enqueueInstanceTypeWhenDevicesChanged` lists
     InstanceTypes by the Devices' feature keys + os/arch (a node serving CPU + device pools enqueues
-    both), replacing the name-guess helper. The CQ still carries a `memory` note for reference (unread).
+    both), replacing the name-guess helper. The CQ carries no `memory` note — the `InstanceType` spec is the VRAM source.
   - `pkg/worker/controllers/setup.go`: register `NodeQueueReconciler`.
   - *Acceptance:* creating an IT yields a schedule-labels + isolation CQ (no resource groups); the
     Default webhook stamps the IT's schedule + entrance labels; deleting the CQ under a live IT recreates
@@ -373,18 +375,18 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
   - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|NodeFlavor|Pod'`, then the full
     suite + build; `make lint`. **Checkpoint: run the entire test suite and build before continuing.**
 
-- [ ] **Task 5 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
+- [x] **Task 5 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
   pinning, group/cores notes, the queue-ownership split, drain-then-empty + reactivate,
   InstanceTypeFlavor), `docs/settings.md` (new setting row), `docs/development.md` (InstanceTypeFlavor
   in the inventory), `README.md` (declarative InstanceType + catalog). *Verify:* links resolve, wording
   matches the shipped behavior.
 
-- [ ] **Task 6 — E2E cases.** Via the `gpustack-operator-e2e` skill: required-field rejection on
+- [x] **Task 6 — E2E cases.** Via the `gpustack-operator-e2e` skill: required-field rejection on
   create; enrichment fills descriptors on create; immutable unit/storage rejection on update;
   drain-then-empty + reactivate on flavor loss; `InstanceTypeFlavor` catalog list; derived restore on
   delete. Update `SKILL.md` + references. *Verify:* `bash -n` each case; `chmod +x` new cases.
 
-- [ ] **Task 7 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
+- [x] **Task 7 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
   builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`), Helm-deploy
   to a reachable Kubernetes cluster, and run the e2e verifications (InstanceTypeFlavor list; admin
   InstanceType create + enrich + admit; required-field + immutability rejection; drain-then-empty +
