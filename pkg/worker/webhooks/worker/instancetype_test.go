@@ -202,3 +202,47 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		assert.Equal(t, "12Gi", it.Spec.Memory, "existing memory is preserved")
 	})
 }
+
+// TestInstanceTypeWebhook_DefaultStampsScheduleLabels pins that Default stamps the pool's
+// schedule labels (feature key + kubernetes.io/os|arch) on the InstanceType from its spec
+// identity, and prunes a stale feature key when the group/acceleratable-ness changes.
+func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build() // no flavor: labels still stamped
+	wh := &InstanceTypeWebhook{Client: cli}
+
+	t.Run("accelerated type gets the acceleratable feature key + os/arch", func(t *testing.T) {
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
+			Spec:       workercore.InstanceTypeSpec{Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"], "accelerated feature key")
+		assert.Equal(t, "linux", it.Labels[core.LabelOSStable])
+		assert.Equal(t, "amd64", it.Labels[core.LabelArchStable])
+		assert.Equal(t, nodefeature.FormatLocalQueueName("my-a10g"), it.Labels[QueueEntranceLabelKey],
+			"entrance label advertises the fronting LocalQueue name")
+	})
+
+	t.Run("cpu-only type gets the general feature key", func(t *testing.T) {
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
+			Spec:       workercore.InstanceTypeSpec{Group: "generic", OS: "linux", Arch: "amd64"},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, "true", it.Labels[nodefeature.GeneralFeatureLabelPrefix+"generic"], "general feature key")
+		assert.NotContains(t, it.Labels, nodefeature.AcceleratableFeatureLabelPrefix+"generic")
+	})
+
+	t.Run("prunes a stale feature key on a group/acceleratable change", func(t *testing.T) {
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{
+				Name:   "repoint",
+				Labels: map[string]string{nodefeature.GeneralFeatureLabelPrefix + "generic": "true"}, // prior identity
+			},
+			Spec: workercore.InstanceTypeSpec{Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"], "new feature key stamped")
+		assert.NotContains(t, it.Labels, nodefeature.GeneralFeatureLabelPrefix+"generic", "stale feature key pruned")
+	})
+}

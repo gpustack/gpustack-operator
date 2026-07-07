@@ -137,4 +137,19 @@ var (
 		setting.InitializeFromEnv("true"),
 		setting.AllowBool(),
 	)
+
+	// InstanceTypeDrainWhenNoFlavors indicates whether a ClusterQueue whose pool has lost
+	// all its ResourceFlavors is drained (HoldAndDrain) before its resource groups are
+	// emptied. When true (default) the queue is drained first so admitted workloads are
+	// evicted; when false the operator waits for the reservations to clear on their own,
+	// then empties without draining. Either way the resource groups are emptied only once
+	// all reservations are zero, so Kueue's counters never go negative.
+	InstanceTypeDrainWhenNoFlavors = settings.NewEditable(
+		"instance-type-drain-when-no-flavors",
+		"Indicates whether a ClusterQueue whose pool lost all ResourceFlavors is drained "+
+			"(HoldAndDrain) before its resource groups are emptied. When true (default), it is "+
+			"drained first; when false, the operator waits for reservations to clear, then empties.",
+		setting.InitializeFromEnv("true"),
+		setting.AllowBool(),
+	)
 )

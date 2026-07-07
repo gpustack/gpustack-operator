@@ -104,6 +104,11 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, _ ctrlcli.ListOp
 	seen := make(map[worker.InstanceTypeFlavorSpec]struct{}, len(rfList.Items))
 	list := &worker.InstanceTypeFlavorList{Items: make([]worker.InstanceTypeFlavor, 0, len(rfList.Items))}
 	for i := range rfList.Items {
+		// Skip a flavor Kueue is finalizing (DeletionTimestamp set): its pool is draining away,
+		// so the catalog must not advertise a pool being torn down.
+		if rfList.Items[i].DeletionTimestamp != nil {
+			continue
+		}
 		_, notes := systemmeta.DescribeResource(&rfList.Items[i])
 		group := notes["group"]
 		if group == "" {

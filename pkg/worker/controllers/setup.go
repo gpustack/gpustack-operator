@@ -12,6 +12,7 @@ import (
 var setups = []controller.Setup{
 	new(worker.InstanceReconciler),
 	new(worker.InstanceTypeReconciler),
+	new(worker.NodeQueueReconciler),
 	new(worker.NodeQueueEntranceReconciler),
 	new(worker.NodeCapacityReconciler),
 	new(worker.NodeFeatureReconciler),

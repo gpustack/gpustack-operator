@@ -35,7 +35,11 @@ import (
 // NodeFlavorReconciler reconciles kueue.ResourceFlavor objects keyed by their own
 // name, driven by both ResourceFlavor and Kubernetes Node changes:
 //   - When one or more Nodes contribute to the flavor's name, (re)build the
-//     ResourceFlavor — capacity = pooled nodes × per-node count.
+//     ResourceFlavor — capacity = pooled nodes × per-node count — and then, when
+//     instance-type-derived-from-node is enabled, author the pool's InstanceType.
+//     The authoring is create-only: it never updates or deletes an existing type, so
+//     an admin's edits are preserved and the InstanceTypeReconciler stays the sole
+//     owner of an InstanceType's lifecycle.
 //   - When no Node contributes, delete the flavor; an unused flavor advertises
 //     stale capacity and a tombstone buys nothing once the ClusterQueue is rebuilt
 //     from ResourceFlavor labels.
@@ -54,11 +58,6 @@ type NodeFlavorReconciler struct {
 var _ ctrlreconcile.Reconciler = (*NodeFlavorReconciler)(nil)
 
 const (
-	// ScheduleLabelPrefix prefixes the operator's schedule.gpustack.ai/* annotation
-	// keys. The ResourceFlavor/ClusterQueue pool identity no longer uses this prefix
-	// — it is carried by feature labels (see featureKeyLabel).
-	ScheduleLabelPrefix = "schedule." + systemname.LabelPrefix
-
 	// The schedule labels are stamped on both the ResourceFlavor and its backing
 	// ClusterQueue in the node-feature vocabulary, so each is reverse-looked-up from
 	// the other and from the matching Nodes/Devices by a label selector: the flavor's
@@ -69,16 +68,6 @@ const (
 	_ResourceFlavorCountLabelSuffix    = ".count"
 	_ResourceFlavorCapacityLabelSuffix = ".capacity"
 )
-
-// featureKeyLabel returns the "<general.|acceleratable.>feature.gpustack.ai/<key>"
-// label key (value "true") identifying a flavor's pool: general for a CPU flavor,
-// acceleratable for a device flavor.
-func featureKeyLabel(acceleratable bool, key string) string {
-	if acceleratable {
-		return nodefeature.AcceleratableFeatureLabelPrefix + key
-	}
-	return nodefeature.GeneralFeatureLabelPrefix + key
-}
 
 // _ResourceFlavorResType is the systemmeta resource type carried by the
 // ResourceFlavors this reconciler owns.
@@ -231,6 +220,18 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 	logger.V(2).Info("synced resource flavor")
+
+	// Author the pool's InstanceType from the just-synced flavor when
+	// instance-type-derived-from-node is enabled — create-only, never delete/update, so an
+	// admin's edits to an existing type are preserved. The InstanceTypeReconciler no longer
+	// derives it.
+	if settings.InstanceTypeDerivedFromNode.ShouldValueBool(ctx) {
+		err = r.authorDerivedInstanceType(ctx, flavor)
+		if err != nil {
+			logger.Error(err, "author derived instance type")
+			return ctrl.Result{}, err
+		}
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -244,6 +245,16 @@ func matchNodeFlavor(nd *core.Node, flavorName string) *nodefeature.NodeFlavor {
 		}
 	}
 	return nil
+}
+
+// featureKeyLabel returns the "<general.|acceleratable.>feature.gpustack.ai/<key>"
+// label key (value "true") identifying a flavor's pool: general for a CPU flavor,
+// acceleratable for a device flavor.
+func featureKeyLabel(acceleratable bool, key string) string {
+	if acceleratable {
+		return nodefeature.AcceleratableFeatureLabelPrefix + key
+	}
+	return nodefeature.GeneralFeatureLabelPrefix + key
 }
 
 // nodeIsAccelerated reports whether the node carries any accelerator, via the
@@ -271,6 +282,63 @@ func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName
 		return g.Accelerators[0].Features.MaxPartitions != 0
 	}
 	return false
+}
+
+const (
+	// _InstanceTypeDerivedFromNodeLabel marks an InstanceType the operator authored by deriving it
+	// from the node-fed ResourceFlavors (instance-type-derived-from-node); it is a provenance marker
+	// only — a derived type is never auto-removed.
+	_InstanceTypeDerivedFromNodeLabel = "schedule.gpustack.ai/derived-from-node"
+)
+
+// authorDerivedInstanceType creates the pool's operator-owned InstanceType from a synced flavor.
+// It stamps the pool identity (group/acceleratable/os/arch) + the fixed default unit spec + the
+// derived marker; the defaulting webhook enriches the descriptor spec. It only ever creates — an
+// existing type (admin- or operator-owned) is left untouched, so an AlreadyExists is a no-op.
+func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, flavor *nodefeature.NodeFlavor) error {
+	logger := ctrllog.FromContext(ctx)
+
+	unitCpu, unitRam, stg := defaultResources(flavor.Acceleratable)
+
+	it := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   fmt.Sprintf("gpustack-%s-%s-%s", flavor.Key, flavor.OS, flavor.Arch),
+			Labels: map[string]string{_InstanceTypeDerivedFromNodeLabel: "true"},
+		},
+		Spec: workercore.InstanceTypeSpec{
+			Group:         flavor.Key,
+			Acceleratable: flavor.Acceleratable,
+			OS:            flavor.OS,
+			Arch:          flavor.Arch,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: unitCpu, RAM: unitRam},
+			LocalStorage:  stg,
+		},
+	}
+	err := r.Client.Create(ctx, it)
+	if err != nil {
+		if !kerrors.IsAlreadyExists(err) {
+			return err
+		}
+		return nil
+	}
+
+	logger.V(2).Info("authored derived instance type",
+		"instance type", it.Name)
+	return nil
+}
+
+// defaultResources returns the fixed per-unit CPU/RAM and storage for a derived InstanceType, chosen by
+// acceleratable-ness: a non-accelerated unit is 1 CPU / 2Gi / 100Gi, an accelerated unit (one whole card)
+// is 4 CPU / 16Gi / 100Gi. Admins override these per InstanceType.
+func defaultResources(acceleratable bool) (unitCpu, unitRam, stg string) {
+	unitCpu = "1"
+	unitRam = "2Gi"
+	stg = "100Gi"
+	if acceleratable {
+		unitCpu = "4"
+		unitRam = "16Gi"
+	}
+	return unitCpu, unitRam, stg
 }
 
 const (

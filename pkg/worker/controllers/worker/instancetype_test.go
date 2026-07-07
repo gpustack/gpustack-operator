@@ -221,17 +221,17 @@ func TestPoolDevicesSelector(t *testing.T) {
 	key := nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g"
 	t.Run("extracts feature key + os/arch and adds managed", func(t *testing.T) {
 		sel := poolDevicesSelector(map[string]string{
-			key:                  valueTrue,
+			key:                  "true",
 			key + ".count":       "8",
 			key + ".capacity":    "16",
 			core.LabelOSStable:   "linux",
 			core.LabelArchStable: "amd64",
 		})
 		assert.Equal(t, map[string]string{
-			key:                        valueTrue,
+			key:                        "true",
 			core.LabelOSStable:         "linux",
 			core.LabelArchStable:       "amd64",
-			systemname.ManagedLabelKey: valueTrue,
+			systemname.ManagedLabelKey: "true",
 		}, sel)
 	})
 	t.Run("nil when no feature key (never matches every Devices)", func(t *testing.T) {
@@ -261,7 +261,6 @@ func buildInstanceTypeClient(objs ...ctrlcli.Object) ctrlcli.Client {
 		WithScheme(scheme.Scheme).
 		WithObjects(objs...).
 		WithStatusSubresource(&workercore.InstanceType{}).
-		WithIndex(&kueue.ResourceFlavor{}, IndexingResourceFlavorByNodeQueue, indexResourceFlavorByNodeQueue).
 		Build()
 }
 
@@ -275,23 +274,22 @@ func reconcileInstanceTypeN(t *testing.T, cli ctrlcli.Client, name string, n int
 	}
 }
 
-// TestInstanceTypeReconciler_CreatesClusterQueue pins that an admin InstanceType with
-// a unit spec gets a backing ClusterQueue carrying its schedule labels + the unit
-// notes, and is held by the finalizer.
+// TestInstanceTypeReconciler_CreatesClusterQueue pins that an admin InstanceType gets a
+// backing ClusterQueue carrying the schedule labels derived from its spec identity, the
+// entrance label, StopPolicy None, and the fixed no-borrow isolation policy stamped into the
+// spec at creation (not gated by derived-from-node) — but no resource groups (the
+// NodeQueueReconciler owns the quota) and no unit-spec notes. The finalizer holds the type.
 func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 	key := "generic"
 	name := nodeQueueName(key)
 	it := &workercore.InstanceType{
-		ObjectMeta: meta.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				featureKeyLabel(false, key): valueTrue,
-				core.LabelOSStable:          "linux",
-				core.LabelArchStable:        "amd64",
-			},
-		},
+		ObjectMeta: meta.ObjectMeta{Name: name},
 		Spec: workercore.InstanceTypeSpec{
-			// A non-accelerated type's unit is one CPU core (unitCPU is pinned to 1).
+			// The schedule labels are derived from the spec identity, not the metadata labels.
+			Group: key,
+			OS:    "linux",
+			Arch:  "amd64",
+			// A non-accelerated type's unit is one CPU core.
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "8Gi"},
 			LocalStorage:  "64Gi",
 		},
@@ -301,9 +299,20 @@ func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 
 	cq := new(kueue.ClusterQueue)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, cq))
-	assert.Equal(t, valueTrue, cq.Labels[featureKeyLabel(false, key)], "queue carries the feature key")
-	assert.Equal(t, nodefeature.FormatLocalQueueName(name), cq.Labels[QueueEntranceLabelKey],
-		"queue advertises its entrance LocalQueue name")
+	assert.Equal(t, "true", cq.Labels[featureKeyLabel(false, key)], "queue carries the feature key")
+	require.NotNil(t, cq.Spec.StopPolicy)
+	assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "created active (StopPolicy None)")
+	assert.Empty(t, cq.Spec.ResourceGroups, "no resource groups (the NodeQueueReconciler owns the quota)")
+
+	// The fixed no-borrow isolation policy is stamped at creation even for an admin
+	// (non-derived) InstanceType.
+	assert.Empty(t, cq.Spec.CohortName, "no cohort (isolated)")
+	require.NotNil(t, cq.Spec.FlavorFungibility)
+	assert.Equal(t, kueue.TryNextFlavor, cq.Spec.FlavorFungibility.WhenCanBorrow, "try next flavor before borrowing")
+	require.NotNil(t, cq.Spec.Preemption)
+	assert.Equal(t, kueue.PreemptionPolicyNever, cq.Spec.Preemption.ReclaimWithinCohort, "never reclaim within cohort")
+	assert.Equal(t, kueue.PreemptionPolicyLowerPriority, cq.Spec.Preemption.WithinClusterQueue, "preempt lower priority in-queue")
+
 	_, notes := systemmeta.DescribeResource(cq)
 	assert.NotContains(t, notes, "unitCPU", "unit spec is not a queue note")
 	assert.NotContains(t, notes, "unitRAM", "unit spec is not a queue note")
@@ -314,50 +323,127 @@ func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 	assert.True(t, systemmeta.IsLocked(got), "finalizer held")
 }
 
-// TestInstanceTypeReconciler_DerivedAuthorsInstanceType pins that, with
-// instance-type-derived-from-node enabled, a ResourceFlavor pool that has no
-// InstanceType gets one authored (marked derived, carrying the schedule labels).
-func TestInstanceTypeReconciler_DerivedAuthorsInstanceType(t *testing.T) {
-	enableInstanceTypeDerivedFromNode(t)
-	key := "nvidia-a10g"
+// TestInstanceTypeReconciler_RecreatesDeletedClusterQueue pins that an accidental delete of a
+// live InstanceType's backing ClusterQueue self-heals: the next reconcile recreates the queue
+// (the reconciler cares that the queue exists, not that it was never touched).
+func TestInstanceTypeReconciler_RecreatesDeletedClusterQueue(t *testing.T) {
+	key := "generic"
 	name := nodeQueueName(key)
-	rf := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", key, 1, 4, accelerated(nodefeature.ManufacturerNVIDIA))
-	cli := buildInstanceTypeClient(rf)
+	it := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.InstanceTypeSpec{
+			Group:         key,
+			OS:            "linux",
+			Arch:          "amd64",
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+			LocalStorage:  "100Gi",
+		},
+	}
+	cli := buildInstanceTypeClient(it)
+	reconcileInstanceTypeN(t, cli, name, 2)
+
+	// A user accidentally deletes the backing queue while the InstanceType still lives.
+	cq, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.NoError(t, cli.Delete(context.Background(), cq))
+	_, err = getClusterQueue(t, cli, name)
+	require.True(t, kerrors.IsNotFound(err), "queue is gone before the reconcile")
 
 	reconcileInstanceTypeN(t, cli, name, 1)
 
-	it := new(workercore.InstanceType)
-	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, it))
-	assert.Equal(t, valueTrue, it.Labels[_InstanceTypeDerivedFromNodeLabel], "marked derived")
-	assert.Equal(t, valueTrue, it.Labels[featureKeyLabel(true, key)], "carries the feature key")
+	_, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err, "backing queue recreated after an accidental deletion")
 }
 
-// TestInstanceTypeReconciler_MaterializesStatus pins that the accelerated three-view
-// is written to the InstanceType status from the Devices ledger, and the hardware
-// descriptors are refreshed from the queue notes.
+// TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange pins that changing an InstanceType's
+// group (mutable — only unitResources/localStorage are frozen on update) re-points its queue's
+// feature-key label instead of leaving the stale one. A leftover key would make the flavor and
+// device selectors (which AND every feature-key label on the queue) match no pool and strand it.
+func TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange(t *testing.T) {
+	name := "gpustack-generic-linux-amd64"
+	it := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.InstanceTypeSpec{
+			Group: "generic", OS: "linux", Arch: "amd64",
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+			LocalStorage:  "100Gi",
+		},
+	}
+	cli := buildInstanceTypeClient(it)
+	reconcileInstanceTypeN(t, cli, name, 2)
+
+	cq, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.Equal(t, "true", cq.Labels[featureKeyLabel(false, "generic")], "initial feature key")
+
+	// Admin re-points the group (group is not frozen by the update webhook).
+	got := getInstanceType(t, cli, name)
+	got.Spec.Group = "generic-v2"
+	require.NoError(t, cli.Update(context.Background(), got))
+	reconcileInstanceTypeN(t, cli, name, 2)
+
+	cq, err = getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	assert.Equal(t, "true", cq.Labels[featureKeyLabel(false, "generic-v2")], "feature key re-pointed")
+	assert.NotContains(t, cq.Labels, featureKeyLabel(false, "generic"), "stale feature key pruned")
+}
+
+// TestInstanceTypeReconciler_RequeuesWhileBackingQueueTerminating pins that a backing queue
+// caught mid-deletion (held by a finalizer, as Kueue holds it while draining) under a live
+// InstanceType makes the reconcile requeue — it does not recreate under the same name yet, nor
+// refresh status from the dying queue. Recreation happens on the later reconcile that finds it
+// gone (covered by _RecreatesDeletedClusterQueue).
+func TestInstanceTypeReconciler_RequeuesWhileBackingQueueTerminating(t *testing.T) {
+	key := "generic"
+	name := nodeQueueName(key)
+	it := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
+		Spec: workercore.InstanceTypeSpec{
+			Group: key, OS: "linux", Arch: "amd64",
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+			LocalStorage:  "100Gi",
+		},
+	}
+	cq := newInstanceTypeQueue(key, false)
+	now := meta.Now()
+	cq.DeletionTimestamp = &now
+	cq.Finalizers = []string{"kueue.x-k8s.io/resource-in-use"} // held (draining) so it lingers
+	cli := buildInstanceTypeClient(it, cq)
+
+	r := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+	res, err := r.Reconcile(context.Background(),
+		ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: name}})
+	require.NoError(t, err)
+	assert.Positive(t, res.RequeueAfter, "requeues while the backing queue is terminating")
+
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err, "terminating queue left to finish, not recreated under the same name")
+	assert.NotNil(t, got.DeletionTimestamp, "the same terminating queue is still there")
+}
+
+// TestInstanceTypeReconciler_MaterializesStatus pins that the accelerated three-view is
+// written to the InstanceType status from the Devices ledger. computeStatus reads
+// acceleratable-ness from the spec (the defaulting webhook fills it at admission; a fake
+// client does not), so the fixture sets it.Spec.Acceleratable directly. The reconciler no
+// longer refreshes the hardware-descriptor spec from the queue notes.
 func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 	key := "nvidia-a10g"
 	name := nodeQueueName(key)
 	featureKey := featureKeyLabel(true, key)
 	poolLabels := map[string]string{
-		featureKey:           valueTrue,
+		featureKey:           "true",
 		core.LabelOSStable:   "linux",
 		core.LabelArchStable: "amd64",
 	}
 
 	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: name, Labels: poolLabels}}
-	systemmeta.NoteResource(cq, _ClusterQueueResType, map[string]string{
-		"acceleratable": valueTrue,
-		"manufacturer":  nodefeature.ManufacturerNVIDIA,
-		"memory":        "24576Mi",
-		"sliceable":     valueTrue,
-	})
+	systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
 
 	devLabels := map[string]string{
-		featureKey:                 valueTrue,
+		featureKey:                 "true",
 		core.LabelOSStable:         "linux",
 		core.LabelArchStable:       "amd64",
-		systemname.ManagedLabelKey: valueTrue,
+		systemname.ManagedLabelKey: "true",
 	}
 	dev := nodeDevices("node-a", devLabels, repeatCard(8, cardFree())...)
 
@@ -367,6 +453,13 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 			Labels:     poolLabels,
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
+		Spec: workercore.InstanceTypeSpec{
+			Group:                   key,
+			Acceleratable:           true,
+			OS:                      "linux",
+			Arch:                    "amd64",
+			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Memory: "24576Mi"},
+		},
 	}
 	cli := buildInstanceTypeClient(it, cq, &dev)
 	reconcileInstanceTypeN(t, cli, name, 4)
@@ -374,9 +467,6 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 	got := new(workercore.InstanceType)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, got))
 
-	assert.True(t, got.Spec.Acceleratable, "descriptor refreshed from notes")
-	assert.True(t, got.Spec.Sliceable, "sliceable refreshed")
-	assert.Equal(t, "24576Mi", got.Spec.Memory, "memory refreshed")
 	assert.Equal(t, nodefeature.FormatLocalQueueName(name), got.Status.Entrance,
 		"status advertises the entrance LocalQueue name")
 
@@ -396,24 +486,19 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 	name := nodeQueueName(key)
 	featureKey := featureKeyLabel(true, key)
 	poolLabels := map[string]string{
-		featureKey:           valueTrue,
+		featureKey:           "true",
 		core.LabelOSStable:   "linux",
 		core.LabelArchStable: "amd64",
 	}
 
 	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: name, Labels: poolLabels}}
-	systemmeta.NoteResource(cq, _ClusterQueueResType, map[string]string{
-		"acceleratable": valueTrue,
-		"manufacturer":  nodefeature.ManufacturerNVIDIA,
-		"memory":        "24576Mi",
-		"sliceable":     valueTrue,
-	})
+	systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
 
 	devLabels := map[string]string{
-		featureKey:                 valueTrue,
+		featureKey:                 "true",
 		core.LabelOSStable:         "linux",
 		core.LabelArchStable:       "amd64",
-		systemname.ManagedLabelKey: valueTrue,
+		systemname.ManagedLabelKey: "true",
 	}
 	dev := nodeDevices("node-a", devLabels, repeatCard(8, cardFree())...)
 
@@ -422,6 +507,13 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 			Name:       name,
 			Labels:     poolLabels,
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
+		},
+		Spec: workercore.InstanceTypeSpec{
+			Group:                   key,
+			Acceleratable:           true,
+			OS:                      "linux",
+			Arch:                    "amd64",
+			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Memory: "24576Mi"},
 		},
 	}
 	cli := buildInstanceTypeClient(it, cq, &dev)
@@ -457,8 +549,8 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 }
 
 // TestInstanceTypeReconciler_TeardownFinalizer pins the delete handshake: deleting an
-// InstanceType drives the backing queue to HoldAndDrain, then — the reconciler being
-// the sole queue owner — drains it, deletes it itself, and releases the finalizer.
+// InstanceType deletes the backing queue (the NodeQueueReconciler drains it in-cluster) and
+// releases the finalizer once the queue has actually disappeared.
 func TestInstanceTypeReconciler_TeardownFinalizer(t *testing.T) {
 	key := "generic"
 	name := nodeQueueName(key)
@@ -468,6 +560,8 @@ func TestInstanceTypeReconciler_TeardownFinalizer(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 	}
+	// No finalizer on the queue: our delete removes it at once (in-cluster Kueue's finalizer
+	// would hold it until drained).
 	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: name}}
 	systemmeta.NoteResource(cq, _ClusterQueueResType, map[string]string{"acceleratable": "false"})
 	cli := buildInstanceTypeClient(it, cq)
@@ -475,25 +569,19 @@ func TestInstanceTypeReconciler_TeardownFinalizer(t *testing.T) {
 	// Deleting an InstanceType with a finalizer stamps its deletion timestamp.
 	require.NoError(t, cli.Delete(context.Background(), it))
 
-	// First reconcile drives the queue to HoldAndDrain.
-	reconcileInstanceTypeN(t, cli, name, 1)
-	gotCQ, err := getClusterQueue(t, cli, name)
-	require.NoError(t, err)
-	require.NotNil(t, gotCQ.Spec.StopPolicy)
-	assert.Equal(t, kueue.HoldAndDrain, *gotCQ.Spec.StopPolicy, "delete sets the queue to HoldAndDrain")
+	// First reconcile deletes the queue; the second finds it gone and releases the finalizer.
+	reconcileInstanceTypeN(t, cli, name, 2)
 
-	// Subsequent reconciles drain (nothing reserved), delete the queue, then release
-	// the finalizer.
-	reconcileInstanceTypeN(t, cli, name, 3)
-	_, err = getClusterQueue(t, cli, name)
-	assert.Truef(t, kerrors.IsNotFound(err), "drained queue must be deleted, got err=%v", err)
+	_, err := getClusterQueue(t, cli, name)
+	assert.Truef(t, kerrors.IsNotFound(err), "backing queue must be deleted, got err=%v", err)
 	err = cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, new(workercore.InstanceType))
 	assert.True(t, kerrors.IsNotFound(err), "instance type released once the queue is gone")
 }
 
-// TestInstanceTypeReconciler_TeardownWaitsForDrain pins that a queue still holding an
-// admitted workload is not deleted, and the finalizer keeps holding the InstanceType.
-func TestInstanceTypeReconciler_TeardownWaitsForDrain(t *testing.T) {
+// TestInstanceTypeReconciler_TeardownWaitsForQueueRemoval pins that while the backing queue is
+// still terminating (held by a finalizer — as Kueue holds it while draining), the InstanceType's
+// own finalizer keeps holding it: the teardown requests the delete once and waits.
+func TestInstanceTypeReconciler_TeardownWaitsForQueueRemoval(t *testing.T) {
 	key := "generic"
 	name := nodeQueueName(key)
 	it := &workercore.InstanceType{
@@ -502,20 +590,65 @@ func TestInstanceTypeReconciler_TeardownWaitsForDrain(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 	}
+	// A finalizer on the queue simulates Kueue holding it (draining) after our delete request,
+	// so it lingers as terminating rather than vanishing.
 	cq := &kueue.ClusterQueue{
-		ObjectMeta: meta.ObjectMeta{Name: name},
-		Spec:       kueue.ClusterQueueSpec{StopPolicy: ptr.To(kueue.HoldAndDrain)},
-		Status:     kueue.ClusterQueueStatus{AdmittedWorkloads: 1},
+		ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{"kueue.x-k8s.io/resource-in-use"}},
 	}
 	systemmeta.NoteResource(cq, _ClusterQueueResType, map[string]string{"acceleratable": "false"})
 	cli := buildInstanceTypeClient(it, cq)
 	require.NoError(t, cli.Delete(context.Background(), it))
 
 	reconcileInstanceTypeN(t, cli, name, 3)
-	_, err := getClusterQueue(t, cli, name)
-	require.NoError(t, err, "queue with a reservation must not be deleted")
+
+	gotCQ, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err, "queue held by its finalizer must not vanish")
+	assert.NotNil(t, gotCQ.DeletionTimestamp, "teardown requested the queue's deletion")
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, new(workercore.InstanceType)),
-		"instance type held until the queue drains")
+		"instance type held until the queue is gone")
+}
+
+// TestInstanceTypeReconciler_EnqueuesInstanceTypesFromDevices pins that a Devices change enqueues
+// every InstanceType whose pool the node serves, resolved by the schedule labels the Default
+// webhook stamps (feature key + os/arch) rather than by name — so admin-named types are found, a
+// node serving both its CPU and device pool enqueues both, and a mismatched os/arch is excluded.
+func TestInstanceTypeReconciler_EnqueuesInstanceTypesFromDevices(t *testing.T) {
+	cpuIT := &workercore.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "admin-cpu", Labels: map[string]string{
+		featureKeyLabel(false, "generic"): "true",
+		core.LabelOSStable:                "linux",
+		core.LabelArchStable:              "amd64",
+	}}}
+	gpuIT := &workercore.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "admin-gpu", Labels: map[string]string{
+		featureKeyLabel(true, "nvidia-a10g"): "true",
+		core.LabelOSStable:                   "linux",
+		core.LabelArchStable:                 "amd64",
+	}}}
+	// Same general group but a different arch: must not be enqueued for a linux/amd64 node.
+	otherIT := &workercore.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "other-arch", Labels: map[string]string{
+		featureKeyLabel(false, "generic"): "true",
+		core.LabelOSStable:                "linux",
+		core.LabelArchStable:              "arm64",
+	}}}
+	cli := buildInstanceTypeClient(cpuIT, gpuIT, otherIT)
+	r := &InstanceTypeReconciler{Client: cli, APIReader: cli}
+
+	// A GPU node's Devices carries both feature keys (it serves both pools) plus os/arch + managed.
+	devices := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: "node-g", Labels: map[string]string{
+		systemname.ManagedLabelKey:           "true",
+		featureKeyLabel(false, "generic"):    "true",
+		featureKeyLabel(true, "nvidia-a10g"): "true",
+		core.LabelOSStable:                   "linux",
+		core.LabelArchStable:                 "amd64",
+	}}}
+
+	reqs := r.enqueueInstanceTypeWhenDevicesChanged(context.Background(), devices)
+
+	names := make([]string, 0, len(reqs))
+	for _, req := range reqs {
+		names = append(names, req.Name)
+	}
+	assert.ElementsMatch(t, []string{"admin-cpu", "admin-gpu"}, names,
+		"both pools the node serves are enqueued by label; the arm64 type is excluded")
 }
 
 // --- shared ResourceFlavor fixtures (the pool the reconciler aggregates) ---
@@ -620,53 +753,38 @@ func enableInstanceTypeDerivedFromNode(t *testing.T) {
 		"setting must read true after enabling")
 }
 
-// TestInstanceTypeReconciler_AlignsClusterQueue pins that a derived pool's flavors
-// materialize an isolated backing ClusterQueue: a CPU-only pool covers only cpu, an
-// accelerated pool covers only credits (= capacity × M), each quota lends nothing.
+// TestInstanceTypeReconciler_AlignsClusterQueue pins the InstanceType-owned metadata of a
+// derived pool's backing ClusterQueue: it is isolated (empty cohort) and Active (StopPolicy
+// None) — but the InstanceTypeReconciler never fills the resource groups (the
+// NodeQueueReconciler owns the quota) and never writes the unit spec as a queue note.
 func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
-	enableInstanceTypeDerivedFromNode(t)
-	creditsName := nodefeature.GetAcceleratableCreditsResourceName(nodefeature.ManufacturerNVIDIA)
-
 	cases := []struct {
-		name string
-
-		key      string
-		flavors  []*kueue.ResourceFlavor
-		capacity int64 // expected aggregate capacity feeding the queue
-
-		wantAccelerated bool
+		name          string
+		key           string
+		acceleratable bool
 	}{
-		{
-			name: "cpu-only queue covers only cpu, nominal = capacity cores",
-			key:  "generic",
-			flavors: []*kueue.ResourceFlavor{
-				newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 12),
-			},
-			capacity: 12,
-		},
-		{
-			name: "accelerated queue covers only credits, nominal = capacity × M",
-			key:  "nvidia-a10g",
-			flavors: []*kueue.ResourceFlavor{
-				newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 3,
-					accelerated(nodefeature.ManufacturerNVIDIA)),
-			},
-			capacity:        3,
-			wantAccelerated: true,
-		},
+		{name: "cpu-only pool", key: "generic"},
+		{name: "accelerated pool", key: "nvidia-a10g", acceleratable: true},
 	}
 
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			name := nodeQueueName(c.key)
-			objs := make([]ctrlcli.Object, 0, len(c.flavors))
-			for _, rf := range c.flavors {
-				objs = append(objs, rf)
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: name},
+				Spec: workercore.InstanceTypeSpec{
+					Group:         c.key,
+					Acceleratable: c.acceleratable,
+					OS:            "linux",
+					Arch:          "amd64",
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:  "100Gi",
+				},
 			}
-			cli := buildInstanceTypeClient(objs...)
+			cli := buildInstanceTypeClient(it)
 
-			// Reconcile authors the derived InstanceType, then creates + aligns its CQ.
+			// Reconcile creates + isolates the backing CQ from the InstanceType spec identity.
 			reconcileInstanceTypeN(t, cli, name, 4)
 
 			cq, err := getClusterQueue(t, cli, name)
@@ -677,297 +795,15 @@ func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
 			require.NotNil(t, cq.Spec.StopPolicy)
 			assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "active (StopPolicy None)")
 
-			// Exactly one resource group with one covered resource.
-			require.Len(t, cq.Spec.ResourceGroups, 1, "one resource group")
-			rg := cq.Spec.ResourceGroups[0]
-			require.Len(t, rg.CoveredResources, 1, "one covered resource")
-			require.Len(t, rg.Flavors, len(c.flavors), "one flavor quota per feeding flavor")
+			// The InstanceTypeReconciler does not fill the quota — the NodeQueueReconciler does.
+			assert.Empty(t, cq.Spec.ResourceGroups, "no resource groups (the NodeQueueReconciler owns the quota)")
 
-			rq := rg.Flavors[0].Resources[0]
-			if c.wantAccelerated {
-				assert.Equal(t, creditsName, rg.CoveredResources[0], "covers credits only")
-				wantNominal := nodefeature.CardsToCredits(*resource.NewQuantity(c.capacity, resource.DecimalSI))
-				assert.Equal(t, wantNominal.Value(), rq.NominalQuota.Value(), "credits nominal = capacity × M")
-			} else {
-				assert.Equal(t, core.ResourceCPU, rg.CoveredResources[0], "covers cpu only")
-				assert.Equal(t, c.capacity, rq.NominalQuota.Value(), "cpu nominal = capacity cores")
-			}
-			// No borrowing/lending limit: the queue keeps an empty cohort, and Kueue
-			// rejects a limit on a cohort-less queue. The empty cohort is the isolation.
-			assert.Nil(t, rq.BorrowingLimit, "no borrowingLimit on a cohort-less queue")
-			assert.Nil(t, rq.LendingLimit, "no lendingLimit on a cohort-less queue")
-
-			// Notes carry the descriptive device fields under "instancetypes"; the unit
-			// spec is not a queue note (it lives on the InstanceType).
+			// The unit spec is never a queue note (it lives on the InstanceType).
 			resType, notes := systemmeta.DescribeResource(cq)
 			assert.Equal(t, _ClusterQueueResType, resType, "resType")
-			for _, k := range []string{"manufacturer", "acceleratable"} {
-				_, ok := notes[k]
-				assert.Truef(t, ok, "note %q present", k)
-			}
 			for _, k := range []string{"unitCPU", "unitRAM", "localStorage"} {
 				assert.NotContainsf(t, notes, k, "unit spec is not a queue note (%q)", k)
 			}
-		})
-	}
-}
-
-// TestInstanceTypeReconciler_AggregatesCapacity pins that multiple flavors differing
-// only in per-node count aggregate into one queue, credits summed across capacities.
-func TestInstanceTypeReconciler_AggregatesCapacity(t *testing.T) {
-	enableInstanceTypeDerivedFromNode(t)
-	key := "nvidia-a10g"
-	name := nodeQueueName(key)
-
-	// Two device flavors of the same key: capacities 2 and 4 → 6 cards total.
-	rf1 := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", key, 1, 2, accelerated(nodefeature.ManufacturerNVIDIA))
-	rf2 := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-2d", key, 2, 4, accelerated(nodefeature.ManufacturerNVIDIA))
-	cli := buildInstanceTypeClient(rf1, rf2)
-
-	reconcileInstanceTypeN(t, cli, name, 4)
-
-	cq, err := getClusterQueue(t, cli, name)
-	require.NoError(t, err)
-	require.Len(t, cq.Spec.ResourceGroups, 1)
-	rg := cq.Spec.ResourceGroups[0]
-	require.Len(t, rg.Flavors, 2, "both flavors feed the queue")
-
-	var total int64
-	for _, fq := range rg.Flavors {
-		total += fq.Resources[0].NominalQuota.Value()
-	}
-	want := nodefeature.CardsToCredits(*resource.NewQuantity(6, resource.DecimalSI))
-	assert.Equal(t, want.Value(), total, "summed credits nominal = (2+4) cards × M")
-}
-
-// TestInstanceTypeReconciler_UnitSpecDerivation pins the non-accelerated unit spec on the
-// InstanceType: a derived type gets the fixed 1c/2Gi/100Gi default regardless of the node
-// hardware behind its flavors, and an admin's unit spec is preserved in full (it is
-// admin-authored and immutable, no longer pinned to a single CPU core).
-func TestInstanceTypeReconciler_UnitSpecDerivation(t *testing.T) {
-	key := "generic"
-	name := nodeQueueName(key)
-
-	// Two CPU flavors of differing size feed the pool; their per-node notes must not leak
-	// into the unit spec — it is a fixed default, not node-derived.
-	mkFlavors := func() []ctrlcli.Object {
-		return []ctrlcli.Object{
-			newNodesFlavor("gpustack-generic-linux-amd64-4c", key, 4, 4),
-			newNodesFlavor("gpustack-generic-linux-amd64-8c", key, 8, 8),
-		}
-	}
-
-	t.Run("derived type gets the fixed 1c/2Gi/100Gi default", func(t *testing.T) {
-		enableInstanceTypeDerivedFromNode(t)
-		cli := buildInstanceTypeClient(mkFlavors()...)
-
-		reconcileInstanceTypeN(t, cli, name, 5)
-
-		it := getInstanceType(t, cli, name)
-		assert.Equal(t, "1", it.Spec.UnitResources.CPU, "fixed default unitCPU")
-		assert.Equal(t, "2Gi", it.Spec.UnitResources.RAM, "fixed default unitRAM")
-		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "fixed default localStorage")
-	})
-
-	t.Run("admin unit spec wins in full", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{
-				Name: name,
-				Labels: map[string]string{
-					featureKeyLabel(false, key): valueTrue,
-					core.LabelOSStable:          "linux",
-					core.LabelArchStable:        "amd64",
-				},
-			},
-			Spec: workercore.InstanceTypeSpec{
-				UnitResources: workercore.InstanceTypeUnitResources{CPU: "2", RAM: "16Gi"},
-				LocalStorage:  "128Gi",
-			},
-		}
-		cli := buildInstanceTypeClient(append(mkFlavors(), it)...)
-
-		reconcileInstanceTypeN(t, cli, name, 4)
-
-		got := getInstanceType(t, cli, name)
-		assert.Equal(t, "2", got.Spec.UnitResources.CPU, "admin unitCPU wins (no longer pinned)")
-		assert.Equal(t, "16Gi", got.Spec.UnitResources.RAM, "admin unitRAM wins")
-		assert.Equal(t, "128Gi", got.Spec.LocalStorage, "admin localStorage wins")
-	})
-}
-
-// TestInstanceTypeReconciler_DerivedInitializesUnitSpec pins that a derived
-// InstanceType — authored without an admin unit spec — carries the fixed default
-// unit spec chosen by acceleratable-ness (accelerated 4/16Gi/100Gi, non-accelerated
-// 1/2Gi/100Gi), independent of the node hardware behind the flavor. The Instance
-// webhook and the table read the unit from the spec, so the derived type must carry it.
-func TestInstanceTypeReconciler_DerivedInitializesUnitSpec(t *testing.T) {
-	enableInstanceTypeDerivedFromNode(t)
-
-	cases := []struct {
-		name   string
-		key    string
-		flavor *kueue.ResourceFlavor
-
-		wantCPU     string
-		wantRAM     string
-		wantStorage string
-	}{
-		{
-			name: "accelerated pool gets the fixed 4c/16Gi/100Gi default",
-			key:  "nvidia-a10g",
-			flavor: newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 4,
-				accelerated(nodefeature.ManufacturerNVIDIA)),
-			wantCPU:     "4",
-			wantRAM:     "16Gi",
-			wantStorage: "100Gi",
-		},
-		{
-			name:        "cpu-only pool gets the fixed 1c/2Gi/100Gi default",
-			key:         "generic",
-			flavor:      newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4),
-			wantCPU:     "1", // a non-accelerated unit is always a single CPU core
-			wantRAM:     "2Gi",
-			wantStorage: "100Gi",
-		},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			name := nodeQueueName(c.key)
-			cli := buildInstanceTypeClient(c.flavor)
-
-			// Author the derived InstanceType (stamped with the fixed unit spec),
-			// create + align its queue, then materialize status.
-			reconcileInstanceTypeN(t, cli, name, 5)
-
-			it := getInstanceType(t, cli, name)
-			require.Equal(t, valueTrue, it.Labels[_InstanceTypeDerivedFromNodeLabel], "authored derived")
-			assert.Equal(t, c.wantCPU, it.Spec.UnitResources.CPU, "fixed default unitCPU")
-			assert.Equal(t, c.wantRAM, it.Spec.UnitResources.RAM, "fixed default unitRAM (Gi suffix)")
-			assert.Equal(t, c.wantStorage, it.Spec.LocalStorage, "fixed default localStorage (Gi suffix)")
-		})
-	}
-}
-
-// TestInstanceTypeReconciler_RefreshesOSArch pins that the descriptor refresh writes
-// the InstanceType's spec.OS / spec.Arch. A derived InstanceType is authored carrying
-// os/arch only as schedule labels, yet the Instance webhook and the table read them
-// from the spec, so the reconcile must materialize them there.
-func TestInstanceTypeReconciler_RefreshesOSArch(t *testing.T) {
-	enableInstanceTypeDerivedFromNode(t)
-
-	cases := []struct {
-		name   string
-		key    string
-		flavor *kueue.ResourceFlavor
-	}{
-		{
-			name: "accelerated pool",
-			key:  "nvidia-a10g",
-			flavor: newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 4,
-				accelerated(nodefeature.ManufacturerNVIDIA)),
-		},
-		{
-			name:   "cpu-only pool",
-			key:    "generic",
-			flavor: newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4),
-		},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			name := nodeQueueName(c.key)
-			cli := buildInstanceTypeClient(c.flavor)
-
-			// Author the derived InstanceType, create + align its queue, then refresh
-			// its descriptor spec from the pool.
-			reconcileInstanceTypeN(t, cli, name, 5)
-
-			it := getInstanceType(t, cli, name)
-			require.Equal(t, valueTrue, it.Labels[_InstanceTypeDerivedFromNodeLabel], "authored derived")
-			assert.Equal(t, "linux", it.Spec.OS, "spec.OS refreshed from the pool")
-			assert.Equal(t, "amd64", it.Spec.Arch, "spec.Arch refreshed from the pool")
-		})
-	}
-}
-
-func TestHasReserved(t *testing.T) {
-	reserved := func(total, borrowed string) kueue.ClusterQueueStatus {
-		return kueue.ClusterQueueStatus{
-			FlavorsReservation: []kueue.FlavorUsage{{
-				Name: kueue.ResourceFlavorReference("f"),
-				Resources: []kueue.ResourceUsage{{
-					Name:     core.ResourceCPU,
-					Total:    resource.MustParse(total),
-					Borrowed: resource.MustParse(borrowed),
-				}},
-			}},
-		}
-	}
-
-	cases := []struct {
-		name   string
-		status kueue.ClusterQueueStatus
-		want   bool
-	}{
-		{"empty", kueue.ClusterQueueStatus{}, false},
-		{"reserving workloads", kueue.ClusterQueueStatus{ReservingWorkloads: 1}, true},
-		{"admitted workloads", kueue.ClusterQueueStatus{AdmittedWorkloads: 1}, true},
-		{"pending workloads do not count", kueue.ClusterQueueStatus{PendingWorkloads: 3}, false},
-		{"reserved total", reserved("2", "0"), true},
-		{"borrowed total", reserved("0", "1"), true},
-		{"zero reservation, zero workloads", reserved("0", "0"), false},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			cq := &kueue.ClusterQueue{Status: c.status}
-			assert.Equal(t, c.want, hasReserved(cq))
-		})
-	}
-}
-
-func TestIndexResourceFlavorByNodeQueue(t *testing.T) {
-	cases := []struct {
-		name string
-		rf   *kueue.ResourceFlavor
-		want []string
-	}{
-		{
-			name: "managed flavor feeds its node queue",
-			rf:   newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4),
-			want: []string{nodeQueueName("generic")},
-		},
-		{
-			name: "flavor differing only in count feeds the same queue",
-			rf:   newNodesFlavor("gpustack-generic-linux-amd64-8c", "generic", 8, 8),
-			want: []string{nodeQueueName("generic")},
-		},
-		{
-			name: "flavor without schedule labels is not indexed",
-			rf:   &kueue.ResourceFlavor{ObjectMeta: meta.ObjectMeta{Name: "bare"}},
-			want: nil,
-		},
-		{
-			name: "deleting flavor is not indexed",
-			rf: func() *kueue.ResourceFlavor {
-				rf := newNodesFlavor("gpustack-generic-linux-amd64-4c", "generic", 4, 4)
-				now := meta.Now()
-				rf.DeletionTimestamp = &now
-				rf.Finalizers = []string{"gpustack.ai/test"}
-				return rf
-			}(),
-			want: nil,
-		},
-	}
-
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, indexResourceFlavorByNodeQueue(c.rf))
 		})
 	}
 }

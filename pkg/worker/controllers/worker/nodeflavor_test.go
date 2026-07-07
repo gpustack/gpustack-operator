@@ -15,6 +15,7 @@ import (
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -178,7 +179,7 @@ func TestNodeFlavorReconciler_Reconcile(t *testing.T) {
 			}
 			require.NoError(t, err, "flavor must be created/kept")
 			if c.wantCapacity != "" {
-				_, _, _, capacity := parseResourceFlavorSchedule(got)
+				capacity := parseResourceFlavorCapacity(got)
 				assert.Equal(t, c.wantCapacity, itoa(capacity), "capacity label")
 			}
 		})
@@ -280,6 +281,79 @@ func TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode(t *testing.T) {
 	reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
 	_, err = getResourceFlavor(t, cli, deviceFlavorName(nd))
 	assert.NoError(t, err, "device flavor must still be created")
+}
+
+// TestNodeFlavorReconciler_AuthorsDerivedInstanceType pins that, with
+// instance-type-derived-from-node enabled, syncing a pool's flavor authors the pool's
+// InstanceType: marked derived, stamped with the pool identity (group/acceleratable/os/arch) and
+// the fixed default unit spec chosen by acceleratable-ness — and only ever created, so an
+// existing (admin) type is left untouched. (The off branch is not asserted: the setting caches
+// once enabled in the shared test binary.)
+func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	t.Run("accelerated pool: derived marker, spec identity, 4c/16Gi/100Gi default", func(t *testing.T) {
+		nd := newManagedAccelNode("node-g", 1)
+		cli := buildNodeFlavorClient(nd)
+
+		reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
+
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Name: nodeQueueName("nvidia-a10g")}, it))
+		assert.Equal(t, "true", it.Labels[_InstanceTypeDerivedFromNodeLabel], "marked derived")
+		assert.Equal(t, "nvidia-a10g", it.Spec.Group, "spec carries the pool group")
+		assert.True(t, it.Spec.Acceleratable, "spec marked acceleratable")
+		assert.Equal(t, "linux", it.Spec.OS, "spec os")
+		assert.Equal(t, "amd64", it.Spec.Arch, "spec arch")
+		assert.Equal(t, "4", it.Spec.UnitResources.CPU, "accelerated unit CPU default")
+		assert.Equal(t, "16Gi", it.Spec.UnitResources.RAM, "accelerated unit RAM default")
+		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "unit localStorage default")
+		// The feature-key metadata label is not stamped — it derives from the spec.
+		assert.NotContains(t, it.Labels, featureKeyLabel(true, "nvidia-a10g"))
+	})
+
+	t.Run("cpu-only pool: 1c/2Gi/100Gi default", func(t *testing.T) {
+		nd := newManagedCPUNode("node-0", 4, 16, 32)
+		cli := buildNodeFlavorClient(nd)
+
+		reconcileNodeFlavor(t, cli, cpuFlavorName(nd))
+
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Name: nodeQueueName("generic")}, it))
+		assert.Equal(t, "true", it.Labels[_InstanceTypeDerivedFromNodeLabel], "marked derived")
+		assert.False(t, it.Spec.Acceleratable, "spec not acceleratable")
+		assert.Equal(t, "1", it.Spec.UnitResources.CPU, "cpu-only unit CPU default")
+		assert.Equal(t, "2Gi", it.Spec.UnitResources.RAM, "cpu-only unit RAM default")
+		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "unit localStorage default")
+	})
+
+	t.Run("create-only: an existing InstanceType is left untouched", func(t *testing.T) {
+		nd := newManagedCPUNode("node-0", 4, 16, 32)
+		existing := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: nodeQueueName("generic")},
+			Spec: workercore.InstanceTypeSpec{
+				Group:         "generic",
+				OS:            "linux",
+				Arch:          "amd64",
+				UnitResources: workercore.InstanceTypeUnitResources{CPU: "2", RAM: "16Gi"},
+				LocalStorage:  "128Gi",
+			},
+		}
+		cli := buildNodeFlavorClient(nd, existing)
+
+		reconcileNodeFlavor(t, cli, cpuFlavorName(nd))
+
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Name: nodeQueueName("generic")}, it))
+		assert.Equal(t, "2", it.Spec.UnitResources.CPU, "admin unit spec preserved (create-only)")
+		assert.Equal(t, "16Gi", it.Spec.UnitResources.RAM, "admin unit spec preserved")
+		assert.Equal(t, "128Gi", it.Spec.LocalStorage, "admin unit spec preserved")
+		assert.NotContains(t, it.Labels, _InstanceTypeDerivedFromNodeLabel,
+			"an existing type is not re-marked derived")
+	})
 }
 
 func TestIndexNodeByScheduleFlavor(t *testing.T) {

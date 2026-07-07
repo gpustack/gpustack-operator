@@ -8,10 +8,13 @@ Make the worker `InstanceType` a declarative, admin-authored API that is spec-cl
 is written: its inputs (group, acceleratable, unit resources, local storage, os, arch) become
 required, its sizing (unit resources + local storage) becomes immutable after creation, and a new
 defaulting webhook enriches the remaining descriptor fields from a matching `ResourceFlavor` at
-admission. The queue side is split in two — the `InstanceTypeReconciler` now only owns the backing
-`ClusterQueue`'s lifecycle and labels (plus Devices→status), while a new `NodeQueueReconciler` owns
-the queue's resource groups: it pools the flavors (smallest-node-first), reactivates a drained
-queue when flavors return, and — gated by a new `instance-type-drain-when-no-flavors` setting —
+admission. The queue side is split in two — the `InstanceTypeReconciler` now owns the backing
+`ClusterQueue`'s existence, labels, and isolation (recreating the queue if an admin deletes it under
+a live `InstanceType`), plus Devices→status, while a new `InstanceType`-agnostic `NodeQueueReconciler`
+owns the queue's resource groups and the node-devices `AdmissionCheck` reference: it pools the flavors
+(smallest-node-first), references the check on an accelerated derived queue once it is Active,
+reactivates a drained queue when flavors return, and — gated by a new
+`instance-type-drain-when-no-flavors` setting —
 drains then empties a queue that has lost all its flavors without ever letting Kueue's counters go
 negative. Node flavors gain a per-node `.count` label so a pool binds to one homogeneous batch of
 nodes, and the `ResourceFlavor` notes carry `group`/`cores`. Finally a new list-only
@@ -80,15 +83,20 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
 2. **Immutable sizing.** `ValidateUpdate` rejects any change to `spec.unitResources` or
    `spec.localStorage` (still enforcing the required/well-formed checks). *Accept:* patching either
    is denied with an "immutable" message; patching a mutable field (e.g. a label) succeeds.
-3. **Defaulting webhook enrichment.** A new mutating (defaulting) webhook runs on Create/Update: when
-   `spec.group` is non-empty and the descriptors are still empty, it builds a label selector — the
-   operator-owned (`nodes`) resource-type label plus `(acceleratable, group)→featureKeyLabel`,
-   `(os)→kubernetes.io/os`, `(arch)→kubernetes.io/arch` — lists `ResourceFlavor`s, takes one, and
-   fills the remaining descriptor spec fields (manufacturer, product, family, and — when accelerated
-   — memory, cores, sliceable) from its notes. It is a no-op when `spec.group` is empty, no
-   `ResourceFlavor` matches, or the descriptors are already populated (enrich-once). *Accept:* an
-   `InstanceType` created with only the required inputs comes back with its descriptor fields
-   populated when a matching flavor exists; unchanged when none does or when already populated.
+3. **Defaulting webhook: stamp labels + enrich descriptors.** A new mutating (defaulting) webhook runs
+   on Create/Update. When `spec.group` is non-empty it first stamps the InstanceType's metadata labels
+   from the spec identity — the `(acceleratable, group)→featureKeyLabel` plus
+   `(os)→kubernetes.io/os`, `(arch)→kubernetes.io/arch`, and the `queue-entrance` label
+   (`FormatLocalQueueName(name)`) — pruning a stale feature key left by a group/acceleratable change, so
+   the InstanceType is selectable by the same discriminators its Devices/ResourceFlavors carry and the
+   Pod webhook can reverse-look it up. Then, while the descriptors are still empty, it lists
+   `ResourceFlavor`s by those discriminators (plus the operator-owned `nodes` resource-type label), takes
+   one, and fills the remaining descriptor fields (manufacturer, product, family, and — when accelerated
+   — memory, cores, sliceable) from its notes. Labels are stamped whenever group is set; enrichment is a
+   no-op when no `ResourceFlavor` matches or the descriptors are already populated (enrich-once).
+   *Accept:* an `InstanceType` created with only the required inputs comes back with the schedule +
+   entrance labels stamped and its descriptor fields populated when a matching flavor exists; the
+   descriptors are unchanged when none matches or when already populated.
 4. **NodeFlavor notes + node `.count` label.**
    - The `ResourceFlavor` notes gain `group=${flavor.key}` and `cores=${flavor.cores}` (cores empty
      for a non-accelerated flavor).
@@ -96,31 +104,55 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
      where `${count}` is the node's `status.capacity` CPU rounded up.
    - `ExtractNodeFlavors` reads the CPU flavor's count from that `.count` label (not directly from
      capacity), and every flavor's `NodeLabels` selector includes its `.count` label so the flavor
-     binds only same-count nodes. *Accept:* a `ResourceFlavor` shows `group`/`cores` notes; its
-     `spec.nodeLabels` carries the `.count` selector; the CPU flavor's count equals the ceil of CPU
-     capacity.
-5. **NodeQueueReconciler (quota owner).** A new controller reconciles the operator-owned
-   `ClusterQueue`, driven by `ClusterQueue` and `ResourceFlavor` changes. It lists the pool's
-   `ResourceFlavor`s by the queue's labels, then:
-   - **Flavors present:** sort ascending by count (smallest first); if `StopPolicy != None` **and**
-     the current resource groups are empty, set `StopPolicy = None`; fill the resource groups from
-     the flavors.
+     binds only same-count nodes.
+   - After a flavor is synced, `NodeFlavorReconciler` authors the pool's `InstanceType` (name
+     `gpustack-${key}-${os}-${arch}`, the derived marker + spec identity + fixed default unit spec)
+     when `instance-type-derived-from-node` is enabled — **create-only**: it never updates or deletes
+     an existing type, so admin edits are preserved and the `InstanceTypeReconciler` stays the sole
+     lifecycle owner. *Accept:* a `ResourceFlavor` shows `group`/`cores` notes; its `spec.nodeLabels`
+     carries the `.count` selector; the CPU flavor's count equals the ceil of CPU capacity; a synced
+     pool with no `InstanceType` gets one authored (and an existing one is left untouched).
+5. **NodeQueueReconciler (quota + admission owner).** A new controller reconciles the operator-owned
+   `ClusterQueue`, driven by `ClusterQueue`, `ResourceFlavor`, and node-devices `AdmissionCheck`
+   changes. It is `InstanceType`-agnostic — it converges the queue from the flavors alone and never
+   looks at the owning `InstanceType`. It lists the pool's `ResourceFlavor`s by the queue's labels,
+   then:
+   - **Being deleted (`DeletionTimestamp` set):** drive `StopPolicy = HoldAndDrain` unconditionally so
+     Kueue evicts the admitted workloads (Kueue never evicts on delete by itself), then Kueue's own
+     `ResourceInUse` finalizer drops once the queue is empty and it is removed. Covers both an admin's
+     direct delete and the `InstanceType` teardown's delete.
+   - **Flavors present:** sort ascending by count (smallest first); reference the node-devices
+     `AdmissionCheck` on an accelerated derived queue once the check reports Active (drop it when
+     inactive/absent); if `StopPolicy != None` **and** the current resource groups are empty, set
+     `StopPolicy = None`; fill the resource groups from the flavors.
    - **No flavors, groups still defined:** if any `FlavorsReservation` Total/Borrowed is non-zero,
      set `StopPolicy = HoldAndDrain` **when `instance-type-drain-when-no-flavors` is true**, then
      requeue in 60s; once all reservations are zero, clear the resource groups (empty).
-   *Accept:* the queue's quota tracks the flavors, fills small nodes first, drains-then-empties on
-   flavor loss with no negative counters, and reactivates when flavors return.
+   Reactivation fires only on a queue whose resource groups are already empty, so it never contends
+   with an in-flight drain. *Accept:* the queue's quota tracks the flavors, fills small nodes first,
+   references the node-devices check only while Active, drains-then-empties on flavor loss with no
+   negative counters, reactivates when flavors return, and drains a deleting queue so Kueue removes it.
 6. **New setting.** `instance-type-drain-when-no-flavors` (editable bool, default `true`), read
    per-reconcile. *Accept:* toggling it flips the drain-vs-wait behavior on the next reconcile.
-7. **InstanceTypeReconciler (lifecycle owner), narrowed.** It only creates the backing `ClusterQueue`
-   filling labels (not resource groups), keeps the queue's schedule labels — derived from the
-   `InstanceType` spec identity (group/acceleratable/os/arch) plus the entrance label — converged,
-   stamps a `memory` annotation on the queue sourced from the enriched `InstanceType.spec.memory` (the
-   per-card VRAM the Pod webhook reads), drives the queue through drain-then-delete on `InstanceType`
-   deletion, and syncs the Devices ledger into `InstanceType.status`. It no longer refreshes descriptor
-   spec fields (snapshot at admission) and no longer deletes a derived type for lack of flavors.
-   *Accept:* a queue is created with labels + the memory annotation (no resource groups); deleting an
-   `InstanceType` drains then removes its queue; status still reflects Devices.
+7. **InstanceTypeReconciler (existence + metadata owner), narrowed.** Its core is guaranteeing the
+   name-identical `ClusterQueue` exists and matches the `InstanceType`. It creates the queue with the
+   spec-derived schedule labels — feature key (group/acceleratable) + os/arch, built by
+   `instanceTypeScheduleLabels` (the entrance label lives on the InstanceType now, stamped by the
+   webhook) — and, at creation only, the fixed no-borrow isolation policy written straight into the
+   spec (regardless of derived-from-node); on later reconciles it aligns only those labels (pruning a
+   stale feature key on a group/acceleratable change). The backing `ClusterQueue` carries no `memory`
+   note — the Pod webhook reads per-card VRAM off the `InstanceType` spec. It never
+   fills the resource groups. It watches its `ClusterQueue` for changes: an update refreshes
+   `InstanceType.status` (phase + CPU view) from the queue's quota/conditions, and a deletion under a
+   live `InstanceType` recreates the queue (guards accidental deletion). It authors no InstanceTypes
+   (the `NodeFlavorReconciler` does) and never deletes a derived type for lack of flavors. On
+   `InstanceType` deletion it **deletes the queue and holds its finalizer until the queue is gone** —
+   the `NodeQueueReconciler` drains the deleting queue; it does not drain the queue itself. It computes
+   `InstanceType.status` from the Devices ledger + the queue and no longer refreshes descriptor spec
+   fields (snapshot at admission). *Accept:* a queue is created with schedule labels + isolation (no
+   resource groups); deleting the queue under a live `InstanceType` recreates it; deleting an
+   `InstanceType` deletes its queue and releases the finalizer once gone; status still reflects
+   Devices + queue.
 8. **InstanceTypeFlavor catalog.** A new list-only aggregated resource (`instypeflavor`, cluster-scoped) pulls
    the operator-owned `ResourceFlavor`s (by resource-type label), extracts notes into a spec ordered like `InstanceTypeSpec` — Group,
    Acceleratable, Manufacturer, Product, Family, Memory, Cores, Sliceable — deduplicates identical
@@ -144,6 +176,11 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
   skips it, list-only, no CRD, no controller), mirroring the `InstanceTypeHandler` pattern.
 - The proposed `NodeQueueReconciler` sits next to the existing `NodeQueueEntranceReconciler`
   (LocalQueue owner); the two names are close but the responsibilities are disjoint.
+- Derived `InstanceType`s are never auto-reclaimed. When a pool's nodes all leave, its ResourceFlavor
+  is deleted and the `NodeQueueReconciler` empties the backing queue, but the derived `InstanceType`
+  persists (Inactive, empty) until the admin turns `instance-type-derived-from-node` off or deletes it
+  manually — the operator authors derived types (in `NodeFlavorReconciler`) create-only and never
+  garbage-collects them.
 
 ### Boundaries
 - **Always:** keep both reconcilers idempotent and level-based; read editable settings per-reconcile;
@@ -153,30 +190,37 @@ family / memory / cores), so that I know exactly what to put in a new `InstanceT
   Instance/Pod admission paths; renaming `NodeQueueReconciler`.
 - **Never:** delete an `InstanceType` (derived or admin) merely because its pool lost all flavors;
   let a `ClusterQueue`'s reservation counters go negative; trust a user-writable `LocalQueue` as the
-  VRAM source; write resource groups from the `InstanceTypeReconciler` — the only descriptor it may
-  stamp on the queue is the per-card `memory` annotation (sourced from `it.Spec.Memory`) the Pod
-  webhook depends on.
+  VRAM source (the Pod webhook reverse-looks-up the `InstanceType` by the entrance label and reads
+  `spec.memory`); write resource groups from the `InstanceTypeReconciler`.
 
 ### Risks and Mitigations
-- **Pod webhook VRAM source → the narrowed CQ must still expose per-card VRAM.** → *Resolved (Task 4):*
-  the CQ keeps a `memory` annotation, and the `InstanceTypeReconciler` sources it from the enriched
-  `InstanceType.spec.memory` — so the InstanceType is the source of truth while the Pod webhook stays
-  unchanged (resolve the CQ by the entrance label, read its `memory` annotation; no
-  `LocalQueue → CQ → InstanceType` lookup). Sourcing the annotation from `it.Spec.Memory` is done in
-  the same task that drops `applyDescriptorsFromClusterQueue`, since keeping both would form a circular
-  memory flow (CQ→spec and spec→CQ); doing it earlier breaks the derived-type memory in unit tests
-  (the enriching webhook does not run there).
-- **Two controllers write the same `ClusterQueue` (`InstanceTypeReconciler` owns labels + teardown
-  StopPolicy; `NodeQueueReconciler` owns resource groups + StopPolicy).** → Partition StopPolicy
-  ownership: `NodeQueueReconciler` must ignore a queue whose `InstanceType` is being deleted (has a
-  DeletionTimestamp / is locked for teardown) so it never flips a draining-for-delete queue back to
-  `None`.
+- **Pod webhook VRAM source → where does per-card VRAM come from.** → *Resolved (Task 4):* the
+  `InstanceType.spec.memory` (filled by the defaulting webhook) is the single source of truth. The
+  webhook stamps the `queue-entrance` label on the InstanceType, and the Pod webhook reverse-looks-up
+  the InstanceType by that label (`FormatLocalQueueName` of the workload's `queue-name`) and reads
+  `spec.memory` directly — never trusting the user-writable, namespaced `LocalQueue`, and no
+  `LocalQueue → CQ → InstanceType` hop. (The `ClusterQueue` still carries a `memory` annotation for
+  reference, but nothing reads it.)
+- **Two controllers write the same `ClusterQueue` (`InstanceTypeReconciler` owns existence + labels +
+  isolation; `NodeQueueReconciler` owns resource groups + StopPolicy + AdmissionCheck).** → Partition
+  by field, not by ownership checks: `NodeQueueReconciler` is `InstanceType`-agnostic. On an
+  `InstanceType` delete the `InstanceTypeReconciler` only **deletes** the queue (it never sets the
+  StopPolicy); `NodeQueueReconciler` then sees the `DeletionTimestamp` and drives `HoldAndDrain`.
+  Reactivation fires only on a queue whose resource groups are already empty, so it never contends with
+  an in-flight drain — no InstanceType lookup required.
+- **An admin's accidental `kubectl delete clusterqueue` on a live `InstanceType` evicts running
+  workloads.** → *Accepted by design:* `NodeQueueReconciler`'s unconditional drain-on-delete sets
+  `HoldAndDrain`, Kueue evicts the admitted workloads, the queue is removed, and the
+  `InstanceTypeReconciler` recreates it. The recreate self-heals the queue **config**, not the in-flight
+  workloads: once a CQ carries a `DeletionTimestamp`, Kueue's own finalizer forces drain-to-empty before
+  removal, so the workloads re-queue and re-admit to the recreated queue. Blocking the delete outright
+  would require the operator to hold its own finalizer on the CQ, which we deliberately do not.
 - **`.count`-source switch in `ExtractNodeFlavors` depends on the new node label existing.** → During
   rollout the CPU flavor briefly disappears until `ConstructNodeCapacityLabels` writes the `.count`
   label; eventual-consistency only, no data loss — note it in docs.
-- **Derived-InstanceType authoring must satisfy the new required fields.** → `createDerivedInstanceType`
-  must stamp `spec.group/acceleratable/os/arch` (and unit spec) so its own Create passes validation
-  and the defaulting webhook enriches it.
+- **Derived-InstanceType authoring must satisfy the new required fields.** →
+  `NodeFlavorReconciler.authorDerivedInstanceType` stamps `spec.group/acceleratable/os/arch` (and the
+  fixed unit spec) so its own Create passes validation and the defaulting webhook enriches it.
 - **Empty `resourceGroups` rejected by Kueue v0.17.1.** → *Resolved:* confirmed allowed —
   `validateResourceGroups` (kueue@v0.17.1 `pkg/webhooks/clusterqueue_webhook.go`) is a bare `for range`
   loop with no `minItems`; the only limits are upper bounds (≤256 flavors / covered resources). An
@@ -272,48 +316,62 @@ scheduling chain functional. Each task is TDD (RED → GREEN → suite → `make
     populated (enrich-once). `ValidateCreate` requires group/os/arch non-empty + a well-formed unit
     spec; `ValidateUpdate` rejects any `unitResources`/`localStorage` change (plus the required
     checks). Add the mutating webhook-gen marker.
-  - `pkg/worker/controllers/worker/instancetype.go`: `createDerivedInstanceType` stamps
-    `spec.group/acceleratable/os/arch` (+ unit spec) so its own `Create` passes validation and the
-    defaulting webhook enriches it; keep only the derived-marker label.
+  - Derived-type authoring stamps `spec.group/acceleratable/os/arch` (+ unit spec) so its own `Create`
+    passes validation and the defaulting webhook enriches it; only the derived-marker label is set
+    (Task 4 moves this authoring to `NodeFlavorReconciler.authorDerivedInstanceType`).
   - *Acceptance:* creating an `InstanceType` missing a required input is denied; a complete one is
     admitted with descriptors filled from a matching flavor (unchanged when none matches); patching
     `unitResources`/`localStorage` is denied.
   - *Verify:* webhook unit tests (create-required, update-immutable, default-enriches with a fake RF);
     `make generate` clean; `make lint`. *(The reconciler still fills quota here — a harmless overlap.)*
 
-- [ ] **Task 4 — Split queue ownership: `NodeQueueReconciler` (quota) + narrowed `InstanceTypeReconciler` (lifecycle) + setting; feed the CQ memory annotation from the InstanceType.**
+- [x] **Task 4 — Split queue ownership: `NodeQueueReconciler` (quota + admission + drain) + narrowed `InstanceTypeReconciler` (CQ existence/labels/status) + `NodeFlavorReconciler` derived authoring + label/VRAM move to the webhooks + setting.**
   - `pkg/worker/settings/value.go`: add `InstanceTypeDrainWhenNoFlavors` (editable bool, default
     `true`), read per-reconcile.
-  - `pkg/worker/controllers/worker/nodequeue.go` (new `NodeQueueReconciler`): `For(ClusterQueue)`
-    (operator-owned) + `Watches(ResourceFlavor)` enqueuing the CQs whose schedule labels match the
-    flavor's pool. Reconcile: skip a CQ that is not operator-owned or whose `InstanceType` has a
-    `DeletionTimestamp` (teardown owns StopPolicy then). List the pool's `ResourceFlavor`s by the CQ's
-    schedule labels (feature-key + os + arch) via `MatchingLabels`. **Flavors present:** sort ascending
-    by count, set `StopPolicy=None` when it was stopped with empty groups, fill the resource groups
-    (move `buildResourceGroups`/credit-vs-cpu here, reading acceleratable/manufacturer from the RF
-    notes). **No flavors + groups defined:** when any `FlavorsReservation` Total/Borrowed ≠ 0 →
-    `StopPolicy=HoldAndDrain` if `instance-type-drain-when-no-flavors` is true, then requeue 60s; once
-    all reservations are zero → clear the resource groups (empty). All writes `DeepEqual`-guarded.
-  - `pkg/worker/controllers/worker/instancetype.go`: `ensureClusterQueue` creates/aligns the CQ with
-    **schedule labels built from `it.Spec`** (`featureKeyLabel(it.Spec.Acceleratable, it.Spec.Group)`,
-    os, arch) + the entrance label + **a `memory` annotation sourced from `it.Spec.Memory`** (the
-    InstanceType, enriched by the Default webhook, feeds the per-card VRAM the Pod webhook reads) — no
-    resource groups, StopPolicy no longer converged post-create (owned by NodeQueue + teardown). Drop
-    `applyDescriptorsFromClusterQueue` (snapshot-at-admission; removing it is what makes sourcing the CQ
-    memory from `it.Spec.Memory` non-circular — the reconciler no longer reads descriptors back from the
-    CQ) and the `len(rfList)==0 && derived → Delete` branch. Keep the derived isolation policy (empty
-    cohort, preemption, fungibility, node-devices AdmissionCheck ref), Devices→status (`computeStatus`
-    reads acceleratable from `it.Spec`), and teardown drain-then-delete. Move the flavor-quota helpers
-    to `nodequeue.go`. The **Pod webhook is unchanged** — it still resolves the operator CQ by the
-    entrance label and reads its `memory` annotation (no `LocalQueue → CQ → InstanceType` lookup).
+  - `pkg/worker/webhooks/worker/instancetype.go`: `Default` stamps the InstanceType's metadata labels
+    from the spec identity — `featureKeyLabel(acceleratable, group)`, os, arch, **and the
+    `QueueEntranceLabelKey` (`FormatLocalQueueName(it.Name)`)** — pruning a stale feature key on a
+    group/acceleratable change, then enriches descriptors from a matching `ResourceFlavor`.
+    `QueueEntranceLabelKey` is defined in this (webhook) package.
+  - `pkg/worker/webhooks/worker/pod.go`: `cardVRAMMib` reverse-looks-up the **InstanceType** by the
+    entrance label (`MatchingLabels{QueueEntranceLabelKey: queueName}`) and reads `spec.Memory` — no
+    longer the `ClusterQueue`'s `memory` note.
+  - `pkg/worker/controllers/worker/nodeflavor.go`: after syncing a flavor, `authorDerivedInstanceType`
+    creates the pool's InstanceType (create-only; `AlreadyExists` is a no-op) when
+    `instance-type-derived-from-node` is enabled; the `_InstanceTypeDerivedFromNodeLabel` marker +
+    `defaultUnitResources`/`defaultUnitLocalStorage` live here.
+  - `pkg/worker/controllers/worker/nodequeue.go` (new `NodeQueueReconciler`, `InstanceType`-agnostic):
+    `For(ClusterQueue)` (fires on generation + DeletionTimestamp changes, not status churn) +
+    `Watches(ResourceFlavor)` + `Watches(AdmissionCheck)` (node-devices). Reconcile: **being deleted →
+    `StopPolicy=HoldAndDrain` unconditionally** (Kueue then drains + drops its own finalizer + removes
+    the queue). **Flavors present:** sort ascending by count, reference the node-devices `AdmissionCheck`
+    on an accelerated derived queue once `nodeDevicesCheckActive`, reactivate (`StopPolicy=None`) only
+    when it was stopped with empty groups, fill the resource groups. **No flavors + groups defined:**
+    gated by `instance-type-drain-when-no-flavors`, `HoldAndDrain` + requeue 60s until reservations
+    clear, then empty. Owns `buildResourceGroups`/`parseNodeFlavorCount`/`parseResourceFlavorCapacity`/
+    `hasReserved`/`nodeDevicesCheckActive` + the AdmissionCheck ref. All writes `DeepEqual`-guarded.
+  - `pkg/worker/controllers/worker/instancetype.go`: `ensureClusterQueue` creates (`createClusterQueue`,
+    stamping the spec-derived **schedule labels** — no entrance label — + the fixed no-borrow isolation
+    into the spec at creation) or aligns (schedule labels only, **pruning a stale feature key** on a
+    group/acceleratable change; `applyClusterQueueIsolation` removed). A CQ mid-deletion under a live IT
+    is left to finish and the reconcile **requeues then recreates it once gone**. The CQ `Watches` fires
+    on **all** operator-CQ changes so status stays fresh; a deletion recreates the queue. Drop
+    `syncInstanceType` (inline `computeStatus` + DeepEqual status write). Teardown **deletes the CQ and
+    holds the finalizer until it is gone** (NodeQueue drains it) — no HoldAndDrain here. It authors no
+    InstanceTypes and never deletes for lack of flavors. `enqueueInstanceTypeWhenDevicesChanged` lists
+    InstanceTypes by the Devices' feature keys + os/arch (a node serving CPU + device pools enqueues
+    both), replacing the name-guess helper. The CQ still carries a `memory` note for reference (unread).
   - `pkg/worker/controllers/setup.go`: register `NodeQueueReconciler`.
-  - *Acceptance:* creating an IT yields a labels + memory-annotation CQ; NodeQueue fills the quota
-    smallest-count first; losing all flavors drains-then-empties with no negative counters and
-    reactivates when flavors return; deleting an IT drains then deletes its CQ; status still tracks
-    Devices; toggling the setting flips drain-vs-wait; a sliced memory-mib Pod still folds from the CQ
-    memory annotation.
-  - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|Pod'`, then the full suite + build;
-    `make lint`. **Checkpoint: run the entire test suite and build before continuing.**
+  - *Acceptance:* creating an IT yields a schedule-labels + isolation CQ (no resource groups); the
+    Default webhook stamps the IT's schedule + entrance labels; deleting the CQ under a live IT recreates
+    it; NodeQueue fills quota smallest-count first, references the check only while Active, drains-then-
+    empties on flavor loss with no negative counters, reactivates when flavors return, never reactivates
+    a held queue with quota, and drains a deleting queue so Kueue removes it; NodeFlavor authors a derived
+    IT (create-only); deleting an IT deletes its CQ then releases the finalizer once gone; a Devices
+    change enqueues every InstanceType the node serves; the Pod webhook folds a sliced memory-mib request
+    from `InstanceType.spec.memory`; toggling the setting flips drain-vs-wait.
+  - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|NodeFlavor|Pod'`, then the full
+    suite + build; `make lint`. **Checkpoint: run the entire test suite and build before continuing.**
 
 - [ ] **Task 5 — Docs.** `docs/architecture.md` (webhook enrichment + immutable sizing, `.count`
   pinning, group/cores notes, the queue-ownership split, drain-then-empty + reactivate,
@@ -338,8 +396,11 @@ this code solid enough prior to committing the changes necessary to implement th
 
 #### Prerequisite testing updates
 Rework the existing `InstanceType`/`NodeFlavor`/webhook tests for the new required fields, the
-immutable unit spec, the narrowed reconciler (labels-only CQ, no descriptor refresh, no
-delete-on-no-flavors), and the `.count`-from-label flavor sizing.
+immutable unit spec, the narrowed reconciler (schedule-labels + isolation CQ with no resource groups;
+CQ watch on all changes for status + recreate-on-delete; delete-then-wait teardown; no descriptor
+refresh; no authoring / no delete-on-no-flavors), the webhook stamping the schedule + entrance labels,
+the Pod webhook reading VRAM off `InstanceType.spec.memory`, `NodeFlavorReconciler` authoring the
+derived type, the Devices→InstanceType enqueue by label, and the `.count`-from-label flavor sizing.
 
 #### Unit tests
 Every added unit has table-driven coverage. Per-package targets (`2026-07-07`):
@@ -353,15 +414,19 @@ Every added unit has table-driven coverage. Per-package targets (`2026-07-07`):
   acceleratable=false for generic).
 
 #### Integration tests
-Fake-client controller tests (post-merge names):
-- `TestNodeQueueReconciler_FillsAndSortsByCount`, `_ReactivatesOnFlavorReturn`,
-  `_DrainThenEmptyRespectsReservations`, `_DrainSettingToggle`, `_SkipsDeletingInstanceType`.
-- `TestInstanceTypeReconciler_CreatesLabelsOnlyQueue`, `_TeardownDrainsThenDeletes`,
-  `_NoDeleteOnFlavorLoss`, `_StatusTracksDevices`.
-- `TestInstanceTypeWebhook_DefaultEnriches` (incl. the accel-memory guard), `_RequireOnCreate`,
-  `_ImmutableUnitAndStorage`.
-- `TestInstanceTypeReconciler_QueueCarriesMemoryAnnotation` (fed from `it.Spec.Memory`);
-  `TestPodWebhook_Default` still folds a sliced memory-mib request from the CQ memory annotation.
+Fake-client controller/webhook tests (as implemented):
+- `TestNodeQueueReconciler_FillsAndSortsByCount`, `_AggregatesCapacity`, `_ReactivatesOnFlavorReturn`,
+  `_DrainThenEmptyRespectsReservations`, `_DoesNotReactivateHeldQueueWithQuota`, `_DrainsOnDelete`,
+  `_ReferencesAdmissionCheckWhenActive`; `TestHasReserved`.
+- `TestInstanceTypeReconciler_CreatesClusterQueue` (labels + isolation), `_RecreatesDeletedClusterQueue`,
+  `_RequeuesWhileBackingQueueTerminating`, `_RepointsFeatureKeyOnGroupChange`, `_TeardownFinalizer`,
+  `_TeardownWaitsForQueueRemoval`, `_AlignsClusterQueue` (isolation + no unit-spec note),
+  `_MaterializesStatus`, `_StatusFreshOnLedgerChange`, `_EnqueuesInstanceTypesFromDevices`.
+- `TestNodeFlavorReconciler_AuthorsDerivedInstanceType` (create-only) alongside the flavor-shape tests.
+- `TestInstanceTypeWebhook_DefaultEnriches`, `_DefaultStampsScheduleLabels` (feature key + os/arch +
+  entrance, prune on re-point), `_ValidateCreateRequired`, `_ValidateUpdateImmutable`.
+- `TestPodWebhook_Default` folds a sliced memory-mib request from `InstanceType.spec.memory`
+  (reverse-looked-up by the entrance label).
 
 #### e2e tests
 Via the `gpustack-operator-e2e` skill on a reachable cluster: required-field rejection; enrichment on
@@ -381,9 +446,9 @@ confirmed at the Kueue v0.17.1 source level (no separate e2e gate needed).
 
 ## Open Questions
 Both prior questions were resolved during planning:
-- **Pod webhook VRAM source** → the CQ keeps a `memory` annotation fed from the enriched
-  `InstanceType.spec.memory`; the Pod webhook reads that annotation unchanged (no InstanceType
-  lookup). Wired in Task 4. See Risks.
+- **Pod webhook VRAM source** → the `ClusterQueue` carries no `memory` annotation; the Pod webhook
+  reverse-looks-up the `InstanceType` by the `queue-entrance` label and reads `spec.memory` directly.
+  Wired in Task 4. See Risks.
 - **NodeQueueReconciler flavor lookup** → a **label selector** (feature-key + os + arch), not the
   pool-name index (`IndexingResourceFlavorByNodeQueue`): admin-created `InstanceType` names are
   arbitrary, so only derived types are named `gpustack-${key}-${os}-${arch}` and the name index cannot
