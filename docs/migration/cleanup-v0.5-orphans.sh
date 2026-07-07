@@ -121,7 +121,7 @@ fi
 
 # 6. Report residue and check node-label self-heal.
 echo "[migrate] residue check"
-residue=$(kubectl get resourceflavor,clusterqueue,cohort -o name 2>/dev/null | grep -Ec "$OLD_RE" || true)
+residue=$(kubectl get resourceflavor,clusterqueue,cohort -o name 2>/dev/null | sed 's#.*/##' | grep -Ec "$OLD_RE" || true)
 residue_lq=$(kubectl get localqueue -A -o json 2>/dev/null | python3 -c '
 import json, sys
 print(sum(1 for lq in json.load(sys.stdin).get("items", []) if lq.get("spec", {}).get("clusterQueue", "").startswith("gpustack--")))
