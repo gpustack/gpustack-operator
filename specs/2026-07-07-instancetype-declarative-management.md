@@ -1,6 +1,6 @@
 # Spec: InstanceType Declarative Management
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
