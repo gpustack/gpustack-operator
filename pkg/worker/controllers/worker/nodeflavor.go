@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strconv"
+	"strings"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -232,9 +234,12 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			aRf.Spec = eRf.Spec
 			skip = false
 		}
-		// Update notes.
-		if !systemmeta.EqualResourceTypeAndNotes(aRf, eRf) {
-			systemmeta.NoteResource(aRf, _ResourceFlavorResType, eNotes)
+		// Update notes — replace the operator note set wholesale so a note that is no longer
+		// desired (e.g. the awareness-gated cpuDetail after the setting flips off, or a stale
+		// transitional note) is removed, not just left behind: systemmeta.NoteResource only
+		// adds/overwrites. This also fixes the mirror case — a note that must now appear (cpuDetail
+		// after the setting flips on) is written even though the existing notes are a subset.
+		if syncNodeFlavorNotes(aRf, eNotes) {
 			skip = false
 		}
 		return aRf, skip, nil
@@ -259,6 +264,26 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 	return ctrl.Result{}, nil
+}
+
+// syncNodeFlavorNotes makes the ResourceFlavor's operator notes exactly equal to want, returning
+// whether it changed anything. It replaces the note set wholesale rather than only overwriting:
+// systemmeta.NoteResource cannot delete, so a note that is no longer desired (the awareness-gated
+// cpuDetail once the setting flips off, or a retired transitional note) would otherwise linger, and
+// a subset comparison would also miss a note that must now appear (cpuDetail once the setting flips
+// on). Non-operator annotations (any key without the note prefix) are left untouched.
+func syncNodeFlavorNotes(rf *kueue.ResourceFlavor, want map[string]string) bool {
+	rt, have := systemmeta.DescribeResource(rf)
+	if rt == _ResourceFlavorResType && maps.Equal(have, want) {
+		return false
+	}
+	for k := range rf.Annotations {
+		if strings.HasPrefix(k, systemmeta.ResourceNoteAnnoPrefix) {
+			delete(rf.Annotations, k)
+		}
+	}
+	systemmeta.NoteResource(rf, _ResourceFlavorResType, want)
+	return true
 }
 
 // matchNodeFlavor returns the node's flavor whose name equals flavorName, or nil

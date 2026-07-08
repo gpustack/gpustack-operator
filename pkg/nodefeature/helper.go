@@ -249,8 +249,11 @@ func ExtractGeneralNodeKey(node *core.Node) string {
 	// not collected, the id prefix is empty and the key falls back to "${manufacturer}".
 	var idPrefix string
 	if name := generalFeatureAnnotation(node, "name"); name != "" {
-		// "${manufacturer}-${idPrefix}", limit the key to 63 characters in total.
-		budget := 63 - len(manu) - 1
+		// "${manufacturer}-${idPrefix}", limited so the key plus its longest sibling suffix still
+		// fits a Kubernetes label name segment: the general key is used bare AND with a ".count"/
+		// ".capacity" suffix on the Node and ResourceFlavor, so "<gKey>.capacity" must stay within
+		// 63. 53 = 63 - 1 (the "-" joiner) - len(".capacity").
+		budget := 53 - len(manu)
 		idPrefix = device.NormalizeName(name, manu, budget, true)
 	} else {
 		family := node.Labels[_NFDCPUModelFamilyLabelKey]

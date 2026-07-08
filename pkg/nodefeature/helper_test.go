@@ -2,9 +2,11 @@ package nodefeature
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -381,6 +383,27 @@ func TestExtractGeneralNodeKey(t *testing.T) {
 			assert.Equal(t, cs.expected, actual, "unexpected general node key")
 		})
 	}
+}
+
+// TestExtractGeneralNodeKey_BudgetLeavesRoomForSuffix pins that the general key is truncated with
+// room for its longest sibling suffix: the key is used bare AND with a ".count"/".capacity" suffix
+// as a Kubernetes label NAME segment (the part after "general.feature.gpustack.ai/"), which must
+// stay within 63 characters. A pathologically long CPU name must therefore not fill the whole 63.
+func TestExtractGeneralNodeKey_BudgetLeavesRoomForSuffix(t *testing.T) {
+	node := &core.Node{ObjectMeta: meta.ObjectMeta{
+		Labels: map[string]string{_NFDCPUModelVendorIDLabelKey: "AMD"},
+		Annotations: map[string]string{
+			// A CPU name far longer than the label budget, so truncation is exercised.
+			FeatureLabelPrefix + "cpu-name": strings.Repeat("epyc-9654-96-core-processor-", 4),
+		},
+	}}
+
+	gKey := ExtractGeneralNodeKey(node)
+	require.NotEmpty(t, gKey)
+	assert.True(t, strings.HasPrefix(gKey, "amd-"), "the manufacturer still leads the key: %q", gKey)
+	// The binding constraint is the longest suffixed form, not the bare key.
+	assert.LessOrEqual(t, len(gKey+".capacity"), 63,
+		"the key plus its longest suffix must fit a 63-char label name segment: %q", gKey)
 }
 
 func TestConstructNodeCapacityLabels(t *testing.T) {

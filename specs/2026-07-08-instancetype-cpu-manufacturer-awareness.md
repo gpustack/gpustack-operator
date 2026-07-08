@@ -266,6 +266,16 @@ the same CPU.
   `general.${gKey}=true`). → *Resolved by design:* every selector carries the
   `feature.gpustack.ai/acceleratable` boolean, so the generic pool matches only `=false` flavors — this
   is the reason the boolean label is added.
+- **An aware `generic` CPU pool over-counts real CPU flavors.** When awareness is on, a node with no
+  resolvable CPU identity — or an admin-authored `Acceleratable=false` `InstanceType` left with an empty
+  `GeneralGroup` — yields the `generic` sentinel, whose pool selector carries no `general.` key
+  (`PoolScheduleLabels` emits none for `generic`). So it is `{os, arch, acceleratable=false}` and matches
+  **every** CPU flavor of that os/arch, including real-CPU flavors that already have their own per-`gKey`
+  pool, double-advertising the shared nodes' cores across two queues. → *Accepted (known limitation):* on
+  real hardware NFD always resolves a CPU vendor, so an aware `generic` pool essentially never arises, and
+  the admin-authored path is a misconfiguration. Documented; a follow-up could skip authoring a `generic`
+  CPU pool while aware. Changing the quota selection now is out of scope per the Boundaries' ask-first-on-
+  quota rule.
 - **Collapsed generic pool descriptors are arbitrary** (many `gKey`s, webhook enriches from the first
   matching flavor). → Accepted: the generic pool is intentionally CPU-agnostic; descriptors are
   best-effort and `cpuDetail` is not written when awareness is off. Documented.

@@ -296,7 +296,7 @@ func buildResourceGroups(rfList *kueue.ResourceFlavorList, acceleratable bool, m
 }
 
 // parseNodeFlavorCount extracts the per-node count encoded in a node ResourceFlavor name
-// "gpustack-${key}-${os}-${arch}-${count}{c|d}" (CPU cores for a CPU flavor, device count for
+// "gpustack--${key}-${os}-${arch}-${count}{c|d}" (CPU cores for a CPU flavor, device count for
 // a device flavor); returns 0 when the name lacks the suffix.
 func parseNodeFlavorCount(name string) int64 {
 	i := strings.LastIndex(name, "-")
