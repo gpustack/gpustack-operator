@@ -286,9 +286,9 @@ func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: name},
 		Spec: workercore.InstanceTypeSpec{
 			// The schedule labels are derived from the spec identity, not the metadata labels.
-			Group: key,
-			OS:    "linux",
-			Arch:  "amd64",
+			GeneralGroup: key,
+			OS:           "linux",
+			Arch:         "amd64",
 			// A non-accelerated type's unit is one CPU core.
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "8Gi"},
 			LocalStorage:  "64Gi",
@@ -299,7 +299,10 @@ func TestInstanceTypeReconciler_CreatesClusterQueue(t *testing.T) {
 
 	cq := new(kueue.ClusterQueue)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, cq))
-	assert.Equal(t, "true", cq.Labels[featureKeyLabel(false, key)], "queue carries the feature key")
+	// Unaware (the unit binary default): a generic pool collapses to the acceleratable=false
+	// discriminator, carrying no general.* key.
+	assert.Equal(t, "false", cq.Labels[nodefeature.NodeAcceleratableLabelKey], "queue carries the acceleratable=false discriminator")
+	assert.NotContains(t, cq.Labels, featureKeyLabel(false, key), "collapsed pool carries no general key")
 	require.NotNil(t, cq.Spec.StopPolicy)
 	assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "created active (StopPolicy None)")
 	assert.Empty(t, cq.Spec.ResourceGroups, "no resource groups (the NodeQueueReconciler owns the quota)")
@@ -332,7 +335,7 @@ func TestInstanceTypeReconciler_RecreatesDeletedClusterQueue(t *testing.T) {
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: name},
 		Spec: workercore.InstanceTypeSpec{
-			Group:         key,
+			GeneralGroup:  key,
 			OS:            "linux",
 			Arch:          "amd64",
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
@@ -356,15 +359,17 @@ func TestInstanceTypeReconciler_RecreatesDeletedClusterQueue(t *testing.T) {
 }
 
 // TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange pins that changing an InstanceType's
-// group (mutable — only unitResources/localStorage are frozen on update) re-points its queue's
-// feature-key label instead of leaving the stale one. A leftover key would make the flavor and
-// device selectors (which AND every feature-key label on the queue) match no pool and strand it.
+// accelerator group (mutable — only unitResources/localStorage are frozen on update) re-points its
+// queue's feature-key label instead of leaving the stale one. A leftover key would make the flavor
+// and device selectors (which AND every feature-key label on the queue) match no pool and strand
+// it. (Accelerated groups always surface an acceleratable.* key regardless of awareness, so this
+// exercises the prune deterministically in the unit binary.)
 func TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange(t *testing.T) {
-	name := "gpustack-generic-linux-amd64"
+	name := "gpustack--nvidia-a10g-linux-amd64"
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: name},
 		Spec: workercore.InstanceTypeSpec{
-			Group: "generic", OS: "linux", Arch: "amd64",
+			AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
 			LocalStorage:  "100Gi",
 		},
@@ -374,18 +379,18 @@ func TestInstanceTypeReconciler_RepointsFeatureKeyOnGroupChange(t *testing.T) {
 
 	cq, err := getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	require.Equal(t, "true", cq.Labels[featureKeyLabel(false, "generic")], "initial feature key")
+	require.Equal(t, "true", cq.Labels[featureKeyLabel(true, "nvidia-a10g")], "initial feature key")
 
-	// Admin re-points the group (group is not frozen by the update webhook).
+	// Admin re-points the accelerator group (group is not frozen by the update webhook).
 	got := getInstanceType(t, cli, name)
-	got.Spec.Group = "generic-v2"
+	got.Spec.AcceleratorGroup = "nvidia-a10g-v2"
 	require.NoError(t, cli.Update(context.Background(), got))
 	reconcileInstanceTypeN(t, cli, name, 2)
 
 	cq, err = getClusterQueue(t, cli, name)
 	require.NoError(t, err)
-	assert.Equal(t, "true", cq.Labels[featureKeyLabel(false, "generic-v2")], "feature key re-pointed")
-	assert.NotContains(t, cq.Labels, featureKeyLabel(false, "generic"), "stale feature key pruned")
+	assert.Equal(t, "true", cq.Labels[featureKeyLabel(true, "nvidia-a10g-v2")], "feature key re-pointed")
+	assert.NotContains(t, cq.Labels, featureKeyLabel(true, "nvidia-a10g"), "stale feature key pruned")
 }
 
 // TestInstanceTypeReconciler_RequeuesWhileBackingQueueTerminating pins that a backing queue
@@ -399,7 +404,7 @@ func TestInstanceTypeReconciler_RequeuesWhileBackingQueueTerminating(t *testing.
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
 		Spec: workercore.InstanceTypeSpec{
-			Group: key, OS: "linux", Arch: "amd64",
+			GeneralGroup: key, OS: "linux", Arch: "amd64",
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
 			LocalStorage:  "100Gi",
 		},
@@ -454,7 +459,7 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			Group:                   key,
+			AcceleratorGroup:        key,
 			Acceleratable:           true,
 			OS:                      "linux",
 			Arch:                    "amd64",
@@ -509,7 +514,7 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			Group:                   key,
+			AcceleratorGroup:        key,
 			Acceleratable:           true,
 			OS:                      "linux",
 			Arch:                    "amd64",
@@ -665,10 +670,9 @@ func accelerated(manufacturer string) flavorOpt {
 }
 
 // newNodesFlavor builds a "nodes" ResourceFlavor carrying the schedule labels the
-// reconciler reads (the feature key, kubernetes.io/os|arch, and the key's
-// .count/.capacity siblings) and the per-flavor notes. Its name is
-// "gpustack-${key}-linux-amd64-${count}{c|d}", so it feeds the pool
-// "gpustack-${key}-linux-amd64"; the device ("d") suffix is used when accelerated.
+// reconciler reads (the feature key, the generic-vs-accelerated boolean, kubernetes.io/os|arch,
+// and the key's .count/.capacity siblings) and the per-flavor notes. The device ("d") suffix is
+// used when accelerated.
 func newNodesFlavor(name, key string, count, capacity int64, opts ...flavorOpt) *kueue.ResourceFlavor {
 	notes := map[string]string{
 		"acceleratable": "false",
@@ -680,14 +684,16 @@ func newNodesFlavor(name, key string, count, capacity int64, opts ...flavorOpt) 
 	for _, o := range opts {
 		o(notes)
 	}
-	keyLabel := featureKeyLabel(notes["acceleratable"] == "true", key)
+	acceleratable := notes["acceleratable"] == "true"
+	keyLabel := featureKeyLabel(acceleratable, key)
 	rf := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				keyLabel:             "true",
-				core.LabelOSStable:   "linux",
-				core.LabelArchStable: "amd64",
+				keyLabel:                                      "true",
+				nodefeature.NodeAcceleratableLabelKey:         notes["acceleratable"],
+				core.LabelOSStable:                            "linux",
+				core.LabelArchStable:                          "amd64",
 				keyLabel + _ResourceFlavorCountLabelSuffix:    itoa(count),
 				keyLabel + _ResourceFlavorCapacityLabelSuffix: itoa(capacity),
 			},
@@ -697,10 +703,12 @@ func newNodesFlavor(name, key string, count, capacity int64, opts ...flavorOpt) 
 	return rf
 }
 
-// nodeQueueName is the pool (ClusterQueue / InstanceType) name a flavor with the given
-// key feeds.
+// nodeQueueName is the pool (ClusterQueue / InstanceType) name a flavor with the given key feeds
+// when CPU-manufacturer awareness is off (the unit binary default): a generic CPU pool collapses
+// under "generic" and an accelerated pool under its accelerator key, both named
+// "gpustack--${key}-linux-amd64".
 func nodeQueueName(key string) string {
-	return fmt.Sprintf("gpustack-%s-linux-amd64", key)
+	return fmt.Sprintf("gpustack--%s-linux-amd64", key)
 }
 
 func getClusterQueue(t *testing.T, cli ctrlcli.Client, name string) (*kueue.ClusterQueue, error) {
@@ -771,16 +779,21 @@ func TestInstanceTypeReconciler_AlignsClusterQueue(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			name := nodeQueueName(c.key)
+			spec := workercore.InstanceTypeSpec{
+				Acceleratable: c.acceleratable,
+				OS:            "linux",
+				Arch:          "amd64",
+				UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+				LocalStorage:  "100Gi",
+			}
+			if c.acceleratable {
+				spec.AcceleratorGroup = c.key
+			} else {
+				spec.GeneralGroup = c.key
+			}
 			it := &workercore.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: name},
-				Spec: workercore.InstanceTypeSpec{
-					Group:         c.key,
-					Acceleratable: c.acceleratable,
-					OS:            "linux",
-					Arch:          "amd64",
-					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
-					LocalStorage:  "100Gi",
-				},
+				Spec:       spec,
 			}
 			cli := buildInstanceTypeClient(it)
 

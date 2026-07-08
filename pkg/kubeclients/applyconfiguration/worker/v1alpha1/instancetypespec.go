@@ -7,8 +7,10 @@ package v1alpha1
 //
 // InstanceTypeSpec defines the desired spec of InstanceType.
 type InstanceTypeSpecApplyConfiguration struct {
-	// Group indicates the group of the InstanceType.
-	Group *string `json:"group,omitempty"`
+	// AcceleratorGroup is the accelerator group (the acceleratable node key) of the
+	// InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
+	// onto and is required by the validating webhook when Acceleratable is true.
+	AcceleratorGroup *string `json:"acceleratorGroup,omitempty"`
 	// Acceleratable indicates whether the InstanceType is acceleratable.
 	Acceleratable *bool `json:"acceleratable,omitempty"`
 	// Manufacturer is the name of the InstanceType manufacturer.
@@ -40,6 +42,11 @@ type InstanceTypeSpecApplyConfiguration struct {
 	// by the validating webhook, and is immutable after creation; a derived InstanceType is
 	// stamped with the fixed default.
 	LocalStorage *string `json:"localStorage,omitempty"`
+	// GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+	// "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+	GeneralGroup *string `json:"generalGroup,omitempty"`
 }
 
 // InstanceTypeSpecApplyConfiguration constructs a declarative configuration of the InstanceTypeSpec type for use with
@@ -48,11 +55,11 @@ func InstanceTypeSpec() *InstanceTypeSpecApplyConfiguration {
 	return &InstanceTypeSpecApplyConfiguration{}
 }
 
-// WithGroup sets the Group field in the declarative configuration to the given value
+// WithAcceleratorGroup sets the AcceleratorGroup field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Group field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithGroup(value string) *InstanceTypeSpecApplyConfiguration {
-	b.Group = &value
+// If called multiple times, the AcceleratorGroup field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithAcceleratorGroup(value string) *InstanceTypeSpecApplyConfiguration {
+	b.AcceleratorGroup = &value
 	return b
 }
 
@@ -221,5 +228,13 @@ func (b *InstanceTypeSpecApplyConfiguration) WithUnitResources(value *InstanceTy
 // If called multiple times, the LocalStorage field is set to the value of the last call.
 func (b *InstanceTypeSpecApplyConfiguration) WithLocalStorage(value string) *InstanceTypeSpecApplyConfiguration {
 	b.LocalStorage = &value
+	return b
+}
+
+// WithGeneralGroup sets the GeneralGroup field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the GeneralGroup field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithGeneralGroup(value string) *InstanceTypeSpecApplyConfiguration {
+	b.GeneralGroup = &value
 	return b
 }

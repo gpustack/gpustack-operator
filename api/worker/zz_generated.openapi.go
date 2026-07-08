@@ -3498,10 +3498,9 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 				Description: "InstanceTypeSpec defines the desired spec of InstanceType.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"group": {
+					"acceleratorGroup": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Group indicates the group of the InstanceType.",
-							Default:     "",
+							Description: "AcceleratorGroup is the accelerator group (the acceleratable node key) of the InstanceType, e.g. \"nvidia-a10g\". It selects the accelerator pool the type schedules onto and is required by the validating webhook when Acceleratable is true.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -3657,8 +3656,15 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
+					"generalGroup": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g. \"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The mutating webhook defaults an empty value to \"generic\"; it participates as a scheduling discriminator only when instance-type-aware-cpu-manufacturer is enabled.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
-				Required: []string{"group", "acceleratable", "os", "arch", "unitResources", "localStorage"},
+				Required: []string{"acceleratable", "os", "arch", "unitResources", "localStorage"},
 			},
 		},
 		Dependencies: []string{

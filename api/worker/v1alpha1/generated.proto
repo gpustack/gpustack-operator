@@ -550,8 +550,10 @@ message InstanceTypeResource {
 
 // InstanceTypeSpec defines the desired spec of InstanceType.
 message InstanceTypeSpec {
-  // Group indicates the group of the InstanceType.
-  optional string group = 1;
+  // AcceleratorGroup is the accelerator group (the acceleratable node key) of the
+  // InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
+  // onto and is required by the validating webhook when Acceleratable is true.
+  optional string acceleratorGroup = 1;
 
   // Acceleratable indicates whether the InstanceType is acceleratable.
   optional bool acceleratable = 2;
@@ -593,6 +595,12 @@ message InstanceTypeSpec {
   // by the validating webhook, and is immutable after creation; a derived InstanceType is
   // stamped with the fixed default.
   optional string localStorage = 11;
+
+  // GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+  // "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+  // mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+  // discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+  optional string generalGroup = 12;
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.

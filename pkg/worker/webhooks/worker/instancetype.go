@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 
-	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
@@ -19,6 +18,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/webhook"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 // QueueEntranceLabelKey, on an InstanceType, records the name of the namespaced LocalQueue that
@@ -94,38 +94,44 @@ func (r *InstanceTypeWebhook) ValidateDelete(_ context.Context, _ runtime.Object
 func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	it := obj.(*workercore.InstanceType)
 
-	// Skip defaulting when group is empty, leaving the admin's spec intact.
-	// The validating webhook will reject the create/update when group is empty.
-	if it.Spec.Group == "" {
+	// Default the CPU group to the generic sentinel so a pool collapses without the admin
+	// setting it; a real CPU group only matters when awareness is on.
+	if it.Spec.GeneralGroup == "" {
+		it.Spec.GeneralGroup = nodefeature.GeneralGroupGeneric
+	}
+	// An accelerated type needs an accelerator group to have a pool to schedule onto; leave it
+	// for the validating webhook to reject rather than stamping degenerate labels.
+	if it.Spec.Acceleratable && it.Spec.AcceleratorGroup == "" {
 		return nil
 	}
 
-	// The pool's feature key from the spec identity.
-	featureKey := nodefeature.GeneralFeatureLabelPrefix + it.Spec.Group
-	if it.Spec.Acceleratable {
-		featureKey = nodefeature.AcceleratableFeatureLabelPrefix + it.Spec.Group
-	}
+	// The pool's schedule labels from the spec identity and the awareness setting. Read the
+	// setting here (the worker process carries the local settings indexer); validation stays
+	// setting-independent.
+	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	sched := nodefeature.PoolScheduleLabels(
+		it.Spec.Acceleratable, aware,
+		it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
+		it.Spec.OS, it.Spec.Arch)
 
-	// Stamp the pool's schedule labels on the InstanceType so it is selectable by the same
-	// (feature-key, os, arch) discriminators its Devices and ResourceFlavors carry. Drop a stale
-	// feature key left by a group/acceleratable change — its key varies, while os/arch keys are
-	// fixed and simply overwritten.
+	// Stamp the schedule labels on the InstanceType so it is selectable by the same
+	// discriminators its Devices and ResourceFlavors carry. Drop a stale feature key left by a
+	// group/acceleratable change — its key varies, while the os/arch and the acceleratable
+	// boolean have fixed keys and are simply overwritten.
 	if it.Labels == nil {
-		it.Labels = make(map[string]string)
+		it.Labels = make(map[string]string, len(sched)+1)
 	}
 	for k := range it.Labels {
-		if k != featureKey &&
-			(strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) ||
-				strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix)) {
+		if _, want := sched[k]; want {
+			continue
+		}
+		if strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) ||
+			strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix) {
 			delete(it.Labels, k)
 		}
 	}
-	it.Labels[featureKey] = "true"
-	if it.Spec.OS != "" {
-		it.Labels[core.LabelOSStable] = it.Spec.OS
-	}
-	if it.Spec.Arch != "" {
-		it.Labels[core.LabelArchStable] = it.Spec.Arch
+	for k, v := range sched {
+		it.Labels[k] = v
 	}
 	// Advertise the fronting LocalQueue name so the Pod webhook reverse-looks-up this
 	// InstanceType for the authoritative per-card VRAM (spec.memory).
@@ -136,12 +142,8 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 	// the Pod webhook reads), so a type already carrying its VRAM is treated as populated.
 	if it.Spec.Manufacturer == "" && it.Spec.Product == "" && (!it.Spec.Acceleratable || it.Spec.Memory == "") {
 		lbs := systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels]("nodes")
-		lbs[featureKey] = "true"
-		if it.Spec.OS != "" {
-			lbs[core.LabelOSStable] = it.Spec.OS
-		}
-		if it.Spec.Arch != "" {
-			lbs[core.LabelArchStable] = it.Spec.Arch
+		for k, v := range sched {
+			lbs[k] = v
 		}
 
 		rfList := new(kueue.ResourceFlavorList)
@@ -172,12 +174,16 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 	return nil
 }
 
-// validateInstanceTypeSpec collects the required-input errors: group/os/arch non-empty plus
-// the unit-spec well-formedness checks.
+// validateInstanceTypeSpec collects the required-input errors: an accelerator group when
+// accelerated, os/arch non-empty, plus the unit-spec well-formedness checks. It reads no
+// editable setting — validation is independent of instance-type-aware-cpu-manufacturer; the
+// mutating webhook defaults an empty GeneralGroup to "generic", so GeneralGroup is never
+// required here.
 func validateInstanceTypeSpec(it *workercore.InstanceType) field.ErrorList {
 	var errs field.ErrorList
-	if it.Spec.Group == "" {
-		errs = append(errs, field.Required(field.NewPath("spec", "group"), "must be specified"))
+	if it.Spec.Acceleratable && it.Spec.AcceleratorGroup == "" {
+		errs = append(errs, field.Required(field.NewPath("spec", "acceleratorGroup"),
+			"must be specified when acceleratable is true"))
 	}
 	if it.Spec.OS == "" {
 		errs = append(errs, field.Required(field.NewPath("spec", "os"), "must be specified"))

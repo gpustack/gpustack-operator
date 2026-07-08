@@ -22,9 +22,9 @@ import (
 // validity with the other required fields satisfied.
 func newInstanceType(cpu, ram, localStorage string) *workercore.InstanceType {
 	return &workercore.InstanceType{
-		ObjectMeta: meta.ObjectMeta{Name: "gpustack-generic-linux-amd64"},
+		ObjectMeta: meta.ObjectMeta{Name: "gpustack--generic-linux-amd64"},
 		Spec: workercore.InstanceTypeSpec{
-			Group:         "generic",
+			GeneralGroup:  "generic",
 			OS:            "linux",
 			Arch:          "amd64",
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: cpu, RAM: ram},
@@ -68,13 +68,18 @@ func TestInstanceTypeWebhook_ValidateUnitSpec(t *testing.T) {
 	}
 }
 
-// TestInstanceTypeWebhook_ValidateCreateRequired pins that group/os/arch are required inputs.
+// TestInstanceTypeWebhook_ValidateCreateRequired pins the required inputs: os/arch always, and
+// acceleratorGroup only when acceleratable. A non-accelerated type needs no group (the mutating
+// webhook defaults GeneralGroup to "generic"), so an empty group is not rejected here.
 func TestInstanceTypeWebhook_ValidateCreateRequired(t *testing.T) {
 	cases := []struct {
 		name   string
 		mutate func(it *workercore.InstanceType)
 	}{
-		{"missing group", func(it *workercore.InstanceType) { it.Spec.Group = "" }},
+		{"missing acceleratorGroup when acceleratable", func(it *workercore.InstanceType) {
+			it.Spec.Acceleratable = true
+			it.Spec.AcceleratorGroup = ""
+		}},
 		{"missing os", func(it *workercore.InstanceType) { it.Spec.OS = "" }},
 		{"missing arch", func(it *workercore.InstanceType) { it.Spec.Arch = "" }},
 	}
@@ -130,8 +135,9 @@ func TestInstanceTypeWebhook_ValidateUpdateImmutable(t *testing.T) {
 func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 	accelRF := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
-			Name: "gpustack-nvidia-a10g-linux-amd64-2d",
+			Name: "gpustack--generic--nvidia-a10g-linux-amd64-2d",
 			Labels: map[string]string{
+				nodefeature.NodeAcceleratableLabelKey:                       "true",
 				nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g": "true",
 				core.LabelOSStable:   "linux",
 				core.LabelArchStable: "amd64",
@@ -149,7 +155,7 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
 			Spec: workercore.InstanceTypeSpec{
-				Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
+				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
 			},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
@@ -161,15 +167,15 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		assert.True(t, it.Spec.Sliceable)
 	})
 
-	t.Run("empty group is a no-op", func(t *testing.T) {
+	t.Run("accelerated type without accelerator group is a no-op", func(t *testing.T) {
 		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: true}}
 		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Empty(t, it.Spec.Manufacturer, "no flavor is queried without a group")
+		assert.Empty(t, it.Spec.Manufacturer, "no flavor is queried without an accelerator group")
 	})
 
 	t.Run("no matching flavor leaves the spec intact", func(t *testing.T) {
 		it := &workercore.InstanceType{
-			Spec: workercore.InstanceTypeSpec{Group: "nvidia-h100", Acceleratable: true, OS: "linux", Arch: "amd64"},
+			Spec: workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-h100", Acceleratable: true, OS: "linux", Arch: "amd64"},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
 		assert.Empty(t, it.Spec.Manufacturer, "an unmatched group enriches nothing")
@@ -179,7 +185,7 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: "preset"},
 			Spec: workercore.InstanceTypeSpec{
-				Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
+				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
 				Manufacturer: "preset-manu", Product: "Preset Card",
 			},
 		}
@@ -193,7 +199,7 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: "preset-mem"},
 			Spec: workercore.InstanceTypeSpec{
-				Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
+				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
 			},
 		}
 		it.Spec.Memory = "12Gi" // an accel type with VRAM present is treated as populated
@@ -204,32 +210,36 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 }
 
 // TestInstanceTypeWebhook_DefaultStampsScheduleLabels pins that Default stamps the pool's
-// schedule labels (feature key + kubernetes.io/os|arch) on the InstanceType from its spec
-// identity, and prunes a stale feature key when the group/acceleratable-ness changes.
+// schedule labels (the acceleratable boolean, the feature keys, kubernetes.io/os|arch) on the
+// InstanceType from its spec identity, and prunes a stale feature key when the
+// group/acceleratable-ness changes. The unit binary resolves instance-type-aware-cpu-manufacturer
+// to false, so a non-accelerated pool collapses (no general.* key, just acceleratable=false).
 func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build() // no flavor: labels still stamped
 	wh := &InstanceTypeWebhook{Client: cli}
 
-	t.Run("accelerated type gets the acceleratable feature key + os/arch", func(t *testing.T) {
+	t.Run("accelerated type gets the acceleratable feature key + boolean + os/arch", func(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
-			Spec:       workercore.InstanceTypeSpec{Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
+			Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
 		assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"], "accelerated feature key")
+		assert.Equal(t, "true", it.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable=true discriminator")
 		assert.Equal(t, "linux", it.Labels[core.LabelOSStable])
 		assert.Equal(t, "amd64", it.Labels[core.LabelArchStable])
 		assert.Equal(t, nodefeature.FormatLocalQueueName("my-a10g"), it.Labels[QueueEntranceLabelKey],
 			"entrance label advertises the fronting LocalQueue name")
 	})
 
-	t.Run("cpu-only type gets the general feature key", func(t *testing.T) {
+	t.Run("cpu-only type collapses to the acceleratable=false discriminator (unaware)", func(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
-			Spec:       workercore.InstanceTypeSpec{Group: "generic", OS: "linux", Arch: "amd64"},
+			Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64"},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "true", it.Labels[nodefeature.GeneralFeatureLabelPrefix+"generic"], "general feature key")
+		assert.Equal(t, "false", it.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable=false discriminator")
+		assert.NotContains(t, it.Labels, nodefeature.GeneralFeatureLabelPrefix+"generic", "no general key when unaware/collapsed")
 		assert.NotContains(t, it.Labels, nodefeature.AcceleratableFeatureLabelPrefix+"generic")
 	})
 
@@ -237,12 +247,12 @@ func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{
 				Name:   "repoint",
-				Labels: map[string]string{nodefeature.GeneralFeatureLabelPrefix + "generic": "true"}, // prior identity
+				Labels: map[string]string{nodefeature.GeneralFeatureLabelPrefix + "amd-epyc-7763": "true"}, // prior identity
 			},
-			Spec: workercore.InstanceTypeSpec{Group: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
+			Spec: workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
 		assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"], "new feature key stamped")
-		assert.NotContains(t, it.Labels, nodefeature.GeneralFeatureLabelPrefix+"generic", "stale feature key pruned")
+		assert.NotContains(t, it.Labels, nodefeature.GeneralFeatureLabelPrefix+"amd-epyc-7763", "stale feature key pruned")
 	})
 }

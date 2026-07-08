@@ -151,7 +151,7 @@ func (r *InstanceTypeReconciler) ensureClusterQueue(
 
 	// Align the existing queue's metadata only — the isolation is written once at creation and
 	// the NodeQueueReconciler owns the quota.
-	eLabels := instanceTypeScheduleLabels(it)
+	eLabels := instanceTypeScheduleLabels(ctx, it)
 	changed := !systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
 	// Drop a stale feature-key label left by a group/acceleratable change (only os/arch keep a
 	// fixed key, so a plain merge would overwrite them but leave the old feature key). The flavor
@@ -200,7 +200,7 @@ func (r *InstanceTypeReconciler) createClusterQueue(
 	cq := &kueue.ClusterQueue{
 		ObjectMeta: meta.ObjectMeta{
 			Name:   it.Name,
-			Labels: instanceTypeScheduleLabels(it),
+			Labels: instanceTypeScheduleLabels(ctx, it),
 		},
 		Spec: kueue.ClusterQueueSpec{
 			NamespaceSelector: &meta.LabelSelector{},
@@ -307,22 +307,17 @@ func (r *InstanceTypeReconciler) computeStatus(
 }
 
 // instanceTypeScheduleLabels builds the schedule discriminator labels stamped on the backing
-// queue from the InstanceType spec identity: the feature key (from the spec group +
-// acceleratable-ness) plus kubernetes.io/os|arch, which reverse-look-up the queue's
-// ResourceFlavors and Devices. They are derived from the spec (admin-authored or derived), not
+// queue from the InstanceType spec identity and the CPU-manufacturer awareness setting (read
+// per-reconcile): the acceleratable boolean, the accelerator key (when accelerated), the CPU
+// key (only when aware), plus kubernetes.io/os|arch. They reverse-look-up the queue's
+// ResourceFlavors and Devices, and are derived from the spec (admin-authored or derived), not
 // the metadata labels, so an admin who sets only the spec still gets a correct queue.
-func instanceTypeScheduleLabels(it *workercore.InstanceType) map[string]string {
-	out := make(map[string]string, 3)
-	if it.Spec.Group != "" {
-		out[featureKeyLabel(it.Spec.Acceleratable, it.Spec.Group)] = "true"
-	}
-	if it.Spec.OS != "" {
-		out[core.LabelOSStable] = it.Spec.OS
-	}
-	if it.Spec.Arch != "" {
-		out[core.LabelArchStable] = it.Spec.Arch
-	}
-	return out
+func instanceTypeScheduleLabels(ctx context.Context, it *workercore.InstanceType) map[string]string {
+	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	return nodefeature.PoolScheduleLabels(
+		it.Spec.Acceleratable, aware,
+		it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
+		it.Spec.OS, it.Spec.Arch)
 }
 
 // listFlavorPoolDevices reads the Devices ledgers of every managed node backing the
