@@ -68,14 +68,15 @@ spec:
   features: {}
 EOF
 
-# 2. Wait for the derived sliceable InstanceType (name gpustack-${AKEY}-<os>-<arch>).
+# 2. Wait for the derived sliceable InstanceType (name gpustack--${AKEY}-<os>-<arch> when
+#    CPU-manufacturer awareness is off).
 IT=""
 for _ in $(seq 1 40); do
   IT=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); n=it['metadata']['name']
-    if n.startswith('gpustack-${AKEY}-') and s.get('acceleratable') and s.get('sliceable'):
+    if n.startswith('gpustack--${AKEY}-') and s.get('acceleratable') and s.get('sliceable'):
         print(n); break
 " 2>/dev/null)
   [ -n "$IT" ] && break

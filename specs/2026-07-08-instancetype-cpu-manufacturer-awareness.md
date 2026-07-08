@@ -477,10 +477,24 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
   is left as-is. *Verify:* the `settings.md#online-adjustable-settings` anchor resolves; wording matches
   shipped behavior. **— Done.**
 
-- [ ] **Task 6 — E2E cases.** Via the `gpustack-operator-e2e` skill: flavor naming (`gpustack--${gKey}…`);
-  toggling `instance-type-aware-cpu-manufacturer` reshapes the queues/types (collapse ↔ split);
-  `cpuDetail` visible on the flavor/InstanceType when awareness is on; `InstanceTypeFlavor` list per
-  setting. Update `SKILL.md` + references. *Verify:* `bash -n` each case; `chmod +x` new cases.
+- [x] **Task 6 — E2E cases.** Via the `gpustack-operator-e2e` skill: added `case-18` — the CPU
+  `ResourceFlavor` is the finest double-dash grain (`gpustack--${gKey}…-${count}c`) and always carries
+  the `cpuDetail` note; toggling `instance-type-aware-cpu-manufacturer` reshapes the `InstanceTypeFlavor`
+  catalog (collapse to one `gpustack--generic` row ↔ split to a per-CPU `gpustack--${gKey}` row) without
+  rewriting flavors, and its trap restores the setting + removes any derived type the aware window
+  created. Also reconciled the existing cases the rename/collapse broke (found while building):
+  case-4/6/12 to the double-dash accelerated derived name; case-2/3 to locate the CPU flavor by its
+  `-${count}c` suffix (it is no longer named after the collapsed `InstanceType`); case-16/17 to
+  `generalGroup`/`acceleratorGroup` (case-17's admission contract now: an accelerated type missing
+  `acceleratorGroup` is rejected, `generalGroup` is defaulted not required, and the awareness-off stamp
+  is the `acceleratable` boolean + os/arch, not a CPU key). Added `case-19` (awareness on → the
+  accelerated type splits by CPU carrying the real GPU descriptors + folded `spec.cpu`, and a real GPU
+  Instance runs on it) and `case-20` (sibling InstanceTypes on one pool stay status-consistent —
+  `enqueueInstanceTypeWhenDevicesChanged`), both real-hardware + auto-skipping. Updated `SKILL.md` (case
+  rows + locked-title prose + the baseline-restore case contract) and `references/` — a new
+  `packaged-image-deploy.md` (the `make package` image-ref ↔ chart-values contract + the remote-builder
+  mirror procedure) and a `troubleshooting.md` accelerator-detection guard. *Verify:* `bash -n` each
+  case (all 20 green); `chmod +x` case-18/19/20. **— Done.**
 
 - [ ] **Task 7 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
   builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`, published to

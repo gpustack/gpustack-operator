@@ -46,7 +46,8 @@ The work is split into shared phase scripts and numbered, self-contained cases:
   `assert-core.sh <NS>`, `teardown.sh <NS>` (self-contained cleanup; mirrors the chart's `cleanup.sh`).
 - `cases/case-N.sh <NS>` — one numbered scenario each, ending in a `STATUS | CHECK | OBJECT` table and
   exiting non-zero on any FAIL.
-- `references/` — `drain-recycle.md` (per-case rationale + mock recipes), shared
+- `references/` — `drain-recycle.md` (per-case rationale + mock recipes), `packaged-image-deploy.md`
+  (the `make package` image-ref ↔ chart-values contract for deploying a registry-pushed image), shared
   `../_e2e-lib/references/orchestration.md` (the multi-specialist flow), and shared
   `../_e2e-lib/references/troubleshooting.md`.
 
@@ -83,6 +84,19 @@ admission contract (required inputs; unit spec frozen on a REAL update — serve
 reliably exercise update admission for a merge patch; Default stamps the schedule + entrance labels).
 Under this split CASE 3's observable changed: draining a pool no longer deletes the InstanceType — the
 flavor is deleted but the type SURVIVES with its queue emptied, and it reactivates when nodes return.
+CASE 18 covers CPU-manufacturer awareness on the general (CPU) pool, so it too runs on any cluster: it
+flips `instance-type-aware-cpu-manufacturer` and asserts the ResourceFlavor stays the finest,
+cpuDetail-bearing grain (`gpustack--${gKey}-…-${count}c`) while the aggregated InstanceTypeFlavor catalog
+collapses (awareness off — one CPU-agnostic `gpustack--generic` row) or splits (awareness on — a per-CPU
+`gpustack--${gKey}` row, generic gone); its trap restores the setting and removes any derived type the
+aware window created. CASE 19 and CASE 20 need **real** accelerator hardware and **auto-skip** on a
+GPU-less cluster: CASE 19 turns awareness on, restarts the worker to force the aware re-derive, and
+asserts the accelerated type `gpustack--${gKey}--${aKey}-${os}-${arch}` carries the real card's
+product/memory/cores plus the awareness-gated folded `spec.cpu`, then runs a real GPU Instance on it
+(the Pod, named after the Instance, must see the card via `nvidia-smi`); CASE 20 declares two sibling
+admin InstanceTypes on one accelerated pool and deploys a whole-card Pod, asserting a Devices-ledger
+change re-enqueues EVERY sibling so their three-view status stays identical
+(`enqueueInstanceTypeWhenDevicesChanged`).
 
 | Case | Title | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
@@ -103,6 +117,9 @@ flavor is deleted but the type SURVIVES with its queue emptied, and it reactivat
 | 15 | Exclusive whole-card SSH Instance still works (regression) | `pkg/worker/controllers/worker/instance.go`, `pack/ssh-server/rootfs/chroot.sh` | `cases/case-15.sh` | yes (confirm) |
 | 16 | InstanceTypeFlavor catalog + declarative queue ownership (recreate-on-delete, delete-then-wait teardown) | `pkg/worker/controllers/worker/{instancetype,nodequeue,nodeflavor}.go`, `pkg/worker/extensionapis/worker/instance_type_flavor.go`, `pkg/worker/settings/value.go` | `cases/case-16.sh` | yes (confirm) |
 | 17 | InstanceType declarative admission (require + freeze inputs; Default stamps schedule + entrance labels) | `pkg/worker/webhooks/worker/instancetype.go`, `api/worker/v1alpha1/instance_type.go` | `cases/case-17.sh` | yes (confirm) |
+| 18 | CPU-manufacturer awareness reshapes the catalog (finest RF + cpuDetail; collapse↔split by setting) | `pkg/nodefeature/helper.go`, `pkg/worker/settings/value.go`, `pkg/worker/extensionapis/worker/instance_type_flavor.go`, `pkg/worker/webhooks/worker/instancetype.go`, `pkg/worker/controllers/worker/nodeflavor.go` | `cases/case-18.sh` | yes (confirm) |
+| 19 | Awareness on: accelerated type carries real GPU + folded CPU descriptors; a real GPU Instance runs on it | `pkg/worker/controllers/worker/{nodeflavor,instancetype}.go`, `pkg/worker/webhooks/worker/instancetype.go`, `pkg/nodefeature/helper.go` | `cases/case-19.sh` | yes (confirm) |
+| 20 | Sibling InstanceTypes on one pool stay status-consistent (Devices-watch re-enqueues all) | `pkg/worker/controllers/worker/instancetype.go` | `cases/case-20.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
@@ -123,7 +140,9 @@ or edited cases follow this six-field template:
 # Environment: <what the cluster must provide + when it AUTO-SKIPS>
 # Inputs:      <what the case creates / injects / toggles; mark MOCKED inputs vs the real thing verified>
 # Expected:    <the PASS assertions — the observable final state>
-# Cleanup:     <what the trap restores; idempotent + safe to re-run>
+# Cleanup:     <what the trap restores — INCLUDING any environment baseline the case changed
+#               (editable settings, managed toggles, node/NodeFeature labels); idempotent, runs on
+#               pass AND fail, safe to re-run>
 ```
 
 - **Mutation posture** rides the title line: `READ-ONLY` (asserts existing state, no trap) or
@@ -136,6 +155,15 @@ or edited cases follow this six-field template:
 - Describe behavior in **plain terms** (e.g. "the node-devices AdmissionCheck holds it as Retry"), not by
   spec reference. The case↔code mapping lives in the case table's "Run when these change" column; the
   case↔spec mapping, if ever needed, is traced from the spec, never baked into the script.
+- **Restore the baseline, pass or fail.** A case that mutates shared **environment baseline** — an
+  editable Setting (e.g. `instance-type-aware-cpu-manufacturer`, `instance-type-derived-from-node`), a
+  `gpustack.ai/managed` toggle, an injected node/NodeFeature label, a patched InstanceType unit spec —
+  MUST return it to the pre-case value in its `trap … EXIT` so cleanup runs on both the pass and the
+  fail path; a later case must never inherit a flipped setting, a drained pool, or an extra derived
+  type. The trap also waits for the chain to settle back (e.g. the derived InstanceType returns to
+  `Active`, the setting cache flips) before exiting. Between cases the lead re-confirms the baseline
+  (awareness off, all nodes managed, no leftover test objects) and restores it if a case died before its
+  trap ran — a mutated baseline is a frequent cause of a *spurious* failure in the NEXT case.
 
 The same contract governs the runtime output: the results banner, `record` messages, and the FAIL-footer
 diagnostics stay spec-anchor-free and self-explanatory.

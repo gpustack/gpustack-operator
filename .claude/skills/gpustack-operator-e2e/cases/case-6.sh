@@ -129,14 +129,15 @@ spec:
 EOF
 
 # 2. Wait for the derived accelerated InstanceType (its name is the pool name
-#    gpustack-${AKEY}-<os>-<arch>) and capture it + its schedule labels.
+#    gpustack--${AKEY}-<os>-<arch> when CPU-manufacturer awareness is off) and capture it + its
+#    schedule labels.
 ITNAME=""
 for _ in $(seq 1 40); do
   ITNAME=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     n=it['metadata']['name']
-    if n.startswith('gpustack-${AKEY}-'):
+    if n.startswith('gpustack--${AKEY}-'):
         print(n); break
 " 2>/dev/null)
   [ -n "$ITNAME" ] && break

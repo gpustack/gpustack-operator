@@ -5,31 +5,37 @@
 #   case-17.sh <NS>
 #
 # Goal:        The InstanceType admission contract —
-#              A: required inputs are enforced on CREATE (an InstanceType missing spec.group, or its
-#                 unit spec unitResources / localStorage, is rejected by the validating webhook);
-#              B: the Default (mutating) webhook stamps, from the spec identity, the feature-key +
-#                 kubernetes.io/os|arch schedule labels AND the queue-entrance label, so a stored type is
-#                 selectable and reverse-lookup-able (the Pod webhook reads per-card VRAM off it) from day one;
+#              A: required inputs are enforced on CREATE (an accelerated InstanceType missing
+#                 spec.acceleratorGroup, or any type missing its unit spec unitResources /
+#                 localStorage, is rejected by the validating webhook; spec.generalGroup is NOT
+#                 required — the Default webhook fills an empty one with the "generic" sentinel);
+#              B: the Default (mutating) webhook stamps, from the spec identity, the
+#                 feature.gpustack.ai/acceleratable boolean + kubernetes.io/os|arch schedule labels
+#                 AND the queue-entrance label, so a stored type is selectable and reverse-lookup-able
+#                 (the Pod webhook reads per-card VRAM off it) from day one;
 #              C: the unit spec is frozen on UPDATE (changing unitResources / localStorage is rejected),
-#                 while spec.group (a schedule discriminator) stays mutable and persists.
+#                 while spec.generalGroup (a schedule discriminator) stays mutable and persists.
 # Environment: Any cluster with a materialized general pool (the webhook chain must be up). No GPU.
+#              CPU-manufacturer awareness is assumed off (the default), so the non-accelerated stamp is
+#              the acceleratable boolean + os/arch, not a general.* CPU key.
 #              A/B use server-side dry-run (nothing persisted); C uses REAL patches on a throwaway type,
 #              because server-side dry-run does not reliably exercise update admission for a merge patch.
 # Inputs:      Nothing mocked —
-#              - A/B: dry-run InstanceType manifests (missing group; missing unit spec; a valid one);
-#              - C: a real throwaway InstanceType e2e-case17-upd (group e2e17upd) patched three ways —
-#                unitResources.cpu, localStorage, and group.
-# Expected:    - A — CREATE rejects the missing-group and missing-unit-spec manifests;
-#              - B — the Default webhook stamps feature-key=true + os=linux + arch=amd64 + a gpustack-
-#                queue-entrance label;
+#              - A/B: dry-run InstanceType manifests (accelerated, missing acceleratorGroup; non-accel,
+#                missing unit spec; a valid non-accel one);
+#              - C: a real throwaway InstanceType e2e-case17-upd (generalGroup e2e17upd) patched three
+#                ways — unitResources.cpu, localStorage, and generalGroup.
+# Expected:    - A — CREATE rejects the accelerated-missing-acceleratorGroup and the missing-unit-spec
+#                manifests;
+#              - B — the Default webhook stamps feature.gpustack.ai/acceleratable=false + os=linux +
+#                arch=amd64 + a gpustack- queue-entrance label;
 #              - C — the unitResources and localStorage patches are REJECTED (immutable) and do not
-#                persist, while the group patch is accepted and persists.
+#                persist, while the generalGroup patch is accepted and persists.
 # Cleanup:     Trap force-strips the throwaway's finalizer if present, deletes the throwaway type + its
 #              ClusterQueue.
 set -uo pipefail
 
 NS="${1:?usage: case-17.sh <NS>}"
-GEN_PREFIX="general.feature.gpustack.ai/"
 ENTRANCE="schedule.gpustack.ai/queue-entrance"
 UPD=e2e-case17-upd   # throwaway persisted InstanceType for the UPDATE (immutability) probes
 
@@ -53,13 +59,15 @@ ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 # --- A. CREATE rejects missing required inputs (server dry-run, nothing persisted). ---
-errGroup=$(kubectl apply --dry-run=server -f - 2>&1 <<'EOF'
+# An accelerated type with no acceleratorGroup has no pool to schedule onto — the validating webhook
+# rejects it. (A non-accel type needs no group at all: Default fills generalGroup with "generic".)
+errAcc=$(kubectl apply --dry-run=server -f - 2>&1 <<'EOF'
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: InstanceType
 metadata:
-  name: e2e-case17-nogroup
+  name: e2e-case17-noaccgroup
 spec:
-  acceleratable: false
+  acceleratable: true
   os: linux
   arch: amd64
   unitResources:
@@ -68,9 +76,9 @@ spec:
   localStorage: "100Gi"
 EOF
 )
-echo "$errGroup" | grep -qiE 'spec.group|group.*must be specified' \
-  && record PASS "CREATE rejects missing group" "validating webhook: group required" \
-  || record FAIL "CREATE rejects missing group" "not rejected: ${errGroup:0:90}"
+echo "$errAcc" | grep -qiE 'spec.acceleratorGroup|acceleratorGroup.*must be specified' \
+  && record PASS "CREATE rejects accelerated missing acceleratorGroup" "validating webhook: acceleratorGroup required when acceleratable" \
+  || record FAIL "CREATE rejects accelerated missing acceleratorGroup" "not rejected: ${errAcc:0:90}"
 
 errUnit=$(kubectl apply --dry-run=server -f - 2>&1 <<'EOF'
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -78,7 +86,7 @@ kind: InstanceType
 metadata:
   name: e2e-case17-nounit
 spec:
-  group: e2e17probe
+  generalGroup: e2e17probe
   acceleratable: false
   os: linux
   arch: amd64
@@ -95,7 +103,7 @@ kind: InstanceType
 metadata:
   name: e2e-case17-probe
 spec:
-  group: e2e17probe
+  generalGroup: e2e17probe
   acceleratable: false
   os: linux
   arch: amd64
@@ -109,26 +117,26 @@ stamp=$(echo "$stamped" | python3 -c "
 import json,sys
 try: l=json.load(sys.stdin).get('metadata',{}).get('labels',{}) or {}
 except Exception: l={}
-fkey=l.get('${GEN_PREFIX}e2e17probe','')
+accel=l.get('feature.gpustack.ai/acceleratable','')
 os_=l.get('kubernetes.io/os',''); arch=l.get('kubernetes.io/arch','')
 ent=l.get('${ENTRANCE}','')
-ok = fkey=='true' and os_=='linux' and arch=='amd64' and ent.startswith('gpustack-')
-print(('PASS' if ok else 'FAIL')+'|fkey=%s os=%s arch=%s entrance=%s'%(fkey or '<none>',os_ or '<none>',arch or '<none>',ent or '<none>'))
+ok = accel=='false' and os_=='linux' and arch=='amd64' and ent.startswith('gpustack-')
+print(('PASS' if ok else 'FAIL')+'|acceleratable=%s os=%s arch=%s entrance=%s'%(accel or '<none>',os_ or '<none>',arch or '<none>',ent or '<none>'))
 " 2>/dev/null)
 if [ "${stamp%%|*}" = "PASS" ]; then
   record PASS "Default stamps schedule + entrance labels" "${stamp#*|}"
 else
-  record FAIL "Default stamps schedule + entrance labels" "${stamp#*|} — Default webhook must stamp feature-key + os/arch + queue-entrance"
+  record FAIL "Default stamps schedule + entrance labels" "${stamp#*|} — Default webhook must stamp the acceleratable boolean + os/arch + queue-entrance"
 fi
 
-# --- C. UPDATE freezes the unit spec; group stays mutable (REAL patches on a throwaway type). ---
+# --- C. UPDATE freezes the unit spec; generalGroup stays mutable (REAL patches on a throwaway type). ---
 kubectl apply -f - >/dev/null 2>&1 <<EOF
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: InstanceType
 metadata:
   name: ${UPD}
 spec:
-  group: e2e17upd
+  generalGroup: e2e17upd
   acceleratable: false
   os: linux
   arch: amd64
@@ -153,11 +161,11 @@ stgNow=$(kubectl get instancetype "$UPD" -o jsonpath='{.spec.localStorage}' 2>/d
   && record PASS "UPDATE freezes localStorage" "localStorage change rejected, stored still 100Gi" \
   || record FAIL "UPDATE freezes localStorage" "err='${errStg:0:70}' stored='${stgNow}' — a localStorage change must be rejected and not persist"
 
-okGroup=$(kubectl patch instancetype "$UPD" --type=merge -p '{"spec":{"group":"e2e17upd2"}}' 2>&1)
-grpNow=$(kubectl get instancetype "$UPD" -o jsonpath='{.spec.group}' 2>/dev/null)
+okGroup=$(kubectl patch instancetype "$UPD" --type=merge -p '{"spec":{"generalGroup":"e2e17upd2"}}' 2>&1)
+grpNow=$(kubectl get instancetype "$UPD" -o jsonpath='{.spec.generalGroup}' 2>/dev/null)
 [ "$grpNow" = "e2e17upd2" ] \
-  && record PASS "UPDATE allows group change (mutable)" "group changed + persisted (e2e17upd -> e2e17upd2)" \
-  || record FAIL "UPDATE allows group change (mutable)" "err='${okGroup:0:70}' storedGroup='${grpNow}' — group is a discriminator, must be mutable"
+  && record PASS "UPDATE allows generalGroup change (mutable)" "generalGroup changed + persisted (e2e17upd -> e2e17upd2)" \
+  || record FAIL "UPDATE allows generalGroup change (mutable)" "err='${okGroup:0:70}' storedGroup='${grpNow}' — generalGroup is a discriminator, must be mutable"
 
 echo
 echo "== CASE 17 — InstanceType declarative admission =="
@@ -168,9 +176,9 @@ echo "== CASE 17 — InstanceType declarative admission =="
 
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s). The webhook must require group/os/arch + a well-formed unit spec on"
-  echo "CREATE, freeze unitResources/localStorage on UPDATE (real patch), and stamp the feature-key +"
-  echo "os/arch + queue-entrance labels in Default. See pkg/worker/webhooks/worker/instancetype.go."
+  echo "FAILED ${FAILS} check(s). The webhook must require acceleratorGroup when acceleratable + os/arch"
+  echo "+ a well-formed unit spec on CREATE, freeze unitResources/localStorage on UPDATE (real patch), and"
+  echo "stamp the acceleratable boolean + os/arch + queue-entrance labels in Default. See pkg/worker/webhooks/worker/instancetype.go."
   exit 1
 fi
 echo "CASE 17 PASS"

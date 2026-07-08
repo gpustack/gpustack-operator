@@ -110,12 +110,12 @@ echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
 #    the fuller teardown (InstanceType survival + queue emptying) is CASE 3.
 rf_gone=""
 for _ in $(seq 1 40); do
-  n=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -c "${IT}-")
+  n=$(kubectl get resourceflavors.kueue.x-k8s.io -o name 2>/dev/null | grep -cE '/gpustack--.*-[0-9]+c$')
   [ "${n:-0}" -eq 0 ] && { rf_gone=1; break; }
   sleep 3
 done
-[ -n "$rf_gone" ] && record PASS "drain removes the pool ResourceFlavor" "no ${IT}-* flavor" \
-  || record FAIL "drain removes the pool ResourceFlavor" "a ${IT}-* flavor persists — managed-toggle did not propagate"
+[ -n "$rf_gone" ] && record PASS "drain removes the pool ResourceFlavor" "no CPU (…-Nc) flavor left" \
+  || record FAIL "drain removes the pool ResourceFlavor" "a CPU (…-Nc) flavor persists — managed-toggle did not propagate"
 
 # 5. THE assertion: the Instance whose InstanceType is now gone/Inactive gets STOPPED, not recreated.
 #    On a drain the queue evicts the Pod; the reconciler must set spec.stop (which deletes the Pod)

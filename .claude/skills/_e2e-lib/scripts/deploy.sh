@@ -15,6 +15,12 @@
 # Pass extra --set flags to vary the install, e.g.:
 #   deploy.sh gpustack-system dev-abc123 --set deviceManager.enabled=false
 #   deploy.sh gpustack-system dev-abc123 --set cleanupOnUninstall=true
+#
+# To deploy an image that was packaged and PUSHED to a registry (not locally loaded) — e.g.
+# `make package PACKAGE_NAMESPACE=<ns> PACKAGE_PUSH=true`, which emits <ns>/gpustack-operator:<tag> —
+# point the chart at it and force a pull (the trailing --set overrides the IfNotPresent below):
+#   deploy.sh gpustack-system <tag> --set image.repository=<ns>/gpustack-operator --set image.pullPolicy=Always
+# See gpustack-operator-e2e/references/packaged-image-deploy.md for the package<->chart image contract.
 set -uo pipefail
 
 NS="${1:?usage: deploy.sh <NS> <TAG> [extra --set args...]}"
