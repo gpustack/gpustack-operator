@@ -8,6 +8,7 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apiserver/pkg/registry/rest"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -93,15 +94,17 @@ func (h *InstanceTypeFlavorHandler) NewList() runtime.Object {
 // then keeps those with a non-empty "group" note (stamped by the NodeFlavorReconciler for
 // every pool, generic or accelerated) as a secondary guard. Identical specs collapse to one
 // entry, so a model spanning several nodes or os/arch appears once.
-func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, _ ctrlcli.ListOptions) (runtime.Object, error) {
+func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.ListOptions) (runtime.Object, error) {
+	// List.
 	rfList := new(kueue.ResourceFlavorList)
-	if err := h.APIReader.List(ctx, rfList,
-		ctrlcli.MatchingLabels{systemmeta.ResourceTypeLabel: _ResourceFlavorResType},
-		ctrlcli.UnsafeDisableDeepCopy); err != nil {
+	err := h.APIReader.List(ctx, rfList,
+		convertResourceFlavorListOptsFromInstanceTypeFlavorListOpts(opts),
+		ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil {
 		return nil, err
 	}
 
-	seen := make(map[worker.InstanceTypeFlavorSpec]struct{}, len(rfList.Items))
+	visited := sets.New[worker.InstanceTypeFlavorSpec]()
 	list := &worker.InstanceTypeFlavorList{Items: make([]worker.InstanceTypeFlavor, 0, len(rfList.Items))}
 	for i := range rfList.Items {
 		// Skip a flavor Kueue is finalizing (DeletionTimestamp set): its pool is draining away,
@@ -124,10 +127,10 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, _ ctrlcli.ListOp
 			Cores:         notes["cores"],
 			Sliceable:     notes["sliceable"] == "true",
 		}
-		if _, dup := seen[spec]; dup {
+		if visited.Has(spec) {
 			continue
 		}
-		seen[spec] = struct{}{}
+		visited.Insert(spec)
 		list.Items = append(list.Items, worker.InstanceTypeFlavor{
 			ObjectMeta: meta.ObjectMeta{Name: group},
 			Spec:       spec,
@@ -158,4 +161,16 @@ func lessInstanceTypeFlavorMemory(a, b string) bool {
 		return qa.Cmp(qb) < 0
 	}
 	return a < b
+}
+
+func convertResourceFlavorListOptsFromInstanceTypeFlavorListOpts(in ctrlcli.ListOptions) (out *ctrlcli.ListOptions) {
+	// Add necessary label selector.
+	if lbs := systemmeta.GetResourcesLabelSelectorOfType(_ResourceFlavorResType); in.LabelSelector == nil {
+		in.LabelSelector = lbs
+	} else {
+		reqs, _ := lbs.Requirements()
+		in.LabelSelector = in.LabelSelector.DeepCopySelector().Add(reqs...)
+	}
+
+	return &in
 }
