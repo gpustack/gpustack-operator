@@ -26,6 +26,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -158,17 +159,32 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// MaxPartitions, read off the contributor's same-named Devices.
 	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, node.Name, flavor.Manufacturer)
 
-	keyLabel := featureKeyLabel(flavor.Acceleratable, flavor.Key)
+	// Read instance-type-aware-cpu-manufacturer per-reconcile: it gates only the accelerated
+	// flavor's cpuDetail note (the CPU is otherwise not a scheduling axis for an accelerated
+	// flavor); it never changes the flavor's name or labels.
+	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+
+	keyLabel := featureKeyLabel(flavor.Acceleratable, flavor.OwnKey())
+	labels := map[string]string{
+		keyLabel:             "true",
+		core.LabelOSStable:   flavor.OS,
+		core.LabelArchStable: flavor.Arch,
+		// The generic-vs-accelerated discriminator every pool selector matches on, so a
+		// collapsed generic pool selects "not accelerated" and an aware generic pool never
+		// matches an accelerated flavor of the same CPU.
+		nodefeature.NodeAcceleratableLabelKey:         strconv.FormatBool(flavor.Acceleratable),
+		keyLabel + _ResourceFlavorCountLabelSuffix:    strconvx.Itoa(flavor.Count),
+		keyLabel + _ResourceFlavorCapacityLabelSuffix: strconvx.Itoa(capacity),
+	}
+	// An accelerated flavor also carries the paired CPU key's presence, so an aware
+	// (CPU-split) pool can select it while a collapsed pool ignores it.
+	if flavor.Acceleratable {
+		labels[nodefeature.GeneralFeatureLabelPrefix+flavor.GeneralKey] = "true"
+	}
 	eRf := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
-			Name: req.Name,
-			Labels: map[string]string{
-				keyLabel:             "true",
-				core.LabelOSStable:   flavor.OS,
-				core.LabelArchStable: flavor.Arch,
-				keyLabel + _ResourceFlavorCountLabelSuffix:    strconvx.Itoa(flavor.Count),
-				keyLabel + _ResourceFlavorCapacityLabelSuffix: strconvx.Itoa(capacity),
-			},
+			Name:   req.Name,
+			Labels: labels,
 		},
 		Spec: kueue.ResourceFlavorSpec{
 			// Tolerate every taint so a workload routed here by quota is never held
@@ -178,15 +194,27 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			NodeLabels:  flavor.NodeLabels,
 		},
 	}
+
+	// generalGroup is always the CPU key; acceleratorGroup is the accelerator key on an
+	// accelerated flavor, empty otherwise. Together they let the InstanceTypeFlavor and the
+	// aggregation layer group by the awareness setting. The "group" note is transitional —
+	// the InstanceTypeFlavor still reads it until it migrates to generalGroup/acceleratorGroup.
 	eNotes := map[string]string{
-		"acceleratable": strconv.FormatBool(flavor.Acceleratable),
-		"group":         flavor.Key,
-		"manufacturer":  flavor.Manufacturer,
-		"product":       flavor.Product,
-		"family":        flavor.Family,
-		"memory":        flavor.Memory,
-		"cores":         flavor.Cores,
-		"sliceable":     strconv.FormatBool(sliceable),
+		"acceleratable":    strconv.FormatBool(flavor.Acceleratable),
+		"group":            flavor.OwnKey(),
+		"generalGroup":     flavor.GeneralKey,
+		"acceleratorGroup": flavor.AcceleratorKey,
+		"manufacturer":     flavor.Manufacturer,
+		"product":          flavor.Product,
+		"family":           flavor.Family,
+		"memory":           flavor.Memory,
+		"cores":            flavor.Cores,
+		"sliceable":        strconv.FormatBool(sliceable),
+	}
+	// Record the raw CPU detail: always for a CPU flavor; for an accelerated flavor only when
+	// CPU-manufacturer awareness is on.
+	if !flavor.Acceleratable || aware {
+		eNotes["cpuDetail"] = cpuDetailNote(nodefeature.ExtractGeneralDetail(node), flavor.Acceleratable)
 	}
 	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)
 	rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {
@@ -302,11 +330,11 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
-			Name:   fmt.Sprintf("gpustack-%s-%s-%s", flavor.Key, flavor.OS, flavor.Arch),
+			Name:   fmt.Sprintf("gpustack-%s-%s-%s", flavor.OwnKey(), flavor.OS, flavor.Arch),
 			Labels: map[string]string{_InstanceTypeDerivedFromNodeLabel: "true"},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			Group:         flavor.Key,
+			Group:         flavor.OwnKey(),
 			Acceleratable: flavor.Acceleratable,
 			OS:            flavor.OS,
 			Arch:          flavor.Arch,
@@ -325,6 +353,40 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 	logger.V(2).Info("authored derived instance type",
 		"instance type", it.Name)
 	return nil
+}
+
+// cpuDetailNote marshals a node's CPU detail into the JSON carried by the ResourceFlavor's
+// cpuDetail note, in the shape the InstanceType webhook folds straight back into the spec (the
+// workercore CPU structs are the single typed source shared by both sides): a non-accelerated
+// flavor stores a plain InstanceTypeCPU — its CPU manufacturer/product/family are the
+// InstanceType's top-level descriptors — while an accelerated flavor stores an
+// InstanceTypeAcceleratorCPU that also carries the CPU's own manufacturer/product/family (distinct
+// from the device's). The note is a nice-to-have, so a marshal error is ignored (ShouldMarshal).
+func cpuDetailNote(d nodefeature.CPUDetail, acceleratable bool) string {
+	cpu := workercore.InstanceTypeCPU{
+		PhysicalCores:          d.PhysicalCores,
+		ThreadsPerPhysicalCore: d.ThreadsPerPhysicalCore,
+		LogicalCores:           d.LogicalCores,
+		Stepping:               d.Stepping,
+		ClockSpeed:             d.ClockSpeed,
+		MaxClockSpeed:          d.MaxClockSpeed,
+		CacheLine:              d.CacheLine,
+		Cache: workercore.InstanceTypeCPUCache{
+			L1I: d.CacheL1I,
+			L1D: d.CacheL1D,
+			L2:  d.CacheL2,
+			L3:  d.CacheL3,
+		},
+	}
+	if acceleratable {
+		return string(json.ShouldMarshal(workercore.InstanceTypeAcceleratorCPU{
+			Manufacturer:    d.Manufacturer,
+			Product:         d.Product,
+			Family:          d.Family,
+			InstanceTypeCPU: cpu,
+		}))
+	}
+	return string(json.ShouldMarshal(cpu))
 }
 
 // defaultResources returns the fixed per-unit CPU/RAM and storage for a derived InstanceType, chosen by

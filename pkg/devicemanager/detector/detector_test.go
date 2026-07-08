@@ -42,6 +42,10 @@ func TestAcceleratableDevicesSelectorLabels(t *testing.T) {
 				core.LabelOSStable:   "linux",
 				core.LabelArchStable: "amd64",
 				featKey:              "true",
+				// The paired CPU-key presence (the fixture reports no cpu-model, so "generic"),
+				// so an aware (CPU-split) accelerated pool can locate this node's Devices. The
+				// .count sizing pin is dropped — it is not a selector key.
+				nodefeature.GeneralFeatureLabelPrefix + "generic": "true",
 			},
 		},
 		{

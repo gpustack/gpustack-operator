@@ -152,4 +152,20 @@ var (
 		setting.InitializeFromEnv("true"),
 		setting.AllowBool(),
 	)
+
+	// InstanceTypeAwareCPUManufacturer governs whether the derived ClusterQueue/InstanceType/
+	// InstanceTypeFlavor aggregation layer treats the CPU manufacturer as a discriminator. When
+	// false (default) non-accelerated flavors collapse into one generic pool per os/arch and
+	// accelerated flavors pool per accelerator (CPU ignored); when true every pool splits by the
+	// CPU key. It never changes a ResourceFlavor's name or labels — flavors are always the finest
+	// grain — and additionally gates the cpuDetail note on an accelerated flavor.
+	InstanceTypeAwareCPUManufacturer = settings.NewEditable(
+		"instance-type-aware-cpu-manufacturer",
+		"Indicates whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor split by CPU "+
+			"manufacturer. When false (default), non-accelerated flavors collapse into one generic pool "+
+			"per os/arch and accelerated flavors pool per accelerator; when true, every pool splits by "+
+			"the CPU manufacturer.",
+		setting.InitializeFromEnv("false"),
+		setting.AllowBool(),
+	)
 )
