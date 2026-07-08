@@ -1527,12 +1527,12 @@ func schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref common.ReferenceCa
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeFlavorSpec describes one pool aggregated from the ResourceFlavor notes. Its fields mirror the InstanceTypeSpec descriptor ordering — group + acceleratable + manufacturer/product/family + memory/cores — so the catalog and an InstanceType read consistently.",
+				Description: "InstanceTypeFlavorSpec describes one pool aggregated from the ResourceFlavor notes. Its fields mirror the InstanceTypeSpec identity — accelerator/general group + acceleratable + manufacturer/product/family + memory/cores — so the catalog and an InstanceType read consistently. Which group fields are populated tracks instance-type-aware-cpu-manufacturer: with awareness off a generic pool carries GeneralGroup=\"generic\" and an accelerated pool only its AcceleratorGroup; with awareness on both carry the real CPU key in GeneralGroup.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"group": {
+					"acceleratorGroup": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Group is the pool key (the InstanceType group), e.g. \"nvidia-a10g\", \"generic\".",
+							Description: "AcceleratorGroup is the accelerator group (the acceleratable key) of an accelerated pool, e.g. \"nvidia-a10g\"; empty for a generic pool.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -1584,6 +1584,13 @@ func schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref common.ReferenceCa
 						SchemaProps: spec.SchemaProps{
 							Description: "Sliceable reports whether the accelerator can be sliced; false for a generic pool.",
 							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"generalGroup": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GeneralGroup is the general(CPU) group of the pool: the real CPU key when instance-type-aware-cpu-manufacturer is on, or the \"generic\" sentinel for a collapsed (unaware) generic pool; empty for an accelerated pool when awareness is off.",
+							Type:        []string{"string"},
 							Format:      "",
 						},
 					},

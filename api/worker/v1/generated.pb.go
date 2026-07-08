@@ -1287,6 +1287,11 @@ func (m *InstanceTypeFlavorSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.GeneralGroup)
+	copy(dAtA[i:], m.GeneralGroup)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.GeneralGroup)))
+	i--
+	dAtA[i] = 0x4a
 	i--
 	if m.Sliceable {
 		dAtA[i] = 1
@@ -1328,9 +1333,9 @@ func (m *InstanceTypeFlavorSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	}
 	i--
 	dAtA[i] = 0x10
-	i -= len(m.Group)
-	copy(dAtA[i:], m.Group)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Group)))
+	i -= len(m.AcceleratorGroup)
+	copy(dAtA[i:], m.AcceleratorGroup)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AcceleratorGroup)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -1933,7 +1938,7 @@ func (m *InstanceTypeFlavorSpec) Size() (n int) {
 	}
 	var l int
 	_ = l
-	l = len(m.Group)
+	l = len(m.AcceleratorGroup)
 	n += 1 + l + sovGenerated(uint64(l))
 	n += 2
 	l = len(m.Manufacturer)
@@ -1947,6 +1952,8 @@ func (m *InstanceTypeFlavorSpec) Size() (n int) {
 	l = len(m.Cores)
 	n += 1 + l + sovGenerated(uint64(l))
 	n += 2
+	l = len(m.GeneralGroup)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -2367,7 +2374,7 @@ func (this *InstanceTypeFlavorSpec) String() string {
 		return "nil"
 	}
 	s := strings.Join([]string{`&InstanceTypeFlavorSpec{`,
-		`Group:` + fmt.Sprintf("%v", this.Group) + `,`,
+		`AcceleratorGroup:` + fmt.Sprintf("%v", this.AcceleratorGroup) + `,`,
 		`Acceleratable:` + fmt.Sprintf("%v", this.Acceleratable) + `,`,
 		`Manufacturer:` + fmt.Sprintf("%v", this.Manufacturer) + `,`,
 		`Product:` + fmt.Sprintf("%v", this.Product) + `,`,
@@ -2375,6 +2382,7 @@ func (this *InstanceTypeFlavorSpec) String() string {
 		`Memory:` + fmt.Sprintf("%v", this.Memory) + `,`,
 		`Cores:` + fmt.Sprintf("%v", this.Cores) + `,`,
 		`Sliceable:` + fmt.Sprintf("%v", this.Sliceable) + `,`,
+		`GeneralGroup:` + fmt.Sprintf("%v", this.GeneralGroup) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -5836,7 +5844,7 @@ func (m *InstanceTypeFlavorSpec) Unmarshal(dAtA []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Group", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorGroup", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -5864,7 +5872,7 @@ func (m *InstanceTypeFlavorSpec) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Group = string(dAtA[iNdEx:postIndex])
+			m.AcceleratorGroup = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 2:
 			if wireType != 0 {
@@ -6066,6 +6074,38 @@ func (m *InstanceTypeFlavorSpec) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.Sliceable = bool(v != 0)
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field GeneralGroup", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.GeneralGroup = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

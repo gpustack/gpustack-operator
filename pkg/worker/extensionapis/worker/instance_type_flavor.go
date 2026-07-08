@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"sort"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -15,7 +16,9 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
 const (
@@ -47,7 +50,8 @@ func (h *InstanceTypeFlavorHandler) SetupHandler(
 
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTableConvertor(
-		instanceTypeFlavorColumn("Group", ".spec.group"),
+		instanceTypeFlavorColumn("GeneralGroup", ".spec.generalGroup"),
+		instanceTypeFlavorColumn("AcceleratorGroup", ".spec.acceleratorGroup"),
 		instanceTypeFlavorColumn("Acceleratable", ".spec.acceleratable"),
 		instanceTypeFlavorColumn("Manufacturer", ".spec.manufacturer"),
 		instanceTypeFlavorColumn("Product", ".spec.product"),
@@ -90,10 +94,12 @@ func (h *InstanceTypeFlavorHandler) NewList() runtime.Object {
 }
 
 // OnList aggregates the operator-owned ResourceFlavors into deduplicated, sorted
-// InstanceTypeFlavors. It lists only the flavors carrying the operator's resource-type label,
-// then keeps those with a non-empty "group" note (stamped by the NodeFlavorReconciler for
-// every pool, generic or accelerated) as a secondary guard. Identical specs collapse to one
-// entry, so a model spanning several nodes or os/arch appears once.
+// InstanceTypeFlavors, grouped the same way the derived ClusterQueue/InstanceType are — governed
+// by instance-type-aware-cpu-manufacturer (read from the remote; the aggregated apiserver has no
+// local settings indexer). With awareness off a generic pool collapses to one "generic" row and an
+// accelerated pool to one row per accelerator (CPU ignored); with awareness on both split by the
+// CPU key. Identical specs collapse to one entry, so a model spanning several nodes or os/arch
+// appears once.
 func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.ListOptions) (runtime.Object, error) {
 	// List.
 	rfList := new(kueue.ResourceFlavorList)
@@ -104,6 +110,8 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 		return nil, err
 	}
 
+	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueFromRemote(ctx) == "true"
+
 	visited := sets.New[worker.InstanceTypeFlavorSpec]()
 	list := &worker.InstanceTypeFlavorList{Items: make([]worker.InstanceTypeFlavor, 0, len(rfList.Items))}
 	for i := range rfList.Items {
@@ -113,26 +121,16 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 			continue
 		}
 		_, notes := systemmeta.DescribeResource(&rfList.Items[i])
-		group := notes["group"]
-		if group == "" {
-			continue
-		}
-		spec := worker.InstanceTypeFlavorSpec{
-			Group:         group,
-			Acceleratable: notes["acceleratable"] == "true",
-			Manufacturer:  notes["manufacturer"],
-			Product:       notes["product"],
-			Family:        notes["family"],
-			Memory:        notes["memory"],
-			Cores:         notes["cores"],
-			Sliceable:     notes["sliceable"] == "true",
+		spec := instanceTypeFlavorSpec(notes, aware)
+		if spec.GeneralGroup == "" && spec.AcceleratorGroup == "" {
+			continue // not an operator pool flavor (no group identity)
 		}
 		if visited.Has(spec) {
 			continue
 		}
 		visited.Insert(spec)
 		list.Items = append(list.Items, worker.InstanceTypeFlavor{
-			ObjectMeta: meta.ObjectMeta{Name: group},
+			ObjectMeta: meta.ObjectMeta{Name: instanceTypeFlavorName(spec)},
 			Spec:       spec,
 		})
 	}
@@ -145,10 +143,65 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 		if a.Product != b.Product {
 			return a.Product < b.Product
 		}
-		return lessInstanceTypeFlavorMemory(a.Memory, b.Memory)
+		if a.Memory != b.Memory {
+			return lessInstanceTypeFlavorMemory(a.Memory, b.Memory)
+		}
+		// Stable tiebreak by group identity, so per-CPU rows (aware) order deterministically.
+		if a.GeneralGroup != b.GeneralGroup {
+			return a.GeneralGroup < b.GeneralGroup
+		}
+		return a.AcceleratorGroup < b.AcceleratorGroup
 	})
 
 	return list, nil
+}
+
+// instanceTypeFlavorSpec builds one catalog row from a ResourceFlavor's notes, grouped by the
+// awareness setting. A non-accelerated flavor becomes a per-CPU row (aware) or the single
+// CPU-agnostic "generic" row (unaware); an accelerated flavor keeps its device descriptors (which
+// are identical across CPU variants, so they deduplicate) and carries the CPU key only when aware.
+func instanceTypeFlavorSpec(notes map[string]string, aware bool) worker.InstanceTypeFlavorSpec {
+	if notes["acceleratable"] != "true" {
+		if aware {
+			return worker.InstanceTypeFlavorSpec{
+				GeneralGroup: notes["generalGroup"],
+				Manufacturer: notes["manufacturer"],
+				Product:      notes["product"],
+				Family:       notes["family"],
+			}
+		}
+		return worker.InstanceTypeFlavorSpec{
+			GeneralGroup: nodefeature.GeneralGroupGeneric,
+			Manufacturer: nodefeature.GeneralManufacturerGeneric,
+		}
+	}
+	spec := worker.InstanceTypeFlavorSpec{
+		AcceleratorGroup: notes["acceleratorGroup"],
+		Acceleratable:    true,
+		Manufacturer:     notes["manufacturer"],
+		Product:          notes["product"],
+		Family:           notes["family"],
+		Memory:           notes["memory"],
+		Cores:            notes["cores"],
+		Sliceable:        notes["sliceable"] == "true",
+	}
+	if aware {
+		spec.GeneralGroup = notes["generalGroup"]
+	}
+	return spec
+}
+
+// instanceTypeFlavorName names a catalog row from its group identity, matching the derived
+// InstanceType names: gpustack--${aKey} / gpustack--${gKey}--${aKey} (accelerated, unaware/aware)
+// and gpustack--generic / gpustack--${gKey} (generic, unaware/aware).
+func instanceTypeFlavorName(spec worker.InstanceTypeFlavorSpec) string {
+	if spec.Acceleratable {
+		if spec.GeneralGroup != "" {
+			return fmt.Sprintf("gpustack--%s--%s", spec.GeneralGroup, spec.AcceleratorGroup)
+		}
+		return fmt.Sprintf("gpustack--%s", spec.AcceleratorGroup)
+	}
+	return fmt.Sprintf("gpustack--%s", spec.GeneralGroup)
 }
 
 // lessInstanceTypeFlavorMemory orders two VRAM notes numerically when both parse as

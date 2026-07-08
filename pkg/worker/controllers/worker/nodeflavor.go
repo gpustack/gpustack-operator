@@ -197,11 +197,9 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// generalGroup is always the CPU key; acceleratorGroup is the accelerator key on an
 	// accelerated flavor, empty otherwise. Together they let the InstanceTypeFlavor and the
-	// aggregation layer group by the awareness setting. The "group" note is transitional —
-	// the InstanceTypeFlavor still reads it until it migrates to generalGroup/acceleratorGroup.
+	// aggregation layer group by the awareness setting.
 	eNotes := map[string]string{
 		"acceleratable":    strconv.FormatBool(flavor.Acceleratable),
-		"group":            flavor.OwnKey(),
 		"generalGroup":     flavor.GeneralKey,
 		"acceleratorGroup": flavor.AcceleratorKey,
 		"manufacturer":     flavor.Manufacturer,
