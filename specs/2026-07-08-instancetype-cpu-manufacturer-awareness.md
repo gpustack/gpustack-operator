@@ -1,6 +1,6 @@
 # Spec: InstanceType CPU-Manufacturer Awareness
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -52,10 +52,11 @@ from a matching flavor.
 - No automatic reclamation of derived `InstanceType`s or their `ClusterQueue`s when the awareness
   setting flips: the operator authors derived types create-only and never garbage-collects them, so a
   flip strands the old-shaped derived types until an admin removes them (see Risks).
-- No migration tooling for `ResourceFlavor`/`ClusterQueue`/`InstanceType` objects named under the old
-  `gpustack-…` scheme; the reconcilers converge to the new `gpustack--…` names and orphans are
-  reclaimed by the existing level-based deletion (CPU/device flavors) or left to the admin (derived
-  types) — see Risks.
+- No **automatic (operator-driven)** migration of old-scheme objects: the reconcilers converge to the
+  new `gpustack--…` names, and orphans are reclaimed by the existing level-based deletion (CPU/device
+  flavors) or an **admin cleanup script** (derived types/queues) — see Risks and the v0.5→v0.6 migration
+  guide. (The intermediate single-dash v0.6.0–v0.6.2 line never shipped, so the real upgrade is v0.5.x's
+  double-dash composite → this release's double-dash split.)
 - No change to how the Device Manager labels nodes (the `acceleratable.…` device labels) or how the
   worker labels nodes (the `general.…` CPU labels); only the general key's CPU-name blending becomes
   unconditional.
