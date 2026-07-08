@@ -25,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -97,7 +98,7 @@ func (r *NodeQueueReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// The pool's ResourceFlavors, matched by the queue's schedule labels (feature key + os +
 	// arch). Admin queue names are arbitrary, so the pool is resolved by labels, not by name.
-	lbs := poolFlavorSelector(cq.Labels)
+	lbs := nodefeature.PoolFlavorSelector(cq.Labels)
 	if len(lbs) == 0 {
 		return ctrl.Result{}, nil
 	}
@@ -335,29 +336,6 @@ func parseResourceFlavorCapacity(rf *kueue.ResourceFlavor) int64 {
 	return 0
 }
 
-// poolFlavorSelector extracts the ResourceFlavor selector from a queue's labels: its feature
-// key plus kubernetes.io/os|arch. Returns nil when the queue carries no feature key, so the
-// caller never matches every flavor.
-func poolFlavorSelector(cqLabels map[string]string) map[string]string {
-	lbs := make(map[string]string, 3)
-	hasFeatureKey := false
-	for k, v := range cqLabels {
-		switch {
-		case k == core.LabelOSStable, k == core.LabelArchStable:
-			lbs[k] = v
-		case v == "true" &&
-			(strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix) ||
-				strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix)):
-			lbs[k] = v
-			hasFeatureKey = true
-		}
-	}
-	if !hasFeatureKey {
-		return nil
-	}
-	return lbs
-}
-
 // nodeDevicesCheckActive reports whether the node-devices AdmissionCheck exists and
 // is Active. The queue references it only when true, since listing an inactive
 // check would turn the ClusterQueue inactive and stop it admitting.
@@ -445,33 +423,42 @@ func (r *NodeQueueReconciler) SetupController(_ context.Context, opts controller
 		Complete(r)
 }
 
-// enqueueNodeQueueWhenResourceFlavorChanged enqueues the operator-owned ClusterQueues whose
-// schedule labels match the changed flavor's pool (feature key + os + arch).
+// enqueueNodeQueueWhenResourceFlavorChanged enqueues every operator-owned ClusterQueue whose
+// flavor selector this changed flavor feeds. The flavor is the finest grain (it always carries
+// the CPU key), whereas a queue's pool may be collapsed and carry fewer discriminators, so a
+// MatchingLabels query keyed on the flavor's labels would miss a collapsed queue. Instead it
+// lists the operator queues and keeps those whose own poolFlavorSelector is a subset of the
+// flavor's discriminators.
 func (r *NodeQueueReconciler) enqueueNodeQueueWhenResourceFlavorChanged(
 	ctx context.Context, obj ctrlcli.Object,
 ) []ctrlreconcile.Request {
 	logger := ctrllog.FromContext(ctx).
 		WithValues("resource flavor", ctrlcli.ObjectKeyFromObject(obj))
 
-	lbs := poolFlavorSelector(obj.GetLabels())
-	if len(lbs) == 0 {
+	rfSel := nodefeature.PoolFlavorSelector(obj.GetLabels())
+	if len(rfSel) == 0 {
 		return nil
 	}
 
+	// Narrow to the operator-owned queues server-side via the resource-type label instead of
+	// listing every ClusterQueue. The subset match below still runs in-memory: a collapsed queue
+	// carries fewer discriminators than the flavor, so a labels-keyed query on the flavor's own
+	// labels would miss it.
 	cqList := new(kueue.ClusterQueueList)
 	err := r.Client.List(ctx, cqList,
-		ctrlcli.MatchingLabels(lbs),
+		systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels](_ClusterQueueResType),
 		ctrlclix.WithoutQuorum,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
-		logger.Error(err, "list cluster queues by resource flavor")
+		logger.Error(err, "list cluster queues for resource flavor")
 		return nil
 	}
 
 	var reqs []ctrlreconcile.Request
 	for i := range cqList.Items {
 		cq := &cqList.Items[i]
-		if !systemmeta.MatchResource(cq, _ClusterQueueResType) {
+		cqSel := nodefeature.PoolFlavorSelector(cq.Labels)
+		if len(cqSel) == 0 || !mapx.Contain(rfSel, cqSel) {
 			continue
 		}
 		reqs = append(reqs, ctrlreconcile.Request{

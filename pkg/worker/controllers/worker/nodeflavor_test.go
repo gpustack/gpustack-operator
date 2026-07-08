@@ -321,7 +321,10 @@ func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 		require.NoError(t, cli.Get(context.Background(),
 			ctrlcli.ObjectKey{Name: nodeQueueName("nvidia-a10g")}, it))
 		assert.Equal(t, "true", it.Labels[_InstanceTypeDerivedFromNodeLabel], "marked derived")
-		assert.Equal(t, "nvidia-a10g", it.Spec.Group, "spec carries the pool group")
+		assert.Equal(t, "nvidia-a10g", it.Spec.AcceleratorGroup, "spec carries the accelerator group")
+		// Unaware (the unit binary default): the accelerated pool collapses across CPUs, so the
+		// general group is the "generic" sentinel.
+		assert.Equal(t, "generic", it.Spec.GeneralGroup, "spec carries the generic sentinel general group")
 		assert.True(t, it.Spec.Acceleratable, "spec marked acceleratable")
 		assert.Equal(t, "linux", it.Spec.OS, "spec os")
 		assert.Equal(t, "amd64", it.Spec.Arch, "spec arch")
@@ -343,6 +346,8 @@ func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 			ctrlcli.ObjectKey{Name: nodeQueueName("generic")}, it))
 		assert.Equal(t, "true", it.Labels[_InstanceTypeDerivedFromNodeLabel], "marked derived")
 		assert.False(t, it.Spec.Acceleratable, "spec not acceleratable")
+		assert.Equal(t, "generic", it.Spec.GeneralGroup, "cpu-only pool collapses to the generic general group")
+		assert.Empty(t, it.Spec.AcceleratorGroup, "no accelerator group for a cpu-only pool")
 		assert.Equal(t, "1", it.Spec.UnitResources.CPU, "cpu-only unit CPU default")
 		assert.Equal(t, "2Gi", it.Spec.UnitResources.RAM, "cpu-only unit RAM default")
 		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "unit localStorage default")
@@ -353,7 +358,7 @@ func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 		existing := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: nodeQueueName("generic")},
 			Spec: workercore.InstanceTypeSpec{
-				Group:         "generic",
+				GeneralGroup:  "generic",
 				OS:            "linux",
 				Arch:          "amd64",
 				UnitResources: workercore.InstanceTypeUnitResources{CPU: "2", RAM: "16Gi"},

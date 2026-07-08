@@ -123,18 +123,18 @@ func instTypeRes(once, remaining, capacity string) workercore.InstanceTypeResour
 
 func instSpecCPUOnly() workercore.InstanceTypeSpec {
 	return workercore.InstanceTypeSpec{
-		Group:         "gpustack-cpu-only",
+		GeneralGroup:  "gpustack-cpu-only",
 		Acceleratable: false,
 	}
 }
 
 func instSpecA10G() workercore.InstanceTypeSpec {
 	return workercore.InstanceTypeSpec{
-		Group:         "gpustack-nvidia-a10g",
-		Acceleratable: true,
-		Manufacturer:  "nvidia",
-		Product:       "NVIDIA-A10G",
-		Family:        "Ampere",
+		AcceleratorGroup: "gpustack-nvidia-a10g",
+		Acceleratable:    true,
+		Manufacturer:     "nvidia",
+		Product:          "NVIDIA-A10G",
+		Family:           "Ampere",
 		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
 			Memory:            "23028Mi",
 			ComputeCapability: "8.6",
@@ -144,11 +144,11 @@ func instSpecA10G() workercore.InstanceTypeSpec {
 
 func instSpecTeslaT4() workercore.InstanceTypeSpec {
 	return workercore.InstanceTypeSpec{
-		Group:         "gpustack-nvidia-tesla-t4",
-		Acceleratable: true,
-		Manufacturer:  "nvidia",
-		Product:       "Tesla-T4",
-		Family:        "Turing",
+		AcceleratorGroup: "gpustack-nvidia-tesla-t4",
+		Acceleratable:    true,
+		Manufacturer:     "nvidia",
+		Product:          "Tesla-T4",
+		Family:           "Turing",
 		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
 			Memory:            "15360Mi",
 			ComputeCapability: "7.5",

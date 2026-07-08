@@ -2,6 +2,7 @@ package nodefeature
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -146,7 +147,73 @@ const (
 	// GeneralFeatureLabelPrefix prefixes the general(CPU) feature label keys,
 	// e.g. "general.feature.gpustack.ai/amd-25-1.cpu".
 	GeneralFeatureLabelPrefix = "general." + FeatureLabelPrefix
+
+	// GeneralGroupGeneric is the sentinel general(CPU) group of a CPU-manufacturer-agnostic
+	// pool. It contributes no general.* discriminator, so a collapsed (unaware) pool and an
+	// aware pool whose CPU is left generic both aggregate every CPU of the os/arch.
+	GeneralGroupGeneric = GeneralManufacturerGeneric
 )
+
+// PoolScheduleLabels builds the schedule discriminator labels for a pool from its identity and
+// the CPU-manufacturer awareness setting. They are stamped on both the InstanceType and its
+// backing ClusterQueue and drive the ResourceFlavor/Devices reverse-lookup:
+//   - feature.gpustack.ai/acceleratable=<bool> is always present, separating generic from
+//     accelerated pools so an aware generic pool never matches an accelerated flavor sharing
+//     its CPU key;
+//   - an accelerated pool adds acceleratable.feature.gpustack.ai/<acceleratorGroup>=true;
+//   - the general.feature.gpustack.ai/<generalGroup>=true key is added only when aware and the
+//     general group is a real CPU (not the "generic" sentinel), so an unaware pool collapses
+//     every CPU and an aware pool splits by CPU.
+//
+// os/arch are included when non-empty.
+func PoolScheduleLabels(acceleratable, aware bool, generalGroup, acceleratorGroup, os, arch string) map[string]string {
+	lbs := map[string]string{
+		NodeAcceleratableLabelKey: strconv.FormatBool(acceleratable),
+	}
+	if os != "" {
+		lbs[core.LabelOSStable] = os
+	}
+	if arch != "" {
+		lbs[core.LabelArchStable] = arch
+	}
+	if acceleratable && acceleratorGroup != "" {
+		lbs[AcceleratableFeatureLabelPrefix+acceleratorGroup] = "true"
+	}
+	if aware && generalGroup != "" && generalGroup != GeneralGroupGeneric {
+		lbs[GeneralFeatureLabelPrefix+generalGroup] = "true"
+	}
+	return lbs
+}
+
+// PoolFlavorSelector is the inverse of PoolScheduleLabels: it extracts the ResourceFlavor selector
+// from a pool's labels (a ClusterQueue's or a ResourceFlavor's) — the generic-vs-accelerated
+// boolean, any feature key, and kubernetes.io/os|arch. It returns nil when the labels carry no
+// discriminator, so a caller never matches every object. The feature.gpustack.ai/acceleratable
+// boolean is a sufficient discriminator on its own (a collapsed generic pool carries only it, no
+// general.* key) and, kept in the selector, stops an aware generic pool (general.<gKey>=true) from
+// matching an accelerated flavor that shares that CPU key (acceleratable=true).
+func PoolFlavorSelector(labels map[string]string) map[string]string {
+	lbs := make(map[string]string, 4)
+	hasDiscriminator := false
+	for k, v := range labels {
+		switch {
+		case k == core.LabelOSStable, k == core.LabelArchStable:
+			lbs[k] = v
+		case k == NodeAcceleratableLabelKey:
+			lbs[k] = v
+			hasDiscriminator = true
+		case v == "true" &&
+			(strings.HasPrefix(k, GeneralFeatureLabelPrefix) ||
+				strings.HasPrefix(k, AcceleratableFeatureLabelPrefix)):
+			lbs[k] = v
+			hasDiscriminator = true
+		}
+	}
+	if !hasDiscriminator {
+		return nil
+	}
+	return lbs
+}
 
 const (
 	_NFDCPUModelVendorIDLabelKey = "feature.node.kubernetes.io/cpu-model.vendor_id"
@@ -377,6 +444,34 @@ func (f NodeFlavor) OwnKey() string {
 		return f.AcceleratorKey
 	}
 	return f.GeneralKey
+}
+
+// DerivedInstanceTypeIdentity returns the setting-correct name and group identity for the pool's
+// derived InstanceType. When CPU-manufacturer awareness is off the pool collapses — a
+// non-accelerated pool to the "generic" CPU group (gpustack--generic-${os}-${arch}) and an
+// accelerated pool to just its accelerator (gpustack--${aKey}-${os}-${arch}, CPU ignored); when
+// on, both split by the CPU key (gpustack--${gKey}-${os}-${arch} /
+// gpustack--${gKey}--${aKey}-${os}-${arch}).
+func (f NodeFlavor) DerivedInstanceTypeIdentity(aware bool) (name, generalGroup, acceleratorGroup string) {
+	generalGroup = GeneralGroupGeneric
+	if aware {
+		generalGroup = f.GeneralKey
+	}
+	if f.Acceleratable {
+		acceleratorGroup = f.AcceleratorKey
+		if aware {
+			name = fmt.Sprintf("gpustack--%s--%s-%s-%s", f.GeneralKey, f.AcceleratorKey, f.OS, f.Arch)
+		} else {
+			name = fmt.Sprintf("gpustack--%s-%s-%s", f.AcceleratorKey, f.OS, f.Arch)
+		}
+		return name, generalGroup, acceleratorGroup
+	}
+	if aware {
+		name = fmt.Sprintf("gpustack--%s-%s-%s", f.GeneralKey, f.OS, f.Arch)
+	} else {
+		name = fmt.Sprintf("gpustack--%s-%s-%s", GeneralGroupGeneric, f.OS, f.Arch)
+	}
+	return name, generalGroup, acceleratorGroup
 }
 
 // ExtractNodeFlavors derives the ResourceFlavors a node contributes to from its

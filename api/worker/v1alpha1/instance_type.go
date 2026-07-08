@@ -27,8 +27,10 @@ var _ runtime.Object = (*InstanceType)(nil)
 
 // InstanceTypeSpec defines the desired spec of InstanceType.
 type InstanceTypeSpec struct {
-	// Group indicates the group of the InstanceType.
-	Group string `json:"group" protobuf:"bytes,1,name=group"`
+	// AcceleratorGroup is the accelerator group (the acceleratable node key) of the
+	// InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
+	// onto and is required by the validating webhook when Acceleratable is true.
+	AcceleratorGroup string `json:"acceleratorGroup,omitempty" protobuf:"bytes,1,opt,name=acceleratorGroup"`
 
 	// Acceleratable indicates whether the InstanceType is acceleratable.
 	Acceleratable bool `json:"acceleratable" protobuf:"bytes,2,name=acceleratable"`
@@ -70,6 +72,12 @@ type InstanceTypeSpec struct {
 	// by the validating webhook, and is immutable after creation; a derived InstanceType is
 	// stamped with the fixed default.
 	LocalStorage string `json:"localStorage" protobuf:"bytes,11,opt,name=localStorage"`
+
+	// GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+	// "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,12,opt,name=generalGroup"`
 }
 
 // InstanceTypeCPU describes the information of the CPU.

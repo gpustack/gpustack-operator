@@ -320,26 +320,30 @@ const (
 )
 
 // authorDerivedInstanceType creates the pool's operator-owned InstanceType from a synced flavor.
-// It stamps the pool identity (group/acceleratable/os/arch) + the fixed default unit spec + the
-// derived marker; the defaulting webhook enriches the descriptor spec. It only ever creates — an
-// existing type (admin- or operator-owned) is left untouched, so an AlreadyExists is a no-op.
+// It stamps the setting-correct pool identity (general/accelerator group + acceleratable/os/arch)
+// + the fixed default unit spec + the derived marker; the defaulting webhook enriches the
+// descriptor spec. It only ever creates — an existing type (admin- or operator-owned) is left
+// untouched, so an AlreadyExists is a no-op.
 func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, flavor *nodefeature.NodeFlavor) error {
 	logger := ctrllog.FromContext(ctx)
 
+	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	name, generalGroup, acceleratorGroup := flavor.DerivedInstanceTypeIdentity(aware)
 	unitCpu, unitRam, stg := defaultResources(flavor.Acceleratable)
 
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
-			Name:   fmt.Sprintf("gpustack-%s-%s-%s", flavor.OwnKey(), flavor.OS, flavor.Arch),
+			Name:   name,
 			Labels: map[string]string{_InstanceTypeDerivedFromNodeLabel: "true"},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			Group:         flavor.OwnKey(),
-			Acceleratable: flavor.Acceleratable,
-			OS:            flavor.OS,
-			Arch:          flavor.Arch,
-			UnitResources: workercore.InstanceTypeUnitResources{CPU: unitCpu, RAM: unitRam},
-			LocalStorage:  stg,
+			GeneralGroup:     generalGroup,
+			AcceleratorGroup: acceleratorGroup,
+			Acceleratable:    flavor.Acceleratable,
+			OS:               flavor.OS,
+			Arch:             flavor.Arch,
+			UnitResources:    workercore.InstanceTypeUnitResources{CPU: unitCpu, RAM: unitRam},
+			LocalStorage:     stg,
 		},
 	}
 	err := r.Client.Create(ctx, it)

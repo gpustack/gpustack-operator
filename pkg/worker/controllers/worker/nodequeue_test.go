@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -91,9 +92,10 @@ func newInstanceTypeQueue(key string, acceleratable bool, groups ...kueue.Resour
 		ObjectMeta: meta.ObjectMeta{
 			Name: name,
 			Labels: map[string]string{
-				featureKeyLabel(acceleratable, key): "true",
-				core.LabelOSStable:                  "linux",
-				core.LabelArchStable:                "amd64",
+				featureKeyLabel(acceleratable, key):   "true",
+				nodefeature.NodeAcceleratableLabelKey: strconv.FormatBool(acceleratable),
+				core.LabelOSStable:                    "linux",
+				core.LabelArchStable:                  "amd64",
 			},
 		},
 		Spec: kueue.ClusterQueueSpec{
@@ -241,6 +243,80 @@ func TestNodeQueueReconciler_FillsAndSortsByCount(t *testing.T) {
 			assert.Nil(t, rq.LendingLimit, "no lendingLimit on a cohort-less queue")
 		})
 	}
+}
+
+// collapsedGenericQueue builds an operator-owned generic ClusterQueue the way the
+// InstanceTypeReconciler leaves it for a non-accelerated pool: the acceleratable=false
+// discriminator plus os/arch, and — only when aware — the general.<gKey> key. StopPolicy None.
+func collapsedGenericQueue(name, generalGroup string) *kueue.ClusterQueue {
+	labels := map[string]string{
+		nodefeature.NodeAcceleratableLabelKey: "false",
+		core.LabelOSStable:                    "linux",
+		core.LabelArchStable:                  "amd64",
+	}
+	if generalGroup != "" {
+		labels[nodefeature.GeneralFeatureLabelPrefix+generalGroup] = "true"
+	}
+	cq := &kueue.ClusterQueue{
+		ObjectMeta: meta.ObjectMeta{Name: name, Labels: labels},
+		Spec: kueue.ClusterQueueSpec{
+			NamespaceSelector: &meta.LabelSelector{},
+			StopPolicy:        ptr.To(kueue.None),
+		},
+	}
+	systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
+	return cq
+}
+
+// TestNodeQueueReconciler_GenericCollapsedFillsFromAllCPUFlavors pins that a collapsed generic
+// queue (carrying only the acceleratable=false discriminator, no general.* key — the unaware
+// shape) fills from every CPU ResourceFlavor of its os/arch regardless of the CPU key, so all
+// CPUs pool together.
+func TestNodeQueueReconciler_GenericCollapsedFillsFromAllCPUFlavors(t *testing.T) {
+	name := "gpustack--generic-linux-amd64"
+	cq := collapsedGenericQueue(name, "") // no general key: fully collapsed
+	// Two CPU flavors of different CPU manufacturers.
+	rf1 := newNodesFlavor("gpustack--amd-epyc-7763-linux-amd64-8c", "amd-epyc-7763", 8, 8)
+	rf2 := newNodesFlavor("gpustack--intel-xeon-8358-linux-amd64-4c", "intel-xeon-8358", 4, 4)
+	cli := buildNodeQueueClient(cq, rf1, rf2)
+
+	reconcileNodeQueueN(t, cli, name, 2)
+
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.Len(t, got.Spec.ResourceGroups, 1, "one resource group")
+	rg := got.Spec.ResourceGroups[0]
+	assert.Equal(t, core.ResourceCPU, rg.CoveredResources[0], "covers cpu")
+	assert.Len(t, rg.Flavors, 2, "both CPU flavors pool into the collapsed generic queue")
+}
+
+// TestNodeQueueReconciler_AwareGenericExcludesAcceleratedFlavor pins the selector isolation: an
+// aware generic queue (general.<gKey>=true + acceleratable=false) never fills from an accelerated
+// flavor that happens to carry the same general.<gKey> — the acceleratable=false discriminator
+// excludes it. Without that boolean guard the general.<gKey> key alone would wrongly match the
+// accelerated flavor and pollute the queue's quota.
+func TestNodeQueueReconciler_AwareGenericExcludesAcceleratedFlavor(t *testing.T) {
+	const gKey = "amd-epyc-7763"
+	name := "gpustack--" + gKey + "-linux-amd64"
+	cq := collapsedGenericQueue(name, gKey) // aware generic: carries general.<gKey>
+
+	cpuRF := newNodesFlavor("gpustack--"+gKey+"-linux-amd64-8c", gKey, 8, 8)
+	// A same-CPU accelerated flavor: it carries the paired general.<gKey> presence (Task 1) plus
+	// acceleratable=true — exactly the case the boolean guard must exclude.
+	accelRF := newNodesFlavor("gpustack--"+gKey+"--nvidia-a10g-linux-amd64-1d", "nvidia-a10g", 1, 4,
+		accelerated(nodefeature.ManufacturerNVIDIA))
+	accelRF.Labels[nodefeature.GeneralFeatureLabelPrefix+gKey] = "true"
+	cli := buildNodeQueueClient(cq, cpuRF, accelRF)
+
+	reconcileNodeQueueN(t, cli, name, 2)
+
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.Len(t, got.Spec.ResourceGroups, 1, "one resource group")
+	rg := got.Spec.ResourceGroups[0]
+	assert.Equal(t, core.ResourceCPU, rg.CoveredResources[0], "covers cpu, not credits")
+	require.Len(t, rg.Flavors, 1, "only the CPU flavor feeds; the accelerated flavor is excluded")
+	assert.Equal(t, cpuRF.Name, string(rg.Flavors[0].Name), "the CPU flavor, not the accelerated one")
 }
 
 // TestNodeQueueReconciler_AggregatesCapacity pins that multiple flavors of one pool differing

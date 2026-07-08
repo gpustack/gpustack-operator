@@ -933,7 +933,6 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 								"spec": {
 									Type: "object",
 									Required: []string{
-										"group",
 										"acceleratable",
 										"os",
 										"arch",
@@ -944,6 +943,10 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 										"acceleratable": {
 											Description: "Acceleratable indicates whether the InstanceType is acceleratable.",
 											Type:        "boolean",
+										},
+										"acceleratorGroup": {
+											Description: "AcceleratorGroup is the accelerator group (the acceleratable node key) of the\nInstanceType, e.g. \"nvidia-a10g\". It selects the accelerator pool the type schedules\nonto and is required by the validating webhook when Acceleratable is true.",
+											Type:        "string",
 										},
 										"arch": {
 											Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".\nIt is a required admin-writable input, enforced by the validating webhook.",
@@ -1059,8 +1062,8 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Description: "Family is the family of the InstanceType.",
 											Type:        "string",
 										},
-										"group": {
-											Description: "Group indicates the group of the InstanceType.",
+										"generalGroup": {
+											Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.\n\"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The\nmutating webhook defaults an empty value to \"generic\"; it participates as a scheduling\ndiscriminator only when instance-type-aware-cpu-manufacturer is enabled.",
 											Type:        "string",
 										},
 										"localStorage": {

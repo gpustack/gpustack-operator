@@ -390,14 +390,17 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
     `cpuDetail` presence follows the gate.
   - *Verify:* `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/... -run 'NodeFlavor|Extract|ConstructNodeCapacity'`; build; `make lint`. **Checkpoint: full build + suite. — Done: `./...` builds, `./pkg/... ./api/...` green, `make lint` 0 issues.**
 
-- [ ] **Task 2 — API rename + CPU-aware aggregation layer.** (Atomic — the rename must compile as a unit.)
-  - `api/worker/v1alpha1/instance_type.go` + `api/worker/v1/instance_type.go`: rename `Group` →
-    `AcceleratorGroup`, add `GeneralGroup`; `make generate` (deepcopy, register, CRD, conversion,
-    protobuf, openapi, applyconfiguration).
-  - Add the shared `poolScheduleLabels(acceleratable, aware, generalGroup, acceleratorGroup, os, arch)`
-    (Code Style sketch): always carries the `feature.gpustack.ai/acceleratable` boolean; adds the
-    `general.` key only when `aware && generalGroup != generalGroupGeneric`; adds the `acceleratable.`
-    key when accelerated.
+- [x] **Task 2 — API rename + CPU-aware aggregation layer.** (Atomic — the rename must compile as a unit.)
+  - `api/worker/v1alpha1/instance_type.go` (the aggregated `v1` type is a Go type alias of it, so no
+    separate edit): rename `Group` → `AcceleratorGroup`, add `GeneralGroup` **at the end (protobuf
+    field 12) to keep the source order matching the protobuf field numbers**; `make generate`
+    (deepcopy, register, CRD, conversion, protobuf, openapi, applyconfiguration).
+  - Add the shared `nodefeature.PoolScheduleLabels(acceleratable, aware, generalGroup, acceleratorGroup,
+    os, arch)`: always carries the `feature.gpustack.ai/acceleratable` boolean; adds the `general.` key
+    only when `aware && generalGroup != GeneralGroupGeneric`; adds the `acceleratable.` key when
+    accelerated. **Its inverse `nodefeature.PoolFlavorSelector(labels)` and the pool-naming
+    `NodeFlavor.DerivedInstanceTypeIdentity(aware)` live in `nodefeature` too — the label algebra and
+    pool identity are consolidated in one package** (moved out of `nodequeue.go`/`nodeflavor.go`).
   - `pkg/worker/webhooks/worker/instancetype.go`: `Default` defaults an empty `GeneralGroup` to
     `generic`, then stamps labels via `poolScheduleLabels` (pruning a stale feature key) + the entrance
     label; enrichment selector uses the same labels. `ValidateCreate`/`ValidateUpdate` require
@@ -408,15 +411,21 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
     name + `GeneralGroup`/`AcceleratorGroup` (off: `gpustack--generic-${os}-${arch}` /
     `gpustack--${aKey}-${os}-${arch}`; on: `gpustack--${gKey}-${os}-${arch}` /
     `gpustack--${gKey}--${aKey}-${os}-${arch}`), create-only.
-  - `pkg/worker/controllers/worker/nodequeue.go`: `poolFlavorSelector` picks up
-    `feature.gpustack.ai/acceleratable` (both values) and treats it as a sufficient discriminator.
+  - `pkg/worker/controllers/worker/nodequeue.go`: calls `nodefeature.PoolFlavorSelector` (which now
+    honours the `feature.gpustack.ai/acceleratable` boolean); `enqueueNodeQueueWhenResourceFlavorChanged`
+    lists the operator queues and keeps those whose selector is a subset of the (finest-grain) flavor's
+    discriminators — a `MatchingLabels` query keyed on the flavor's labels would miss a collapsed queue
+    that carries fewer labels.
   - Update `instancetype_test.go`, `nodequeue_test.go`, `nodeflavor_test.go`, webhook tests for the
-    rename + setting-aware behavior.
+    rename + setting-aware behavior; add `_GenericCollapsedFillsFromAllCPUFlavors` and
+    `_AwareGenericExcludesAcceleratedFlavor`. Also repaired the `workergateway/service` spec fixtures for
+    the rename.
   - *Acceptance:* Features 3–8 — the queues/types match the tables for both settings; an aware generic
     queue never lists an accelerated flavor; derived types are named per the setting; a flip converges
     on the next reconcile without rewriting a flavor.
   - *Verify:* `go test ./pkg/worker/... -run 'InstanceType|NodeQueue|NodeFlavor|Pod'`; `make generate`
-    clean; build; `make lint`. **Checkpoint: full build + suite.**
+    clean; build; `make lint`. **Checkpoint: full build + suite. — Done: `./...` builds, `make generate`
+    idempotent, `./pkg/... ./api/...` green, `make lint` 0 issues.**
 
 - [ ] **Task 3 — `cpuDetail` write-back in the defaulting webhook (awareness-gated).**
   - `pkg/worker/controllers/worker/nodeflavor.go`: marshal the `cpuDetail` note from the `workercore`
