@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -255,4 +256,94 @@ func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 		assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"], "new feature key stamped")
 		assert.NotContains(t, it.Labels, nodefeature.GeneralFeatureLabelPrefix+"amd-epyc-7763", "stale feature key pruned")
 	})
+}
+
+// TestInstanceTypeWebhook_FoldCPUDetail pins the cpuDetail JSON ↔ spec mapping the defaulting
+// webhook applies when awareness is on: a non-accelerated type carries the raw CPU detail as the
+// embedded spec.CPU (promoted PhysicalCores etc.), while an accelerated type carries it as
+// spec.Accelerator.CPU — which also records the CPU's own manufacturer/product/family, distinct
+// from the device's. The note is the JSON the NodeFlavorReconciler marshals (an
+// InstanceTypeAcceleratorCPU), so this round-trips the single typed source.
+func TestInstanceTypeWebhook_FoldCPUDetail(t *testing.T) {
+	detail := workercore.InstanceTypeAcceleratorCPU{
+		Manufacturer: "amd",
+		Product:      "AMD EPYC 7763",
+		Family:       "25",
+		InstanceTypeCPU: workercore.InstanceTypeCPU{
+			PhysicalCores: "64",
+			LogicalCores:  "128",
+			Cache:         workercore.InstanceTypeCPUCache{L3: "256MiB"},
+		},
+	}
+	accelRaw, err := json.Marshal(detail)
+	require.NoError(t, err)
+	// A non-accelerated flavor's cpuDetail note is a plain InstanceTypeCPU (its
+	// manufacturer/product/family are the InstanceType's top-level descriptors).
+	cpuRaw, err := json.Marshal(detail.InstanceTypeCPU)
+	require.NoError(t, err)
+
+	t.Run("non-accelerated folds an InstanceTypeCPU into the embedded spec.CPU", func(t *testing.T) {
+		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: false}}
+		foldCPUDetail(it, string(cpuRaw))
+		assert.Equal(t, "64", it.Spec.PhysicalCores, "promoted from the embedded InstanceTypeCPU")
+		assert.Equal(t, "128", it.Spec.LogicalCores)
+		assert.Equal(t, "256MiB", it.Spec.Cache.L3)
+		assert.Empty(t, it.Spec.CPU.Manufacturer, "the accelerator CPU is untouched for a non-accelerated type")
+	})
+
+	t.Run("accelerated folds an InstanceTypeAcceleratorCPU into spec.Accelerator.CPU", func(t *testing.T) {
+		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: true}}
+		foldCPUDetail(it, string(accelRaw))
+		assert.Equal(t, "amd", it.Spec.CPU.Manufacturer, "the accelerator CPU carries the CPU's own manufacturer")
+		assert.Equal(t, "AMD EPYC 7763", it.Spec.CPU.Product)
+		assert.Equal(t, "64", it.Spec.CPU.PhysicalCores)
+		assert.Empty(t, it.Spec.PhysicalCores, "the embedded top-level CPU detail is untouched for an accelerated type")
+	})
+
+	t.Run("empty note is a no-op", func(t *testing.T) {
+		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: false}}
+		foldCPUDetail(it, "")
+		assert.Empty(t, it.Spec.PhysicalCores)
+	})
+
+	t.Run("malformed note leaves the existing CPU detail unchanged", func(t *testing.T) {
+		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: true}}
+		it.Spec.CPU = workercore.InstanceTypeAcceleratorCPU{Manufacturer: "amd", Product: "AMD EPYC 7763"}
+		foldCPUDetail(it, "{not valid json")
+		assert.Equal(t, "amd", it.Spec.CPU.Manufacturer, "a malformed note must not clobber the spec to zero")
+		assert.Equal(t, "AMD EPYC 7763", it.Spec.CPU.Product)
+	})
+}
+
+// TestInstanceTypeWebhook_DefaultSkipsCPUDetailWhenUnaware pins that with CPU-manufacturer
+// awareness off (the unit binary default) the Default webhook enriches the descriptors but never
+// folds the flavor's cpuDetail note into the spec — the CPU is not a scheduling axis then.
+func TestInstanceTypeWebhook_DefaultSkipsCPUDetailWhenUnaware(t *testing.T) {
+	cpuRF := &kueue.ResourceFlavor{
+		ObjectMeta: meta.ObjectMeta{
+			Name: "gpustack--amd-epyc-7763-linux-amd64-8c",
+			Labels: map[string]string{
+				nodefeature.NodeAcceleratableLabelKey: "false",
+				core.LabelOSStable:                    "linux",
+				core.LabelArchStable:                  "amd64",
+			},
+		},
+	}
+	// A CPU flavor always carries a cpuDetail note (a plain InstanceTypeCPU); the webhook must
+	// ignore it when unaware.
+	systemmeta.NoteResource(cpuRF, "nodes", map[string]string{
+		"acceleratable": "false",
+		"manufacturer":  "amd",
+		"cpuDetail":     `{"physicalCores":"64"}`,
+	})
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(cpuRF).Build()
+	wh := &InstanceTypeWebhook{Client: cli}
+
+	it := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
+		Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64"},
+	}
+	require.NoError(t, wh.Default(context.Background(), it))
+	assert.Equal(t, "amd", it.Spec.Manufacturer, "descriptors still enriched")
+	assert.Empty(t, it.Spec.PhysicalCores, "cpuDetail is not folded when awareness is off")
 }
