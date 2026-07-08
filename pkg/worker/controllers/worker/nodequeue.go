@@ -317,21 +317,24 @@ func parseNodeFlavorCount(name string) int64 {
 }
 
 // parseResourceFlavorCapacity reads a flavor's pooled capacity (nodes × count) from the
-// ".capacity" sibling of its feature-key label (the bare "general."/"acceleratable." prefixed
-// label whose value is "true"). Returns 0 when the flavor carries no feature key or capacity.
+// ".capacity" sibling of its OWN feature-key label: an accelerated flavor sizes on its
+// "acceleratable." key, a CPU flavor on its "general." key. An accelerated flavor also carries the
+// "general.<gKey>" selector label (without a ".capacity" sibling), so the search is scoped to the
+// own-key prefix by the feature.gpustack.ai/acceleratable boolean and skips a key whose ".capacity"
+// is absent or non-positive — otherwise the map's random iteration order could read the wrong
+// (missing) key and silently drop the flavor's quota. Returns 0 when no own capacity is found.
 func parseResourceFlavorCapacity(rf *kueue.ResourceFlavor) int64 {
+	prefix := nodefeature.GeneralFeatureLabelPrefix
+	if rf.Labels[nodefeature.NodeAcceleratableLabelKey] == "true" {
+		prefix = nodefeature.AcceleratableFeatureLabelPrefix
+	}
 	for k, v := range rf.Labels {
-		if v != "true" {
+		if v != "true" || !strings.HasPrefix(k, prefix) {
 			continue
 		}
-		switch {
-		case strings.HasPrefix(k, nodefeature.AcceleratableFeatureLabelPrefix),
-			strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix):
-		default:
-			continue
+		if capacity, err := strconvx.Atoi[int64](rf.Labels[k+_ResourceFlavorCapacityLabelSuffix]); err == nil && capacity > 0 {
+			return capacity
 		}
-		capacity, _ := strconvx.Atoi[int64](rf.Labels[k+_ResourceFlavorCapacityLabelSuffix])
-		return capacity
 	}
 	return 0
 }

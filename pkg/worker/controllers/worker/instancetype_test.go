@@ -669,6 +669,15 @@ func accelerated(manufacturer string) flavorOpt {
 	}
 }
 
+// withGeneralKey stamps the general.<gKey>=true selector label an accelerated flavor also carries
+// (so an aware generic pool can be excluded from it) — without a .capacity sibling, mirroring the
+// real NodeFlavorReconciler. It is applied by newNodesFlavor after the labels are built.
+func withGeneralKey(gKey string) flavorOpt {
+	return func(notes map[string]string) {
+		notes["_generalKey"] = gKey
+	}
+}
+
 // newNodesFlavor builds a "nodes" ResourceFlavor carrying the schedule labels the
 // reconciler reads (the feature key, the generic-vs-accelerated boolean, kubernetes.io/os|arch,
 // and the key's .count/.capacity siblings) and the per-flavor notes. The device ("d") suffix is
@@ -686,18 +695,22 @@ func newNodesFlavor(name, key string, count, capacity int64, opts ...flavorOpt) 
 	}
 	acceleratable := notes["acceleratable"] == "true"
 	keyLabel := featureKeyLabel(acceleratable, key)
+	labels := map[string]string{
+		keyLabel:                                      "true",
+		nodefeature.NodeAcceleratableLabelKey:         notes["acceleratable"],
+		core.LabelOSStable:                            "linux",
+		core.LabelArchStable:                          "amd64",
+		keyLabel + _ResourceFlavorCountLabelSuffix:    itoa(count),
+		keyLabel + _ResourceFlavorCapacityLabelSuffix: itoa(capacity),
+	}
+	// An accelerated flavor also carries the general.<gKey> selector label (no .capacity sibling);
+	// withGeneralKey requests it via a sentinel note that never reaches the stored notes.
+	if gk := notes["_generalKey"]; gk != "" {
+		labels[nodefeature.GeneralFeatureLabelPrefix+gk] = "true"
+		delete(notes, "_generalKey")
+	}
 	rf := &kueue.ResourceFlavor{
-		ObjectMeta: meta.ObjectMeta{
-			Name: name,
-			Labels: map[string]string{
-				keyLabel:                                      "true",
-				nodefeature.NodeAcceleratableLabelKey:         notes["acceleratable"],
-				core.LabelOSStable:                            "linux",
-				core.LabelArchStable:                          "amd64",
-				keyLabel + _ResourceFlavorCountLabelSuffix:    itoa(count),
-				keyLabel + _ResourceFlavorCapacityLabelSuffix: itoa(capacity),
-			},
-		},
+		ObjectMeta: meta.ObjectMeta{Name: name, Labels: labels},
 	}
 	systemmeta.NoteResource(rf, _ResourceFlavorResType, notes)
 	return rf

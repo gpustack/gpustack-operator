@@ -234,9 +234,17 @@ func TestParseCardRequest_TakesStrictestSlicedUnits(t *testing.T) {
 
 func TestCandidateDevices(t *testing.T) {
 	poolLabels := map[string]string{"feature.gpustack.ai/nvidia": "true", "kubernetes.io/os": "linux"}
+	// The flavor's nodeLabels also carry a ".count" node-batch pin (for Kueue scheduling) that the
+	// DeviceManager deliberately omits from a Devices object's selector labels; candidateDevices must
+	// drop it, or MatchingLabels would find no Devices and the AdmissionCheck would wrongly Retry.
+	rfNodeLabels := map[string]string{
+		"feature.gpustack.ai/nvidia":                     "true",
+		"kubernetes.io/os":                               "linux",
+		"acceleratable.feature.gpustack.ai/nvidia.count": "1",
+	}
 	rf := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{Name: "gpu-pool"},
-		Spec:       kueue.ResourceFlavorSpec{NodeLabels: poolLabels},
+		Spec:       kueue.ResourceFlavorSpec{NodeLabels: rfNodeLabels},
 	}
 	inPool := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: "node-a", Labels: poolLabels}}
 	otherOS := &workercore.Devices{ObjectMeta: meta.ObjectMeta{
