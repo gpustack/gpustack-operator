@@ -256,10 +256,11 @@ the same CPU.
   reclaimed. → *Mitigation:* document it; the admin deletes the stale types; the drain/empty path keeps
   their queues from corrupting Kueue counters. Consider a follow-up reclamation only if it proves
   painful.
-- **Name-scheme change (`gpustack-…` → `gpustack--…`) orphans existing objects on upgrade.** → CPU/
-  device flavors are reclaimed by the existing "no contributing node → delete" branch as the new-named
-  flavors appear; derived `InstanceType`s/queues under old names linger (create-only), same as the
-  setting-flip case — document the one-time cleanup.
+- **Name-scheme change (`gpustack-…` → `gpustack--…`) + `Group` rename orphans existing objects on
+  upgrade.** → CPU/device flavors are reclaimed by the existing "no contributing node → delete" branch
+  as the new-named flavors appear; derived `InstanceType`s/queues under old names linger (create-only),
+  same as the setting-flip case. → *Mitigation (Task 8):* ship a migration guide + orphan-cleanup script
+  (modeled on `v0.5-to-v0.6.md` / `cleanup-v0.5-orphans.sh`), validated on the live cluster.
 - **Aware generic queue could match accelerated flavors of the same CPU** (both carry
   `general.${gKey}=true`). → *Resolved by design:* every selector carries the
   `feature.gpustack.ai/acceleratable` boolean, so the generic pool matches only `=false` flavors — this
@@ -482,9 +483,21 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
   setting. Update `SKILL.md` + references. *Verify:* `bash -n` each case; `chmod +x` new cases.
 
 - [ ] **Task 7 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
-  builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`), Helm-deploy to
-  a reachable Kubernetes cluster, and run the e2e verifications. *Verify:* the e2e case suite passes on
-  the cluster.
+  builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`, published to
+  Docker Hub; the builder host + upload path are supplied at run time, kept out of tracked files),
+  Helm-deploy to a reachable Kubernetes cluster with the packaged image tag, and run the e2e
+  verifications. *Verify:* the e2e case suite passes on the cluster.
+
+- [ ] **Task 8 — Migration guide + orphan-cleanup for the `gpustack--` rename.** This release renames
+  every materialized scheduling object again — `ResourceFlavor`/`ClusterQueue`/`InstanceType` from the
+  single-dash `gpustack-${key}-…` back to the double-dash `gpustack--${gKey}[--${aKey}]-…`, and the
+  `InstanceType` spec `Group` → `AcceleratorGroup` + `GeneralGroup` — so a plain `helm upgrade` leaves
+  the old-named objects as orphans (same failure mode as v0.5→v0.6). Add `docs/migration/<from>-to-<to>.md`
+  (modeled on `v0.5-to-v0.6.md`: what changes, why a plain upgrade orphans, uninstall-reinstall vs
+  in-place + cleanup) and a `docs/migration/cleanup-<old>-orphans.sh` (modeled on
+  `cleanup-v0.5-orphans.sh`) that deletes the old single-dash operator-owned RFs/CQs/derived ITs/LQs.
+  *Verify:* validate on the live cluster (Task 7 image) — upgrade an old-named deployment, run the
+  cleanup, confirm zero old-named residue and a healthy new-named chain; `bash -n` the script.
 
 ### Test Plan
 [ ] I/we understand the owners of the involved components may require updates to existing tests to make
