@@ -466,10 +466,15 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
     "false" default); `make generate` clean; build; `make lint`. **— Done: `./...` builds, `make generate`
     idempotent, `./pkg/... ./api/...` green, `make lint` 0 issues.**
 
-- [ ] **Task 5 — Docs.** `docs/architecture.md` (unconditional CPU key, the finest-grain flavor +
-  `acceleratable` boolean + `cpuDetail`, the awareness setting's collapse/split, the selector isolation),
-  `docs/settings.md` (new setting row), `docs/development.md` (any inventory touch), `README.md`.
-  *Verify:* links resolve; wording matches the shipped behavior.
+- [x] **Task 5 — Docs.** `docs/architecture.md` (unconditional CPU key; the finest-grain flavor + the
+  `feature.gpustack.ai/acceleratable` discriminator + `cpuDetail`; the awareness setting's
+  collapse/split naming table; the reconciler/webhook bullets; the rewritten worked example showing
+  RF-per-CPU vs collapsed CQ/IT), `docs/settings.md` (new `instance-type-aware-cpu-manufacturer` row;
+  removed the deleted `GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME` env var; "last five" per-reconcile),
+  `README.md` (one discovery-bullet clause). `docs/development.md` needed no change (its
+  `TestExtractGeneralNodeKey` reference is now correct); the historical `docs/migration/v0.5-to-v0.6.md`
+  is left as-is. *Verify:* the `settings.md#online-adjustable-settings` anchor resolves; wording matches
+  shipped behavior. **— Done.**
 
 - [ ] **Task 6 — E2E cases.** Via the `gpustack-operator-e2e` skill: flavor naming (`gpustack--${gKey}…`);
   toggling `instance-type-aware-cpu-manufacturer` reshapes the queues/types (collapse ↔ split);
