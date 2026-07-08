@@ -53,10 +53,12 @@ kubectl -n gpustack-system patch setting instance-type-derived-from-node --type 
 | `instance-type-mixed-on-node` | `GPUSTACK_INSTANCE_TYPE_MIXED_ON_NODE` | `true` | Whether one node may surface both a GPU and a CPU-only InstanceType. When `true`, a node is summarized into every type it can serve; when `false`, a node with accelerators yields only a GPU InstanceType and a CPU-only node only a general one. Read per-reconcile. |
 | `instance-type-derived-from-node` | `GPUSTACK_INSTANCE_TYPE_DERIVED_FROM_NODE` | `true` | Whether the operator auto-derives the InstanceType (and its backing ClusterQueue) from node hardware. When `true`, the `NodeFlavorReconciler` authors the derived InstanceType (create-only); when `false`, it only aligns the ResourceFlavor and the administrator defines the InstanceType via the API. Read per-reconcile. |
 | `instance-type-drain-when-no-flavors` | `GPUSTACK_INSTANCE_TYPE_DRAIN_WHEN_NO_FLAVORS` | `true` | Whether a ClusterQueue whose pool has lost all its ResourceFlavors is drained (`HoldAndDrain`, so Kueue evicts admitted workloads) before its resource groups are emptied. When `true`, the queue is drained first; when `false`, the operator waits for the reservations to clear on their own, then empties. Either way the groups are emptied only once every reservation is zero, so Kueue's counters never go negative. Read per-reconcile. |
+| `instance-type-aware-cpu-manufacturer` | `GPUSTACK_INSTANCE_TYPE_AWARE_CPU_MANUFACTURER` | `false` | Whether the derived ClusterQueue/InstanceType/InstanceTypeFlavor aggregation splits by CPU manufacturer. When `false`, non-accelerated flavors collapse into one `generic` pool per os/arch and accelerated flavors pool per accelerator (CPU ignored); when `true`, every pool splits by the CPU key (`gpustack--${gKey}-…` / `gpustack--${gKey}--${aKey}-…`) and the InstanceType records the raw CPU detail. The `ResourceFlavor`s themselves are unaffected — they always carry the CPU key, so a flip only re-groups the aggregation layer. Read per-reconcile. |
 
-The last four (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
-`instance-type-drain-when-no-flavors`) are read **per-reconcile** (`ShouldValueBool(ctx)`), so flipping one
-re-converges the scheduling chain on the next reconcile without restarting the operator.
+The last five (`node-management-manual`, `instance-type-mixed-on-node`, `instance-type-derived-from-node`,
+`instance-type-drain-when-no-flavors`, `instance-type-aware-cpu-manufacturer`) are read **per-reconcile**
+(`ShouldValueBool(ctx)`), so flipping one re-converges the scheduling chain on the next reconcile without
+restarting the operator.
 
 ## Deploy-Time Environment Variables
 
@@ -72,7 +74,6 @@ on the Worker Deployment propagates to the DMs automatically.
 | `GPUSTACK_CONF_DIR` | `/etc/gpustack` | all | Root directory for configuration and metadata, e.g. bundled Helm charts. |
 | `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | WK + DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Read in two places with identical parsing: the WK injects it into the NFD chart's `deviceClassWhitelist` and the acceleratable-detection NodeFeatureRule, and the DM applies it to its local sysfs PCI scan. |
 | `GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY` | `false` | DM | When `true`, the devices group ID gains a memory-size suffix (e.g. `nvidia-tesla-t4-16g` instead of `nvidia-tesla-t4`), so same-model devices with different VRAM sizes form distinct groups. |
-| `GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME` | `false` | WK | When `true`, the general(CPU) node key blends the CPU identity — the sanitized CPU name, or the NFD cpu-model family/id as a fallback — e.g. `intel-xeon-platinum-8358`, so Kueue flavors/queues subdivide by CPU model. When `false`, every node shares the `generic` key, pooling all CPUs together. The key never encodes os/arch; that is appended in full to the ResourceFlavor/ClusterQueue names (e.g. `-linux-arm64`) and pinned on the flavor's `spec.nodeLabels`. |
 
 ### Per-Manufacturer Overrides
 
