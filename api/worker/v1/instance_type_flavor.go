@@ -27,12 +27,15 @@ type InstanceTypeFlavor struct {
 var _ runtime.Object = (*InstanceTypeFlavor)(nil)
 
 // InstanceTypeFlavorSpec describes one pool aggregated from the ResourceFlavor notes. Its
-// fields mirror the InstanceTypeSpec descriptor ordering — group + acceleratable +
+// fields mirror the InstanceTypeSpec identity — accelerator/general group + acceleratable +
 // manufacturer/product/family + memory/cores — so the catalog and an InstanceType read
-// consistently.
+// consistently. Which group fields are populated tracks instance-type-aware-cpu-manufacturer:
+// with awareness off a generic pool carries GeneralGroup="generic" and an accelerated pool only
+// its AcceleratorGroup; with awareness on both carry the real CPU key in GeneralGroup.
 type InstanceTypeFlavorSpec struct {
-	// Group is the pool key (the InstanceType group), e.g. "nvidia-a10g", "generic".
-	Group string `json:"group,omitempty" protobuf:"bytes,1,opt,name=group"`
+	// AcceleratorGroup is the accelerator group (the acceleratable key) of an accelerated pool,
+	// e.g. "nvidia-a10g"; empty for a generic pool.
+	AcceleratorGroup string `json:"acceleratorGroup,omitempty" protobuf:"bytes,1,opt,name=acceleratorGroup"`
 
 	// Acceleratable reports whether the pool represents accelerated hardware; a generic
 	// (CPU-only) pool is false. It delimits generic from accelerated flavors.
@@ -55,6 +58,11 @@ type InstanceTypeFlavorSpec struct {
 
 	// Sliceable reports whether the accelerator can be sliced; false for a generic pool.
 	Sliceable bool `json:"sliceable,omitempty" protobuf:"varint,8,opt,name=sliceable"`
+
+	// GeneralGroup is the general(CPU) group of the pool: the real CPU key when
+	// instance-type-aware-cpu-manufacturer is on, or the "generic" sentinel for a collapsed
+	// (unaware) generic pool; empty for an accelerated pool when awareness is off.
+	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,9,opt,name=generalGroup"`
 }
 
 // InstanceTypeFlavorList holds the list of InstanceTypeFlavor.

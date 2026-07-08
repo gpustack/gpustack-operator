@@ -447,16 +447,24 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
     can't be unit-tested since the editable setting caches globally in the shared test binary, so it is
     an e2e case); build; `make lint`. **— Done: webhook tests pass, `./...` builds, `make lint` 0 issues.**
 
-- [ ] **Task 4 — `InstanceTypeFlavor` catalog: fields + setting-aware grouping.**
-  - `api/worker/v1/instance_type_flavor.go`: replace `Group` with `GeneralGroup` + `AcceleratorGroup`;
-    `make generate`.
-  - `pkg/worker/extensionapis/worker/instance_type_flavor.go`: read the setting via
-    `ShouldValueFromRemote(ctx) == "true"`; build the group identity per the setting (off → per-`aKey`
-    and one `generic`; on → per-`(gKey,aKey)` and per-`gKey`); name without os/arch; dedup; sort; update
-    the table columns.
+- [x] **Task 4 — `InstanceTypeFlavor` catalog: fields + setting-aware grouping.**
+  - `api/worker/v1/instance_type_flavor.go`: replace `Group` with `AcceleratorGroup` (proto 1) +
+    `GeneralGroup` (proto 9, last — proto-linear); `make generate`.
+  - `pkg/worker/extensionapis/worker/instance_type_flavor.go`: `OnList` reads the setting via
+    `ShouldValueFromRemote(ctx) == "true"`; `instanceTypeFlavorSpec` builds the group identity per the
+    setting (off → per-`aKey` accelerated rows + one `generic` row; on → per-`(gKey,aKey)` + per-`gKey`),
+    dropping the CPU-specific descriptors for the collapsed generic row so it dedups to one;
+    `instanceTypeFlavorName` names it (`gpustack--…`, no os/arch); the sort gains a group tiebreak; the
+    table gains `GeneralGroup`/`AcceleratorGroup` columns.
+  - Migration completed: `NodeFlavorReconciler` drops the transitional `group` note (only the catalog
+    read it), and the `nodeflavor_test` `group`-note assertions are removed.
   - *Acceptance:* Feature 9 — `kubectl get instancetypeflavors` lists the setting-correct rows; a
     generic row shows `acceleratable=false` with empty memory/cores/sliceable.
-  - *Verify:* aggregation unit test; `make generate` clean; build; `make lint`.
+  - *Verify:* aggregation unit test (collapse across CPUs → one row per accelerator + one generic; the
+    aware=true split is an e2e case since the editable setting caches globally in the shared test
+    binary; the test configures a fake loopback kube client so the remote read falls back to the
+    "false" default); `make generate` clean; build; `make lint`. **— Done: `./...` builds, `make generate`
+    idempotent, `./pkg/... ./api/...` green, `make lint` 0 issues.**
 
 - [ ] **Task 5 — Docs.** `docs/architecture.md` (unconditional CPU key, the finest-grain flavor +
   `acceleratable` boolean + `cpuDetail`, the awareness setting's collapse/split, the selector isolation),
