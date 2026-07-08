@@ -148,6 +148,25 @@ func (s Setting) ShouldValueFromRemote(ctx context.Context) string {
 	return funcx.NoError(s.ValueFromRemote(ctx))
 }
 
+// ValueBoolFromRemote returns the boolean value of the setting, reading from remote (see
+// ValueFromRemote). Prefer this over comparing ShouldValueFromRemote to a literal "true": the bool
+// admission (AllowBool) accepts any strconv.ParseBool form ("1"/"TRUE"/...), so it mirrors ValueBool.
+func (s Setting) ValueBoolFromRemote(ctx context.Context) (bool, error) {
+	// ValueFromRemote returns the setting's default in valStr even on error, so parse valStr
+	// unconditionally to honor the "default on not found" contract; surface the fetch error alongside.
+	valStr, err := s.ValueFromRemote(ctx)
+	b, perr := strconv.ParseBool(valStr)
+	if err != nil {
+		return b, err
+	}
+	return b, perr
+}
+
+// ShouldValueBoolFromRemote returns the boolean value of the setting from remote without error.
+func (s Setting) ShouldValueBoolFromRemote(ctx context.Context) bool {
+	return funcx.NoError(s.ValueBoolFromRemote(ctx))
+}
+
 // Value returns the value of the setting.
 //
 // If the value is not found in the delegated secret, it returns the default value of the setting.

@@ -437,3 +437,68 @@ func contains(xs []string, v string) bool {
 	}
 	return false
 }
+
+// TestSyncNodeFlavorNotes pins that the flavor's operator note set is replaced wholesale, not just
+// overwritten — the regression behind the awareness-gated cpuDetail note. NoteResource cannot delete,
+// so before this the note-sync used a subset comparison that (a) never added cpuDetail when awareness
+// flipped on (existing notes stayed a subset of the desired set) and (b) never removed it when
+// awareness flipped off (the stale note lingered). It must add, remove, no-op when equal, drop a
+// retired note, and never touch a non-operator annotation.
+func TestSyncNodeFlavorNotes(t *testing.T) {
+	const detail = `{"product":"AMD EPYC 7R32"}`
+	// rf builds a ResourceFlavor carrying the given operator notes plus a foreign annotation the
+	// sync must preserve.
+	rf := func(notes map[string]string) *kueue.ResourceFlavor {
+		f := &kueue.ResourceFlavor{ObjectMeta: meta.ObjectMeta{
+			Name:        "gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d",
+			Annotations: map[string]string{"example.com/keep": "yes"},
+		}}
+		systemmeta.NoteResource(f, _ResourceFlavorResType, notes)
+		return f
+	}
+
+	cases := []struct {
+		name        string
+		have, want  map[string]string
+		wantChanged bool
+	}{
+		{
+			name:        "adds a now-desired note (cpuDetail after awareness flips on)",
+			have:        map[string]string{"acceleratable": "true", "acceleratorGroup": "nvidia-a10g"},
+			want:        map[string]string{"acceleratable": "true", "acceleratorGroup": "nvidia-a10g", "cpuDetail": detail},
+			wantChanged: true,
+		},
+		{
+			name:        "removes a no-longer-desired note (cpuDetail after awareness flips off)",
+			have:        map[string]string{"acceleratable": "true", "acceleratorGroup": "nvidia-a10g", "cpuDetail": detail},
+			want:        map[string]string{"acceleratable": "true", "acceleratorGroup": "nvidia-a10g"},
+			wantChanged: true,
+		},
+		{
+			name:        "no change when the note set already matches",
+			have:        map[string]string{"acceleratable": "true", "cpuDetail": detail},
+			want:        map[string]string{"acceleratable": "true", "cpuDetail": detail},
+			wantChanged: false,
+		},
+		{
+			name:        "drops a retired note not in the desired set",
+			have:        map[string]string{"acceleratable": "true", "group": "nvidia-a10g"},
+			want:        map[string]string{"acceleratable": "true", "acceleratorGroup": "nvidia-a10g"},
+			wantChanged: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			f := rf(c.have)
+			changed := syncNodeFlavorNotes(f, c.want)
+			assert.Equal(t, c.wantChanged, changed)
+
+			rt, got := systemmeta.DescribeResource(f)
+			assert.Equal(t, _ResourceFlavorResType, rt, "resource type stays stamped")
+			assert.Equal(t, c.want, got, "notes equal the desired set exactly")
+			assert.Equal(t, "yes", f.Annotations["example.com/keep"], "a non-operator annotation is preserved")
+		})
+	}
+}

@@ -110,7 +110,10 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 		return nil, err
 	}
 
-	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueFromRemote(ctx) == "true"
+	// Read the awareness setting as a bool (matching the reconcilers' ShouldValueBool), not a literal
+	// "true": the setting's AllowBool admission also accepts "1"/"TRUE"/etc., and comparing to "true"
+	// alone would leave the catalog collapsed while the reconciled ClusterQueues/InstanceTypes split.
+	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBoolFromRemote(ctx)
 
 	visited := sets.New[worker.InstanceTypeFlavorSpec]()
 	list := &worker.InstanceTypeFlavorList{Items: make([]worker.InstanceTypeFlavor, 0, len(rfList.Items))}
