@@ -16,6 +16,44 @@ Skill-specific symptoms live in each skill's own `references/`.
   Dockerfile's `GPUSTACK_GIT_COMMIT` build-arg recompiles per commit), then rebuild with a fresh
   `TAG=dev-$(git rev-parse --short HEAD)`, reload, and redeploy pointing at the new tag.
 
+## Cluster capability / accelerator detection
+
+`nvidia.com/gpu` (and `.sliced` / `.shared`) **allocatable is advertised by the GPUStack DeviceManager
+itself — it IS the device plugin, doing the same job as the vendor's.** So it is a valid "is an
+accelerator schedulable on this node" signal, with one caveat about timing:
+
+- It appears only once the node's `gpustack-operator-device-manager-<vendor>` DaemonSet pod is
+  **Running/Ready** and has registered. It is legitimately absent on a real GPU node when the operator is
+  not installed yet, or while that pod is `Init`/`CrashLoopBackOff`/not-Ready. **Do not conclude
+  "GPU-less" from an empty `nvidia.com/gpu` that you read before the operator (or its device-manager) was
+  up.** That was the actual mis-call once: a *pre-deploy* `kubectl get nodes …:.status.allocatable.nvidia\.com/gpu`
+  showed `<none>` (correct — no plugin yet) and got carried forward as "this cluster has no GPUs", when
+  the nodes were g5/g4dn cards all along.
+
+- The **hardware-presence** signal that does NOT depend on the device-plugin being up is NFD's
+  `acceleratable.feature.gpustack.ai/<manufacturer>[-<id>]=true` node labels (NFD PCI-vendor detection
+  runs regardless of the DeviceManager). Use those for "does this node have accelerator hardware"; use
+  `nvidia.com/gpu` allocatable (with the device-manager Ready) for "is it schedulable now". The Devices
+  ledger (`kubectl get devices.worker.gpustack.ai`) and accelerated ResourceFlavors (`gpustack--…-Nd`)
+  are operator-derived signals too.
+
+  ```
+  kubectl get nodes -o json | python3 -c "
+  import json,sys
+  for n in json.load(sys.stdin)['items']:
+      L=n['metadata']['labels']; a=n.get('status',{}).get('allocatable',{}); name=n['metadata']['name']
+      hw=[k.split('/')[-1] for k in L if k.startswith('acceleratable.feature.gpustack.ai/') and '.' not in k.split('/')[-1]]
+      sched=[k for k in a if k.endswith('/gpu') or k.endswith('/npu')]
+      print(name, L.get('node.kubernetes.io/instance-type','?'), 'hw=', hw or '-', 'schedulable=', sched or '-')"
+  ```
+
+- **Before calling an operator-owned ResourceFlavor/ClusterQueue an "orphan", enumerate the live nodes'
+  gpustack feature keys and check the object's `creationTimestamp`.** An RF/CQ whose `${gKey}`/`${aKey}`
+  matches a live node's `general.`/`acceleratable.` labels is a legitimate pool, not a leftover — a
+  heterogeneous cluster (a CPU node plus g5/g4dn GPU nodes) legitimately yields several CPU keys and
+  several accelerator pools, so pool names that differ from the first node you looked at are expected. A
+  `creationTimestamp` right after your own `helm install` also rules out "prior run" residue.
+
 ## Extension APIs / startup order
 
 - **Extension APIService not `Available`** — the aggregated apiserver isn't ready; check the worker

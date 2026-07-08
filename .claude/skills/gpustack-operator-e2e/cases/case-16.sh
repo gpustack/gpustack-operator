@@ -18,7 +18,7 @@
 # Inputs:      All real, nothing mocked —
 #              - reads the InstanceTypeFlavor catalog;
 #              - deletes the derived general pool's backing ClusterQueue, then lets it self-heal;
-#              - creates + deletes a throwaway admin InstanceType e2e-case16-teardown (group e2e16td).
+#              - creates + deletes a throwaway admin InstanceType e2e-case16-teardown (generalGroup e2e16td).
 # Expected:    - A — >=1 InstanceTypeFlavor row, and a generic (acceleratable=false) one;
 #              - B — the ClusterQueue is recreated with a NEW uid while the InstanceType survives;
 #              - C — the throwaway's backing ClusterQueue is created, then both it and the InstanceType
@@ -62,9 +62,9 @@ n_flavors=$(kubectl get instancetypeflavors.worker.gpustack.ai --no-headers 2>/d
   && record PASS "InstanceTypeFlavor lists the fleet's pools" "${n_flavors} row(s)" \
   || record FAIL "InstanceTypeFlavor lists the fleet's pools" "no rows — the aggregated catalog must project the ResourceFlavors"
 generic=$(kubectl get instancetypeflavors.worker.gpustack.ai \
-  -o jsonpath='{.items[?(@.spec.acceleratable==false)].spec.group}' 2>/dev/null | tr ' ' '\n' | grep -m1 .)
+  -o jsonpath='{.items[?(@.spec.acceleratable==false)].spec.generalGroup}' 2>/dev/null | tr ' ' '\n' | grep -m1 .)
 [ -n "$generic" ] \
-  && record PASS "generic pool surfaces as acceleratable=false" "group=${generic}" \
+  && record PASS "generic pool surfaces as acceleratable=false" "generalGroup=${generic}" \
   || record FAIL "generic pool surfaces as acceleratable=false" "no acceleratable=false InstanceTypeFlavor row"
 
 # --- B. Accidental delete of the backing ClusterQueue self-heals (recreated with a new uid). ---
@@ -101,7 +101,7 @@ kind: InstanceType
 metadata:
   name: ${PROBE}
 spec:
-  group: e2e16td
+  generalGroup: e2e16td
   acceleratable: false
   os: linux
   arch: amd64

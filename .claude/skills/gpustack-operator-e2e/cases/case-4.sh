@@ -86,7 +86,7 @@ for _ in $(seq 1 40); do
   ITNAME=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
-    if it['metadata']['name'].startswith('gpustack-${AKEY}-'): print(it['metadata']['name']); break
+    if it['metadata']['name'].startswith('gpustack--${AKEY}-'): print(it['metadata']['name']); break
 " 2>/dev/null)
   [ -n "$ITNAME" ] && break
   sleep 3
