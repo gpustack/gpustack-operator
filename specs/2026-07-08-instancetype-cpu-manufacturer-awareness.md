@@ -1,6 +1,6 @@
 # Spec: InstanceType CPU-Manufacturer Awareness
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -259,8 +259,9 @@ the same CPU.
 - **Name-scheme change (`gpustack-…` → `gpustack--…`) + `Group` rename orphans existing objects on
   upgrade.** → CPU/device flavors are reclaimed by the existing "no contributing node → delete" branch
   as the new-named flavors appear; derived `InstanceType`s/queues under old names linger (create-only),
-  same as the setting-flip case. → *Mitigation (Task 8):* ship a migration guide + orphan-cleanup script
-  (modeled on `v0.5-to-v0.6.md` / `cleanup-v0.5-orphans.sh`), validated on the live cluster.
+  same as the setting-flip case. → *Mitigation (Task 8):* revise the existing v0.5→v0.6 migration guide +
+  cleanup script in place for the v0.5.x → v0.6.x path (both endpoints are double-dash, so the
+  discriminator moves to the v0.5.x-only `-${n}c-${n}g` unit-spec), validated on the live cluster.
 - **Aware generic queue could match accelerated flavors of the same CPU** (both carry
   `general.${gKey}=true`). → *Resolved by design:* every selector carries the
   `feature.gpustack.ai/acceleratable` boolean, so the generic pool matches only `=false` flavors — this
@@ -512,16 +513,21 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
   stops guessing the sentinel; the AdmissionCheck drops the `.count` pin from its `Devices` selector),
   with regression tests. *Verify:* the e2e case suite passes on the cluster. **— Done.**
 
-- [ ] **Task 8 — Migration guide + orphan-cleanup for the `gpustack--` rename.** This release renames
-  every materialized scheduling object again — `ResourceFlavor`/`ClusterQueue`/`InstanceType` from the
-  single-dash `gpustack-${key}-…` back to the double-dash `gpustack--${gKey}[--${aKey}]-…`, and the
-  `InstanceType` spec `Group` → `AcceleratorGroup` + `GeneralGroup` — so a plain `helm upgrade` leaves
-  the old-named objects as orphans (same failure mode as v0.5→v0.6). Add `docs/migration/<from>-to-<to>.md`
-  (modeled on `v0.5-to-v0.6.md`: what changes, why a plain upgrade orphans, uninstall-reinstall vs
-  in-place + cleanup) and a `docs/migration/cleanup-<old>-orphans.sh` (modeled on
-  `cleanup-v0.5-orphans.sh`) that deletes the old single-dash operator-owned RFs/CQs/derived ITs/LQs.
-  *Verify:* validate on the live cluster (Task 7 image) — upgrade an old-named deployment, run the
-  cleanup, confirm zero old-named residue and a healthy new-named chain; `bash -n` the script.
+- [x] **Task 8 — Migration guide + orphan-cleanup for the v0.5.x → v0.6.x upgrade.** This release
+  returns the materialized `ResourceFlavor`/`ClusterQueue` names to a double-dash scheme (now **split** —
+  a CPU flavor and a device flavor, count-suffixed) and renames the `InstanceType` spec `Group` →
+  `AcceleratorGroup` + `GeneralGroup`, so a plain `helm upgrade` from v0.5.x leaves the old objects as
+  orphans. The intermediate single-dash v0.6.0–v0.6.2 line never shipped to users, so the only real
+  upgrade is **v0.5.x → v0.6.x** — both double-dash. Because both are double-dash, the existing
+  `cleanup-v0.5-orphans.sh` discriminator (`^gpustack--`) would now also match the healthy v0.6.x chain —
+  a footgun. **Revised the existing `docs/migration/v0.5-to-v0.6.md` + `docs/migration/cleanup-v0.5-orphans.sh`
+  in place:** corrected the v0.6.x endpoint to the double-dash split scheme and moved the orphan
+  discriminator to a v0.5.x-only signal — the `-${n}c-${n}g` CPU/RAM unit-spec baked into every v0.5.x
+  composite RF/CQ/Cohort name, which no v0.6.x split name carries (v0.6.x names end in a bare `-${n}c` /
+  `-${n}d` count). v0.5.x `InstanceType`s were a virtual API (no CRs), so the cleanup still touches only
+  RFs/CQs/Cohorts/LQs. *Verify:* validated on the live v0.6.x cluster — a hand-created v0.5.x object set
+  (composite RF/CQ/Cohort + a LocalQueue) was removed with zero residue and the v0.6.x chain left
+  byte-for-byte identical; `bash -n` clean. **— Done.**
 
 ### Test Plan
 [ ] I/we understand the owners of the involved components may require updates to existing tests to make

@@ -4,25 +4,36 @@
 # `helm upgrade` of the GPUStack Operator to v0.6.x (or later).
 #
 # WHY THIS IS NEEDED
-#   v0.6.x renamed every materialized scheduling object and dropped Cohort entirely:
-#     ResourceFlavor / ClusterQueue  gpustack--<genKey>-<cpu>c-<ram>g...   (v0.5.x, DOUBLE dash)
-#                                 -> gpustack-<key>-<os>-<arch>[-<n>c|-<n>d] (v0.6.x, single dash)
+#   v0.6.x reshaped every materialized scheduling object and dropped Cohort entirely. Both v0.5.x and
+#   v0.6.x names are DOUBLE dash, but the shape differs — v0.5.x is a CPU+device COMPOSITE with the
+#   CPU/RAM unit-spec baked in and an abbreviated os/arch; v0.6.x SPLITS CPU and device into separate
+#   flavors with the full os/arch and a bare trailing count:
+#     ResourceFlavor / ClusterQueue  gpustack--<genKey>-<cpu>c-<ram>g...--<acc>d    (v0.5.x, composite)
+#                                 -> gpustack--<genKey>-<os>-<arch>-<n>c             (v0.6.x, CPU)
+#                                 -> gpustack--<genKey>--<accKey>-<os>-<arch>-<n>d   (v0.6.x, device)
 #     Cohort                         one per pool (v0.5.x)  ->  removed (v0.6.x)
-#     InstanceType                   aggregated virtual API ->  real CRD
+#     InstanceType                   aggregated virtual API (nothing stored, v0.5.x) -> real CRD (v0.6.x)
 #   The upgraded operator indexes objects by their NEW names, so it never reconciles or
 #   garbage-collects the v0.5.x-named set. `helm upgrade` runs no cleanup hook (the chart's
 #   post-delete `cleanup.sh` only fires on uninstall), so the old objects leak in place —
 #   dead ResourceFlavors, ClusterQueues, Cohorts and LocalQueues accumulate alongside the
 #   working v0.6.x set. This script removes ONLY those orphans.
 #
+# HOW v0.5.x IS TOLD APART FROM v0.6.x (both are "gpustack--")
+#   A bare "^gpustack--" match is NOT safe: v0.6.x objects are double-dash too, so it would delete the
+#   healthy chain. The reliable v0.5.x-only signal is the CPU/RAM unit-spec baked into every v0.5.x
+#   flavor/queue/cohort name — a "-<n>c-<n>g" pair (e.g. "-4c-16g"). v0.6.x names carry only a trailing
+#   "-<n>c" (CPU) or "-<n>d" (device) COUNT and never a "-<n>g" gibibyte segment, so they never match.
+#
 # WHAT IT TOUCHES
-#   Only objects whose name begins with "gpustack--" (DOUBLE dash) — the v0.5.x naming.
-#   v0.6.x objects are "gpustack-<key>-..." (single dash) and are never matched. It never
-#   deletes namespaces, Instances, or any of the user's own resources directly. If an old
-#   ClusterQueue still holds admitted workloads (a v0.5.x Instance was running across the
-#   upgrade), it is drained via HoldAndDrain first — which EVICTS those workloads — before the
-#   queue is removed; because the queue names changed in v0.6.x, evicted workloads must be
-#   re-created under the new pool's queue. An old queue with no workloads is deleted directly.
+#   Only objects whose name matches ^gpustack--.*-<n>c-<n>g (the v0.5.x composite unit-spec).
+#   v0.6.x objects ("gpustack--<key>-<os>-<arch>-<n>c|-<n>d", no "-<n>g") are never matched. It never
+#   deletes namespaces, Instances, or any of the user's own resources directly, and — because v0.5.x
+#   InstanceTypes were a virtual API with no stored CRs — it never touches InstanceType objects. If an
+#   old ClusterQueue still holds admitted workloads (a v0.5.x Instance was running across the upgrade),
+#   it is drained via HoldAndDrain first — which EVICTS those workloads — before the queue is removed;
+#   because the queue names changed, evicted workloads must be re-created under the new pool's queue.
+#   An old queue with no workloads is deleted directly.
 #
 # NODE LABELS
 #   The stale v0.5.x node labels (.z-flavor/.z-queue/.z-cohort, generic-ln-x64, per-unit
@@ -40,7 +51,10 @@ set -uo pipefail
 DRY_RUN=false
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=true
 
-OLD_RE='^gpustack--'   # v0.5.x double-dash orphans only; v0.6.x single-dash never matches
+# v0.5.x double-dash orphans only: the composite "-<n>c-<n>g" unit-spec never appears in a v0.6.x name
+# (which carries a bare "-<n>c" / "-<n>d" count), so the healthy double-dash v0.6.x chain never matches.
+OLD_RE='^gpustack--.*-[0-9]+c-[0-9]+g'
+export OLD_RE
 
 run() { # echo + execute (or just echo under --dry-run)
   echo "  + $*"
@@ -49,12 +63,13 @@ run() { # echo + execute (or just echo under --dry-run)
 
 echo "[migrate] scanning for v0.5.x orphans (names matching ${OLD_RE})$($DRY_RUN && echo '  [DRY-RUN]')"
 
-# 1. LocalQueues that point at an old (gpustack--) ClusterQueue, across all namespaces.
+# 1. LocalQueues that point at an old (v0.5.x) ClusterQueue, across all namespaces.
 echo "[migrate] (1/4) orphaned LocalQueues"
 kubectl get localqueue -A -o json 2>/dev/null | python3 -c '
-import json, sys
+import json, os, re, sys
+rx = re.compile(os.environ["OLD_RE"])
 for lq in json.load(sys.stdin).get("items", []):
-    if lq.get("spec", {}).get("clusterQueue", "").startswith("gpustack--"):
+    if rx.search(lq.get("spec", {}).get("clusterQueue", "")):
         print(lq["metadata"]["namespace"], lq["metadata"]["name"])
 ' | while read -r ns name; do
   run kubectl -n "$ns" delete localqueue "$name" --ignore-not-found --timeout=60s
@@ -66,7 +81,7 @@ done
 #    drained. This mirrors the operator's own InstanceType retirement
 #    (pkg/worker/controllers/worker/instancetype.go: HoldAndDrain -> wait !hasReserved -> delete).
 #    Empty queues skip straight to delete (no needless wait). NOTE: draining EVICTS those workloads;
-#    because the queue names changed in v0.6.x they must be re-created under the new pool's queue.
+#    because the queue names changed they must be re-created under the new pool's queue.
 echo "[migrate] (2/4) orphaned ClusterQueues (drain first if they still hold workloads)"
 for name in $(kubectl get clusterqueue -o name 2>/dev/null | sed 's#.*/##' | grep -E "$OLD_RE"); do
   reserving=$(kubectl get clusterqueue "$name" -o jsonpath='{.status.reservingWorkloads}' 2>/dev/null)
@@ -87,7 +102,8 @@ for name in $(kubectl get clusterqueue -o name 2>/dev/null | sed 's#.*/##' | gre
 done
 
 # 3. Old Cohorts, 4. Old ResourceFlavors. ResourceFlavors LAST so Kueue has already released the
-#    resource-in-use finalizer their (now deleted) ClusterQueues held on them.
+#    resource-in-use finalizer their (now deleted) ClusterQueues held on them. (v0.6.x creates no
+#    Cohorts, so any matching one is a v0.5.x orphan.)
 for kind in cohort resourceflavor; do
   echo "[migrate] ($( [ "$kind" = cohort ] && echo 3/4 || echo 4/4 )) orphaned ${kind}s"
   for name in $(kubectl get "$kind" -o name 2>/dev/null | sed 's#.*/##' | grep -E "$OLD_RE"); do
@@ -102,9 +118,10 @@ if ! $DRY_RUN; then
   for kind in localqueue clusterqueue cohort resourceflavor; do
     if [ "$kind" = localqueue ]; then
       kubectl get localqueue -A -o json 2>/dev/null | python3 -c '
-import json, sys
+import json, os, re, sys
+rx = re.compile(os.environ["OLD_RE"])
 for lq in json.load(sys.stdin).get("items", []):
-    if lq["metadata"]["name"].startswith("gpustack--") or lq.get("spec", {}).get("clusterQueue", "").startswith("gpustack--"):
+    if rx.search(lq["metadata"]["name"]) or rx.search(lq.get("spec", {}).get("clusterQueue", "")):
         print(lq["metadata"]["namespace"], lq["metadata"]["name"])
 ' | while read -r ns name; do
         echo "  ~ strip localqueue ${ns}/${name}"
@@ -123,11 +140,12 @@ fi
 echo "[migrate] residue check"
 residue=$(kubectl get resourceflavor,clusterqueue,cohort -o name 2>/dev/null | sed 's#.*/##' | grep -Ec "$OLD_RE" || true)
 residue_lq=$(kubectl get localqueue -A -o json 2>/dev/null | python3 -c '
-import json, sys
-print(sum(1 for lq in json.load(sys.stdin).get("items", []) if lq.get("spec", {}).get("clusterQueue", "").startswith("gpustack--")))
+import json, os, re, sys
+rx = re.compile(os.environ["OLD_RE"])
+print(sum(1 for lq in json.load(sys.stdin).get("items", []) if rx.search(lq.get("spec", {}).get("clusterQueue", ""))))
 ' 2>/dev/null || echo "?")
-echo "  gpustack-- RF/CQ/Cohort remaining: ${residue}"
-echo "  LocalQueues pointing at old CQ:    ${residue_lq}"
+echo "  v0.5.x RF/CQ/Cohort remaining:  ${residue}"
+echo "  LocalQueues pointing at old CQ: ${residue_lq}"
 
 stale_labels=$(kubectl get nodes -o json 2>/dev/null | python3 -c '
 import json, sys
