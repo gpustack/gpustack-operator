@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	core "k8s.io/api/core/v1"
@@ -393,12 +394,15 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 }
 
 // acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object
-// (os/arch plus each acceleratable feature key, minus the managed mark) that let the worker locate
-// the node's Devices by a single List. The acceleratable feature keys are taken from the feature
-// labels being published this pass (publishedFeatureLabels, i.e. the NodeFeature's spec labels), NOT
-// read back off the node: NFD merges those labels onto the node only afterwards, so a freshly
-// onboarded node would otherwise yield no keys until an unrelated resync. os/arch are stable node
-// labels present from registration. gpustack.ai/managed is synced separately by NodeDevicesReconciler.
+// (os/arch plus each acceleratable feature key and its paired CPU-key presence, minus the managed
+// mark and the .count sizing pin) that let the worker locate the node's Devices by a single List.
+// The acceleratable feature keys are taken from the feature labels being published this pass
+// (publishedFeatureLabels, i.e. the NodeFeature's spec labels), NOT read back off the node: NFD
+// merges those labels onto the node only afterwards, so a freshly onboarded node would otherwise
+// yield no keys until an unrelated resync. os/arch are stable node labels present from registration.
+// gpustack.ai/managed is synced separately by NodeDevicesReconciler. The per-node .count pin sizes
+// the ResourceFlavor's node batch; it is not a Devices selector key (the worker lists Devices by the
+// feature-key presence + os/arch), so it is dropped here.
 func acceleratableDevicesSelectorLabels(node *core.Node, publishedFeatureLabels map[string]string) map[string]string {
 	src := &core.Node{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{
 		core.LabelOSStable:   node.Labels[core.LabelOSStable],
@@ -413,7 +417,7 @@ func acceleratableDevicesSelectorLabels(node *core.Node, publishedFeatureLabels 
 			continue
 		}
 		for k, v := range nf.NodeLabels {
-			if k == systemname.ManagedLabelKey {
+			if k == systemname.ManagedLabelKey || strings.HasSuffix(k, ".count") {
 				continue
 			}
 			out[k] = v

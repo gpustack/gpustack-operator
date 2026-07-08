@@ -11,20 +11,10 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
-	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
-
-// Toggle of the functions.
-var (
-	generalNodeKeyWithCPUName bool
-)
-
-func init() {
-	generalNodeKeyWithCPUName = osx.Getenv("GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME") == "true"
-}
 
 const (
 	// FeatureLabelPrefix prefixes the node feature label/annotation keys.
@@ -164,73 +154,42 @@ const (
 	_NFDCPUModelIDLabelKey       = "feature.node.kubernetes.io/cpu-model.id"
 )
 
-// ExtractGeneralNodeKey derives the general(CPU) node key of the given Node,
-// it always returns a non-empty key.
-// Unless the GPUSTACK_GENERAL_NODE_KEY_WITH_CPU_NAME environment variable is
-// truthy at startup, it returns "generic". Otherwise, the key is in the format
-// "${manufacturer}-${id}", e.g. "intel-xeon-platinum-8358": the id leads with
-// the sanitized "feature.gpustack.ai/cpu-name" annotation when reported, or with
-// the NFD cpu-model family and id labels otherwise. It falls back to "generic"
-// when neither the cpu-name annotation nor the cpu-model labels are usable.
+// ExtractGeneralNodeKey derives the general(CPU) node key of the given Node; it always
+// returns a non-empty key blending the node's real CPU identity.
+//
+// os/arch are not part of the key: the ResourceFlavor/ClusterQueue name carries os/arch
+// explicitly and spec.nodeLabels pins kubernetes.io/os|arch, so nodes of different ISAs
+// cannot pool into one flavor/queue even when the key collides (the cpu-model family and
+// id labels are independent numbering spaces on x86 versus arm64, so a small value such as
+// "25-1" can legitimately appear on both).
+//
+// The manufacturer (the lowercased NFD cpu-model vendor_id, or "generic" when unknown)
+// leads and a CPU identity is blended in after it: the sanitized
+// "feature.gpustack.ai/cpu-name" annotation when reported (e.g. "amd-epyc-7763"), the NFD
+// cpu-model family and id labels as the fallback when the annotation is absent (e.g.
+// "amd-25-1"), or nothing when no CPU identity is usable (e.g. "amd", or "generic" when the
+// vendor is unknown too — the graceful degradation when NFD is absent).
 func ExtractGeneralNodeKey(node *core.Node) string {
-	return extractGeneralNodeKey(node, generalNodeKeyWithCPUName)
-}
+	// The manufacturer part of the general node key is derived from the NFD cpu-model
+	// vendor_id label.
+	manu := extractGeneralNodeKeyManufacturer(node)
 
-// extractGeneralNodeKey is ExtractGeneralNodeKey with the CPU-name blending
-// toggle passed in explicitly, so tests can exercise both modes.
-//
-// os/arch are not part of the key: the ResourceFlavor/ClusterQueue name carries
-// os/arch explicitly and spec.nodeLabels pins kubernetes.io/os|arch, so nodes of
-// different ISAs cannot pool into one flavor/queue even when the key collides
-// (the cpu-model family and id labels are independent numbering spaces on x86
-// versus arm64, so a small value such as "25-1" can legitimately appear on both).
-//
-// When generalNodeKeyWithCPUName is false, the key is "generic": every CPU pools
-// together, separated only by the os/arch carried in the flavor/queue name.
-//
-// When it is true, the manufacturer (the lowercased NFD cpu-model vendor_id, or
-// "generic" when unknown) leads and a CPU identity is blended in between: the
-// sanitized "feature.gpustack.ai/cpu-name" annotation when reported (e.g.
-// "amd-epyc-7763"), the NFD cpu-model family and id labels as the rare fallback
-// when the annotation is absent (e.g. "amd-25-1"), or nothing when no CPU
-// identity is usable (e.g. "amd", or "generic" when the vendor is unknown too).
-func extractGeneralNodeKey(node *core.Node, generalNodeKeyWithCPUName bool) string {
-	// If generalNodeKeyWithCPUName is enabled,
-	// the manufacturer part of the general node key is derived from the NFD cpu-model vendor_id label.
-	var manu string
-	if generalNodeKeyWithCPUName {
-		manu = extractGeneralNodeKeyManufacturer(node)
-	} else {
-		manu = GeneralManufacturerGeneric
-	}
-
-	// os/arch are no longer part of the key: the ResourceFlavor/ClusterQueue name
-	// carries os/arch explicitly and spec.nodeLabels pins kubernetes.io/os|arch, so
-	// cross-ISA pools cannot collide — the key need not also bake them in.
-	//
-	// When generalNodeKeyWithCPUName is enabled,
-	// try to blend the CPU name into the general node key for better readability and differentiation.
-	// The CPU name is reported by the NFD NodeFeatureRule with the "feature.gpustack.ai/cpu-name" annotation,
-	// it is sanitized and truncated to fit the Kubernetes label value requirements when constructing the node key.
-	//
-	// When the annotation is unavailable,
-	// the NFD cpu-model family and id labels are used as the fallback id prefix,
-	// which are always present and meaningful when CPU information is properly collected.
-	//
-	// If NFD is not deployed, or the CPU information is not properly collected,
-	// the id prefix is empty and the general node key falls back to "${manufacturer}-${idSuffix}".
+	// Blend the CPU name into the general node key for readability and differentiation. The
+	// CPU name is reported by the NFD NodeFeatureRule with the "feature.gpustack.ai/cpu-name"
+	// annotation; it is sanitized and truncated to fit the Kubernetes label value
+	// requirements. When the annotation is unavailable, the NFD cpu-model family and id
+	// labels are the fallback id prefix. If NFD is not deployed, or the CPU information is
+	// not collected, the id prefix is empty and the key falls back to "${manufacturer}".
 	var idPrefix string
-	if generalNodeKeyWithCPUName {
-		if name := generalFeatureAnnotation(node, "name"); name != "" {
-			// "${manufacturer}-${idPrefix}", limit the key to 63 characters in total.
-			budget := 63 - len(manu) - 1
-			idPrefix = device.NormalizeName(name, manu, budget, true)
-		} else {
-			family := node.Labels[_NFDCPUModelFamilyLabelKey]
-			modelID := node.Labels[_NFDCPUModelIDLabelKey]
-			if family != "" && modelID != "" {
-				idPrefix = family + "-" + modelID
-			}
+	if name := generalFeatureAnnotation(node, "name"); name != "" {
+		// "${manufacturer}-${idPrefix}", limit the key to 63 characters in total.
+		budget := 63 - len(manu) - 1
+		idPrefix = device.NormalizeName(name, manu, budget, true)
+	} else {
+		family := node.Labels[_NFDCPUModelFamilyLabelKey]
+		modelID := node.Labels[_NFDCPUModelIDLabelKey]
+		if family != "" && modelID != "" {
+			idPrefix = family + "-" + modelID
 		}
 	}
 
@@ -255,6 +214,49 @@ func extractGeneralNodeKeyManufacturer(node *core.Node) string {
 		manu = GeneralManufacturerGeneric
 	}
 	return manu
+}
+
+// CPUDetail is the raw CPU information read from a node's "feature.gpustack.ai/cpu-*"
+// annotations (reported by the NFD NodeFeatureRule). It is recorded verbatim onto a
+// ResourceFlavor's cpuDetail note; the InstanceType webhook folds it back into the
+// InstanceType spec when CPU-manufacturer awareness is on.
+type CPUDetail struct {
+	Manufacturer           string
+	Product                string
+	Family                 string
+	PhysicalCores          string
+	ThreadsPerPhysicalCore string
+	LogicalCores           string
+	Stepping               string
+	ClockSpeed             string
+	MaxClockSpeed          string
+	CacheLine              string
+	CacheL1I               string
+	CacheL1D               string
+	CacheL2                string
+	CacheL3                string
+}
+
+// ExtractGeneralDetail reads the node's CPU detail from its "feature.gpustack.ai/cpu-*"
+// annotations. An unreported attribute — an unresolved NFD "@cpu.model.*" template or an
+// absent annotation — is returned empty (see generalFeatureAnnotation).
+func ExtractGeneralDetail(node *core.Node) CPUDetail {
+	return CPUDetail{
+		Manufacturer:           extractGeneralNodeKeyManufacturer(node),
+		Product:                generalFeatureAnnotation(node, "name"),
+		Family:                 generalFeatureAnnotation(node, "family"),
+		PhysicalCores:          generalFeatureAnnotation(node, "physical-cores"),
+		ThreadsPerPhysicalCore: generalFeatureAnnotation(node, "threads-per-core"),
+		LogicalCores:           generalFeatureAnnotation(node, "logical-cores"),
+		Stepping:               generalFeatureAnnotation(node, "stepping"),
+		ClockSpeed:             generalFeatureAnnotation(node, "hz"),
+		MaxClockSpeed:          generalFeatureAnnotation(node, "boost-freq"),
+		CacheLine:              generalFeatureAnnotation(node, "cache-line"),
+		CacheL1I:               generalFeatureAnnotation(node, "cache-l1i"),
+		CacheL1D:               generalFeatureAnnotation(node, "cache-l1d"),
+		CacheL2:                generalFeatureAnnotation(node, "cache-l2"),
+		CacheL3:                generalFeatureAnnotation(node, "cache-l3"),
+	}
 }
 
 type (
@@ -327,13 +329,17 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 // is the count of pooled nodes times Count. The unit spec is not derived here — it is
 // a fixed default on the InstanceType.
 type NodeFlavor struct {
-	// Name is the ResourceFlavor name:
-	// "gpustack-${key}-${os}-${arch}-${count}c" for a CPU flavor or
-	// "gpustack-${key}-${os}-${arch}-${count}d" for a device flavor, with full
-	// os/arch.
+	// Name is the ResourceFlavor name, with the CPU key always encoded and full os/arch:
+	// "gpustack--${gKey}-${os}-${arch}-${count}c" for a CPU flavor or
+	// "gpustack--${gKey}--${aKey}-${os}-${arch}-${count}d" for a device flavor.
 	Name string
-	// Key is the general(CPU) node key or the acceleratable(device) node key.
-	Key string
+	// GeneralKey is the node's general(CPU) key, always set. It mirrors the InstanceType's
+	// GeneralGroup.
+	GeneralKey string
+	// AcceleratorKey is the acceleratable(device) key of a device flavor, empty for a CPU
+	// flavor. It mirrors the InstanceType's AcceleratorGroup, so an accelerated flavor encodes
+	// both the CPU (GeneralKey) and the accelerator (AcceleratorKey).
+	AcceleratorKey string
 	// OS and Arch are the node's kubernetes.io/os and kubernetes.io/arch values
 	// (full, e.g. "linux"/"amd64"), carried verbatim into the Name and the
 	// schedule labels.
@@ -362,6 +368,15 @@ type NodeFlavor struct {
 	// kubernetes.io/arch (full values), the flavor's feature key label, and its
 	// per-node .count sibling so a reserved flavor binds one homogeneous batch of nodes.
 	NodeLabels map[string]string
+}
+
+// OwnKey returns the flavor's own feature key — the accelerator key when accelerated,
+// otherwise the general(CPU) key — which the flavor sizes its own .count/.capacity on.
+func (f NodeFlavor) OwnKey() string {
+	if f.Acceleratable {
+		return f.AcceleratorKey
+	}
+	return f.GeneralKey
 }
 
 // ExtractNodeFlavors derives the ResourceFlavors a node contributes to from its
@@ -394,23 +409,19 @@ func ExtractNodeFlavors(node *core.Node) (flavors []NodeFlavor) {
 			gCountKey: node.Labels[gCountKey],
 		}
 
-		nf := NodeFlavor{
-			Name:         formatNodeFlavorName(gKey, os, arch, cpuCount, false),
-			Key:          gKey,
+		flavors = append(flavors, NodeFlavor{
+			Name:         formatNodeFlavorName(gKey, "", os, arch, cpuCount, false),
+			GeneralKey:   gKey,
 			OS:           os,
 			Arch:         arch,
 			Count:        cpuCount,
 			Manufacturer: manufacturer,
-			NodeLabels:   nodeLabels,
-		}
-		// The default "generic" key pools heterogeneous CPUs, so a single node's
-		// CPU identity is only meaningful when CPU-name blending is enabled.
-		if generalNodeKeyWithCPUName {
-			nf.Product = generalFeatureAnnotation(node, "name")
-			nf.Family = generalFeatureAnnotation(node, "family")
-		}
-
-		flavors = append(flavors, nf)
+			// The general key now always reflects the node's real CPU, so the CPU
+			// identity is meaningful and always recorded.
+			Product:    generalFeatureAnnotation(node, "name"),
+			Family:     generalFeatureAnnotation(node, "family"),
+			NodeLabels: nodeLabels,
+		})
 	}
 
 	// Device flavors: one per acceleratable key, sized by its reported device count.
@@ -426,40 +437,44 @@ func ExtractNodeFlavors(node *core.Node) (flavors []NodeFlavor) {
 			systemname.ManagedLabelKey: "true",
 			core.LabelOSStable:         os,
 			core.LabelArchStable:       arch,
-			aNodeKey:                   "true",
-			// Pin to same-count nodes so a reserved flavor stays on one homogeneous batch.
+			// Pin the CPU-key presence so an accelerated flavor binds nodes of the
+			// paired CPU (the aggregation layer decides whether to split on it).
+			gNodeKey:  "true",
+			aNodeKey:  "true",
 			aCountKey: node.Labels[aCountKey],
 		}
 
 		flavors = append(flavors, NodeFlavor{
-			Name:          formatNodeFlavorName(aKey, os, arch, count, true),
-			Key:           aKey,
-			OS:            os,
-			Arch:          arch,
-			Count:         count,
-			Acceleratable: true,
-			Manufacturer:  manufacturer,
-			Product:       node.Labels[aNodeKey+".product"],
-			Family:        node.Labels[aNodeKey+".family"],
-			Memory:        node.Labels[aNodeKey+".memory"],
-			Cores:         node.Labels[aNodeKey+".cores"],
-			NodeLabels:    nodeLabels,
+			Name:           formatNodeFlavorName(gKey, aKey, os, arch, count, true),
+			GeneralKey:     gKey,
+			AcceleratorKey: aKey,
+			OS:             os,
+			Arch:           arch,
+			Count:          count,
+			Acceleratable:  true,
+			Manufacturer:   manufacturer,
+			Product:        node.Labels[aNodeKey+".product"],
+			Family:         node.Labels[aNodeKey+".family"],
+			Memory:         node.Labels[aNodeKey+".memory"],
+			Cores:          node.Labels[aNodeKey+".cores"],
+			NodeLabels:     nodeLabels,
 		})
 	}
 
 	return flavors
 }
 
-// formatNodeFlavorName builds a ResourceFlavor name from a node key, the node's
-// full os/arch and the per-node count. The suffix is "c" for a CPU flavor and "d"
-// for a device flavor.
-func formatNodeFlavorName(key, os, arch string, count int64, acceleratable bool) string {
-	suffix := "c"
+// formatNodeFlavorName builds a ResourceFlavor name that always encodes the CPU key gKey
+// and, for a device flavor, the accelerator key aKey after a "--" separator; the node's
+// full os/arch and the per-node count follow. The suffix is "c" for a CPU flavor and "d"
+// for a device flavor. The "gpustack--" prefix and "--" key separator are deliberate:
+// gKey/aKey themselves contain single dashes, so the doubled dash keeps the segments
+// unambiguous.
+func formatNodeFlavorName(gKey, aKey, os, arch string, count int64, acceleratable bool) string {
 	if acceleratable {
-		suffix = "d"
+		return fmt.Sprintf("gpustack--%s--%s-%s-%s-%dd", gKey, aKey, os, arch, count)
 	}
-	return fmt.Sprintf("gpustack-%s-%s-%s-%d%s",
-		key, os, arch, count, suffix)
+	return fmt.Sprintf("gpustack--%s-%s-%s-%dc", gKey, os, arch, count)
 }
 
 // generalFeatureAnnotation returns the "feature.gpustack.ai/cpu-${name}"

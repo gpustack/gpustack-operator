@@ -24,7 +24,8 @@ import (
 
 // newManagedCPUNode builds a managed Node carrying the general(CPU) feature labels
 // and the status capacity the reconciler reads — enough for ExtractNodeFlavors to
-// emit exactly one CPU flavor named "gpustack-generic-linux-amd64-${cpu}c".
+// emit exactly one CPU flavor named "gpustack--generic-linux-amd64-${cpu}c" (the
+// fixture reports no cpu-model, so the general key falls back to "generic").
 func newManagedCPUNode(name string, cpu, memGi, stgGi int64) *core.Node {
 	nd := &core.Node{
 		ObjectMeta: meta.ObjectMeta{
@@ -55,8 +56,9 @@ func newManagedCPUNode(name string, cpu, memGi, stgGi int64) *core.Node {
 
 // newManagedAccelNode builds a managed Node carrying one nvidia-a10g accelerator
 // (count cards, per-card VRAM) plus its CPU capacity. ExtractNodeFlavors emits two
-// flavors: the device flavor "gpustack-nvidia-a10g-linux-amd64-${count}d" and a CPU
-// flavor; the umbrella acceleratable label marks the node accelerated.
+// flavors: the device flavor "gpustack--generic--nvidia-a10g-linux-amd64-${count}d"
+// (the CPU key is "generic" as the fixture reports no cpu-model) and a CPU flavor; the
+// umbrella acceleratable label marks the node accelerated.
 func newManagedAccelNode(name string, count int64) *core.Node {
 	nd := newManagedCPUNode(name, 48, 192, 100)
 	aKey := "nvidia-a10g"
@@ -207,6 +209,8 @@ func TestNodeFlavorReconciler_ActiveShape(t *testing.T) {
 	assert.Equal(t, "amd64", rf.Labels[core.LabelArchStable], "arch label (full)")
 	assert.Equal(t, "4", rf.Labels[gKey+_ResourceFlavorCountLabelSuffix], "count label")
 	assert.Equal(t, "4", rf.Labels[gKey+_ResourceFlavorCapacityLabelSuffix], "capacity label")
+	// The generic-vs-accelerated discriminator: a CPU flavor is "false".
+	assert.Equal(t, "false", rf.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable discriminator")
 
 	// nodeLabels pin the pooled nodes; a blanket Exists toleration is set.
 	assert.Equal(t, "true", rf.Spec.NodeLabels[systemname.ManagedLabelKey], "managed pinned")
@@ -224,7 +228,12 @@ func TestNodeFlavorReconciler_ActiveShape(t *testing.T) {
 	assert.Equal(t, "false", notes["acceleratable"], "acceleratable note")
 	assert.Equal(t, "generic", notes["manufacturer"], "manufacturer note")
 	assert.Equal(t, "generic", notes["group"], "group note")
+	assert.Equal(t, "generic", notes["generalGroup"], "generalGroup note")
+	assert.Empty(t, notes["acceleratorGroup"], "no acceleratorGroup for a cpu flavor")
 	assert.Empty(t, notes["cores"], "no cores for a cpu flavor")
+	// A CPU flavor always carries the raw CPU detail (here only the manufacturer is
+	// reported, so the JSON is minimal but present).
+	assert.NotEmpty(t, notes["cpuDetail"], "cpu flavor always records cpuDetail")
 	assert.NotContains(t, notes, "unitCPU", "no unit spec in flavor notes")
 	assert.NotContains(t, notes, "unitRAM", "no unit spec in flavor notes")
 	assert.NotContains(t, notes, "localStorage", "no unit spec in flavor notes")
@@ -247,15 +256,25 @@ func TestNodeFlavorReconciler_ActiveShapeAccelerated(t *testing.T) {
 	assert.Equal(t, "2", rf.Labels[aKey+_ResourceFlavorCountLabelSuffix], "device count label")
 	// capacity = 1 node × 2 cards.
 	assert.Equal(t, "2", rf.Labels[aKey+_ResourceFlavorCapacityLabelSuffix], "device capacity label")
+	// The generic-vs-accelerated discriminator: a device flavor is "true".
+	assert.Equal(t, "true", rf.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable discriminator")
+	// The paired CPU key's presence (the fixture node reports no cpu-model, so "generic"),
+	// so an aware (CPU-split) pool can select it.
+	assert.Equal(t, "true", rf.Labels[nodefeature.GeneralFeatureLabelPrefix+"generic"], "paired cpu key presence")
 
 	_, notes := systemmeta.DescribeResource(rf)
 	assert.Equal(t, "true", notes["acceleratable"], "acceleratable note")
 	assert.Equal(t, "nvidia", notes["manufacturer"], "manufacturer note")
 	assert.Equal(t, "nvidia-a10g", notes["group"], "group note")
+	assert.Equal(t, "generic", notes["generalGroup"], "generalGroup note (paired cpu key)")
+	assert.Equal(t, "nvidia-a10g", notes["acceleratorGroup"], "acceleratorGroup note")
 	assert.Equal(t, "NVIDIA A10G", notes["product"], "product note")
 	assert.Equal(t, "ampere", notes["family"], "family note")
 	assert.Equal(t, "24Gi", notes["memory"], "per-card VRAM note")
 	assert.Equal(t, "9216", notes["cores"], "per-card cores note")
+	// With CPU-manufacturer awareness off (the unit binary's resolved default), an
+	// accelerated flavor does not record cpuDetail — the CPU is not a scheduling axis.
+	assert.NotContains(t, notes, "cpuDetail", "accel cpuDetail gated off when unaware")
 }
 
 // TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode pins the
