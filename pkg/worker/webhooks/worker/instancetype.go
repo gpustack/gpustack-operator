@@ -16,6 +16,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/webhook"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -168,10 +169,42 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 				it.Spec.Cores = notes["cores"]
 				it.Spec.Sliceable = notes["sliceable"] == "true"
 			}
+			// Fold the raw CPU detail back into the spec only when CPU-manufacturer awareness is
+			// on (the flavor carries the cpuDetail note always for a CPU flavor, but only when
+			// aware for an accelerated one). Off leaves the CPU spec untouched.
+			if aware {
+				foldCPUDetail(it, notes["cpuDetail"])
+			}
 		}
 	}
 
 	return nil
+}
+
+// foldCPUDetail unmarshals a ResourceFlavor's cpuDetail note back into the InstanceType spec,
+// mirroring the shape the NodeFlavorReconciler stored (the single typed source). InstanceTypeSpec
+// inlines both an InstanceTypeCPU and an InstanceTypeAccelerator, so: a non-accelerated type's note
+// is a plain InstanceTypeCPU folded into the embedded InstanceTypeCPU (promoted as spec.physicalCores
+// etc.), while an accelerated type's note is an InstanceTypeAcceleratorCPU folded into spec.CPU (the
+// embedded InstanceTypeAccelerator's CPU field, which also records the CPU's own
+// manufacturer/product/family, distinct from the device's). The note is a nice-to-have, so a
+// malformed note leaves the spec unchanged (the unmarshal target is only assigned on success); an
+// empty note is a no-op.
+func foldCPUDetail(it *workercore.InstanceType, raw string) {
+	if raw == "" {
+		return
+	}
+	if it.Spec.Acceleratable {
+		var detail workercore.InstanceTypeAcceleratorCPU
+		if err := json.Unmarshal([]byte(raw), &detail); err == nil {
+			it.Spec.CPU = detail
+		}
+	} else {
+		var detail workercore.InstanceTypeCPU
+		if err := json.Unmarshal([]byte(raw), &detail); err == nil {
+			it.Spec.InstanceTypeCPU = detail
+		}
+	}
 }
 
 // validateInstanceTypeSpec collects the required-input errors: an accelerator group when

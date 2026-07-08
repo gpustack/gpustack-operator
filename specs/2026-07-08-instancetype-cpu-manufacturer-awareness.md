@@ -427,15 +427,25 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
     clean; build; `make lint`. **Checkpoint: full build + suite. — Done: `./...` builds, `make generate`
     idempotent, `./pkg/... ./api/...` green, `make lint` 0 issues.**
 
-- [ ] **Task 3 — `cpuDetail` write-back in the defaulting webhook (awareness-gated).**
-  - `pkg/worker/controllers/worker/nodeflavor.go`: marshal the `cpuDetail` note from the `workercore`
-    CPU structs (single typed source).
-  - `pkg/worker/webhooks/worker/instancetype.go`: when `InstanceTypeAwareCPUManufacturer` is true, read
-    the matched flavor's `cpuDetail` note and unmarshal into `spec.Accelerator.CPU` (accelerated) or
-    `spec.CPU` (non-accelerated); when false, never touch it.
-  - *Acceptance:* awareness on fills `cpuDetail`; awareness off leaves it; a non-accelerated type never
-    keeps a stale accelerator `CPU`.
-  - *Verify:* webhook unit tests; build; `make lint`.
+- [x] **Task 3 — `cpuDetail` write-back in the defaulting webhook (awareness-gated).**
+  - `pkg/worker/controllers/worker/nodeflavor.go`: `cpuDetailNote(detail, acceleratable)` stores the
+    **type-specific shape** — a plain `InstanceTypeCPU` for a non-accelerated flavor (its CPU
+    manufacturer/product/family are the InstanceType's top-level descriptors) and an
+    `InstanceTypeAcceleratorCPU` for an accelerated one (carrying the CPU's own
+    manufacturer/product/family, distinct from the device's). *(Folded into Task 1's commit.)*
+  - `pkg/worker/webhooks/worker/instancetype.go`: `foldCPUDetail(it, raw)` unmarshals the matched
+    flavor's `cpuDetail` note into the **matching** target — `spec.Accelerator.CPU`
+    (`InstanceTypeAcceleratorCPU`) when `it.Spec.Acceleratable`, else the embedded `spec.CPU`
+    (`InstanceTypeCPU`); `Default` calls it inside the enrich-once block **only when
+    `InstanceTypeAwareCPUManufacturer` is true**, so awareness off never touches the CPU spec.
+  - The `cpuDetail` note is a nice-to-have: both sides use `pkg/utils/json`'s error-ignoring
+    `ShouldMarshal`/`ShouldUnmarshal`, so neither `cpuDetailNote` nor `foldCPUDetail` returns an error.
+  - *Acceptance:* awareness on folds `cpuDetail` into the acceleratable-correct spec field; awareness
+    off leaves it; a non-accelerated type never keeps a stale accelerator `CPU`.
+  - *Verify:* webhook unit tests (`_FoldCPUDetail` round-trips accel→`spec.Accelerator.CPU` /
+    non-accel→`spec.CPU` / empty; `_DefaultSkipsCPUDetailWhenUnaware` pins the off gate — the on branch
+    can't be unit-tested since the editable setting caches globally in the shared test binary, so it is
+    an e2e case); build; `make lint`. **— Done: webhook tests pass, `./...` builds, `make lint` 0 issues.**
 
 - [ ] **Task 4 — `InstanceTypeFlavor` catalog: fields + setting-aware grouping.**
   - `api/worker/v1/instance_type_flavor.go`: replace `Group` with `GeneralGroup` + `AcceleratorGroup`;
