@@ -246,8 +246,19 @@ func (r *NodeDevicesAdmissionReconciler) candidateDevices(ctx context.Context, w
 		if len(rf.Spec.NodeLabels) == 0 {
 			continue
 		}
+		// The flavor's nodeLabels carry a ".count" node-batch pin (for Kueue scheduling) that the
+		// DeviceManager deliberately omits from a Devices object's selector labels; drop it so the
+		// List matches — the real CPU key, the acceleratable key, os/arch and managed remain, and
+		// those are exactly what NodeDevicesReconciler + the DeviceManager stamp onto the Devices.
+		sel := make(ctrlcli.MatchingLabels, len(rf.Spec.NodeLabels))
+		for k, v := range rf.Spec.NodeLabels {
+			if strings.HasSuffix(k, _ResourceFlavorCountLabelSuffix) {
+				continue
+			}
+			sel[k] = v
+		}
 		list := new(workercore.DevicesList)
-		if err := r.APIReader.List(ctx, list, ctrlcli.MatchingLabels(rf.Spec.NodeLabels)); err != nil {
+		if err := r.APIReader.List(ctx, list, sel); err != nil {
 			return nil, err
 		}
 		for i := range list.Items {

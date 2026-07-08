@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -22,7 +23,9 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/datax"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/osx"
+	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
@@ -394,34 +397,35 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 }
 
 // acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object
-// (os/arch plus each acceleratable feature key and its paired CPU-key presence, minus the managed
-// mark and the .count sizing pin) that let the worker locate the node's Devices by a single List.
-// The acceleratable feature keys are taken from the feature labels being published this pass
-// (publishedFeatureLabels, i.e. the NodeFeature's spec labels), NOT read back off the node: NFD
-// merges those labels onto the node only afterwards, so a freshly onboarded node would otherwise
-// yield no keys until an unrelated resync. os/arch are stable node labels present from registration.
-// gpustack.ai/managed is synced separately by NodeDevicesReconciler. The per-node .count pin sizes
-// the ResourceFlavor's node batch; it is not a Devices selector key (the worker lists Devices by the
-// feature-key presence + os/arch), so it is dropped here.
+// (os/arch plus each acceleratable feature key, minus the managed mark, the .count sizing pin, and the
+// general(CPU) key) that let the worker locate the node's Devices by a single List. The acceleratable
+// feature keys are taken from the feature labels being published this pass (publishedFeatureLabels,
+// i.e. the NodeFeature's spec labels), NOT read back off the node: NFD merges those labels onto the
+// node only afterwards, so a freshly onboarded node would otherwise yield no keys until an unrelated
+// resync. os/arch are stable node labels present from registration. gpustack.ai/managed and the real
+// general(CPU) key are synced separately by NodeDevicesReconciler (this NodeFeature carries no CPU
+// labels, so ExtractGeneralNodeKey here can only yield the "generic" sentinel — the worker, which sees
+// the node's CPU labels, owns the CPU key on the Devices). The per-node .count pin sizes the
+// ResourceFlavor's node batch; it is not a Devices selector key, so it is dropped here.
 func acceleratableDevicesSelectorLabels(node *core.Node, publishedFeatureLabels map[string]string) map[string]string {
 	src := &core.Node{ObjectMeta: meta.ObjectMeta{Labels: map[string]string{
 		core.LabelOSStable:   node.Labels[core.LabelOSStable],
 		core.LabelArchStable: node.Labels[core.LabelArchStable],
 	}}}
-	for k, v := range publishedFeatureLabels {
-		src.Labels[k] = v
-	}
-	out := map[string]string{}
-	for _, nf := range nodefeature.ExtractNodeFlavors(src) {
-		if !nf.Acceleratable {
-			continue
-		}
-		for k, v := range nf.NodeLabels {
-			if k == systemname.ManagedLabelKey || strings.HasSuffix(k, ".count") {
-				continue
-			}
-			out[k] = v
-		}
-	}
-	return out
+	maps.Copy(src.Labels, publishedFeatureLabels)
+
+	// The accelerator selector labels are the union, over the node's accelerated flavors, of each
+	// flavor's node labels minus the worker-owned keys (the managed mark and the general(CPU) key —
+	// the "generic" one derivable here is a wrong guess the worker later replaces) and the .count
+	// sizing pin (a batch hint, not a selector).
+	accelerated := slicex.Filter(nodefeature.ExtractNodeFlavors(src), func(nf nodefeature.NodeFlavor) bool {
+		return nf.Acceleratable
+	})
+	return mapx.Merge(slicex.Transform(accelerated, func(nf nodefeature.NodeFlavor) map[string]string {
+		return mapx.Filter(nf.NodeLabels, func(k, _ string) bool {
+			return k != systemname.ManagedLabelKey &&
+				!strings.HasSuffix(k, ".count") &&
+				!strings.HasPrefix(k, nodefeature.GeneralFeatureLabelPrefix)
+		})
+	})...)
 }

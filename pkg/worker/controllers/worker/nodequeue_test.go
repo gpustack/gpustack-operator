@@ -245,6 +245,32 @@ func TestNodeQueueReconciler_FillsAndSortsByCount(t *testing.T) {
 	}
 }
 
+// TestNodeQueueReconciler_AcceleratedFillsDespiteGeneralKey pins that an accelerated pool's queue
+// fills its credits quota even though each accelerated ResourceFlavor also carries the
+// general.<gKey> selector label WITHOUT a .capacity sibling. parseResourceFlavorCapacity must read
+// the acceleratable key's capacity, not the general key's missing one — the map's random iteration
+// order otherwise dropped the quota to 0 on roughly half of the reconciles.
+func TestNodeQueueReconciler_AcceleratedFillsDespiteGeneralKey(t *testing.T) {
+	const aKey = "nvidia-a10g"
+	name := nodeQueueName(aKey)
+	rf := newNodesFlavor("gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64-1d", aKey, 1, 1,
+		accelerated(nodefeature.ManufacturerNVIDIA), withGeneralKey("amd-epyc-7r32"))
+
+	// The bug was nondeterministic (map iteration order), so exercise several independent reconciles
+	// on a fresh client each round; every one must land the same non-zero credits quota.
+	for range 10 {
+		cli := buildNodeQueueClient(newInstanceTypeQueue(aKey, true), rf.DeepCopy())
+		reconcileNodeQueueN(t, cli, name, 1)
+		got, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err)
+		require.Len(t, got.Spec.ResourceGroups, 1,
+			"accelerated queue must fill despite the general.<gKey> label")
+		rq := got.Spec.ResourceGroups[0].Flavors[0].Resources[0]
+		assert.Equal(t, creditsValue(1), rq.NominalQuota.Value(),
+			"credits from the acceleratable key's capacity, not the missing general one")
+	}
+}
+
 // collapsedGenericQueue builds an operator-owned generic ClusterQueue the way the
 // InstanceTypeReconciler leaves it for a non-accelerated pool: the acceleratable=false
 // discriminator plus os/arch, and — only when aware — the general.<gKey> key. StopPolicy None.

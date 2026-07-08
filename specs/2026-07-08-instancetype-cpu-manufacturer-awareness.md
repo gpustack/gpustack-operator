@@ -496,11 +496,21 @@ CPU-aware on top of it (Task 2); descriptors, catalog, docs, and e2e follow.
   mirror procedure) and a `troubleshooting.md` accelerator-detection guard. *Verify:* `bash -n` each
   case (all 20 green); `chmod +x` case-18/19/20. **— Done.**
 
-- [ ] **Task 7 — Package + live-cluster verify (user-driven).** Package the dev image on the amd64
-  builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package`, published to
-  Docker Hub; the builder host + upload path are supplied at run time, kept out of tracked files),
-  Helm-deploy to a reachable Kubernetes cluster with the packaged image tag, and run the e2e
-  verifications. *Verify:* the e2e case suite passes on the cluster.
+- [x] **Task 7 — Package + live-cluster verify (user-driven).** Packaged the dev image on the amd64
+  builder (`PACKAGE_ARCH=amd64 PACKAGE_NAMESPACE=thxcode PACKAGE_PUSH=true make package` via `bash -lc`,
+  published to Docker Hub; the builder host + upload path are supplied at run time, kept out of tracked
+  files), Helm-deployed to a reachable Kubernetes cluster (`image.repository=thxcode/gpustack-operator`,
+  `pullPolicy=Always`), and ran the suite — CASE 1/16/17/18 plus the real-GPU CASE 19/20 all pass. The
+  live run surfaced two accelerated-path defects the real-gKey change (Task 1) introduced but the
+  mock-based unit tests could not: (1) `parseResourceFlavorCapacity` read a random label under Go's map
+  iteration once an accelerated flavor also carried the `general.<gKey>` key (no `.capacity` sibling),
+  so an accelerated `ClusterQueue`'s quota filled nondeterministically; (2) the `Devices` ledger carried
+  the DeviceManager's `general.generic` sentinel while the accelerated `ResourceFlavor`'s nodeLabels
+  carried the real CPU key (plus a `.count` pin), so the node-devices `AdmissionCheck` matched no
+  `Devices` and held every GPU workload as Retry. Both are fixed in a follow-up `fix(worker)` commit
+  (own-key capacity read; the worker syncs the real CPU key onto the `Devices` and the DeviceManager
+  stops guessing the sentinel; the AdmissionCheck drops the `.count` pin from its `Devices` selector),
+  with regression tests. *Verify:* the e2e case suite passes on the cluster. **— Done.**
 
 - [ ] **Task 8 — Migration guide + orphan-cleanup for the `gpustack--` rename.** This release renames
   every materialized scheduling object again — `ResourceFlavor`/`ClusterQueue`/`InstanceType` from the
