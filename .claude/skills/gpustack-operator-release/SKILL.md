@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-release
-description: "Cut a GPUStack Operator release end to end: sync & verify `main`, pick and confirm the release commit, draft highlight-focused release notes from the Conventional-Commit history, cut & push the `vX.Y.Z` git tag, watch every tag-triggered pipeline (`ci.yml` image/Release + `ci-chart.yml` Helm chart) go green, then promote the CI-published pre-release to the official/latest release. Releases are published as **pre-releases first** and promoted only after CI is green and the user confirms. Proactively offer this when the user wants to ship/tag/publish a new version. Examples: \"release v0.7.0\", \"cut the next release\", \"tag and publish v0.7.0\", \"do an rc pre-release\", \"ship v0.7.0 and watch CI\"."
+description: "Cut a GPUStack Operator release end to end: sync & verify the target branch (any branch, default `main`), pick and confirm the release commit, draft highlight-focused release notes from the Conventional-Commit history, cut & push the `vX.Y.Z` git tag, watch every tag-triggered pipeline (`ci.yml` image/Release + `ci-chart.yml` Helm chart) go green, then promote the CI-published pre-release to the official/latest release. Releases are published as **pre-releases first** and promoted only after CI is green and the user confirms. Proactively offer this when the user wants to ship/tag/publish a new version. Examples: \"release v0.7.0\", \"cut the next release\", \"tag and publish v0.7.0\", \"do an rc pre-release\", \"ship v0.7.0 and watch CI\"."
 allowed-tools: "Read, AskUserQuestion, Bash(git fetch*), Bash(git log*), Bash(git tag -l*), Bash(git tag --list*), Bash(git rev-parse*), Bash(git status*), Bash(git show*), Bash(git diff*), Bash(git describe*), Bash(git merge-base*), Bash(make version), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*), Bash(gh auth status*), Bash(gh release list*), Bash(gh release view*), Bash(gh run list*), Bash(gh run view*), Bash(gh run watch*), Bash(gh pr list*), Bash(gh pr view*)"
 model: sonnet
 ---
@@ -26,8 +26,11 @@ release once CI is green. Nothing gets the GitHub **Latest** badge until you pro
 
 ## Hard rules
 
-- **Release only off the `origin/main` line.** Tag a commit that is an ancestor of `origin/main`; default
-  to `origin/main` HEAD. Do not switch branches to do this — tag by SHA.
+- **Release off any branch; default to `origin/main`.** Tag by SHA — do not switch branches to do this.
+  The default target is `origin/main` HEAD; when the user names another branch or commit (e.g. a
+  maintenance line like `origin/v0.5-dev`), tag that instead. For such a maintenance-line release the
+  commit will **not** be an ancestor of `origin/main` — that is expected, not an error; confirm the
+  (branch, commit) with the user and flag it as a maintenance release in the summary.
 - **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less
   form like `v0.6.1rc1` is rejected (this is the Phase 1 regex). Any tag containing `rc` stays a
   pre-release and must not be promoted. The `-rcN` **hyphen is required**: `ci-chart.yml` sets the Helm
@@ -44,9 +47,10 @@ release once CI is green. Nothing gets the GitHub **Latest** badge until you pro
 - **Interactive (default).** Confirm at each gate: the (version, commit) pair, the drafted notes, the tag
   push, the note replacement, and the final promotion.
 - **Auto / bypass-permissions** (the user says "auto", or runs with permissions skipped). Replace every
-  confirmation with the sensible default — target = `origin/main` HEAD, notes generated without asking which
-  items to surface — and run **Phase 0 → 5 unattended, then stop at the published pre-release** (skip Phase
-  6). Report the release URL and tell the user to promote to the official release on GitHub when ready.
+  confirmation with the sensible default — target = the branch the user named (its HEAD), else `origin/main`
+  HEAD; notes generated without asking which items to surface — and run **Phase 0 → 5 unattended, then stop
+  at the published pre-release** (skip Phase 6). Report the release URL and tell the user to promote to the
+  official release on GitHub when ready.
 
 ## Flow
 
@@ -56,30 +60,33 @@ Let `VER` = the requested version (e.g. `v0.7.0`) and `RPT=.claude/reports/$(dat
 
 Confirm the tooling and the release line before touching anything.
 
+Let `BR` = the target branch — the branch the user named, else `main`. Fetch it explicitly if it is not
+`main` (`git fetch origin "$BR"`).
+
 ```bash
 gh auth status
 git fetch origin --tags --prune
 git status --porcelain                              # must be empty — refuse on a dirty tree
-git rev-parse origin/main                           # the default target SHA
+git rev-parse "origin/$BR"                          # the default target SHA (BR defaults to main)
 git tag -l 'v*' --sort=-creatordate | head -n 5     # recent release tags → the previous one
-git log --oneline -1 origin/main
+git log --oneline -1 "origin/$BR"
 make version
 ```
 
-Report whether local `main` matches `origin/main` (`git rev-parse main origin/main`, if `main` exists
-locally). If they differ and the user is on `main`, offer `git pull --ff-only`; otherwise just tag off
-`origin/main` — no branch switch is needed. Then `mkdir -p "$RPT"` for the run artifacts.
+Report whether local `$BR` matches `origin/$BR` (`git rev-parse "$BR" "origin/$BR"`, if the local branch
+exists). If they differ and the user is on `$BR`, offer `git pull --ff-only`; otherwise just tag off
+`origin/$BR` by SHA — no branch switch is needed. Then `mkdir -p "$RPT"` for the run artifacts.
 
 ### Phase 1 — Version + commit (confirm)
 
 - Validate `VER` against `^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$` (pre-releases need the SemVer2 hyphen,
   e.g. `v0.6.1-rc1`); reject if the tag already exists
   (`git tag -l "$VER"` must be empty); sanity-check it is greater than the previous tag.
-- Default target = `origin/main` HEAD (`SHA=$(git rev-parse origin/main)`).
+- Default target = `origin/$BR` HEAD (`SHA=$(git rev-parse "origin/$BR")`, `BR` defaulting to `main`).
 - If the user wants a different commit, list candidates and let them pick (`AskUserQuestion`):
 
   ```bash
-  git log --date=short --pretty='%h  %ad  %s' origin/main | head -n 20
+  git log --date=short --pretty='%h  %ad  %s' "origin/$BR" | head -n 20
   ```
 
 Confirm the final **(version, commit)** pair before proceeding.
@@ -89,9 +96,10 @@ Confirm the final **(version, commit)** pair before proceeding.
 Read the range since the previous release and group by Conventional-Commit type.
 
 ```bash
-# previous *stable* release — skip -rcN pre-releases so the range spans from the last GA, not an rc
-LAST=$(git tag -l 'v*' --sort=-creatordate | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
-# no prior stable tag (brand-new repo): fall back to the full history up to $SHA
+# previous *stable* release ON THIS LINE — restrict to tags reachable from $SHA so a maintenance-line
+# release picks its own predecessor (e.g. v0.5.3 for v0.5.4, not the global-latest v0.6.x); skip -rcN
+LAST=$(git tag -l 'v*' --merged "$SHA" --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
+# no prior stable tag on this line (brand-new repo/branch): fall back to the full history up to $SHA
 git log --no-merges --pretty='%h %s (%an)' ${LAST:+"$LAST.."}"$SHA"
 ```
 
@@ -151,11 +159,19 @@ The release is already `prerelease` (from the CI contract) — nothing else to f
 
 ### Phase 6 — Promote (interactive only; confirm → prompts)
 
-Confirm with the user (`AskUserQuestion`) that the pre-release is good, then promote it to the official,
-latest release:
+Confirm with the user (`AskUserQuestion`) that the pre-release is good, then promote it to the official
+release:
 
 ```bash
 gh release edit "$VER" --latest --prerelease=false
+```
+
+**Do not take the `--latest` badge on a maintenance-line release when a newer stable tag exists** (e.g.
+releasing `v0.5.4` while `v0.6.3` is out) — `--latest` would steal the badge from the newer GA. In that
+case drop `--prerelease=false` alone and keep `--latest=false`:
+
+```bash
+gh release edit "$VER" --prerelease=false --latest=false
 ```
 
 Skip this phase entirely for `rc` tags and in auto mode — leave those as pre-releases.
