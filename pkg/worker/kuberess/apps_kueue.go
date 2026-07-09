@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"text/template"
 
+	"golang.org/x/mod/semver"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -24,17 +25,26 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 
 	name := "kueue"
 	version := "0.18.2"
+	chartVersion := "0.17.6"
 	if disable.Has(name) {
 		return nil
 	}
 
+	// If the Kubernetes version is 1.31 or later,
+	// use Kueue chart 0.18 directly (which requires Kubernetes >= 1.31),
+	// see https://github.com/kubernetes-sigs/kueue/pull/11568.
+	if kubeVer := helmCli.KubeVersion(ctx); semver.Compare(fmt.Sprintf("v%s.%s", kubeVer.Major, kubeVer.Minor), "v1.31") >= 0 {
+		chartVersion = version
+	}
+
 	release := "gpustack-kueue"
-	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", name, version))
-	download := fmt.Sprintf("https://github.com/kubernetes-sigs/kueue/releases/download/v%[1]s/kueue-%[1]s.tgz", version)
+	path := filepath.Join(system.SubConfDir("charts"), fmt.Sprintf("%s-%s.tgz", name, chartVersion))
+	download := fmt.Sprintf("https://github.com/kubernetes-sigs/kueue/releases/download/v%[1]s/kueue-%[1]s.tgz", chartVersion)
 
 	valuesContext := globalValuesContext
 	valuesContext["Release"] = release
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
+	valuesContext["Tag"] = "v" + version
 
 	funcMap := extendKueueChartValuesTemplateFuncMap()
 	funcMap["hasAPIResource"] = func(apiversion, kind string) bool {
@@ -46,7 +56,7 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 
 	chart := &helm.Chart{
 		Name:        name,
-		Version:     version,
+		Version:     chartVersion,
 		Release:     release,
 		Path:        path,
 		DownloadURL: download,
@@ -100,6 +110,7 @@ controllerManager:
 {{- $prefix := "mirrored" }}
 {{- $image := printf "%s/%s/%s-kueue" $registry $namespace $prefix }}
       repository: "{{ $image }}"
+      tag: "{{ $.Tag }}"
       pullPolicy: "{{ default "IfNotPresent" $.ImagePullPolicy }}"
     podAnnotations:
       {{ $.ManagedLabel }}: "true"
@@ -127,7 +138,8 @@ managerConfig:
     featureGates:
       AssignQueueLabelsForPods: false
       TASBalancedPlacement: true
-      # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18).
+      # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18). The bundled
+      # controller image is always 0.18, so the gate is always available.
       QuotaCheckStrategy: true
     health:
       healthProbeBindAddress: :8081

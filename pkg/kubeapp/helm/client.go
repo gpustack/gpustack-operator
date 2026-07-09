@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	helmaction "helm.sh/helm/v3/pkg/action"
@@ -24,6 +25,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubeconfig"
+	"gpustack.ai/gpustack/pkg/kubediscovery"
 )
 
 type (
@@ -88,6 +90,19 @@ func (c *Client) KubeRestClientGetter() genericclioptions.RESTClientGetter {
 func (c *Client) KubeClientSet() kubernetes.Interface {
 	conf, _ := c.getter.ToRESTConfig()
 	return kubernetes.NewForConfigOrDie(conf)
+}
+
+// KubeVersion returns the Kubernetes version information. Minor is normalized
+// to its leading digits, dropping any non-numeric suffix (e.g. "31+") that some
+// distributions report, so it is safe to parse or compare numerically.
+func (c *Client) KubeVersion(ctx context.Context) kubediscovery.Version {
+	kv, err := kubediscovery.GetVersion(ctx, c.KubeClientSet().Discovery())
+	if err != nil {
+		return kubediscovery.Version{}
+	}
+	v := *kv
+	v.Minor = strings.TrimRightFunc(v.Minor, func(r rune) bool { return r < '0' || r > '9' })
+	return v
 }
 
 // Install installs the given chart, and returns the values.
