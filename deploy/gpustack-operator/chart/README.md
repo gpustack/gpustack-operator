@@ -17,7 +17,7 @@ scheduling chain for accelerators (GPU/NPU/TPU), built on
 
 ## Prerequisites
 
-Kubernetes: `>=1.27.0-0`
+Kubernetes: `>=1.23.0-0`
 - Helm 3.8.0+
 - (Optional) [cert-manager](https://cert-manager.io) when `worker.certmanager.enabled` is `"true"` (or `"auto"` with cert-manager present)
 
@@ -44,7 +44,7 @@ helm uninstall gpustack-operator --namespace gpustack-system
 
 ## Requirements
 
-Kubernetes: `>=1.27.0-0`
+Kubernetes: `>=1.23.0-0`
 
 ## Values
 

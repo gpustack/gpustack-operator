@@ -7,7 +7,7 @@ type: application
 # The release workflow overrides both from the pushed git tag.
 version: 0.0.0
 appVersion: dev
-kubeVersion: ">=1.27.0-0"
+kubeVersion: ">=1.23.0-0"
 home: https://github.com/gpustack/gpustack-operator
 sources:
   - https://github.com/gpustack/gpustack
