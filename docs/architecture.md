@@ -251,39 +251,9 @@ flowchart LR
 
 > **Known behavior:** the Kueue feature gate `AssignQueueLabelsForPods` is disabled at installation (`pkg/worker/kuberess/apps_kueue.go`), so Kueue never copies cluster/local queue names onto Pod labels — long ClusterQueue names would not fit a label value. The deployed Kueue Configuration also sets `resources.quotaCheckStrategy: IgnoreUndeclared`, so a single-dimension queue (only `cpu`, or only the manufacturer `credits`) does not reject a Workload for the other Pod resources (`memory`/`ephemeral-storage`) it does not cover.
 
-## Example
+## Walkthrough
 
-Consider cluster `cluster-1` with 5 linux/arm64 nodes, running with the default `instance-type-aware-cpu-manufacturer=false` (so the aggregation layer collapses CPU manufacturers — the node keys are still CPU-accurate):
-
-| Node   | Accelerators | CPU model       | CPU | RAM  | Disk |
-|--------|--------------|-----------------|-----|------|------|
-| node-1 | —            | AMD EPYC 7763   | 16C | 32G  | 100G |
-| node-2 | T4 × 1       | Intel Xeon 8358 | 4C  | 16G  | 100G |
-| node-3 | T4 × 1       | AMD EPYC 7763   | 8C  | 32G  | 100G |
-| node-4 | T4 × 2       | AMD EPYC 7763   | 8C  | 32G  | 100G |
-| node-5 | A10G × 4     | AMD EPYC 7763   | 48C | 192G | 100G |
-
-The **`ResourceFlavor`s are the finest grain** — one per `(gKey, [aKey,] os, arch, count)`, always encoding the real CPU key (`amd-epyc-7763` / `intel-xeon-8358`); the **`ClusterQueue`/`InstanceType`s collapse** them per the setting (general capacity is the node's CPU count; the InstanceType unit spec is the fixed default — `1c/2Gi` non-accelerated, `4c/16Gi` accelerated, both `100Gi` local storage; accelerated `credits` = card count × `M`):
-
-| Node     | ResourceFlavor (finest, per real CPU)                         | ClusterQueue / InstanceType (collapsed) |
-|----------|---------------------------------------------------------------|-----------------------------------------|
-| node-1   | `gpustack--amd-epyc-7763-linux-arm64-16c`                     | `gpustack--generic-linux-arm64`         |
-| node-2   | `gpustack--intel-xeon-8358-linux-arm64-4c`                    | `gpustack--generic-linux-arm64`         |
-| node-3/4 | `gpustack--amd-epyc-7763-linux-arm64-8c` *(2 nodes, cap 16)*  | `gpustack--generic-linux-arm64`         |
-| node-5   | `gpustack--amd-epyc-7763-linux-arm64-48c`                     | `gpustack--generic-linux-arm64`         |
-| node-2   | `gpustack--intel-xeon-8358--nvidia-tesla-t4-linux-arm64-1d`   | `gpustack--nvidia-tesla-t4-linux-arm64` |
-| node-3   | `gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-arm64-1d`     | `gpustack--nvidia-tesla-t4-linux-arm64` |
-| node-4   | `gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-arm64-2d`     | `gpustack--nvidia-tesla-t4-linux-arm64` |
-| node-5   | `gpustack--amd-epyc-7763--nvidia-a10g-linux-arm64-4d`         | `gpustack--nvidia-a10g-linux-arm64`     |
-
-Each ClusterQueue is mirrored as a hash-named LocalQueue (e.g. `gpustack--generic-linux-arm64` → `gpustack-fnv64-…`, 31 characters) in every non-system namespace. Observations:
-
-- **One isolated queue per pool, zero Cohort.** Exclusive / shared / sliced all live in one accelerated queue; there is no borrow topology, so no `Cohort` objects exist after reconcile.
-- **The flavor is keyed by CPU + device count.** node-3 and node-4 both run AMD EPYC 7763, but node-3 (1×T4) yields `gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-arm64-1d` and node-4 (2×T4) its own `…-2d`; node-2's T4 is on a different CPU, so it is a distinct flavor `gpustack--intel-xeon-8358--nvidia-tesla-t4-linux-arm64-1d`. All three T4 flavors feed the single collapsed `gpustack--nvidia-tesla-t4-linux-arm64` queue, whose `credits.gpustack.ai/nvidia` nominal is `(1+1+2) × M`.
-- **CPUs collapse into `generic` by default.** The four CPU flavors (two CPU models, three sizes) all feed one `gpustack--generic-linux-arm64` queue, and all three T4 flavors (two CPU models) feed one `gpustack--nvidia-tesla-t4-linux-arm64` queue. With `instance-type-aware-cpu-manufacturer=true` they would instead split by CPU — e.g. `gpustack--amd-epyc-7763-linux-arm64` vs `gpustack--intel-xeon-8358-linux-arm64`, and `gpustack--amd-epyc-7763--nvidia-tesla-t4-linux-arm64` vs `gpustack--intel-xeon-8358--nvidia-tesla-t4-linux-arm64` — without any flavor being rewritten.
-- **The three-view is per-card, from the ledger.** The `gpustack--nvidia-a10g-linux-arm64` InstanceType on node-5 reports `.status` `8`-cards-style views computed from that node's `Devices` ledger; a request for more whole cards than any single node has free is held by the AdmissionCheck even if pool `credits` would cover it.
-
-For a **recorded end-to-end run on a live cluster** — the materialized objects with real YAML, then
-removing/re-adding a node, requesting a sliced GPU (with `nvidia-smi` showing the capped VRAM),
-authoring a custom `InstanceType`, and switching CPU-manufacturer awareness on — see the
-[walkthrough](./walkthrough.md).
+For a **recorded end-to-end run on a live cluster** — the materialized `ResourceFlavor` / `ClusterQueue` /
+`InstanceType` / `LocalQueue` objects with real YAML, then removing/re-adding a node, requesting a sliced
+GPU (with `nvidia-smi` showing the capped VRAM), authoring a custom `InstanceType`, and switching
+CPU-manufacturer awareness on — see the [walkthrough](./walkthrough.md).

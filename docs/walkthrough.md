@@ -1,7 +1,7 @@
-# GPUStack Operator — End-to-End Walkthrough
+# Walkthrough
 
 A recorded run of the scheduling chain on a live Kubernetes cluster, referenced from the
-[architecture](./architecture.md) "Example" section. Every command is the real `kubectl` invocation and
+[architecture](./architecture.md#walkthrough). Every command is the real `kubectl` invocation and
 its real output; every object is shown as YAML (trimmed to the relevant `metadata.labels` / `spec` /
 `status`); every operation shows a **before / after** comparison via `kubectl get instancetypes`.
 
@@ -523,10 +523,8 @@ gpustack--nvidia-tesla-t4-linux-amd64                               gpustack-fnv
 - The old collapsed `gpustack--generic-…` / `gpustack--nvidia-a10g-…` / `gpustack--nvidia-tesla-t4-…`
   remain (create-only, not garbage-collected).
 
-> **Cleanup hint.** The old non-aware accelerated types — `gpustack--nvidia-a10g-linux-amd64` and
-> `gpustack--nvidia-tesla-t4-linux-amd64` (collapsed `generalGroup: generic`) — are superseded by the
-> per-CPU `gpustack--${gKey}--${aKey}-…` types. An admin may delete the redundant ones:
-> `kubectl delete instancetype gpustack--nvidia-a10g-linux-amd64 gpustack--nvidia-tesla-t4-linux-amd64`.
+> **Cleanup hint.** An admin may delete the stale ones:
+> `kubectl delete instancetype gpustack--generic-linux-amd64 gpustack--nvidia-a10g-linux-amd64 gpustack--nvidia-tesla-t4-linux-amd64`.
 
 Re-purpose the `custom-demo` Instance stopped in section 4. A drained Instance carries `spec.stop: true`
 (set by the operator), so repoint its `type` at a CPU-aware pool and clear the stop:
