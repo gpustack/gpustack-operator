@@ -55,6 +55,7 @@ func renderKueueConfigYAML(t *testing.T, manufacturers []string) string {
 		"Manufacturers":   manufacturers,
 		"Namespace":       SystemNamespaceName,
 		"ImagePullPolicy": "Always",
+		"Tag":             "v0.18.2",
 	}
 	values := getKueueChartTemplateValues("kueue", data, extendKueueChartValuesTemplateFuncMap())
 	v, err := values.GetValues(t.Context())

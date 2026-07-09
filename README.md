@@ -44,7 +44,7 @@ variables — see [Settings & Environment Variables](./docs/settings.md#per-manu
 
 ## Quick Start
 
-**Prerequisites:** Kubernetes `>= 1.29` (required by the bundled Kueue), Helm `3.8+`, and cluster-admin.
+**Prerequisites:** Kubernetes `>= 1.23` (required by the bundled Kueue), Helm `3.8+`, and cluster-admin.
 cert-manager is optional — with the default `worker.certmanager.enabled=auto`, its resources are created only
 when cert-manager is detected; otherwise the worker self-signs.
 
