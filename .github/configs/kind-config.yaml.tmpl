@@ -1,0 +1,20 @@
+# Template for the ci-chart lint-test job. The __NODE_IMAGE__ placeholder is
+# substituted with the matrix kindest/node image before the kind cluster is
+# created, so a single template covers every tested Kubernetes version.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    image: __NODE_IMAGE__
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            enable-aggregator-routing: "true"
+          certSANs:
+            - "127.0.0.1"
+            - "internal.docker.host"
+            - "host.docker.internal"
+  - role: worker
+    image: __NODE_IMAGE__

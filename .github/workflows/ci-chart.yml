@@ -22,7 +22,7 @@ on:
     paths:
       - "deploy/gpustack-operator/chart/**"
       - ".github/workflows/ci-chart.yml"
-      - ".github/configs/kind-config.yaml"
+      - ".github/configs/kind-config.yaml.tmpl"
   pull_request:
     branches:
       - "main"
@@ -30,12 +30,26 @@ on:
     paths:
       - "deploy/gpustack-operator/chart/**"
       - ".github/workflows/ci-chart.yml"
-      - ".github/configs/kind-config.yaml"
+      - ".github/configs/kind-config.yaml.tmpl"
 
 jobs:
   lint-test:
+    # Skip on tag pushes: releases must not be gated by the version matrix.
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     timeout-minutes: 60
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # kindest/node images spanning v1.23 -> v1.35, one per every other minor.
+        node-image:
+          - "kindest/node:v1.23.17"
+          - "kindest/node:v1.25.16"
+          - "kindest/node:v1.27.16"
+          - "kindest/node:v1.29.14"
+          - "kindest/node:v1.31.14"
+          - "kindest/node:v1.33.12"
+          - "kindest/node:v1.35.5"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,10 +71,19 @@ jobs:
           key: chart-toolbox-${{ runner.os }}
           path: |-
             ${{ github.workspace }}/.sbin
+      - name: Generate Kind Config
+        env:
+          NODE_IMAGE: ${{ matrix.node-image }}
+        run: |
+          sed "s#__NODE_IMAGE__#${NODE_IMAGE}#g" \
+            .github/configs/kind-config.yaml.tmpl > "${RUNNER_TEMP}/kind-config.yaml"
+          echo "::group::generated kind-config.yaml (${NODE_IMAGE})"
+          cat "${RUNNER_TEMP}/kind-config.yaml"
+          echo "::endgroup::"
       - name: Setup Kind
         uses: helm/kind-action@v1
         with:
-          config: .github/configs/kind-config.yaml
+          config: ${{ runner.temp }}/kind-config.yaml
           version: v0.32.0
       - name: Generate
         run: make generate chart
@@ -89,8 +112,6 @@ jobs:
 
   pack:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
-    needs:
-      - lint-test
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:
