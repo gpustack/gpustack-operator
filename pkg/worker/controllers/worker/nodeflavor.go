@@ -157,15 +157,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	capacity := int64(len(contributors)) * flavor.Count
 
-	// An accelerated flavor is sliceable when its hardware reports a non-zero
-	// MaxPartitions, read off the contributor's same-named Devices.
-	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, node.Name, flavor.Manufacturer)
-
-	// Read instance-type-aware-cpu-manufacturer per-reconcile: it gates only the accelerated
-	// flavor's cpuDetail note (the CPU is otherwise not a scheduling axis for an accelerated
-	// flavor); it never changes the flavor's name or labels.
-	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
-
 	keyLabel := featureKeyLabel(flavor.Acceleratable, flavor.OwnKey())
 	labels := map[string]string{
 		keyLabel:             "true",
@@ -183,6 +174,12 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if flavor.Acceleratable {
 		labels[nodefeature.GeneralFeatureLabelPrefix+flavor.GeneralKey] = "true"
 	}
+	// When disallow mixed CPU/accelerator nodes,
+	// mark the flavor as not acceleratable so a collapsed generic pool does not select it.
+	nodeLabels := flavor.NodeLabels
+	if !flavor.Acceleratable && !mixingAllowed {
+		nodeLabels[nodefeature.NodeAcceleratableLabelKey] = "false"
+	}
 	eRf := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
 			Name:   req.Name,
@@ -193,9 +190,18 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			// back by a node taint; node eligibility is governed by nodeLabels (the
 			// managed mark + feature key + os/arch), not by taints.
 			Tolerations: []core.Toleration{{Operator: core.TolerationOpExists}},
-			NodeLabels:  flavor.NodeLabels,
+			NodeLabels:  nodeLabels,
 		},
 	}
+
+	// An accelerated flavor is sliceable when its hardware reports a non-zero
+	// MaxPartitions, read off the contributor's same-named Devices.
+	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, node.Name, flavor.Manufacturer)
+
+	// Read instance-type-aware-cpu-manufacturer per-reconcile: it gates only the accelerated
+	// flavor's cpuDetail note (the CPU is otherwise not a scheduling axis for an accelerated
+	// flavor); it never changes the flavor's name or labels.
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
 
 	// generalGroup is always the CPU key; acceleratorGroup is the accelerator key on an
 	// accelerated flavor, empty otherwise. Together they let the InstanceTypeFlavor and the
@@ -213,9 +219,10 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 	// Record the raw CPU detail: always for a CPU flavor; for an accelerated flavor only when
 	// CPU-manufacturer awareness is on.
-	if !flavor.Acceleratable || aware {
+	if !flavor.Acceleratable || cpuAware {
 		eNotes["cpuDetail"] = cpuDetailNote(nodefeature.ExtractGeneralDetail(node), flavor.Acceleratable)
 	}
+
 	systemmeta.NoteResource(eRf, _ResourceFlavorResType, eNotes)
 	rfAlignFn := func(aRf *kueue.ResourceFlavor) (_ *kueue.ResourceFlavor, skip bool, err error) {
 		skip = true
@@ -322,7 +329,9 @@ func nodeIsAccelerated(nd *core.Node) bool {
 // node reports.
 func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName, manufacturer string) bool {
 	devs := new(workercore.Devices)
-	if err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs); err != nil {
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs,
+		ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil {
 		return false
 	}
 	for i := range devs.Spec.Groups {
@@ -350,8 +359,8 @@ const (
 func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, flavor *nodefeature.NodeFlavor) error {
 	logger := ctrllog.FromContext(ctx)
 
-	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
-	name, generalGroup, acceleratorGroup := flavor.DerivedInstanceTypeIdentity(aware)
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	name, generalGroup, acceleratorGroup := flavor.DerivedInstanceTypeIdentity(cpuAware)
 	unitCpu, unitRam, stg := defaultResources(flavor.Acceleratable)
 
 	it := &workercore.InstanceType{

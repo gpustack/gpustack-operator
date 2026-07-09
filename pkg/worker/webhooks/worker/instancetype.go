@@ -109,9 +109,9 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 	// The pool's schedule labels from the spec identity and the awareness setting. Read the
 	// setting here (the worker process carries the local settings indexer); validation stays
 	// setting-independent.
-	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
 	sched := nodefeature.PoolScheduleLabels(
-		it.Spec.Acceleratable, aware,
+		it.Spec.Acceleratable, cpuAware,
 		it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
 		it.Spec.OS, it.Spec.Arch)
 
@@ -172,7 +172,7 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 			// Fold the raw CPU detail back into the spec only when CPU-manufacturer awareness is
 			// on (the flavor carries the cpuDetail note always for a CPU flavor, but only when
 			// aware for an accelerated one). Off leaves the CPU spec untouched.
-			if aware {
+			if cpuAware {
 				foldCPUDetail(it, notes["cpuDetail"])
 			}
 		}

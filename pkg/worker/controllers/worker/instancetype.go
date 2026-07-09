@@ -313,9 +313,9 @@ func (r *InstanceTypeReconciler) computeStatus(
 // ResourceFlavors and Devices, and are derived from the spec (admin-authored or derived), not
 // the metadata labels, so an admin who sets only the spec still gets a correct queue.
 func instanceTypeScheduleLabels(ctx context.Context, it *workercore.InstanceType) map[string]string {
-	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
 	return nodefeature.PoolScheduleLabels(
-		it.Spec.Acceleratable, aware,
+		it.Spec.Acceleratable, cpuAware,
 		it.Spec.GeneralGroup, it.Spec.AcceleratorGroup,
 		it.Spec.OS, it.Spec.Arch)
 }

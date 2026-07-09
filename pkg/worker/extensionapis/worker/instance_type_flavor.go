@@ -113,7 +113,7 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 	// Read the awareness setting as a bool (matching the reconcilers' ShouldValueBool), not a literal
 	// "true": the setting's AllowBool admission also accepts "1"/"TRUE"/etc., and comparing to "true"
 	// alone would leave the catalog collapsed while the reconciled ClusterQueues/InstanceTypes split.
-	aware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBoolFromRemote(ctx)
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBoolFromRemote(ctx)
 
 	visited := sets.New[worker.InstanceTypeFlavorSpec]()
 	list := &worker.InstanceTypeFlavorList{Items: make([]worker.InstanceTypeFlavor, 0, len(rfList.Items))}
@@ -124,7 +124,7 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 			continue
 		}
 		_, notes := systemmeta.DescribeResource(&rfList.Items[i])
-		spec := instanceTypeFlavorSpec(notes, aware)
+		spec := instanceTypeFlavorSpec(notes, cpuAware)
 		if spec.GeneralGroup == "" && spec.AcceleratorGroup == "" {
 			continue // not an operator pool flavor (no group identity)
 		}
@@ -163,9 +163,9 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 // awareness setting. A non-accelerated flavor becomes a per-CPU row (aware) or the single
 // CPU-agnostic "generic" row (unaware); an accelerated flavor keeps its device descriptors (which
 // are identical across CPU variants, so they deduplicate) and carries the CPU key only when aware.
-func instanceTypeFlavorSpec(notes map[string]string, aware bool) worker.InstanceTypeFlavorSpec {
+func instanceTypeFlavorSpec(notes map[string]string, cpuAware bool) worker.InstanceTypeFlavorSpec {
 	if notes["acceleratable"] != "true" {
-		if aware {
+		if cpuAware {
 			return worker.InstanceTypeFlavorSpec{
 				GeneralGroup: notes["generalGroup"],
 				Manufacturer: notes["manufacturer"],
@@ -188,7 +188,7 @@ func instanceTypeFlavorSpec(notes map[string]string, aware bool) worker.Instance
 		Cores:            notes["cores"],
 		Sliceable:        notes["sliceable"] == "true",
 	}
-	if aware {
+	if cpuAware {
 		spec.GeneralGroup = notes["generalGroup"]
 	}
 	return spec

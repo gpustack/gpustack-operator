@@ -20,6 +20,7 @@ import (
 const (
 	// FeatureLabelPrefix prefixes the node feature label/annotation keys.
 	FeatureLabelPrefix = "feature." + systemname.LabelPrefix
+
 	// CreditsLabelPrefix prefixes the node feature credits label/annotation keys.
 	CreditsLabelPrefix = "credits." + systemname.LabelPrefix
 )
@@ -33,40 +34,7 @@ const (
 	// accelerator, e.g. "feature.gpustack.ai/acceleratable=true". It is the cheap
 	// "is this node accelerated?" check, set alongside the per-device keys.
 	NodeAcceleratableLabelKey = FeatureLabelPrefix + "acceleratable"
-
-	// SlicedPartitionsLabelSuffix is the suffix of the admin-authored slicing label
-	// that enables slicing on an accelerator model, e.g.
-	// "acceleratable.feature.gpustack.ai/nvidia-a10g.sliced.partitions". Its value is
-	// the partition count N (a power of two validated by the admission webhook).
-	SlicedPartitionsLabelSuffix = ".sliced.partitions"
 )
-
-// GetAcceleratableSlicedPartitions returns the validated slice partition count the
-// admin enabled for accelerator model aKey on node — the value of the
-// "<AcceleratableFeatureLabelPrefix><aKey><SlicedPartitionsLabelSuffix>" label — or 0
-// when the label is absent, unparseable, or not a valid partition count.
-func GetAcceleratableSlicedPartitions(node *core.Node, aKey string) int64 {
-	v := node.Labels[AcceleratableFeatureLabelPrefix+aKey+SlicedPartitionsLabelSuffix]
-	if v == "" {
-		return 0
-	}
-	n, err := strconvx.Atoi[int64](v)
-	if err != nil || !IsValidSlicedPartitions(n) {
-		return 0
-	}
-	return n
-}
-
-// FilterAcceleratableSlicedPartitionsLabels returns the admin-authored slicing
-// opt-in labels carried by labels — those matching
-// "<AcceleratableFeatureLabelPrefix>...<SlicedPartitionsLabelSuffix>" — and drops
-// every other entry. The result is nil when labels carries no such opt-in.
-func FilterAcceleratableSlicedPartitionsLabels(labels map[string]string) map[string]string {
-	return mapx.Filter(labels, func(k, _ string) bool {
-		return strings.HasPrefix(k, AcceleratableFeatureLabelPrefix) &&
-			strings.HasSuffix(k, SlicedPartitionsLabelSuffix)
-	})
-}
 
 // ConstructAcceleratableNodeLabels constructs accelerator feature labels from the given device group list.
 func ConstructAcceleratableNodeLabels(groups device.DevicesGroupList) map[string]string {
@@ -166,7 +134,7 @@ const (
 //     every CPU and an aware pool splits by CPU.
 //
 // os/arch are included when non-empty.
-func PoolScheduleLabels(acceleratable, aware bool, generalGroup, acceleratorGroup, os, arch string) map[string]string {
+func PoolScheduleLabels(acceleratable, cpuAware bool, generalGroup, acceleratorGroup, os, arch string) map[string]string {
 	lbs := map[string]string{
 		NodeAcceleratableLabelKey: strconv.FormatBool(acceleratable),
 	}
@@ -179,7 +147,7 @@ func PoolScheduleLabels(acceleratable, aware bool, generalGroup, acceleratorGrou
 	if acceleratable && acceleratorGroup != "" {
 		lbs[AcceleratableFeatureLabelPrefix+acceleratorGroup] = "true"
 	}
-	if aware && generalGroup != "" && generalGroup != GeneralGroupGeneric {
+	if cpuAware && generalGroup != "" && generalGroup != GeneralGroupGeneric {
 		lbs[GeneralFeatureLabelPrefix+generalGroup] = "true"
 	}
 	return lbs
