@@ -24,6 +24,7 @@ var (
 		setting.AllowBlank(),
 		setting.AllowContainerRegistry(),
 	)
+
 	// ContainerNamespace is the namespace to pull images, which is used in all built-in applications' deployment.
 	ContainerNamespace = settings.NewEditable(
 		"container-namespace",
@@ -31,6 +32,7 @@ var (
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
 	)
+
 	// ImagePullSecrets is the image pull secret for pulling images, which is used in all built-in applications' deployment.
 	ImagePullSecrets = settings.NewEditable(
 		"image-pull-secrets",
@@ -38,6 +40,7 @@ var (
 		setting.InitializeFromEnv(),
 		setting.AllowBlank(),
 	)
+
 	// ImagePullPolicy is the image pull policy for pulling images, which is used in all built-in applications' deployment.
 	ImagePullPolicy = settings.NewEditable(
 		"image-pull-policy",
@@ -91,12 +94,7 @@ var (
 		setting.AllowBlank(),
 	)
 
-	// Node / InstanceType management.
-	//
-	// These three switches are editable booleans, so an administrator can adjust
-	// them at runtime without restarting the operator. Consumers must read them
-	// per-reconcile via ShouldValueBool(ctx) (never cache a package-level value),
-	// so a flip re-converges on the next reconcile.
+	// InstanceType.
 
 	// NodeManagementManual indicates to skip auto-managing nodes.
 	// When false (default) the operator auto-injects `gpustack.ai/managed=true` to
