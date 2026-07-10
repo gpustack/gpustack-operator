@@ -96,7 +96,13 @@ product/memory/cores plus the awareness-gated folded `spec.cpu`, then runs a rea
 (the Pod, named after the Instance, must see the card via `nvidia-smi`); CASE 20 declares two sibling
 admin InstanceTypes on one accelerated pool and deploys a whole-card Pod, asserting a Devices-ledger
 change re-enqueues EVERY sibling so their three-view status stays identical
-(`enqueueInstanceTypeWhenDevicesChanged`).
+(`enqueueInstanceTypeWhenDevicesChanged`). CASE 21 covers the non-interactive SSH exec channel on the
+general (CPU) pool, so it runs on any cluster and **auto-skips** only when the runner is missing one of the
+`ssh`/`ssh-keygen`/`sftp` client tools (no GPU needed): it renders a CPU-only SSH-enabled Instance and
+asserts, through real SSH connections, that
+`ssh host '<cmd>'` runs the command inside `main` and returns only its output — no login banner — while
+capability-stripped (empty CapEff/CapBnd, host `mknod` denied), that a plain interactive `ssh host` still
+prints the banner and a login shell, and that a loopback TCP port-forward through the Instance round-trips.
 
 | Case | Title | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
@@ -120,6 +126,7 @@ change re-enqueues EVERY sibling so their three-view status stays identical
 | 18 | CPU-manufacturer awareness reshapes the catalog (finest RF + cpuDetail; collapse↔split by setting) | `pkg/nodefeature/helper.go`, `pkg/worker/settings/value.go`, `pkg/worker/extensionapis/worker/instance_type_flavor.go`, `pkg/worker/webhooks/worker/instancetype.go`, `pkg/worker/controllers/worker/nodeflavor.go` | `cases/case-18.sh` | yes (confirm) |
 | 19 | Awareness on: accelerated type carries real GPU + folded CPU descriptors; a real GPU Instance runs on it | `pkg/worker/controllers/worker/{nodeflavor,instancetype}.go`, `pkg/worker/webhooks/worker/instancetype.go`, `pkg/nodefeature/helper.go` | `cases/case-19.sh` | yes (confirm) |
 | 20 | Sibling InstanceTypes on one pool stay status-consistent (Devices-watch re-enqueues all) | `pkg/worker/controllers/worker/instancetype.go` | `cases/case-20.sh` | yes (confirm) |
+| 21 | SSH Instance serves non-interactive SSH (exec channel) + interactive login unchanged | `pack/ssh-server/rootfs/chroot.sh`, `pack/ssh-server/Dockerfile`, `pkg/worker/settings/value.go` | `cases/case-21.sh` | yes (confirm) |
 
 Also warranting CASE 1 at minimum: changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`,
 `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
