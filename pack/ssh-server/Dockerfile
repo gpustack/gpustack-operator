@@ -1,3 +1,51 @@
+ARG GO_VERSION="1.26.4"
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-alpine AS sftp-server
+
+# Build a fully static SFTP server. The sidecar is musl/Alpine, but `main` is often
+# glibc; a musl sftp-server cannot exec inside main's glibc chroot, and OpenSSH's
+# internal-sftp would serve the sidecar's files, not main's. So the server is staged
+# into main and run there, which means it must be statically linked (CGO off) to run
+# under either libc. It speaks SFTP over stdin/stdout, exactly as sshd invokes a
+# Subsystem sftp binary.
+ARG TARGETOS
+ARG TARGETARCH
+WORKDIR /src
+RUN <<EOF
+    set -ex
+    go mod init gpustack-sftp-server
+    cat >main.go <<'GO'
+package main
+
+import (
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/pkg/sftp"
+)
+
+func main() {
+	rwc := struct {
+		io.Reader
+		io.WriteCloser
+	}{os.Stdin, os.Stdout}
+
+	server, err := sftp.NewServer(rwc)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "gpustack-sftp-server: init sftp server:", err)
+		os.Exit(1)
+	}
+	if err := server.Serve(); err != nil && err != io.EOF {
+		fmt.Fprintln(os.Stderr, "gpustack-sftp-server: serve:", err)
+		os.Exit(1)
+	}
+}
+GO
+    go get github.com/pkg/sftp@v1.13.7
+    GOOS="${TARGETOS}" GOARCH="${TARGETARCH}" CGO_ENABLED=0 \
+        go build -trimpath -ldflags='-s -w' -o /gpustack-sftp-server .
+EOF
+
 FROM alpine:3.23.4
 SHELL ["/bin/sh", "-c"]
 
@@ -39,6 +87,8 @@ RUN <<EOF
     rm -rf /var/tmp/* \
         && rm -rf /tmp/*
 EOF
+
+COPY --from=sftp-server /gpustack-sftp-server /usr/local/bin/gpustack-sftp-server
 
 EXPOSE 22
 WORKDIR /
