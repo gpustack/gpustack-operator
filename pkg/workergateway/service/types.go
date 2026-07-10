@@ -17,7 +17,12 @@ type (
 	}
 
 	// AggregatedInstanceTypeFlavorSpec represents the specification of an AggregatedInstanceTypeFlavor.
-	AggregatedInstanceTypeFlavorSpec = worker.InstanceTypeFlavorSpec
+	AggregatedInstanceTypeFlavorSpec struct {
+		worker.InstanceTypeFlavorSpec `json:",inline"`
+
+		// Clusters are the clusters that have this instance type flavor, e.g. "cluster-a", "cluster-b".
+		Clusters []string `json:"clusters"`
+	}
 
 	// AggregatedInstanceTypeFlavorList represents a list of AggregatedInstanceTypeFlavor.
 	AggregatedInstanceTypeFlavorList struct {
