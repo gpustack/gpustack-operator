@@ -166,10 +166,10 @@ if [ "$exec_capeff" = "0000000000000000" ] && [ "$exec_capbnd" = "00000000000000
 else
   record FAIL "exec path is capability-stripped" "CapEff='${exec_capeff:-?}' CapBnd='${exec_capbnd:-?}', want all-zero"
 fi
-if [ -n "$exec_mknod" ] && [ "$exec_mknod" != "0" ]; then
-  record PASS "exec path cannot mknod a host device" "mknod rc=${exec_mknod} (denied)"
+if [ "$exec_mknod" = "1" ]; then
+  record PASS "exec path cannot mknod a host device" "mknod rc=1 (EPERM, denied)"
 else
-  record FAIL "exec path cannot mknod a host device" "mknod rc='${exec_mknod:-?}', want non-zero (EPERM)"
+  record FAIL "exec path cannot mknod a host device" "mknod rc='${exec_mknod:-?}', want 1 (EPERM — 127 would mean mknod absent, not denied)"
 fi
 
 # 5. Interactive path (regression): no command, stdin over a heredoc → banner + login shell, unchanged.
