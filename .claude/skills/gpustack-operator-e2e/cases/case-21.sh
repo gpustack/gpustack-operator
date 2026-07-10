@@ -9,8 +9,9 @@
 #              non-interactive `ssh host '<cmd>'` runs the command inside `main` and returns only the
 #              command's output — no login banner — while a plain interactive `ssh host` still prints
 #              the banner and a login shell in `main`. Every path stays confined (empty capabilities
-#              in `main`'s rootfs, host `mknod` denied), and a loopback TCP port-forward through the
-#              Instance round-trips. Guards the regression where `chroot.sh` ignored the requested
+#              in `main`'s rootfs, host `mknod` denied); an `sftp` put/get round-trips through the
+#              bundled static sftp-server into `main`'s own filesystem, and a loopback TCP port-forward
+#              through the Instance round-trips. Guards the regression where `chroot.sh` ignored the requested
 #              command and always launched an interactive login shell, so VS Code Remote-SSH / scp /
 #              rsync never ran their bootstrap command.
 # Environment: Any cluster with a materialized general (CPU-only) pool; needs a real cluster and the
@@ -18,13 +19,14 @@
 #              AUTO-SKIPS (exit 0) when any of those tools is missing.
 # Inputs:      All real, nothing mocked — an SSH key + secret; the general InstanceType unit spec; a
 #              CPU-only SSH-enabled Instance (ubuntu, no accelerator) on the general pool; a
-#              port-forward and real SSH connections (exec channel, interactive PTY-less login, and a
-#              `-L` TCP forward).
+#              port-forward and real SSH connections (exec channel, interactive PTY-less login, an `sftp`
+#              subsystem session, and a `-L` TCP forward).
 # Expected:    - the Pod reaches 2/2 Running (main + sshd);
 #              - `ssh host '<cmd>'` returns the command's output (marker present), with no banner on
 #                stdout or stderr;
 #              - that exec path runs capability-stripped (empty CapEff/CapBnd) and host `mknod` is denied;
 #              - a plain interactive `ssh host` still prints the login banner and runs a shell in `main`;
+#              - an `sftp` put/get round-trips and the uploaded file is visible in `main`'s /workspace;
 #              - a loopback TCP port-forward through the Instance round-trips (reaches the in-Pod sshd).
 # Cleanup:     Trap kills the port-forwards, deletes the test Instance and its SSH secret, removes the
 #              temp key dir. The general InstanceType unit spec is left set (idempotent; shared with the
@@ -182,7 +184,31 @@ else
   record FAIL "interactive login still prints banner + runs shell" "banner or login-shell output missing — interactive path regressed"
 fi
 
-# 6. Loopback TCP port-forward: forward a local port through the Instance to the in-Pod sshd (:22) and
+# 6. SFTP subsystem: `sftp` requests the Subsystem, which under ForceCommand reaches chroot.sh with
+#    $SSH_ORIGINAL_COMMAND set to the configured sftp-server path. chroot.sh stages the bundled static
+#    sftp-server into `main` and serves it there (not the musl sidecar), so a put/get round-trips and the
+#    uploaded file is visible in `main`'s own filesystem. The old chroot.sh discarded the subsystem request.
+SFTP_OPTS=(-P "$LOCAL_PORT" -i "$KEYDIR/id" -o IdentitiesOnly=yes
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o ConnectTimeout=15)
+SFTP_MARK=__case21_sftp__
+printf '%s\n' "$SFTP_MARK" >"$KEYDIR/up.txt"
+sftp "${SFTP_OPTS[@]}" root@127.0.0.1 >/dev/null 2>&1 <<SFTP
+put $KEYDIR/up.txt /workspace/case21-sftp.txt
+get /workspace/case21-sftp.txt $KEYDIR/down.txt
+SFTP
+sftp_seen=$(ssh -T "${SSH_OPTS[@]}" root@127.0.0.1 'cat /workspace/case21-sftp.txt' 2>/dev/null)
+if [ -f "$KEYDIR/down.txt" ] && diff -q "$KEYDIR/up.txt" "$KEYDIR/down.txt" >/dev/null 2>&1; then
+  record PASS "sftp subsystem round-trips a file" "put/get returned identical bytes via the bundled sftp-server"
+else
+  record FAIL "sftp subsystem round-trips a file" "sftp put/get did not round-trip — subsystem discarded (old chroot.sh)"
+fi
+if printf '%s\n' "$sftp_seen" | grep -qF "$SFTP_MARK"; then
+  record PASS "sftp writes into main's filesystem" "uploaded file readable in main at /workspace"
+else
+  record FAIL "sftp writes into main's filesystem" "uploaded file not visible in main — sftp served the sidecar, not the target"
+fi
+
+# 7. Loopback TCP port-forward: forward a local port through the Instance to the in-Pod sshd (:22) and
 #    read its protocol greeting back. Proves TCP forwarding round-trips (direct-tcpip, ForceCommand-agnostic).
 ssh -N -T "${SSH_OPTS[@]}" -o ExitOnForwardFailure=yes \
   -L "127.0.0.1:${FWD_PORT}:127.0.0.1:22" root@127.0.0.1 >/dev/null 2>&1 &

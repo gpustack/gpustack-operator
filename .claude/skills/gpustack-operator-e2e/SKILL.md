@@ -102,7 +102,8 @@ general (CPU) pool, so it runs on any cluster and **auto-skips** only when the r
 asserts, through real SSH connections, that
 `ssh host '<cmd>'` runs the command inside `main` and returns only its output — no login banner — while
 capability-stripped (empty CapEff/CapBnd, host `mknod` denied), that a plain interactive `ssh host` still
-prints the banner and a login shell, and that a loopback TCP port-forward through the Instance round-trips.
+prints the banner and a login shell, that an `sftp` put/get round-trips through the bundled sftp-server into
+`main`'s own filesystem, and that a loopback TCP port-forward through the Instance round-trips.
 
 | Case | Title | Run when these change (`git diff --name-only origin/main...HEAD`) | Script | Mutates |
 |---|---|---|---|---|
