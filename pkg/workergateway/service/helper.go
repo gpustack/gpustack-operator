@@ -5,7 +5,6 @@ import (
 	"sort"
 
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
@@ -45,8 +44,8 @@ func (in *ListClusterInstanceTypeFlavors) Result() ClusterInstanceTypeFlavorList
 }
 
 type ListAggregateInstanceTypeFlavors struct {
-	list    AggregatedInstanceTypeFlavorList
-	visited sets.Set[worker.InstanceTypeFlavorSpec]
+	list        AggregatedInstanceTypeFlavorList
+	itemIndexer map[worker.InstanceTypeFlavorSpec]int
 }
 
 func OpListAggregateInstanceTypeFlavors() *ListAggregateInstanceTypeFlavors {
@@ -54,32 +53,42 @@ func OpListAggregateInstanceTypeFlavors() *ListAggregateInstanceTypeFlavors {
 		list: AggregatedInstanceTypeFlavorList{
 			Items: make([]AggregatedInstanceTypeFlavor, 0),
 		},
-		visited: sets.New[worker.InstanceTypeFlavorSpec](),
+		itemIndexer: make(map[worker.InstanceTypeFlavorSpec]int),
 	}
 }
 
 // Next deduplicates flavors by Spec across clusters, so identical pools served by several
 // clusters collapse to one entry. The Name is carried from the cluster-computed flavor, which
-// is deterministic from the Spec.
-func (in *ListAggregateInstanceTypeFlavors) Next(_ string, obj runtime.Object) error {
+// is deterministic from the Spec. Every cluster contributing the flavor is recorded in
+// Spec.Clusters; Result sorts that list so the observable order is deterministic.
+func (in *ListAggregateInstanceTypeFlavors) Next(cluster string, obj runtime.Object) error {
 	flavor, ok := obj.(*worker.InstanceTypeFlavor)
 	if !ok {
 		return fmt.Errorf("object is not of type InstanceTypeFlavor")
 	}
 
-	if in.visited.Has(flavor.Spec) {
-		return nil
+	itemIndex, existed := in.itemIndexer[flavor.Spec]
+	if !existed {
+		itemIndex = len(in.list.Items)
+		in.itemIndexer[flavor.Spec] = itemIndex
+		in.list.Items = append(in.list.Items, AggregatedInstanceTypeFlavor{
+			Name: flavor.Name,
+			Spec: AggregatedInstanceTypeFlavorSpec{
+				InstanceTypeFlavorSpec: flavor.Spec,
+				Clusters:               make([]string, 0),
+			},
+		})
 	}
-	in.visited.Insert(flavor.Spec)
-	in.list.Items = append(in.list.Items, AggregatedInstanceTypeFlavor{
-		Name: flavor.Name,
-		Spec: flavor.Spec,
-	})
+
+	item := &in.list.Items[itemIndex]
+	item.Spec.Clusters = append(item.Spec.Clusters, cluster)
 	return nil
 }
 
 // Result returns the aggregated flavor list. When sorted, accelerated flavors come first, then
 // ascending by Name, which is deterministic within both the accelerated and generic groups.
+// Each item's Clusters are always sorted ascending so the list is deterministic regardless of
+// cluster iteration order.
 func (in *ListAggregateInstanceTypeFlavors) Result(sorted bool) AggregatedInstanceTypeFlavorList {
 	if sorted {
 		sort.Slice(in.list.Items, func(i, j int) bool {
@@ -89,6 +98,10 @@ func (in *ListAggregateInstanceTypeFlavors) Result(sorted bool) AggregatedInstan
 			}
 			return a.Name < b.Name
 		})
+	}
+
+	for i := range in.list.Items {
+		sort.Strings(in.list.Items[i].Spec.Clusters)
 	}
 	return in.list
 }

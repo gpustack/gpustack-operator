@@ -1097,6 +1097,13 @@ func flavorSpecCPUGroup(group string) worker.InstanceTypeFlavorSpec {
 	}
 }
 
+func aggFlavorSpec(spec worker.InstanceTypeFlavorSpec, clusters ...string) AggregatedInstanceTypeFlavorSpec {
+	return AggregatedInstanceTypeFlavorSpec{
+		InstanceTypeFlavorSpec: spec,
+		Clusters:               clusters,
+	}
+}
+
 type flavorSeed struct {
 	cluster string
 	obj     *worker.InstanceTypeFlavor
@@ -1162,23 +1169,26 @@ func TestListClusterInstanceTypeFlavors_Next(t *testing.T) {
 }
 
 func TestListAggregateInstanceTypeFlavors_Next(t *testing.T) {
-	t.Run("identical Spec across clusters collapses to one entry", func(t *testing.T) {
+	t.Run("identical Spec across clusters collapses to one entry with sorted clusters", func(t *testing.T) {
 		op := OpListAggregateInstanceTypeFlavors()
-		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
 		require.NoError(t, op.Next("cluster-b", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
+		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
 
 		result := op.Result(false)
 		require.Len(t, result.Items, 1)
 		assert.Equal(t, "gpustack-nvidia-a10g", result.Items[0].Name)
+		assert.Equal(t, []string{"cluster-a", "cluster-b"}, result.Items[0].Spec.Clusters)
 	})
 
-	t.Run("differing Specs are preserved", func(t *testing.T) {
+	t.Run("differing Specs are preserved with their own clusters", func(t *testing.T) {
 		op := OpListAggregateInstanceTypeFlavors()
 		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
-		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-tesla-t4", flavorSpecTeslaT4())))
+		require.NoError(t, op.Next("cluster-b", newFlavor("gpustack-nvidia-tesla-t4", flavorSpecTeslaT4())))
 
 		result := op.Result(false)
 		require.Len(t, result.Items, 2)
+		assert.Equal(t, []string{"cluster-a"}, result.Items[0].Spec.Clusters)
+		assert.Equal(t, []string{"cluster-b"}, result.Items[1].Spec.Clusters)
 	})
 
 	t.Run("rejects a non-flavor object", func(t *testing.T) {
@@ -1203,9 +1213,9 @@ func TestListAggregateInstanceTypeFlavors_Result(t *testing.T) {
 		{
 			name: "unsorted preserves insertion order",
 			items: []AggregatedInstanceTypeFlavor{
-				{Name: "gpustack-cpu-only", Spec: flavorSpecCPUGroup("generic")},
-				{Name: "gpustack-nvidia-tesla-t4", Spec: flavorSpecTeslaT4()},
-				{Name: "gpustack-nvidia-a10g", Spec: flavorSpecA10G()},
+				{Name: "gpustack-cpu-only", Spec: aggFlavorSpec(flavorSpecCPUGroup("generic"))},
+				{Name: "gpustack-nvidia-tesla-t4", Spec: aggFlavorSpec(flavorSpecTeslaT4())},
+				{Name: "gpustack-nvidia-a10g", Spec: aggFlavorSpec(flavorSpecA10G())},
 			},
 			sorted:   false,
 			expected: []string{"gpustack-cpu-only", "gpustack-nvidia-tesla-t4", "gpustack-nvidia-a10g"},
@@ -1213,9 +1223,9 @@ func TestListAggregateInstanceTypeFlavors_Result(t *testing.T) {
 		{
 			name: "sorted puts accelerated first then name ascending",
 			items: []AggregatedInstanceTypeFlavor{
-				{Name: "gpustack-cpu-only", Spec: flavorSpecCPUGroup("generic")},
-				{Name: "gpustack-nvidia-tesla-t4", Spec: flavorSpecTeslaT4()},
-				{Name: "gpustack-nvidia-a10g", Spec: flavorSpecA10G()},
+				{Name: "gpustack-cpu-only", Spec: aggFlavorSpec(flavorSpecCPUGroup("generic"))},
+				{Name: "gpustack-nvidia-tesla-t4", Spec: aggFlavorSpec(flavorSpecTeslaT4())},
+				{Name: "gpustack-nvidia-a10g", Spec: aggFlavorSpec(flavorSpecA10G())},
 			},
 			sorted:   true,
 			expected: []string{"gpustack-nvidia-a10g", "gpustack-nvidia-tesla-t4", "gpustack-cpu-only"},
@@ -1223,8 +1233,8 @@ func TestListAggregateInstanceTypeFlavors_Result(t *testing.T) {
 		{
 			name: "sorted is deterministic within the generic group",
 			items: []AggregatedInstanceTypeFlavor{
-				{Name: "gpustack-cpu-intel", Spec: flavorSpecCPUGroup("intel")},
-				{Name: "gpustack-cpu-amd", Spec: flavorSpecCPUGroup("amd")},
+				{Name: "gpustack-cpu-intel", Spec: aggFlavorSpec(flavorSpecCPUGroup("intel"))},
+				{Name: "gpustack-cpu-amd", Spec: aggFlavorSpec(flavorSpecCPUGroup("amd"))},
 			},
 			sorted:   true,
 			expected: []string{"gpustack-cpu-amd", "gpustack-cpu-intel"},
