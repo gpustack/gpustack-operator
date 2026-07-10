@@ -2,10 +2,6 @@
 
 set -e
 
-if [ -t 1 ]; then
-  clear || true
-fi
-
 ###############################################################################
 # Target process detection
 ###############################################################################
@@ -356,28 +352,53 @@ prepare_environment() {
 # Main
 ###############################################################################
 
-print_banner
+# Capture the client's request before prepare_environment touches the environment.
+# Under ForceCommand $SSH_ORIGINAL_COMMAND is empty for an interactive/PTY session
+# and the client's command string for a non-interactive exec (ssh host <cmd>, rsync,
+# scp -O, the VS Code Remote-SSH server bootstrap).
+REQUEST="${SSH_ORIGINAL_COMMAND:-}"
+
 prepare_environment
 
 nsenter_bin="$(command -v nsenter)"
 chroot_bin="$(command -v chroot)"
 setpriv_bin="$(command -v setpriv)"
 
-# Enter the target namespaces (nsenter needs the sidecar's caps), then drop all
-# capabilities before handing control to the interactive shell: --bounding-set=-all
-# prevents any capability from ever being regained and --inh-caps=-all clears the
-# inheritable set, so the login shell runs with an empty effective set. Device
-# access and GPU slicing still work (they come from the device-cgroup grant, not a
-# capability), while host escapes such as mknod are denied.
-exec "$nsenter_bin" \
-  --target "$TARGET_PID" \
-  --mount \
-  --uts \
-  --ipc \
-  --net \
-  --pid \
-  -- \
-  "$chroot_bin" "$TARGET_ROOT" \
-  "$setpriv_bin" --clear-groups \
-    --bounding-set=-all --inh-caps=-all \
-  "$TARGET_SHELL" -l
+# enter runs its arguments inside the target's namespaces/rootfs, confined. nsenter
+# needs the sidecar's caps to cross namespaces; setpriv then drops every capability
+# before the target program starts: --bounding-set=-all prevents any capability from
+# ever being regained and --inh-caps=-all clears the inheritable set, so the program
+# runs with an empty effective set. Device access and GPU slicing still work (they
+# come from the device-cgroup grant, not a capability), while host escapes such as
+# mknod are denied. Every path below hands control off through this same chain.
+enter() {
+  exec "$nsenter_bin" \
+    --target "$TARGET_PID" \
+    --mount \
+    --uts \
+    --ipc \
+    --net \
+    --pid \
+    -- \
+    "$chroot_bin" "$TARGET_ROOT" \
+    "$setpriv_bin" --clear-groups \
+      --bounding-set=-all --inh-caps=-all \
+    "$@"
+}
+
+case "$REQUEST" in
+  "")
+    # Interactive login: clear the terminal, print the banner, then a login shell.
+    if [ -t 1 ]; then
+      clear || true
+    fi
+    print_banner
+    enter "$TARGET_SHELL" -l
+    ;;
+  *)
+    # Non-interactive command exec: run the request inside the target and return only
+    # its output. No banner or terminal clear — either would corrupt the client stream
+    # (VS Code, scp, and rsync abort on unexpected bytes).
+    enter "$TARGET_SHELL" -c "$REQUEST"
+    ;;
+esac
