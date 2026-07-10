@@ -7,163 +7,236 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
 
+// AggregatedInstanceTypeFlavor.
 type (
-	AggregatedInstanceTypeSpec     = workercore.InstanceTypeSpec
-	AggregatedInstanceTypeResource = workercore.InstanceTypeResource
+	// AggregatedInstanceTypeFlavor represents an aggregated view of instance type flavors across multiple clusters.
+	AggregatedInstanceTypeFlavor struct {
+		Name string `json:"name"`
+
+		Spec AggregatedInstanceTypeFlavorSpec `json:"spec"`
+	}
+
+	// AggregatedInstanceTypeFlavorSpec represents the specification of an AggregatedInstanceTypeFlavor.
+	AggregatedInstanceTypeFlavorSpec = worker.InstanceTypeFlavorSpec
+
+	// AggregatedInstanceTypeFlavorList represents a list of AggregatedInstanceTypeFlavor.
+	AggregatedInstanceTypeFlavorList struct {
+		Items []AggregatedInstanceTypeFlavor `json:"items"`
+	}
 )
 
-type AggregatedInstanceType struct {
-	Name string `json:"name"`
+// AggregatedInstanceType.
+type (
+	// AggregatedInstanceType represents an aggregated view of instance types across multiple clusters.
+	AggregatedInstanceType struct {
+		Name string `json:"name"`
 
-	Spec   AggregatedInstanceTypeSpec   `json:"spec"`
-	Status AggregatedInstanceTypeStatus `json:"status"`
-}
+		Spec   AggregatedInstanceTypeSpec   `json:"spec"`
+		Status AggregatedInstanceTypeStatus `json:"status"`
+	}
 
-type AggregatedInstanceTypeStatus struct {
-	// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceType.
-	//
-	// It is the resource bundle of the tier that wins on the primary dimension:
-	// Accelerator when Spec.Acceleratable is true, otherwise CPU.
-	// All four fields (Accelerator/AcceleratorShared/AcceleratorSliced/CPU) are taken from the same winning tier,
-	// so the overview always represents a bundle achievable by some real candidate,
-	// not a per-dimension maximum across tiers.
-	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
+	// AggregatedInstanceTypeSpec represents the specification of an AggregatedInstanceType.
+	AggregatedInstanceTypeSpec = workercore.InstanceTypeSpec
 
-	// Remaining is the total remaining requestable resources of the AggregatedInstanceType.
-	//
-	// Each dimension is the sum of the corresponding dimension across all tiers (i.e. all
-	// candidates), giving a fleet-wide view of how much capacity is still requestable.
-	// Unlike OnceMaxRequest, which is a single-allocation bundle, Remaining is an aggregate
-	// total and may not be achievable in one allocation.
-	Remaining AggregatedInstanceTypeOverviewResource `json:"remaining"`
+	// AggregatedInstanceTypeResource represents the resource of an AggregatedInstanceType.
+	AggregatedInstanceTypeResource = workercore.InstanceTypeResource
 
-	// Tiers is the list of once max request tiers of the AggregatedInstanceType, grouped by accelerator OnceMaxRequest.
-	//
-	// When Spec.Acceleratable is true, each tier holds candidates sharing the same accelerator OnceMaxRequest value.
-	// When Spec.Acceleratable is false, all candidates collapse into a single tier (accelerator is always zero);
-	// in that case, the per-candidate CPU OnceMaxRequest is the primary dimension within the tier.
-	//
-	// Each tier represents a combination of AggregatedInstanceTypeOnceMaxRequestCandidate that satisfy the once max request of the tier.
-	Tiers []AggregatedInstanceTypeOnceMaxRequestTier `json:"tiers"`
-}
+	// AggregatedInstanceTypeStatus represents the status of an AggregatedInstanceType,
+	// including resource availability and tier information.
+	AggregatedInstanceTypeStatus struct {
+		// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceType.
+		//
+		// It is the resource bundle of the tier that wins on the primary dimension:
+		// Accelerator when Spec.Acceleratable is true, otherwise CPU.
+		// All four fields (Accelerator/AcceleratorShared/AcceleratorSliced/CPU) are taken from the same winning tier,
+		// so the overview always represents a bundle achievable by some real candidate,
+		// not a per-dimension maximum across tiers.
+		OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
-type AggregatedInstanceTypeOverviewResource struct {
-	// Accelerator is the allocatable-as-exclusive accelerator resource of the AggregatedInstanceType, e.g. "1", "4".
-	Accelerator resource.Quantity `json:"accelerator"`
+		// Remaining is the total remaining requestable resources of the AggregatedInstanceType.
+		//
+		// Each dimension is the sum of the corresponding dimension across all tiers (i.e. all
+		// candidates), giving a fleet-wide view of how much capacity is still requestable.
+		// Unlike OnceMaxRequest, which is a single-allocation bundle, Remaining is an aggregate
+		// total and may not be achievable in one allocation.
+		Remaining AggregatedInstanceTypeOverviewResource `json:"remaining"`
 
-	// AcceleratorShared is the shareable accelerator resource of the AggregatedInstanceType, e.g. "10", "40".
-	AcceleratorShared resource.Quantity `json:"acceleratorShared"`
+		// Tiers is the list of once max request tiers of the AggregatedInstanceType, grouped by accelerator OnceMaxRequest.
+		//
+		// When Spec.Acceleratable is true, each tier holds candidates sharing the same accelerator OnceMaxRequest value.
+		// When Spec.Acceleratable is false, all candidates collapse into a single tier (accelerator is always zero);
+		// in that case, the per-candidate CPU OnceMaxRequest is the primary dimension within the tier.
+		//
+		// Each tier represents a combination of AggregatedInstanceTypeOnceMaxRequestCandidate that satisfy the once max request of the tier.
+		Tiers []AggregatedInstanceTypeOnceMaxRequestTier `json:"tiers"`
+	}
 
-	// AcceleratorSliced is the sliceable accelerator resource of the AggregatedInstanceType, e.g. "100", "400".
-	AcceleratorSliced resource.Quantity `json:"acceleratorSliced"`
+	// AggregatedInstanceTypeOverviewResource represents the overview resource of an AggregatedInstanceType,
+	// including allocatable-as-exclusive, shareable, sliceable accelerator resources and CPU resources.
+	AggregatedInstanceTypeOverviewResource struct {
+		// Accelerator is the allocatable-as-exclusive accelerator resource of the AggregatedInstanceType, e.g. "1", "4".
+		Accelerator resource.Quantity `json:"accelerator"`
 
-	// CPU is the CPU remaining resource of the AggregatedInstanceType, e.g. "4", "8".
-	CPU resource.Quantity `json:"cpu"`
-}
+		// AcceleratorShared is the shareable accelerator resource of the AggregatedInstanceType, e.g. "10", "40".
+		AcceleratorShared resource.Quantity `json:"acceleratorShared"`
 
-type AggregatedInstanceTypeOnceMaxRequestTier struct {
-	// OnceMaxRequest is the resource bundle of the candidate that wins on the primary dimension within this tier.
-	//
-	// The primary dimension is Accelerator when the owning AggregatedInstanceType is acceleratable, otherwise CPU.
-	// All four fields are taken from the same winning candidate so the bundle is achievable, not synthesized
-	// from per-dimension maxes across candidates.
-	OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
+		// AcceleratorSliced is the sliceable accelerator resource of the AggregatedInstanceType, e.g. "100", "400".
+		AcceleratorSliced resource.Quantity `json:"acceleratorSliced"`
 
-	// Remaining is the total remaining requestable resources of the tier.
-	//
-	// Each dimension is the sum of the corresponding dimension across all candidates in the tier.
-	// Unlike OnceMaxRequest, which is a single-allocation bundle, Remaining is an aggregate total
-	// and may not be achievable in one allocation.
-	Remaining AggregatedInstanceTypeOverviewResource `json:"remaining"`
+		// CPU is the CPU remaining resource of the AggregatedInstanceType, e.g. "4", "8".
+		CPU resource.Quantity `json:"cpu"`
+	}
 
-	// Candidates is the list of candidates of the tier.
-	//
-	// All candidates in the same tier share the same accelerator OnceMaxRequest,
-	// but may differ on AcceleratorShared/AcceleratorSliced/CPU.
-	Candidates []AggregatedInstanceTypeOnceMaxRequestCandidate `json:"candidates"`
-}
+	// AggregatedInstanceTypeOnceMaxRequestTier represents a tier of once max request candidates of the AggregatedInstanceType.
+	AggregatedInstanceTypeOnceMaxRequestTier struct {
+		// OnceMaxRequest is the resource bundle of the candidate that wins on the primary dimension within this tier.
+		//
+		// The primary dimension is Accelerator when the owning AggregatedInstanceType is acceleratable, otherwise CPU.
+		// All four fields are taken from the same winning candidate so the bundle is achievable, not synthesized
+		// from per-dimension maxes across candidates.
+		OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
-// AggregatedInstanceTypeOnceMaxRequestCandidate represents a candidate of the max request tier of the AggregatedInstanceType.
-type AggregatedInstanceTypeOnceMaxRequestCandidate struct {
-	// Cluster is the candidate belongs to, e.g. "cluster-a", "cluster-b".
-	Cluster string `json:"cluster"`
+		// Remaining is the total remaining requestable resources of the tier.
+		//
+		// Each dimension is the sum of the corresponding dimension across all candidates in the tier.
+		// Unlike OnceMaxRequest, which is a single-allocation bundle, Remaining is an aggregate total
+		// and may not be achievable in one allocation.
+		Remaining AggregatedInstanceTypeOverviewResource `json:"remaining"`
 
-	// Name is the instance type name of the candidate, e.g. "nvidia-a100-40g", "nvidia-v100-32g".
-	Name string `json:"name"`
+		// Candidates is the list of candidates of the tier.
+		//
+		// All candidates in the same tier share the same accelerator OnceMaxRequest,
+		// but may differ on AcceleratorShared/AcceleratorSliced/CPU.
+		Candidates []AggregatedInstanceTypeOnceMaxRequestCandidate `json:"candidates"`
+	}
 
-	// Accelerator is the allocatable-as-exclusive accelerator resource of the candidate, e.g. "1", "4".
-	Accelerator AggregatedInstanceTypeResource `json:"accelerator"`
+	// AggregatedInstanceTypeOnceMaxRequestCandidate represents a candidate of the max request tier of the AggregatedInstanceType.
+	AggregatedInstanceTypeOnceMaxRequestCandidate struct {
+		// Cluster is the candidate belongs to, e.g. "cluster-a", "cluster-b".
+		Cluster string `json:"cluster"`
 
-	// AcceleratorShared is the shareable accelerator resource of the candidate, e.g. "10", "40".
-	AcceleratorShared AggregatedInstanceTypeResource `json:"acceleratorShared"`
+		// Name is the instance type name of the candidate, e.g. "nvidia-a100-40g", "nvidia-v100-32g".
+		Name string `json:"name"`
 
-	// AcceleratorSliced is the sliceable accelerator resource of the candidate, e.g. "100", "400".
-	AcceleratorSliced AggregatedInstanceTypeResource `json:"acceleratorSliced"`
+		// Accelerator is the allocatable-as-exclusive accelerator resource of the candidate, e.g. "1", "4".
+		Accelerator AggregatedInstanceTypeResource `json:"accelerator"`
 
-	// CPU is the CPU once max request resource of the candidate, e.g. "4", "8".
-	CPU AggregatedInstanceTypeResource `json:"cpu"`
-}
+		// AcceleratorShared is the shareable accelerator resource of the candidate, e.g. "10", "40".
+		AcceleratorShared AggregatedInstanceTypeResource `json:"acceleratorShared"`
 
-type AggregatedInstanceTypeList struct {
-	Items []AggregatedInstanceType `json:"items,omitempty"`
-}
+		// AcceleratorSliced is the sliceable accelerator resource of the candidate, e.g. "100", "400".
+		AcceleratorSliced AggregatedInstanceTypeResource `json:"acceleratorSliced"`
 
-type ClusterInstanceType struct {
-	worker.InstanceType
+		// CPU is the CPU once max request resource of the candidate, e.g. "4", "8".
+		CPU AggregatedInstanceTypeResource `json:"cpu"`
+	}
 
-	Cluster string `json:"cluster"`
-}
+	// AggregatedInstanceTypeList represents a list of AggregatedInstanceType.
+	AggregatedInstanceTypeList struct {
+		Items []AggregatedInstanceType `json:"items,omitempty"`
+	}
+)
 
-type ClusterInstanceTypeList struct {
-	Items []ClusterInstanceType `json:"items"`
-}
+// ClusterInstanceTypeFlavor.
+type (
+	// ClusterInstanceTypeFlavor represents an instance type flavor in a specific cluster.
+	ClusterInstanceTypeFlavor struct {
+		worker.InstanceTypeFlavor
 
-type ClusterInstance struct {
-	worker.Instance
+		Cluster string `json:"cluster"`
+	}
 
-	Cluster string `json:"cluster"`
-}
+	// ClusterInstanceTypeFlavorList represents a list of ClusterInstanceTypeFlavor.
+	ClusterInstanceTypeFlavorList struct {
+		Items []ClusterInstanceTypeFlavor `json:"items"`
+	}
+)
 
-type ClusterInstanceList struct {
-	Items []ClusterInstance `json:"items"`
-}
+// ClusterInstanceType.
+type (
+	// ClusterInstanceType represents an instance type in a specific cluster.
+	ClusterInstanceType struct {
+		worker.InstanceType
 
-type ClusterInstancePersistentVolumeType struct {
-	worker.InstancePersistentVolumeType
+		Cluster string `json:"cluster"`
+	}
 
-	Cluster string `json:"cluster"`
-}
+	// ClusterInstanceTypeList represents a list of ClusterInstanceType.
+	ClusterInstanceTypeList struct {
+		Items []ClusterInstanceType `json:"items"`
+	}
+)
 
-type ClusterInstancePersistentVolumeTypeList struct {
-	Items []ClusterInstancePersistentVolumeType `json:"items"`
-}
+// ClusterInstance.
+type (
+	// ClusterInstance represents an instance in a specific cluster.
+	ClusterInstance struct {
+		worker.Instance
 
-type ClusterInstancePersistentVolume struct {
-	worker.InstancePersistentVolume
+		Cluster string `json:"cluster"`
+	}
 
-	Cluster string `json:"cluster"`
-}
+	// ClusterInstanceList represents a list of ClusterInstance.
+	ClusterInstanceList struct {
+		Items []ClusterInstance `json:"items"`
+	}
+)
 
-type ClusterInstancePersistentVolumeList struct {
-	Items []ClusterInstancePersistentVolume `json:"items"`
-}
+// ClusterInstancePersistentVolumeType.
+type (
+	// ClusterInstancePersistentVolumeType represents a persistent volume type in a specific cluster.
+	ClusterInstancePersistentVolumeType struct {
+		worker.InstancePersistentVolumeType
 
-type ClusterInstanceImagePullSecret struct {
-	worker.InstanceImagePullSecret
+		Cluster string `json:"cluster"`
+	}
 
-	Cluster string `json:"cluster"`
-}
+	// ClusterInstancePersistentVolumeTypeList represents a list of ClusterInstancePersistentVolumeType.
+	ClusterInstancePersistentVolumeTypeList struct {
+		Items []ClusterInstancePersistentVolumeType `json:"items"`
+	}
+)
 
-type ClusterInstanceImagePullSecretList struct {
-	Items []ClusterInstanceImagePullSecret `json:"items"`
-}
+// ClusterInstancePersistentVolume.
+type (
+	// ClusterInstancePersistentVolume represents a persistent volume in a specific cluster.
+	ClusterInstancePersistentVolume struct {
+		worker.InstancePersistentVolume
 
-type ClusterInstanceSSHPublicKey struct {
-	worker.InstanceSSHPublicKey
+		Cluster string `json:"cluster"`
+	}
 
-	Cluster string `json:"cluster"`
-}
+	// ClusterInstancePersistentVolumeList represents a list of ClusterInstancePersistentVolume.
+	ClusterInstancePersistentVolumeList struct {
+		Items []ClusterInstancePersistentVolume `json:"items"`
+	}
+)
 
-type ClusterInstanceSSHPublicKeyList struct {
-	Items []ClusterInstanceSSHPublicKey `json:"items"`
-}
+// ClusterInstanceImagePullSecret.
+type (
+	// ClusterInstanceImagePullSecret represents an image pull secret in a specific cluster.
+	ClusterInstanceImagePullSecret struct {
+		worker.InstanceImagePullSecret
+
+		Cluster string `json:"cluster"`
+	}
+	// ClusterInstanceImagePullSecretList represents a list of ClusterInstanceImagePullSecret.
+	ClusterInstanceImagePullSecretList struct {
+		Items []ClusterInstanceImagePullSecret `json:"items"`
+	}
+)
+
+// ClusterInstanceSSHPublicKey.
+type (
+	// ClusterInstanceSSHPublicKey represents an SSH public key in a specific cluster.
+	ClusterInstanceSSHPublicKey struct {
+		worker.InstanceSSHPublicKey
+
+		Cluster string `json:"cluster"`
+	}
+
+	// ClusterInstanceSSHPublicKeyList represents a list of ClusterInstanceSSHPublicKey.
+	ClusterInstanceSSHPublicKeyList struct {
+		Items []ClusterInstanceSSHPublicKey `json:"items"`
+	}
+)

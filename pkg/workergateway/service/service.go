@@ -45,6 +45,8 @@ func (s *Service) Index() http.Handler {
 		HandlerFunc(s.handleSubscribeWorker)
 	r.Path("/workers").Methods(http.MethodDelete).
 		HandlerFunc(s.handleUnsubscribeWorker)
+	r.Path("/instancetypeflavors").Methods(http.MethodGet).
+		HandlerFunc(s.handleListInstanceTypeFlavors)
 	r.Path("/instancetypes").Methods(http.MethodGet).
 		HandlerFunc(s.handleListInstanceTypes)
 	r.Path("/instances").Methods(http.MethodGet).
@@ -141,6 +143,45 @@ func (s *Service) handleUnsubscribeWorker(w http.ResponseWriter, r *http.Request
 	logger.Info("unsubscribe worker", "cluster", req.Cluster)
 
 	s.Manager.UnsubscribeWorker(ctx, req.Cluster)
+}
+
+// handleListInstanceTypeFlavors handles the list instance type flavors request.
+//
+// GET /instancetypeflavors?cluster=cluster1&cluster=cluster2[&aggregated=true]
+func (s *Service) handleListInstanceTypeFlavors(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	logger := klog.FromContext(ctx)
+
+	var req struct {
+		Clusters   []string `query:"cluster,omitempty"`
+		Aggregated bool     `query:"aggregated,omitempty"`
+	}
+	_ = httpx.BindWith(r, &req, httpx.BindQuery)
+
+	gvk := worker.SchemeGroupVersionKind("InstanceTypeFlavor")
+
+	if req.Aggregated {
+		listOp := OpListAggregateInstanceTypeFlavors()
+		err := s.Manager.IterateWorkers(ctx, req.Clusters, gvk, manager.IteratorOptions{}, listOp.Next)
+		if err != nil {
+			logger.Error(err, "iterate workers failed")
+			httpx.Error(w, http.StatusInternalServerError)
+			return
+		}
+
+		httpx.JSON(w, http.StatusOK, listOp.Result(true))
+		return
+	}
+
+	listOp := OpListClusterInstanceTypeFlavors()
+	err := s.Manager.IterateWorkers(ctx, req.Clusters, gvk, manager.IteratorOptions{}, listOp.Next)
+	if err != nil {
+		logger.Error(err, "iterate workers failed")
+		httpx.Error(w, http.StatusInternalServerError)
+		return
+	}
+
+	httpx.JSON(w, http.StatusOK, listOp.Result())
 }
 
 // handleListInstanceTypes handles the list instance types request.
