@@ -26,6 +26,15 @@ RUN <<EOF
     echo "Banner no" >> /etc/ssh/sshd_config
     echo "ForceCommand /chroot.sh" >> /etc/ssh/sshd_config
 
+    # Enable TCP and stream-local forwarding and pin the sftp subsystem to a known
+    # path. Alpine ships an active `AllowTcpForwarding no` and `Subsystem sftp
+    # internal-sftp`; sshd honours the first value of a keyword and rejects a duplicate
+    # Subsystem, so drop the shipped active lines before writing ours.
+    sed -i -E '/^[[:space:]]*(AllowTcpForwarding|AllowStreamLocalForwarding|Subsystem[[:space:]]+sftp)[[:space:]]/d' /etc/ssh/sshd_config
+    echo "AllowTcpForwarding yes" >> /etc/ssh/sshd_config
+    echo "AllowStreamLocalForwarding yes" >> /etc/ssh/sshd_config
+    echo "Subsystem sftp /usr/lib/ssh/sftp-server" >> /etc/ssh/sshd_config
+
     # Cleanup
     rm -rf /var/tmp/* \
         && rm -rf /tmp/*
