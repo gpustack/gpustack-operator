@@ -85,6 +85,9 @@ func parseGVKString(s string) (schema.GroupVersionKind, error) {
 //
 // POST /workers?cluster=cluster1[&force=true&gvk=worker.gpustack.ai/v1/Devices&gvk=...]
 // Body (optional): {"token":"...","force":true,"clusters":"...","gvks":["worker.gpustack.ai/v1/Devices"]}
+//
+// Omitting gvk builds no informers for the worker: it stays listable through the live-list proxy,
+// but a subsequent watch request for it receives no events.
 func (s *Service) handleSubscribeWorker(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := klog.FromContext(ctx)
