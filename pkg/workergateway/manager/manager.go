@@ -8,7 +8,8 @@ import (
 	"time"
 
 	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
+	kmeta "k8s.io/apimachinery/pkg/api/meta"
+	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -67,8 +68,10 @@ type (
 
 	// Manager defines the interface for managing workers across multiple clusters.
 	Manager interface {
-		// SubscribeWorker subscribes a worker for the given cluster and starts informers
-		// for the given GroupVersionKinds. If gvks is empty, all built-in GVKs are used.
+		// SubscribeWorker subscribes a worker for the given cluster and starts informers for the
+		// given GroupVersionKinds. If gvks is empty, no informers are started: the worker stays
+		// listable through the live-list proxy (see IterateWorkers), but a watch request for it
+		// delivers no events, since events are published only by informers.
 		// If force is true, it will unsubscribe the existing worker before subscribing a new one.
 		SubscribeWorker(ctx context.Context, cluster, token string, gvks []schema.GroupVersionKind, force bool) error
 		// UnsubscribeWorker unsubscribes the worker for the given cluster.
@@ -126,6 +129,7 @@ type (
 		Context   context.Context
 		Cancel    context.CancelFunc
 		Cluster   string
+		Client    kubernetes.Interface
 		Informers map[schema.GroupVersionKind]cache.SharedIndexInformer
 		AllReady  atomic.Bool
 	}
@@ -150,10 +154,6 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 	} else if wm.hasWorker(cluster) {
 		logger.V(2).Info("worker already exists, skip")
 		return nil
-	}
-
-	if len(gvks) == 0 {
-		gvks = defaultGVKs()
 	}
 
 	cfg, err := wm.ConstructRestConfig(cluster, token)
@@ -259,7 +259,11 @@ func (wm *_Manager) ListWorkers(_ context.Context) []WorkerInfo {
 }
 
 func (wm *_Manager) IterateWorkers(
-	_ context.Context, clusters []string, gvk schema.GroupVersionKind, opts IteratorOptions, processor ProcessObjectFunc,
+	ctx context.Context,
+	clusters []string,
+	gvk schema.GroupVersionKind,
+	opts IteratorOptions,
+	processor ProcessObjectFunc,
 ) error {
 	if len(clusters) == 0 {
 		clusters = wm.Clusters
@@ -289,24 +293,39 @@ func (wm *_Manager) IterateWorkers(
 			wm.RUnlock()
 			continue
 		}
-		inf, ok := wk.Informers[gvk]
-		if !ok {
-			logger.Info("informer not found for gvk, skip")
-			wm.RUnlock()
-			continue
-		}
-		if !inf.HasSynced() {
-			logger.Info("informer not synced, skip")
-			wm.RUnlock()
-			continue
-		}
+		inf, hasInformer := wk.Informers[gvk]
+		cli := wk.Client
 		wm.RUnlock()
 
+		// Objects come from the informer cache when the worker has one for this GVK, or from a live
+		// per-cluster List (defaultListerFactories) as a read-through proxy when it does not — for a
+		// list-only GVK, or one the worker was subscribed without. A GVK backed by neither is skipped.
 		var objs []any
-		if opts.Namespace == "" {
-			objs = inf.GetIndexer().List()
-		} else {
-			objs, _ = inf.GetIndexer().ByIndex(cache.NamespaceIndex, opts.Namespace)
+		switch {
+		case hasInformer:
+			if !inf.HasSynced() {
+				logger.Info("informer not synced, skip")
+				continue
+			}
+			if opts.Namespace == "" {
+				objs = inf.GetIndexer().List()
+			} else {
+				objs, _ = inf.GetIndexer().ByIndex(cache.NamespaceIndex, opts.Namespace)
+			}
+		default:
+			lister, ok := defaultListerFactories[gvk]
+			if !ok {
+				logger.Info("no informer or lister for gvk, skip")
+				continue
+			}
+			ros, err := lister(ctx, cli, opts.Namespace)
+			if err != nil {
+				// Skip this cluster and keep the others, matching the informer path's
+				// graceful degradation for a transiently unavailable worker.
+				logger.Error(err, "list objects, skip")
+				continue
+			}
+			objs = ros
 		}
 
 		for _, obj := range objs {
@@ -315,7 +334,7 @@ func (wm *_Manager) IterateWorkers(
 				logger.Error(nil, "assert object to runtime.Object")
 				continue
 			}
-			mo, err := meta.Accessor(ro)
+			mo, err := kmeta.Accessor(ro)
 			if err != nil {
 				logger.Error(err, "access object meta")
 				continue
@@ -364,6 +383,7 @@ func newWorker(
 		Context:   ctx,
 		Cancel:    cancel,
 		Cluster:   cluster,
+		Client:    cli,
 		Informers: make(map[schema.GroupVersionKind]cache.SharedIndexInformer),
 	}
 
@@ -388,7 +408,10 @@ func newWorker(
 }
 
 func registerEventHandler(
-	ctx context.Context, inf cache.SharedIndexInformer, cluster string, gvk schema.GroupVersionKind,
+	ctx context.Context,
+	inf cache.SharedIndexInformer,
+	cluster string,
+	gvk schema.GroupVersionKind,
 ) {
 	t := WorkerEventTopic(gvk)
 	publishEvent := func(et watch.EventType, obj any) {
@@ -456,7 +479,15 @@ func (w *_Worker) Subscribe() error {
 		}
 	})
 
-	return gp.Wait()
+	// A worker with informers keeps Wait blocked until cancel (its run-loops return ctx.Err then),
+	// and any task error surfaces here — return it so SubscribeWorker can react. Only a worker with
+	// no informers reaches Wait cleanly (nil) at once; block until it is unsubscribed so it stays
+	// registered instead of being deleted and re-subscribed.
+	if err := gp.Wait(); err != nil {
+		return err
+	}
+	<-w.Context.Done()
+	return nil
 }
 
 func (w *_Worker) Unsubscribe(ctx context.Context) {
@@ -496,10 +527,58 @@ var defaultInformerFactories = map[schema.GroupVersionKind]func(kubernetes.Inter
 	},
 }
 
-func defaultGVKs() []schema.GroupVersionKind {
-	gvks := make([]schema.GroupVersionKind, 0, len(defaultInformerFactories))
-	for gvk := range defaultInformerFactories {
-		gvks = append(gvks, gvk)
+// _RuntimeObjectLister lists a resource and returns its typed list object, which is itself a
+// runtime.Object. Every generated worker client satisfies it for its own list type.
+type _RuntimeObjectLister[T runtime.Object] interface {
+	List(ctx context.Context, opts meta.ListOptions) (T, error)
+}
+
+// listAll lists via lister (reading from the apiserver cache) and boxes each list item as a
+// runtime.Object for the IterateWorkers loop, using kmeta.EachListItem to walk the typed items.
+func listAll[T runtime.Object](ctx context.Context, lister _RuntimeObjectLister[T]) ([]any, error) {
+	list, err := lister.List(ctx, meta.ListOptions{ResourceVersion: "0"})
+	if err != nil {
+		return nil, err
 	}
-	return gvks
+
+	var objs []any
+	err = kmeta.EachListItem(list, func(obj runtime.Object) error {
+		objs = append(objs, obj)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return objs, nil
+}
+
+// defaultListerFactories maps each worker GVK to its live per-cluster List, used by IterateWorkers
+// as a read-through proxy whenever a worker has no informer for the requested GVK. This covers both
+// list-only GVKs that can never have an informer (no Watch, e.g. InstanceTypeFlavor) and
+// informer-backed GVKs on a worker that was subscribed without them.
+var defaultListerFactories = map[schema.GroupVersionKind]func(context.Context, kubernetes.Interface, string) ([]any, error){
+	worker.SchemeGroupVersionKind("Devices"): func(ctx context.Context, cli kubernetes.Interface, _ string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().Devices())
+	},
+	worker.SchemeGroupVersionKind("InstanceTypeFlavor"): func(ctx context.Context, cli kubernetes.Interface, _ string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().InstanceTypeFlavors())
+	},
+	worker.SchemeGroupVersionKind("InstanceType"): func(ctx context.Context, cli kubernetes.Interface, _ string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().InstanceTypes())
+	},
+	worker.SchemeGroupVersionKind("Instance"): func(ctx context.Context, cli kubernetes.Interface, ns string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().Instances(ns))
+	},
+	worker.SchemeGroupVersionKind("InstancePersistentVolumeType"): func(ctx context.Context, cli kubernetes.Interface, _ string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().InstancePersistentVolumeTypes())
+	},
+	worker.SchemeGroupVersionKind("InstancePersistentVolume"): func(ctx context.Context, cli kubernetes.Interface, ns string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().InstancePersistentVolumes(ns))
+	},
+	worker.SchemeGroupVersionKind("InstanceImagePullSecret"): func(ctx context.Context, cli kubernetes.Interface, ns string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().InstanceImagePullSecrets(ns))
+	},
+	worker.SchemeGroupVersionKind("InstanceSSHPublicKey"): func(ctx context.Context, cli kubernetes.Interface, ns string) ([]any, error) {
+		return listAll(ctx, cli.WorkerV1().InstanceSSHPublicKeys(ns))
+	},
 }
