@@ -5,12 +5,93 @@ import (
 	"sort"
 
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	"gpustack.ai/gpustack/pkg/utils/funcx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
+
+type ListClusterInstanceTypeFlavors struct {
+	list ClusterInstanceTypeFlavorList
+}
+
+func OpListClusterInstanceTypeFlavors() *ListClusterInstanceTypeFlavors {
+	return &ListClusterInstanceTypeFlavors{
+		list: ClusterInstanceTypeFlavorList{
+			Items: make([]ClusterInstanceTypeFlavor, 0),
+		},
+	}
+}
+
+func (in *ListClusterInstanceTypeFlavors) Next(cluster string, obj runtime.Object) error {
+	flavor, ok := obj.(*worker.InstanceTypeFlavor)
+	if !ok {
+		return fmt.Errorf("object is not of type InstanceTypeFlavor")
+	}
+
+	item := ClusterInstanceTypeFlavor{
+		InstanceTypeFlavor: *flavor,
+		Cluster:            cluster,
+	}
+	item.ManagedFields = nil
+	in.list.Items = append(in.list.Items, item)
+	return nil
+}
+
+func (in *ListClusterInstanceTypeFlavors) Result() ClusterInstanceTypeFlavorList {
+	return in.list
+}
+
+type ListAggregateInstanceTypeFlavors struct {
+	list    AggregatedInstanceTypeFlavorList
+	visited sets.Set[worker.InstanceTypeFlavorSpec]
+}
+
+func OpListAggregateInstanceTypeFlavors() *ListAggregateInstanceTypeFlavors {
+	return &ListAggregateInstanceTypeFlavors{
+		list: AggregatedInstanceTypeFlavorList{
+			Items: make([]AggregatedInstanceTypeFlavor, 0),
+		},
+		visited: sets.New[worker.InstanceTypeFlavorSpec](),
+	}
+}
+
+// Next deduplicates flavors by Spec across clusters, so identical pools served by several
+// clusters collapse to one entry. The Name is carried from the cluster-computed flavor, which
+// is deterministic from the Spec.
+func (in *ListAggregateInstanceTypeFlavors) Next(_ string, obj runtime.Object) error {
+	flavor, ok := obj.(*worker.InstanceTypeFlavor)
+	if !ok {
+		return fmt.Errorf("object is not of type InstanceTypeFlavor")
+	}
+
+	if in.visited.Has(flavor.Spec) {
+		return nil
+	}
+	in.visited.Insert(flavor.Spec)
+	in.list.Items = append(in.list.Items, AggregatedInstanceTypeFlavor{
+		Name: flavor.Name,
+		Spec: flavor.Spec,
+	})
+	return nil
+}
+
+// Result returns the aggregated flavor list. When sorted, accelerated flavors come first, then
+// ascending by Name, which is deterministic within both the accelerated and generic groups.
+func (in *ListAggregateInstanceTypeFlavors) Result(sorted bool) AggregatedInstanceTypeFlavorList {
+	if sorted {
+		sort.Slice(in.list.Items, func(i, j int) bool {
+			a, b := in.list.Items[i], in.list.Items[j]
+			if a.Spec.Acceleratable != b.Spec.Acceleratable {
+				return a.Spec.Acceleratable
+			}
+			return a.Name < b.Name
+		})
+	}
+	return in.list
+}
 
 // lessTierByPrimary returns whether tier i should come before tier j when sorting
 // ascending by the primary dimension: Accelerator if Spec.Acceleratable, otherwise CPU.
