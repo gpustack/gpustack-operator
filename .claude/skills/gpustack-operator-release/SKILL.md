@@ -70,8 +70,10 @@ git status --porcelain                              # must be empty — refuse o
 git rev-parse "origin/$BR"                          # the default target SHA (BR defaults to main)
 git tag -l 'v*' --sort=-creatordate | head -n 5     # recent release tags → the previous one
 git log --oneline -1 "origin/$BR"
-make version
 ```
+
+The version is derived at build time from the git tag via ldflags (`hack/lib/version.sh` → `--version`),
+so there is nothing meaningful to print before the tag exists — the git tag is the single source of truth.
 
 Report whether local `$BR` matches `origin/$BR` (`git rev-parse "$BR" "origin/$BR"`, if the local branch
 exists). If they differ and the user is on `$BR`, offer `git pull --ff-only`; otherwise just tag off
@@ -184,3 +186,16 @@ Report the tag, the release URL, the CI run URLs, and the final state; persist a
 ```bash
 gh release view "$VER" --json tagName,isPrerelease,isDraft,url
 ```
+
+**Verifying the Latest badge.** `isLatest` is **not** a field on `gh release view --json` — it rejects
+unknown fields client-side (`Unknown JSON field: "isLatest"`), because "Latest" is a repo-level pointer,
+not a per-release property. `isPrerelease=false` proves it is a GA, not that it holds the badge. When
+Phase 6 promoted with `--latest`, confirm the badge actually landed by comparing the repo's latest-release
+tag to `$VER`:
+
+```bash
+gh api repos/gpustack/gpustack-operator/releases/latest --jq '.tag_name'   # == $VER for a promoted GA
+```
+
+For a maintenance-line release that kept `--latest=false`, this correctly still points at the newer GA —
+not `$VER` — so a mismatch there is expected, not a failure.
