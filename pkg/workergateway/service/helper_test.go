@@ -1060,3 +1060,188 @@ func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
 		assert.True(t, item.Status.Tiers[0].Remaining.AcceleratorSliced.Equal(r.AcceleratorSliced))
 	})
 }
+
+func newFlavor(name string, spec worker.InstanceTypeFlavorSpec) *worker.InstanceTypeFlavor {
+	return &worker.InstanceTypeFlavor{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec:       spec,
+	}
+}
+
+func flavorSpecA10G() worker.InstanceTypeFlavorSpec {
+	return worker.InstanceTypeFlavorSpec{
+		AcceleratorGroup: "gpustack-nvidia-a10g",
+		Acceleratable:    true,
+		Manufacturer:     "nvidia",
+		Product:          "NVIDIA A10G",
+		Family:           "ampere",
+		Memory:           "23028Mi",
+	}
+}
+
+func flavorSpecTeslaT4() worker.InstanceTypeFlavorSpec {
+	return worker.InstanceTypeFlavorSpec{
+		AcceleratorGroup: "gpustack-nvidia-tesla-t4",
+		Acceleratable:    true,
+		Manufacturer:     "nvidia",
+		Product:          "Tesla T4",
+		Family:           "turing",
+		Memory:           "15360Mi",
+	}
+}
+
+func flavorSpecCPUGroup(group string) worker.InstanceTypeFlavorSpec {
+	return worker.InstanceTypeFlavorSpec{
+		GeneralGroup:  group,
+		Acceleratable: false,
+	}
+}
+
+type flavorSeed struct {
+	cluster string
+	obj     *worker.InstanceTypeFlavor
+}
+
+func TestListClusterInstanceTypeFlavors_Result(t *testing.T) {
+	type row struct{ cluster, name string }
+	cases := []struct {
+		name  string
+		seeds []flavorSeed
+		want  []row
+	}{
+		{
+			name: "empty yields empty list",
+			want: []row{},
+		},
+		{
+			name: "same flavor from two clusters yields one row per cluster",
+			seeds: []flavorSeed{
+				{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+				{cluster: "cluster-b", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+			},
+			want: []row{
+				{cluster: "cluster-a", name: "gpustack-nvidia-a10g"},
+				{cluster: "cluster-b", name: "gpustack-nvidia-a10g"},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			op := OpListClusterInstanceTypeFlavors()
+			for _, s := range c.seeds {
+				require.NoError(t, op.Next(s.cluster, s.obj))
+			}
+			result := op.Result()
+			got := make([]row, len(result.Items))
+			for i, item := range result.Items {
+				got[i] = row{cluster: item.Cluster, name: item.Name}
+			}
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+func TestListClusterInstanceTypeFlavors_Next(t *testing.T) {
+	t.Run("clears ManagedFields", func(t *testing.T) {
+		op := OpListClusterInstanceTypeFlavors()
+		flavor := newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())
+		flavor.ManagedFields = []meta.ManagedFieldsEntry{{Manager: "worker"}}
+
+		require.NoError(t, op.Next("cluster-a", flavor))
+
+		result := op.Result()
+		require.Len(t, result.Items, 1)
+		assert.Nil(t, result.Items[0].ManagedFields)
+	})
+
+	t.Run("rejects a non-flavor object", func(t *testing.T) {
+		op := OpListClusterInstanceTypeFlavors()
+		assert.Error(t, op.Next("cluster-a", &worker.InstanceType{}))
+	})
+}
+
+func TestListAggregateInstanceTypeFlavors_Next(t *testing.T) {
+	t.Run("identical Spec across clusters collapses to one entry", func(t *testing.T) {
+		op := OpListAggregateInstanceTypeFlavors()
+		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
+		require.NoError(t, op.Next("cluster-b", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
+
+		result := op.Result(false)
+		require.Len(t, result.Items, 1)
+		assert.Equal(t, "gpustack-nvidia-a10g", result.Items[0].Name)
+	})
+
+	t.Run("differing Specs are preserved", func(t *testing.T) {
+		op := OpListAggregateInstanceTypeFlavors()
+		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())))
+		require.NoError(t, op.Next("cluster-a", newFlavor("gpustack-nvidia-tesla-t4", flavorSpecTeslaT4())))
+
+		result := op.Result(false)
+		require.Len(t, result.Items, 2)
+	})
+
+	t.Run("rejects a non-flavor object", func(t *testing.T) {
+		op := OpListAggregateInstanceTypeFlavors()
+		assert.Error(t, op.Next("cluster-a", &worker.InstanceType{}))
+	})
+}
+
+func TestListAggregateInstanceTypeFlavors_Result(t *testing.T) {
+	cases := []struct {
+		name     string
+		items    []AggregatedInstanceTypeFlavor
+		sorted   bool
+		expected []string
+	}{
+		{
+			name:     "empty list + sorted",
+			items:    []AggregatedInstanceTypeFlavor{},
+			sorted:   true,
+			expected: []string{},
+		},
+		{
+			name: "unsorted preserves insertion order",
+			items: []AggregatedInstanceTypeFlavor{
+				{Name: "gpustack-cpu-only", Spec: flavorSpecCPUGroup("generic")},
+				{Name: "gpustack-nvidia-tesla-t4", Spec: flavorSpecTeslaT4()},
+				{Name: "gpustack-nvidia-a10g", Spec: flavorSpecA10G()},
+			},
+			sorted:   false,
+			expected: []string{"gpustack-cpu-only", "gpustack-nvidia-tesla-t4", "gpustack-nvidia-a10g"},
+		},
+		{
+			name: "sorted puts accelerated first then name ascending",
+			items: []AggregatedInstanceTypeFlavor{
+				{Name: "gpustack-cpu-only", Spec: flavorSpecCPUGroup("generic")},
+				{Name: "gpustack-nvidia-tesla-t4", Spec: flavorSpecTeslaT4()},
+				{Name: "gpustack-nvidia-a10g", Spec: flavorSpecA10G()},
+			},
+			sorted:   true,
+			expected: []string{"gpustack-nvidia-a10g", "gpustack-nvidia-tesla-t4", "gpustack-cpu-only"},
+		},
+		{
+			name: "sorted is deterministic within the generic group",
+			items: []AggregatedInstanceTypeFlavor{
+				{Name: "gpustack-cpu-intel", Spec: flavorSpecCPUGroup("intel")},
+				{Name: "gpustack-cpu-amd", Spec: flavorSpecCPUGroup("amd")},
+			},
+			sorted:   true,
+			expected: []string{"gpustack-cpu-amd", "gpustack-cpu-intel"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			op := ListAggregateInstanceTypeFlavors{
+				list: AggregatedInstanceTypeFlavorList{Items: c.items},
+			}
+			result := op.Result(c.sorted)
+			actual := make([]string, len(result.Items))
+			for i, item := range result.Items {
+				actual[i] = item.Name
+			}
+			assert.Equal(t, c.expected, actual)
+		})
+	}
+}
