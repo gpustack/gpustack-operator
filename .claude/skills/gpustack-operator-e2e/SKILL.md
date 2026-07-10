@@ -274,4 +274,6 @@ Never delete the user's pre-existing resources.
 - `references/drain-recycle.md` — why CASE 2–6 need a real cluster (the fake-client blind spots), the
   managed-toggle code path, and the accelerated mock recipes (fake accelerator NodeFeature + the
   phantom-node `Devices` ledger, patched on the **v1alpha1** CRD).
+- `references/manual-ssh-verification.md` — the manual pass CASE 21 cannot drive in CI: a real VS Code
+  Remote-SSH session (workspace opens, integrated terminal in `main`) and an `sshfs` mount round-trip.
 - `../_e2e-lib/references/troubleshooting.md` — shared image/rollout/teardown failure modes.
