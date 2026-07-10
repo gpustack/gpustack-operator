@@ -395,17 +395,26 @@ case "$REQUEST" in
     print_banner
     enter "$TARGET_SHELL" -l
     ;;
-  */sftp-server|internal-sftp)
+  "/usr/lib/ssh/sftp-server"|internal-sftp)
     # SFTP subsystem (sftp, sshfs, default scp): serve the target's files, not the
     # sidecar's. OpenSSH's internal-sftp would operate on the sidecar's Alpine
     # filesystem, so instead stage the bundled static server into the target's rootfs
-    # and run it there under the same confinement. The copy uses the sidecar's
-    # privileges and runs before the cap-drop; the staged binary lives on the target's
-    # /tmp and vanishes with the Pod.
+    # and run it there under the same confinement. Match the exact path pinned by the
+    # sidecar's sftp Subsystem directive — a glob would also swallow a user exec command
+    # that merely ends in /sftp-server and silently discard it. The copy uses the
+    # sidecar's privileges and runs before the cap-drop; the staged binary lives on the
+    # target's /tmp and vanishes with the Pod. Stage it atomically: a concurrent session
+    # (an sshfs mount holds a long-lived channel) may be executing the staged binary, so
+    # write a fresh inode and rename it into place — rename never truncates the running
+    # file (no ETXTBSY) and leaves no partial-write window for a racing exec.
     staged=/tmp/.gpustack-sftp-server
-    mkdir -p "${TARGET_ROOT}/tmp"
-    cp /usr/local/bin/gpustack-sftp-server "${TARGET_ROOT}${staged}"
-    chmod 0755 "${TARGET_ROOT}${staged}"
+    # Create the target's /tmp only if the image lacks it, with the standard sticky
+    # 01777 (not mkdir's default 0755) so software in the chroot still gets a proper
+    # /tmp; never re-permission a /tmp the image already ships.
+    [ -d "${TARGET_ROOT}/tmp" ] || mkdir -m 1777 "${TARGET_ROOT}/tmp"
+    cp /usr/local/bin/gpustack-sftp-server "${TARGET_ROOT}${staged}.$$"
+    chmod 0755 "${TARGET_ROOT}${staged}.$$"
+    mv -f "${TARGET_ROOT}${staged}.$$" "${TARGET_ROOT}${staged}"
     enter "$staged"
     ;;
   *)
