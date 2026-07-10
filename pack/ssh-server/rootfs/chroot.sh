@@ -395,6 +395,19 @@ case "$REQUEST" in
     print_banner
     enter "$TARGET_SHELL" -l
     ;;
+  */sftp-server|internal-sftp)
+    # SFTP subsystem (sftp, sshfs, default scp): serve the target's files, not the
+    # sidecar's. OpenSSH's internal-sftp would operate on the sidecar's Alpine
+    # filesystem, so instead stage the bundled static server into the target's rootfs
+    # and run it there under the same confinement. The copy uses the sidecar's
+    # privileges and runs before the cap-drop; the staged binary lives on the target's
+    # /tmp and vanishes with the Pod.
+    staged=/tmp/.gpustack-sftp-server
+    mkdir -p "${TARGET_ROOT}/tmp"
+    cp /usr/local/bin/gpustack-sftp-server "${TARGET_ROOT}${staged}"
+    chmod 0755 "${TARGET_ROOT}${staged}"
+    enter "$staged"
+    ;;
   *)
     # Non-interactive command exec: run the request inside the target and return only
     # its output. No banner or terminal clear — either would corrupt the client stream
