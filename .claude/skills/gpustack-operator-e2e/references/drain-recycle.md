@@ -60,14 +60,16 @@ credit units out of `D = 1,600,000` per whole card (`50%` sliced ⇒ `remaining 
    general `ram` capacity label" injection no longer works: a general pool's capacity is the Node's CPU
    count, not a bumpable label. NFD owns `gpustack.ai/managed` (it is in the node's
    `nfd.node.kubernetes.io/feature-labels`), so the NodeFeature edit propagates to the node label.
-3. **The running Instance is stopped, not recreated.** As the pool drains, the derived InstanceType
-   tears down (`HoldAndDrain` → Kueue evicts the Pod → CQ deleted → IT removed). `instance.go` evaluates
-   the gone/`Inactive` type on every reconcile — before (re)creating the Pod — and sets `spec.stop=true`
-   (log `stop instance as inactive instance type`), which deletes the Pod and marks the Instance
-   `Stopped`. An `InstanceType` watch enqueues the Instance so the stop is prompt even when no Pod event
-   fires. This closed a pre-existing gap (`1afc5b5` on main) where the stop check sat inside the
-   `pod == nil` branch with no InstanceType watch: an evicted Pod was recreated (the type still looked
-   `Active` at that instant) and the running Instance was left with a stuck Pending Pod, never stopped.
+3. **The running Instance is stopped, not recreated.** As the pool drains, the backing Kueue
+   `ClusterQueue` moves to `HoldAndDrain` and Kueue evicts the admitted Pod. `instance.go` reads that
+   backing `ClusterQueue`'s `StopPolicy` on every reconcile — before (re)creating the Pod — and on
+   `HoldAndDrain` (or when the type is gone / being deleted) sets `spec.stop=true` (log
+   `stop instance as its instance type is gone, deleting, or draining`), which deletes the Pod and marks
+   the Instance `Stopped`. A `ClusterQueue` watch (on its `StopPolicy`) enqueues the Instance so the stop
+   is prompt even when no Pod event fires; the InstanceType phase is not relied on, because a fast drain
+   clears the reservation before a durable `Draining` phase is ever observed. This closed a pre-existing
+   gap (`1afc5b5` on main) where the stop check sat inside the `pod == nil` branch: an evicted Pod was
+   recreated and the running Instance was left with a stuck Pending Pod, never stopped.
 
 Why a real cluster: the Instance's Pod carries the `kueue.x-k8s.io/queue-name` label, so it is
 admission-managed; the admission decision, the eviction, and the managed-toggle drain propagation cannot

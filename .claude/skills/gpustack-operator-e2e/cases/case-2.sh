@@ -117,10 +117,10 @@ done
 [ -n "$rf_gone" ] && record PASS "drain removes the pool ResourceFlavor" "no CPU (…-Nc) flavor left" \
   || record FAIL "drain removes the pool ResourceFlavor" "a CPU (…-Nc) flavor persists — managed-toggle did not propagate"
 
-# 5. THE assertion: the Instance whose InstanceType is now gone/Inactive gets STOPPED, not recreated.
-#    On a drain the queue evicts the Pod; the reconciler must set spec.stop (which deletes the Pod)
-#    instead of recreating a Pod the drained queue can never admit. An InstanceType watch re-enqueues
-#    the Instance so the stop is prompt even when no Pod event fires (poll — async).
+# 5. THE assertion: the Instance whose backing queue is now draining (HoldAndDrain) gets STOPPED,
+#    not recreated. On a drain the queue evicts the Pod; the reconciler must set spec.stop (which
+#    deletes the Pod) instead of recreating a Pod the drained queue can never admit. A ClusterQueue
+#    watch re-enqueues the Instance so the stop is prompt even when no Pod event fires (poll — async).
 stopped=""
 for _ in $(seq 1 40); do
   s=$(kubectl -n default get instance gpustack-e2e-instance -o jsonpath='{.spec.stop}' 2>/dev/null)
@@ -130,16 +130,16 @@ done
 [ -n "$stopped" ] && record PASS "instance STOPPED (not recreated)" "spec.stop=true" \
   || record FAIL "instance STOPPED (not recreated)" "spec.stop still ${s:-<unset>} — a running Instance must stop when its type drains"
 
-# Ground truth in the logs — proves the stop-on-inactive/gone branch ran (grep -c, not -q: under
+# Ground truth in the logs — proves the stop-on-drain/gone branch ran (grep -c, not -q: under
 # pipefail, -q closes the pipe early and kubectl logs gets SIGPIPE → non-zero pipeline).
 logged=""
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  cnt=$(kubectl -n "$NS" logs deploy/gpustack-operator-worker --since=10m 2>/dev/null | grep -c "stop instance as inactive instance type")
+  cnt=$(kubectl -n "$NS" logs deploy/gpustack-operator-worker --since=10m 2>/dev/null | grep -c "stop instance as its instance type is gone, deleting, or draining")
   [ "${cnt:-0}" -gt 0 ] && { logged=1; break; }
   sleep 3
 done
-[ -n "$logged" ] && record PASS "stop-on-inactive/gone branch ran" "log: stop instance as inactive instance type" \
-  || record FAIL "stop-on-inactive/gone branch ran" "log line absent — the stop branch may not have run"
+[ -n "$logged" ] && record PASS "stop-on-drain/gone branch ran" "log: stop instance as its instance type is gone, deleting, or draining" \
+  || record FAIL "stop-on-drain/gone branch ran" "log line absent — the stop branch may not have run"
 
 echo
 echo "== CASE 2 — Running Instance admits, then drain stops it (not recreate) =="

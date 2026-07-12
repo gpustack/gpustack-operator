@@ -20,6 +20,7 @@ import (
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 	kueuectrlconst "sigs.k8s.io/kueue/pkg/controller/constants"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
@@ -69,10 +70,14 @@ const (
 )
 
 const (
-	// InstanceTypePhaseInactive is the InstanceType status phase reported when its
-	// backing Kueue ClusterQueue is not active (e.g., draining via HoldAndDrain),
-	// mirroring the "Inactive" summary from apistatus.GetSummaryOfClusterQueue.
+	// InstanceTypePhaseInactive is the InstanceType status phase reported when its backing Kueue
+	// ClusterQueue is held (Hold, an admin Inactive) or already fully drained (HoldAndDrain with no
+	// reservations left), mirroring the "Inactive" summary from apistatus.GetSummaryOfClusterQueue.
 	InstanceTypePhaseInactive = "Inactive"
+	// InstanceTypePhaseDraining is the InstanceType status phase reported while its backing Kueue
+	// ClusterQueue is actively evicting admitted workloads (HoldAndDrain with reservations still
+	// outstanding), mirroring the "Draining" summary from apistatus.GetSummaryOfClusterQueue.
+	InstanceTypePhaseDraining = "Draining"
 )
 
 func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -234,24 +239,41 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	instTypeGone := kerrors.IsNotFound(err)
 
-	// Stop the Instance once its InstanceType is gone, being deleted, or Inactive, regardless of
-	// whether a Pod exists. Running before (re)creating the Pod means a drain that evicts a running
-	// Pod stops the Instance instead of recreating one the drained queue can never admit; keying off
-	// the InstanceType's own deletion timestamp (not only its phase) stops the Instance the moment
-	// its teardown begins, without waiting for the queue to drain the Pod. The InstanceType watch
-	// re-enqueues here so the stop stays level-based even when no Pod event fires.
-	if instTypeGone || instType.DeletionTimestamp != nil ||
-		instType.Status.Phase == InstanceTypePhaseInactive {
+	// Read the backing ClusterQueue's StopPolicy — the only signal that distinguishes an admin Hold
+	// (block new admission, keep running Pods) from a HoldAndDrain drain or teardown (evict admitted
+	// workloads). Both collapse to InstanceType phase Inactive once no reservation remains, and a fast
+	// drain skips a durable Draining phase entirely, so the phase cannot be relied on to stop a drained
+	// Instance. The ClusterQueue is named after the InstanceType.
+	var draining bool
+	if !instTypeGone {
+		cq := new(kueue.ClusterQueue)
+		cqErr := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: inst.Spec.Type}, cq)
+		if cqErr != nil && !kerrors.IsNotFound(cqErr) {
+			logger.Error(cqErr, "fetch backing cluster queue")
+			return ctrl.Result{}, cqErr
+		}
+		draining = cqErr == nil && ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.HoldAndDrain
+	}
+
+	// Stop the Instance once its InstanceType is gone, being deleted, or its backing queue is
+	// HoldAndDrain (a pool drain or a teardown that evicts admitted workloads), regardless of whether
+	// a Pod exists. An admin Hold keeps running Pods, so a Hold-Inactive type does not stop the
+	// Instance; a new Instance under it simply stays pending. Keying off the InstanceType's own
+	// deletion timestamp (not only the queue) stops the Instance the moment teardown begins, without
+	// waiting for the queue to drain the Pod. The InstanceType and ClusterQueue watches re-enqueue here
+	// on a phase transition, StopPolicy change, or deletion, so the stop stays level-based even when no
+	// Pod event fires.
+	if instTypeGone || instType.DeletionTimestamp != nil || draining {
 		// Persist the stop intent first so the instance reliably stays stopped
 		// even if the status update below fails.
 		inst.Spec.Stop = true
 		err = r.Client.Update(ctx, inst)
 		if err != nil {
-			logger.Error(err, "stop instance with inactive instance type")
+			logger.Error(err, "stop instance with unschedulable instance type")
 			return ctrl.Result{}, ctrlcli.IgnoreNotFound(err)
 		}
 
-		logger.Info("stop instance as inactive instance type", "type", inst.Spec.Type)
+		logger.Info("stop instance as its instance type is gone, deleting, or draining", "type", inst.Spec.Type)
 		return ctrl.Result{}, nil
 	}
 
@@ -704,9 +726,10 @@ func (r *InstanceReconciler) SetupController(_ context.Context, opts controller.
 			),
 		).
 		Watches(
-			// Watch InstanceTypes and enqueue every Instance of that type, so a type that goes
-			// Inactive or is removed stops its running Instances promptly instead of only being
-			// caught at Pod-creation time.
+			// Watch InstanceTypes and enqueue every Instance of that type the moment the type starts
+			// being deleted, so a teardown stops its running Instances promptly — before the backing
+			// queue finishes draining — instead of only being caught at Pod-creation time. The
+			// draining (StopPolicy) signal is owned by the ClusterQueue watch below.
 			&workercore.InstanceType{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
 				3*time.Second,
@@ -714,22 +737,55 @@ func (r *InstanceReconciler) SetupController(_ context.Context, opts controller.
 				r.enqueueInstancesWhenInstanceTypeChanged,
 			),
 			ctrlbuilder.WithPredicates(
-				// Only a phase transition (e.g. Active→Inactive on drain) or removal can require
-				// stopping an Instance; ignore the frequent three-view status churn driven by
-				// Devices changes, which never moves the phase.
+				// The stop now reads the backing ClusterQueue's StopPolicy, not the InstanceType
+				// phase, so only the type entering deletion (teardown) still needs to re-enqueue
+				// here; a plain phase transition no longer changes the stop decision. Ignore
+				// creation and the frequent three-view status churn driven by Devices changes.
 				ctrlpredicate.Funcs{
+					CreateFunc: func(e ctrlevent.CreateEvent) bool {
+						return false
+					},
 					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
 						return false
 					},
 					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
 						oldInstType, newInstType := e.ObjectOld.(*workercore.InstanceType), e.ObjectNew.(*workercore.InstanceType)
 						if newInstType.DeletionTimestamp == nil {
-							return oldInstType.Status.Phase != newInstType.Status.Phase
+							return false
 						}
-						if oldInstType.DeletionTimestamp == nil {
-							return true
+						return oldInstType.DeletionTimestamp == nil ||
+							!oldInstType.DeletionTimestamp.Equal(newInstType.DeletionTimestamp)
+					},
+				},
+			),
+		).
+		Watches(
+			// Watch the backing ClusterQueues (named after the InstanceType) and enqueue every
+			// Instance of that type on a StopPolicy change, so a HoldAndDrain drain/teardown stops
+			// its Instances promptly. Only a StopPolicy transition can change the stop decision;
+			// ignore the frequent status churn.
+			&kueue.ClusterQueue{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+				3*time.Second,
+				dedupWindow,
+				r.enqueueInstancesWhenInstanceTypeChanged,
+			),
+			ctrlbuilder.WithPredicates(
+				ctrlpredicate.Funcs{
+					CreateFunc: func(e ctrlevent.CreateEvent) bool {
+						cq, ok := e.Object.(*kueue.ClusterQueue)
+						return ok && ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.HoldAndDrain
+					},
+					UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+						oldCQ, ok1 := e.ObjectOld.(*kueue.ClusterQueue)
+						newCQ, ok2 := e.ObjectNew.(*kueue.ClusterQueue)
+						if !ok1 || !ok2 {
+							return false
 						}
-						return !oldInstType.DeletionTimestamp.Equal(newInstType.DeletionTimestamp)
+						return ptr.Deref(oldCQ.Spec.StopPolicy, kueue.None) != ptr.Deref(newCQ.Spec.StopPolicy, kueue.None)
+					},
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
+						return false
 					},
 				},
 			),
