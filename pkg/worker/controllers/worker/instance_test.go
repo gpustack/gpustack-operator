@@ -13,6 +13,7 @@ import (
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 	ctrlreconcile "sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -345,7 +346,8 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 
 		instType         string
 		withInstanceType bool
-		itPhase          string
+		stopPolicy       kueue.StopPolicy // backing ClusterQueue StopPolicy; "" leaves it unset (None)
+		withCQ           bool
 		itDeleting       bool
 		withPod          bool
 
@@ -359,22 +361,37 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 			wantStop: true,
 		},
 		{
-			// A Ready instance whose Pod is gone while its InstanceType is Inactive
-			// (ClusterQueue in HoldAndDrain) must be stopped, not recreated.
-			name:             "inactive type stops pod-less instance",
+			// A Hold-Inactive type (admin marked it Inactive without draining; its ClusterQueue
+			// is Hold) blocks new admission but keeps running workloads, so it leaves a running
+			// instance's Pod untouched.
+			name:             "hold-inactive type keeps running instance",
+			instType:         "hold-type",
+			withInstanceType: true,
+			withCQ:           true,
+			stopPolicy:       kueue.Hold,
+			withPod:          true,
+			wantStop:         false,
+		},
+		{
+			// A draining type (its ClusterQueue is HoldAndDrain, evicting admitted workloads)
+			// stops a running instance instead of leaving the Pod behind.
+			name:             "draining type stops running instance",
 			instType:         "draining-type",
 			withInstanceType: true,
-			itPhase:          InstanceTypePhaseInactive,
+			withCQ:           true,
+			stopPolicy:       kueue.HoldAndDrain,
+			withPod:          true,
 			wantStop:         true,
 		},
 		{
-			// The stop check also runs for a RUNNING instance (Pod present): an
-			// Inactive type stops it instead of leaving the Pod behind.
-			name:             "inactive type stops running instance",
-			instType:         "draining-type",
+			// A fully-drained HoldAndDrain queue stops even a pod-less instance: the stop keys on the
+			// queue's StopPolicy, not a transient Draining phase (which a fast drain skips), so a
+			// drained pool never leaves an instance able to recreate a Pod it can never schedule.
+			name:             "drained holdanddrain stops pod-less instance",
+			instType:         "drained-type",
 			withInstanceType: true,
-			itPhase:          InstanceTypePhaseInactive,
-			withPod:          true,
+			withCQ:           true,
+			stopPolicy:       kueue.HoldAndDrain,
 			wantStop:         true,
 		},
 		{
@@ -390,17 +407,17 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 			name:             "deleting type stops running instance",
 			instType:         "deleting-type",
 			withInstanceType: true,
-			itPhase:          "Active",
+			withCQ:           true,
 			itDeleting:       true,
 			withPod:          true,
 			wantStop:         true,
 		},
 		{
-			// A healthy Active type must not stop a running instance.
+			// A healthy Active type (queue None) must not stop a running instance.
 			name:             "active type keeps running instance",
 			instType:         "active-type",
 			withInstanceType: true,
-			itPhase:          "Active",
+			withCQ:           true,
 			withPod:          true,
 			wantStop:         false,
 		},
@@ -419,7 +436,6 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 			if c.withInstanceType {
 				it := &worker.InstanceType{
 					ObjectMeta: meta.ObjectMeta{Name: c.instType},
-					Status:     workercore.InstanceTypeStatus{Phase: c.itPhase},
 				}
 				if c.itDeleting {
 					now := meta.Now()
@@ -427,6 +443,13 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 					it.Finalizers = []string{systemmeta.LockedResourceFinalizer}
 				}
 				objs = append(objs, it)
+			}
+			if c.withCQ {
+				cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: c.instType}}
+				if c.stopPolicy != "" {
+					cq.Spec.StopPolicy = ptr.To(c.stopPolicy)
+				}
+				objs = append(objs, cq)
 			}
 			cli := buildInstanceClient(objs...)
 
