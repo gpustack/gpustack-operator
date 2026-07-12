@@ -43,8 +43,9 @@ import (
 //     policy (empty cohort, no-borrow preemption) stamped into its spec.
 //   - It watches the CQ to refresh its status (phase + CPU view) from the queue's quota and
 //     conditions, and to recreate the queue on an admin's accidental delete while its
-//     InstanceType still lives. The NodeQueueReconciler owns the quota/StopPolicy; this
-//     reconciler only reads them for status and never writes them.
+//     InstanceType still lives. The NodeQueueReconciler owns the quota and the HoldAndDrain
+//     StopPolicy (teardown / no-flavors drain); this reconciler owns only the admin Inactive
+//     Hold<->None pair on the StopPolicy (see syncInactive) and otherwise reads the quota for status.
 //   - It does not author InstanceTypes: the NodeFlavorReconciler creates a derived InstanceType
 //     (create-only) after it syncs a pool's flavors. This reconciler manages only types that
 //     already exist, and never deletes one for lack of flavors — the NodeQueueReconciler
@@ -106,6 +107,18 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 
+	// Converge the admin Inactive flag and the queue's StopPolicy. A write here bumps the queue
+	// spec or the InstanceType generation and re-triggers reconcile, which then finds the state
+	// stable; skip the status refresh this cycle so status reflects the settled queue.
+	changed, err := r.syncInactive(ctx, it, cq)
+	if err != nil {
+		logger.Error(err, "sync instance type inactive with cluster queue stop policy")
+		return ctrl.Result{}, err
+	}
+	if changed {
+		return ctrl.Result{}, nil
+	}
+
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 	desiredStatus := r.computeStatus(ctx, it, cq, overcommit)
 	if !kubemeta.DeepEqual(desiredStatus, it.Status) {
@@ -117,6 +130,49 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		logger.V(2).Info("refreshed instance type status")
 	}
 	return ctrl.Result{}, nil
+}
+
+// syncInactive converges Spec.Inactive and the backing queue's StopPolicy, per the truth table:
+//
+//	| StopPolicy (owner)       | Spec.Inactive | Action                            |
+//	| ------------------------ | ------------- | --------------------------------- |
+//	| None (active)            | false         | stable                            |
+//	| None (active)            | true          | forward: set StopPolicy=Hold      |
+//	| Hold (admin)             | true          | stable                            |
+//	| Hold (admin)             | false         | forward: set StopPolicy=None      |
+//	| HoldAndDrain (NodeQueue)  | true         | stable                            |
+//	| HoldAndDrain (NodeQueue)  | false        | mirror: backfill Spec.Inactive    |
+//
+// It evaluates the forward direction (Inactive drives the Hold<->None pair) first; the
+// NodeQueueReconciler owns HoldAndDrain (teardown / no-flavors drain), so the forward direction
+// never sets or clears it — an Inactive=true set while the queue is already HoldAndDrain does not
+// downgrade it to Hold. The mirror is one-way: a queue stopped by any means backfills
+// Inactive=true, but it never clears Inactive on None. That keeps the sync memoryless and
+// non-oscillating; a pool that recovered from a full-drain stays inactive (its leftover
+// Inactive=true re-Holds the reactivated queue) until an admin clears the flag. At most one
+// guarded write happens per call; a stable state writes nothing. It reports whether it wrote.
+func (r *InstanceTypeReconciler) syncInactive(
+	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue,
+) (bool, error) {
+	switch ptr.Deref(cq.Spec.StopPolicy, kueue.None) {
+	case kueue.None:
+		if it.Spec.Inactive {
+			cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+			return true, r.Client.Update(ctx, cq)
+		}
+	case kueue.Hold:
+		if !it.Spec.Inactive {
+			cq.Spec.StopPolicy = ptr.To(kueue.None)
+			return true, r.Client.Update(ctx, cq)
+		}
+	}
+
+	if ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.None && !it.Spec.Inactive {
+		it.Spec.Inactive = true
+		return true, r.Client.Update(ctx, it)
+	}
+
+	return false, nil
 }
 
 // ensureClusterQueue guarantees the backing ClusterQueue matches the InstanceType. It creates

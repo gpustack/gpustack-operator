@@ -656,6 +656,70 @@ func TestInstanceTypeReconciler_EnqueuesInstanceTypesFromDevices(t *testing.T) {
 		"both pools the node serves are enqueued by label; the arm64 type is excluded")
 }
 
+// TestInstanceTypeReconciler_SyncInactive pins the Inactive<->StopPolicy truth table: the forward
+// direction drives the Hold<->None pair from Spec.Inactive, the one-way mirror backfills
+// Inactive=true for a stopped queue, a HoldAndDrain (owned by the NodeQueueReconciler) is never
+// downgraded to Hold, and every row converges to a state that reconciles without further writes.
+func TestInstanceTypeReconciler_SyncInactive(t *testing.T) {
+	cases := []struct {
+		name string
+
+		startPolicy kueue.StopPolicy
+		inactive    bool
+
+		wantPolicy   kueue.StopPolicy
+		wantInactive bool
+	}{
+		{"active stays active", kueue.None, false, kueue.None, false},
+		{"inactive holds the active queue", kueue.None, true, kueue.Hold, true},
+		{"held inactive is stable", kueue.Hold, true, kueue.Hold, true},
+		{"cleared inactive releases the hold", kueue.Hold, false, kueue.None, false},
+		{"draining inactive is not downgraded", kueue.HoldAndDrain, true, kueue.HoldAndDrain, true},
+		{"draining backfills inactive (drain wins)", kueue.HoldAndDrain, false, kueue.HoldAndDrain, true},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			key := "nvidia-a10g"
+			name := nodeQueueName(key)
+			it := &workercore.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
+				Spec: workercore.InstanceTypeSpec{
+					AcceleratorGroup: key,
+					Acceleratable:    true,
+					OS:               "linux",
+					Arch:             "amd64",
+					Inactive:         c.inactive,
+					UnitResources:    workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:     "100Gi",
+				},
+			}
+			cq := newInstanceTypeQueue(key, true)
+			cq.Spec.StopPolicy = ptr.To(c.startPolicy)
+			cli := buildInstanceTypeClient(it, cq)
+
+			// Converge.
+			reconcileInstanceTypeN(t, cli, name, 4)
+
+			gotCQ, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			require.NotNil(t, gotCQ.Spec.StopPolicy)
+			assert.Equal(t, c.wantPolicy, *gotCQ.Spec.StopPolicy, "converged StopPolicy")
+			assert.Equal(t, c.wantInactive, getInstanceType(t, cli, name).Spec.Inactive, "converged Inactive")
+
+			// Stable: once converged, further reconciles write nothing (no oscillation).
+			cqRV := gotCQ.ResourceVersion
+			itRV := getInstanceType(t, cli, name).ResourceVersion
+			reconcileInstanceTypeN(t, cli, name, 2)
+			stableCQ, err := getClusterQueue(t, cli, name)
+			require.NoError(t, err)
+			assert.Equal(t, cqRV, stableCQ.ResourceVersion, "StopPolicy stable (no write)")
+			assert.Equal(t, itRV, getInstanceType(t, cli, name).ResourceVersion, "Inactive stable (no write)")
+		})
+	}
+}
+
 // --- shared ResourceFlavor fixtures (the pool the reconciler aggregates) ---
 
 // flavorOpt mutates the notes a test ResourceFlavor carries, so a fixture can be

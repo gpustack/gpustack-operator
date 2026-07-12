@@ -176,9 +176,11 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 		cq.Spec.AdmissionChecksStrategy = admissionChecks
 		changed = true
 	}
-	// Reactivate a queue we drained to empty: only when it is stopped AND its quota is
-	// empty, so an intentionally-held queue that still carries quota is left untouched.
-	if ptr.Deref(cq.Spec.StopPolicy, kueue.None) != kueue.None && len(cq.Spec.ResourceGroups) == 0 {
+	// Reactivate only a queue WE drained to empty (HoldAndDrain + empty quota). An admin Hold is
+	// owned by the InstanceTypeReconciler (a type marked Inactive) and stays sticky across a pool
+	// losing and regaining its flavors, so it must not be flipped back to None here — doing so would
+	// briefly admit workloads onto an Inactive type until syncInactive re-holds it.
+	if ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.HoldAndDrain && len(cq.Spec.ResourceGroups) == 0 {
 		cq.Spec.StopPolicy = ptr.To(kueue.None)
 		changed = true
 	}
