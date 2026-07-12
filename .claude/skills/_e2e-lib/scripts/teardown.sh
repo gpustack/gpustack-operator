@@ -91,4 +91,16 @@ for _ in $(seq 1 20); do
   sleep 3
 done
 
+# 6. Delete the Secrets the worker provisions at runtime — its cert-manager webhook serving cert and
+#    the delegated editable-settings store (gpustack-settings, a fixed name set in code). The cert
+#    Secret is named "<worker-fullname>-cert", release-dependent via the chart fullname; accept the
+#    resolved name as $2 (mirroring cleanup.sh), defaulting to gpustack-operator-worker-cert as this
+#    harness always installs under that release. Neither Secret is helm-owned, so `helm uninstall`
+#    leaves them behind. Delete by exact name, never a label sweep, so a co-located standalone GPUStack
+#    app's own Secrets are untouched.
+worker_cert_secret="${2:-gpustack-operator-worker-cert}"
+for s in "$worker_cert_secret" gpustack-settings; do
+  kubectl -n "$NS" delete secret "$s" --ignore-not-found 2>/dev/null || true
+done
+
 echo "[teardown] done (namespace ${NS} kept on purpose)"
