@@ -239,6 +239,12 @@ func cpuOnlyInstCustom(name, cpu, ram, storage string) *worker.InstanceType {
 	return newInstType("gpustack-cpu-only-", name, instSpecCPUOnly(), status)
 }
 
+// withPhase overrides an instance type's status phase; the status helpers default to "Active".
+func withPhase(it *worker.InstanceType, phase string) *worker.InstanceType {
+	it.Status.Phase = phase
+	return it
+}
+
 type seed struct {
 	cluster string
 	obj     *worker.InstanceType
@@ -689,14 +695,14 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
-					Cluster: "cluster-a", Name: "fat-ram",
+					Cluster: "cluster-a", Name: "fat-ram", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi")},
 					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti")},
 				},
 				{
-					Cluster: "cluster-b", Name: "fat-cpu",
+					Cluster: "cluster-b", Name: "fat-cpu", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi")},
@@ -722,14 +728,14 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
-					Cluster: "cluster-a", Name: "first",
+					Cluster: "cluster-a", Name: "first", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("2")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi")},
 					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("500Gi")},
 				},
 				{
-					Cluster: "cluster-b", Name: "second",
+					Cluster: "cluster-b", Name: "second", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("2")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi")},
@@ -754,7 +760,7 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_BundleSemantics(t *t
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
-					Cluster: "1", Name: "gpustack-nvidia-a10g-linux-amd64",
+					Cluster: "1", Name: "gpustack-nvidia-a10g-linux-amd64", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0")},
@@ -829,14 +835,14 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
-					Cluster: "cluster-a", Name: "small",
+					Cluster: "cluster-a", Name: "small", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("1")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("4")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("16Gi"), Remaining: resource.MustParse("16Gi")},
 					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("200Gi"), Remaining: resource.MustParse("200Gi")},
 				},
 				{
-					Cluster: "cluster-b", Name: "big",
+					Cluster: "cluster-b", Name: "big", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1"), Remaining: resource.MustParse("3")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("8"), Remaining: resource.MustParse("12")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("32Gi"), Remaining: resource.MustParse("48Gi")},
@@ -860,14 +866,14 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 		tier := AggregatedInstanceTypeOnceMaxRequestTier{
 			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
 				{
-					Cluster: "cluster-a", Name: "fat-ram",
+					Cluster: "cluster-a", Name: "fat-ram", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Remaining: resource.MustParse("10")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("512Gi"), Remaining: resource.MustParse("1Ti")},
 					AcceleratorSliced: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("1Ti"), Remaining: resource.MustParse("2Ti")},
 				},
 				{
-					Cluster: "cluster-b", Name: "fat-cpu",
+					Cluster: "cluster-b", Name: "fat-cpu", Phase: "Active",
 					Accelerator:       AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("0"), Remaining: resource.MustParse("0")},
 					CPU:               AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64"), Remaining: resource.MustParse("128")},
 					AcceleratorShared: AggregatedInstanceTypeResource{OnceMaxRequest: resource.MustParse("64Gi"), Remaining: resource.MustParse("256Gi")},
@@ -1059,6 +1065,171 @@ func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
 		assert.True(t, item.Status.Tiers[0].Remaining.AcceleratorShared.Equal(r.AcceleratorShared))
 		assert.True(t, item.Status.Tiers[0].Remaining.AcceleratorSliced.Equal(r.AcceleratorSliced))
 	})
+}
+
+// TestListAggregateInstanceTypes_PhaseFiltering covers the batch (Next/Result) path: only
+// Active candidates contribute to the tier/item OnceMaxRequest and Remaining totals, while
+// non-Active candidates stay listed with their recorded Phase.
+func TestListAggregateInstanceTypes_PhaseFiltering(t *testing.T) {
+	t.Run("inactive candidate is retained but excluded from tier/item totals", func(t *testing.T) {
+		op := OpListAggregateInstanceTypes()
+		require.NoError(t, op.Next("cluster-a", a10gInstCustom("a10g-active", "4", "8", "32Gi", "500Gi")))
+		require.NoError(t, op.Next("cluster-b",
+			withPhase(a10gInstCustom("a10g-inactive", "4", "16", "64Gi", "1Ti"), "Inactive")))
+
+		result := op.Result(false)
+
+		require.Len(t, result.Items, 1)
+		item := result.Items[0]
+		require.Len(t, item.Status.Tiers, 1, "both candidates share Acc=4, so a single tier")
+		tier := item.Status.Tiers[0]
+		require.Len(t, tier.Candidates, 2, "the inactive candidate is retained, not dropped")
+
+		byName := map[string]AggregatedInstanceTypeOnceMaxRequestCandidate{}
+		for _, c := range tier.Candidates {
+			byName[c.Name] = c
+		}
+		assert.Equal(t, "Active", byName["a10g-active"].Phase)
+		assert.Equal(t, "Inactive", byName["a10g-inactive"].Phase, "candidate Phase must be recorded")
+
+		// Totals reflect the Active candidate only (CPU=8), never the inactive one (CPU=16).
+		assert.True(t, tier.OnceMaxRequest.CPU.Equal(resource.MustParse("8")),
+			"OnceMaxRequest must not pull CPU=16 from the inactive candidate")
+		assert.True(t, tier.Remaining.CPU.Equal(resource.MustParse("8")),
+			"Remaining must sum Active candidates only")
+		assert.True(t, item.Status.Remaining.CPU.Equal(resource.MustParse("8")))
+		assert.True(t, item.Status.OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")))
+	})
+
+	t.Run("all-inactive tier zeroes its stats but keeps its candidates and stable identity", func(t *testing.T) {
+		op := OpListAggregateInstanceTypes()
+		require.NoError(t, op.Next("cluster-a", withPhase(a10gInst("inst-a", "4"), "Inactive")))
+
+		result := op.Result(false)
+
+		require.Len(t, result.Items, 1)
+		item := result.Items[0]
+		require.Len(t, item.Status.Tiers, 1)
+		require.Len(t, item.Status.Tiers[0].Candidates, 1)
+		assert.True(t, item.Status.Tiers[0].OnceMaxRequest.Accelerator.IsZero(), "all-inactive tier contributes zero")
+		assert.True(t, item.Status.Tiers[0].Remaining.Accelerator.IsZero())
+		assert.True(t, item.Status.OnceMaxRequest.Accelerator.IsZero())
+		assert.True(t, item.Status.Tiers[0].Candidates[0].Accelerator.OnceMaxRequest.Equal(resource.MustParse("4")),
+			"the candidate's raw accelerator is the tier's stable identity")
+	})
+
+	t.Run("item overview picks the active fully-sliced tier over an all-inactive whole-card tier", func(t *testing.T) {
+		// Seed-collision guard: an inactive whole-card tier (raw Acc=4, zeroed by Phase filtering)
+		// and an active fully-sliced tier (raw Acc=0, Sliced=50) both recompute to Accelerator=0.
+		// The all-zero inactive tier must not seed the item bundle and mask the 50.
+		op := OpListAggregateInstanceTypes()
+		require.NoError(t, op.Next("cluster-a",
+			withPhase(a10gInstCustom("a10g-whole-inactive", "4", "8", "32Gi", "0"), "Inactive")))
+		require.NoError(t, op.Next("cluster-b",
+			a10gInstCustom("a10g-sliced-active", "0", "0", "0", "50")))
+
+		result := op.Result(false)
+
+		require.Len(t, result.Items, 1)
+		item := result.Items[0]
+		require.Len(t, item.Status.Tiers, 2, "distinct raw accelerators keep two tiers")
+
+		o := item.Status.OnceMaxRequest
+		assert.True(t, o.Accelerator.IsZero(), "no whole card is requestable once max")
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("50")),
+			"the active fully-sliced tier's bundle must win, not the zeroed inactive tier")
+		assert.True(t, item.Status.Remaining.AcceleratorSliced.Equal(resource.MustParse("50")))
+		assert.True(t, item.Status.Remaining.CPU.IsZero(), "the inactive whole-card CPU must not count")
+	})
+}
+
+// TestHandleAggregatedInstanceType_PhaseAwareTierIdentity covers the streaming path: a tier whose
+// only candidate is inactive recomputes to zero stats, yet a later same-accelerator Active candidate
+// must still join it (matched on the stable candidate value) rather than spawn a duplicate tier.
+func TestHandleAggregatedInstanceType_PhaseAwareTierIdentity(t *testing.T) {
+	h := OpHandleAggregatedInstanceType(buildState(t,
+		seed{cluster: "cluster-a", obj: withPhase(a10gInst("inst-a", "4"), "Inactive")},
+	))
+
+	item0 := findItem(h.state, "gpustack-nvidia-a10g")
+	require.NotNil(t, item0)
+	require.Len(t, item0.Status.Tiers, 1)
+	require.True(t, item0.Status.Tiers[0].OnceMaxRequest.Accelerator.IsZero(),
+		"the seeded all-inactive tier recomputes to zero stats")
+
+	evts := h.Handle(&manager.WorkerEvent{
+		Type:    manager.WorkerEventAdded,
+		Cluster: "cluster-b",
+		Object:  a10gInst("inst-b", "4"),
+	})
+
+	require.Len(t, evts, 1)
+	assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+	item := findItem(h.state, "gpustack-nvidia-a10g")
+	require.NotNil(t, item)
+	require.Len(t, item.Status.Tiers, 1, "the Active candidate must join the existing Acc=4 tier, not duplicate it")
+	require.Len(t, item.Status.Tiers[0].Candidates, 2)
+	assert.True(t, item.Status.Tiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")),
+		"tier totals now reflect the Active candidate")
+}
+
+// TestHandleAggregatedInstanceType_InactiveCrossTierMoveDoesNotLeakCapacity covers the streaming
+// cross-tier move that lands an inactive candidate in a brand-new tier: that tier must be recomputed
+// (Phase-filtered to zero) before the item overview aggregates it, so the moved candidate's raw
+// resources never surface as fleet capacity.
+func TestHandleAggregatedInstanceType_InactiveCrossTierMoveDoesNotLeakCapacity(t *testing.T) {
+	h := OpHandleAggregatedInstanceType(buildState(t,
+		seed{cluster: "cluster-a", obj: a10gInst("active-a", "4")},
+		seed{cluster: "cluster-b", obj: withPhase(a10gInst("inactive-b", "2"), "Inactive")},
+	))
+
+	// The inactive candidate's raw accelerator changes to 8, moving it into a brand-new tier.
+	evts := h.Handle(&manager.WorkerEvent{
+		Type:    manager.WorkerEventModified,
+		Cluster: "cluster-b",
+		Object:  withPhase(a10gInst("inactive-b", "8"), "Inactive"),
+	})
+
+	require.Len(t, evts, 1)
+	assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+
+	item := findItem(h.state, "gpustack-nvidia-a10g")
+	require.NotNil(t, item)
+
+	var movedTier *AggregatedInstanceTypeOnceMaxRequestTier
+	for i := range item.Status.Tiers {
+		if item.Status.Tiers[i].Candidates[0].Accelerator.OnceMaxRequest.Equal(resource.MustParse("8")) {
+			movedTier = &item.Status.Tiers[i]
+		}
+	}
+	require.NotNil(t, movedTier, "the moved candidate must occupy its own Acc=8 tier")
+	assert.True(t, movedTier.OnceMaxRequest.Accelerator.IsZero(),
+		"an inactive candidate contributes zero to its new tier")
+	assert.True(t, item.Status.OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")),
+		"the inactive candidate's raw Acc=8 must not become the item's OnceMaxRequest")
+}
+
+// TestListAggregateInstanceTypes_GroupingIgnoresInactiveAndDisplayName covers the cross-cluster
+// grouping identity: the same hardware collapses into one aggregated item even when clusters
+// disagree on Inactive/DisplayName, and the stored item keeps the first-seen DisplayName.
+func TestListAggregateInstanceTypes_GroupingIgnoresInactiveAndDisplayName(t *testing.T) {
+	a := a10gInst("inst-a", "1")
+	a.Spec.DisplayName = "A10G Prod"
+	b := a10gInst("inst-b", "1")
+	b.Spec.Inactive = true
+	b.Spec.DisplayName = "A10G Staging"
+
+	state := buildState(t,
+		seed{cluster: "cluster-a", obj: a},
+		seed{cluster: "cluster-b", obj: b},
+	)
+
+	require.Len(t, state.Items, 1, "hardware-identical types must not split on Inactive/DisplayName")
+	item := state.Items[0]
+	require.Len(t, item.Status.Tiers, 1)
+	require.Len(t, item.Status.Tiers[0].Candidates, 2)
+	assert.Equal(t, "A10G Prod", item.Spec.DisplayName, "stored DisplayName is the first-seen one")
 }
 
 func newFlavor(name string, spec worker.InstanceTypeFlavorSpec) *worker.InstanceTypeFlavor {

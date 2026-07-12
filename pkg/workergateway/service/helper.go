@@ -12,6 +12,24 @@ import (
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
+// instanceTypePhaseActive is the InstanceType status phase that marks a candidate as schedulable.
+// Only Active candidates contribute to the aggregated OnceMaxRequest/Remaining totals; non-Active
+// candidates stay listed but count as zero.
+//
+// It must stay in lockstep with the "Active" summary produced by apistatus.GetSummaryOfClusterQueue
+// (and the InstanceType phase constants in the worker controllers); the literal is duplicated here
+// because the workergateway is a separate binary with no dependency on those packages.
+const instanceTypePhaseActive = "Active"
+
+// normalizeAggregatedInstanceTypeSpec zeroes the fields that must not split the cross-cluster
+// grouping identity. Inactive and DisplayName describe an administrative/presentation state that
+// varies per cluster, so the same hardware collapses into one aggregated item regardless of them.
+func normalizeAggregatedInstanceTypeSpec(spec AggregatedInstanceTypeSpec) AggregatedInstanceTypeSpec {
+	spec.Inactive = false
+	spec.DisplayName = ""
+	return spec
+}
+
 type ListClusterInstanceTypeFlavors struct {
 	list ClusterInstanceTypeFlavorList
 }
@@ -135,19 +153,28 @@ func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
 func (in *AggregatedInstanceType) Recompute() {
 	var newOnceMaxRequest, newRemaining AggregatedInstanceTypeOverviewResource
 
+	seeded := false
 	for i := range in.Status.Tiers {
 		tier := &in.Status.Tiers[i]
 
-		wins := i == 0
-		if !wins {
-			if in.Spec.Acceleratable {
-				wins = newOnceMaxRequest.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0
-			} else {
-				wins = newOnceMaxRequest.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0
+		// A tier whose bundle is entirely zero (e.g. one holding only inactive candidates, since
+		// tier Recompute zeroes those) offers no single allocation, so it must not seed the winner:
+		// otherwise it would mask a real bundle from a tier that ties it on the primary dimension
+		// (both zero), as a fully-sliced active tier does. Such a tier still adds its (zero)
+		// Remaining, so excluding it from the seed changes nothing but the OnceMaxRequest bundle.
+		if !overviewResourceIsZero(tier.OnceMaxRequest) {
+			wins := !seeded
+			if !wins {
+				if in.Spec.Acceleratable {
+					wins = newOnceMaxRequest.Accelerator.Cmp(tier.OnceMaxRequest.Accelerator) < 0
+				} else {
+					wins = newOnceMaxRequest.CPU.Cmp(tier.OnceMaxRequest.CPU) < 0
+				}
 			}
-		}
-		if wins {
-			newOnceMaxRequest = tier.OnceMaxRequest
+			if wins {
+				newOnceMaxRequest = tier.OnceMaxRequest
+			}
+			seeded = true
 		}
 
 		newRemaining.Accelerator.Add(tier.Remaining.Accelerator)
@@ -158,6 +185,13 @@ func (in *AggregatedInstanceType) Recompute() {
 
 	in.Status.OnceMaxRequest = newOnceMaxRequest
 	in.Status.Remaining = newRemaining
+}
+
+// overviewResourceIsZero reports whether every dimension of an overview bundle is zero, i.e. the
+// bundle offers no single allocation on any dimension.
+func overviewResourceIsZero(r AggregatedInstanceTypeOverviewResource) bool {
+	return r.Accelerator.IsZero() && r.AcceleratorShared.IsZero() &&
+		r.AcceleratorSliced.IsZero() && r.CPU.IsZero()
 }
 
 // Recompute rebuilds the tier-level OnceMaxRequest and Remaining overviews from the candidates.
@@ -179,10 +213,19 @@ func (in *AggregatedInstanceType) Recompute() {
 func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool) {
 	var newOnceMaxRequest, newRemaining AggregatedInstanceTypeOverviewResource
 
+	seeded := false
 	for i := range in.Candidates {
 		candidate := &in.Candidates[i]
 
-		wins := i == 0
+		// Only Active candidates count toward the totals; a non-Active candidate stays listed but
+		// contributes zero, so an inactive/transitioning pool never inflates the fleet overview.
+		if candidate.Phase != instanceTypePhaseActive {
+			continue
+		}
+
+		// The first Active candidate seeds the bundle so a real bundle is picked even when the
+		// primary dimension is zero (e.g. a fully-sliced accelerator).
+		wins := !seeded
 		if !wins {
 			if acceleratable {
 				wins = newOnceMaxRequest.Accelerator.Cmp(candidate.Accelerator.OnceMaxRequest) < 0
@@ -198,6 +241,7 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 				AcceleratorSliced: candidate.AcceleratorSliced.OnceMaxRequest,
 			}
 		}
+		seeded = true
 
 		newRemaining.Accelerator.Add(candidate.Accelerator.Remaining)
 		newRemaining.CPU.Add(candidate.CPU.Remaining)
@@ -230,10 +274,13 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 		return fmt.Errorf("object is not of type InstanceType")
 	}
 
-	itemIndex, existed := in.itemIndexer[instType.Spec]
+	// Group by a normalized spec so the same hardware collapses across clusters regardless of
+	// per-cluster Inactive/DisplayName; the stored item keeps the first-seen (full) spec.
+	itemKey := normalizeAggregatedInstanceTypeSpec(instType.Spec)
+	itemIndex, existed := in.itemIndexer[itemKey]
 	if !existed {
 		itemIndex = len(in.list.Items)
-		in.itemIndexer[instType.Spec] = itemIndex
+		in.itemIndexer[itemKey] = itemIndex
 		in.itemTierIndexer = append(in.itemTierIndexer, make(map[string]int))
 		item := AggregatedInstanceType{
 			Name: funcx.Ternary(instType.GenerateName != "", stringx.TrimSuffix(instType.GenerateName, "-"), instType.Name),
@@ -271,6 +318,7 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 	candidate := AggregatedInstanceTypeOnceMaxRequestCandidate{
 		Cluster:           cluster,
 		Name:              instType.Name,
+		Phase:             instType.Status.Phase,
 		Accelerator:       instType.Status.Accelerator,
 		CPU:               instType.Status.CPU,
 		AcceleratorShared: instType.Status.AcceleratorShared,
@@ -295,14 +343,15 @@ func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceType
 	for i := range in.list.Items {
 		item := &in.list.Items[i]
 
-		// Sorted ascending by the primary dimension for better readability.
-		sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
-
-		// Calculate the once max request of each tier.
+		// Recompute each tier first so Phase filtering is reflected before ordering: an all-inactive
+		// tier recomputes to zero and must sort by that, not by its raw first-candidate seed.
 		for j := range item.Status.Tiers {
 			tier := &item.Status.Tiers[j]
 			tier.Recompute(item.Spec.Acceleratable)
 		}
+
+		// Sorted ascending by the primary dimension for better readability.
+		sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
 
 		// Calculate the once max request of the item.
 		item.Recompute()
@@ -394,8 +443,11 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 	index := [3]int{-1, -1, -1} // item index, tier index, candidate index
 
+	// Match items on the normalized spec so a candidate whose only difference is Inactive/DisplayName
+	// still lands on the aggregated item that groups the same hardware.
+	instTypeKey := normalizeAggregatedInstanceTypeSpec(instType.Spec)
 	for i := 0; i < len(in.state.Items); i++ {
-		if in.state.Items[i].Spec != instType.Spec {
+		if normalizeAggregatedInstanceTypeSpec(in.state.Items[i].Spec) != instTypeKey {
 			continue
 		}
 		index[0] = i
@@ -404,7 +456,10 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 		for j := 0; j < len(item.Status.Tiers); j++ {
 			tier := &item.Status.Tiers[j]
-			if tier.OnceMaxRequest.Accelerator.Equal(instType.Status.Accelerator.OnceMaxRequest) {
+			// Match tiers on a candidate's raw accelerator OnceMaxRequest (which Recompute never
+			// mutates), not the tier's recomputed OnceMaxRequest, since Phase filtering may zero the
+			// latter for an all-inactive tier and would then spawn a duplicate tier.
+			if tier.Candidates[0].Accelerator.OnceMaxRequest.Equal(instType.Status.Accelerator.OnceMaxRequest) {
 				index[1] = j
 			}
 			for k := range tier.Candidates {
@@ -463,13 +518,14 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
 				Cluster:           evt.Cluster,
 				Name:              instType.Name,
+				Phase:             instType.Status.Phase,
 				Accelerator:       instType.Status.Accelerator,
 				CPU:               instType.Status.CPU,
 				AcceleratorShared: instType.Status.AcceleratorShared,
 				AcceleratorSliced: instType.Status.AcceleratorSliced,
 			}
 
-			if tier.OnceMaxRequest.Accelerator.Equal(candidate.Accelerator.OnceMaxRequest) {
+			if tier.Candidates[0].Accelerator.OnceMaxRequest.Equal(candidate.Accelerator.OnceMaxRequest) {
 				// If the once max request has not changed, update the candidate in place.
 				tier.Candidates[index[2]] = *candidate
 
@@ -487,10 +543,11 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					tier.Recompute(item.Spec.Acceleratable)
 				}
 
-				// Find the new tier to move in.
+				// Find the new tier to move in, matching on a candidate's raw accelerator OnceMaxRequest
+				// so a Phase-zeroed tier still resolves to its stable identity.
 				newTierIndex := -1
 				for j := 0; j < len(item.Status.Tiers); j++ {
-					if item.Status.Tiers[j].OnceMaxRequest.Accelerator.Equal(instType.Status.Accelerator.OnceMaxRequest) {
+					if item.Status.Tiers[j].Candidates[0].Accelerator.OnceMaxRequest.Equal(instType.Status.Accelerator.OnceMaxRequest) {
 						newTierIndex = j
 						break
 					}
@@ -521,6 +578,10 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 							Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
 						})
 
+					// Recompute the just-appended tier so a moved non-Active candidate does not leak
+					// its raw capacity into the item overview, and the sort key is Phase-filtered.
+					item.Status.Tiers[len(item.Status.Tiers)-1].Recompute(item.Spec.Acceleratable)
+
 					// Sorted ascending by the primary dimension.
 					sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
 				}
@@ -550,6 +611,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
 				Cluster:           evt.Cluster,
 				Name:              instType.Name,
+				Phase:             instType.Status.Phase,
 				Accelerator:       instType.Status.Accelerator,
 				CPU:               instType.Status.CPU,
 				AcceleratorShared: instType.Status.AcceleratorShared,
@@ -595,6 +657,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				{
 					Cluster:           evt.Cluster,
 					Name:              instType.Name,
+					Phase:             instType.Status.Phase,
 					Accelerator:       instType.Status.Accelerator,
 					CPU:               instType.Status.CPU,
 					AcceleratorShared: instType.Status.AcceleratorShared,
@@ -607,6 +670,9 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 		if index[0] != -1 {
 			item := &in.state.Items[index[0]]
 			item.Status.Tiers = append(item.Status.Tiers, tier)
+
+			// Recompute the just-appended tier so Phase filtering applies before sorting/aggregation.
+			item.Status.Tiers[len(item.Status.Tiers)-1].Recompute(item.Spec.Acceleratable)
 
 			// Sorted ascending by the primary dimension.
 			sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
@@ -622,6 +688,9 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 			return evts
 		}
+
+		// Recompute the tier so a non-Active first candidate does not seed the new item's overview.
+		tier.Recompute(instType.Spec.Acceleratable)
 
 		// Not found the same item, tier and candidate, create a new item with a new tier and candidate.
 		in.state.Items = append(in.state.Items, AggregatedInstanceType{
