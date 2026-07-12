@@ -395,6 +395,30 @@ func TestNodeQueueReconciler_ReactivatesOnFlavorReturn(t *testing.T) {
 	require.Len(t, got.Spec.ResourceGroups, 1, "resource groups refilled")
 }
 
+// TestNodeQueueReconciler_KeepsAdminHoldStickyOnFlavorReturn pins that an admin-set Hold (the
+// InstanceType-owned Inactive state) drained to empty is left sticky when the pool's flavors
+// return: only a NodeQueue-owned HoldAndDrain is reactivated, so the queue must stay Hold here
+// rather than flip to None (which would briefly admit workloads onto an Inactive type).
+func TestNodeQueueReconciler_KeepsAdminHoldStickyOnFlavorReturn(t *testing.T) {
+	key := "nvidia-a10g"
+	name := nodeQueueName(key)
+
+	cq := newInstanceTypeQueue(key, true)
+	cq.Spec.StopPolicy = ptr.To(kueue.Hold)
+	cq.Spec.ResourceGroups = nil
+
+	rf := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-1d", key, 1, 4, accelerated(nodefeature.ManufacturerNVIDIA))
+	cli := buildNodeQueueClient(cq, rf)
+
+	reconcileNodeQueueN(t, cli, name, 2)
+
+	got, err := getClusterQueue(t, cli, name)
+	require.NoError(t, err)
+	require.NotNil(t, got.Spec.StopPolicy)
+	assert.Equal(t, kueue.Hold, *got.Spec.StopPolicy, "admin Hold stays sticky across flavor return")
+	require.Len(t, got.Spec.ResourceGroups, 1, "resource groups still refilled under Hold")
+}
+
 // TestNodeQueueReconciler_DrainThenEmptyRespectsReservations pins the no-flavors path: while
 // the queue still holds a reservation the quota is kept and the queue is driven to
 // HoldAndDrain (requeued), and only once nothing is reserved are the resource groups emptied.
