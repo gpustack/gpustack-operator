@@ -123,6 +123,12 @@ type (
 		// Name is the instance type name of the candidate, e.g. "nvidia-a100-40g", "nvidia-v100-32g".
 		Name string `json:"name"`
 
+		// Phase is the InstanceType status phase of the candidate, e.g. "Active", "Inactive", "Draining".
+		//
+		// Only Active candidates contribute to the tier/item OnceMaxRequest and Remaining totals;
+		// a non-Active candidate stays listed here but counts as zero.
+		Phase string `json:"phase"`
+
 		// Accelerator is the allocatable-as-exclusive accelerator resource of the candidate, e.g. "1", "4".
 		Accelerator AggregatedInstanceTypeResource `json:"accelerator"`
 
