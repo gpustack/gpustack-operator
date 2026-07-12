@@ -78,6 +78,18 @@ type InstanceTypeSpec struct {
 	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
 	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
 	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,12,opt,name=generalGroup"`
+
+	// DisplayName is a human-friendly label for the InstanceType. The mutating webhook
+	// defaults an empty value to Product.
+	//
+	// +k8s:validation:maxLength=64
+	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,13,opt,name=displayName"`
+
+	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
+	// holds the backing ClusterQueue (blocks new admission without evicting running
+	// workloads); clearing it reactivates the queue. A queue stopped by any means is
+	// reflected back into Inactive=true.
+	Inactive bool `json:"inactive,omitempty" protobuf:"varint,14,opt,name=inactive"`
 }
 
 // InstanceTypeCPU describes the information of the CPU.

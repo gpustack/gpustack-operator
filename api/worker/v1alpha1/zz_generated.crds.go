@@ -636,7 +636,6 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 										"stop": {
 											Description: "Stop indicates whether to stop the Instance after it is created.",
 											Type:        "boolean",
-											Nullable:    true,
 										},
 										"type": {
 											Description: "Type is the name of InstanceType that provisions corresponding resources.\nImmutable after creation.",
@@ -1058,6 +1057,11 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 												},
 											},
 										},
+										"displayName": {
+											Description: "DisplayName is a human-friendly label for the InstanceType. The mutating webhook\ndefaults an empty value to Product.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](64),
+										},
 										"family": {
 											Description: "Family is the family of the InstanceType.",
 											Type:        "string",
@@ -1065,6 +1069,10 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 										"generalGroup": {
 											Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.\n\"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The\nmutating webhook defaults an empty value to \"generic\"; it participates as a scheduling\ndiscriminator only when instance-type-aware-cpu-manufacturer is enabled.",
 											Type:        "string",
+										},
+										"inactive": {
+											Description: "Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler\nholds the backing ClusterQueue (blocks new admission without evicting running\nworkloads); clearing it reactivates the queue. A queue stopped by any means is\nreflected back into Inactive=true.",
+											Type:        "boolean",
 										},
 										"localStorage": {
 											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced\nby the validating webhook, and is immutable after creation; a derived InstanceType is\nstamped with the fixed default.",

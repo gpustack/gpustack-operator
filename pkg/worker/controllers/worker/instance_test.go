@@ -436,7 +436,7 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 			got := &workercore.Instance{}
 			require.NoError(t, cli.Get(context.Background(),
 				ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
-			assert.Equal(t, c.wantStop, ptr.Deref(got.Spec.Stop, false), "Spec.Stop")
+			assert.Equal(t, c.wantStop, got.Spec.Stop, "Spec.Stop")
 		})
 	}
 }

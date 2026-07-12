@@ -59,7 +59,7 @@ type InstanceSpec struct {
 	SSHPublicKey *core.LocalObjectReference `json:"sshPublicKey,omitempty" protobuf:"bytes,6,opt,name=sshPublicKey"`
 
 	// Stop indicates whether to stop the Instance after it is created.
-	Stop *bool `json:"stop,omitempty" protobuf:"varint,7,opt,name=stop"`
+	Stop bool `json:"stop,omitempty" protobuf:"varint,7,opt,name=stop"`
 }
 
 // InstanceTemplate defines the template for the Instance to run.

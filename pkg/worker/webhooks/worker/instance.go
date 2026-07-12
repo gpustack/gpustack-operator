@@ -10,7 +10,6 @@ import (
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
-	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
@@ -66,7 +65,7 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 	// validated against it; a stopped instance may reference an InstanceType that is
 	// draining or already removed.
 	var instType *worker.InstanceType
-	if !ptr.Deref(inst.Spec.Stop, false) {
+	if !inst.Spec.Stop {
 		instType = &worker.InstanceType{
 			ObjectMeta: meta.ObjectMeta{
 				Name: inst.Spec.Type,
@@ -120,9 +119,9 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj runtime.Object) (ctrladmission.Warnings, error) {
 	instOld, inst := oldObj.(*workercore.Instance), newObj.(*workercore.Instance)
 
-	stopped := ptr.Deref(instOld.Spec.Stop, false)
-	starting := stopped && !ptr.Deref(inst.Spec.Stop, false)
-	stopping := !stopped && ptr.Deref(inst.Spec.Stop, false)
+	stopped := instOld.Spec.Stop
+	starting := stopped && !inst.Spec.Stop
+	stopping := !stopped && inst.Spec.Stop
 
 	var errs field.ErrorList
 
@@ -269,7 +268,7 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 
 	// If the instance is stopped,
 	// skip defaulting resources.
-	if ptr.Deref(inst.Spec.Stop, false) {
+	if inst.Spec.Stop {
 		return nil
 	}
 

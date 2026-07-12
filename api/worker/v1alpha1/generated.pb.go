@@ -1006,16 +1006,14 @@ func (m *InstanceSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
-	if m.Stop != nil {
-		i--
-		if *m.Stop {
-			dAtA[i] = 1
-		} else {
-			dAtA[i] = 0
-		}
-		i--
-		dAtA[i] = 0x38
+	i--
+	if m.Stop {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
 	}
+	i--
+	dAtA[i] = 0x38
 	if m.SSHPublicKey != nil {
 		{
 			size, err := m.SSHPublicKey.MarshalToSizedBuffer(dAtA[:i])
@@ -1664,6 +1662,19 @@ func (m *InstanceTypeSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i--
+	if m.Inactive {
+		dAtA[i] = 1
+	} else {
+		dAtA[i] = 0
+	}
+	i--
+	dAtA[i] = 0x70
+	i -= len(m.DisplayName)
+	copy(dAtA[i:], m.DisplayName)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.DisplayName)))
+	i--
+	dAtA[i] = 0x6a
 	i -= len(m.GeneralGroup)
 	copy(dAtA[i:], m.GeneralGroup)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.GeneralGroup)))
@@ -2248,9 +2259,7 @@ func (m *InstanceSpec) Size() (n int) {
 		l = m.SSHPublicKey.Size()
 		n += 1 + l + sovGenerated(uint64(l))
 	}
-	if m.Stop != nil {
-		n += 2
-	}
+	n += 2
 	return n
 }
 
@@ -2494,6 +2503,9 @@ func (m *InstanceTypeSpec) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.GeneralGroup)
 	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.DisplayName)
+	n += 1 + l + sovGenerated(uint64(l))
+	n += 2
 	return n
 }
 
@@ -2832,7 +2844,7 @@ func (this *InstanceSpec) String() string {
 		`InstanceTemplate:` + strings.Replace(strings.Replace(this.InstanceTemplate.String(), "InstanceTemplate", "InstanceTemplate", 1), `&`, ``, 1) + `,`,
 		`Volume:` + strings.Replace(strings.Replace(this.Volume.String(), "InstanceVolume", "InstanceVolume", 1), `&`, ``, 1) + `,`,
 		`SSHPublicKey:` + strings.Replace(fmt.Sprintf("%v", this.SSHPublicKey), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
-		`Stop:` + valueToStringGenerated(this.Stop) + `,`,
+		`Stop:` + fmt.Sprintf("%v", this.Stop) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3016,6 +3028,8 @@ func (this *InstanceTypeSpec) String() string {
 		`UnitResources:` + strings.Replace(strings.Replace(this.UnitResources.String(), "InstanceTypeUnitResources", "InstanceTypeUnitResources", 1), `&`, ``, 1) + `,`,
 		`LocalStorage:` + fmt.Sprintf("%v", this.LocalStorage) + `,`,
 		`GeneralGroup:` + fmt.Sprintf("%v", this.GeneralGroup) + `,`,
+		`DisplayName:` + fmt.Sprintf("%v", this.DisplayName) + `,`,
+		`Inactive:` + fmt.Sprintf("%v", this.Inactive) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -6186,8 +6200,7 @@ func (m *InstanceSpec) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			b := bool(v != 0)
-			m.Stop = &b
+			m.Stop = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -8543,6 +8556,58 @@ func (m *InstanceTypeSpec) Unmarshal(dAtA []byte) error {
 			}
 			m.GeneralGroup = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
+		case 13:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field DisplayName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.DisplayName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 14:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Inactive", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.Inactive = bool(v != 0)
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
