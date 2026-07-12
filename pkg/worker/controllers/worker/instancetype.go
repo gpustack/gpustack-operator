@@ -290,7 +290,7 @@ func (r *InstanceTypeReconciler) computeStatus(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue, withOvercommit bool,
 ) workercore.InstanceTypeStatus {
 	acceleratable := it.Spec.Acceleratable
-	draining := cq.Spec.StopPolicy != nil && *cq.Spec.StopPolicy == kueue.HoldAndDrain
+	draining := ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.HoldAndDrain
 
 	var st workercore.InstanceTypeStatus
 	if !draining {
@@ -302,7 +302,7 @@ func (r *InstanceTypeReconciler) computeStatus(
 		}
 	}
 	st.Entrance = nodefeature.FormatLocalQueueName(cq.Name)
-	st.Phase, st.PhaseMessage = apistatus.GetSummaryOfClusterQueue(&cq.Status)
+	st.Phase, st.PhaseMessage = apistatus.GetSummaryOfClusterQueue(cq)
 	return st
 }
 
