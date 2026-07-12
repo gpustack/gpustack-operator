@@ -165,7 +165,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// If the Instance is marked as stopped,
 	// ensure the backing Pod is deleted and update the Instance status to "Stopped".
-	if ptr.Deref(inst.Spec.Stop, false) {
+	if inst.Spec.Stop {
 		// Pod already deleted, mark the Instance as stopped.
 		if pod == nil {
 			if inst.Status.Phase == InstancePhaseStopped {
@@ -244,7 +244,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		instType.Status.Phase == InstanceTypePhaseInactive {
 		// Persist the stop intent first so the instance reliably stays stopped
 		// even if the status update below fails.
-		inst.Spec.Stop = ptr.To(true)
+		inst.Spec.Stop = true
 		err = r.Client.Update(ctx, inst)
 		if err != nil {
 			logger.Error(err, "stop instance with inactive instance type")

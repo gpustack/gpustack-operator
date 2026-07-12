@@ -3670,6 +3670,21 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is a human-friendly label for the InstanceType. The mutating webhook defaults an empty value to Product.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"inactive": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler holds the backing ClusterQueue (blocks new admission without evicting running workloads); clearing it reactivates the queue. A queue stopped by any means is reflected back into Inactive=true.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"acceleratable", "os", "arch", "unitResources", "localStorage"},
 			},

@@ -436,11 +436,6 @@ func (in *InstanceSpec) DeepCopyInto(out *InstanceSpec) {
 		*out = new(v1.LocalObjectReference)
 		**out = **in
 	}
-	if in.Stop != nil {
-		in, out := &in.Stop, &out.Stop
-		*out = new(bool)
-		**out = **in
-	}
 	return
 }
 

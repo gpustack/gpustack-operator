@@ -47,6 +47,14 @@ type InstanceTypeSpecApplyConfiguration struct {
 	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
 	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
 	GeneralGroup *string `json:"generalGroup,omitempty"`
+	// DisplayName is a human-friendly label for the InstanceType. The mutating webhook
+	// defaults an empty value to Product.
+	DisplayName *string `json:"displayName,omitempty"`
+	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
+	// holds the backing ClusterQueue (blocks new admission without evicting running
+	// workloads); clearing it reactivates the queue. A queue stopped by any means is
+	// reflected back into Inactive=true.
+	Inactive *bool `json:"inactive,omitempty"`
 }
 
 // InstanceTypeSpecApplyConfiguration constructs a declarative configuration of the InstanceTypeSpec type for use with
@@ -236,5 +244,21 @@ func (b *InstanceTypeSpecApplyConfiguration) WithLocalStorage(value string) *Ins
 // If called multiple times, the GeneralGroup field is set to the value of the last call.
 func (b *InstanceTypeSpecApplyConfiguration) WithGeneralGroup(value string) *InstanceTypeSpecApplyConfiguration {
 	b.GeneralGroup = &value
+	return b
+}
+
+// WithDisplayName sets the DisplayName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DisplayName field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithDisplayName(value string) *InstanceTypeSpecApplyConfiguration {
+	b.DisplayName = &value
+	return b
+}
+
+// WithInactive sets the Inactive field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Inactive field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithInactive(value bool) *InstanceTypeSpecApplyConfiguration {
+	b.Inactive = &value
 	return b
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -68,7 +67,7 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 			w := newInstanceWebhook()
 			inst := webhookInstance("a", c.instType)
 			if c.stop {
-				inst.Spec.Stop = ptr.To(true)
+				inst.Spec.Stop = true
 			}
 
 			_, err := w.ValidateCreate(context.Background(), inst)
@@ -254,7 +253,7 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 		name string
 
 		oldType, newType string
-		oldStop, newStop *bool  // nil → Stop left unset (distinct from false)
+		oldStop, newStop bool
 		phase            string // applied to both old and new status
 		registerType     string // "" → no InstanceType registered
 
@@ -263,7 +262,7 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 		{
 			name:    "stopped allows type change",
 			oldType: "old", newType: "new",
-			oldStop: ptr.To(true), newStop: ptr.To(true),
+			oldStop: true, newStop: true,
 			phase: workerctrl.InstancePhaseStopped,
 		},
 		{
@@ -275,14 +274,14 @@ func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 		{
 			name:    "start stopped requires existing type",
 			oldType: "gone", newType: "gone",
-			oldStop: ptr.To(true), newStop: ptr.To(false),
+			oldStop: true, newStop: false,
 			phase:   workerctrl.InstancePhaseStopped,
 			wantErr: true,
 		},
 		{
 			name:    "start stopped with existing type allowed",
 			oldType: "live", newType: "live",
-			oldStop: ptr.To(true), newStop: ptr.To(false),
+			oldStop: true, newStop: false,
 			phase:        workerctrl.InstancePhaseStopped,
 			registerType: "live",
 		},
@@ -395,10 +394,10 @@ func TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources(t *testing.T) 
 			w := newInstanceWebhook(generic, sliceable)
 
 			old := webhookInstance("a", c.instType)
-			old.Spec.Stop = ptr.To(true)
+			old.Spec.Stop = true
 			old.Status.Phase = workerctrl.InstancePhaseStopped
 			neu := webhookInstance("a", c.instType)
-			neu.Spec.Stop = ptr.To(false)
+			neu.Spec.Stop = false
 			neu.Status.Phase = workerctrl.InstancePhaseStopped
 			neu.Spec.Resources = c.res
 
@@ -443,7 +442,7 @@ func TestInstanceWebhook_Default(t *testing.T) {
 			w := newInstanceWebhook()
 			inst := webhookInstance("a", "missing")
 			if c.stop {
-				inst.Spec.Stop = ptr.To(true)
+				inst.Spec.Stop = true
 			}
 			inst.Status.Phase = c.phase
 
