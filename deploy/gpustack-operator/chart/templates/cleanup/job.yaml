@@ -38,6 +38,7 @@ spec:
           command: ["/usr/bin/env", "bash", "/scripts/cleanup.sh"]
           args:
             - {{ include "gpustack-operator.namespace" . | quote }}
+            - {{ printf "%s-cert" (include "gpustack-operator.worker.fullname" .) | quote }}
           volumeMounts:
             - name: cleanup-script
               mountPath: /scripts
