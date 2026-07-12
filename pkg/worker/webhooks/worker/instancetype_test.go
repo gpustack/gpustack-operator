@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -315,10 +316,12 @@ func TestInstanceTypeWebhook_FoldCPUDetail(t *testing.T) {
 	})
 }
 
-// TestInstanceTypeWebhook_DefaultSkipsCPUDetailWhenUnaware pins that with CPU-manufacturer
-// awareness off (the unit binary default) the Default webhook enriches the descriptors but never
-// folds the flavor's cpuDetail note into the spec — the CPU is not a scheduling axis then.
-func TestInstanceTypeWebhook_DefaultSkipsCPUDetailWhenUnaware(t *testing.T) {
+// TestInstanceTypeWebhook_DefaultClearsCPUDescriptorsWhenAgnostic pins that with CPU-manufacturer
+// awareness off (the unit binary default) a non-acceleratable type is manufacturer-agnostic: the
+// Default webhook clears its CPU descriptors and skips enrichment entirely (no flavor is stamped),
+// because the collapsed pool spans many CPU kinds and no single flavor represents it. The schedule
+// and entrance labels are still stamped — the guard runs after label stamping.
+func TestInstanceTypeWebhook_DefaultClearsCPUDescriptorsWhenAgnostic(t *testing.T) {
 	cpuRF := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "gpustack--amd-epyc-7763-linux-amd64-8c",
@@ -329,21 +332,107 @@ func TestInstanceTypeWebhook_DefaultSkipsCPUDetailWhenUnaware(t *testing.T) {
 			},
 		},
 	}
-	// A CPU flavor always carries a cpuDetail note (a plain InstanceTypeCPU); the webhook must
-	// ignore it when unaware.
+	// A matching CPU flavor exists; under awareness-off the webhook must NOT stamp its manufacturer
+	// onto the agnostic pool.
 	systemmeta.NoteResource(cpuRF, "nodes", map[string]string{
 		"acceleratable": "false",
 		"manufacturer":  "amd",
+		"product":       "AMD EPYC 7763",
+		"family":        "25",
 		"cpuDetail":     `{"physicalCores":"64"}`,
 	})
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(cpuRF).Build()
 	wh := &InstanceTypeWebhook{Client: cli}
 
+	// A pre-set manufacturer/product/family is cleared too — an agnostic pool carries no
+	// representative CPU identity.
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
-		Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64"},
+		Spec: workercore.InstanceTypeSpec{
+			GeneralGroup: "generic", OS: "linux", Arch: "amd64",
+			Manufacturer: "stale", Product: "Stale", Family: "stale",
+		},
 	}
 	require.NoError(t, wh.Default(context.Background(), it))
-	assert.Equal(t, "amd", it.Spec.Manufacturer, "descriptors still enriched")
-	assert.Empty(t, it.Spec.PhysicalCores, "cpuDetail is not folded when awareness is off")
+	assert.Empty(t, it.Spec.Manufacturer, "manufacturer cleared (no representative for an agnostic pool)")
+	assert.Empty(t, it.Spec.Product, "product cleared")
+	assert.Empty(t, it.Spec.Family, "family cleared")
+	assert.Empty(t, it.Spec.PhysicalCores, "cpuDetail is not folded")
+	// Labels are still stamped (the guard runs after label stamping).
+	assert.Equal(t, "false", it.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable=false discriminator stamped")
+	assert.Equal(t, nodefeature.FormatLocalQueueName("my-generic"), it.Labels[QueueEntranceLabelKey], "entrance label stamped")
+}
+
+// TestInstanceTypeWebhook_DefaultDisplayName pins the DisplayName default: it copies the
+// (possibly just-enriched) Product when absent and preserves an admin-provided value. On the
+// CPU-agnostic guard path Product is empty, so a defaulted DisplayName stays empty.
+func TestInstanceTypeWebhook_DefaultDisplayName(t *testing.T) {
+	accelRF := &kueue.ResourceFlavor{
+		ObjectMeta: meta.ObjectMeta{
+			Name: "gpustack--generic--nvidia-a10g-linux-amd64-2d",
+			Labels: map[string]string{
+				nodefeature.NodeAcceleratableLabelKey:                       "true",
+				nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g": "true",
+				core.LabelOSStable:   "linux",
+				core.LabelArchStable: "amd64",
+			},
+		},
+	}
+	systemmeta.NoteResource(accelRF, "nodes", map[string]string{
+		"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA A10G", "memory": "24Gi",
+	})
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(accelRF).Build()
+	wh := &InstanceTypeWebhook{Client: cli}
+
+	newAccel := func() *workercore.InstanceType {
+		return &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
+			Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
+		}
+	}
+
+	t.Run("defaults to the enriched product on the enriched path", func(t *testing.T) {
+		it := newAccel()
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, "NVIDIA A10G", it.Spec.DisplayName, "defaults to the enriched Product")
+	})
+
+	t.Run("preserves an admin-provided display name", func(t *testing.T) {
+		it := newAccel()
+		it.Spec.DisplayName = "Custom Name"
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, "Custom Name", it.Spec.DisplayName, "an admin value is preserved")
+	})
+
+	t.Run("stays empty on the CPU-agnostic guard path", func(t *testing.T) {
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
+			Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64"},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Empty(t, it.Spec.DisplayName, "no Product to default from on the agnostic path")
+	})
+
+	t.Run("preserves an admin-provided display name on the guard path", func(t *testing.T) {
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
+			Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64", DisplayName: "Agnostic Pool"},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, "Agnostic Pool", it.Spec.DisplayName, "an admin value survives the guard path")
+	})
+
+	t.Run("caps a defaulted display name at 64 characters", func(t *testing.T) {
+		long := strings.Repeat("x", 100)
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-long"},
+			Spec: workercore.InstanceTypeSpec{
+				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
+				Manufacturer: "nvidia", Product: long,
+			},
+		}
+		require.NoError(t, wh.Default(context.Background(), it))
+		assert.Equal(t, strings.Repeat("x", 64), it.Spec.DisplayName,
+			"a defaulted DisplayName longer than the maxLength is capped at 64 runes")
+	})
 }

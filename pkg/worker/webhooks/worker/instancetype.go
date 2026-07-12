@@ -138,6 +138,18 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 	// InstanceType for the authoritative per-card VRAM (spec.memory).
 	it.Labels[QueueEntranceLabelKey] = nodefeature.FormatLocalQueueName(it.Name)
 
+	// A CPU-manufacturer-agnostic pool (awareness off and not acceleratable) collapses many CPU
+	// kinds into one type, so no single ResourceFlavor's manufacturer/product/family is a valid
+	// representative. Clear the CPU descriptors and skip enrichment (and its flavor List) so no
+	// arbitrary flavor's identity is stamped onto the collapsed pool. An admin-provided DisplayName
+	// is preserved, but the empty Product leaves a defaulted DisplayName unset on this path.
+	if !cpuAware && !it.Spec.Acceleratable {
+		it.Spec.Manufacturer = ""
+		it.Spec.Product = ""
+		it.Spec.Family = ""
+		return nil
+	}
+
 	// Default the descriptors only while manufacturer and product are still empty; for an
 	// accelerated type the per-card memory counts too (it feeds the ClusterQueue annotation
 	// the Pod webhook reads), so a type already carrying its VRAM is treated as populated.
@@ -175,6 +187,17 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 			if cpuAware {
 				foldCPUDetail(it, notes["cpuDetail"])
 			}
+		}
+	}
+
+	// Default the human-friendly DisplayName to the (possibly just-enriched) Product; an
+	// admin-provided DisplayName is preserved. Cap the defaulted value at the field's maxLength (64)
+	// so a long Product cannot produce a DisplayName the CRD schema would reject; an explicit
+	// over-length DisplayName is left to fail validation as user error.
+	if it.Spec.DisplayName == "" {
+		it.Spec.DisplayName = it.Spec.Product
+		if runes := []rune(it.Spec.DisplayName); len(runes) > 64 {
+			it.Spec.DisplayName = string(runes[:64])
 		}
 	}
 

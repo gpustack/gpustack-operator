@@ -98,10 +98,11 @@ func TestInstanceTypeFlavorHandler_OnList(t *testing.T) {
 	assert.Equal(t, "gpustack--nvidia-h100", list.Items[2].Name)
 
 	// Generic collapses to one CPU-agnostic row: acceleratable=false, GeneralGroup="generic",
-	// no accelerator group / memory / cores.
+	// no manufacturer sentinel, and no accelerator group / memory / cores.
 	generic := list.Items[0]
 	assert.False(t, generic.Spec.Acceleratable)
 	assert.Equal(t, "generic", generic.Spec.GeneralGroup)
+	assert.Empty(t, generic.Spec.Manufacturer, "CPU-agnostic row carries no manufacturer sentinel")
 	assert.Empty(t, generic.Spec.AcceleratorGroup)
 	assert.Empty(t, generic.Spec.Memory)
 	assert.Empty(t, generic.Spec.Cores)

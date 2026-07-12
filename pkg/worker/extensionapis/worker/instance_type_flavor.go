@@ -175,7 +175,6 @@ func instanceTypeFlavorSpec(notes map[string]string, cpuAware bool) worker.Insta
 		}
 		return worker.InstanceTypeFlavorSpec{
 			GeneralGroup: nodefeature.GeneralGroupGeneric,
-			Manufacturer: nodefeature.GeneralManufacturerGeneric,
 		}
 	}
 	spec := worker.InstanceTypeFlavorSpec{
