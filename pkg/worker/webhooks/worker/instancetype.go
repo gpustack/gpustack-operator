@@ -147,6 +147,9 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 		it.Spec.Manufacturer = ""
 		it.Spec.Product = ""
 		it.Spec.Family = ""
+		if it.Spec.DisplayName == "" {
+			it.Spec.DisplayName = "CPU-only"
+		}
 		return nil
 	}
 
