@@ -215,7 +215,7 @@ type InstanceTypeResource struct {
 
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.
 type InstanceTypeUnitResources struct {
-	// CPU is the unit CPU resource(milli-cores) of the InstanceType.
+	// CPU is the unit CPU resource(cores) of the InstanceType.
 	CPU string `json:"cpu,omitempty" protobuf:"bytes,1,opt,name=cpu"`
 
 	// RAM is the unit RAM resource(Mi) of the InstanceType.

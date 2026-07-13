@@ -19,8 +19,8 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
-// newInstanceType builds an InstanceType carrying the required admin inputs (a generic
-// linux/amd64 pool) plus the given unit spec, so the unit-spec cases exercise unit
+// newInstanceType builds a non-acceleratable InstanceType carrying the required admin inputs (a
+// generic linux/amd64 pool) plus the given unit spec, so the unit-spec cases exercise unit
 // validity with the other required fields satisfied.
 func newInstanceType(cpu, ram, localStorage string) *workercore.InstanceType {
 	return &workercore.InstanceType{
@@ -35,32 +35,65 @@ func newInstanceType(cpu, ram, localStorage string) *workercore.InstanceType {
 	}
 }
 
-// TestInstanceTypeWebhook_ValidateUnitSpec pins the unit-spec rule: all three fields must
-// be set and well-formed. An empty or partial spec is rejected — a derived type is stamped
-// with the fixed default at creation and an admin must supply the full triple.
+// newAcceleratableInstanceType builds an acceleratable InstanceType (an nvidia-a10g linux/amd64
+// pool) plus the given unit spec, so the unit-CPU well-formedness cases (any positive integer)
+// are exercised without tripping the CPU-only unit-CPU-must-be-1 rule.
+func newAcceleratableInstanceType(cpu, ram, localStorage string) *workercore.InstanceType {
+	return &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "gpustack--nvidia-a10g-linux-amd64"},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable:    true,
+			AcceleratorGroup: "nvidia-a10g",
+			OS:               "linux",
+			Arch:             "amd64",
+			UnitResources:    workercore.InstanceTypeUnitResources{CPU: cpu, RAM: ram},
+			LocalStorage:     localStorage,
+		},
+	}
+}
+
+// TestInstanceTypeWebhook_ValidateUnitSpec pins the unit-spec rule: all three fields must be set
+// and well-formed — unitRAM and localStorage a positive integer with a "Gi" suffix. The unit-CPU
+// rule branches on acceleratable: an acceleratable type accepts any unitless positive integer,
+// while a non-acceleratable (CPU-only) type accepts only exactly 1 core.
 func TestInstanceTypeWebhook_ValidateUnitSpec(t *testing.T) {
 	cases := []struct {
 		name                   string
+		acceleratable          bool
 		cpu, ram, localStorage string
 		wantErr                bool
 	}{
-		{"empty is rejected (must supply the full triple)", "", "", "", true},
-		{"all three valid", "12", "48Gi", "100Gi", false},
-		{"partial: only cpu", "12", "", "", true},
-		{"partial: missing localStorage", "12", "48Gi", "", true},
-		{"cpu with unit suffix", "12Gi", "48Gi", "100Gi", true},
-		{"cpu fractional", "0.5", "48Gi", "100Gi", true},
-		{"cpu zero", "0", "48Gi", "100Gi", true},
-		{"ram without Gi suffix", "12", "48", "100Gi", true},
-		{"ram lowercase gi", "12", "48gi", "100Gi", true},
-		{"localStorage zero", "12", "48Gi", "0Gi", true},
+		// The full triple must be supplied and RAM/localStorage well-formed (branch-independent).
+		{"empty is rejected (must supply the full triple)", true, "", "", "", true},
+		{"partial: only cpu", true, "4", "", "", true},
+		{"partial: missing localStorage", true, "4", "48Gi", "", true},
+		{"ram without Gi suffix", true, "4", "48", "100Gi", true},
+		{"ram lowercase gi", true, "4", "48gi", "100Gi", true},
+		{"localStorage zero", true, "4", "48Gi", "0Gi", true},
+		// Acceleratable unit CPU: any unitless positive integer.
+		{"accel all three valid", true, "4", "48Gi", "100Gi", false},
+		{"accel cpu with unit suffix", true, "4Gi", "48Gi", "100Gi", true},
+		{"accel cpu fractional", true, "0.5", "48Gi", "100Gi", true},
+		{"accel cpu zero", true, "0", "48Gi", "100Gi", true},
+		// Non-acceleratable (CPU-only) unit CPU: exactly 1 core.
+		{"non-accel cpu 1 is valid", false, "1", "48Gi", "100Gi", false},
+		{"non-accel cpu 2 is rejected", false, "2", "48Gi", "100Gi", true},
+		{"non-accel cpu 4 is rejected", false, "4", "48Gi", "100Gi", true},
+		{"non-accel cpu 0 is rejected", false, "0", "48Gi", "100Gi", true},
+		{"non-accel cpu empty is rejected", false, "", "48Gi", "100Gi", true},
+		{"non-accel cpu 1000 is rejected", false, "1000", "48Gi", "100Gi", true},
+		{"non-accel cpu 1Gi is rejected", false, "1Gi", "48Gi", "100Gi", true},
 	}
 
 	wh := &InstanceTypeWebhook{}
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			_, err := wh.ValidateCreate(context.Background(), newInstanceType(c.cpu, c.ram, c.localStorage))
+			it := newInstanceType(c.cpu, c.ram, c.localStorage)
+			if c.acceleratable {
+				it = newAcceleratableInstanceType(c.cpu, c.ram, c.localStorage)
+			}
+			_, err := wh.ValidateCreate(context.Background(), it)
 			if c.wantErr {
 				require.Error(t, err)
 				return
@@ -90,7 +123,7 @@ func TestInstanceTypeWebhook_ValidateCreateRequired(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			it := newInstanceType("12", "48Gi", "100Gi")
+			it := newInstanceType("1", "48Gi", "100Gi")
 			c.mutate(it)
 			_, err := wh.ValidateCreate(context.Background(), it)
 			require.Error(t, err, "a missing required input must be rejected")
@@ -101,7 +134,7 @@ func TestInstanceTypeWebhook_ValidateCreateRequired(t *testing.T) {
 // TestInstanceTypeWebhook_ValidateUpdateImmutable pins that the unit spec is frozen after
 // creation while other fields stay mutable.
 func TestInstanceTypeWebhook_ValidateUpdateImmutable(t *testing.T) {
-	base := newInstanceType("12", "48Gi", "100Gi")
+	base := newInstanceType("1", "48Gi", "100Gi")
 
 	cases := []struct {
 		name    string
