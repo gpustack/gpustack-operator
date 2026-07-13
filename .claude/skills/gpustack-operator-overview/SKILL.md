@@ -11,8 +11,7 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 ## Architecture in brief
 
-A single `gpustack-operator` binary with three subcommands. The scheduling chain is built in four
-stages:
+One `gpustack-operator` binary, three subcommands; the scheduling chain builds in four stages:
 
 1. **Bootstrap** — the `worker` installs NFD and per-manufacturer Device Manager DaemonSets.
 2. **Device discovery** — the Device Manager detects accelerators and writes `acceleratable.feature.gpustack.ai/*` labels.

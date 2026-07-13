@@ -7,41 +7,35 @@ model: sonnet
 
 # GPUStack Operator — accelerator xbuild & verify
 
-Build one soft-slicing builder stage from `pack/gpustack-operator/Dockerfile` and verify the runtime it
-produces, on the local docker host or on a remote accelerator host over ssh. Two backends:
+Build one soft-slicing builder stage from `pack/gpustack-operator/Dockerfile` and verify the runtime it produces, on the local docker host or on a remote accelerator host over ssh. Two backends:
 
-- **Ascend (vcann-rt).** `xbuild-ascend-cann-*` → `libvruntime.so` + `enpu-monitor`. Verifies artifacts/
-  linking, the `npu_info.config` injection, and **real memory-quota enforcement** on a real NPU.
-- **NVIDIA (HAMi-core).** `xbuild-nvidia-cuda-*` → `libvgpu.so`. Verifies artifacts/linking, single-card
-  injection (`nvidia-smi` shows the sliced VRAM + the SM/compute limit is applied), and **multi-card
-  per-device limits** on real GPUs.
+- **Ascend (vcann-rt).** `xbuild-ascend-cann-*` → `libvruntime.so` + `enpu-monitor`. Verifies artifacts/linking, the `npu_info.config` injection, and **real memory-quota enforcement** on a real NPU.
+- **NVIDIA (HAMi-core).** `xbuild-nvidia-cuda-*` → `libvgpu.so`. Verifies artifacts/linking, single-card injection (`nvidia-smi` shows the sliced VRAM + the SM/compute limit), and **multi-card per-device limits** on real GPUs.
 
-It is the build+runtime-contract counterpart to the cluster-level `gpustack-operator-e2e` (scheduling
-chain) and `gpustack-operator-chart-e2e` (chart). This is an evolving, e2e-style skill: extend the cases as
-the build flow grows.
+It is the build+runtime-contract counterpart to the cluster-level `gpustack-operator-e2e` (scheduling chain) and `gpustack-operator-chart-e2e` (chart). Evolving, e2e-style — extend the cases as the build flow grows.
 
 ## When to offer it
+
 Proactively suggest this skill when a branch changes the Docker build flow:
+
 ```bash
 git diff --name-only origin/main...HEAD | grep -E 'pack/gpustack-operator/(Dockerfile|external/(ascend|nvidia)/)'
 ```
 
 ## Runner model (local or remote)
+
 All scripts source `scripts/lib.sh` and run through one runner, selected by env:
 - `XB_MODE=local` — build & verify on this host.
-- `XB_MODE=ssh XB_HOST=user@host` — build & verify on a remote host. Files move via base64-over-ssh
-  (never scp — a login banner corrupts it); a remote login banner is filtered from output.
+- `XB_MODE=ssh XB_HOST=user@host` — build & verify on a remote host. Files move via base64-over-ssh (never scp — a login banner corrupts it); a remote login banner is filtered from output.
 
 The remote host is **never hardcoded** — always ask the user for it.
 
 ## Hard rules
+
 - **Never push images** — builds use `buildx --load` into the local/remote docker store only.
-- **Confirm before any remote build or container run** (they consume the host's accelerator/driver).
-  Preflight and the build-artifact case (ASCEND-CASE 1 / NVIDIA-CASE 1) are safe once the user names the target.
-- Touch only what the skill creates (the `vcann-build:*` / `vgpu-build:*` image, `${XB_STAGE}` artifacts,
-  `${XB_STAGE}/test` config/preload, the remote build context). Never modify the user's other resources.
-- The hardware cases require a **real accelerator** (local or the ssh host): ASCEND-CASE 2/3 need an NPU;
-  NVIDIA-CASE 2 needs a GPU, NVIDIA-CASE 3 needs **≥ 2** GPUs. The two CASE-1 builds need only docker+buildx.
+- **Confirm before any remote build or container run** (they consume the host's accelerator/driver). Preflight and the build-artifact case (ASCEND-CASE 1 / NVIDIA-CASE 1) are safe once the user names the target.
+- **Touch only what the skill creates** — the `vcann-build:*` / `vgpu-build:*` image, `${XB_STAGE}` artifacts, `${XB_STAGE}/test` config/preload, the remote build context. Never modify the user's other resources.
+- **Hardware cases require a real accelerator** (local or the ssh host): ASCEND-CASE 2/3 need an NPU; NVIDIA-CASE 2 needs a GPU, NVIDIA-CASE 3 needs **≥ 2** GPUs. The two CASE-1 builds need only docker+buildx.
 
 ## Flow
 
@@ -49,8 +43,7 @@ The remote host is **never hardcoded** — always ask the user for it.
    ```bash
    grep -nE 'AS xbuild-(ascend-cann|nvidia-cuda)-' pack/gpustack-operator/Dockerfile
    ```
-   Ascend: `xbuild-ascend-cann-8-910b`, `-8-910c`, `-9-910b`, `-9-910c`, `-9-950`.
-   NVIDIA: `xbuild-nvidia-cuda-12`, `-13`.
+   Ascend: `xbuild-ascend-cann-8-910b`, `-8-910c`, `-9-910b`, `-9-910c`, `-9-950`. NVIDIA: `xbuild-nvidia-cuda-12`, `-13`.
 
 2. **Pick connection (AskUserQuestion).** Local, or ssh — and if ssh, the host. Set `XB_MODE`/`XB_HOST`.
 
@@ -58,19 +51,13 @@ The remote host is **never hardcoded** — always ask the user for it.
    ```bash
    XB_MODE=… XB_HOST=… bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/preflight.sh
    ```
-   docker+buildx must PASS to build. The hardware rows (`npu-smi`/ascend-runtime/`/dev/davinci*` and
-   `nvidia-smi`/nvidia-runtime/`/dev/nvidia*`) WARN when absent — the matching hardware cases are then
-   unavailable. If buildx is missing, the table prints the install one-liner.
+   docker+buildx must PASS to build. The hardware rows (`npu-smi`/ascend-runtime/`/dev/davinci*` and `nvidia-smi`/nvidia-runtime/`/dev/nvidia*`) WARN when absent — the matching hardware cases are then unavailable. buildx missing → the table prints the install one-liner.
 
-4. **Build the chosen target (confirm).** `build.sh` infers the backend from the target prefix. Native on a
-   matching-arch host (fast); cross-arch uses qemu.
+4. **Build the chosen target (confirm).** `build.sh` infers the backend from the target prefix; native on a matching-arch host (fast), cross-arch uses qemu.
    ```bash
    XB_MODE=… XB_HOST=… bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/build.sh xbuild-nvidia-cuda-13
    ```
-   Produces `XB_IMAGE` (Ascend `vcann-build:<suffix>` / NVIDIA `vgpu-build:<suffix>`) and stages the
-   artifacts under `XB_STAGE` (Ascend `/opt/enpu/vcann-rt`, NVIDIA `/opt/vgpu`). The built image is
-   CANN/CUDA-based and doubles as the workload image for the hardware cases (`XB_WORKLOAD_IMAGE` defaults
-   to it).
+   Produces `XB_IMAGE` (Ascend `vcann-build:<suffix>` / NVIDIA `vgpu-build:<suffix>`) and stages the artifacts under `XB_STAGE` (Ascend `/opt/enpu/vcann-rt`, NVIDIA `/opt/vgpu`). The CANN/CUDA-based image doubles as the workload image for the hardware cases (`XB_WORKLOAD_IMAGE` defaults to it).
 
 5. **Run cases.** Pass the same target; read each PASS/FAIL table — don't re-derive from raw logs.
    ```bash
