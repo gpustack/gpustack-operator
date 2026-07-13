@@ -6,11 +6,11 @@ entries:
       artifacthub.io/operator: "true"
     apiVersion: v2
     appVersion: 0.6.6
-    created: "2026-07-13T03:40:14.373276078Z"
+    created: "2026-07-13T08:26:35.376591261Z"
     description: A Kubernetes operator that turns raw node hardware into a Kueue-based
       scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature Discovery
       (NFD) and Kueue.
-    digest: 60346ba2c11e8fd8bbd54f9b23aa0fe767b535cf3fdf40be89883e3aa21041c4
+    digest: 5eca20fe3194dc20709cbd85eeb8be706c7a9b5120ac38acb27a94c5855cf133
     home: https://github.com/gpustack/gpustack-operator
     icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.png
     keywords:
@@ -384,4 +384,4 @@ entries:
     urls:
     - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.5.1.tgz
     version: 0.5.1
-generated: "2026-07-13T03:40:14.370926964Z"
+generated: "2026-07-13T08:26:35.375519635Z"
