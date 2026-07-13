@@ -365,7 +365,7 @@ func TestInstanceTypeWebhook_DefaultClearsCPUDescriptorsWhenAgnostic(t *testing.
 
 // TestInstanceTypeWebhook_DefaultDisplayName pins the DisplayName default: it copies the
 // (possibly just-enriched) Product when absent and preserves an admin-provided value. On the
-// CPU-agnostic guard path Product is empty, so a defaulted DisplayName stays empty.
+// CPU-agnostic guard path Product is empty, so a defaulted DisplayName falls back to "CPU-only".
 func TestInstanceTypeWebhook_DefaultDisplayName(t *testing.T) {
 	accelRF := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
@@ -404,13 +404,13 @@ func TestInstanceTypeWebhook_DefaultDisplayName(t *testing.T) {
 		assert.Equal(t, "Custom Name", it.Spec.DisplayName, "an admin value is preserved")
 	})
 
-	t.Run("stays empty on the CPU-agnostic guard path", func(t *testing.T) {
+	t.Run("defaults to CPU-only on the CPU-agnostic guard path", func(t *testing.T) {
 		it := &workercore.InstanceType{
 			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
 			Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64"},
 		}
 		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Empty(t, it.Spec.DisplayName, "no Product to default from on the agnostic path")
+		assert.Equal(t, "CPU-only", it.Spec.DisplayName, "the agnostic path defaults DisplayName to CPU-only")
 	})
 
 	t.Run("preserves an admin-provided display name on the guard path", func(t *testing.T) {
