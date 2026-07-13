@@ -129,7 +129,7 @@ locals {
 
 # module "ebs_csi_driver_irsa" {
 #   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-#   version = "6.6.0"
+#   version = "6.6.1"
 #
 #   name                  = "ebs-csi"
 #   attach_ebs_csi_policy = true
@@ -149,7 +149,7 @@ locals {
 #
 # module "efs_csi_driver_irsa" {
 #   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts"
-#   version = "6.6.0"
+#   version = "6.6.1"
 #
 #   name                  = "efs-csi"
 #   attach_efs_csi_policy = true
@@ -169,7 +169,7 @@ locals {
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "21.17.1"
+  version = "21.24.0"
 
   name               = local.eks_name
   kubernetes_version = var.eks_version
@@ -264,10 +264,10 @@ resource "null_resource" "update_kubeconfig" {
 }
 
 provider "helm" {
-  kubernetes {
+  kubernetes = {
     host                   = module.eks.cluster_endpoint
     cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    exec {
+    exec = {
       api_version = "client.authentication.k8s.io/v1beta1"
       command     = "aws"
       args        = ["eks", "get-token", "--region", var.region, "--cluster-name", module.eks.cluster_name]
@@ -298,23 +298,24 @@ resource "helm_release" "gpustack_operator" {
   wait    = false
   timeout = 600
 
-  set {
-    name  = "image.repository"
-    value = local.gpustack_operator_image.repository
-  }
-  set {
-    name  = "image.tag"
-    value = local.gpustack_operator_image.tag
-  }
-  set {
-    name  = "image.pullPolicy"
-    value = "Always"
-  }
-
-  # The EKS module installs the cert-manager addon, so let the chart issue the
-  # worker webhook certificate through cert-manager.
-  set {
-    name  = "worker.certmanager.enabled"
-    value = "true"
-  }
+  set = [
+    {
+      name  = "image.repository"
+      value = local.gpustack_operator_image.repository
+    },
+    {
+      name  = "image.tag"
+      value = local.gpustack_operator_image.tag
+    },
+    {
+      name  = "image.pullPolicy"
+      value = "Always"
+    },
+    # The EKS module installs the cert-manager addon, so let the chart issue the
+    # worker webhook certificate through cert-manager.
+    {
+      name  = "worker.certmanager.enabled"
+      value = "true"
+    }
+  ]
 }
