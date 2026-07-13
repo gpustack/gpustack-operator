@@ -7,9 +7,9 @@ model: haiku
 
 # Regenerate API & webhook code
 
-The `api/` types and the `pkg/*/webhooks/*/` webhook sources are hand-written; the deepcopy,
-register, apiservice, CRD, conversion, protobuf, and webhook stubs are **generated** from them. After
-editing either, regenerate so the generated code stays in sync.
+The `api/` types and `pkg/*/webhooks/*/` sources are hand-written; the deepcopy, register, apiservice,
+CRD, conversion, protobuf, and webhook stubs are **generated** from them. After editing either,
+regenerate to keep the generated code in sync.
 
 ## When to run
 

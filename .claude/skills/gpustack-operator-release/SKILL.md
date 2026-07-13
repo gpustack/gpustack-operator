@@ -7,50 +7,27 @@ model: sonnet
 
 # GPUStack Operator — cut a release
 
-Drive a full release from a version number to a published GitHub Release. Cutting a release is a single
-act — **pushing a `vX.Y.Z` git tag** — which fans out to two pipelines:
+Drive a full release from a version number to a published GitHub Release. Cutting a release is a single act — **pushing a `vX.Y.Z` git tag** — which fans out to two pipelines:
 
-- `ci.yml` → multi-arch image + the **GitHub Release** object (published as a **pre-release** with a
-  categorized baseline note; see the note-generation contract below).
+- `ci.yml` → multi-arch image + the **GitHub Release** object (published as a **pre-release** with a categorized baseline note).
 - `ci-chart.yml` → the Helm chart, repacked from the tag and published to `github-pages`.
 
-The version propagates from the tag into the binary (`pack/utils.mk` / `hack/lib/version.sh` → ldflags →
-`gpustack-operator --version`) and into the chart, so the git tag is the single source of truth. There is
-no `VERSION` file to bump.
+The version propagates from the tag → binary (`pack/utils.mk` / `hack/lib/version.sh` → ldflags → `gpustack-operator --version`) and → chart, so **the git tag is the single source of truth** — there is no `VERSION` file to bump.
 
-**Release-note contract.** The `release` job in `ci.yml` builds a categorized baseline note
-(`mikepenz/release-changelog-builder-action` in COMMIT mode, grouped by Conventional-Commit prefix) and
-publishes the release as `prerelease: true`. This skill's job is to (a) produce a **better,
-highlight-focused** note and replace the baseline, and (b) **promote** the pre-release to the official
-release once CI is green. Nothing gets the GitHub **Latest** badge until you promote it — that is the gate.
+**Release-note contract.** `ci.yml`'s `release` job builds a categorized baseline note (`mikepenz/release-changelog-builder-action` in COMMIT mode, grouped by Conventional-Commit prefix) and publishes as `prerelease: true`. This skill's job: (a) produce a **better, highlight-focused** note and replace the baseline, and (b) **promote** the pre-release to the official release once CI is green. Nothing gets the GitHub **Latest** badge until you promote — that is the gate.
 
 ## Hard rules
 
-- **Release off any branch; default to `origin/main`.** Tag by SHA — do not switch branches to do this.
-  The default target is `origin/main` HEAD; when the user names another branch or commit (e.g. a
-  maintenance line like `origin/v0.5-dev`), tag that instead. For such a maintenance-line release the
-  commit will **not** be an ancestor of `origin/main` — that is expected, not an error; confirm the
-  (branch, commit) with the user and flag it as a maintenance release in the summary.
-- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less
-  form like `v0.6.1rc1` is rejected (this is the Phase 1 regex). Any tag containing `rc` stays a
-  pre-release and must not be promoted. The `-rcN` **hyphen is required**: `ci-chart.yml` sets the Helm
-  chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less
-  pre-release like `0.6.1rc1`. The build's version derivation requires this shape too.
-- **Every mutating step is confirmed** — creating/pushing the tag, `gh release edit`, and any tag/release
-  deletion prompt for approval. Read-only inspection (git log/status, `gh run list/watch`, `gh release
-  view`) runs without prompting.
+- **Release off any branch; default to `origin/main`.** Tag by SHA — never switch branches. Default target = `origin/main` HEAD; when the user names another branch/commit (e.g. a maintenance line like `origin/v0.5-dev`), tag that. A maintenance-line commit will **not** be an ancestor of `origin/main` — expected, not an error; confirm the (branch, commit) with the user and flag it as a maintenance release in the summary.
+- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less form like `v0.6.1rc1` is rejected (Phase 1 regex). The `-rcN` **hyphen is required**: `ci-chart.yml` sets the Helm chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less pre-release like `0.6.1rc1`; the build's version derivation requires this shape too. Any tag containing `rc` stays a pre-release and must not be promoted.
+- **Every mutating step is confirmed** — creating/pushing the tag, `gh release edit`, and any tag/release deletion. Read-only inspection (git log/status, `gh run list/watch`, `gh release view`) runs without prompting.
 - **Never force-push; never delete a published tag or release** without an explicit, separate confirm.
 - **Auto mode does not promote** — it stops at the published pre-release (see Modes).
 
 ## Modes
 
-- **Interactive (default).** Confirm at each gate: the (version, commit) pair, the drafted notes, the tag
-  push, the note replacement, and the final promotion.
-- **Auto / bypass-permissions** (the user says "auto", or runs with permissions skipped). Replace every
-  confirmation with the sensible default — target = the branch the user named (its HEAD), else `origin/main`
-  HEAD; notes generated without asking which items to surface — and run **Phase 0 → 5 unattended, then stop
-  at the published pre-release** (skip Phase 6). Report the release URL and tell the user to promote to the
-  official release on GitHub when ready.
+- **Interactive (default).** Confirm at each gate: the (version, commit) pair, the drafted notes, the tag push, the note replacement, and the final promotion.
+- **Auto / bypass-permissions** (user says "auto", or runs with permissions skipped). Replace every confirmation with the sensible default — target = the branch the user named (its HEAD), else `origin/main` HEAD; notes generated without asking — and run **Phase 0 → 5 unattended, then stop at the published pre-release** (skip Phase 6). Report the release URL and tell the user to promote to the official release on GitHub when ready.
 
 ## Flow
 
@@ -58,10 +35,7 @@ Let `VER` = the requested version (e.g. `v0.7.0`) and `RPT=.claude/reports/$(dat
 
 ### Phase 0 — Preflight (read-only)
 
-Confirm the tooling and the release line before touching anything.
-
-Let `BR` = the target branch — the branch the user named, else `main`. Fetch it explicitly if it is not
-`main` (`git fetch origin "$BR"`).
+Confirm the tooling and the release line before touching anything. Let `BR` = the target branch (the branch the user named, else `main`); fetch it explicitly if it is not `main` (`git fetch origin "$BR"`).
 
 ```bash
 gh auth status
@@ -72,20 +46,13 @@ git tag -l 'v*' --sort=-creatordate | head -n 5     # recent release tags → th
 git log --oneline -1 "origin/$BR"
 ```
 
-The version is derived at build time from the git tag via ldflags (`hack/lib/version.sh` → `--version`),
-so there is nothing meaningful to print before the tag exists — the git tag is the single source of truth.
-
-Report whether local `$BR` matches `origin/$BR` (`git rev-parse "$BR" "origin/$BR"`, if the local branch
-exists). If they differ and the user is on `$BR`, offer `git pull --ff-only`; otherwise just tag off
-`origin/$BR` by SHA — no branch switch is needed. Then `mkdir -p "$RPT"` for the run artifacts.
+Nothing meaningful to print before the tag exists (version is derived from it at build time via ldflags — the git tag is the single source of truth). Report whether local `$BR` matches `origin/$BR` (`git rev-parse "$BR" "origin/$BR"`, if the local branch exists); if they differ and the user is on `$BR`, offer `git pull --ff-only`, otherwise just tag off `origin/$BR` by SHA — no branch switch. Then `mkdir -p "$RPT"` for the run artifacts.
 
 ### Phase 1 — Version + commit (confirm)
 
-- Validate `VER` against `^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$` (pre-releases need the SemVer2 hyphen,
-  e.g. `v0.6.1-rc1`); reject if the tag already exists
-  (`git tag -l "$VER"` must be empty); sanity-check it is greater than the previous tag.
+- Validate `VER` against `^v[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$` (pre-releases need the SemVer2 hyphen, e.g. `v0.6.1-rc1`); reject if the tag already exists (`git tag -l "$VER"` must be empty); sanity-check it is greater than the previous tag.
 - Default target = `origin/$BR` HEAD (`SHA=$(git rev-parse "origin/$BR")`, `BR` defaulting to `main`).
-- If the user wants a different commit, list candidates and let them pick (`AskUserQuestion`):
+- Different commit wanted → list candidates and let the user pick (`AskUserQuestion`):
 
   ```bash
   git log --date=short --pretty='%h  %ad  %s' "origin/$BR" | head -n 20
@@ -107,16 +74,12 @@ git log --no-merges --pretty='%h %s (%an)' ${LAST:+"$LAST.."}"$SHA"
 
 Compose `$RPT/notes.md`:
 
-- **Do not start the body with a title/heading that repeats the tag** (e.g. `## vX.Y.Z`) — GitHub already
-  renders the release name as the page title, so a leading title shows up as a duplicate. Start straight
-  with an optional one-line intro or the first section.
+- **Don't start the body with a title/heading that repeats the tag** (e.g. `## vX.Y.Z`) — GitHub renders the release name as the page title, so a leading title shows up as a duplicate. Start with an optional one-line intro or the first section.
 - Sections **🚀 Features / 🐛 Fixes / ♻️ Refactor / 📚 Docs / Other**, concise bullets, imperative voice.
 - Keep the **highlights**; fold or drop noisy `chore`/`ci`/`build`/`test`/`style` unless notable.
-- Link PRs/issues: parse `(#NNN)` from subjects; for squash/merge commits without one, recover via
-  `gh pr list --search "<subject>"` / `gh pr view`.
+- Link PRs/issues: parse `(#NNN)` from subjects; for squash/merge commits without one, recover via `gh pr list --search "<subject>"` / `gh pr view`.
 - End with **Full Changelog**: `https://github.com/gpustack/gpustack-operator/compare/$LAST...$VER`.
-- **When unsure which items to surface, list them and ask the user** which to include (`AskUserQuestion`).
-  In auto mode, skip the question and include the sensible default set.
+- **Unsure which items to surface → list them and ask** (`AskUserQuestion`). Auto mode: skip the question, include the sensible default set.
 
 ### Phase 3 — Cut & push the tag (confirm → prompts)
 
@@ -125,21 +88,18 @@ git tag -a "$VER" "$SHA" -m "Release $VER"
 git push origin "$VER"
 ```
 
-This triggers `ci.yml` and `ci-chart.yml`. With the note-generation contract, `ci.yml` creates the GitHub
-Release as a **pre-release** carrying the categorized baseline body.
+This triggers `ci.yml` and `ci-chart.yml`. Per the note-generation contract, `ci.yml` creates the GitHub Release as a **pre-release** carrying the categorized baseline body.
 
 ### Phase 4 — Monitor CI (read-only)
 
-Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the
-head branch.
+Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the head branch.
 
 ```bash
 gh run list --branch "$VER" --limit 20              # enumerate ci.yml + ci-chart.yml runs
 gh run watch <run-id> --exit-status --compact       # per run, blocks until it finishes
 ```
 
-Report per-workflow status. On any failure: `gh run view <run-id> --log-failed`, triage, and **stop — do
-not promote**. Offer (each gated by a confirm) to fix forward, or to delete and retry:
+Report per-workflow status. On any failure: `gh run view <run-id> --log-failed`, triage, and **stop — do not promote**. Offer (each gated by a confirm) to fix forward, or to delete and retry:
 
 ```bash
 # retry after a fix (mutating — confirm each):
@@ -161,16 +121,13 @@ The release is already `prerelease` (from the CI contract) — nothing else to f
 
 ### Phase 6 — Promote (interactive only; confirm → prompts)
 
-Confirm with the user (`AskUserQuestion`) that the pre-release is good, then promote it to the official
-release:
+Confirm with the user (`AskUserQuestion`) that the pre-release is good, then promote it to the official release:
 
 ```bash
 gh release edit "$VER" --latest --prerelease=false
 ```
 
-**Do not take the `--latest` badge on a maintenance-line release when a newer stable tag exists** (e.g.
-releasing `v0.5.4` while `v0.6.3` is out) — `--latest` would steal the badge from the newer GA. In that
-case drop `--prerelease=false` alone and keep `--latest=false`:
+**Do not take the `--latest` badge on a maintenance-line release when a newer stable tag exists** (e.g. releasing `v0.5.4` while `v0.6.3` is out) — `--latest` would steal the badge from the newer GA. In that case drop `--prerelease=false` alone and keep `--latest=false`:
 
 ```bash
 gh release edit "$VER" --prerelease=false --latest=false
@@ -180,22 +137,16 @@ Skip this phase entirely for `rc` tags and in auto mode — leave those as pre-r
 
 ### Phase 7 — Summary
 
-Report the tag, the release URL, the CI run URLs, and the final state; persist a short summary next to
-`$RPT/notes.md`.
+Report the tag, the release URL, the CI run URLs, and the final state; persist a short summary next to `$RPT/notes.md`.
 
 ```bash
 gh release view "$VER" --json tagName,isPrerelease,isDraft,url
 ```
 
-**Verifying the Latest badge.** `isLatest` is **not** a field on `gh release view --json` — it rejects
-unknown fields client-side (`Unknown JSON field: "isLatest"`), because "Latest" is a repo-level pointer,
-not a per-release property. `isPrerelease=false` proves it is a GA, not that it holds the badge. When
-Phase 6 promoted with `--latest`, confirm the badge actually landed by comparing the repo's latest-release
-tag to `$VER`:
+**Verifying the Latest badge.** `isLatest` is **not** a field on `gh release view --json` — it rejects unknown fields client-side (`Unknown JSON field: "isLatest"`), because "Latest" is a repo-level pointer, not a per-release property. `isPrerelease=false` proves it is a GA, not that it holds the badge. When Phase 6 promoted with `--latest`, confirm the badge actually landed by comparing the repo's latest-release tag to `$VER`:
 
 ```bash
 gh api repos/gpustack/gpustack-operator/releases/latest --jq '.tag_name'   # == $VER for a promoted GA
 ```
 
-For a maintenance-line release that kept `--latest=false`, this correctly still points at the newer GA —
-not `$VER` — so a mismatch there is expected, not a failure.
+For a maintenance-line release that kept `--latest=false`, this correctly still points at the newer GA — not `$VER` — so a mismatch there is expected, not a failure.
