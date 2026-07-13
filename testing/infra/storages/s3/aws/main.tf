@@ -13,6 +13,7 @@ locals {
 
 module "s3_bucket" {
   source = "terraform-aws-modules/s3-bucket/aws"
+  version="5.14.1"
 
   bucket = lower(local.s3_name)
   region = var.region
