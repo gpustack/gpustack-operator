@@ -131,26 +131,46 @@ func TestInstanceTypeWebhook_ValidateCreateRequired(t *testing.T) {
 	}
 }
 
-// TestInstanceTypeWebhook_ValidateUpdateImmutable pins that the unit spec is frozen after
-// creation while other fields stay mutable.
+// TestInstanceTypeWebhook_ValidateUpdateImmutable pins that the whole spec is frozen after
+// creation except the two admin-editable fields: displayName (rename) and inactive (take in/out
+// of service). Every other spec field — descriptors, os/arch, groups, acceleratable, unit
+// resources, local storage — is rejected on update.
 func TestInstanceTypeWebhook_ValidateUpdateImmutable(t *testing.T) {
-	base := newInstanceType("1", "48Gi", "100Gi")
+	nonAccel := func() *workercore.InstanceType { return newInstanceType("1", "48Gi", "100Gi") }
+	// An acceleratable base isolates the acceleratable toggle through the immutability check:
+	// flipping it to false keeps the object otherwise valid (unit cpu 1 passes the CPU-only rule),
+	// so the rejection is attributable to the spec-immutability guard, not the required-input check.
+	accel := func() *workercore.InstanceType { return newAcceleratableInstanceType("1", "48Gi", "100Gi") }
+	// A CPU-only object stored with unit cpu other than 1 predates the F1 rule; update must not
+	// re-run the create-time check against it, so a displayName/inactive edit (and the operator's
+	// own inactive backfill) still goes through while the frozen unit cpu is left as stored.
+	legacyNonAccel := func() *workercore.InstanceType { return newInstanceType("8", "48Gi", "100Gi") }
 
 	cases := []struct {
 		name    string
+		base    func() *workercore.InstanceType
 		mutate  func(it *workercore.InstanceType)
 		wantErr bool
 	}{
-		{"unitResources cpu change is rejected", func(it *workercore.InstanceType) { it.Spec.UnitResources.CPU = "24" }, true},
-		{"unitResources ram change is rejected", func(it *workercore.InstanceType) { it.Spec.UnitResources.RAM = "96Gi" }, true},
-		{"localStorage change is rejected", func(it *workercore.InstanceType) { it.Spec.LocalStorage = "200Gi" }, true},
-		{"descriptor change is allowed", func(it *workercore.InstanceType) { it.Spec.Manufacturer = "nvidia" }, false},
+		{"displayName change is allowed", nonAccel, func(it *workercore.InstanceType) { it.Spec.DisplayName = "Renamed" }, false},
+		{"inactive toggle is allowed", nonAccel, func(it *workercore.InstanceType) { it.Spec.Inactive = true }, false},
+		{"legacy non-1 cpu displayName change is allowed", legacyNonAccel, func(it *workercore.InstanceType) { it.Spec.DisplayName = "Renamed" }, false},
+		{"legacy non-1 cpu inactive toggle is allowed", legacyNonAccel, func(it *workercore.InstanceType) { it.Spec.Inactive = true }, false},
+		{"manufacturer change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.Manufacturer = "nvidia" }, true},
+		{"unitResources change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.UnitResources.RAM = "96Gi" }, true},
+		{"localStorage change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.LocalStorage = "200Gi" }, true},
+		{"os change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.OS = "windows" }, true},
+		{"arch change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.Arch = "arm64" }, true},
+		{"generalGroup change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.GeneralGroup = "amd-epyc-7763" }, true},
+		{"acceleratorGroup change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.AcceleratorGroup = "nvidia-a10g" }, true},
+		{"acceleratable toggle is rejected", accel, func(it *workercore.InstanceType) { it.Spec.Acceleratable = false }, true},
 	}
 
 	wh := &InstanceTypeWebhook{}
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
+			base := c.base()
 			updated := base.DeepCopy()
 			c.mutate(updated)
 			_, err := wh.ValidateUpdate(context.Background(), base, updated)
