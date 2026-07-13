@@ -254,15 +254,22 @@ func validateInstanceTypeSpec(it *workercore.InstanceType) field.ErrorList {
 }
 
 // validateInstanceTypeUnitSpec enforces the unit spec: all three fields must be set and
-// well-formed — unitCPU a unitless positive integer, unitRAM and localStorage a positive
-// integer with a case-sensitive "Gi" suffix.
+// well-formed — unitRAM and localStorage a positive integer with a case-sensitive "Gi" suffix.
+// The unitCPU rule branches on acceleratable: an acceleratable type accepts any unitless
+// positive integer, while a non-acceleratable (CPU-only) type accepts only exactly 1 core,
+// matching how a CPU-only request is sized (the requested CPU count is the unit count).
 func validateInstanceTypeUnitSpec(it *workercore.InstanceType) field.ErrorList {
 	cpu, ram, localStg := it.Spec.UnitResources.CPU, it.Spec.UnitResources.RAM, it.Spec.LocalStorage
 
 	var errs field.ErrorList
-	if extractPositiveNumberFromString(cpu) == "" {
+	if it.Spec.Acceleratable {
+		if extractPositiveNumberFromString(cpu) == "" {
+			errs = append(errs, field.Invalid(field.NewPath("spec", "unitResources", "cpu"),
+				cpu, "must be a positive integer with no unit suffix"))
+		}
+	} else if n, err := strconvx.ParseInt[int32](cpu, 10, 32); err != nil || n != 1 {
 		errs = append(errs, field.Invalid(field.NewPath("spec", "unitResources", "cpu"),
-			cpu, "must be a positive integer with no unit suffix"))
+			cpu, "must be 1 when acceleratable is false"))
 	}
 	if extractPositiveNumberFromQuantity(ram, "Gi") == "" {
 		errs = append(errs, field.Invalid(field.NewPath("spec", "unitResources", "ram"),
