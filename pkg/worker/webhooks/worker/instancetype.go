@@ -33,7 +33,7 @@ const QueueEntranceLabelKey = "schedule." + systemname.LabelPrefix + "queue-entr
 //
 // The defaulting webhook enriches the descriptor spec from a matching ResourceFlavor at
 // admission, so a stored InstanceType is spec-clear from day one. The validating webhook
-// requires the admin-writable inputs on create and freezes the unit spec on update.
+// requires the admin-writable inputs on create and freezes the spec on update.
 //
 // nolint: lll
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="instancetypes",scope="Cluster"
@@ -69,10 +69,13 @@ func (r *InstanceTypeWebhook) ValidateCreate(_ context.Context, obj runtime.Obje
 func (r *InstanceTypeWebhook) ValidateUpdate(_ context.Context, oldObj, newObj runtime.Object) (ctrladmission.Warnings, error) {
 	itOld, it := oldObj.(*workercore.InstanceType), newObj.(*workercore.InstanceType)
 
-	if errs := validateInstanceTypeSpec(it); len(errs) > 0 {
-		return nil, kerrors.NewInvalid(workercore.Kind("InstanceType"), it.Name, errs)
-	}
-	if errs := validateInstanceTypeUnitSpecImmutable(itOld, it); len(errs) > 0 {
+	// Only immutability is enforced on update: the spec is frozen except displayName and
+	// inactive, so every input validateInstanceTypeSpec checks on create is already frozen to
+	// its stored value. Re-running those create-time checks here would add no protection and
+	// would wedge a legacy object whose stored value predates a tightened rule (e.g. a CPU-only
+	// type stored with unit CPU other than 1), blocking even a displayName/inactive edit or the
+	// operator's own inactive backfill.
+	if errs := validateInstanceTypeSpecImmutable(itOld, it); len(errs) > 0 {
 		return nil, kerrors.NewInvalid(workercore.Kind("InstanceType"), itOld.Name, errs)
 	}
 	return nil, nil
@@ -303,17 +306,17 @@ func extractPositiveNumberFromQuantity(v, suffix string) string {
 	return ""
 }
 
-// validateInstanceTypeUnitSpecImmutable rejects any change to the unit resources or the local
-// storage after creation.
-func validateInstanceTypeUnitSpecImmutable(itOld, it *workercore.InstanceType) field.ErrorList {
-	var errs field.ErrorList
-	if itOld.Spec.UnitResources != it.Spec.UnitResources {
-		errs = append(errs, field.Invalid(field.NewPath("spec", "unitResources"),
-			it.Spec.UnitResources, "unitResources is immutable"))
+// validateInstanceTypeSpecImmutable rejects any change to the spec after creation other than the
+// two admin-editable fields: DisplayName (rename) and Inactive (take in/out of service). The
+// spec is fully comparable, so it masks those two fields on both sides and compares the rest with
+// a single equality check — a newly added spec field is then frozen automatically.
+func validateInstanceTypeSpecImmutable(itOld, it *workercore.InstanceType) field.ErrorList {
+	oldSpec, newSpec := itOld.Spec, it.Spec
+	oldSpec.DisplayName, newSpec.DisplayName = "", ""
+	oldSpec.Inactive, newSpec.Inactive = false, false
+	if oldSpec != newSpec {
+		return field.ErrorList{field.Forbidden(field.NewPath("spec"),
+			"is immutable except displayName and inactive")}
 	}
-	if itOld.Spec.LocalStorage != it.Spec.LocalStorage {
-		errs = append(errs, field.Invalid(field.NewPath("spec", "localStorage"),
-			it.Spec.LocalStorage, "localStorage is immutable"))
-	}
-	return errs
+	return nil
 }
