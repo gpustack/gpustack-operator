@@ -413,7 +413,7 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 		switch {
 		case instType.Spec.Sliceable:
 			// The slice is requested as memory/compute percentages in [0,100] (0 disables
-			// slicing). The compute budget must not be smaller than the memory budget.
+			// slicing); the two budgets are independent.
 			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
 			coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
 			memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
@@ -425,10 +425,6 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 			if coresPct < 0 || coresPct > 100 {
 				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
 					"must be between 0 and 100"))
-			}
-			if coresPct > 0 && coresPct < memPct {
-				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
-					"must not be less than the memory percentage"))
 			}
 			if memPct > 0 || coresPct > 0 {
 				// A sliced request (a non-zero percentage) is a fraction of ONE card: the

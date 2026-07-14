@@ -30,9 +30,9 @@ import (
 // into the credit-counting .sliced.units so Kueue and the device-plugin agree —
 // any client-supplied .sliced.units is ignored and recomputed, since the value is
 // webhook-derived only. Validating: a .sliced request that omits the card count,
-// names no memory, sets both memory keys, carries a non-positive or over-100
-// budget, or whose compute budget is smaller than its percentage memory budget is
-// rejected.
+// names no memory, sets both memory keys, carries a non-positive budget, or sets a
+// percentage budget above 100 is rejected; a Pod mixing accelerator allocation
+// modes (exclusive/shared/sliced) is also rejected.
 //
 // nolint: lll
 // +k8s:webhook-gen:validating:group="",version="v1",resource="pods",scope="Namespaced"
@@ -300,9 +300,9 @@ func (r *PodWebhook) ValidateDelete(_ context.Context, _ runtime.Object) (ctrlad
 }
 
 // validateSlicedContainer checks one container's sliced request for the given
-// manufacturer family: it must name exactly one positive memory budget, carry no
-// non-positive sliced budget, and keep the compute budget at least as large as
-// the percentage memory budget.
+// manufacturer family: it must name exactly one memory budget (percentage or mib),
+// every budget it sets must be positive, and the percentage budgets must not exceed
+// 100. The compute and memory budgets are independent.
 func validateSlicedContainer(ctr *core.Container, names slicedResourceNames, idx int) field.ErrorList {
 	var errs field.ErrorList
 	path := field.NewPath("spec", "containers").Index(idx).Child("resources", "requests")
@@ -338,11 +338,6 @@ func validateSlicedContainer(ctr *core.Container, names slicedResourceNames, idx
 	if hasCoresPct && (coresPctQ.Value() <= 0 || coresPctQ.Value() > 100) {
 		errs = append(errs, field.Invalid(path.Key(string(names.coresPct)), coresPctQ.String(),
 			"must be within (0, 100]"))
-	}
-
-	if hasMemPct && memPctQ.Value() > 0 && hasCoresPct && coresPctQ.Value() < memPctQ.Value() {
-		errs = append(errs, field.Invalid(path.Key(string(names.coresPct)), coresPctQ.String(),
-			fmt.Sprintf("must not be less than %s", names.memPct)))
 	}
 
 	return errs
