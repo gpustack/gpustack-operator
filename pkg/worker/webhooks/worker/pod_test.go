@@ -206,9 +206,8 @@ func TestPodWebhook_ValidateCreate(t *testing.T) {
 			wantErr:  true,
 		},
 		{
-			name:     "cores smaller than memory rejected",
+			name:     "cores smaller than memory allowed",
 			requests: map[core.ResourceName]string{names.card: "1", names.memPct: "50", names.coresPct: "20"},
-			wantErr:  true,
 		},
 		{
 			name:     "non-positive memory-percentage rejected",

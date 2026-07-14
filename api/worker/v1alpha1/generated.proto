@@ -294,7 +294,7 @@ message InstanceResources {
   optional int32 acceleratorSlicedMemoryPercentage = 5;
 
   // AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
-  // a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than
+  // a sliced InstanceType, as a percentage in [0,100]. It is independent of
   // AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
   // copies it to the other. It is ignored by non-sliced requests.
   //
@@ -648,7 +648,7 @@ message InstanceTypeStatus {
 
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.
 message InstanceTypeUnitResources {
-  // CPU is the unit CPU resource(milli-cores) of the InstanceType.
+  // CPU is the unit CPU resource(cores) of the InstanceType.
   optional string cpu = 1;
 
   // RAM is the unit RAM resource(Mi) of the InstanceType.

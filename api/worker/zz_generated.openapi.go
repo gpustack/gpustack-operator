@@ -2643,7 +2643,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceC
 					},
 					"acceleratorSlicedCoresPercentage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook copies it to the other. It is ignored by non-sliced requests.",
+							Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on a sliced InstanceType, as a percentage in [0,100]. It is independent of AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook copies it to the other. It is ignored by non-sliced requests.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -3769,7 +3769,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeUnitResources(ref common.Re
 				Properties: map[string]spec.Schema{
 					"cpu": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CPU is the unit CPU resource(milli-cores) of the InstanceType.",
+							Description: "CPU is the unit CPU resource(cores) of the InstanceType.",
 							Type:        []string{"string"},
 							Format:      "",
 						},

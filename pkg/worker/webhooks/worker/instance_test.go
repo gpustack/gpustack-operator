@@ -81,8 +81,8 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 }
 
 // TestInstanceWebhook_ValidateCreate_SlicedPercentages pins the sliced request
-// contract: the memory/compute percentages must be in [0,100] and the compute
-// budget may not be smaller than the memory budget.
+// contract: the memory/compute percentages must be in [0,100] and are independent
+// of each other.
 func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 	const typeName = "sliced-8s"
 
@@ -95,7 +95,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 		{name: "compute larger than memory allowed", memPct: 20, coresPct: 50},
 		{name: "whole-card slice allowed", memPct: 100, coresPct: 100},
 		{name: "no slice allowed", memPct: 0, coresPct: 0},
-		{name: "compute smaller than memory rejected", memPct: 50, coresPct: 20, wantErr: true},
+		{name: "compute smaller than memory allowed", memPct: 50, coresPct: 20},
 		{name: "memory above 100 rejected", memPct: 101, coresPct: 101, wantErr: true},
 		{name: "compute above 100 rejected", memPct: 20, coresPct: 101, wantErr: true},
 		{name: "negative memory rejected", memPct: -1, wantErr: true},

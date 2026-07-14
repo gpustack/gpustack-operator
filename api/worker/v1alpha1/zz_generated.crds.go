@@ -568,7 +568,7 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 													XIntOrString: true,
 												},
 												"acceleratorSlicedCoresPercentage": {
-													Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It must not be smaller than\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
+													Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
 													Type:        "integer",
 													Format:      "int32",
 												},
@@ -1123,7 +1123,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"cpu": {
-													Description: "CPU is the unit CPU resource(milli-cores) of the InstanceType.",
+													Description: "CPU is the unit CPU resource(cores) of the InstanceType.",
 													Type:        "string",
 												},
 												"ram": {

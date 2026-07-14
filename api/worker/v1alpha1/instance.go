@@ -173,7 +173,7 @@ type InstanceResources struct {
 	AcceleratorSlicedMemoryPercentage int32 `json:"acceleratorSlicedMemoryPercentage,omitempty" protobuf:"varint,5,opt,name=acceleratorSlicedMemoryPercentage"` // nolint: lll
 
 	// AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
-	// a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than
+	// a sliced InstanceType, as a percentage in [0,100]. It is independent of
 	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
 	// copies it to the other. It is ignored by non-sliced requests.
 	//

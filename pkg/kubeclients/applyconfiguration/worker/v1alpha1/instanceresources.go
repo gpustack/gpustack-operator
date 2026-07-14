@@ -25,7 +25,7 @@ type InstanceResourcesApplyConfiguration struct {
 	// normalized .sliced.units; it is ignored by non-sliced requests.
 	AcceleratorSlicedMemoryPercentage *int32 `json:"acceleratorSlicedMemoryPercentage,omitempty"`
 	// AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
-	// a sliced InstanceType, as a percentage in [0,100]. It must not be smaller than
+	// a sliced InstanceType, as a percentage in [0,100]. It is independent of
 	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
 	// copies it to the other. It is ignored by non-sliced requests.
 	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
