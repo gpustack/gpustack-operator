@@ -7,7 +7,7 @@ package v1alpha1
 //
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.
 type InstanceTypeUnitResourcesApplyConfiguration struct {
-	// CPU is the unit CPU resource(milli-cores) of the InstanceType.
+	// CPU is the unit CPU resource(cores) of the InstanceType.
 	CPU *string `json:"cpu,omitempty"`
 	// RAM is the unit RAM resource(Mi) of the InstanceType.
 	RAM *string `json:"ram,omitempty"`
