@@ -40,6 +40,7 @@ The `gpustack-operator-lint` hook runs `make lint` after Go changes; run it your
 - Handle errors explicitly; never use panics for control flow.
 - Keep interfaces minimal; accept abstractions, return concrete implementations.
 - Use concise names accurately reflecting purpose and domain meaning.
+- Name multi-word Go source files in snake_case (`instance_type.go`, `node_queue.go`), never flat-concatenated (`instancetype.go`).
 - Write focused functions performing one responsibility and nothing else.
 - Prefer composition and values over inheritance-like design patterns.
 - Keep concurrency simple, safe, justified, and minimally applied.

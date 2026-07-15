@@ -162,7 +162,7 @@ if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Types sharing os/arch/acceleratorGroup/acceleratable share one pool;"
   echo "enqueueInstanceTypeWhenDevicesChanged must enqueue ALL of them on a Devices change so their"
-  echo "three-view status stays identical. See pkg/worker/controllers/worker/instancetype.go."
+  echo "three-view status stays identical. See pkg/worker/controllers/worker/instance_type.go."
   exit 1
 fi
 echo "CASE 20 PASS"

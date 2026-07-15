@@ -178,7 +178,7 @@ if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). The webhook must require acceleratorGroup when acceleratable + os/arch"
   echo "+ a well-formed unit spec on CREATE, freeze unitResources/localStorage on UPDATE (real patch), and"
-  echo "stamp the acceleratable boolean + os/arch + queue-entrance labels in Default. See pkg/worker/webhooks/worker/instancetype.go."
+  echo "stamp the acceleratable boolean + os/arch + queue-entrance labels in Default. See pkg/worker/webhooks/worker/instance_type.go."
   exit 1
 fi
 echo "CASE 17 PASS"

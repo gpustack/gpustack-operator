@@ -144,7 +144,7 @@ if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). The InstanceTypeReconciler owns the backing queue's existence"
   echo "(recreate on accidental delete; delete-then-wait teardown); the InstanceTypeFlavor catalog"
-  echo "projects the pools. See instancetype.go / nodequeue.go / extensionapis."
+  echo "projects the pools. See instance_type.go / node_queue.go / extensionapis."
   exit 1
 fi
 echo "CASE 16 PASS"
