@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"sort"
 
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/apiserver/pkg/registry/rest"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
@@ -18,6 +21,7 @@ import (
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
+	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -29,15 +33,20 @@ const (
 	_ResourceFlavorResType = "nodes"
 )
 
-// InstanceTypeFlavorHandler serves v1.InstanceTypeFlavor objects list-only.
+// InstanceTypeFlavorHandler serves v1.InstanceTypeFlavor objects read-only (get, list and watch).
 //
 // It has no backing CRD: OnList aggregates the operator-owned Kueue ResourceFlavors,
 // parsing each pool's note.gpustack.ai/* annotations into one InstanceTypeFlavor,
-// deduplicating identical entries and sorting by manufacturer, product, then memory.
+// deduplicating identical entries and sorting by manufacturer, product, then memory. OnWatch
+// projects the ResourceFlavor watch onto the same deduplicated catalog, emitting a flavor ADDED
+// only when its first backing ResourceFlavor appears and a DELETED only when the last is gone.
+// OnGet resolves a single flavor by name against the same aggregated OnList output.
 type InstanceTypeFlavorHandler struct {
 	extensionapi.ObjectInfo
-	extensionapi.ListOperation
+	extensionapi.ListWatchOperation
+	extensionapi.GetOperation
 
+	Client    ctrlcli.WithWatch
 	APIReader ctrlcli.Reader
 }
 
@@ -65,7 +74,9 @@ func (h *InstanceTypeFlavorHandler) SetupHandler(
 
 	// As storage.
 	h.ObjectInfo = &worker.InstanceTypeFlavor{}
-	h.ListOperation = extensionapi.WithList(tc, h)
+	h.ListWatchOperation = extensionapi.WithListWatch(tc, h)
+	h.GetOperation = extensionapi.WithGet(h)
+	h.Client = opts.Manager.GetClient().(ctrlcli.WithWatch)
 	h.APIReader = opts.Manager.GetAPIReader()
 
 	return gvr, srs, err
@@ -81,6 +92,8 @@ func instanceTypeFlavorColumn(name, jsonPath string) extensionapi.JSONPathTableC
 var (
 	_ rest.Storage = (*InstanceTypeFlavorHandler)(nil)
 	_ rest.Lister  = (*InstanceTypeFlavorHandler)(nil)
+	_ rest.Watcher = (*InstanceTypeFlavorHandler)(nil)
+	_ rest.Getter  = (*InstanceTypeFlavorHandler)(nil)
 )
 
 func (h *InstanceTypeFlavorHandler) New() runtime.Object {
@@ -118,15 +131,9 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 	visited := sets.New[worker.InstanceTypeFlavorSpec]()
 	list := &worker.InstanceTypeFlavorList{Items: make([]worker.InstanceTypeFlavor, 0, len(rfList.Items))}
 	for i := range rfList.Items {
-		// Skip a flavor Kueue is finalizing (DeletionTimestamp set): its pool is draining away,
-		// so the catalog must not advertise a pool being torn down.
-		if rfList.Items[i].DeletionTimestamp != nil {
+		spec, ok := resourceFlavorToSpec(&rfList.Items[i], cpuAware)
+		if !ok {
 			continue
-		}
-		_, notes := systemmeta.DescribeResource(&rfList.Items[i])
-		spec := instanceTypeFlavorSpec(notes, cpuAware)
-		if spec.GeneralGroup == "" && spec.AcceleratorGroup == "" {
-			continue // not an operator pool flavor (no group identity)
 		}
 		if visited.Has(spec) {
 			continue
@@ -157,6 +164,227 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 	})
 
 	return list, nil
+}
+
+// OnGet resolves a single flavor by name against the same aggregated catalog OnList produces. The
+// catalog is derived and has no per-object store, so Get lists, then filters by name. A flavor name
+// is derived from group identity alone and is not guaranteed unique, so the first match in OnList's
+// deterministic (manufacturer, product, memory) order is returned; NotFound when no pool matches.
+func (h *InstanceTypeFlavorHandler) OnGet(ctx context.Context, key types.NamespacedName, _ ctrlcli.GetOptions) (runtime.Object, error) {
+	listObj, err := h.OnList(ctx, ctrlcli.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	list := listObj.(*worker.InstanceTypeFlavorList)
+	for i := range list.Items {
+		if list.Items[i].Name == key.Name {
+			return &list.Items[i], nil
+		}
+	}
+	return nil, kerrors.NewNotFound(worker.Resource(_InstanceTypeFlavorResource), key.Name)
+}
+
+// OnWatch projects the operator-owned ResourceFlavor watch onto the deduplicated InstanceTypeFlavor
+// catalog. Because the projection is many-ResourceFlavor -> one-flavor, it cannot map events 1:1: a
+// flavor is added only when its first backing ResourceFlavor appears and deleted only when its last
+// backing ResourceFlavor is gone. It seeds a backing-count multiset from the current flavors so the
+// upstream watch's initial replay is suppressed (the client already has that state from the list),
+// then folds each ResourceFlavor event into the multiset and emits the resulting flavor deltas.
+//
+// It mirrors SettingHandler.OnWatch: the awareness setting is read once at watch start (a client
+// reconnect re-derives if it later changes), and the outer ListWatchOperation.Watch wrapper handles
+// the resource-version dedup and bookmark passthrough, so every emitted flavor carries the backing
+// ResourceFlavor's resource version.
+func (h *InstanceTypeFlavorHandler) OnWatch(ctx context.Context, opts ctrlcli.ListOptions) (watch.Interface, error) {
+	// Read the awareness setting once at watch start (matching OnList's read).
+	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBoolFromRemote(ctx)
+
+	// Seed the backing-count multiset from the current ResourceFlavors so the upstream watch's
+	// initial replay (an ADDED per existing flavor) is suppressed as already-known.
+	rfList := new(kueue.ResourceFlavorList)
+	err := h.APIReader.List(ctx, rfList,
+		convertResourceFlavorListOptsFromInstanceTypeFlavorListOpts(opts),
+		ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil {
+		return nil, err
+	}
+	state := newInstanceTypeFlavorWatchState()
+	for i := range rfList.Items {
+		if spec, ok := resourceFlavorToSpec(&rfList.Items[i], cpuAware); ok {
+			state.seed(rfList.Items[i].Name, spec)
+		}
+	}
+
+	// Watch the operator-owned ResourceFlavors (same scoping the list uses).
+	uw, err := h.Client.Watch(ctx, new(kueue.ResourceFlavorList),
+		convertResourceFlavorListOptsFromInstanceTypeFlavorListOpts(opts))
+	if err != nil {
+		return nil, err
+	}
+
+	c := make(chan watch.Event)
+	dw := watch.NewProxyWatcher(c)
+	gox.Go(func() {
+		defer close(c)
+		defer uw.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				// Cancel by context.
+				return
+			case <-dw.StopChan():
+				// Stop by downstream.
+				return
+			case e, ok := <-uw.ResultChan():
+				if !ok {
+					// Close by upstream.
+					return
+				}
+
+				// Nothing to do.
+				if e.Object == nil {
+					c <- e
+					continue
+				}
+
+				// Type assert.
+				rf, ok := e.Object.(*kueue.ResourceFlavor)
+				if !ok {
+					c <- e
+					continue
+				}
+
+				// Process bookmark: carry the resource version through on a placeholder flavor.
+				if e.Type == watch.Bookmark {
+					e.Object = &worker.InstanceTypeFlavor{
+						ObjectMeta: meta.ObjectMeta{ResourceVersion: rf.ResourceVersion},
+					}
+					c <- e
+					continue
+				}
+
+				// Fold the ResourceFlavor event into the dedup multiset and dispatch the deltas.
+				for _, fe := range state.apply(e.Type, rf, cpuAware) {
+					c <- fe
+				}
+			}
+		}
+	})
+
+	return dw, nil
+}
+
+// instanceTypeFlavorWatchState tracks which ResourceFlavors currently back each catalog flavor spec,
+// so the many-ResourceFlavor -> one-flavor projection emits a flavor ADDED only when its first
+// backing ResourceFlavor appears and a DELETED only when its last backing ResourceFlavor is gone.
+// It is owned by a single OnWatch goroutine and needs no locking.
+type instanceTypeFlavorWatchState struct {
+	rfSpec   map[string]worker.InstanceTypeFlavorSpec // ResourceFlavor name -> the spec it backs
+	specRefs map[worker.InstanceTypeFlavorSpec]int    // flavor spec -> number of backing ResourceFlavors
+}
+
+func newInstanceTypeFlavorWatchState() *instanceTypeFlavorWatchState {
+	return &instanceTypeFlavorWatchState{
+		rfSpec:   make(map[string]worker.InstanceTypeFlavorSpec),
+		specRefs: make(map[worker.InstanceTypeFlavorSpec]int),
+	}
+}
+
+// seed records a backing without emitting an event, so the upstream watch's initial replay of the
+// already-listed flavors surfaces no duplicate ADDED.
+func (s *instanceTypeFlavorWatchState) seed(rfName string, spec worker.InstanceTypeFlavorSpec) {
+	s.rfSpec[rfName] = spec
+	s.specRefs[spec]++
+}
+
+// apply folds one ResourceFlavor event into the multiset and returns the flavor events it triggers.
+// An ADDED fires when a spec gains its first backer; a DELETED fires when it loses its last. A
+// backing whose derived spec is unchanged produces nothing; one that changes spec releases the old
+// (possibly DELETED) and acquires the new (possibly ADDED).
+//
+// When a single ResourceFlavor event yields both events (a spec-change move), they share the backing
+// ResourceFlavor's resource version, so the outer ListWatchOperation.Watch wrapper's version dedup
+// would drop the second. Two things keep both: the ADDED is emitted first so it wins the version
+// swap, and every DELETED carries a DeletionTimestamp (via flavorWatchEvent), which the wrapper lets
+// through regardless of the version. Emitted flavors carry the ResourceFlavor's resource version.
+func (s *instanceTypeFlavorWatchState) apply(evtType watch.EventType, rf *kueue.ResourceFlavor, cpuAware bool) []watch.Event {
+	newSpec, present := resourceFlavorToSpec(rf, cpuAware)
+	oldSpec, tracked := s.rfSpec[rf.Name]
+
+	var added, deleted []watch.Event
+	release := func() {
+		if !tracked {
+			return
+		}
+		delete(s.rfSpec, rf.Name)
+		s.specRefs[oldSpec]--
+		if s.specRefs[oldSpec] <= 0 {
+			delete(s.specRefs, oldSpec)
+			deleted = append(deleted, flavorWatchEvent(watch.Deleted, oldSpec, rf.ResourceVersion))
+		}
+	}
+	acquire := func() {
+		s.rfSpec[rf.Name] = newSpec
+		s.specRefs[newSpec]++
+		if s.specRefs[newSpec] == 1 {
+			added = append(added, flavorWatchEvent(watch.Added, newSpec, rf.ResourceVersion))
+		}
+	}
+
+	switch evtType {
+	case watch.Deleted:
+		release()
+	case watch.Added, watch.Modified:
+		switch {
+		case !present:
+			// The ResourceFlavor is draining or lost its pool identity: drop its backing.
+			release()
+		case tracked && oldSpec == newSpec:
+			// The backing is unchanged: the dedup set is untouched.
+		default:
+			release() // decrement the old spec first so its entry is gone before the new one lands
+			acquire() // increment the new spec (may emit ADDED)
+		}
+	}
+
+	// ADDED before DELETED so both survive the wrapper's version dedup on a move (see the doc above).
+	return append(added, deleted...)
+}
+
+// flavorWatchEvent builds a watch event for one catalog flavor, stamping the backing ResourceFlavor's
+// resource version so the outer ListWatchOperation.Watch wrapper's version dedup passes it through. A
+// DELETED also carries a DeletionTimestamp so the wrapper passes it even when it shares a resource
+// version with a preceding event (a spec-change move emits both under one version).
+func flavorWatchEvent(t watch.EventType, spec worker.InstanceTypeFlavorSpec, rv string) watch.Event {
+	obj := &worker.InstanceTypeFlavor{
+		ObjectMeta: meta.ObjectMeta{
+			Name:            instanceTypeFlavorName(spec),
+			ResourceVersion: rv,
+		},
+		Spec: spec,
+	}
+	if t == watch.Deleted {
+		now := meta.Now()
+		obj.DeletionTimestamp = &now
+	}
+	return watch.Event{Type: t, Object: obj}
+}
+
+// resourceFlavorToSpec derives the catalog spec a ResourceFlavor contributes, or ok=false when the
+// flavor is draining (DeletionTimestamp set, so the catalog must not advertise a pool being torn
+// down) or carries no operator pool identity.
+func resourceFlavorToSpec(rf *kueue.ResourceFlavor, cpuAware bool) (worker.InstanceTypeFlavorSpec, bool) {
+	if rf.DeletionTimestamp != nil {
+		return worker.InstanceTypeFlavorSpec{}, false
+	}
+	_, notes := systemmeta.DescribeResource(rf)
+	spec := instanceTypeFlavorSpec(notes, cpuAware)
+	if spec.GeneralGroup == "" && spec.AcceleratorGroup == "" {
+		return worker.InstanceTypeFlavorSpec{}, false
+	}
+	return spec, true
 }
 
 // instanceTypeFlavorSpec builds one catalog row from a ResourceFlavor's notes, grouped by the
