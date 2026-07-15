@@ -116,8 +116,12 @@ spec:
           ports:
             - name: https
               containerPort: {{ .Values.worker.securePort }}
+          # The worker installs NFD/Kueue/CSI on boot and can self-heal a stranded Kueue
+          # (reap orphaned finalizers, then a Kueue upgrade that recreates its controller);
+          # give startup generous headroom so a long first boot is not killed mid-repair,
+          # which would strand the Kueue release pending-rollback and never converge.
           startupProbe:
-            failureThreshold: 10
+            failureThreshold: 60
             periodSeconds: 5
             httpGet:
               scheme: HTTPS
