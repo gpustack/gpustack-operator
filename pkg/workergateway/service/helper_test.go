@@ -14,6 +14,66 @@ import (
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
+// Spec-derived aggregated item names produced by buildAggregatedInstanceTypeName from the shared
+// instSpec* fixtures. They are the identity every Next/Handle-path test keys on.
+const (
+	itemNameA10G    = "generic-nvidia-a10g-linux-amd64-4c-16g-100g"
+	itemNameTeslaT4 = "generic-nvidia-tesla-t4-linux-amd64-4c-16g-100g"
+	itemNameCPUOnly = "generic-linux-amd64-2g-100g"
+)
+
+func TestBuildAggregatedInstanceTypeName(t *testing.T) {
+	cases := []struct {
+		name string
+		spec AggregatedInstanceTypeSpec
+		want string
+	}{
+		{
+			name: "accelerated encodes accelerator group and per-unit cpu",
+			spec: AggregatedInstanceTypeSpec{
+				GeneralGroup:     "generic",
+				AcceleratorGroup: "nvidia-a10g",
+				Acceleratable:    true,
+				OS:               "linux",
+				Arch:             "amd64",
+				UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
+				LocalStorage:     "100Gi",
+			},
+			want: "generic-nvidia-a10g-linux-amd64-4c-16g-100g",
+		},
+		{
+			name: "non-accelerated omits accelerator group and cpu",
+			spec: AggregatedInstanceTypeSpec{
+				GeneralGroup:  "generic",
+				Acceleratable: false,
+				OS:            "linux",
+				Arch:          "amd64",
+				UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+				LocalStorage:  "100Gi",
+			},
+			want: "generic-linux-amd64-2g-100g",
+		},
+		{
+			name: "ram and local storage without a Gi suffix keep their raw value",
+			spec: AggregatedInstanceTypeSpec{
+				GeneralGroup:  "generic",
+				Acceleratable: false,
+				OS:            "linux",
+				Arch:          "amd64",
+				UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2048"},
+				LocalStorage:  "100",
+			},
+			want: "generic-linux-amd64-2048g-100g",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, buildAggregatedInstanceTypeName(c.spec))
+		})
+	}
+}
+
 func TestListAggregateInstanceTypes_Result(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -123,18 +183,27 @@ func instTypeRes(once, remaining, capacity string) workercore.InstanceTypeResour
 
 func instSpecCPUOnly() workercore.InstanceTypeSpec {
 	return workercore.InstanceTypeSpec{
-		GeneralGroup:  "gpustack-cpu-only",
+		GeneralGroup:  "generic",
 		Acceleratable: false,
+		OS:            "linux",
+		Arch:          "amd64",
+		UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+		LocalStorage:  "100Gi",
 	}
 }
 
 func instSpecA10G() workercore.InstanceTypeSpec {
 	return workercore.InstanceTypeSpec{
-		AcceleratorGroup: "gpustack-nvidia-a10g",
+		GeneralGroup:     "generic",
+		AcceleratorGroup: "nvidia-a10g",
 		Acceleratable:    true,
 		Manufacturer:     "nvidia",
 		Product:          "NVIDIA-A10G",
 		Family:           "Ampere",
+		OS:               "linux",
+		Arch:             "amd64",
+		UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
+		LocalStorage:     "100Gi",
 		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
 			Memory:            "23028Mi",
 			ComputeCapability: "8.6",
@@ -144,11 +213,16 @@ func instSpecA10G() workercore.InstanceTypeSpec {
 
 func instSpecTeslaT4() workercore.InstanceTypeSpec {
 	return workercore.InstanceTypeSpec{
-		AcceleratorGroup: "gpustack-nvidia-tesla-t4",
+		GeneralGroup:     "generic",
+		AcceleratorGroup: "nvidia-tesla-t4",
 		Acceleratable:    true,
 		Manufacturer:     "nvidia",
 		Product:          "Tesla-T4",
 		Family:           "Turing",
+		OS:               "linux",
+		Arch:             "amd64",
+		UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
+		LocalStorage:     "100Gi",
 		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
 			Memory:            "15360Mi",
 			ComputeCapability: "7.5",
@@ -283,7 +357,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 
 		item, ok := evts[0].Object.(*AggregatedInstanceType)
 		require.True(t, ok, "Added event Object must be *AggregatedInstanceType, got %T", evts[0].Object)
-		assert.Equal(t, "gpustack-nvidia-a10g", item.Name)
+		assert.Equal(t, itemNameA10G, item.Name)
 
 		require.Len(t, h.state.Items, 1)
 		require.Len(t, h.state.Items[0].Status.Tiers, 1)
@@ -304,7 +378,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 1)
 		assert.Len(t, item.Status.Tiers[0].Candidates, 2)
@@ -324,7 +398,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 2)
 		assert.True(t,
@@ -350,7 +424,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 1)
 		require.Len(t, item.Status.Tiers[0].Candidates, 1)
@@ -374,7 +448,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 1, "tier Acc=1 should be removed when its only candidate moves out")
 		tier := &item.Status.Tiers[0]
@@ -404,7 +478,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 2)
 		assert.True(t, item.Status.Tiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("4")),
@@ -427,7 +501,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 1)
 		require.Len(t, item.Status.Tiers[0].Candidates, 1)
@@ -449,7 +523,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1)
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers, 1)
 		assert.True(t, item.Status.Tiers[0].OnceMaxRequest.Accelerator.Equal(resource.MustParse("2")))
@@ -472,12 +546,12 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		assert.Equal(t, manager.WorkerEventDeleted, evts[0].Type)
 		deleted, ok := evts[0].Object.(*AggregatedInstanceType)
 		require.True(t, ok)
-		assert.Equal(t, "gpustack-nvidia-a10g", deleted.Name,
+		assert.Equal(t, itemNameA10G, deleted.Name,
 			"Deleted event name must reflect the removed item, not the post-splice neighbor")
 
-		assert.NotNil(t, findItem(h.state, "gpustack-cpu-only"))
-		assert.NotNil(t, findItem(h.state, "gpustack-nvidia-tesla-t4"))
-		assert.Nil(t, findItem(h.state, "gpustack-nvidia-a10g"))
+		assert.NotNil(t, findItem(h.state, itemNameCPUOnly))
+		assert.NotNil(t, findItem(h.state, itemNameTeslaT4))
+		assert.Nil(t, findItem(h.state, itemNameA10G))
 	})
 
 	t.Run("delete-all-cluster emits Deleted with correct name for every removed item", func(t *testing.T) {
@@ -501,9 +575,9 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 			require.True(t, ok)
 			got[d.Name] = true
 		}
-		assert.True(t, got["gpustack-cpu-only"], "cpu-only Deleted event missing or wrong name; got names=%v", got)
-		assert.True(t, got["gpustack-nvidia-a10g"], "a10g Deleted event missing or wrong name; got names=%v", got)
-		assert.True(t, got["gpustack-nvidia-tesla-t4"], "tesla-t4 Deleted event missing or wrong name; got names=%v", got)
+		assert.True(t, got[itemNameCPUOnly], "cpu-only Deleted event missing or wrong name; got names=%v", got)
+		assert.True(t, got[itemNameA10G], "a10g Deleted event missing or wrong name; got names=%v", got)
+		assert.True(t, got[itemNameTeslaT4], "tesla-t4 Deleted event missing or wrong name; got names=%v", got)
 		assert.Empty(t, h.state.Items)
 	})
 
@@ -522,13 +596,13 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		require.Len(t, evts, 1, "only cpu-only had a cluster-a candidate; expect exactly one Modified event")
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-		cpu := findItem(h.state, "gpustack-cpu-only")
+		cpu := findItem(h.state, itemNameCPUOnly)
 		require.NotNil(t, cpu)
 		require.Len(t, cpu.Status.Tiers, 1)
 		require.Len(t, cpu.Status.Tiers[0].Candidates, 1)
 		assert.Equal(t, "cluster-b", cpu.Status.Tiers[0].Candidates[0].Cluster)
 
-		gpu := findItem(h.state, "gpustack-nvidia-a10g")
+		gpu := findItem(h.state, itemNameA10G)
 		require.NotNil(t, gpu, "a10g item must remain untouched")
 		require.Len(t, gpu.Status.Tiers, 1)
 		require.Len(t, gpu.Status.Tiers[0].Candidates, 1)
@@ -570,7 +644,7 @@ func TestHandleAggregatedInstanceType(t *testing.T) {
 		assert.Equal(t, manager.WorkerEventModified, evts[0].Type,
 			"item still has cluster-b's candidate, so we expect Modified, not Deleted")
 
-		item := findItem(h.state, "gpustack-nvidia-a10g")
+		item := findItem(h.state, itemNameA10G)
 		require.NotNil(t, item)
 		require.Len(t, item.Status.Tiers[0].Candidates, 1)
 		assert.Equal(t, "cluster-b", item.Status.Tiers[0].Candidates[0].Cluster)
@@ -958,7 +1032,7 @@ func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 
 		require.Len(t, result.Items, 1)
 		item := result.Items[0]
-		assert.Equal(t, "gpustack-nvidia-a10g", item.Name)
+		assert.Equal(t, itemNameA10G, item.Name)
 		require.Len(t, item.Status.Tiers, 2)
 
 		// Tier ordering is ascending by primary (Acc).
@@ -984,7 +1058,7 @@ func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 
 		require.Len(t, result.Items, 1)
 		item := result.Items[0]
-		assert.Equal(t, "gpustack-cpu-only", item.Name)
+		assert.Equal(t, itemNameCPUOnly, item.Name)
 		require.Len(t, item.Status.Tiers, 1, "CPU-only items must collapse into a single tier")
 		require.Len(t, item.Status.Tiers[0].Candidates, 2)
 
@@ -1151,7 +1225,7 @@ func TestHandleAggregatedInstanceType_PhaseAwareTierIdentity(t *testing.T) {
 		seed{cluster: "cluster-a", obj: withPhase(a10gInst("inst-a", "4"), "Inactive")},
 	))
 
-	item0 := findItem(h.state, "gpustack-nvidia-a10g")
+	item0 := findItem(h.state, itemNameA10G)
 	require.NotNil(t, item0)
 	require.Len(t, item0.Status.Tiers, 1)
 	require.True(t, item0.Status.Tiers[0].OnceMaxRequest.Accelerator.IsZero(),
@@ -1166,7 +1240,7 @@ func TestHandleAggregatedInstanceType_PhaseAwareTierIdentity(t *testing.T) {
 	require.Len(t, evts, 1)
 	assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-	item := findItem(h.state, "gpustack-nvidia-a10g")
+	item := findItem(h.state, itemNameA10G)
 	require.NotNil(t, item)
 	require.Len(t, item.Status.Tiers, 1, "the Active candidate must join the existing Acc=4 tier, not duplicate it")
 	require.Len(t, item.Status.Tiers[0].Candidates, 2)
@@ -1194,7 +1268,7 @@ func TestHandleAggregatedInstanceType_InactiveCrossTierMoveDoesNotLeakCapacity(t
 	require.Len(t, evts, 1)
 	assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
 
-	item := findItem(h.state, "gpustack-nvidia-a10g")
+	item := findItem(h.state, itemNameA10G)
 	require.NotNil(t, item)
 
 	var movedTier *AggregatedInstanceTypeOnceMaxRequestTier

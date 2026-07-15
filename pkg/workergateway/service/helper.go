@@ -3,12 +3,11 @@ package service
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
-	"gpustack.ai/gpustack/pkg/utils/funcx"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
@@ -28,6 +27,22 @@ func normalizeAggregatedInstanceTypeSpec(spec AggregatedInstanceTypeSpec) Aggreg
 	spec.Inactive = false
 	spec.DisplayName = ""
 	return spec
+}
+
+// buildAggregatedInstanceTypeName derives a stable, spec-only identity so the same hardware profile
+// reads identically across clusters regardless of which cluster's InstanceType (or its arbitrary
+// object name) was seen first. Accelerated types encode the accelerator group and the per-unit CPU;
+// a non-accelerated type omits both (its unit CPU is webhook-fixed to 1). The Gi suffix on
+// RAM/LocalStorage is stripped best-effort, keeping the raw value when the suffix is absent.
+func buildAggregatedInstanceTypeName(spec AggregatedInstanceTypeSpec) string {
+	ram := strings.TrimSuffix(spec.UnitResources.RAM, "Gi")
+	localStorage := strings.TrimSuffix(spec.LocalStorage, "Gi")
+	if spec.Acceleratable {
+		return fmt.Sprintf("%s-%s-%s-%s-%sc-%sg-%sg",
+			spec.GeneralGroup, spec.AcceleratorGroup, spec.OS, spec.Arch,
+			spec.UnitResources.CPU, ram, localStorage)
+	}
+	return fmt.Sprintf("%s-%s-%s-%sg-%sg", spec.GeneralGroup, spec.OS, spec.Arch, ram, localStorage)
 }
 
 type ListClusterInstanceTypeFlavors struct {
@@ -283,7 +298,7 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 		in.itemIndexer[itemKey] = itemIndex
 		in.itemTierIndexer = append(in.itemTierIndexer, make(map[string]int))
 		item := AggregatedInstanceType{
-			Name: funcx.Ternary(instType.GenerateName != "", stringx.TrimSuffix(instType.GenerateName, "-"), instType.Name),
+			Name: buildAggregatedInstanceTypeName(instType.Spec),
 			Spec: instType.Spec,
 		}
 		in.list.Items = append(in.list.Items, item)
@@ -694,7 +709,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 		// Not found the same item, tier and candidate, create a new item with a new tier and candidate.
 		in.state.Items = append(in.state.Items, AggregatedInstanceType{
-			Name: funcx.Ternary(instType.GenerateName != "", stringx.TrimSuffix(instType.GenerateName, "-"), instType.Name),
+			Name: buildAggregatedInstanceTypeName(instType.Spec),
 			Spec: instType.Spec,
 			Status: AggregatedInstanceTypeStatus{
 				OnceMaxRequest: tier.OnceMaxRequest,
