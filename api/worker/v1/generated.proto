@@ -369,12 +369,13 @@ message InstanceType {
 // ResourceFlavors — the catalog of hardware groups an InstanceType can be built on. Each
 // distinct pool (accelerated or generic CPU-only) surfaces as one InstanceTypeFlavor, parsed
 // from the flavor's note.gpustack.ai/* annotations, deduplicated, and sorted. It is served
-// list-only by the aggregated apiserver: there is no backing CRD and no controller, so an
-// administrator can discover the group + descriptor fields needed to author an InstanceType.
+// read-only (get, list and watch) by the aggregated apiserver: there is no backing CRD and no
+// controller, so an administrator can discover the group + descriptor fields needed to author
+// an InstanceType. Get resolves a single flavor by name against the same aggregated list.
 //
 // +genclient
 // +genclient:nonNamespaced
-// +genclient:onlyVerbs=list
+// +genclient:onlyVerbs=get,list,watch
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +k8s:apireg-gen:resource:scope="Cluster",categories=["gpustack"],shortName=["instypeflavor"]
 message InstanceTypeFlavor {

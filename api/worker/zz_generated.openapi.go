@@ -1437,7 +1437,7 @@ func schema_gpustack_api_worker_v1_InstanceTypeFlavor(ref common.ReferenceCallba
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeFlavor is an aggregated, read-only projection over the operator-owned Kueue ResourceFlavors — the catalog of hardware groups an InstanceType can be built on. Each distinct pool (accelerated or generic CPU-only) surfaces as one InstanceTypeFlavor, parsed from the flavor's note.gpustack.ai/* annotations, deduplicated, and sorted. It is served list-only by the aggregated apiserver: there is no backing CRD and no controller, so an administrator can discover the group + descriptor fields needed to author an InstanceType.",
+				Description: "InstanceTypeFlavor is an aggregated, read-only projection over the operator-owned Kueue ResourceFlavors — the catalog of hardware groups an InstanceType can be built on. Each distinct pool (accelerated or generic CPU-only) surfaces as one InstanceTypeFlavor, parsed from the flavor's note.gpustack.ai/* annotations, deduplicated, and sorted. It is served read-only (get, list and watch) by the aggregated apiserver: there is no backing CRD and no controller, so an administrator can discover the group + descriptor fields needed to author an InstanceType. Get resolves a single flavor by name against the same aggregated list.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {

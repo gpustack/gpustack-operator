@@ -13,6 +13,7 @@ import (
 	workerv1 "gpustack.ai/gpustack/api/worker/v1"
 	scheme "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	watch "k8s.io/apimachinery/pkg/watch"
 	gentype "k8s.io/client-go/gentype"
 )
 
@@ -24,7 +25,9 @@ type InstanceTypeFlavorsGetter interface {
 
 // InstanceTypeFlavorInterface has methods to work with InstanceTypeFlavor resources.
 type InstanceTypeFlavorInterface interface {
+	Get(ctx context.Context, name string, opts metav1.GetOptions) (*workerv1.InstanceTypeFlavor, error)
 	List(ctx context.Context, opts metav1.ListOptions) (*workerv1.InstanceTypeFlavorList, error)
+	Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error)
 	InstanceTypeFlavorExpansion
 }
 
