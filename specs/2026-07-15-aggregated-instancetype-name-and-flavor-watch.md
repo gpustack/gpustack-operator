@@ -1,6 +1,6 @@
 # Spec: Spec-Derived Aggregated InstanceType Naming & InstanceTypeFlavor Watch
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -204,7 +204,7 @@ independent build but is required for Task 4 at runtime; **Task 4 (gateway watch
 (compile) + Task 3 (runtime). **No PoC needed** — the apiserver synthetic watch is proven by
 `SettingHandler.OnWatch`, the gateway watch by the existing `InstanceType` watch path.
 
-- [ ] **Task 1 — Spec-derived aggregated `InstanceType` name (Track A; `helper.go`, `helper_test.go`).**
+- [x] **Task 1 — Spec-derived aggregated `InstanceType` name (Track A; `helper.go`, `helper_test.go`).**
   - Add self-contained `buildAggregatedInstanceTypeName(spec)` (strip `Gi` from ram/localStorage;
     accelerated vs non-accelerated templates; non-accelerated omits `${acceleratorGroup}` and `${cpu}c`).
   - Replace both `funcx.Ternary(...)` sites (`helper.go:286` Next, `:697` Handle); drop the now-orphaned
