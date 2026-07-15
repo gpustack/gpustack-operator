@@ -79,7 +79,7 @@ done
 #    upgrade), drain it gracefully first — set StopPolicy=HoldAndDrain so Kueue evicts the admitted
 #    workloads and releases the kueue.x-k8s.io/resource-in-use finalizer on its own, then delete once
 #    drained. This mirrors the operator's own InstanceType retirement
-#    (pkg/worker/controllers/worker/instancetype.go: HoldAndDrain -> wait !hasReserved -> delete).
+#    (pkg/worker/controllers/worker/instance_type.go: HoldAndDrain -> wait !hasReserved -> delete).
 #    Empty queues skip straight to delete (no needless wait). NOTE: draining EVICTS those workloads;
 #    because the queue names changed they must be re-created under the new pool's queue.
 echo "[migrate] (2/4) orphaned ClusterQueues (drain first if they still hold workloads)"
