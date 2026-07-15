@@ -1,6 +1,6 @@
 # Spec: Spec-Derived Aggregated InstanceType Naming & InstanceTypeFlavor Watch
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -78,10 +78,12 @@ rather than poll-only.
 2. **`InstanceTypeFlavor` verb-level watch.** The API marker becomes
    `+genclient:onlyVerbs=get,list,watch`; after `make generate`, `InstanceTypeFlavorInterface` exposes
    `Watch`, and discovery advertises `watch`. (`get` is required because `lister-gen` emits a lister only
-   for a `list`+`get` type, and the `list`+`watch`-triggered `informer-gen` output depends on that lister;
-   the apiserver itself still serves only `list`+`watch`, so the extra client `Get` is unused.)
-   - AC: the generated client compiles with `Watch`; the extension apiserver returns a watch stream (not
-     `405`).
+   for a `list`+`get` type, and the `list`+`watch`-triggered `informer-gen` output depends on that lister.
+   The handler also implements a read-only `OnGet` — list-then-filter by name, returning the first match
+   in the deterministic sort order since a group-derived flavor name is not guaranteed unique — so the
+   advertised `get` is honest rather than a `405`.)
+   - AC: the generated client compiles with `Watch` and `Get`; the extension apiserver returns a watch
+     stream (not `405`) and Get resolves a flavor by name.
 3. **Extension-apiserver synthetic watch.** `InstanceTypeFlavorHandler` implements `rest.Watcher` via
    `WithListWatch`; `OnWatch` watches operator-owned `ResourceFlavor`s (reusing the existing
    label-selector conversion + `DeletionTimestamp` skip + `cpuAware`), and emits deduplicated
