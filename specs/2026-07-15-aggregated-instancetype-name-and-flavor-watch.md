@@ -129,8 +129,24 @@ rather than poll-only.
   client that keys by name → *Mitigation:* in practice `acceleratorGroup`/`generalGroup` imply those
   descriptors, so collisions are unlikely; flagged as an Open Question if strict uniqueness is required.
 - **Synthetic-watch correctness** (dedup: an RF delete must not drop a flavor other RFs still back) →
-  *Mitigation:* recompute-and-diff the derived set per event (RF/flavor counts are tiny) or maintain a
-  per-spec backing-RF count; table-driven tests for add-dup / partial-delete / last-delete.
+  *Mitigation:* maintain a per-spec backing-RF count (`instanceTypeFlavorWatchState`); table-driven tests
+  for add-dup / partial-delete / last-delete / move / draining.
+- **RV-dedup drops a co-versioned event** — a single RF event can yield two flavor events (a spec-change
+  *move*: DELETED old + ADDED new) sharing the backing RF's resource version, and the outer
+  `ListWatchOperation.Watch` wrapper drops a non-delete event whose version is not strictly newer → the
+  ADDED would be silently lost until a relist. *Mitigation:* emit the ADDED first (it wins the version
+  swap) and stamp every synthetic DELETED with a `DeletionTimestamp` (the wrapper passes deletes
+  regardless of version). Note the shared wrapper has the same latent same-version drop for any
+  multi-emit handler (e.g. `SettingHandler` on a bulk Secret write); a wrapper-level fix is out of scope
+  here (would change shared behavior — "ask first").
+- **List/watch not resource-version coherent** — `OnWatch` seeds the multiset from a fresh
+  `ResourceFlavor` list, then starts the upstream watch from the caller's options rather than pinning
+  it to that list's `ResourceVersion`; a `ResourceFlavor` changed in the seed→watch window can be
+  missed (no synthetic RV is threaded through the list/watch contract, and there is no relist). This
+  is identical to the mirrored `SettingHandler.OnWatch` precedent. *Mitigation:* accepted as-is — a
+  proper fix threads the backing list RV through the shared synthetic list/watch + RV-dedup wrapper
+  contract (shared behavior across handlers), which is out of scope here ("ask first"); a client
+  reconnect re-derives, and the window is small.
 - **`cpuAware` changes mid-watch** could drift the derived set from a long-lived stream → *Mitigation:*
   read at watch start (as `OnList` does); a client reconnect re-derives; documented caveat.
 - **Watch load** — a live RF watch per flavor-watch client → *Mitigation:* one shared upstream RF watch
@@ -233,7 +249,7 @@ independent build but is required for Task 4 at runtime; **Task 4 (gateway watch
   - **Verify:** `make generate` (idempotent on re-run — confirmed); `git status` (only expected regen);
     `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build -tags "goccy netgo" ./...` (confirmed).
 
-- [ ] **Task 3 — Extension-apiserver synthetic watch (Track B; `pkg/worker/extensionapis/worker/instance_type_flavor.go` + `_test.go`).**
+- [x] **Task 3 — Extension-apiserver synthetic watch (Track B; `pkg/worker/extensionapis/worker/instance_type_flavor.go` + `_test.go`).**
   - Add `Client ctrlcli.WithWatch` (`opts.Manager.GetClient()`); switch `ListOperation` →
     `WithListWatch(tc, h)`; assert `rest.Watcher`.
   - Implement `OnWatch`: index the current flavors (reuse `OnList`), watch the operator-owned
