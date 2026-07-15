@@ -4,6 +4,14 @@ variable "region" {
   default     = "us-east-1"
 }
 
+variable "ssh_public_key" {
+  # Registered as the nodes' EC2 key pair for SSH access (the node security group
+  # already opens port 22). pathexpand() handles the leading "~".
+  description = "Path to the SSH public key registered as the EC2 key pair for node access."
+  type        = string
+  default     = "~/.ssh/id_rsa.pub"
+}
+
 variable "vpc_cidr" {
   description = "CIDR block for the VPC"
   type        = string

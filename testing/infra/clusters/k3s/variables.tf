@@ -70,3 +70,31 @@ variable "flannel_backend" {
     error_message = "flannel_backend must be one of: vxlan, host-gw, wireguard-native, none."
   }
 }
+
+variable "cluster_cidr" {
+  # Defaults to k3s's own default. Passed to every server as --cluster-cidr;
+  # agents inherit it from the server. Also scopes the post-uninstall route
+  # flush that clears stale flannel host-gw routes, so a custom value stays
+  # consistent between the running pod network and the cleanup.
+  description = "Pod (cluster) network CIDR, passed to k3s servers as --cluster-cidr. Comma-separate two CIDRs for dual-stack."
+  type        = string
+  default     = "10.42.0.0/16"
+
+  validation {
+    condition     = alltrue([for c in split(",", var.cluster_cidr) : can(cidrhost(c, 0))])
+    error_message = "cluster_cidr must be a CIDR, or comma-separated CIDRs for dual-stack (e.g. '10.42.0.0/16')."
+  }
+}
+
+variable "service_cidr" {
+  # Defaults to k3s's own default. Passed to every server as --service-cidr;
+  # agents inherit it from the server.
+  description = "Service network CIDR, passed to k3s servers as --service-cidr. Comma-separate two CIDRs for dual-stack."
+  type        = string
+  default     = "10.43.0.0/16"
+
+  validation {
+    condition     = alltrue([for c in split(",", var.service_cidr) : can(cidrhost(c, 0))])
+    error_message = "service_cidr must be a CIDR, or comma-separated CIDRs for dual-stack (e.g. '10.43.0.0/16')."
+  }
+}
