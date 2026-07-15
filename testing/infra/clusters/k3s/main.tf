@@ -49,6 +49,8 @@ resource "null_resource" "server_init" {
     key_path        = pathexpand(var.ssh_private_key)
     version         = var.release
     flannel_backend = var.flannel_backend
+    cluster_cidr    = var.cluster_cidr
+    service_cidr    = var.service_cidr
   }
 
   connection {
@@ -69,7 +71,14 @@ resource "null_resource" "server_init" {
       # Destructive by design — this module owns its target hosts.
       "if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; fi",
       "if [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh; fi",
-      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --cluster-init --flannel-backend ${var.flannel_backend} --tls-san ${local.first_server.host}",
+      # k3s-uninstall drops cni0/flannel.1 but not flannel's host-gw routes, which
+      # live on the physical NIC and survive it. A re-apply that reassigns pod CIDRs
+      # (e.g. swapped server/agent roles) would otherwise inherit stale routes that
+      # send a node's own pod subnet to its peer and black-hole pod traffic. Flush
+      # the routes under the configured cluster CIDR (var.cluster_cidr, split for
+      # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
+      "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
+      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${local.first_server.host}",
     ]
   }
 
@@ -81,6 +90,10 @@ resource "null_resource" "server_init" {
 
     inline = [
       "sudo /usr/local/bin/k3s-uninstall.sh",
+      # Also drop flannel's leftover host-gw pod-CIDR routes (see the reclaim step)
+      # so destroy leaves the node's routing table clean for any later re-provision.
+      # Destroy provisioners may reference only self, so read the CIDR off triggers.
+      "for c in $(echo '${self.triggers.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
     ]
   }
 }
@@ -101,6 +114,8 @@ resource "null_resource" "server_join" {
     version         = var.release
     server          = local.server_url
     flannel_backend = var.flannel_backend
+    cluster_cidr    = var.cluster_cidr
+    service_cidr    = var.service_cidr
   }
 
   connection {
@@ -116,8 +131,15 @@ resource "null_resource" "server_join" {
       # Reclaim the host before joining (see server_init).
       "if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; fi",
       "if [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh; fi",
+      # k3s-uninstall drops cni0/flannel.1 but not flannel's host-gw routes, which
+      # live on the physical NIC and survive it. A re-apply that reassigns pod CIDRs
+      # (e.g. swapped server/agent roles) would otherwise inherit stale routes that
+      # send a node's own pod subnet to its peer and black-hole pod traffic. Flush
+      # the routes under the configured cluster CIDR (var.cluster_cidr, split for
+      # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
+      "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
       "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/6443) 2>/dev/null; do sleep 3; done'",
-      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --tls-san ${each.value.host}",
+      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${each.value.host}",
     ]
   }
 
@@ -127,6 +149,10 @@ resource "null_resource" "server_join" {
 
     inline = [
       "sudo /usr/local/bin/k3s-uninstall.sh",
+      # Also drop flannel's leftover host-gw pod-CIDR routes (see the reclaim step)
+      # so destroy leaves the node's routing table clean for any later re-provision.
+      # Destroy provisioners may reference only self, so read the CIDR off triggers.
+      "for c in $(echo '${self.triggers.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
     ]
   }
 }
@@ -146,6 +172,9 @@ resource "null_resource" "agent" {
     # track the servers instead of only the first server being reinstalled.
     version = var.release
     server  = local.server_url
+    # Tracked so this agent re-provisions when the pod network changes, and so the
+    # destroy-time route flush can read the CIDR off self.triggers.
+    cluster_cidr = var.cluster_cidr
   }
 
   connection {
@@ -161,6 +190,13 @@ resource "null_resource" "agent" {
       # Reclaim the host before joining (see server_init).
       "if [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo /usr/local/bin/k3s-uninstall.sh; fi",
       "if [ -x /usr/local/bin/k3s-agent-uninstall.sh ]; then sudo /usr/local/bin/k3s-agent-uninstall.sh; fi",
+      # k3s-uninstall drops cni0/flannel.1 but not flannel's host-gw routes, which
+      # live on the physical NIC and survive it. A re-apply that reassigns pod CIDRs
+      # (e.g. swapped server/agent roles) would otherwise inherit stale routes that
+      # send a node's own pod subnet to its peer and black-hole pod traffic. Flush
+      # the routes under the configured cluster CIDR (var.cluster_cidr, split for
+      # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
+      "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
       "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/6443) 2>/dev/null; do sleep 3; done'",
       "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' K3S_URL='${local.server_url}' sh -s - agent",
     ]
@@ -172,6 +208,10 @@ resource "null_resource" "agent" {
 
     inline = [
       "sudo /usr/local/bin/k3s-agent-uninstall.sh",
+      # Also drop flannel's leftover host-gw pod-CIDR routes (see the reclaim step)
+      # so destroy leaves the node's routing table clean for any later re-provision.
+      # Destroy provisioners may reference only self, so read the CIDR off triggers.
+      "for c in $(echo '${self.triggers.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
     ]
   }
 }

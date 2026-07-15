@@ -63,7 +63,7 @@ module "vpc" {
 
 resource "aws_key_pair" "accessor" {
   key_name   = "${local.eks_name}-accessor"
-  public_key = file("~/.ssh/id_rsa.pub")
+  public_key = file(pathexpand(var.ssh_public_key))
 }
 
 locals {
