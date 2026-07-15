@@ -97,12 +97,12 @@ locals {
       }
     },
     {
-      for idx, it in var.eks_gpu_instance_types :
-      "gpu-${idx}" => {
+      for name, types in var.eks_gpu_instance_types :
+      "gpu-${name}" => {
         ami_type       = "AL2023_x86_64_NVIDIA"
         max_size       = 1
         min_size       = 0
-        instance_types = it
+        instance_types = types
         disk_size      = 100
         key_name       = aws_key_pair.accessor.key_name
         network_interfaces = [
@@ -258,64 +258,25 @@ module "eks" {
 resource "null_resource" "update_kubeconfig" {
   depends_on = [module.eks]
 
+  # Stash the connection details in triggers so the destroy provisioner (which
+  # may only reference self) can strip the same context/cluster/user it added.
+  triggers = {
+    region  = var.region
+    name    = module.eks.cluster_name
+    arn     = module.eks.cluster_arn
+    context = module.eks.cluster_name
+  }
+
   provisioner "local-exec" {
-    command = "aws eks --region ${var.region} update-kubeconfig --name ${module.eks.cluster_name} --alias ${module.eks.cluster_name} --user-alias ${module.eks.cluster_name}"
+    command = "aws eks --region ${self.triggers.region} update-kubeconfig --name ${self.triggers.name} --alias ${self.triggers.context} --user-alias ${self.triggers.context}"
   }
-}
 
-provider "helm" {
-  kubernetes = {
-    host                   = module.eks.cluster_endpoint
-    cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
-    exec = {
-      api_version = "client.authentication.k8s.io/v1beta1"
-      command     = "aws"
-      args        = ["eks", "get-token", "--region", var.region, "--cluster-name", module.eks.cluster_name]
-    }
+  # On destroy, remove the context (named by --alias), the cluster entry (named
+  # by its ARN), and the user (named by --user-alias) from ~/.kube/config.
+  # on_failure=continue keeps re-destroys idempotent when the entries are gone.
+  provisioner "local-exec" {
+    when       = destroy
+    on_failure = continue
+    command    = "kubectl config delete-context '${self.triggers.context}' || true; kubectl config delete-cluster '${self.triggers.arn}' || true; kubectl config unset 'users.${self.triggers.context}' || true"
   }
-}
-
-locals {
-  # Split the test image reference "<repository>:<tag>" into the separate fields
-  # expected by the chart's "image" values. Falls back to empty fields when no
-  # image is provided.
-  gpustack_operator_image = length(var.image) > 0 ? try(regex("^(?P<repository>.+):(?P<tag>[^:/]+)$", var.image), { repository = var.image, tag = "" }) : { repository = "", tag = "" }
-}
-
-resource "helm_release" "gpustack_operator" {
-  count      = length(var.image) > 0 ? 1 : 0
-  depends_on = [null_resource.update_kubeconfig]
-
-  name             = "gpustack-operator"
-  namespace        = "gpustack-system"
-  create_namespace = true
-
-  chart             = "${path.module}/../../../../deploy/gpustack-operator/chart"
-  dependency_update = true
-
-  # Match the previous behaviour: do not block apply on the worker rollout, as
-  # the operator installs the in-cluster applications after it starts.
-  wait    = false
-  timeout = 600
-
-  set = [
-    {
-      name  = "image.repository"
-      value = local.gpustack_operator_image.repository
-    },
-    {
-      name  = "image.tag"
-      value = local.gpustack_operator_image.tag
-    },
-    {
-      name  = "image.pullPolicy"
-      value = "Always"
-    },
-    # The EKS module installs the cert-manager addon, so let the chart issue the
-    # worker webhook certificate through cert-manager.
-    {
-      name  = "worker.certmanager.enabled"
-      value = "true"
-    }
-  ]
 }

@@ -29,16 +29,13 @@ variable "eks_cpu_instance_types" {
 }
 
 variable "eks_gpu_instance_types" {
-  description = "Instance types for EKS GPU node group list, check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
-  type        = list(list(string))
-  default     = [["g4dn.xlarge", "g4dn.12xlarge"]]
-  # default     = [["g4dn.xlarge", "g5.xlarge"], ["g5.xlarge", "g6.xlarge"], ["g4dn.12xlarge", "g5.12xlarge"]]
-  # default     = [["g4dn.xlarge", "g4dn.12xlarge", "g6.xlarge"], ["g4dn.12xlarge", "g5.12xlarge", "g6.12xlarge"]]
-  # default     = [["g4dn.xlarge", "g4dn.12xlarge"], ["g5.xlarge", "g5.12xlarge"], ["g6.xlarge", "g6.12xlarge"]]
-}
-
-variable "image" {
-  description = "Container image to deploy for testing"
-  type        = string
-  default     = ""
+  # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
+  # Adding a key is a +create only; editing a key's instance-type list replaces
+  # just that group, never rotating the others.
+  description = "Instance types per EKS GPU node group, keyed by group name; check with https://docs.aws.amazon.com/dlami/latest/devguide/gpu.html and https://aws.amazon.com/ec2/pricing/on-demand/"
+  type        = map(list(string))
+  default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"] }
+  # default     = { xlarge = ["g4dn.xlarge", "g5.xlarge"], xlarge-alt = ["g5.xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge"] }
+  # default     = { small = ["g4dn.xlarge", "g4dn.12xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge", "g6.12xlarge"] }
+  # default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"], g5 = ["g5.xlarge", "g5.12xlarge"], g6 = ["g6.xlarge", "g6.12xlarge"] }
 }
