@@ -62,7 +62,7 @@ kubectl -n gpustack-system rollout status deployment/gpustack-operator-worker
 ```
 
 Uninstall (add `--set cleanupOnUninstall=true` at install time, or see the
-[migration guide](./docs/migration/v0.5-to-v0.6.md), to also remove runtime-installed leftovers):
+[migration guide](./docs/migration/from-v0.5.md), to also remove runtime-installed leftovers):
 
 ```bash
 helm uninstall gpustack-operator --namespace gpustack-system
@@ -89,7 +89,7 @@ worked example cluster.
 - [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
 - [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
-- [Migration v0.5 → v0.6](./docs/migration/v0.5-to-v0.6.md) — upgrading an existing install across the scheduling-chain refactor.
+- [Migrating from v0.5.x](./docs/migration/from-v0.5.md) — upgrading an existing install to a higher version across the scheduling-chain refactor.
 
 ## License
 
