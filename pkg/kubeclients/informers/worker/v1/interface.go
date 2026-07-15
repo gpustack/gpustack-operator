@@ -27,6 +27,8 @@ type Interface interface {
 	InstanceSSHPublicKeys() InstanceSSHPublicKeyInformer
 	// InstanceTypes returns a InstanceTypeInformer.
 	InstanceTypes() InstanceTypeInformer
+	// InstanceTypeFlavors returns a InstanceTypeFlavorInformer.
+	InstanceTypeFlavors() InstanceTypeFlavorInformer
 }
 
 type version struct {
@@ -73,4 +75,9 @@ func (v *version) InstanceSSHPublicKeys() InstanceSSHPublicKeyInformer {
 // InstanceTypes returns a InstanceTypeInformer.
 func (v *version) InstanceTypes() InstanceTypeInformer {
 	return &instanceTypeInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
+}
+
+// InstanceTypeFlavors returns a InstanceTypeFlavorInformer.
+func (v *version) InstanceTypeFlavors() InstanceTypeFlavorInformer {
+	return &instanceTypeFlavorInformer{factory: v.factory, tweakListOptions: v.tweakListOptions}
 }

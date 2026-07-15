@@ -50,3 +50,7 @@ type InstanceSSHPublicKeyNamespaceListerExpansion interface{}
 // InstanceTypeListerExpansion allows custom methods to be added to
 // InstanceTypeLister.
 type InstanceTypeListerExpansion interface{}
+
+// InstanceTypeFlavorListerExpansion allows custom methods to be added to
+// InstanceTypeFlavorLister.
+type InstanceTypeFlavorListerExpansion interface{}

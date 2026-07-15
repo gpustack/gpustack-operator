@@ -76,8 +76,10 @@ rather than poll-only.
      spec.
    - AC3: A CPU-only (non-accelerated) item's name omits both `${acceleratorGroup}` and `${cpu}c`.
 2. **`InstanceTypeFlavor` verb-level watch.** The API marker becomes
-   `+genclient:onlyVerbs=list,watch`; after `make generate`, `InstanceTypeFlavorInterface` exposes
-   `Watch`, and discovery advertises `watch`.
+   `+genclient:onlyVerbs=get,list,watch`; after `make generate`, `InstanceTypeFlavorInterface` exposes
+   `Watch`, and discovery advertises `watch`. (`get` is required because `lister-gen` emits a lister only
+   for a `list`+`get` type, and the `list`+`watch`-triggered `informer-gen` output depends on that lister;
+   the apiserver itself still serves only `list`+`watch`, so the extra client `Get` is unused.)
    - AC: the generated client compiles with `Watch`; the extension apiserver returns a watch stream (not
      `405`).
 3. **Extension-apiserver synthetic watch.** `InstanceTypeFlavorHandler` implements `rest.Watcher` via
@@ -156,7 +158,8 @@ and pass). All Go commands use `GODEBUG=gotypesalias=0 CGO_ENABLED=1` and build 
 
 ### Project Structure
 - `api/worker/v1/instance_type_flavor.go` — **edit (Track B):** `+genclient:onlyVerbs=list` →
-  `+genclient:onlyVerbs=list,watch`; refresh the type doc to drop "list-only".
+  `+genclient:onlyVerbs=get,list,watch` (`get` unlocks the lister the generated informer depends on);
+  refresh the type doc to drop "list-only".
 - generated client/apiservice (`pkg/kubeclients/.../worker/v1/instancetypeflavor.go`, `zz_generated.*`) —
   **regenerated** by `make generate`.
 - `pkg/worker/extensionapis/worker/instance_type_flavor.go` — **edit (Track B):** add a
@@ -220,12 +223,15 @@ independent build but is required for Task 4 at runtime; **Task 4 (gateway watch
   - **Verify:** `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -tags "goccy netgo" ./pkg/workergateway/service/...`;
     `make lint`.
 
-- [ ] **Task 2 — `InstanceTypeFlavor` watch verb + client regen (Track B; `api/worker/v1/instance_type_flavor.go` + regenerated files).**
-  - Change `+genclient:onlyVerbs=list` → `+genclient:onlyVerbs=list,watch`; refresh the type doc (drop
-    "list-only" / "no Watch"). Run `make generate`.
+- [x] **Task 2 — `InstanceTypeFlavor` watch verb + client regen (Track B; `api/worker/v1/instance_type_flavor.go` + regenerated files).**
+  - Change `+genclient:onlyVerbs=list` → `+genclient:onlyVerbs=get,list,watch` (`get` is required so
+    `lister-gen` emits the lister that the `watch`-triggered generated informer references — without it the
+    new informer fails to compile); refresh the type doc (drop "list-only" / "no Watch"). Run `make generate`.
   - **Acceptance:** `InstanceTypeFlavorInterface` exposes `Watch`; the tree compiles; the regen diff is
-    limited to this type's client/lister/informer/apiservice.
-  - **Verify:** `make generate` (idempotent on re-run); `git status` (only expected regen); `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build -tags "goccy netgo" ./...`.
+    limited to this type's client/lister/informer/apiservice (plus the doc-comment churn in
+    `generated.proto` / `zz_generated.openapi.go`).
+  - **Verify:** `make generate` (idempotent on re-run — confirmed); `git status` (only expected regen);
+    `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build -tags "goccy netgo" ./...` (confirmed).
 
 - [ ] **Task 3 — Extension-apiserver synthetic watch (Track B; `pkg/worker/extensionapis/worker/instance_type_flavor.go` + `_test.go`).**
   - Add `Client ctrlcli.WithWatch` (`opts.Manager.GetClient()`); switch `ListOperation` →
