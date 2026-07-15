@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/tools/cache"
+
+	worker "gpustack.ai/gpustack/api/worker/v1"
 )
 
 // TestWorkerSubscribe_BlocksWithoutInformers guards the lifecycle fix for a worker subscribed with
@@ -41,4 +43,13 @@ func TestWorkerSubscribe_BlocksWithoutInformers(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Subscribe did not return after cancel")
 	}
+}
+
+// TestDefaultInformerFactories_IncludesInstanceTypeFlavor guards the wiring the flavor watch depends
+// on: a worker subscribed with the InstanceTypeFlavor GVK must get a watch-backed informer, not just
+// the live-list fallback (which delivers no watch events).
+func TestDefaultInformerFactories_IncludesInstanceTypeFlavor(t *testing.T) {
+	gvk := worker.SchemeGroupVersionKind("InstanceTypeFlavor")
+	_, ok := defaultInformerFactories[gvk]
+	assert.True(t, ok, "InstanceTypeFlavor must have an informer factory registered")
 }

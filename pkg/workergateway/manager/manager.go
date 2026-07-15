@@ -298,8 +298,8 @@ func (wm *_Manager) IterateWorkers(
 		wm.RUnlock()
 
 		// Objects come from the informer cache when the worker has one for this GVK, or from a live
-		// per-cluster List (defaultListerFactories) as a read-through proxy when it does not — for a
-		// list-only GVK, or one the worker was subscribed without. A GVK backed by neither is skipped.
+		// per-cluster List (defaultListerFactories) as a read-through proxy when it does not — a GVK
+		// the worker was subscribed without. A GVK backed by neither is skipped.
 		var objs []any
 		switch {
 		case hasInformer:
@@ -507,6 +507,9 @@ var defaultInformerFactories = map[schema.GroupVersionKind]func(kubernetes.Inter
 	worker.SchemeGroupVersionKind("Devices"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
 		return NewSharedIndexInformerWithOptions(cli.WorkerV1().Devices(), &worker.Devices{}, p)
 	},
+	worker.SchemeGroupVersionKind("InstanceTypeFlavor"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
+		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstanceTypeFlavors(), &worker.InstanceTypeFlavor{}, p)
+	},
 	worker.SchemeGroupVersionKind("InstanceType"): func(cli kubernetes.Interface, p time.Duration) cache.SharedIndexInformer {
 		return NewSharedIndexInformerWithOptions(cli.WorkerV1().InstanceTypes(), &worker.InstanceType{}, p)
 	},
@@ -553,9 +556,8 @@ func listAll[T runtime.Object](ctx context.Context, lister _RuntimeObjectLister[
 }
 
 // defaultListerFactories maps each worker GVK to its live per-cluster List, used by IterateWorkers
-// as a read-through proxy whenever a worker has no informer for the requested GVK. This covers both
-// list-only GVKs that can never have an informer (no Watch, e.g. InstanceTypeFlavor) and
-// informer-backed GVKs on a worker that was subscribed without them.
+// as a read-through proxy whenever a worker has no informer for the requested GVK — an
+// informer-backed GVK on a worker that was subscribed without it (an empty or partial GVK set).
 var defaultListerFactories = map[schema.GroupVersionKind]func(context.Context, kubernetes.Interface, string) ([]any, error){
 	worker.SchemeGroupVersionKind("Devices"): func(ctx context.Context, cli kubernetes.Interface, _ string) ([]any, error) {
 		return listAll(ctx, cli.WorkerV1().Devices())

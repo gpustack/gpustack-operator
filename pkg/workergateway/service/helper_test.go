@@ -1500,3 +1500,259 @@ func TestListAggregateInstanceTypeFlavors_Result(t *testing.T) {
 		})
 	}
 }
+
+func buildFlavorState(t *testing.T, seeds ...flavorSeed) AggregatedInstanceTypeFlavorList {
+	t.Helper()
+	op := OpListAggregateInstanceTypeFlavors()
+	for _, s := range seeds {
+		require.NoError(t, op.Next(s.cluster, s.obj))
+	}
+	return op.Result(false)
+}
+
+// findFlavorItem locates an aggregated item by its grouping Spec. Names are not unique (two pools
+// differing only in a non-name spec field share a name), so the Spec is the reliable key.
+func findFlavorItem(state AggregatedInstanceTypeFlavorList, spec worker.InstanceTypeFlavorSpec) *AggregatedInstanceTypeFlavor {
+	for i := range state.Items {
+		if state.Items[i].Spec.InstanceTypeFlavorSpec == spec {
+			return &state.Items[i]
+		}
+	}
+	return nil
+}
+
+func TestHandleClusterInstanceTypeFlavor(t *testing.T) {
+	t.Run("wraps flavor with cluster and clears ManagedFields", func(t *testing.T) {
+		h := OpHandleClusterInstanceTypeFlavor()
+		flavor := newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())
+		flavor.ManagedFields = []meta.ManagedFieldsEntry{{Manager: "worker"}}
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-a",
+			Object:  flavor,
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventAdded, evts[0].Type)
+		item, ok := evts[0].Object.(*ClusterInstanceTypeFlavor)
+		require.True(t, ok, "Object must be *ClusterInstanceTypeFlavor, got %T", evts[0].Object)
+		assert.Equal(t, "cluster-a", item.Cluster)
+		assert.Equal(t, "gpustack-nvidia-a10g", item.Name)
+		assert.Nil(t, item.ManagedFields)
+	})
+
+	t.Run("DeletionTimestamp forces a Deleted event", func(t *testing.T) {
+		h := OpHandleClusterInstanceTypeFlavor()
+		flavor := newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())
+		now := meta.NewTime(time.Now())
+		flavor.DeletionTimestamp = &now
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  flavor,
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventDeleted, evts[0].Type)
+	})
+
+	t.Run("nil object passes through untouched (delete-all-cluster)", func(t *testing.T) {
+		h := OpHandleClusterInstanceTypeFlavor()
+		evt := &manager.WorkerEvent{Type: manager.WorkerEventDeleted, Cluster: "cluster-a", Object: nil}
+
+		evts := h.Handle(evt)
+
+		require.Len(t, evts, 1)
+		assert.Same(t, evt, evts[0])
+	})
+
+	t.Run("rejects a non-flavor object", func(t *testing.T) {
+		h := OpHandleClusterInstanceTypeFlavor()
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-a",
+			Object:  &worker.InstanceType{},
+		})
+		assert.Nil(t, evts)
+	})
+}
+
+func TestHandleAggregatedInstanceTypeFlavor(t *testing.T) {
+	t.Run("add brand-new flavor emits Added with *AggregatedInstanceTypeFlavor", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-a",
+			Object:  newFlavor("gpustack-nvidia-a10g", flavorSpecA10G()),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventAdded, evts[0].Type)
+		item, ok := evts[0].Object.(*AggregatedInstanceTypeFlavor)
+		require.True(t, ok, "Added Object must be *AggregatedInstanceTypeFlavor, got %T", evts[0].Object)
+		assert.Equal(t, "gpustack-nvidia-a10g", item.Name)
+		assert.Equal(t, []string{"cluster-a"}, item.Spec.Clusters)
+	})
+
+	t.Run("second cluster with same spec emits Modified with sorted clusters", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-b", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-a",
+			Object:  newFlavor("gpustack-nvidia-a10g", flavorSpecA10G()),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+		item := findFlavorItem(h.state, flavorSpecA10G())
+		require.NotNil(t, item)
+		assert.Equal(t, []string{"cluster-a", "cluster-b"}, item.Spec.Clusters)
+	})
+
+	t.Run("duplicate contribution from same cluster is a no-op", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  newFlavor("gpustack-nvidia-a10g", flavorSpecA10G()),
+		})
+
+		assert.Empty(t, evts)
+		require.Len(t, h.state.Items, 1)
+		assert.Equal(t, []string{"cluster-a"}, h.state.Items[0].Spec.Clusters)
+	})
+
+	t.Run("delete one of several clusters emits Modified", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+			flavorSeed{cluster: "cluster-b", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  newFlavor("gpustack-nvidia-a10g", flavorSpecA10G()),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+		item := findFlavorItem(h.state, flavorSpecA10G())
+		require.NotNil(t, item)
+		assert.Equal(t, []string{"cluster-b"}, item.Spec.Clusters)
+	})
+
+	t.Run("delete last cluster emits Deleted with the flavor name", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-tesla-t4", flavorSpecTeslaT4())},
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  newFlavor("gpustack-nvidia-a10g", flavorSpecA10G()),
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventDeleted, evts[0].Type)
+		deleted, ok := evts[0].Object.(*AggregatedInstanceTypeFlavor)
+		require.True(t, ok)
+		assert.Equal(t, "gpustack-nvidia-a10g", deleted.Name)
+		assert.Equal(t, flavorSpecA10G(), deleted.Spec.InstanceTypeFlavorSpec,
+			"DELETED must carry the grouping Spec so consumers can disambiguate collidable names")
+		assert.Equal(t, []string{}, deleted.Spec.Clusters,
+			"DELETED carries an empty, non-nil cluster list so it serializes as [] not null")
+		assert.Nil(t, findFlavorItem(h.state, flavorSpecA10G()))
+		assert.NotNil(t, findFlavorItem(h.state, flavorSpecTeslaT4()), "the other flavor must remain")
+	})
+
+	t.Run("deleting a non-existent contribution is a no-op", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-b",
+			Object:  newFlavor("gpustack-nvidia-a10g", flavorSpecA10G()),
+		})
+
+		assert.Empty(t, evts)
+		require.Len(t, h.state.Items, 1)
+	})
+
+	t.Run("Modified with DeletionTimestamp is treated as delete", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+			flavorSeed{cluster: "cluster-b", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+		))
+
+		dying := newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())
+		now := meta.NewTime(time.Now())
+		dying.DeletionTimestamp = &now
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventModified,
+			Cluster: "cluster-a",
+			Object:  dying,
+		})
+
+		require.Len(t, evts, 1)
+		assert.Equal(t, manager.WorkerEventModified, evts[0].Type)
+		item := findFlavorItem(h.state, flavorSpecA10G())
+		require.NotNil(t, item)
+		assert.Equal(t, []string{"cluster-b"}, item.Spec.Clusters)
+	})
+
+	t.Run("delete-all-cluster drops the cluster from every group it contributes to", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t,
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+			flavorSeed{cluster: "cluster-b", obj: newFlavor("gpustack-nvidia-a10g", flavorSpecA10G())},
+			flavorSeed{cluster: "cluster-a", obj: newFlavor("gpustack-cpu-only", flavorSpecCPUGroup("generic"))},
+		))
+
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventDeleted,
+			Cluster: "cluster-a",
+			Object:  nil,
+		})
+
+		// a10g keeps cluster-b (Modified); cpu-only had only cluster-a (Deleted).
+		require.Len(t, evts, 2)
+		byType := map[manager.WorkerEventType]*AggregatedInstanceTypeFlavor{}
+		for _, e := range evts {
+			item, ok := e.Object.(*AggregatedInstanceTypeFlavor)
+			require.True(t, ok)
+			byType[e.Type] = item
+		}
+		require.NotNil(t, byType[manager.WorkerEventModified])
+		assert.Equal(t, "gpustack-nvidia-a10g", byType[manager.WorkerEventModified].Name)
+		assert.Equal(t, []string{"cluster-b"}, byType[manager.WorkerEventModified].Spec.Clusters)
+		require.NotNil(t, byType[manager.WorkerEventDeleted])
+		assert.Equal(t, "gpustack-cpu-only", byType[manager.WorkerEventDeleted].Name)
+		assert.Equal(t, flavorSpecCPUGroup("generic"), byType[manager.WorkerEventDeleted].Spec.InstanceTypeFlavorSpec,
+			"DELETED must carry the grouping Spec")
+
+		assert.NotNil(t, findFlavorItem(h.state, flavorSpecA10G()))
+		assert.Nil(t, findFlavorItem(h.state, flavorSpecCPUGroup("generic")))
+	})
+
+	t.Run("rejects a non-flavor object", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceTypeFlavor(buildFlavorState(t))
+		evts := h.Handle(&manager.WorkerEvent{
+			Type:    manager.WorkerEventAdded,
+			Cluster: "cluster-a",
+			Object:  &worker.InstanceType{},
+		})
+		assert.Nil(t, evts)
+	})
+}

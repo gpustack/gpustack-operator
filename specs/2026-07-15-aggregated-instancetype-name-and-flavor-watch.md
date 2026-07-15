@@ -1,6 +1,6 @@
 # Spec: Spec-Derived Aggregated InstanceType Naming & InstanceTypeFlavor Watch
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -266,7 +266,7 @@ independent build but is required for Task 4 at runtime; **Task 4 (gateway watch
   - **Verify:** unit tests pass; manual `kubectl get instancetypeflavor -w` on a worker while a
     `ResourceFlavor` pool is added/removed.
 
-- [ ] **Task 4 — Worker-gateway flavor watch end-to-end (Track B; `manager.go`, `service.go`, `helper.go`, `helper_test.go`).**
+- [x] **Task 4 — Worker-gateway flavor watch end-to-end (Track B; `manager.go`, `service.go`, `helper.go`, `helper_test.go`).**
   - manager: add `InstanceTypeFlavor` to `defaultInformerFactories`
     (`NewSharedIndexInformerWithOptions(cli.WorkerV1().InstanceTypeFlavors(), &worker.InstanceTypeFlavor{}, p)`);
     keep the `defaultListerFactories` fallback.
