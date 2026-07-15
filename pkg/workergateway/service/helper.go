@@ -139,6 +139,203 @@ func (in *ListAggregateInstanceTypeFlavors) Result(sorted bool) AggregatedInstan
 	return in.list
 }
 
+type HandleClusterInstanceTypeFlavor struct{}
+
+func OpHandleClusterInstanceTypeFlavor() *HandleClusterInstanceTypeFlavor {
+	return &HandleClusterInstanceTypeFlavor{}
+}
+
+func (in *HandleClusterInstanceTypeFlavor) Handle(evt *manager.WorkerEvent) []*manager.WorkerEvent {
+	if evt.Object != nil {
+		flavor, ok := evt.Object.(*worker.InstanceTypeFlavor)
+		if !ok {
+			return nil
+		}
+		if flavor.DeletionTimestamp != nil {
+			evt.Type = manager.WorkerEventDeleted
+		}
+		clusterFlavor := &ClusterInstanceTypeFlavor{
+			InstanceTypeFlavor: *flavor,
+			Cluster:            evt.Cluster,
+		}
+		clusterFlavor.ManagedFields = nil
+		evt.Object = clusterFlavor
+	}
+	return []*manager.WorkerEvent{evt}
+}
+
+// HandleAggregatedInstanceTypeFlavor maintains the deduplicated, cross-cluster flavor catalog for a
+// watch stream, mirroring the OpListAggregateInstanceTypeFlavors grouping: flavors are grouped by
+// their full Spec and each group records its contributing clusters. Unlike the InstanceType stream
+// there are no tiers or candidate math — a group is created when its first cluster contributes
+// (Added), updated as clusters join or leave (Modified), and removed when its last cluster leaves
+// (Deleted).
+//
+// Each event is self-contained: the worker's flavor watch keys on the full Spec, so a spec change
+// arrives as a Deleted (carrying the old Spec) followed by an Added (the new Spec) rather than a
+// single in-place Modified. The group is therefore located from the event's own Spec, with no need
+// to track prior per-flavor membership.
+type HandleAggregatedInstanceTypeFlavor struct {
+	state AggregatedInstanceTypeFlavorList
+}
+
+func OpHandleAggregatedInstanceTypeFlavor(state AggregatedInstanceTypeFlavorList) *HandleAggregatedInstanceTypeFlavor {
+	return &HandleAggregatedInstanceTypeFlavor{
+		state: state,
+	}
+}
+
+// groupIndex returns the index of the aggregated item holding spec, or -1. The catalog is small
+// (one entry per distinct hardware pool), so a linear scan avoids an index map that item removals
+// would invalidate.
+func (in *HandleAggregatedInstanceTypeFlavor) groupIndex(spec worker.InstanceTypeFlavorSpec) int {
+	for i := range in.state.Items {
+		if in.state.Items[i].Spec.InstanceTypeFlavorSpec == spec {
+			return i
+		}
+	}
+	return -1
+}
+
+func (in *HandleAggregatedInstanceTypeFlavor) Handle(evt *manager.WorkerEvent) []*manager.WorkerEvent {
+	var evts []*manager.WorkerEvent
+
+	if evt.Type == manager.WorkerEventDeleted && evt.Object == nil {
+		// Drop the cluster from every group it contributes to. Splice deleted items in place and
+		// step the index back so a Modified event's pointer (into an earlier, unshifted slot) stays
+		// valid until the caller encodes it.
+		for i := 0; i < len(in.state.Items); i++ {
+			item := &in.state.Items[i]
+			kept := dropCluster(item.Spec.Clusters, evt.Cluster)
+			if len(kept) == len(item.Spec.Clusters) {
+				continue
+			}
+			if len(kept) == 0 {
+				deleted := deletedFlavor(item)
+				in.state.Items = append(in.state.Items[:i], in.state.Items[i+1:]...)
+				i--
+				evts = append(evts, &manager.WorkerEvent{
+					Type:   manager.WorkerEventDeleted,
+					Object: deleted,
+				})
+				continue
+			}
+			item.Spec.Clusters = kept
+			evts = append(evts, &manager.WorkerEvent{
+				Type:   manager.WorkerEventModified,
+				Object: item,
+			})
+		}
+		return evts
+	}
+
+	flavor, ok := evt.Object.(*worker.InstanceTypeFlavor)
+	if !ok {
+		return nil
+	}
+	if flavor.DeletionTimestamp != nil {
+		evt.Type = manager.WorkerEventDeleted
+	}
+
+	if evt.Type == manager.WorkerEventDeleted {
+		// The deleted flavor object carries the Spec it contributed, so its group is found directly.
+		return in.removeCluster(evt.Cluster, flavor.Spec)
+	}
+
+	// Added or Modified: ensure the cluster contributes to the flavor's group.
+	return in.addCluster(evt.Cluster, flavor.Name, flavor.Spec)
+}
+
+// addCluster records cluster as a contributor to spec's group, creating the group (Added) when it is
+// the first contributor or extending the cluster list (Modified). A cluster already present yields
+// no event. Clusters are kept sorted so the observable order is deterministic.
+func (in *HandleAggregatedInstanceTypeFlavor) addCluster(cluster, name string, spec worker.InstanceTypeFlavorSpec) []*manager.WorkerEvent {
+	idx := in.groupIndex(spec)
+	if idx == -1 {
+		in.state.Items = append(in.state.Items, AggregatedInstanceTypeFlavor{
+			Name: name,
+			Spec: AggregatedInstanceTypeFlavorSpec{
+				InstanceTypeFlavorSpec: spec,
+				Clusters:               []string{cluster},
+			},
+		})
+		return []*manager.WorkerEvent{{
+			Type:   manager.WorkerEventAdded,
+			Object: &in.state.Items[len(in.state.Items)-1],
+		}}
+	}
+
+	item := &in.state.Items[idx]
+	for _, c := range item.Spec.Clusters {
+		if c == cluster {
+			return nil
+		}
+	}
+	item.Spec.Clusters = append(item.Spec.Clusters, cluster)
+	sort.Strings(item.Spec.Clusters)
+	return []*manager.WorkerEvent{{
+		Type:   manager.WorkerEventModified,
+		Object: item,
+	}}
+}
+
+// removeCluster drops cluster from spec's group, deleting the group (Deleted) when it was the last
+// contributor or shrinking the cluster list (Modified). A cluster that was not a contributor, or an
+// unknown group, yields no event.
+func (in *HandleAggregatedInstanceTypeFlavor) removeCluster(cluster string, spec worker.InstanceTypeFlavorSpec) []*manager.WorkerEvent {
+	idx := in.groupIndex(spec)
+	if idx == -1 {
+		return nil
+	}
+
+	item := &in.state.Items[idx]
+	kept := dropCluster(item.Spec.Clusters, cluster)
+	if len(kept) == len(item.Spec.Clusters) {
+		return nil
+	}
+	if len(kept) == 0 {
+		deleted := deletedFlavor(item)
+		in.state.Items = append(in.state.Items[:idx], in.state.Items[idx+1:]...)
+		return []*manager.WorkerEvent{{
+			Type:   manager.WorkerEventDeleted,
+			Object: deleted,
+		}}
+	}
+	item.Spec.Clusters = kept
+	return []*manager.WorkerEvent{{
+		Type:   manager.WorkerEventModified,
+		Object: item,
+	}}
+}
+
+// deletedFlavor builds the payload for a DELETED event: the removed group's Name plus its grouping
+// Spec. The Spec is carried because a flavor name is derived from group identity alone and can
+// collide across distinct InstanceTypeFlavorSpecs, so Name by itself would not let a watch consumer
+// tell which group was removed. Clusters is an empty (non-nil) slice — none remain, but the field
+// has no omitempty, so a non-nil slice keeps it serializing as [] like every other event rather than
+// null. It copies the identity, so the caller may splice the source item away immediately after.
+func deletedFlavor(item *AggregatedInstanceTypeFlavor) *AggregatedInstanceTypeFlavor {
+	return &AggregatedInstanceTypeFlavor{
+		Name: item.Name,
+		Spec: AggregatedInstanceTypeFlavorSpec{
+			InstanceTypeFlavorSpec: item.Spec.InstanceTypeFlavorSpec,
+			Clusters:               []string{},
+		},
+	}
+}
+
+// dropCluster returns clusters with cluster removed, preserving order so a sorted list stays sorted.
+// The result shares no backing array with the input.
+func dropCluster(clusters []string, cluster string) []string {
+	kept := make([]string, 0, len(clusters))
+	for _, c := range clusters {
+		if c != cluster {
+			kept = append(kept, c)
+		}
+	}
+	return kept
+}
+
 // lessTierByPrimary returns whether tier i should come before tier j when sorting
 // ascending by the primary dimension: Accelerator if Spec.Acceleratable, otherwise CPU.
 // Bind as item.lessTierByPrimary and pass to sort.Slice for consistent ordering.

@@ -150,13 +150,15 @@ func (s *Service) handleUnsubscribeWorker(w http.ResponseWriter, r *http.Request
 
 // handleListInstanceTypeFlavors handles the list instance type flavors request.
 //
-// GET /instancetypeflavors?cluster=cluster1&cluster=cluster2[&aggregated=true]
+// GET /instancetypeflavors?cluster=cluster1&cluster=cluster2[&watch=true][&aggregated=true]
+// watch and aggregated are independent: either may be set without the other.
 func (s *Service) handleListInstanceTypeFlavors(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := klog.FromContext(ctx)
 
 	var req struct {
 		Clusters   []string `query:"cluster,omitempty"`
+		Watch      bool     `query:"watch,omitempty"`
 		Aggregated bool     `query:"aggregated,omitempty"`
 	}
 	_ = httpx.BindWith(r, &req, httpx.BindQuery)
@@ -172,19 +174,34 @@ func (s *Service) handleListInstanceTypeFlavors(w http.ResponseWriter, r *http.R
 			return
 		}
 
-		httpx.JSON(w, http.StatusOK, listOp.Result(true))
+		if !req.Watch {
+			httpx.JSON(w, http.StatusOK, listOp.Result(true))
+			return
+		}
+
+		// The result of listOp has transferred the ownership to watchOp,
+		// the result must not be retained or read after this point.
+		watchOp := OpHandleAggregatedInstanceTypeFlavor(listOp.Result(false))
+		s.streamResponse(w, r, req.Clusters, gvk, watchOp.Handle)
+
 		return
 	}
 
-	listOp := OpListClusterInstanceTypeFlavors()
-	err := s.Manager.IterateWorkers(ctx, req.Clusters, gvk, manager.IteratorOptions{}, listOp.Next)
-	if err != nil {
-		logger.Error(err, "iterate workers failed")
-		httpx.Error(w, http.StatusInternalServerError)
+	if !req.Watch {
+		listOp := OpListClusterInstanceTypeFlavors()
+		err := s.Manager.IterateWorkers(ctx, req.Clusters, gvk, manager.IteratorOptions{}, listOp.Next)
+		if err != nil {
+			logger.Error(err, "iterate workers failed")
+			httpx.Error(w, http.StatusInternalServerError)
+			return
+		}
+
+		httpx.JSON(w, http.StatusOK, listOp.Result())
 		return
 	}
 
-	httpx.JSON(w, http.StatusOK, listOp.Result())
+	watchOp := OpHandleClusterInstanceTypeFlavor()
+	s.streamResponse(w, r, req.Clusters, gvk, watchOp.Handle)
 }
 
 // handleListInstanceTypes handles the list instance types request.
