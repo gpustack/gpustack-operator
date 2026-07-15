@@ -1,15 +1,17 @@
-# Migrating the GPUStack Operator from v0.5.x to v0.6.x
+# Migrating the GPUStack Operator from v0.5.x to a higher version
 
-v0.6.x ("unified-pool refactor",
-[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](../../specs/2026-06-29-instancetype-unified-pool-refactor.md))
-is a **breaking** release for the scheduling objects the operator materializes. Reconcile and
-in-cluster behavior are backward compatible for your **workloads** (running Pods are never touched),
-but the operator renames nearly every Kueue/NFD object it manages and removes the `Cohort` layer.
-A plain `helm upgrade` therefore leaves the entire v0.5.x object set behind as **orphans**.
+v0.5.x is superseded by higher versions that fundamentally reshape the scheduling objects the
+operator materializes. The first such release, v0.6.x ("unified-pool refactor",
+[`specs/2026-06-29-instancetype-unified-pool-refactor.md`](../../specs/2026-06-29-instancetype-unified-pool-refactor.md)),
+renames nearly every Kueue/NFD object it manages and removes the `Cohort` layer; later versions may
+reshape the v0.5.x structures further. Every such upgrade is **breaking** for the scheduling objects
+but backward compatible for your **workloads** (running Pods are never touched), so a plain
+`helm upgrade` leaves the entire v0.5.x object set behind as **orphans**.
 
-This guide explains what changes, and gives two supported upgrade paths.
+This guide explains what changes and gives two supported upgrade paths. It uses v0.6.x as the concrete
+worked example throughout; substitute your actual target version in the commands.
 
-## What changes
+## What changes (v0.5.x → v0.6.x, the first higher version)
 
 | Object | v0.5.x | v0.6.x |
 |---|---|---|
@@ -34,6 +36,33 @@ LocalQueue in every namespace). The v0.5.x Cohorts in particular are never clean
 
 The stale **node labels** are the one exception: they self-heal, because the same-named
 `<node>-gpustack-worker` NodeFeature is overwritten on upgrade and NFD drops the removed labels.
+
+## Kueue finalizer deadlock (self-healed automatically)
+
+A running v0.5.x `Instance` uses an `InstanceType`-backed `ClusterQueue`, and Kueue stamps every
+ClusterQueue with the `kueue.x-k8s.io/resource-in-use` finalizer. If the worker's runtime Kueue
+(re)install ever tears Kueue down while that finalizer is still held — the destructive
+`helm uninstall` path removes the controller — the ClusterQueue **and its CRD** get stuck
+`Terminating` with nothing left to clear the finalizer. The Kueue install can then never recreate the
+CRD, and because the worker gates startup on installing its applications, the operator itself fails to
+start. The finalizer cannot even be force-stripped by hand: Kueue's validating webhook
+(`failurePolicy: Fail`) is still registered but its Service has no endpoints, so any update to a
+ClusterQueue is rejected.
+
+Higher-version operators self-heal this on the Kueue install path, so the upgrade completes without
+manual intervention:
+
+- Before (re)installing Kueue, the worker reaps an orphaned Kueue when it detects a Kueue CRD stuck
+  `Terminating`: it deletes the Kueue admission-webhook configurations **first** (so the finalizer
+  strip is no longer rejected), then strips the orphaned `resource-in-use` finalizers, then lets the
+  Terminating CRDs drain so the install can recreate them. It is a no-op on a healthy cluster.
+- Kueue is then repaired with a `helm upgrade` rather than a destructive `helm uninstall`+install, so
+  the controller stays alive to clear finalizers and no CRD is stranded.
+
+If you are on an older operator that predates this fix and are **already** wedged (a Kueue
+CRD/ClusterQueue stuck `Terminating`), recover with Path A below: the chart's `cleanup.sh` deletes the
+Kueue webhook configurations before stripping finalizers — the same load-bearing order — after which a
+fresh install comes up cleanly.
 
 ## Path A — uninstall then reinstall (recommended)
 
@@ -96,6 +125,10 @@ An old queue with no workloads is deleted directly.
 ## Verify
 
 ```bash
+# Nothing is wedged Terminating (the DELETING column is <none> for every kueue CRD — see the
+# finalizer-deadlock section; a timestamp on an older operator needs the Path A recovery):
+kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
+
 # No v0.5.x orphans remain (expect empty) — match the v0.5.x-only "-<n>c-<n>g" unit-spec, NOT a bare
 # "gpustack--" (which would also list the healthy v0.6.x objects):
 kubectl get resourceflavor,clusterqueue,cohort -A -o name | grep -E 'gpustack--.*-[0-9]+c-[0-9]+g'

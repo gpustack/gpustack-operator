@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 #
 # cleanup-v0.5-orphans.sh — remove the v0.5.x Kueue objects orphaned by an in-place
-# `helm upgrade` of the GPUStack Operator to v0.6.x (or later).
+# `helm upgrade` of the GPUStack Operator from v0.5.x to a higher version.
 #
 # WHY THIS IS NEEDED
-#   v0.6.x reshaped every materialized scheduling object and dropped Cohort entirely. Both v0.5.x and
-#   v0.6.x names are DOUBLE dash, but the shape differs — v0.5.x is a CPU+device COMPOSITE with the
+#   Higher versions reshape every materialized scheduling object; the first, v0.6.x, also dropped
+#   Cohort entirely. Both v0.5.x and v0.6.x names are DOUBLE dash, but the shape differs — v0.5.x is a
+#   CPU+device COMPOSITE with the
 #   CPU/RAM unit-spec baked in and an abbreviated os/arch; v0.6.x SPLITS CPU and device into separate
 #   flavors with the full os/arch and a bare trailing count:
 #     ResourceFlavor / ClusterQueue  gpustack--<genKey>-<cpu>c-<ram>g...--<acc>d    (v0.5.x, composite)
@@ -44,7 +45,7 @@
 #   cleanup-v0.5-orphans.sh [--dry-run]
 #     --dry-run   list what would be deleted, change nothing.
 #
-# Run it AFTER the v0.6.x worker is healthy (`kubectl -n gpustack-system rollout status
+# Run it AFTER the upgraded worker is healthy (`kubectl -n gpustack-system rollout status
 # deploy/gpustack-operator-worker`). Idempotent and safe to re-run.
 set -uo pipefail
 
