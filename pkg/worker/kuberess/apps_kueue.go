@@ -83,6 +83,10 @@ func installKueue(ctx context.Context, helmCli *helm.Client, globalValuesContext
 		Path:        path,
 		DownloadURL: download,
 		Values:      values,
+		// Repair a failed Kueue release with an upgrade, never the uninstall+install
+		// path: uninstalling tears down the controller while ClusterQueues still hold
+		// the resource-in-use finalizer, which strands the Helm-managed CRDs.
+		RepairViaUpgradeOnly: true,
 	}
 	_, err := helmCli.Install(ctx, chart)
 	if err != nil {

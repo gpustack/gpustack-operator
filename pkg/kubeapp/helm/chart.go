@@ -46,6 +46,16 @@ type (
 		// this function is a chance to check whether to continue installation on this fresh installation,
 		// or just skip.
 		SkippedInstallationIfApiServiceReady string
+		// RepairViaUpgradeOnly repairs a bad-status release with a Helm upgrade instead
+		// of the destructive uninstall+install path.
+		//
+		// A chart whose CRDs are Helm-managed templates and whose custom resources carry
+		// controller finalizers (e.g. Kueue) can deadlock on the uninstall path: the
+		// uninstall removes the controller while its finalizers still pin the CRs, so the
+		// CRDs get stuck Terminating and the reinstall can never recreate them. An upgrade
+		// keeps the controller alive to clear the finalizers and recreates any missing
+		// resources, so the release converges without stranding.
+		RepairViaUpgradeOnly bool
 	}
 
 	ChartValues interface {

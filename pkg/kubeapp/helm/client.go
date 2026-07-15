@@ -110,35 +110,56 @@ func (c *Client) KubeVersion(ctx context.Context) kubediscovery.Version {
 // If the release has been found, it will be done.
 func (c *Client) Install(ctx context.Context, chart *Chart, overrideNamespace ...string) (helmchartutil.Values, error) {
 	next := func(r *helmrelease.Release) NextStepType {
-		switch r.Info.Status {
-		case helmrelease.StatusDeployed, helmrelease.StatusSuperseded:
-			if r.Chart.Metadata.Version != "" {
-				lv := r.Chart.Metadata.Version
-				rv := chart.Version
-				if lv != rv {
-					return NextStepUpgrade
-				}
-			}
-			if rv := r.Config; rv != nil {
-				cv, err := chart.Values.GetValues(ctx)
-				if err != nil {
-					return NextStepDone
-				}
-				if !reflect.DeepEqual(rv, cv) {
-					return NextStepUpgrade
-				}
-			}
-			return NextStepDone
-		case helmrelease.StatusPendingInstall, helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
-			if time.Since(r.Info.LastDeployed.Time) > c.timeout {
-				return _NextStepInstall
-			}
-			return NextStepRequeue
-		default:
-			return NextStepReinstall
-		}
+		return c.nextStep(ctx, r, chart)
 	}
 	return c.InstallWith(ctx, chart, next, overrideNamespace...)
+}
+
+// nextStep decides what to do with an already-found release of the given chart.
+func (c *Client) nextStep(ctx context.Context, r *helmrelease.Release, chart *Chart) NextStepType {
+	switch r.Info.Status {
+	case helmrelease.StatusDeployed, helmrelease.StatusSuperseded:
+		if r.Chart.Metadata.Version != "" {
+			lv := r.Chart.Metadata.Version
+			rv := chart.Version
+			if lv != rv {
+				return NextStepUpgrade
+			}
+		}
+		if rv := r.Config; rv != nil {
+			cv, err := chart.Values.GetValues(ctx)
+			if err != nil {
+				return NextStepDone
+			}
+			if !reflect.DeepEqual(rv, cv) {
+				return NextStepUpgrade
+			}
+		}
+		return NextStepDone
+	case helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
+		// An upgrade/rollback interrupted mid-flight (e.g. the process was killed while
+		// waiting on it) wedges the release: Helm refuses the next upgrade ("another
+		// operation in progress") and the pinned CRs never converge. The prior operation
+		// is not running, so its last deployed revision is intact — roll back to it to clear
+		// the lock, then the loop upgrades. Others keep the wait-then-reinstall behavior.
+		if chart.RepairViaUpgradeOnly {
+			return NextStepRollback
+		}
+		fallthrough
+	case helmrelease.StatusPendingInstall:
+		if time.Since(r.Info.LastDeployed.Time) > c.timeout {
+			return _NextStepInstall
+		}
+		return NextStepRequeue
+	default:
+		// A bad-status release (e.g. failed) is normally reinstalled, but that
+		// uninstall can deadlock charts whose finalized CRs pin Helm-managed CRDs.
+		// RepairViaUpgradeOnly repairs it with an upgrade instead — see the field doc.
+		if chart.RepairViaUpgradeOnly {
+			return NextStepUpgrade
+		}
+		return NextStepReinstall
+	}
 }
 
 // NextStepType is the type of the next step.
@@ -148,6 +169,7 @@ const (
 	NextStepDone NextStepType = iota
 	NextStepRequeue
 	NextStepUpgrade
+	NextStepRollback
 	NextStepReinstall
 	_NextStepInstall
 )
@@ -222,6 +244,20 @@ func (c *Client) InstallWith(
 			// Requeue.
 			logger.Info("requeueing")
 			time.Sleep(10 * time.Second)
+			r, err = g.Run(chart.Release)
+			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
+				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
+			}
+		case NextStepRollback:
+			// Clear a wedged pending release by rolling back to its last deployed revision,
+			// then re-evaluate (the loop then upgrades it). This only removes the pending
+			// lock; the upgrade that follows does the real reconciliation.
+			logger.Info("rolling back wedged release")
+			rb := helmaction.NewRollback(config)
+			rb.Timeout = c.timeout
+			if err := rb.Run(chart.Release); err != nil {
+				return nil, fmt.Errorf("helm rollback: release %s: %w", chart.Release, err)
+			}
 			r, err = g.Run(chart.Release)
 			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
 				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
