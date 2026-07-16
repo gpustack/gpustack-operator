@@ -63,11 +63,13 @@ Each case is self-contained; its header (see **Case header contract**) states go
 | 19 | Awareness on: accelerated type carries real GPU + folded CPU descriptors; a real GPU Instance runs on it | `pkg/worker/controllers/worker/{node_flavor,instance_type}.go`, `pkg/worker/webhooks/worker/instance_type.go`, `pkg/nodefeature/helper.go` | `cases/case-19.sh` | yes (confirm) | real GPU · skips: GPU-less |
 | 20 | Sibling InstanceTypes on one pool stay status-consistent (Devices-watch re-enqueues all) | `pkg/worker/controllers/worker/instance_type.go` | `cases/case-20.sh` | yes (confirm) | real GPU · skips: GPU-less |
 | 21 | SSH Instance serves non-interactive SSH (exec channel) + interactive login unchanged | `pack/ssh-server/rootfs/chroot.sh`, `pack/ssh-server/Dockerfile`, `pkg/worker/settings/value.go` | `cases/case-21.sh` | yes (confirm) | ssh client · skips: no ssh/ssh-keygen/sftp |
+| 22 | Exclusive and shared claims never co-locate on one physical card (Kueue + raw paths) | `pkg/deviceplugin/{server,helper}.go`, `pkg/devicemanager/allocator/**`, `pkg/worker/webhooks/worker/pod.go`, `pkg/worker/controllers/worker/node_devices_admission.go` | `cases/case-22.sh` | yes (confirm) | real GPU (exclusive + shared) · skips: no `*/gpu` + `*/gpu.shared` |
 
 - Also run **CASE 1 at minimum** for changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`, `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
 - `spec.os`/`spec.arch` materialization is asserted **inline** — CASE 1 (cpu pool) + CASE 6 (accelerated) — not as a standalone case.
 - CASE 3 under the queue-ownership split: draining a pool no longer deletes the InstanceType — the flavor is deleted but the **type survives with its queue emptied**, and reactivates when nodes return.
 - CASE 4's mock uses a fake product key (`nvidia-e2emock`) that never collides with a real GPU pool → safe on a real-accelerator cluster too.
+- CASE 22 needs a **real** GPU (the co-location can only be observed on cards the device plugin actually allocates); it runs the same "no exclusive/shared co-location" invariant on both the Kueue path (Pod carries the LocalQueue label) and the raw path (no label). It is the regression guard for the on-node device-plugin mutual-exclusion gap and is expected to expose a divergence between the two paths until that gap is closed.
 
 ## Case header contract
 
