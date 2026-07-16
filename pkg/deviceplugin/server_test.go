@@ -2,16 +2,23 @@ package deviceplugin
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	grpccodes "google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	kubeletdeviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	ctrlintercept "sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
@@ -208,6 +215,575 @@ func TestResourceServer_Allocate_Sliced_RecordsUnits(t *testing.T) {
 	acc := allocated.Groups[0].Accelerators[0]
 	assert.Equal(t, workercore.DeviceAllocationModeSliced, acc.Mode)
 	assert.Equal(t, wantUnits, acc.Allocated, "real per-card committed units, not the token count")
+}
+
+// crossModeDevices builds a single-card node inventory. When statusMode is not None the ledger
+// Status records dev-0 held in statusMode (Remaining 0), so a cross-mode Allocate observes it.
+func crossModeDevices(nodeName string, statusMode workercore.DeviceAllocationMode) *workercore.Devices {
+	d := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{{
+					ID:       "dev-0",
+					Index:    0,
+					Features: workercore.AcceleratorFeatures{MaxPartitions: 8},
+				}},
+			}},
+		},
+	}
+	if statusMode != workercore.DeviceAllocationModeNone {
+		d.Status = workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.AcceleratorAllocation{{
+					ID:        "dev-0",
+					Index:     0,
+					Mode:      statusMode,
+					Remaining: 0,
+				}},
+			}},
+		}
+	}
+	return d
+}
+
+// TestResourceServer_Allocate_CrossMode verifies the authoritative on-node gate: a card kubelet
+// assigned that another, non-None mode already holds — via the ledger Status OR the in-process
+// reservation (the ledger not yet reconciled) — is refused with FailedPrecondition and never
+// patches an allocation annotation, while a free card and same-mode (sliced-on-sliced) succeed.
+func TestResourceServer_Allocate_CrossMode(t *testing.T) {
+	cases := []struct {
+		name        string
+		serverMode  workercore.DeviceAllocationMode
+		statusMode  workercore.DeviceAllocationMode // dev-0 mode in the ledger Status (None ⇒ free/absent)
+		reserveMode workercore.DeviceAllocationMode // a sibling pod's reservation on dev-0 (None ⇒ none)
+		wantErr     bool
+	}{
+		{
+			name:       "shared onto an exclusive-held card (via Status) is rejected",
+			serverMode: workercore.DeviceAllocationModeShared,
+			statusMode: workercore.DeviceAllocationModeExclusive,
+			wantErr:    true,
+		},
+		{
+			name:        "shared onto an exclusive-held card (via reservation only, ledger lagging) is rejected",
+			serverMode:  workercore.DeviceAllocationModeShared,
+			reserveMode: workercore.DeviceAllocationModeExclusive,
+			wantErr:     true,
+		},
+		{
+			name:       "exclusive onto a shared-held card is rejected",
+			serverMode: workercore.DeviceAllocationModeExclusive,
+			statusMode: workercore.DeviceAllocationModeShared,
+			wantErr:    true,
+		},
+		{
+			name:       "shared onto a free card succeeds",
+			serverMode: workercore.DeviceAllocationModeShared,
+			wantErr:    false,
+		},
+		{
+			name:       "sliced onto a sliced-held card (same mode) succeeds",
+			serverMode: workercore.DeviceAllocationModeSliced,
+			statusMode: workercore.DeviceAllocationModeSliced,
+			wantErr:    false,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			const nodeName = "node-cm"
+			devs := crossModeDevices(nodeName, c.statusMode)
+			resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, c.serverMode)
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-cm"},
+				Spec: core.PodSpec{
+					NodeName: nodeName,
+					Containers: []core.Container{{
+						Name: "main",
+						Resources: core.ResourceRequirements{
+							Limits: core.ResourceList{resName: resource.MustParse("1")},
+						},
+					}},
+				},
+			}
+
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(devs, pod).
+				WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+					return []string{obj.(*core.Pod).Spec.NodeName}
+				}).
+				Build()
+
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			if c.reserveMode != workercore.DeviceAllocationModeNone {
+				rec.reserveDevices("sibling", workercore.DevicesStatus{
+					Groups: []workercore.DevicesAllocationGroup{{
+						ID:           "grp-0",
+						Manufacturer: nodefeature.ManufacturerNVIDIA,
+						Accelerators: []workercore.AcceleratorAllocation{{ID: "dev-0", Mode: c.reserveMode}},
+					}},
+				})
+			}
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: c.serverMode,
+				Reconciler:     rec,
+				Responder:      stubResponder{},
+			}
+
+			_, err := s.Allocate(context.Background(), &AllocateRequest{
+				ContainerRequests: []*ContainerAllocateRequest{{
+					DevicesIds: []string{"grp-0:dev-0:0000"},
+				}},
+			})
+
+			got := new(core.Pod)
+			require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+			_, annotated := got.Annotations[AllocatedAcceleratorAnnoKey]
+
+			if c.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, grpccodes.FailedPrecondition, grpcstatus.Code(err),
+					"a cross-mode conflict must be a FailedPrecondition")
+				assert.False(t, annotated, "a rejected Allocate must not patch the allocation annotation")
+				return
+			}
+			require.NoError(t, err)
+			assert.True(t, annotated, "a permitted Allocate must patch the allocation annotation")
+		})
+	}
+}
+
+// twoCardDevices builds a two-card node inventory (dev-0, dev-1). When dev0Status is not None the
+// ledger Status records dev-0 held in that mode (Remaining 0) and dev-1 free.
+func twoCardDevices(nodeName string, dev0Status workercore.DeviceAllocationMode) *workercore.Devices {
+	d := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{
+					{ID: "dev-0", Index: 0, Features: workercore.AcceleratorFeatures{MaxPartitions: 8}},
+					{ID: "dev-1", Index: 1, Features: workercore.AcceleratorFeatures{MaxPartitions: 8}},
+				},
+			}},
+		},
+	}
+	if dev0Status != workercore.DeviceAllocationModeNone {
+		d.Status = workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.AcceleratorAllocation{
+					{ID: "dev-0", Index: 0, Mode: dev0Status, Remaining: 0},
+					{ID: "dev-1", Index: 1, Mode: workercore.DeviceAllocationModeNone, Remaining: nodefeature.ResourceMaxUnits},
+				},
+			}},
+		}
+	}
+	return d
+}
+
+// TestResourceServer_GetListAndWatch_AdvertisesByHealth verifies ListAndWatch reflects hardware
+// health only, never allocation state: a card held in a conflicting mode — via the ledger Status OR
+// an in-process reservation — is still advertised for this mode. Withholding its tokens would make
+// the advertised allocatable count track allocation and desync kubelet's device accounting; the
+// cross-mode invariant is enforced at Allocate, not here.
+func TestResourceServer_GetListAndWatch_AdvertisesByHealth(t *testing.T) {
+	const nodeName = "node-wh"
+	dev0 := Resource{Group: "grp-0", Device: "dev-0"}
+	dev1 := Resource{Group: "grp-0", Device: "dev-1"}
+
+	// dev-0 held Exclusive in the ledger Status; dev-1 held Exclusive only via a reservation (ledger
+	// lagging). A shared server must still advertise both.
+	devs := twoCardDevices(nodeName, workercore.DeviceAllocationModeExclusive)
+	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(devs).Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	rec.reserveDevices("sibling", workercore.DevicesStatus{
+		Groups: []workercore.DevicesAllocationGroup{{
+			ID:           "grp-0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: []workercore.AcceleratorAllocation{{ID: "dev-1", Mode: workercore.DeviceAllocationModeExclusive}},
+		}},
+	})
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeShared,
+		Reconciler:     rec,
+	}
+
+	resp, err := s.getListAndWatchResponse(context.Background())
+	require.NoError(t, err)
+	assert.Greater(t, cardTokenCount(resp, dev0), 0,
+		"a card held in another mode via Status must still be advertised (health-only)")
+	assert.Greater(t, cardTokenCount(resp, dev1), 0,
+		"a card held in another mode via reservation must still be advertised (health-only)")
+}
+
+// concurrentAllocatePod builds a pending pod requesting count units of mode's resource on node.
+func concurrentAllocatePod(nodeName, name, uid string, mode workercore.DeviceAllocationMode, count int) *core.Pod {
+	resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, mode)
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
+		Spec: core.PodSpec{
+			NodeName: nodeName,
+			Containers: []core.Container{{
+				Name: "main",
+				Resources: core.ResourceRequirements{
+					Limits: core.ResourceList{resName: *resource.NewQuantity(int64(count), resource.DecimalSI)},
+				},
+			}},
+		},
+	}
+}
+
+// waitOrDeadlock fails the test if wg does not complete within the timeout.
+func waitOrDeadlock(t *testing.T, wg *sync.WaitGroup, timeout time.Duration) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		t.Fatal("Allocate deadlocked")
+	}
+}
+
+// TestResourceServer_Allocate_Concurrent verifies the node allocate mutex closes the check→reserve
+// TOCTOU: simultaneous exclusive and shared Allocate for the same free card(s) yield exactly one
+// success and one FailedPrecondition (never two co-located allocations), including a multi-card
+// request whose cards are requested in the opposite order.
+func TestResourceServer_Allocate_Concurrent(t *testing.T) {
+	// classifyOutcomes counts nil (success) vs FailedPrecondition (rejected); any other error fails.
+	classifyOutcomes := func(t *testing.T, errs []error) (success, rejected int) {
+		t.Helper()
+		for _, err := range errs {
+			switch {
+			case err == nil:
+				success++
+			case grpcstatus.Code(err) == grpccodes.FailedPrecondition:
+				rejected++
+			default:
+				t.Fatalf("unexpected Allocate error: %v", err)
+			}
+		}
+		return success, rejected
+	}
+
+	cases := []struct {
+		name       string
+		cardsInReq []string // device IDs each concurrent Allocate requests (both request the same cards)
+	}{
+		{
+			name:       "one card: exactly one of exclusive/shared wins",
+			cardsInReq: []string{"grp-0:dev-0:0000"},
+		},
+		{
+			name:       "two cards (opposite request order): exactly one of exclusive/shared wins, no deadlock",
+			cardsInReq: []string{"grp-0:dev-0:0000", "grp-0:dev-1:0000"},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			const nodeName = "node-cc"
+			count := len(c.cardsInReq)
+
+			devs := twoCardDevices(nodeName, workercore.DeviceAllocationModeNone) // dev-0, dev-1 both free
+			exclPod := concurrentAllocatePod(nodeName, "excl", "uid-excl", workercore.DeviceAllocationModeExclusive, count)
+			sharedPod := concurrentAllocatePod(nodeName, "shared", "uid-shared", workercore.DeviceAllocationModeShared, count)
+
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(devs, exclPod, sharedPod).
+				WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+					return []string{obj.(*core.Pod).Spec.NodeName}
+				}).
+				Build()
+
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			exclServer := &ResourceServer{
+				Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: workercore.DeviceAllocationModeExclusive,
+				Reconciler: rec, Responder: stubResponder{},
+			}
+			sharedServer := &ResourceServer{
+				Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: workercore.DeviceAllocationModeShared,
+				Reconciler: rec, Responder: stubResponder{},
+			}
+
+			// Both request the same cards; the shared server requests them in reverse so the outcome
+			// (exactly one winner) is shown to be independent of the device-ID order in each request,
+			// which the single node allocateMutex serializes.
+			exclIDs := append([]string(nil), c.cardsInReq...)
+			sharedIDs := append([]string(nil), c.cardsInReq...)
+			for i, j := 0, len(sharedIDs)-1; i < j; i, j = i+1, j-1 {
+				sharedIDs[i], sharedIDs[j] = sharedIDs[j], sharedIDs[i]
+			}
+
+			var wg sync.WaitGroup
+			errs := make([]error, 2)
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				_, errs[0] = exclServer.Allocate(context.Background(),
+					&AllocateRequest{ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: exclIDs}}})
+			}()
+			go func() {
+				defer wg.Done()
+				_, errs[1] = sharedServer.Allocate(context.Background(),
+					&AllocateRequest{ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: sharedIDs}}})
+			}()
+			waitOrDeadlock(t, &wg, 15*time.Second)
+
+			success, rejected := classifyOutcomes(t, errs)
+			assert.Equal(t, 1, success, "exactly one Allocate must succeed")
+			assert.Equal(t, 1, rejected, "exactly one Allocate must be rejected with FailedPrecondition")
+		})
+	}
+}
+
+// TestDevicesReconciler_GetAllocatingPod_SkipReserved verifies the pod-identification skip that
+// underlies distinct-pod attribution: with two identical pending pods, skipReserved=false returns
+// the oldest (the legacy guess), while skipReserved=true skips a pod already holding a reservation
+// and returns the next one.
+func TestDevicesReconciler_GetAllocatingPod_SkipReserved(t *testing.T) {
+	const nodeName = "node-skip"
+	resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	podX := concurrentAllocatePod(nodeName, "x", "uid-x", workercore.DeviceAllocationModeExclusive, 1)
+	podY := concurrentAllocatePod(nodeName, "y", "uid-y", workercore.DeviceAllocationModeExclusive, 1)
+	// podY is created after podX, so the "oldest pending" guess prefers podX.
+	podY.CreationTimestamp = meta.NewTime(podX.CreationTimestamp.Add(time.Second))
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(podX, podY).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	q := resource.MustParse("1")
+
+	// No reservation yet: the oldest pending pod is returned.
+	got, _, err := rec.getAllocatingPod(context.Background(), resName, q, true)
+	require.NoError(t, err)
+	assert.Equal(t, types.UID("uid-x"), got.UID, "oldest pending pod when none is reserved")
+
+	// Reserve podX: skipReserved=true now skips it and returns podY; skipReserved=false still returns podX.
+	rec.reserveDevices("uid-x", workercore.DevicesStatus{
+		Groups: []workercore.DevicesAllocationGroup{{
+			ID:           "grp-0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: []workercore.AcceleratorAllocation{{ID: "dev-0", Mode: workercore.DeviceAllocationModeExclusive}},
+		}},
+	})
+	got, _, err = rec.getAllocatingPod(context.Background(), resName, q, true)
+	require.NoError(t, err)
+	assert.Equal(t, types.UID("uid-y"), got.UID, "skipReserved must skip the already-reserved pod")
+
+	got, _, err = rec.getAllocatingPod(context.Background(), resName, q, false)
+	require.NoError(t, err)
+	assert.Equal(t, types.UID("uid-x"), got.UID, "without skipReserved the oldest pod is still returned")
+}
+
+// TestResourceServer_Allocate_ConcurrentDistinctPods verifies the node allocate mutex + skip-reserved
+// pod identification: when two identical exclusive Pods are pending at once (a Kueue-admitted batch)
+// and kubelet issues one Allocate per distinct card, each Allocate must map to a DISTINCT pod so both
+// cards are accounted. Before the fix both Allocates resolved to the oldest pending pod, so one card
+// was double-attributed to it and the other was lost from the ledger — which could make a genuinely
+// held card look free and defeat the cross-mode exclusion.
+func TestResourceServer_Allocate_ConcurrentDistinctPods(t *testing.T) {
+	const nodeName = "node-dp"
+	devs := twoCardDevices(nodeName, workercore.DeviceAllocationModeNone) // dev-0, dev-1 both free
+	podX := concurrentAllocatePod(nodeName, "x", "uid-x", workercore.DeviceAllocationModeExclusive, 1)
+	podY := concurrentAllocatePod(nodeName, "y", "uid-y", workercore.DeviceAllocationModeExclusive, 1)
+	// podY is created after podX, so the naive "oldest pending" guess would pick podX for both.
+	podY.CreationTimestamp = meta.NewTime(podX.CreationTimestamp.Add(time.Second))
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, podX, podY).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	// One exclusive server instance handles both calls (as in production); the reconciler singleton
+	// carries the shared allocate mutex and reservation map.
+	exclServer := &ResourceServer{
+		Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: workercore.DeviceAllocationModeExclusive,
+		Reconciler: rec, Responder: stubResponder{},
+	}
+
+	// kubelet assigns a distinct card to each pod; the two Allocate calls race.
+	reqIDs := []string{"grp-0:dev-0:0000", "grp-0:dev-1:0000"}
+	var wg sync.WaitGroup
+	errs := make([]error, len(reqIDs))
+	wg.Add(len(reqIDs))
+	for i := range reqIDs {
+		i := i
+		go func() {
+			defer wg.Done()
+			_, errs[i] = exclServer.Allocate(context.Background(),
+				&AllocateRequest{ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{reqIDs[i]}}}})
+		}()
+	}
+	waitOrDeadlock(t, &wg, 15*time.Second)
+	require.NoError(t, errs[0])
+	require.NoError(t, errs[1])
+
+	// Both distinct pods are reserved, and the two reserved cards are exactly {dev-0, dev-1}: no card
+	// was double-attributed to one pod nor lost (the pod↔card pairing may vary with the mutex order).
+	resX, okX := rec.reservedDevices("uid-x")
+	resY, okY := rec.reservedDevices("uid-y")
+	require.True(t, okX, "podX must hold a reservation")
+	require.True(t, okY, "podY must hold a reservation")
+
+	reservedCards := map[string]struct{}{}
+	for _, res := range []workercore.DevicesStatus{resX, resY} {
+		require.Len(t, res.Groups, 1)
+		require.Len(t, res.Groups[0].Accelerators, 1)
+		reservedCards[res.Groups[0].Accelerators[0].ID] = struct{}{}
+	}
+	assert.Equal(t, map[string]struct{}{"dev-0": {}, "dev-1": {}}, reservedCards,
+		"each pod must be attributed a distinct card (both cards accounted)")
+}
+
+// mustGetDevices reads the current Devices (with Status) through the reconciler, failing the test
+// on error.
+func mustGetDevices(t *testing.T, rec *DevicesReconciler) *workercore.Devices {
+	t.Helper()
+	d, err := rec.getDevices(context.Background())
+	require.NoError(t, err)
+	return d
+}
+
+// cardTokenCount counts the device tokens a ListAndWatch response advertises for one physical card.
+func cardTokenCount(resp *kubeletdeviceplugin.ListAndWatchResponse, res Resource) int {
+	n := 0
+	for i := range resp.Devices {
+		if ru, err := ConvertResourceUnitFromDeviceIds(resp.Devices[i].ID); err == nil && ru.Resource == res {
+			n++
+		}
+	}
+	return n
+}
+
+// TestDevicesReconciler_ReleaseOnPodTermination verifies the release counting once a Pod is done:
+// the in-process reservation gates cross-mode allocation for the holding Pod's whole lifetime, so
+// it must be pruned in the same live-pod-set sweep Reconcile uses — freeing the card for the
+// opposite mode exactly when the Pod disappears — and it must NOT be dropped while the Pod is live.
+// (Release via the ledger Status rebuild on Pod deletion is covered end-to-end by e2e CASE 22.)
+func TestDevicesReconciler_ReleaseOnPodTermination(t *testing.T) {
+	const nodeName = "node-rel"
+	dev0 := Resource{Group: "grp-0", Device: "dev-0"}
+
+	devs := crossModeDevices(nodeName, workercore.DeviceAllocationModeNone) // dev-0 free in the ledger
+	podB := concurrentAllocatePod(nodeName, "b", "uid-b", workercore.DeviceAllocationModeShared, 1)
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, podB).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	sharedServer := &ResourceServer{
+		Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: workercore.DeviceAllocationModeShared,
+		Reconciler: rec, Responder: stubResponder{},
+	}
+
+	ctx := context.Background()
+	oneCard := &AllocateRequest{ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}}}
+
+	// Pod A (uid-a) holds dev-0 exclusively via the reservation the workload Allocate records; the
+	// ledger Status stays free here, isolating the reservation as the authoritative release signal.
+	rec.reserveDevices("uid-a", workercore.DevicesStatus{
+		Groups: []workercore.DevicesAllocationGroup{{
+			ID:           "grp-0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: []workercore.AcceleratorAllocation{{ID: "dev-0", Mode: workercore.DeviceAllocationModeExclusive}},
+		}},
+	})
+
+	// While Pod A is still live (in the sweep's live-pod set), pruning keeps its reservation, so
+	// dev-0 stays held against a shared claim at the Allocate gate. ListAndWatch still advertises it
+	// (health-only): the cross-mode invariant lives in Allocate, not the advertisement.
+	rec.pruneReservations([]string{"uid-a", "uid-b"})
+	held, _ := sharedServer.cardHeldInOtherMode(mustGetDevices(t, rec), dev0)
+	assert.True(t, held, "dev-0 must stay held while its exclusive Pod is live")
+	lw, err := sharedServer.getListAndWatchResponse(ctx)
+	require.NoError(t, err)
+	assert.Greater(t, cardTokenCount(lw, dev0), 0, "a held card is still advertised (health-only)")
+
+	// Pod A terminates: the same live-pod-set sweep that rebuilds the ledger Status prunes its
+	// reservation, so the card frees for the opposite mode exactly when its Pod disappears.
+	rec.pruneReservations([]string{"uid-b"})
+	_, stillReserved := rec.reservedDevices("uid-a")
+	assert.False(t, stillReserved, "the reservation must be pruned once Pod A is gone")
+	held, _ = sharedServer.cardHeldInOtherMode(mustGetDevices(t, rec), dev0)
+	assert.False(t, held, "dev-0 must be free for the opposite mode once its Pod is gone")
+
+	// The freed card is reusable by the opposite mode: a shared claim now succeeds on dev-0.
+	_, err = sharedServer.Allocate(ctx, oneCard)
+	require.NoError(t, err, "a shared claim must succeed on the freed card")
+	gotB := new(core.Pod)
+	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(podB), gotB))
+	allocated, err := extractAllocatedStatusFromPod(gotB)
+	require.NoError(t, err)
+	require.Len(t, allocated.Groups, 1)
+	require.Len(t, allocated.Groups[0].Accelerators, 1)
+	assert.Equal(t, workercore.DeviceAllocationModeShared, allocated.Groups[0].Accelerators[0].Mode)
+}
+
+// TestResourceServer_Allocate_RollsBackReservationOnPatchFailure verifies the release counting on
+// the failure path: when the durable annotation patch fails after the in-process reservation was
+// written, Allocate rolls the reservation back, so the card is not stranded for the opposite mode
+// (the Pod-delete prune would otherwise never fire — it is gated on the annotation that never landed).
+func TestResourceServer_Allocate_RollsBackReservationOnPatchFailure(t *testing.T) {
+	const nodeName = "node-rb"
+	devs := crossModeDevices(nodeName, workercore.DeviceAllocationModeNone)
+	podA := concurrentAllocatePod(nodeName, "a", "uid-a", workercore.DeviceAllocationModeExclusive, 1)
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, podA).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Patch: func(_ context.Context, _ ctrlcli.WithWatch, _ ctrlcli.Object, _ ctrlcli.Patch, _ ...ctrlcli.PatchOption) error {
+				return errors.New("simulated annotation patch failure")
+			},
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	s := &ResourceServer{
+		Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: workercore.DeviceAllocationModeExclusive,
+		Reconciler: rec, Responder: stubResponder{},
+	}
+
+	_, err := s.Allocate(context.Background(), &AllocateRequest{
+		ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+	})
+	require.Error(t, err, "Allocate must fail when the annotation patch fails")
+
+	_, reserved := rec.reservedDevices("uid-a")
+	assert.False(t, reserved, "a failed patch must roll back the reservation so the card is not stranded")
 }
 
 // TestDevicesReconciler_Reservation verifies the in-process, pod-keyed reservation the

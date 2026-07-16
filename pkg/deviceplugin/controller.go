@@ -58,6 +58,16 @@ type (
 		// cache propagation.
 		reservationsMutex sync.RWMutex
 		reservations      map[types.UID]workercore.DevicesStatus
+
+		// allocateMutex serializes the whole workload Allocate identify→cross-mode-check→reserve
+		// section for the node. All per-mode ResourceServers share this one reconciler, so a single
+		// node-wide mutex makes concurrent Allocates (e.g. a Kueue-admitted batch of identical Pods)
+		// run that section one at a time: the reservation each writes is visible before the next
+		// identifies its pod, so getAllocatingPod (skipping already-reserved pods) maps each Allocate
+		// to a distinct pod instead of all resolving to the oldest pending one, and no opposite-mode
+		// Allocate for the same card can interleave between the cross-mode check and the reservation
+		// write (TOCTOU). It is never held across the annotation patch (I/O).
+		allocateMutex sync.Mutex
 	}
 )
 
@@ -314,6 +324,41 @@ func (r *DevicesReconciler) reservedDevices(podUID types.UID) (workercore.Device
 	return got, ok
 }
 
+// releaseReservation drops the reservation recorded for a pod. It rolls back a reservation
+// written before a durable-annotation patch that then failed: without the annotation the
+// Pod-delete watch (gated on it) would never enqueue a prune, so the card would stay held for
+// the opposite mode until the next full resync. Undoing it here frees the card immediately.
+func (r *DevicesReconciler) releaseReservation(podUID types.UID) {
+	r.reservationsMutex.Lock()
+	defer r.reservationsMutex.Unlock()
+	delete(r.reservations, podUID)
+}
+
+// reservedModeForResource reports the allocation mode a physical card (group:device) is
+// currently held in by any pod's reservation, and the owning pod UID. The reservation map is
+// written synchronously by every workload Allocate, so it is the race-safe cross-pod source of
+// a card's held mode when the Devices ledger Status has not yet reconciled. Returns
+// DeviceAllocationModeNone and an empty UID when no reservation holds the card.
+func (r *DevicesReconciler) reservedModeForResource(group, device string) (workercore.DeviceAllocationMode, types.UID) {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	for uid, status := range r.reservations {
+		for i := range status.Groups {
+			grp := &status.Groups[i]
+			if grp.ID != group {
+				continue
+			}
+			for j := range grp.Accelerators {
+				acc := &grp.Accelerators[j]
+				if acc.ID == device && acc.Mode != workercore.DeviceAllocationModeNone {
+					return acc.Mode, uid
+				}
+			}
+		}
+	}
+	return workercore.DeviceAllocationModeNone, ""
+}
+
 // pruneReservations drops reservations for pods no longer in the live set, so a
 // reservation cannot outlive its pod. It piggybacks the Reconcile live-pod-UID sweep.
 func (r *DevicesReconciler) pruneReservations(livePodUIDs []string) {
@@ -340,10 +385,10 @@ const (
 )
 
 func (r *DevicesReconciler) getAllocatingPodWithRetry(
-	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
+	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity, skipReserved bool,
 ) (pod *core.Pod, ctr *core.Container, err error) {
 	for i := 0; i < 5; i++ {
-		pod, ctr, err = r.getAllocatingPod(ctx, resName, resQuantity)
+		pod, ctr, err = r.getAllocatingPod(ctx, resName, resQuantity, skipReserved)
 		if err == nil {
 			return pod, ctr, nil
 		}
@@ -352,8 +397,14 @@ func (r *DevicesReconciler) getAllocatingPodWithRetry(
 	return nil, nil, fmt.Errorf("get allocating pod with retry: %w", err)
 }
 
+// getAllocatingPod maps a kubelet Allocate/GetPreferredAllocation call to the pod being admitted.
+// The device-plugin API omits the pod identity, so it picks the oldest Pending pod on the node whose
+// container requests the matching resource+quantity. When skipReserved is set it also skips pods that
+// already hold an in-process reservation, so concurrent workload Allocates serialized by allocateMutex
+// each resolve to a distinct pod instead of all matching the same oldest one; the visibility path
+// passes false, since it must re-find its own reserved pod.
 func (r *DevicesReconciler) getAllocatingPod(
-	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
+	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity, skipReserved bool,
 ) (*core.Pod, *core.Container, error) {
 	podList := new(core.PodList)
 	err := r.Client.List(ctx, podList,
@@ -374,6 +425,14 @@ func (r *DevicesReconciler) getAllocatingPod(
 		pod := &podList.Items[i]
 		if p := pod.Status.Phase; p != "" && p != core.PodPending {
 			continue
+		}
+		// Skip a pod whose workload Allocate already reserved its cards: the reservation is the
+		// synchronous, cache-lag-free claim marker, so under allocateMutex the next Allocate in a
+		// concurrent batch does not re-pick the pod the previous one just claimed.
+		if skipReserved {
+			if _, ok := r.reservedDevices(pod.UID); ok {
+				continue
+			}
 		}
 		for j := range pod.Spec.InitContainers {
 			ctr := &pod.Spec.InitContainers[j]

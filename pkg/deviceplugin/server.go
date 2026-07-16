@@ -135,6 +135,11 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 				Group:  devGroup.ID,
 				Device: devAccelerator.ID,
 			}
+			// ListAndWatch reflects hardware health only, never allocation state: a card held in
+			// another mode stays advertised. Withholding its tokens here would make the advertised
+			// allocatable count fluctuate with allocation (the external Detector drives these
+			// updates), desynchronizing kubelet's device accounting. The cross-mode invariant is
+			// enforced at the authoritative Allocate gate instead.
 			health := deviceplugin.Healthy
 			if devAccelerator.Status.Unhealthy {
 				health = deviceplugin.Unhealthy
@@ -182,7 +187,9 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(ctrReq.GetAllocationSize()), resource.DecimalSI)
-	pod, ctr, err := s.Reconciler.getAllocatingPodWithRetry(ctx, resName, resQuantity)
+	// Advisory path: do not skip reserved pods (kubelet may ignore this hint, and the authoritative
+	// pod identification with skip-reserved happens in Allocate).
+	pod, ctr, err := s.Reconciler.getAllocatingPodWithRetry(ctx, resName, resQuantity, false)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for preferred allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for preferred allocation: %v", err)
@@ -345,6 +352,37 @@ outside:
 	return resp, nil
 }
 
+// statusModeOf returns the allocation mode the Devices ledger currently records for a physical
+// card, or DeviceAllocationModeNone when the card is free or absent from the Status.
+func statusModeOf(devs *workercore.Devices, res Resource) workercore.DeviceAllocationMode {
+	for i := range devs.Status.Groups {
+		grp := &devs.Status.Groups[i]
+		if grp.ID != res.Group {
+			continue
+		}
+		for j := range grp.Accelerators {
+			if grp.Accelerators[j].ID == res.Device {
+				return grp.Accelerators[j].Mode
+			}
+		}
+	}
+	return workercore.DeviceAllocationModeNone
+}
+
+// cardHeldInOtherMode reports whether the physical card is currently held in a mode different
+// from this server's, per the ledger Status OR the in-process reservations (the reservation is
+// race-safe: written synchronously by every workload Allocate). Free (None) or same-mode is not
+// a conflict. It returns the conflicting mode for logging.
+func (s *ResourceServer) cardHeldInOtherMode(devs *workercore.Devices, res Resource) (bool, workercore.DeviceAllocationMode) {
+	if m := statusModeOf(devs, res); m != workercore.DeviceAllocationModeNone && m != s.AllocationMode {
+		return true, m
+	}
+	if m, _ := s.Reconciler.reservedModeForResource(res.Group, res.Device); m != workercore.DeviceAllocationModeNone && m != s.AllocationMode {
+		return true, m
+	}
+	return false, workercore.DeviceAllocationModeNone
+}
+
 // Allocate is called during container creation so that
 // the Device Plugin can run device specific operations and instruct Kubelet of the steps
 // to make the Device available in the container.
@@ -373,94 +411,136 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity)
-	if err != nil {
-		s.Logger.Error(err, "get allocating pod for allocation")
-		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
-	}
 
-	devs, err := s.Reconciler.getDevices(ctx)
-	if err != nil {
-		s.Logger.Error(err, "get devices for allocation")
-		return nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for allocation: %v", err)
-	}
-
-	// For a sliced allocation each token placed on a card commits the container's per-card
-	// ".sliced.units" — the normalized units the Pod webhook folds the memory budget into.
-	// Recording that real cost (not the loose injection-token count) keeps the per-card ledger
-	// honest, so the node-devices admission check refuses a card whose committed units would
-	// exceed capacity and the InstanceType sliced view reports the true remaining. Fall back to
-	// the token count when the units request is absent (a sliced Pod the webhook did not shape).
-	slicedUnitsPerToken := int64(1)
-	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
-		unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)
-		if q, ok := ctr.Resources.Limits[unitsResName]; ok && q.Value() > 0 {
-			slicedUnitsPerToken = q.Value()
-		}
-	}
-
+	// Identify the pod, enforce the cross-mode invariant, and reserve the cards under the node
+	// allocate mutex (see DevicesReconciler.allocateMutex). Holding it across the whole section
+	// makes a concurrent Allocate batch (e.g. Kueue admitting identical Pods together) resolve to
+	// DISTINCT pods — getAllocatingPod skips pods a prior Allocate already reserved, and that
+	// reservation is written here before the next Allocate reads it — and stops an opposite-mode
+	// Allocate for the same card from interleaving between the check and the reservation (TOCTOU).
+	// Its reads (getAllocatingPod, getDevices) are served from the informer cache and it makes no
+	// durable writes; crucially the mutex is NOT held across the annotation patch, which runs after
+	// the mutex is released.
 	var (
+		pod                 *core.Pod
+		ctr                 *core.Container
+		devs                *workercore.Devices
 		allocatedStatus     workercore.DevicesStatus
 		allocatedAllocation = make(map[Resource]int32)
 	)
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		if devsGroup.Manufacturer != s.Manufacturer {
-			continue
+	if err := func() error {
+		s.Reconciler.allocateMutex.Lock()
+		defer s.Reconciler.allocateMutex.Unlock()
+
+		var err error
+		pod, ctr, err = s.Reconciler.getAllocatingPod(ctx, resName, resQuantity, true)
+		if err != nil {
+			s.Logger.Error(err, "get allocating pod for allocation")
+			return grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
 		}
-		for j := range devsGroup.Accelerators {
-			devsAccelerator := &devsGroup.Accelerators[j]
-			res := Resource{
-				Group:  devsGroup.ID,
-				Device: devsAccelerator.ID,
+
+		devs, err = s.Reconciler.getDevices(ctx)
+		if err != nil {
+			s.Logger.Error(err, "get devices for allocation")
+			return grpcstatus.Errorf(grpccodes.Internal, "get devices for allocation: %v", err)
+		}
+
+		// For a sliced allocation each token placed on a card commits the container's per-card
+		// ".sliced.units" — the normalized units the Pod webhook folds the memory budget into.
+		// Recording that real cost (not the loose injection-token count) keeps the per-card ledger
+		// honest, so the node-devices admission check refuses a card whose committed units would
+		// exceed capacity and the InstanceType sliced view reports the true remaining. Fall back to
+		// the token count when the units request is absent (a sliced Pod the webhook did not shape).
+		slicedUnitsPerToken := int64(1)
+		if s.AllocationMode == workercore.DeviceAllocationModeSliced {
+			unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)
+			if q, ok := ctr.Resources.Limits[unitsResName]; ok && q.Value() > 0 {
+				slicedUnitsPerToken = q.Value()
 			}
-			resUnits, existed := allocatedResUnitsMap[res]
-			if !existed {
+		}
+
+		// Enforce the per-card exclusive/shared/sliced cross-mode invariant at the authoritative
+		// on-node gate: refuse a card kubelet assigned that another mode already holds (per the
+		// ledger Status OR the in-process reservation), so an exclusive tenant truly owns its card
+		// on every path, Kueue or raw. Free (None) and same-mode (e.g. sliced-on-sliced) cards pass.
+		for res := range allocatedResUnitsMap {
+			if held, mode := s.cardHeldInOtherMode(devs, res); held {
+				s.Logger.Error(nil, "cross-mode allocation rejected",
+					"pod", kubemeta.GetNamespacedNameKey(pod), "card", res.String(),
+					"heldMode", mode.String(), "requestedMode", s.AllocationMode.String())
+				return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+					"card %s is held in %s mode, cannot allocate it in %s mode", res, mode, s.AllocationMode)
+			}
+		}
+
+		for i := range devs.Spec.Groups {
+			devsGroup := &devs.Spec.Groups[i]
+			if devsGroup.Manufacturer != s.Manufacturer {
 				continue
 			}
-			var allocated int32
-			switch s.AllocationMode {
-			default:
-				allocated = nodefeature.ResourceMaxUnits // a whole card
-			case workercore.DeviceAllocationModeShared:
-				allocated = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize // units per owner
-			case workercore.DeviceAllocationModeSliced:
-				// Real per-card units this container's slices commit on the card, so the
-				// ledger reflects capacity (not the loose injection-token count); the
-				// node-devices admission check then refuses a card whose committed units
-				// would exceed capacity, and the InstanceType sliced view reports true remaining.
-				allocated = int32(min(slicedUnitsPerToken*int64(len(resUnits)), int64(nodefeature.ResourceMaxUnits)))
-			}
-			if allocated > nodefeature.ResourceMaxUnits {
-				allocated = nodefeature.ResourceMaxUnits
-			}
-			if len(allocatedStatus.Groups) == 0 || allocatedStatus.Groups[len(allocatedStatus.Groups)-1].ID != devsGroup.ID {
-				allocatedStatus.Groups = append(allocatedStatus.Groups, workercore.DevicesAllocationGroup{
-					ID:           devsGroup.ID,
-					Manufacturer: devsGroup.Manufacturer,
+			for j := range devsGroup.Accelerators {
+				devsAccelerator := &devsGroup.Accelerators[j]
+				res := Resource{
+					Group:  devsGroup.ID,
+					Device: devsAccelerator.ID,
+				}
+				resUnits, existed := allocatedResUnitsMap[res]
+				if !existed {
+					continue
+				}
+				var allocated int32
+				switch s.AllocationMode {
+				default:
+					allocated = nodefeature.ResourceMaxUnits // a whole card
+				case workercore.DeviceAllocationModeShared:
+					allocated = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize // units per owner
+				case workercore.DeviceAllocationModeSliced:
+					// Real per-card units this container's slices commit on the card, so the
+					// ledger reflects capacity (not the loose injection-token count); the
+					// node-devices admission check then refuses a card whose committed units
+					// would exceed capacity, and the InstanceType sliced view reports true remaining.
+					allocated = int32(min(slicedUnitsPerToken*int64(len(resUnits)), int64(nodefeature.ResourceMaxUnits)))
+				}
+				if allocated > nodefeature.ResourceMaxUnits {
+					allocated = nodefeature.ResourceMaxUnits
+				}
+				if len(allocatedStatus.Groups) == 0 || allocatedStatus.Groups[len(allocatedStatus.Groups)-1].ID != devsGroup.ID {
+					allocatedStatus.Groups = append(allocatedStatus.Groups, workercore.DevicesAllocationGroup{
+						ID:           devsGroup.ID,
+						Manufacturer: devsGroup.Manufacturer,
+					})
+				}
+				devsStatusGroup := &allocatedStatus.Groups[len(allocatedStatus.Groups)-1]
+				devsStatusGroup.Accelerators = append(devsStatusGroup.Accelerators, workercore.AcceleratorAllocation{
+					ID:        devsAccelerator.ID,
+					Index:     devsAccelerator.Index,
+					Mode:      s.AllocationMode,
+					Allocated: allocated,
 				})
+				allocatedAllocation[res] = allocated
 			}
-			devsStatusGroup := &allocatedStatus.Groups[len(allocatedStatus.Groups)-1]
-			devsStatusGroup.Accelerators = append(devsStatusGroup.Accelerators, workercore.AcceleratorAllocation{
-				ID:        devsAccelerator.ID,
-				Index:     devsAccelerator.Index,
-				Mode:      s.AllocationMode,
-				Allocated: allocated,
-			})
-			allocatedAllocation[res] = allocated
 		}
+
+		// Reserve the cards in-process before releasing the mutex: the card is taken the instant
+		// the check passes, so the next serialized Allocate observes it (cross-mode check and
+		// getAllocatingPod's skip-reserved), and the SSH sidecar's visibility Allocate can
+		// co-allocate the same physical device without racing the annotation's cache propagation.
+		s.Reconciler.reserveDevices(pod.UID, allocatedStatus)
+		return nil
+	}(); err != nil {
+		return nil, err
 	}
 
-	err = s.Reconciler.patchAllocatingPod(ctx, pod, allocatedStatus)
-	if err != nil {
+	// Persist the durable allocation annotation outside the mutex (I/O). On failure roll back the
+	// reservation written above: with the annotation absent, the Pod-delete watch (gated on it)
+	// would never enqueue a prune, so the card would stay stranded for the opposite mode. Kubelet
+	// does not start the container on this error, so freeing the reservation now is safe and keeps
+	// the release counting honest.
+	if err := s.Reconciler.patchAllocatingPod(ctx, pod, allocatedStatus); err != nil {
+		s.Reconciler.releaseReservation(pod.UID)
 		s.Logger.Error(err, "patch allocating pod for allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 	}
-
-	// Record the allocation in-process so the SSH sidecar's visibility Allocate (same pod,
-	// later in this admission window) can co-allocate the same physical device without
-	// racing the annotation's cache propagation.
-	s.Reconciler.reserveDevices(pod.UID, allocatedStatus)
 
 	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
 	if err != nil {
@@ -488,7 +568,9 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity)
+	// Do not skip reserved pods: visibility re-finds its own pod (whose workload Allocate already
+	// recorded the reservation) to co-allocate the same physical device to the sidecar.
+	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity, false)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for visibility allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
