@@ -33,10 +33,8 @@ message Accelerator {
   // Topology is the topology information of the device.
   optional DeviceTopology topology = 4;
 
-  // Features is the features supported by the device.
-  optional AcceleratorFeatures features = 5;
-
   // Status is the current status of the device.
+  // Field number 5 is reserved for the removed per-accelerator Features.
   optional AcceleratorStatus status = 6;
 }
 
@@ -58,30 +56,37 @@ message AcceleratorAllocation {
   optional int32 remaining = 5;
 }
 
-// AcceleratorFeatures describes the features supported by the accelerator device.
-message AcceleratorFeatures {
-  // PhysicalPartition indicates whether the device supports the real space sharing of cores and memory.
-  optional bool physicalPartition = 1;
+// AcceleratorSliced describes one slicing capability of a device model.
+message AcceleratorSliced {
+  // MaxSize is the maximum number of slices a single device can be split into.
+  optional int32 maxSize = 1;
 
-  // VirtualPartition indicates whether the device supports the virtual space sharing of cores and memory.
-  optional bool virtualPartition = 2;
+  // CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
+  // device compute (time-sharing / weighted sharing), so the sum across slices may
+  // exceed one whole device; false means compute is partitioned (the sum stays within
+  // one device).
+  optional bool coresPercentageOvercommit = 2;
 
-  // SoftPartition indicates whether the device supports the temporal sharing of cores, soft partitioning of memory or both.
-  optional bool softPartition = 3;
-
-  // MaxPartitions is the maximum number of partitions that the device can be split into.
-  // Returns the minimum value of the maximum number of partitions that
-  // the device can be split into for physical partition, virtual partition and multiplexed.
-  optional int32 maxPartitions = 4;
-
-  // RoCE indicates the RoCE information of the device.
-  optional DeviceEthernet roce = 5;
+  // MemoryPercentageStep is the granularity, in percentage points, at which the device
+  // memory can be sliced.
+  optional int32 memoryPercentageStep = 3;
 }
 
 // AcceleratorStatus describes the observed state of the accelerator device.
 message AcceleratorStatus {
   // Unhealthy indicates whether the device is healthy or not.
   optional bool unhealthy = 1;
+}
+
+// AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
+message AcceleratorsFeature {
+  // PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real
+  // spatial partition of cores and memory — when its MaxSize is non-zero.
+  optional AcceleratorSliced physicalSliced = 1;
+
+  // LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an
+  // ld.preload interception library when its MaxSize is non-zero.
+  optional AcceleratorSliced logicalSliced = 2;
 }
 
 // DeviceEthernet describes the Ethernet information of the device.
@@ -112,6 +117,9 @@ message DeviceTopology {
 
   // CpuAffinity is the CPU cores that are close to the device.
   optional string cpuAffinity = 5;
+
+  // RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.
+  optional DeviceEthernet roce = 6;
 }
 
 // Devices is the schema for worker.gpustack.ai.
@@ -177,6 +185,9 @@ message DevicesGroup {
   // +listType=map
   // +listMapKey=id
   repeated Accelerator accelerators = 10;
+
+  // AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
+  optional AcceleratorsFeature acceleratorsFeature = 11;
 }
 
 // DevicesList holds the list of Devices.

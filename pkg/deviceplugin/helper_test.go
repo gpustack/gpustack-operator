@@ -16,12 +16,12 @@ func TestResource_GetDeviceIds(t *testing.T) {
 	res := Resource{Group: "grp-0", Device: "dev-0"}
 
 	cases := []struct {
-		name          string
-		mode          workercore.DeviceAllocationMode
-		maxPartitions int32
-		wantLen       int
-		wantFirst     string
-		wantLast      string
+		name      string
+		mode      workercore.DeviceAllocationMode
+		maxSlices int32
+		wantLen   int
+		wantFirst string
+		wantLast  string
 	}{
 		{
 			name:      "exclusive advertises a single whole-card token",
@@ -37,26 +37,24 @@ func TestResource_GetDeviceIds(t *testing.T) {
 			wantFirst: "grp-0:dev-0:0000",
 		},
 		{
-			// Sliced advertises a loose token pool sized by the card's MaxPartitions,
+			// Sliced advertises a loose token pool sized by the group's max slice count,
 			// not the old per-card MaxUnits (12800) fake-device pool.
-			name:          "sliced advertises MaxPartitions tokens per card",
-			mode:          workercore.DeviceAllocationModeSliced,
-			maxPartitions: 8,
-			wantLen:       8,
-			wantFirst:     "grp-0:dev-0:0000",
-			wantLast:      "grp-0:dev-0:0007",
+			name:      "sliced advertises maxSlices tokens per card",
+			mode:      workercore.DeviceAllocationModeSliced,
+			maxSlices: 8,
+			wantLen:   8,
+			wantFirst: "grp-0:dev-0:0000",
+			wantLast:  "grp-0:dev-0:0007",
 		},
 		{
-			name:          "sliced clamps a non-positive MaxPartitions to one token",
-			mode:          workercore.DeviceAllocationModeSliced,
-			maxPartitions: 0,
-			wantLen:       1,
-			wantFirst:     "grp-0:dev-0:0000",
-			wantLast:      "grp-0:dev-0:0000",
+			name:      "sliced advertises no token when maxSlices is non-positive",
+			mode:      workercore.DeviceAllocationModeSliced,
+			maxSlices: 0,
+			wantLen:   0,
 		},
 		{
 			// Visibility advertises a fixed per-card pool sized to SlicedResourceMaxSize,
-			// independent of MaxPartitions.
+			// independent of the group's max slice count.
 			name:      "visibility advertises SlicedResourceMaxSize tokens per card",
 			mode:      workercore.DeviceAllocationModeVisibility,
 			wantLen:   nodefeature.SlicedResourceMaxSize,
@@ -68,7 +66,7 @@ func TestResource_GetDeviceIds(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			ids := res.GetDeviceIds(c.mode, c.maxPartitions)
+			ids := res.GetDeviceIds(c.mode, c.maxSlices)
 			assert.Len(t, ids, c.wantLen)
 			if c.wantLen > 0 {
 				assert.Equal(t, c.wantFirst, ids[0], "first id")

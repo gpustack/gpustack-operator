@@ -194,8 +194,8 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		},
 	}
 
-	// An accelerated flavor is sliceable when its hardware reports a non-zero
-	// MaxPartitions, read off the contributor's same-named Devices.
+	// An accelerated flavor is sliceable when its device group reports a non-zero
+	// MaxSlices(), read off the contributor's same-named Devices.
 	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, node.Name, flavor.Manufacturer)
 
 	// Read instance-type-aware-cpu-manufacturer per-reconcile: it gates only the accelerated
@@ -323,10 +323,9 @@ func nodeIsAccelerated(nd *core.Node) bool {
 
 // nodeFlavorSliceable reports whether the accelerator backing this flavor can be
 // sliced. It reads the node's same-named Devices object (one per node), finds the
-// device group of the flavor's manufacturer, and inspects its first accelerator's
-// hardware MaxPartitions: a non-zero value means the card supports partitioning.
-// A missing Devices object or group yields false; the flavor is rebuilt once the
-// node reports.
+// device group of the flavor's manufacturer, and inspects its slicing features: a
+// non-zero MaxSlices() means the device model supports partitioning. A missing
+// Devices object or group yields false; the flavor is rebuilt once the node reports.
 func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName, manufacturer string) bool {
 	devs := new(workercore.Devices)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs,
@@ -336,10 +335,10 @@ func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName
 	}
 	for i := range devs.Spec.Groups {
 		g := &devs.Spec.Groups[i]
-		if g.Manufacturer != manufacturer || len(g.Accelerators) == 0 {
+		if g.Manufacturer != manufacturer {
 			continue
 		}
-		return g.Accelerators[0].Features.MaxPartitions != 0
+		return g.AcceleratorsFeature.MaxSlices() != 0
 	}
 	return false
 }

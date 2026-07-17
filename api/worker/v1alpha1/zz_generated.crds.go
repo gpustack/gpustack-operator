@@ -92,57 +92,9 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																		"index",
 																		"physicalIndexes",
 																		"topology",
-																		"features",
 																		"status",
 																	},
 																	Properties: map[string]v1.JSONSchemaProps{
-																		"features": {
-																			Description: "Features is the features supported by the device.",
-																			Type:        "object",
-																			Properties: map[string]v1.JSONSchemaProps{
-																				"maxPartitions": {
-																					Description: "MaxPartitions is the maximum number of partitions that the device can be split into.\nReturns the minimum value of the maximum number of partitions that\nthe device can be split into for physical partition, virtual partition and multiplexed.",
-																					Type:        "integer",
-																					Format:      "int32",
-																				},
-																				"physicalPartition": {
-																					Description: "PhysicalPartition indicates whether the device supports the real space sharing of cores and memory.",
-																					Type:        "boolean",
-																				},
-																				"roce": {
-																					Description: "RoCE indicates the RoCE information of the device.",
-																					Type:        "object",
-																					Required: []string{
-																						"ip",
-																						"subnetMask",
-																						"gateway",
-																					},
-																					Properties: map[string]v1.JSONSchemaProps{
-																						"gateway": {
-																							Description: "Gateway is the gateway of the Ethernet interface of the device.",
-																							Type:        "string",
-																						},
-																						"ip": {
-																							Description: "IP is the IP address of the Ethernet interface of the device.",
-																							Type:        "string",
-																						},
-																						"subnetMask": {
-																							Description: "SubnetMask is the subnet mask of the Ethernet interface of the device.",
-																							Type:        "string",
-																						},
-																					},
-																					Nullable: true,
-																				},
-																				"softPartition": {
-																					Description: "SoftPartition indicates whether the device supports the temporal sharing of cores, soft partitioning of memory or both.",
-																					Type:        "boolean",
-																				},
-																				"virtualPartition": {
-																					Description: "VirtualPartition indicates whether the device supports the virtual space sharing of cores and memory.",
-																					Type:        "boolean",
-																				},
-																			},
-																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",
 																			Type:        "string",
@@ -164,7 +116,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Nullable: true,
 																		},
 																		"status": {
-																			Description: "Status is the current status of the device.",
+																			Description: "Status is the current status of the device.\nField number 5 is reserved for the removed per-accelerator Features.",
 																			Type:        "object",
 																			Required: []string{
 																				"unhealthy",
@@ -207,6 +159,30 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Description: "PciRootID is the PCI root ID of the device.",
 																					Type:        "string",
 																				},
+																				"roce": {
+																					Description: "RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.",
+																					Type:        "object",
+																					Required: []string{
+																						"ip",
+																						"subnetMask",
+																						"gateway",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"gateway": {
+																							Description: "Gateway is the gateway of the Ethernet interface of the device.",
+																							Type:        "string",
+																						},
+																						"ip": {
+																							Description: "IP is the IP address of the Ethernet interface of the device.",
+																							Type:        "string",
+																						},
+																						"subnetMask": {
+																							Description: "SubnetMask is the subnet mask of the Ethernet interface of the device.",
+																							Type:        "string",
+																						},
+																					},
+																					Nullable: true,
+																				},
 																			},
 																		},
 																	},
@@ -217,6 +193,58 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																"id",
 															},
 															XListType: ptr.To[string]("map"),
+														},
+														"acceleratorsFeature": {
+															Description: "AcceleratorsFeature is the slicing capability shared by every accelerator in this group.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"logicalSliced": {
+																	Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an\nld.preload interception library when its MaxSize is non-zero.",
+																	Type:        "object",
+																	Required: []string{
+																		"maxSize",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"coresPercentageOvercommit": {
+																			Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
+																			Type:        "boolean",
+																		},
+																		"maxSize": {
+																			Description: "MaxSize is the maximum number of slices a single device can be split into.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"memoryPercentageStep": {
+																			Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																	},
+																},
+																"physicalSliced": {
+																	Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real\nspatial partition of cores and memory — when its MaxSize is non-zero.",
+																	Type:        "object",
+																	Required: []string{
+																		"maxSize",
+																	},
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"coresPercentageOvercommit": {
+																			Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
+																			Type:        "boolean",
+																		},
+																		"maxSize": {
+																			Description: "MaxSize is the maximum number of slices a single device can be split into.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"memoryPercentageStep": {
+																			Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																	},
+																},
+															},
 														},
 														"computeCapability": {
 															Description: "ComputeCapability is the compute capability of the device.",

@@ -14,9 +14,11 @@ func (*Accelerator) ProtoMessage() {}
 
 func (*AcceleratorAllocation) ProtoMessage() {}
 
-func (*AcceleratorFeatures) ProtoMessage() {}
+func (*AcceleratorSliced) ProtoMessage() {}
 
 func (*AcceleratorStatus) ProtoMessage() {}
+
+func (*AcceleratorsFeature) ProtoMessage() {}
 
 func (*DeviceEthernet) ProtoMessage() {}
 

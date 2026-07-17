@@ -1284,8 +1284,10 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.AcceleratorApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorAllocation"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorAllocationApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorFeatures"):
-		return &applyconfigurationworkerv1alpha1.AcceleratorFeaturesApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorsFeature"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorsFeatureApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSliced"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorStatus"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceEthernet"):

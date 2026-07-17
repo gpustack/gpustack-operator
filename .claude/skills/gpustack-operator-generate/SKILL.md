@@ -35,6 +35,17 @@ the source types above and regenerate.
    (`make generate binding` is a separate target for the CGO bindings under `binding/` — only needed
    when you change `gen/binding/<runtime>/config.yaml`, not for API/webhook changes.)
 
+   **Worktree caveat.** `make generate` only works when the checkout directory's **real** path ends in
+   the module import path `gpustack.ai/gpustack` — go-to-protobuf derives its output base by trimming
+   that suffix off the cwd. It therefore **fails from a git worktree** (e.g. `.claude/worktrees/<name>`)
+   with `Could not make proto path relative … No such file or directory`. Run it from the **main
+   checkout** instead. A symlink does not help (the Go toolchain canonicalizes it back to the real
+   worktree path). To generate against uncommitted worktree changes without touching the shared main
+   checkout: WIP-commit the worktree, `git worktree add --detach /tmp/<x>/gpustack.ai/gpustack HEAD`,
+   run `make generate` there, copy the regenerated files back into the worktree, `git worktree remove
+   --force`, then `git reset` the WIP commit. (`go build`/`go test`/`make lint` all run fine from a
+   worktree — only `make generate` is path-sensitive.)
+
 2. Review that the diff is confined to source edits + generated files:
 
    ```bash

@@ -76,6 +76,9 @@ type (
 		// +listType=map
 		// +listMapKey=id
 		Accelerators []Accelerator `json:"accelerators,omitempty" yaml:"accelerators,omitempty" protobuf:"bytes,10,opt,name=accelerators"`
+
+		// AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
+		AcceleratorsFeature AcceleratorsFeature `json:"acceleratorsFeature,omitempty" yaml:"acceleratorsFeature,omitempty" protobuf:"bytes,11,opt,name=acceleratorsFeature"` // nolint: lll
 	}
 
 	// DeviceTopology describes the topology information of the device.
@@ -94,6 +97,9 @@ type (
 
 		// CpuAffinity is the CPU cores that are close to the device.
 		CpuAffinity string `json:"cpuAffinity" yaml:"cpuAffinity" protobuf:"bytes,5,name=cpuAffinity"`
+
+		// RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.
+		RoCE *DeviceEthernet `json:"roce,omitempty" yaml:"roce,omitempty" protobuf:"bytes,6,opt,name=roce"`
 	}
 
 	// DeviceEthernet describes the Ethernet information of the device.
@@ -177,31 +183,36 @@ type (
 		// Topology is the topology information of the device.
 		Topology DeviceTopology `json:"topology" yaml:"topology" protobuf:"bytes,4,name=topology"`
 
-		// Features is the features supported by the device.
-		Features AcceleratorFeatures `json:"features" yaml:"features" protobuf:"bytes,5,name=features"`
-
 		// Status is the current status of the device.
+		// Field number 5 is reserved for the removed per-accelerator Features.
 		Status AcceleratorStatus `json:"status" yaml:"status" protobuf:"bytes,6,name=status"`
 	}
 
-	// AcceleratorFeatures describes the features supported by the accelerator device.
-	AcceleratorFeatures struct {
-		// PhysicalPartition indicates whether the device supports the real space sharing of cores and memory.
-		PhysicalPartition bool `json:"physicalPartition,omitempty" yaml:"physicalPartition,omitempty" protobuf:"bytes,1,opt,name=physicalPartition"`
+	// AcceleratorSliced describes one slicing capability of a device model.
+	AcceleratorSliced struct {
+		// MaxSize is the maximum number of slices a single device can be split into.
+		MaxSize int32 `json:"maxSize" yaml:"maxSize" protobuf:"varint,1,opt,name=maxSize"`
 
-		// VirtualPartition indicates whether the device supports the virtual space sharing of cores and memory.
-		VirtualPartition bool `json:"virtualPartition,omitempty" yaml:"virtualPartition,omitempty" protobuf:"bytes,2,opt,name=virtualPartition"`
+		// CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
+		// device compute (time-sharing / weighted sharing), so the sum across slices may
+		// exceed one whole device; false means compute is partitioned (the sum stays within
+		// one device).
+		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,2,opt,name=coresPercentageOvercommit"` // nolint: lll
 
-		// SoftPartition indicates whether the device supports the temporal sharing of cores, soft partitioning of memory or both.
-		SoftPartition bool `json:"softPartition,omitempty" yaml:"softPartition,omitempty" protobuf:"bytes,3,opt,name=softPartition"`
+		// MemoryPercentageStep is the granularity, in percentage points, at which the device
+		// memory can be sliced.
+		MemoryPercentageStep int32 `json:"memoryPercentageStep,omitempty" yaml:"memoryPercentageStep,omitempty" protobuf:"varint,3,opt,name=memoryPercentageStep"` // nolint: lll
+	}
 
-		// MaxPartitions is the maximum number of partitions that the device can be split into.
-		// Returns the minimum value of the maximum number of partitions that
-		// the device can be split into for physical partition, virtual partition and multiplexed.
-		MaxPartitions int32 `json:"maxPartitions,omitempty" yaml:"maxPartitions,omitempty" protobuf:"varint,4,opt,name=maxPartitions"`
+	// AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
+	AcceleratorsFeature struct {
+		// PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real
+		// spatial partition of cores and memory — when its MaxSize is non-zero.
+		PhysicalSliced AcceleratorSliced `json:"physicalSliced,omitempty" yaml:"physicalSliced,omitempty" protobuf:"bytes,1,opt,name=physicalSliced"`
 
-		// RoCE indicates the RoCE information of the device.
-		RoCE *DeviceEthernet `json:"roce,omitempty" yaml:"roce,omitempty" protobuf:"bytes,5,name=roce"`
+		// LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an
+		// ld.preload interception library when its MaxSize is non-zero.
+		LogicalSliced AcceleratorSliced `json:"logicalSliced,omitempty" yaml:"logicalSliced,omitempty" protobuf:"bytes,2,opt,name=logicalSliced"`
 	}
 
 	// AcceleratorStatus describes the observed state of the accelerator device.
@@ -228,6 +239,18 @@ type (
 		Remaining int32 `json:"remaining,omitempty" yaml:"remaining,omitempty" protobuf:"varint,5,opt,name=remaining"`
 	}
 )
+
+// MaxSlices returns the maximum number of slices a single device in the group can be
+// split into: the larger of the physical (hardware) and logical (software) slice sizes.
+// A zero Size means the mode is disabled, so a group with neither capability yields 0
+// (not sliceable), and the allocator advertises no ".sliced" resource for it.
+func (in AcceleratorsFeature) MaxSlices() int32 {
+	n := in.PhysicalSliced.MaxSize
+	if in.LogicalSliced.MaxSize > n {
+		n = in.LogicalSliced.MaxSize
+	}
+	return n
+}
 
 // DevicesList holds the list of Devices.
 //
