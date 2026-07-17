@@ -247,7 +247,13 @@ spec:
   family: Ampere
   memory: 24Gi
   cores: "10240"
-  sliceable: true
+  feature:
+    logicalSliced:
+      maxSize: 128
+      coresPercentageOvercommit: true
+      memoryPercentageStep: 1
+    physicalSliced:
+      maxSize: 0
   unitResources:
     cpu: "4"
     ram: 16Gi
@@ -345,7 +351,7 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi
 
 ## 3. Requesting a sliced GPU
 
-A sliceable InstanceType (A10G is `sliceable: true`) admits fractional-card workloads. Request 20 % of
+A sliceable InstanceType (A10G's `feature.logicalSliced.maxSize` is `128`) admits fractional-card workloads. Request 20 % of
 a card's VRAM with `acceleratorSlicedMemoryPercentage`:
 
 ```yaml
