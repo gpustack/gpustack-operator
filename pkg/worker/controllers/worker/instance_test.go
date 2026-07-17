@@ -25,6 +25,20 @@ import (
 // qty parses a quantity for terse fixture construction.
 func qty(s string) resource.Quantity { return resource.MustParse(s) }
 
+// sliceableAccelerator builds an InstanceTypeAccelerator whose Feature marks it sliceable
+// (a non-zero MaxSlices) or not, so fixtures can toggle IsSliceable() without hand-writing
+// the slicing descriptor.
+func sliceableAccelerator(sliceable bool) workercore.InstanceTypeAccelerator {
+	if !sliceable {
+		return workercore.InstanceTypeAccelerator{}
+	}
+	return workercore.InstanceTypeAccelerator{
+		Feature: workercore.AcceleratorsFeature{
+			LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128},
+		},
+	}
+}
+
 // qtyEqual compares quantities by value (Cmp) so the assertion does not depend
 // on the SI format (BinarySI vs DecimalSI) of the operands.
 func qtyEqual(t *testing.T, want, got resource.Quantity, name string) {
@@ -73,7 +87,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		// InstanceType fixture.
 		acceleratable bool
 		manufacturer  string
-		sliceable     bool // → Spec.Sliceable (true → the accelerator can be sliced)
+		sliceable     bool // → Spec.Feature (true → the accelerator can be sliced)
 
 		// getResourceRequirements flags.
 		withGeneral, withGeneralOvercommit, withAccelerator, withVisibility bool
@@ -300,7 +314,7 @@ func TestGetResourceRequirements(t *testing.T) {
 				Spec: workercore.InstanceTypeSpec{
 					Acceleratable:           c.acceleratable,
 					Manufacturer:            c.manufacturer,
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: c.sliceable},
+					InstanceTypeAccelerator: sliceableAccelerator(c.sliceable),
 				},
 			}
 
@@ -506,7 +520,7 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 		Spec: workercore.InstanceTypeSpec{
 			Acceleratable:           true,
 			Manufacturer:            nodefeature.ManufacturerNVIDIA,
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Sliceable: true},
+			InstanceTypeAccelerator: sliceableAccelerator(true),
 		},
 	}
 

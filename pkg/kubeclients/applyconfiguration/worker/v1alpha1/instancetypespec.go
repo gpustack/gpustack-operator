@@ -207,11 +207,11 @@ func (b *InstanceTypeSpecApplyConfiguration) WithComputeCapability(value string)
 	return b
 }
 
-// WithSliceable sets the Sliceable field in the declarative configuration to the given value
+// WithFeature sets the Feature field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Sliceable field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithSliceable(value bool) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeAcceleratorApplyConfiguration.Sliceable = &value
+// If called multiple times, the Feature field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithFeature(value *AcceleratorsFeatureApplyConfiguration) *InstanceTypeSpecApplyConfiguration {
+	b.InstanceTypeAcceleratorApplyConfiguration.Feature = value
 	return b
 }
 

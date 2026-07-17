@@ -147,13 +147,14 @@ type AcceleratorsFeature struct {
 | `<vendor>/<device>.sliced.memory-percentage` | `NodeCapacityReconciler` | `cards × 100` | unchanged |
 | `<vendor>/<device>.sliced.memory-mib` | `NodeCapacityReconciler` | `Σ cards × per-card VRAM MiB` | unchanged |
 
-- **Allocator**: sizes the `.sliced` token pool from `DevicesGroup.Features` max slice count (was the per-accelerator
+- **Allocator**: sizes the `.sliced` token pool from `DevicesGroup.AcceleratorsFeature` max slice count (was the per-accelerator
   `Features.MaxPartitions`); a group with no slicing capability contributes no tokens, and a manufacturer with no
   sliceable group advertises no `.sliced` resource at all.
 - **`NodeCapacityReconciler`**: reads the Node (card counts, per-card VRAM) **and** the same-named `Devices` CR
-  (per-manufacturer max slice count + `CoresPercentageOvercommit`); patches the four `.sliced.*` keys for a
-  manufacturer **only while** that manufacturer's `.sliced` resource is present and > 0 in `Node.status.capacity`,
-  and reverse-patches (removes) them when it is absent or 0. No separate `Devices` watch is needed: `maxSlices` and
+  (each model's max slice count + `CoresPercentageOvercommit`, matched by the group ID in the node key); patches
+  the four `.sliced.*` keys for a manufacturer **only while** that manufacturer's `.sliced` resource is present
+  and > 0 in `Node.status.capacity`, summing over only its sliceable models, and reverse-patches (removes) them
+  when it is absent or 0. No separate `Devices` watch is needed: `maxSlices` and
   the overcommit flag are fixed per-vendor constants, and the device-plugin sizes the bare `.sliced` pool as
   `cards × maxSlices` off the same `Devices` CR, so every capability change (enable / disable / resize) also moves
   the bare `.sliced` capacity the Node predicate already watches (which re-fires the reconcile).
@@ -208,12 +209,12 @@ and consumed.
 | # | Feature | Acceptance |
 |---|---------|-----------|
 | F1 | `AcceleratorSliced` + `AcceleratorsFeature` types | `api/worker/v1alpha1/devices.go` defines `AcceleratorSliced{MaxSize int32; CoresPercentageOvercommit bool; MemoryPercentageStep int32}` and `AcceleratorsFeature{PhysicalSliced, LogicalSliced AcceleratorSliced}` (value structs, not pointers). `AcceleratorFeatures` (and its `PhysicalPartition`/`VirtualPartition`/`SoftPartition`/`MaxPartitions` fields) is removed. A helper `MaxSlices()` returns `max(PhysicalSliced.MaxSize, LogicalSliced.MaxSize)`. `make generate` regenerates deepcopy / protobuf / applyconfiguration / CRD without error. |
-| F2 | `Features` moves to `DevicesGroup`; `RoCE` moves to `DeviceTopology` | `DevicesGroup` gains `Features AcceleratorsFeature`; `Accelerator.Features` is gone. `DeviceTopology` gains `RoCE *DeviceEthernet`; the feature struct no longer carries `RoCE`. The two current read sites move accordingly: the allocator sizing (`pkg/deviceplugin/server.go`) and `nodeFlavorSliceable` (`pkg/worker/controllers/worker/node_flavor.go`) read `group.Features`. |
-| F3 | Detectors fill per-vendor `LogicalSliced` | Each of the six vendor detectors sets `group.Features.LogicalSliced` to the table value. NVIDIA sets it always and additionally seeds a placeholder `PhysicalSliced{7, false, 25}` (`TODO`-marked) when the card's MIG mode is enabled; the other five vendors leave `PhysicalSliced` zero. Ascend only for families `910B`/`910C`/`950`. Ascend's RoCE is written to each accelerator's `Topology.RoCE`. AMD / Iluvatar / THead remain feature-less. |
+| F2 | `Features` moves to `DevicesGroup`; `RoCE` moves to `DeviceTopology` | `DevicesGroup` gains `AcceleratorsFeature AcceleratorsFeature` (field named after its type); `Accelerator.Features` is gone. `DeviceTopology` gains `RoCE *DeviceEthernet`; the feature struct no longer carries `RoCE`. The two current read sites move accordingly: the allocator sizing (`pkg/deviceplugin/server.go`) and `nodeFlavorSliceable` (`pkg/worker/controllers/worker/node_flavor.go`) read `group.AcceleratorsFeature`. |
+| F3 | Detectors fill per-vendor `LogicalSliced` | Each of the six vendor detectors sets `group.AcceleratorsFeature.LogicalSliced` to the table value. NVIDIA sets it always and additionally seeds a placeholder `PhysicalSliced{7, false, 25}` (`TODO`-marked) when the card's MIG mode is enabled; the other five vendors leave `PhysicalSliced` zero. Ascend only for families `910B`/`910C`/`950`. Ascend's RoCE is written to each accelerator's `Topology.RoCE`. AMD / Iluvatar / THead remain feature-less. |
 | F4 | Allocator advertises `.sliced = cards × maxSlices`, or nothing | `pkg/deviceplugin` sizes the Sliced token pool from the group's `MaxSlices()` (was the per-accelerator `MaxPartitions`); `MaxSlices() == 0` yields an empty token list (drop the floor-to-1), so a non-sliceable group contributes no tokens and a manufacturer with no sliceable group advertises no `.sliced`. The `!opts.NoSliced` gate is unchanged; the per-group capability is the new second condition. |
-| F5 | `NodeCapacityReconciler` reads Node + Devices, gates on `.sliced`, honors overcommit | It patches the four `.sliced.*` keys for a manufacturer only while `<mfr>.sliced` is present and > 0 in `Node.status.capacity`, reverse-patching otherwise (including at exactly 0). `.sliced.cores-percentage = cards × maxSlices × 100` when the manufacturer's `CoresPercentageOvercommit` is true, else `cards × 100`; `.sliced.units`/`.memory-percentage`/`.memory-mib` are unchanged formulas. It reads `maxSlices` + overcommit from the same-named `Devices` CR at reconcile time; no `Devices` watch is needed because the device-plugin sizes the bare `.sliced` pool as `cards × maxSlices` off the same CR, so any capability change moves the bare `.sliced` capacity the Node predicate watches. Stale cleanup still covers all four suffixes. |
-| F6 | `NodeFlavorReconciler` records `AcceleratorsFeature` in notes + injects into the derived InstanceType | The RF notes carry the group's `AcceleratorsFeature` as JSON (replacing the `sliceable` string note); `nodeFlavorSliceable` reads `group.Features` (`MaxSlices() > 0`). `authorDerivedInstanceType` injects the slicing descriptor into the InstanceType spec. |
-| F7 | InstanceType API replaces `Sliceable bool` with the structured slicing descriptor | `InstanceTypeAccelerator` drops `Sliceable bool` for a field mirroring `AcceleratorsFeature` (physical / logical sliced descriptor). The v1 proxy type + conversion, the validating/mutating webhooks (`instance_type.go`), and the `Spec.Sliceable` consumers (`webhooks/worker/instance.go`, `controllers/worker/instance.go`) migrate to the new shape (a `IsSliceable()`-style helper). `make generate` regenerates deepcopy / protobuf / CRD / conversion / apiservice. |
+| F5 | `NodeCapacityReconciler` reads Node + Devices, gates on `.sliced`, honors overcommit | It patches the four `.sliced.*` keys for a manufacturer only while `<mfr>.sliced` is present and > 0 in `Node.status.capacity`, reverse-patching otherwise (including at exactly 0), and sums each key over only that manufacturer's models whose Devices group — matched by the group ID in the acceleratable node key — reports a slicing capability, so a non-sliceable model (e.g. an Ascend 310 beside a sliceable 910B) contributes nothing. `.sliced.cores-percentage = Σ cards × maxSlices × 100` for a model whose `CoresPercentageOvercommit` is true, else `Σ cards × 100`; `.sliced.units`/`.memory-percentage`/`.memory-mib` are unchanged formulas. It reads `maxSlices` + overcommit from the same-named `Devices` CR at reconcile time; no `Devices` watch is needed because the device-plugin sizes the bare `.sliced` pool as `cards × maxSlices` off the same CR, so any capability change moves the bare `.sliced` capacity the Node predicate watches. Stale cleanup still covers all four suffixes. |
+| F6 | `NodeFlavorReconciler` records `AcceleratorsFeature` in notes; the derived InstanceType folds it in | The RF notes carry the group's `AcceleratorsFeature` as an `acceleratorFeature` JSON note (replacing the `sliceable` string note), read via `nodeFlavorAcceleratorsFeature`, which resolves the flavor's own device group by the group ID in its accelerator key. The InstanceType defaulting webhook folds the note into `Spec.Feature`, so a derived type carries the descriptor without a separate injection step. |
+| F7 | InstanceType API replaces `Sliceable bool` with the structured slicing descriptor | `InstanceTypeAccelerator` drops `Sliceable bool` for a **value** `Feature AcceleratorsFeature` field + an `IsSliceable()` helper (value, not pointer, so `InstanceTypeSpec` stays comparable for the workergateway map key). The v1 InstanceType is a type alias (no conversion), and the `Spec.Sliceable` consumers (`webhooks/worker/instance.go`, `controllers/worker/instance.go`) migrate to `IsSliceable()`. `make generate` regenerates deepcopy / protobuf / CRD / apiservice / applyconfiguration. |
 | F8 | Architecture doc: five-gate admission | `docs/architecture.md`'s admission section is rewritten as the five gates above (Pod webhook / credits / AdmissionCheck / scheduler / allocator), with the `Devices` ledger described as the backing store for gate 3. The `NodeCapacityReconciler` and `MaxPartitions=512` references are updated to the per-vendor max slice count. |
 | F9 | `testing/sample` devices updated | `testing/sample/devices/ascend-910b.yaml` (and any other sample carrying `features`/`roce`) moves the per-accelerator `features.roce` block to `topology.roce` and adds a group-level `features.logicalSliced` block (`{size: 63, coresPercentageOvercommit: true, memoryPercentageStep: 1}`). |
 
@@ -320,7 +321,7 @@ bash .claude/skills/gpustack-operator-e2e/cases/<sliced-capacity-case>.sh gpusta
 ```
 api/worker/v1alpha1/devices.go                     # F1/F2 AcceleratorSliced + AcceleratorsFeature; Features→DevicesGroup; RoCE→DeviceTopology; drop AcceleratorFeatures
 api/worker/v1/devices.go                            # F1/F2 mirror the shape for the v1 proxy + conversion
-api/worker/v1alpha1/instance_type.go                # F7 drop Sliceable bool; add structured sliced descriptor
+api/worker/v1alpha1/instance_type.go                # F7 drop Sliceable bool; add value Feature AcceleratorsFeature + IsSliceable()
 api/worker/v1/instance_type.go                      # F7 proxy type + conversion
 pkg/device/types.go                                 # F1/F2 device.AcceleratorFeatures alias → AcceleratorsFeature; MaxSlices() helper
 pkg/devicemanager/detector/nvidia/device.go         # F3 LogicalSliced{128,true,1}; keep MIG branch (PhysicalSliced zero)
@@ -331,11 +332,11 @@ pkg/devicemanager/detector/mthreads/device.go       # F3 LogicalSliced{16,false,
 pkg/devicemanager/detector/metax/device.go          # F3 LogicalSliced{16,false,1}
 pkg/deviceplugin/server.go, helper.go               # F4 size .sliced from group MaxSlices(); 0 → no tokens (drop floor-to-1)
 pkg/worker/controllers/worker/node_capacity.go      # F5 read Node + Devices; presence-gate on .sliced; overcommit-aware cores-percentage; Node predicate reacts to bare .sliced
-pkg/worker/controllers/worker/node_flavor.go        # F6 notes carry AcceleratorsFeature JSON; nodeFlavorSliceable reads group.Features; inject into derived InstanceType
-api/worker/v1/instance_type_flavor.go               # F7 InstanceTypeFlavor.Sliceable (display flavor) → structured/derived field
+pkg/worker/controllers/worker/node_flavor.go        # F6 eNotes carry acceleratorFeature JSON via nodeFlavorAcceleratorsFeature
+api/worker/v1/instance_type_flavor.go               # F7 InstanceTypeFlavor.Sliceable stays a bool (map key + CLI column), derived from the acceleratorFeature note
 pkg/worker/extensionapis/worker/instance_type_flavor.go # F7 CLI column ".spec.sliceable" needs a jsonpath-addressable field
 pkg/kubeclients/applyconfiguration/worker/v1{,alpha1}/  # F7 generated apply-config for the descriptor (regenerated, not hand-edited)
-pkg/worker/webhooks/worker/instance_type.go         # F7 sliced descriptor default/validate + note fold (instance_type.go:188 notes["sliceable"])
+pkg/worker/webhooks/worker/instance_type.go         # F6/F7 fold the acceleratorFeature note into Spec.Feature (defaulting webhook)
 pkg/worker/webhooks/worker/instance.go              # F7 Spec.Sliceable consumers (:305,:414) → IsSliceable()
 pkg/worker/controllers/worker/instance.go           # F7 Spec.Sliceable consumer (:947) → IsSliceable()
 docs/architecture.md                                # F8 five-gate admission; per-vendor max slice count
@@ -368,10 +369,10 @@ if overcommit {
 `DevicesGroup.Features`, delete `AcceleratorFeatures`) is atomic — it cannot be split across commits without
 breaking the build — and it exercises the two riskiest mechanics up front (`make generate` over the reshaped API
 + the CGO vendor detectors still compiling after the move). Task 2 (NodeCapacity) and Task 3 (InstanceType
-descriptor) both depend only on Task 1. Task 4 (NodeFlavor producer) depends on Task 1 **and** Task 3 (the
-InstanceType field must exist before the flavor can inject it). Task 5 (doc) depends on the behavior settling
-(after Task 2/4). Each task is a vertical slice that leaves the tree building; a `make lint` + `go test` +
-`make generate`-clean checkpoint sits after Tasks 1, 2, and 4.
+descriptor + NodeFlavor note round-trip) both depend only on Task 1 — Task 3 folds F6 (the `NodeFlavor` producer
++ derived-InstanceType consumer) into F7 because the note round-trip and the InstanceType field are one vertical
+slice. Task 4 (doc) depends on the behavior settling (after Task 2/3). Each task is a vertical slice that leaves
+the tree building; a `make lint` + `go test` + `make generate`-clean checkpoint sits after Tasks 1, 2, and 3.
 
 - [x] **Task 1 (foundation / de-risk) — Devices slicing model + per-vendor detection + `.sliced` advertising
   (F1/F2/F3/F4/F9).** Add `AcceleratorSliced{Size int32; CoresPercentageOvercommit bool; MemoryPercentageStep
@@ -382,9 +383,9 @@ InstanceType field must exist before the flavor can inject it). Task 5 (doc) dep
   the group-level `LogicalSliced` in all six detectors (NVIDIA always `{128,true,1}`, seeding a placeholder
   `PhysicalSliced{7,false,25}` when MIG mode is enabled; Ascend `{63,true,1}` on families 910B/910C/950; Cambricon `{16,false,1}`; Hygon
   `{4,true,1}`; MThreads `{16,false,1}`; MetaX `{16,false,1}`) and route Ascend RoCE into each accelerator's
-  `Topology.RoCE`. Size `.sliced` from `group.Features.MaxSlices()` in `pkg/deviceplugin/server.go`, and make
+  `Topology.RoCE`. Size `.sliced` from `group.AcceleratorsFeature.MaxSlices()` in `pkg/deviceplugin/server.go`, and make
   `GetDeviceIds(Sliced, n)` return an empty list for `n ≤ 0` (drop the floor-to-1). Fix `nodeFlavorSliceable` to
-  read `group.Features.MaxSlices() != 0` (compile-level; the richer note lands in Task 4). Update
+  read `group.AcceleratorsFeature.MaxSlices() != 0` (compile-level; the richer note lands in Task 4). Update
   `testing/sample/devices/ascend-910b.yaml` (per-accelerator `features.roce` → `topology.roce`; add group
   `features.logicalSliced {63,true,1}`). **Accept:** `make generate` leaves the tree clean; `make lint` clean; a
   `pkg/deviceplugin` table test shows a NVIDIA group (`MaxSlices()=128`) advertises `cards×128` `.sliced` devices
@@ -401,24 +402,25 @@ InstanceType field must exist before the flavor can inject it). Task 5 (doc) dep
   8×NVIDIA node → `nvidia.com/gpu.sliced.cores-percentage = 102400`, `.sliced.units = 12,800,000`; an 8×MThreads
   node (overcommit=false) → cores-percentage = 800; removing the manufacturer's `.sliced` reverse-patches all
   four keys. **Verify:** `go test ./pkg/worker/controllers/worker/... -run NodeCapacity && make lint`.
-- [ ] **Task 3 — InstanceType structured slicing descriptor (API + consumers + conversion) (F7).** Replace
-  `InstanceTypeAccelerator.Sliceable bool` (v1 + v1alpha1) with a structured `Sliced *InstanceTypeAcceleratorSliced`
-  mirroring `AcceleratorsFeature`, plus an `IsSliceable()` helper. Migrate the v1↔v1alpha1 conversion, the
-  generated apply-config, the display flavor `InstanceTypeFlavor.Sliceable` (`api/worker/v1/instance_type_flavor.go`)
-  and its CLI column (`pkg/worker/extensionapis/worker/instance_type_flavor.go` — keep a jsonpath-addressable
-  field for the `Sliceable` column), the boolean consumers (`webhooks/worker/instance.go:305,:414`,
-  `controllers/worker/instance.go:947` → `IsSliceable()`), and the InstanceType webhook's note fold
-  (`webhooks/worker/instance_type.go:188`). Run `make generate`. **Accept:** the tree builds; `kubectl get
-  instancetype -o yaml` shows the structured `sliced` descriptor (no `sliceable` bool on the accelerator);
-  `IsSliceable()`-gated slice admission is behavior-unchanged; the `instancetypeflavor` CLI still prints a
-  Sliceable column. **Verify:** `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/... ./pkg/worker/extensionapis/... && make generate && make lint`.
-- [ ] **Task 4 — NodeFlavor produces the descriptor: RF notes + derived InstanceType (F6).** Replace the RF
-  `sliceable` string note with the group's `AcceleratorsFeature` JSON (a new note key, e.g. `slicedFeature`);
-  have the InstanceType webhook / `authorDerivedInstanceType` fold the note into the InstanceType `Sliced`
-  descriptor (the Task 3 field). **Accept:** a derived NVIDIA InstanceType carries
-  `Sliced.LogicalSliced = {128,true,1}`; the RF note round-trips the descriptor; removing slicing capability
-  clears it. **Verify:** `go test ./pkg/worker/controllers/worker/... -run NodeFlavor && make lint`.
-- [ ] **Task 5 — Architecture doc: five-gate admission (F8).** Rewrite `docs/architecture.md`'s admission section
+- [x] **Task 3 — InstanceType slicing descriptor + NodeFlavor note round-trip (F6/F7).** Replace
+  `InstanceTypeAccelerator.Sliceable bool` (v1alpha1; the v1 InstanceType is a type alias, so it and the
+  generated apply-config follow) with a **value** `Feature AcceleratorsFeature` field plus an `IsSliceable()`
+  helper — a value, not a pointer, so `InstanceTypeSpec` stays comparable (the workergateway cross-cluster
+  aggregation keys on it via `map[AggregatedInstanceTypeSpec]int` and `!=`). Migrate the boolean consumers
+  (`webhooks/worker/instance.go:305,:414`, `controllers/worker/instance.go:947` → `IsSliceable()`). Fold F6's
+  note round-trip in: `NodeFlavorReconciler` records the device group's `AcceleratorsFeature` as an
+  `acceleratorFeature` JSON note (replacing the `sliceable` string; `nodeFlavorSliceable` →
+  `nodeFlavorAcceleratorsFeature`; produced with `json.ShouldMarshal`), the InstanceType defaulting webhook
+  folds that note into `Spec.Feature` (error-returning `json.Unmarshal`: a present-but-malformed note fails
+  admission with a `field.Error`, an absent one is skipped — never a silent `ShouldUnmarshal`), and the
+  extension-API flavor (a read-only catalog projection, not the admission path) derives its display `Sliceable`
+  bool from the note best-effort (`ShouldUnmarshal`, `MaxSlices() > 0`; `InstanceTypeFlavor.Sliceable` stays a
+  bool — it is also a map key and the CLI column).
+  Run `make generate`. **Accept:** the tree builds; a derived NVIDIA InstanceType carries
+  `Feature.LogicalSliced = {128,true,1}` folded from the note; `IsSliceable()`-gated slice admission is
+  behavior-unchanged; the `instancetypeflavor` CLI still prints a Sliceable column. **Verify:**
+  `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/... ./pkg/worker/extensionapis/... && make generate && make lint`.
+- [ ] **Task 4 — Architecture doc: five-gate admission (F8).** Rewrite `docs/architecture.md`'s admission section
   as the five gates (Pod webhook → Kueue credits → Kueue AdmissionCheck → default scheduler → DeviceManager
   allocator), with the `Devices` ledger described as gate-3's backing store; update the `.sliced.cores-percentage`
   formula and replace the `MaxPartitions = 512` narrative with the per-vendor max slice count + the overcommit
@@ -453,9 +455,9 @@ Table-driven; target ≥ existing per-package coverage, no regression. Per-packa
   `AcceleratorSliced` (Devices) and the InstanceType `Sliced` descriptor.
 - `pkg/worker/controllers/worker`: `node_capacity_test` — the four `.sliced.*` keys, overcommit true/false paths,
   presence-gate + reverse-patch (absent / exactly 0), values sourced from the `Devices` CR; `node_flavor_test` —
-  RF note carries the `AcceleratorsFeature` JSON, `nodeFlavorSliceable` reads `group.Features`, and the derived
-  InstanceType is injected with the `Sliced` descriptor.
-- `pkg/worker/webhooks/worker`: `instance_type_test` — RF `slicedFeature` note folds into the `Sliced` descriptor;
+  the RF `acceleratorFeature` note round-trips the group's `AcceleratorsFeature` JSON via
+  `nodeFlavorAcceleratorsFeature` (a slicing group and a no-Devices node).
+- `pkg/worker/webhooks/worker`: `instance_type_test` — the RF `acceleratorFeature` note folds into `Spec.Feature`;
   `instance_test` — `IsSliceable()`-gated slice admission is behavior-unchanged.
 - `pkg/worker/extensionapis/worker`: `instance_type_flavor_test` — the `Sliceable` CLI column resolves from the
   new field.
@@ -493,10 +495,13 @@ Table-driven; target ≥ existing per-package coverage, no regression. Per-packa
   follow-up.
 
 ## Open Questions
-- **`InstanceType` sliced descriptor shape.** F7 says "a field mirroring `AcceleratorsFeature`." Whether the
-  InstanceType reuses `AcceleratorsFeature` directly or a display-oriented mirror (e.g. flattening to
-  `mode + maxSlices + overcommit + step`) is a `/my-plan` decision; it must round-trip through the v1 proxy +
-  conversion and be consumable by the Pod webhook (gate 1) for the memory step.
+- **`InstanceType` slicing descriptor shape — resolved (Task 3).** The InstanceType reuses the Devices
+  `AcceleratorsFeature` directly, as a **value** field `InstanceTypeAccelerator.Feature` (not a pointer, not a
+  display-oriented mirror). A value keeps `InstanceTypeSpec` comparable, which the workergateway cross-cluster
+  aggregation requires (it keys on `map[AggregatedInstanceTypeSpec]int` and compares specs with `!=`); a pointer
+  would degrade equality to pointer identity and break the dedup. Reuse avoids a parallel type and any conversion
+  (the v1 InstanceType is a type alias), and the `NodeFlavor` `acceleratorFeature` note round-trips the same
+  type; `IsSliceable()` and `Feature.LogicalSliced.MemoryPercentageStep` stay consumable by the Pod webhook.
 - **`CoresPercentageOvercommit` values are deliberate per-vendor modeling.** The Hygon `true` (spatial CU bitmask
   is arguably not overcommit) and MThreads `false` (compute is a relative weight) are recorded as given; they may
   be refined when each vendor's real injection branch is built. Confirm during that follow-up, not here.

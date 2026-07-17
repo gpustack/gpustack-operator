@@ -471,9 +471,13 @@ message InstanceTypeAccelerator {
   // ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
   optional string computeCapability = 3;
 
-  // Sliceable indicates whether the accelerator can be sliced, i.e. its hardware
-  // reports a non-zero MaxPartitions. It is a capability flag, not a slice count.
-  optional bool sliceable = 4;
+  // Feature is the accelerator's slicing capability: the physical / logical slicing mode, the
+  // per-device maximum slice count, whether compute may be overcommitted, and the memory step.
+  // A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's
+  // AcceleratorsFeature, folded in from the node-derived ResourceFlavor.
+  //
+  // Field number 4 is reserved for the removed Sliceable bool.
+  optional AcceleratorsFeature feature = 6;
 
   // CPU describes the CPU information of the accelerator.
   optional InstanceTypeAcceleratorCPU cpu = 5;

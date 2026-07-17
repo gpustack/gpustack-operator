@@ -194,10 +194,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		},
 	}
 
-	// An accelerated flavor is sliceable when its device group reports a non-zero
-	// MaxSlices(), read off the contributor's same-named Devices.
-	sliceable := flavor.Acceleratable && r.nodeFlavorSliceable(ctx, node.Name, flavor.Manufacturer)
-
 	// Read instance-type-aware-cpu-manufacturer per-reconcile: it gates only the accelerated
 	// flavor's cpuDetail note (the CPU is otherwise not a scheduling axis for an accelerated
 	// flavor); it never changes the flavor's name or labels.
@@ -215,7 +211,12 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"family":           flavor.Family,
 		"memory":           flavor.Memory,
 		"cores":            flavor.Cores,
-		"sliceable":        strconv.FormatBool(sliceable),
+	}
+	// Record the device group's slicing capability as JSON so the derived InstanceType and the
+	// flavor catalog can surface how (and how finely) the pool slices; a CPU flavor carries none.
+	if flavor.Acceleratable {
+		feature := r.nodeFlavorAcceleratorsFeature(ctx, node.Name, flavor.AcceleratorKey)
+		eNotes["acceleratorFeature"] = string(json.ShouldMarshal(feature))
 	}
 	// Record the raw CPU detail: always for a CPU flavor; for an accelerated flavor only when
 	// CPU-manufacturer awareness is on.
@@ -321,26 +322,29 @@ func nodeIsAccelerated(nd *core.Node) bool {
 	return kubemeta.IsLabeled(nd, nodefeature.NodeAcceleratableLabelKey, "true")
 }
 
-// nodeFlavorSliceable reports whether the accelerator backing this flavor can be
-// sliced. It reads the node's same-named Devices object (one per node), finds the
-// device group of the flavor's manufacturer, and inspects its slicing features: a
-// non-zero MaxSlices() means the device model supports partitioning. A missing
-// Devices object or group yields false; the flavor is rebuilt once the node reports.
-func (r *NodeFlavorReconciler) nodeFlavorSliceable(ctx context.Context, nodeName, manufacturer string) bool {
+// nodeFlavorAcceleratorsFeature returns the slicing capability of the specific accelerator model
+// backing this flavor. It reads the node's same-named Devices object (one per node) and finds the
+// device group whose "${manufacturer}-${group ID}" key matches the flavor's accelerator key, so a
+// node hosting several models of one manufacturer (e.g. a sliceable Ascend 910B and a non-sliceable
+// 310) resolves each flavor to its own group. A missing Devices object or group yields the zero
+// feature (not sliceable); the flavor is rebuilt once the node reports.
+func (r *NodeFlavorReconciler) nodeFlavorAcceleratorsFeature(ctx context.Context, nodeName, acceleratorKey string) workercore.AcceleratorsFeature {
 	devs := new(workercore.Devices)
 	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs,
 		ctrlcli.UnsafeDisableDeepCopy)
 	if err != nil {
-		return false
+		return workercore.AcceleratorsFeature{}
 	}
 	for i := range devs.Spec.Groups {
 		g := &devs.Spec.Groups[i]
-		if g.Manufacturer != manufacturer {
+		// Match the full "${manufacturer}-${group ID}" key: ConstructGroupID strips the
+		// vendor prefix, so a bare group ID can collide across manufacturers on a node.
+		if g.Manufacturer+"-"+g.ID != acceleratorKey {
 			continue
 		}
-		return g.AcceleratorsFeature.MaxSlices() != 0
+		return g.AcceleratorsFeature
 	}
-	return false
+	return workercore.AcceleratorsFeature{}
 }
 
 const (

@@ -19,6 +19,10 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
+// acceleratorFeatureNote is a marshaled AcceleratorsFeature (LogicalSliced 128 / overcommit / step
+// 1) a sliceable pool's ResourceFlavor carries in its acceleratorFeature note.
+const acceleratorFeatureNote = `{"logicalSliced":{"maxSize":128,"coresPercentageOvercommit":true,"memoryPercentageStep":1}}`
+
 // newInstanceType builds a non-acceleratable InstanceType carrying the required admin inputs (a
 // generic linux/amd64 pool) plus the given unit spec, so the unit-spec cases exercise unit
 // validity with the other required fields satisfied.
@@ -201,7 +205,7 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 	}
 	systemmeta.NoteResource(accelRF, "nodes", map[string]string{
 		"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA A10G",
-		"family": "ampere", "memory": "24Gi", "cores": "9216", "sliceable": "true",
+		"family": "ampere", "memory": "24Gi", "cores": "9216", "acceleratorFeature": acceleratorFeatureNote,
 	})
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(accelRF).Build()
 	wh := &InstanceTypeWebhook{Client: cli}
@@ -219,7 +223,7 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		assert.Equal(t, "ampere", it.Spec.Family)
 		assert.Equal(t, "24Gi", it.Spec.Memory)
 		assert.Equal(t, "9216", it.Spec.Cores)
-		assert.True(t, it.Spec.Sliceable)
+		assert.True(t, it.Spec.IsSliceable())
 	})
 
 	t.Run("accelerated type without accelerator group is a no-op", func(t *testing.T) {
@@ -261,6 +265,38 @@ func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
 		require.NoError(t, wh.Default(context.Background(), it))
 		assert.Empty(t, it.Spec.Manufacturer, "an accel type that already has memory is not enriched")
 		assert.Equal(t, "12Gi", it.Spec.Memory, "existing memory is preserved")
+	})
+
+	t.Run("a malformed acceleratorFeature note fails admission", func(t *testing.T) {
+		// The note rides on a corruptible annotation, so the defaulting webhook decodes it with
+		// an erroring Unmarshal (not a silent best-effort) — a present-but-malformed note must
+		// fail admission rather than yield a half-decoded descriptor.
+		badRF := &kueue.ResourceFlavor{
+			ObjectMeta: meta.ObjectMeta{
+				Name: "gpustack--generic--nvidia-h100-linux-amd64-2d",
+				Labels: map[string]string{
+					nodefeature.NodeAcceleratableLabelKey:                       "true",
+					nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-h100": "true",
+					core.LabelOSStable:   "linux",
+					core.LabelArchStable: "amd64",
+				},
+			},
+		}
+		systemmeta.NoteResource(badRF, "nodes", map[string]string{
+			"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA H100",
+			"memory": "80Gi", "cores": "16896", "acceleratorFeature": "{not json",
+		})
+		badCli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(badRF).Build()
+		badWH := &InstanceTypeWebhook{Client: badCli}
+
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: "my-h100"},
+			Spec: workercore.InstanceTypeSpec{
+				AcceleratorGroup: "nvidia-h100", Acceleratable: true, OS: "linux", Arch: "amd64",
+			},
+		}
+		err := badWH.Default(context.Background(), it)
+		require.Error(t, err, "a present-but-malformed acceleratorFeature note must fail admission")
 	})
 }
 

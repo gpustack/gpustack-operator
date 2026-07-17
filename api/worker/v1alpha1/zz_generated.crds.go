@@ -1094,6 +1094,58 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Description: "Family is the family of the InstanceType.",
 											Type:        "string",
 										},
+										"feature": {
+											Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the\nper-device maximum slice count, whether compute may be overcommitted, and the memory step.\nA zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's\nAcceleratorsFeature, folded in from the node-derived ResourceFlavor.\nField number 4 is reserved for the removed Sliceable bool.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"logicalSliced": {
+													Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an\nld.preload interception library when its MaxSize is non-zero.",
+													Type:        "object",
+													Required: []string{
+														"maxSize",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"coresPercentageOvercommit": {
+															Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
+															Type:        "boolean",
+														},
+														"maxSize": {
+															Description: "MaxSize is the maximum number of slices a single device can be split into.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"memoryPercentageStep": {
+															Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+													},
+												},
+												"physicalSliced": {
+													Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real\nspatial partition of cores and memory — when its MaxSize is non-zero.",
+													Type:        "object",
+													Required: []string{
+														"maxSize",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"coresPercentageOvercommit": {
+															Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
+															Type:        "boolean",
+														},
+														"maxSize": {
+															Description: "MaxSize is the maximum number of slices a single device can be split into.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+														"memoryPercentageStep": {
+															Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
+															Type:        "integer",
+															Format:      "int32",
+														},
+													},
+												},
+											},
+										},
 										"generalGroup": {
 											Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.\n\"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The\nmutating webhook defaults an empty value to \"generic\"; it participates as a scheduling\ndiscriminator only when instance-type-aware-cpu-manufacturer is enabled.",
 											Type:        "string",
@@ -1133,10 +1185,6 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 										"product": {
 											Description: "Product is the name of the InstanceType product.",
 											Type:        "string",
-										},
-										"sliceable": {
-											Description: "Sliceable indicates whether the accelerator can be sliced, i.e. its hardware\nreports a non-zero MaxPartitions. It is a capability flag, not a slice count.",
-											Type:        "boolean",
 										},
 										"stepping": {
 											Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",

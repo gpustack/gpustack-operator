@@ -13,9 +13,13 @@ type InstanceTypeAcceleratorApplyConfiguration struct {
 	Cores *string `json:"cores,omitempty"`
 	// ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
 	ComputeCapability *string `json:"computeCapability,omitempty"`
-	// Sliceable indicates whether the accelerator can be sliced, i.e. its hardware
-	// reports a non-zero MaxPartitions. It is a capability flag, not a slice count.
-	Sliceable *bool `json:"sliceable,omitempty"`
+	// Feature is the accelerator's slicing capability: the physical / logical slicing mode, the
+	// per-device maximum slice count, whether compute may be overcommitted, and the memory step.
+	// A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's
+	// AcceleratorsFeature, folded in from the node-derived ResourceFlavor.
+	//
+	// Field number 4 is reserved for the removed Sliceable bool.
+	Feature *AcceleratorsFeatureApplyConfiguration `json:"feature,omitempty"`
 	// CPU describes the CPU information of the accelerator.
 	CPU *InstanceTypeAcceleratorCPUApplyConfiguration `json:"cpu,omitempty"`
 }
@@ -50,11 +54,11 @@ func (b *InstanceTypeAcceleratorApplyConfiguration) WithComputeCapability(value 
 	return b
 }
 
-// WithSliceable sets the Sliceable field in the declarative configuration to the given value
+// WithFeature sets the Feature field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Sliceable field is set to the value of the last call.
-func (b *InstanceTypeAcceleratorApplyConfiguration) WithSliceable(value bool) *InstanceTypeAcceleratorApplyConfiguration {
-	b.Sliceable = &value
+// If called multiple times, the Feature field is set to the value of the last call.
+func (b *InstanceTypeAcceleratorApplyConfiguration) WithFeature(value *AcceleratorsFeatureApplyConfiguration) *InstanceTypeAcceleratorApplyConfiguration {
+	b.Feature = value
 	return b
 }
 

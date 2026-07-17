@@ -302,7 +302,7 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 		memPct := instRess.AcceleratorSlicedMemoryPercentage
 		coresPct := instRess.AcceleratorSlicedCoresPercentage
-		if instType.Spec.Sliceable && (memPct > 0 || coresPct > 0) {
+		if instType.Spec.IsSliceable() && (memPct > 0 || coresPct > 0) {
 			// A slice is a fraction of ONE card, so default an absent or explicitly zero
 			// accelerator count to 1 (nil was already defaulted above); otherwise
 			// validation would reject it for not being exactly 1.
@@ -411,7 +411,7 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	// Validate accelerator request first since it may determine the validation of other resource requests.
 	if instType.Spec.Acceleratable {
 		switch {
-		case instType.Spec.Sliceable:
+		case instType.Spec.IsSliceable():
 			// The slice is requested as memory/compute percentages in [0,100] (0 disables
 			// slicing); the two budgets are independent.
 			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
