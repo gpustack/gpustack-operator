@@ -86,12 +86,12 @@ func TestResourceServer_Allocate_Sliced(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:           "grp-0",
-				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				ID:                  "grp-0",
+				Manufacturer:        nodefeature.ManufacturerNVIDIA,
+				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
 				Accelerators: []workercore.Accelerator{{
-					ID:       "dev-0",
-					Index:    0,
-					Features: workercore.AcceleratorFeatures{MaxPartitions: 8},
+					ID:    "dev-0",
+					Index: 0,
 				}},
 			}},
 		},
@@ -158,12 +158,12 @@ func TestResourceServer_Allocate_Sliced_RecordsUnits(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:           "grp-0",
-				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				ID:                  "grp-0",
+				Manufacturer:        nodefeature.ManufacturerNVIDIA,
+				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
 				Accelerators: []workercore.Accelerator{{
-					ID:       "dev-0",
-					Index:    0,
-					Features: workercore.AcceleratorFeatures{MaxPartitions: 8},
+					ID:    "dev-0",
+					Index: 0,
 				}},
 			}},
 		},
@@ -224,12 +224,12 @@ func crossModeDevices(nodeName string, statusMode workercore.DeviceAllocationMod
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:           "grp-0",
-				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				ID:                  "grp-0",
+				Manufacturer:        nodefeature.ManufacturerNVIDIA,
+				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
 				Accelerators: []workercore.Accelerator{{
-					ID:       "dev-0",
-					Index:    0,
-					Features: workercore.AcceleratorFeatures{MaxPartitions: 8},
+					ID:    "dev-0",
+					Index: 0,
 				}},
 			}},
 		},
@@ -368,11 +368,12 @@ func twoCardDevices(nodeName string, dev0Status workercore.DeviceAllocationMode)
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:           "grp-0",
-				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				ID:                  "grp-0",
+				Manufacturer:        nodefeature.ManufacturerNVIDIA,
+				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
 				Accelerators: []workercore.Accelerator{
-					{ID: "dev-0", Index: 0, Features: workercore.AcceleratorFeatures{MaxPartitions: 8}},
-					{ID: "dev-1", Index: 1, Features: workercore.AcceleratorFeatures{MaxPartitions: 8}},
+					{ID: "dev-0", Index: 0},
+					{ID: "dev-1", Index: 1},
 				},
 			}},
 		},
@@ -839,12 +840,12 @@ func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:           "grp-0",
-				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				ID:                  "grp-0",
+				Manufacturer:        nodefeature.ManufacturerNVIDIA,
+				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
 				Accelerators: []workercore.Accelerator{{
-					ID:       "dev-0",
-					Index:    0,
-					Features: workercore.AcceleratorFeatures{MaxPartitions: 8},
+					ID:    "dev-0",
+					Index: 0,
 				}},
 			}},
 		},
@@ -944,6 +945,53 @@ func TestResourceServer_GetListAndWatch_Visibility(t *testing.T) {
 	require.Len(t, resp.Devices, nodefeature.SlicedResourceMaxSize, "one card advertises SlicedResourceMaxSize visibility tokens")
 	for i := range resp.Devices {
 		assert.Equal(t, kubeletdeviceplugin.Healthy, resp.Devices[i].Health)
+	}
+}
+
+// TestResourceServer_GetListAndWatch_Sliced verifies the sliced mode advertises, per card, a token
+// pool sized by the device group's MaxSlices() (from its Features), and advertises nothing for a
+// group with no slicing capability.
+func TestResourceServer_GetListAndWatch_Sliced(t *testing.T) {
+	const nodeName = "node-s"
+	twoCards := []workercore.Accelerator{{ID: "dev-0", Index: 0}, {ID: "dev-1", Index: 1}}
+	cases := []struct {
+		name     string
+		features workercore.AcceleratorsFeature
+		wantLen  int
+	}{
+		{
+			name:     "nvidia group advertises cards x MaxSlices",
+			features: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128}},
+			wantLen:  2 * 128,
+		},
+		{
+			name:    "feature-less group advertises nothing",
+			wantLen: 0,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			devs := &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec: workercore.DevicesSpec{
+					Groups: []workercore.DevicesGroup{{
+						ID:                  "grp-0",
+						Manufacturer:        nodefeature.ManufacturerNVIDIA,
+						AcceleratorsFeature: c.features,
+						Accelerators:        twoCards,
+					}},
+				},
+			}
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(devs).Build()
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: workercore.DeviceAllocationModeSliced,
+				Reconciler:     &DevicesReconciler{NodeName: nodeName, Client: cli},
+			}
+			resp, err := s.getListAndWatchResponse(context.Background())
+			require.NoError(t, err)
+			assert.Len(t, resp.Devices, c.wantLen)
+		})
 	}
 }
 

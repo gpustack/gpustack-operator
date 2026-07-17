@@ -158,13 +158,19 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 				RuntimeVersion: device.NormalizeVersion(rtVer),
 			})
 			grpIndex = len(grpList) - 1
+
+			// MLU logical slicing via the cnDev sMLU profile; the per-device slice count is
+			// capped at 16 (operationally confirmed). Compute is spatially partitioned, so it
+			// is not overcommitted.
+			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
+				MaxSize:              16,
+				MemoryPercentageStep: 1,
+			}
 		}
 
 		physicalIndexes := []uint32{uint32(i)}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
-
-		// var features device.AcceleratorFeatures
 
 		var status device.AcceleratorStatus
 		{
@@ -178,8 +184,7 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 				Index:           index,
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
-				// Features: features,
-				Status: status,
+				Status:          status,
 			},
 		)
 		index++

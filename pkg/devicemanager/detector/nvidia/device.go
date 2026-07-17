@@ -177,6 +177,24 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				ComputeCapability: stringifyComputeCapability(ccMajor, ccMinor),
 			})
 			grpIndex = len(grpList) - 1
+
+			// Soft (logical) slicing via HAMi-core ld.preload; the per-device slice count is
+			// capped at the max CUDA user processes a GPU serves (128, Volta+).
+			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
+				MaxSize:                   128,
+				CoresPercentageOvercommit: true,
+				MemoryPercentageStep:      1,
+			}
+			// MIG (physical) hard partitioning is seeded as a placeholder when the card has
+			// MIG mode enabled; the real max size / memory step come from the MIG profile in
+			// a follow-up.
+			migModeCurrent, migModePending, _ := dev.GetMigMode()
+			if migModeCurrent == nvml.DEVICE_MIG_ENABLE || migModePending == nvml.DEVICE_MIG_ENABLE {
+				grpList[grpIndex].AcceleratorsFeature.PhysicalSliced = device.AcceleratorSliced{
+					MaxSize:              7,  // TODO gain max size from MIG profile later
+					MemoryPercentageStep: 25, // TODO complete step from MIG profile later
+				}
+			}
 		}
 
 		var physicalIndexes []uint32
@@ -191,23 +209,6 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
 
-		migModeCurrent, migModePending, _ := dev.GetMigMode()
-
-		var features device.AcceleratorFeatures
-		{
-			features.PhysicalPartition = migModeCurrent == nvml.DEVICE_MIG_ENABLE || migModePending == nvml.DEVICE_MIG_ENABLE
-			features.SoftPartition = true
-			switch {
-			case features.PhysicalPartition:
-			// TODO
-			case features.SoftPartition:
-				// A soft-sliced card advertises a fixed SlicedResourceMaxSize budget,
-				// so node-level ".sliced" capacity is cards*SlicedResourceMaxSize and
-				// the device-plugin GetDeviceIds token pool is sized to match.
-				features.MaxPartitions = int32(nodefeature.SlicedResourceMaxSize)
-			}
-		}
-
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
@@ -220,7 +221,6 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				Index:           index,
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
-				Features:        features,
 				Status:          status,
 			},
 		)

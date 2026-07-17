@@ -217,31 +217,29 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					Family:         family,
 				})
 				grpIndex = len(grpList) - 1
+
+				// 910B/910C/950 support logical (soft) slicing: temporal compute sharing
+				// plus soft VRAM partitioning via vCANN-RT ld.preload. The per-device slice
+				// count is capped at the max user processes a device serves (63).
+				switch grpList[grpIndex].Family {
+				case "910B", "910C", "950":
+					grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
+						MaxSize:                   63,
+						CoresPercentageOvercommit: true,
+						MemoryPercentageStep:      1,
+					}
+				}
 			}
 
 			topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
 
-			var features device.AcceleratorFeatures
-			{
-				// 910B/910C/950 support soft partitioning (temporal compute sharing
-				// plus soft VRAM partitioning); advertise a fixed SlicedResourceMaxSize
-				// budget so node-level ".sliced" capacity is cards*SlicedResourceMaxSize
-				// and the device-plugin GetDeviceIds token pool is sized to match.
-				switch grpList[grpIndex].Family {
-				case "910B", "910C", "950":
-					features.SoftPartition = true
-					features.MaxPartitions = int32(nodefeature.SlicedResourceMaxSize)
-				}
-
-				ip, snm, ret := dev.GetIp(dcmi.ROCE_PORT, 0)
-				if ret.IsSuccess() {
-					gw, ret := dev.GetGateway(dcmi.ROCE_PORT, 0)
-					if ret.IsSuccess() {
-						features.RoCE = &device.Ethernet{
-							IP:         ip.String(),
-							SubnetMask: snm.String(),
-							Gateway:    gw.String(),
-						}
+			// RoCE is per-card networking, recorded on the card's topology.
+			if ip, snm, ret := dev.GetIp(dcmi.ROCE_PORT, 0); ret.IsSuccess() {
+				if gw, ret := dev.GetGateway(dcmi.ROCE_PORT, 0); ret.IsSuccess() {
+					topo.RoCE = &device.Ethernet{
+						IP:         ip.String(),
+						SubnetMask: snm.String(),
+						Gateway:    gw.String(),
 					}
 				}
 			}
@@ -258,7 +256,6 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					Index:           index,
 					PhysicalIndexes: physicalIndexes,
 					Topology:        topo,
-					Features:        features,
 					Status:          status,
 				},
 			)

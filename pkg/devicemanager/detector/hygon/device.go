@@ -190,11 +190,18 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				ComputeCapability: tgVer,
 			})
 			grpIndex = len(grpList) - 1
+
+			// DCU logical slicing via hy-virtual (vdev.conf + DTK/hyhal); the per-device slice
+			// count is capped at 4 (product default). Compute may be time-shared, so it is
+			// overcommitted.
+			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
+				MaxSize:                   4,
+				CoresPercentageOvercommit: true,
+				MemoryPercentageStep:      1,
+			}
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
-
-		// var features device.AcceleratorFeatures
 
 		var status device.AcceleratorStatus
 		{
@@ -208,8 +215,7 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				Index:           index,
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
-				// Features: features,
-				Status: status,
+				Status:          status,
 			},
 		)
 		index++

@@ -154,7 +154,7 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 					}),
 				}
 			}
-			ids := res.GetDeviceIds(s.AllocationMode, devAccelerator.Features.MaxPartitions)
+			ids := res.GetDeviceIds(s.AllocationMode, devGroup.AcceleratorsFeature.MaxSlices())
 			for k := range ids {
 				resp.Devices = append(resp.Devices,
 					&deviceplugin.Device{

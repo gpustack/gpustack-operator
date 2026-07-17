@@ -39,10 +39,10 @@ const (
 	// and used for Kueue credits accounting.
 	SharedResourceNameSuffix = ".shared"
 	// SlicedResourceNameSuffix is the coarse sliced injection-token key, advertised
-	// by the device-plugin as a loose per-card token pool sized by the card's
-	// hardware MaxPartitions (so node allocatable is cards*MaxPartitions, not the
-	// card count); it only triggers the allocator's Allocate() injection hook. The
-	// binding credits accounting lives on the fine-grained ".sliced.units" key.
+	// by the device-plugin as a loose per-card token pool sized by the device group's
+	// max slice count (so node allocatable is cards*maxSlices, not the card count); it
+	// only triggers the allocator's Allocate() injection hook. The binding credits
+	// accounting lives on the fine-grained ".sliced.units" key.
 	SlicedResourceNameSuffix = ".sliced"
 	// SlicedUnitsResourceNameSuffix is the fine-grained sliced counting key,
 	// reported per node via Patch Node and used for Kueue credits accounting.
@@ -303,8 +303,7 @@ func GetAcceleratableRuntimeName(manufacturer string) string {
 
 // IsValidSlicedPartitions reports whether n is a usable slice partition count: a
 // power of two in [2, SlicedResourceMaxSize]. A single slice (n=1) is a whole card
-// and is not a valid slicing request. The per-card hardware limit (MaxPartitions)
-// is enforced separately by the admission webhook.
+// and is not a valid slicing request.
 func IsValidSlicedPartitions(n int64) bool {
 	return n >= 2 && n <= SlicedResourceMaxSize && n&(n-1) == 0
 }

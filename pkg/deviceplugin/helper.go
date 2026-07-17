@@ -41,7 +41,7 @@ func (in Resource) String() string {
 	return in.Group + ":" + in.Device
 }
 
-func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartitions int32) []string {
+func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxSlices int32) []string {
 	str := in.String() + ":"
 
 	if mode == workercore.DeviceAllocationModeExclusive {
@@ -71,16 +71,17 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxPartiti
 		return devIDs
 	}
 
-	// Sliced advertises a coarse, loose injection-token pool sized by the card's
-	// hardware MaxPartitions. It only needs to be >= the real max concurrency (the
-	// admin partition count N, which the Webhook bounds to <= MaxPartitions) so it
-	// never blocks; the binding constraint is always the ".sliced.units" capacity.
-	n := maxPartitions
-	if n < 1 {
-		n = 1
+	// Sliced advertises a coarse, loose injection-token pool sized by the device group's
+	// max slice count: one interchangeable token per possible concurrent slice on a card.
+	// It only needs to be >= the real max concurrency so it never gates scheduling — the
+	// binding constraint is the ".sliced.units" capacity the Pod webhook folds each slice's
+	// memory request into. A group with no slicing capability (maxSlices <= 0) advertises no
+	// tokens at all.
+	if maxSlices <= 0 {
+		return nil
 	}
-	devIDs := make([]string, n)
-	for i := int32(0); i < n; i++ {
+	devIDs := make([]string, maxSlices)
+	for i := int32(0); i < maxSlices; i++ {
 		devIDs[i] = str + padIndex(uint64(i))
 	}
 	return devIDs

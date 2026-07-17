@@ -203,8 +203,6 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
 
-		// var features device.AcceleratorFeatures
-
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
@@ -217,8 +215,7 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 				Index:           index,
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
-				// Features: features,
-				Status: status,
+				Status:          status,
 			},
 		)
 		index++

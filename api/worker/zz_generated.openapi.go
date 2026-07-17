@@ -52,8 +52,9 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
 		v1alpha1.Accelerator{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
 		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
-		v1alpha1.AcceleratorFeatures{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_AcceleratorFeatures(ref),
+		v1alpha1.AcceleratorSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorSliced(ref),
 		v1alpha1.AcceleratorStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref),
+		v1alpha1.AcceleratorsFeature{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_AcceleratorsFeature(ref),
 		v1alpha1.DeviceEthernet{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_DeviceEthernet(ref),
 		v1alpha1.DeviceTopology{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref),
 		v1alpha1.Devices{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_Devices(ref),
@@ -1845,26 +1846,19 @@ func schema_gpustack_api_worker_v1alpha1_Accelerator(ref common.ReferenceCallbac
 							Ref:         ref(v1alpha1.DeviceTopology{}.OpenAPIModelName()),
 						},
 					},
-					"features": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Features is the features supported by the device.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorFeatures{}.OpenAPIModelName()),
-						},
-					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Status is the current status of the device.",
+							Description: "Status is the current status of the device. Field number 5 is reserved for the removed per-accelerator Features.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorStatus{}.OpenAPIModelName()),
 						},
 					},
 				},
-				Required: []string{"id", "index", "physicalIndexes", "topology", "features", "status"},
+				Required: []string{"id", "index", "physicalIndexes", "topology", "status"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.AcceleratorFeatures{}.OpenAPIModelName(), v1alpha1.AcceleratorStatus{}.OpenAPIModelName(), v1alpha1.DeviceTopology{}.OpenAPIModelName()},
+			v1alpha1.AcceleratorStatus{}.OpenAPIModelName(), v1alpha1.DeviceTopology{}.OpenAPIModelName()},
 	}
 }
 
@@ -1920,52 +1914,39 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 	}
 }
 
-func schema_gpustack_api_worker_v1alpha1_AcceleratorFeatures(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_gpustack_api_worker_v1alpha1_AcceleratorSliced(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorFeatures describes the features supported by the accelerator device.",
+				Description: "AcceleratorSliced describes one slicing capability of a device model.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"physicalPartition": {
+					"maxSize": {
 						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalPartition indicates whether the device supports the real space sharing of cores and memory.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"virtualPartition": {
-						SchemaProps: spec.SchemaProps{
-							Description: "VirtualPartition indicates whether the device supports the virtual space sharing of cores and memory.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"softPartition": {
-						SchemaProps: spec.SchemaProps{
-							Description: "SoftPartition indicates whether the device supports the temporal sharing of cores, soft partitioning of memory or both.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"maxPartitions": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxPartitions is the maximum number of partitions that the device can be split into. Returns the minimum value of the maximum number of partitions that the device can be split into for physical partition, virtual partition and multiplexed.",
+							Description: "MaxSize is the maximum number of slices a single device can be split into.",
+							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
-					"roce": {
+					"coresPercentageOvercommit": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RoCE indicates the RoCE information of the device.",
-							Ref:         ref(v1alpha1.DeviceEthernet{}.OpenAPIModelName()),
+							Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the device compute (time-sharing / weighted sharing), so the sum across slices may exceed one whole device; false means compute is partitioned (the sum stays within one device).",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"memoryPercentageStep": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device memory can be sliced.",
+							Type:        []string{"integer"},
+							Format:      "int32",
 						},
 					},
 				},
+				Required: []string{"maxSize"},
 			},
 		},
-		Dependencies: []string{
-			v1alpha1.DeviceEthernet{}.OpenAPIModelName()},
 	}
 }
 
@@ -1988,6 +1969,35 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref common.ReferenceC
 				Required: []string{"unhealthy"},
 			},
 		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorsFeature(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorsFeature describes the slicing features shared by every accelerator in a group.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"physicalSliced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real spatial partition of cores and memory — when its MaxSize is non-zero.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorSliced{}.OpenAPIModelName()),
+						},
+					},
+					"logicalSliced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an ld.preload interception library when its MaxSize is non-zero.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorSliced{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorSliced{}.OpenAPIModelName()},
 	}
 }
 
@@ -2076,10 +2086,18 @@ func schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref common.ReferenceCall
 							Format:      "",
 						},
 					},
+					"roce": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.",
+							Ref:         ref(v1alpha1.DeviceEthernet{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"pciBusId", "pciRootId", "pciClass", "numaAffinity", "cpuAffinity"},
 			},
 		},
+		Dependencies: []string{
+			v1alpha1.DeviceEthernet{}.OpenAPIModelName()},
 	}
 }
 
@@ -2281,12 +2299,19 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 							},
 						},
 					},
+					"acceleratorsFeature": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorsFeature is the slicing capability shared by every accelerator in this group.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"id", "manufacturer", "name", "memory"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.Accelerator{}.OpenAPIModelName()},
+			v1alpha1.Accelerator{}.OpenAPIModelName(), v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()},
 	}
 }
 

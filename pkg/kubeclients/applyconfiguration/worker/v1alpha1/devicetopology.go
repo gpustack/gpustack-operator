@@ -17,6 +17,8 @@ type DeviceTopologyApplyConfiguration struct {
 	NumaAffinity *string `json:"numaAffinity,omitempty"`
 	// CpuAffinity is the CPU cores that are close to the device.
 	CpuAffinity *string `json:"cpuAffinity,omitempty"`
+	// RoCE is the RoCE (RDMA over Converged Ethernet) network information of the device.
+	RoCE *DeviceEthernetApplyConfiguration `json:"roce,omitempty"`
 }
 
 // DeviceTopologyApplyConfiguration constructs a declarative configuration of the DeviceTopology type for use with
@@ -62,5 +64,13 @@ func (b *DeviceTopologyApplyConfiguration) WithNumaAffinity(value string) *Devic
 // If called multiple times, the CpuAffinity field is set to the value of the last call.
 func (b *DeviceTopologyApplyConfiguration) WithCpuAffinity(value string) *DeviceTopologyApplyConfiguration {
 	b.CpuAffinity = &value
+	return b
+}
+
+// WithRoCE sets the RoCE field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the RoCE field is set to the value of the last call.
+func (b *DeviceTopologyApplyConfiguration) WithRoCE(value *DeviceEthernetApplyConfiguration) *DeviceTopologyApplyConfiguration {
+	b.RoCE = value
 	return b
 }

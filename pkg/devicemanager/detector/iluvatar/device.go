@@ -171,8 +171,6 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
 
-		// var features device.AcceleratorFeatures
-
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
@@ -185,8 +183,7 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 				Index:           index,
 				PhysicalIndexes: physicalIndexes,
 				Topology:        topo,
-				// Features: features,
-				Status: status,
+				Status:          status,
 			},
 		)
 		index++

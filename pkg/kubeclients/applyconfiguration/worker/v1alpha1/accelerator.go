@@ -15,9 +15,8 @@ type AcceleratorApplyConfiguration struct {
 	PhysicalIndexes []uint32 `json:"physicalIndexes,omitempty"`
 	// Topology is the topology information of the device.
 	Topology *DeviceTopologyApplyConfiguration `json:"topology,omitempty"`
-	// Features is the features supported by the device.
-	Features *AcceleratorFeaturesApplyConfiguration `json:"features,omitempty"`
 	// Status is the current status of the device.
+	// Field number 5 is reserved for the removed per-accelerator Features.
 	Status *AcceleratorStatusApplyConfiguration `json:"status,omitempty"`
 }
 
@@ -58,14 +57,6 @@ func (b *AcceleratorApplyConfiguration) WithPhysicalIndexes(values ...uint32) *A
 // If called multiple times, the Topology field is set to the value of the last call.
 func (b *AcceleratorApplyConfiguration) WithTopology(value *DeviceTopologyApplyConfiguration) *AcceleratorApplyConfiguration {
 	b.Topology = value
-	return b
-}
-
-// WithFeatures sets the Features field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Features field is set to the value of the last call.
-func (b *AcceleratorApplyConfiguration) WithFeatures(value *AcceleratorFeaturesApplyConfiguration) *AcceleratorApplyConfiguration {
-	b.Features = value
 	return b
 }
 
