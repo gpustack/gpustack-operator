@@ -1,6 +1,6 @@
 # Spec: Vendor-Aware Slicing Capability in the Unified Pool — Devices `AcceleratorsFeature`, Per-Vendor Max Slices, and Five-Gate Admission
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -62,7 +62,7 @@ gap is an explicit Non-Goal here and the seed of a follow-up spec.
      sliced count is `8 × 16 = 128` and cores-percentage is `8 × 100 = 800` (no overcommit).
   2. A manufacturer whose device group carries no `PhysicalSliced`/`LogicalSliced` advertises no `.sliced` and
      the node shows none of the four `.sliced.*` capacities; removing slicing capability reverse-patches them.
-  3. `Accelerator.Features` no longer exists; slicing capability is read from `DevicesGroup.Features` and RoCE
+  3. `Accelerator.Features` no longer exists; slicing capability is read from `DevicesGroup.AcceleratorsFeature` and RoCE
      from `Accelerator.Topology.RoCE`.
   4. `InstanceType` carries the structured slicing descriptor (no `Sliceable bool`), populated from the
      `NodeFlavor` notes on derived types.
@@ -119,7 +119,7 @@ type AcceleratorsFeature struct {
 ```
 
 - **Rename** `AcceleratorFeatures` → `AcceleratorsFeature` and **move** it from `Accelerator.Features` to
-  `DevicesGroup.Features` (slicing capability is a property of the device *model*, shared by every card in the
+  `DevicesGroup.AcceleratorsFeature` (slicing capability is a property of the device *model*, shared by every card in the
   group).
 - **Remove** the flat `PhysicalPartition` / `VirtualPartition` / `SoftPartition` bools and the bare
   `MaxPartitions int32`; they are superseded by `PhysicalSliced` / `LogicalSliced` (value structs — a non-zero
@@ -244,7 +244,7 @@ and consumed.
   named `Size` collides with it. `MemoryPercentageStep` is `1` for every vendor today — reserved for future
   per-vendor memory granularity (e.g. a vendor whose legal memory slices are coarse).
 - **`Devices` is operator-detected, not user-authored**, so the field move (`Accelerator.Features` →
-  `DevicesGroup.Features`, `RoCE` → `Topology.RoCE`) needs no data migration: the DeviceManager re-reports every
+  `DevicesGroup.AcceleratorsFeature`, `RoCE` → `Topology.RoCE`) needs no data migration: the DeviceManager re-reports every
   `Devices` CR in the new shape on the next detect. Protobuf field numbers are freshly assigned for the new fields
   (design detail for `/my-plan` + `make generate`).
 - **`SlicedResourceMaxSize = 512` stays** as a constant: it keeps D divisible by every power-of-two partition size
@@ -257,7 +257,7 @@ and consumed.
 
 ### Boundaries
 - **Always:** keep `.sliced.units = cards × D` and the credit fold-down untouched; keep the max slice count sourced
-  from `Devices` (detector → `DevicesGroup.Features`), never re-hard-coded in the allocator or reconciler; make
+  from `Devices` (detector → `DevicesGroup.AcceleratorsFeature`), never re-hard-coded in the allocator or reconciler; make
   `NodeCapacityReconciler`'s `.sliced.*` patch presence-gated and idempotent (reverse-patch when `.sliced` is
   absent or 0); run `make generate` after the API change and `make lint` + `go test` on changed packages.
 - **Ask first:** any change to `SlicedResourceMaxSize` or the D basis; enabling `PhysicalSliced` (hard partition)
@@ -366,7 +366,7 @@ if overcommit {
 ```
 ### Implementation Plan
 **Dependency graph.** Task 1 is the foundation *and* the de-risk task: the field move (`Accelerator.Features` →
-`DevicesGroup.Features`, delete `AcceleratorFeatures`) is atomic — it cannot be split across commits without
+`DevicesGroup.AcceleratorsFeature`, delete `AcceleratorFeatures`) is atomic — it cannot be split across commits without
 breaking the build — and it exercises the two riskiest mechanics up front (`make generate` over the reshaped API
 + the CGO vendor detectors still compiling after the move). Task 2 (NodeCapacity) and Task 3 (InstanceType
 descriptor + NodeFlavor note round-trip) both depend only on Task 1 — Task 3 folds F6 (the `NodeFlavor` producer
@@ -375,8 +375,8 @@ slice. Task 4 (doc) depends on the behavior settling (after Task 2/3). Each task
 the tree building; a `make lint` + `go test` + `make generate`-clean checkpoint sits after Tasks 1, 2, and 3.
 
 - [x] **Task 1 (foundation / de-risk) — Devices slicing model + per-vendor detection + `.sliced` advertising
-  (F1/F2/F3/F4/F9).** Add `AcceleratorSliced{Size int32; CoresPercentageOvercommit bool; MemoryPercentageStep
-  int32}` and `AcceleratorsFeature{PhysicalSliced, LogicalSliced *AcceleratorSliced}` with a `MaxSlices()` helper
+  (F1/F2/F3/F4/F9).** Add `AcceleratorSliced{MaxSize int32; CoresPercentageOvercommit bool; MemoryPercentageStep
+  int32}` and `AcceleratorsFeature{PhysicalSliced, LogicalSliced AcceleratorSliced}` with a `MaxSlices()` helper
   (`api/worker/v1alpha1/devices.go`, mirror in `api/worker/v1`); move `Features` from `Accelerator` to
   `DevicesGroup`; move `RoCE` into `DeviceTopology`; delete `AcceleratorFeatures` and its `*Partition` bools +
   `MaxPartitions`. Update the `device.AcceleratorFeatures` alias (`pkg/device/types.go`). Run `make generate`. Set
@@ -420,12 +420,12 @@ the tree building; a `make lint` + `go test` + `make generate`-clean checkpoint 
   `Feature.LogicalSliced = {128,true,1}` folded from the note; `IsSliceable()`-gated slice admission is
   behavior-unchanged; the `instancetypeflavor` CLI still prints a Sliceable column. **Verify:**
   `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/... ./pkg/worker/extensionapis/... && make generate && make lint`.
-- [ ] **Task 4 — Architecture doc: five-gate admission (F8).** Rewrite `docs/architecture.md`'s admission section
+- [x] **Task 4 — Architecture doc: five-gate admission (F8).** Rewrite `docs/architecture.md`'s admission section
   as the five gates (Pod webhook → Kueue credits → Kueue AdmissionCheck → default scheduler → DeviceManager
   allocator), with the `Devices` ledger described as gate-3's backing store; update the `.sliced.cores-percentage`
-  formula and replace the `MaxPartitions = 512` narrative with the per-vendor max slice count + the overcommit
+  formula and describe `maxSlices` as the per-vendor max slice count + the overcommit
   distinction; note the four stub vendors advertise sliced without real isolation (follow-up). **Accept:** the
-  admission section reads as five gates with correct formulas and no stale `512`/`MaxPartitions` claims.
+  admission section reads as five gates with correct per-vendor `maxSlices` formulas.
   **Verify:** manual read; keep the tree lint-clean.
 - *Checkpoints (after Tasks 1, 2, 4):* `make generate` clean + `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./...`
   + `make lint` clean + `go test ./pkg/...` green; a final e2e capacity-feedback case on the rebuilt image.
@@ -435,7 +435,7 @@ code solid enough prior to committing the changes necessary to implement this en
 
 #### Prerequisite testing updates
 - Reshape every fixture that constructs `Accelerator{Features: …}` or `AcceleratorFeatures{MaxPartitions: …}` to
-  the new `DevicesGroup.Features` / `AcceleratorsFeature{LogicalSliced: …}` shape (the `pkg/deviceplugin` server /
+  the new `DevicesGroup.AcceleratorsFeature` / `AcceleratorsFeature{LogicalSliced: …}` shape (the `pkg/deviceplugin` server /
   `GetDeviceIds` tests, the `node_flavor_test` Devices fixtures, and any `testing/sample`-derived fixtures).
 - Rescale `node_capacity_test` expectations from `.sliced.cores-percentage = cards × 512 × 100` to the per-vendor
   formula (overcommit → `cards × maxSlices × 100`, else `cards × 100`) and add the presence-gate / reverse-patch
