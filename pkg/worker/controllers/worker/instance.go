@@ -944,7 +944,7 @@ func getResourceRequirements(
 		cardQ := *inst.Spec.Resources.Accelerator
 		switch {
 		case withAccelerator:
-			if instType.Spec.Sliceable && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
+			if instType.Spec.IsSliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
 				// A sliced request emits the bare card count C (.sliced, which Kueue
 				// folds into credits via multiplyBy) plus the per-card memory/compute
 				// percentages. The Pod webhook folds .sliced.memory-percentage into the

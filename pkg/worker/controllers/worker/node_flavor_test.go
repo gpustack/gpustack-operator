@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -273,6 +274,59 @@ func TestNodeFlavorReconciler_ActiveShapeAccelerated(t *testing.T) {
 	// With CPU-manufacturer awareness off (the unit binary's resolved default), an
 	// accelerated flavor does not record cpuDetail — the CPU is not a scheduling axis.
 	assert.NotContains(t, notes, "cpuDetail", "accel cpuDetail gated off when unaware")
+}
+
+// TestNodeFlavorReconciler_SlicedFeatureNote pins that the reconciler records the device group's
+// slicing capability as the acceleratorFeature JSON note, read off the contributor's same-named
+// Devices and matched to the flavor's model by "${manufacturer}-${group ID}": a group reporting slicing round-trips its
+// AcceleratorsFeature, and a node with no Devices records a zero (non-sliceable) feature.
+func TestNodeFlavorReconciler_SlicedFeatureNote(t *testing.T) {
+	readSlicedFeature := func(t *testing.T, rf *kueue.ResourceFlavor) workercore.AcceleratorsFeature {
+		t.Helper()
+		_, notes := systemmeta.DescribeResource(rf)
+		var feature workercore.AcceleratorsFeature
+		require.NoError(t, json.Unmarshal([]byte(notes["acceleratorFeature"]), &feature))
+		return feature
+	}
+
+	t.Run("device group reports slicing: note round-trips the feature", func(t *testing.T) {
+		nd := newManagedAccelNode("node-sf", 2)
+		devs := &workercore.Devices{
+			ObjectMeta: meta.ObjectMeta{Name: nd.Name},
+			Spec: workercore.DevicesSpec{Groups: []workercore.DevicesGroup{{
+				// The manufacturer + group ID must equal the node aKey ("nvidia-a10g"), since
+				// nodeFlavorAcceleratorsFeature resolves the flavor's model by "${manufacturer}-${id}".
+				ID:           "a10g",
+				Manufacturer: "nvidia",
+				AcceleratorsFeature: workercore.AcceleratorsFeature{
+					LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128, CoresPercentageOvercommit: true, MemoryPercentageStep: 1},
+				},
+			}}},
+		}
+		cli := buildNodeFlavorClient(nd, devs)
+		devName := deviceFlavorName(nd)
+
+		reconcileNodeFlavor(t, cli, devName)
+
+		rf, err := getResourceFlavor(t, cli, devName)
+		require.NoError(t, err)
+		feature := readSlicedFeature(t, rf)
+		assert.Equal(t, int32(128), feature.MaxSlices())
+		assert.True(t, feature.SlicedCoresOvercommit())
+	})
+
+	t.Run("no Devices: note records a zero (non-sliceable) feature", func(t *testing.T) {
+		nd := newManagedAccelNode("node-nf", 1)
+		cli := buildNodeFlavorClient(nd)
+		devName := deviceFlavorName(nd)
+
+		reconcileNodeFlavor(t, cli, devName)
+
+		rf, err := getResourceFlavor(t, cli, devName)
+		require.NoError(t, err)
+		feature := readSlicedFeature(t, rf)
+		assert.Zero(t, feature.MaxSlices())
+	})
 }
 
 // TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode pins the

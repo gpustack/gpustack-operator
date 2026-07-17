@@ -22,6 +22,10 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
 
+// acceleratorFeatureNote is a marshaled AcceleratorsFeature (LogicalSliced 128 / overcommit / step
+// 1) a sliceable pool's ResourceFlavor carries in its acceleratorFeature note.
+const acceleratorFeatureNote = `{"logicalSliced":{"maxSize":128,"coresPercentageOvercommit":true,"memoryPercentageStep":1}}`
+
 // flavorWithNotes builds an operator-owned (resType "nodes") ResourceFlavor carrying the
 // given note.gpustack.ai/* annotations.
 func flavorWithNotes(name string, notes map[string]string) *kueue.ResourceFlavor {
@@ -55,17 +59,17 @@ func TestInstanceTypeFlavorHandler_OnList(t *testing.T) {
 		flavorWithNotes("gpustack--amd-epyc-7763--nvidia-a10g-linux-amd64-2d", map[string]string{
 			"generalGroup": "amd-epyc-7763", "acceleratorGroup": "nvidia-a10g", "acceleratable": "true",
 			"manufacturer": "nvidia", "product": "NVIDIA A10G", "family": "ampere",
-			"memory": "24Gi", "cores": "9216", "sliceable": "true",
+			"memory": "24Gi", "cores": "9216", "acceleratorFeature": acceleratorFeatureNote,
 		}),
 		flavorWithNotes("gpustack--intel-xeon-8358--nvidia-a10g-linux-amd64-4d", map[string]string{
 			"generalGroup": "intel-xeon-8358", "acceleratorGroup": "nvidia-a10g", "acceleratable": "true",
 			"manufacturer": "nvidia", "product": "NVIDIA A10G", "family": "ampere",
-			"memory": "24Gi", "cores": "9216", "sliceable": "true",
+			"memory": "24Gi", "cores": "9216", "acceleratorFeature": acceleratorFeatureNote,
 		}),
 		flavorWithNotes("gpustack--amd-epyc-7763--nvidia-h100-linux-amd64-8d", map[string]string{
 			"generalGroup": "amd-epyc-7763", "acceleratorGroup": "nvidia-h100", "acceleratable": "true",
 			"manufacturer": "nvidia", "product": "NVIDIA H100", "family": "hopper",
-			"memory": "80Gi", "cores": "16896", "sliceable": "true",
+			"memory": "80Gi", "cores": "16896", "acceleratorFeature": acceleratorFeatureNote,
 		}),
 		// Two generic CPU-only flavors of different CPUs: with awareness off they collapse to one
 		// CPU-agnostic "generic" row.
@@ -163,7 +167,7 @@ func a10gFlavor(name, generalGroup string) *kueue.ResourceFlavor {
 	return flavorWithNotes(name, map[string]string{
 		"generalGroup": generalGroup, "acceleratorGroup": "nvidia-a10g", "acceleratable": "true",
 		"manufacturer": "nvidia", "product": "NVIDIA A10G", "family": "ampere",
-		"memory": "24Gi", "cores": "9216", "sliceable": "true",
+		"memory": "24Gi", "cores": "9216", "acceleratorFeature": acceleratorFeatureNote,
 	})
 }
 
@@ -171,7 +175,7 @@ func h100Flavor(name, generalGroup string) *kueue.ResourceFlavor {
 	return flavorWithNotes(name, map[string]string{
 		"generalGroup": generalGroup, "acceleratorGroup": "nvidia-h100", "acceleratable": "true",
 		"manufacturer": "nvidia", "product": "NVIDIA H100", "family": "hopper",
-		"memory": "80Gi", "cores": "16896", "sliceable": "true",
+		"memory": "80Gi", "cores": "16896", "acceleratorFeature": acceleratorFeatureNote,
 	})
 }
 

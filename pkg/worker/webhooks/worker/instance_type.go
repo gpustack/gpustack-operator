@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -92,7 +93,7 @@ func (r *InstanceTypeWebhook) ValidateDelete(_ context.Context, _ runtime.Object
 // carry (pruning a stale feature key left by a group/acceleratable change), plus the entrance
 // label (nodefeature.FormatLocalQueueName(name)) the Pod webhook reverse-looks-up for the per-card
 // VRAM. It then lists the ResourceFlavors by those discriminators, takes the first, and fills
-// manufacturer/product/family (and, when accelerated, memory/cores/sliceable) from its notes.
+// manufacturer/product/family (and, when accelerated, memory/cores + the slicing feature) from its notes.
 // Labels are stamped whenever group is set; descriptor enrichment is a snapshot at admission
 // (skipped once populated) and the reconciler does not refresh it as hardware changes.
 func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) error {
@@ -171,7 +172,11 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 			ctrlcli.UnsafeDisableDeepCopy,
 			ctrlcli.Limit(1))
 		if err != nil {
-			return err
+			// The list keys on the whole schedule-discriminator set (generalGroup for a
+			// CPU-only type, acceleratorGroup for an accelerated one), and the failure is an
+			// infrastructure error rather than a bad field value, so attribute it to spec.
+			return field.InternalError(field.NewPath("spec"),
+				fmt.Errorf("list resource flavors: %w", err))
 		}
 
 		if len(rfList.Items) != 0 {
@@ -185,7 +190,17 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 			if it.Spec.Acceleratable {
 				it.Spec.Memory = notes["memory"]
 				it.Spec.Cores = notes["cores"]
-				it.Spec.Sliceable = notes["sliceable"] == "true"
+				// Fold the flavor's slicing-capability note into the accelerator's Feature. The
+				// note is operator-produced, but it rides on an annotation that could be corrupted
+				// out from under us, so a present-but-malformed note fails admission loudly rather
+				// than silently yielding a half-decoded descriptor; an absent note leaves the
+				// zeroed (non-sliceable) descriptor above.
+				if raw := notes["acceleratorFeature"]; raw != "" {
+					if err := json.Unmarshal([]byte(raw), &it.Spec.Feature); err != nil {
+						return field.InternalError(field.NewPath("spec", "feature"),
+							fmt.Errorf("unmarshal accelerator feature note: %w", err))
+					}
+				}
 			}
 			// Fold the raw CPU detail back into the spec only when CPU-manufacturer awareness is
 			// on (the flavor carries the cpuDetail note always for a CPU flavor, but only when

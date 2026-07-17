@@ -3215,11 +3215,11 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref common.Refe
 							Format:      "",
 						},
 					},
-					"sliceable": {
+					"feature": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Sliceable indicates whether the accelerator can be sliced, i.e. its hardware reports a non-zero MaxPartitions. It is a capability flag, not a slice count.",
-							Type:        []string{"boolean"},
-							Format:      "",
+							Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the per-device maximum slice count, whether compute may be overcommitted, and the memory step. A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's AcceleratorsFeature, folded in from the node-derived ResourceFlavor.\n\nField number 4 is reserved for the removed Sliceable bool.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
 						},
 					},
 					"cpu": {
@@ -3233,7 +3233,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref common.Refe
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
+			v1alpha1.AcceleratorsFeature{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
 	}
 }
 
@@ -3659,11 +3659,11 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"sliceable": {
+					"feature": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Sliceable indicates whether the accelerator can be sliced, i.e. its hardware reports a non-zero MaxPartitions. It is a capability flag, not a slice count.",
-							Type:        []string{"boolean"},
-							Format:      "",
+							Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the per-device maximum slice count, whether compute may be overcommitted, and the memory step. A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's AcceleratorsFeature, folded in from the node-derived ResourceFlavor.\n\nField number 4 is reserved for the removed Sliceable bool.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
 						},
 					},
 					"cpu": {
@@ -3715,7 +3715,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName(), v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
+			v1alpha1.AcceleratorsFeature{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName(), v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
 	}
 }
 
