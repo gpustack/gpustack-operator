@@ -153,8 +153,10 @@ type AcceleratorsFeature struct {
 - **`NodeCapacityReconciler`**: reads the Node (card counts, per-card VRAM) **and** the same-named `Devices` CR
   (per-manufacturer max slice count + `CoresPercentageOvercommit`); patches the four `.sliced.*` keys for a
   manufacturer **only while** that manufacturer's `.sliced` resource is present and > 0 in `Node.status.capacity`,
-  and reverse-patches (removes) them when it is absent or 0. It watches the `Devices` CR so a capability change
-  re-converges.
+  and reverse-patches (removes) them when it is absent or 0. No separate `Devices` watch is needed: `maxSlices` and
+  the overcommit flag are fixed per-vendor constants, and the device-plugin sizes the bare `.sliced` pool as
+  `cards × maxSlices` off the same `Devices` CR, so every capability change (enable / disable / resize) also moves
+  the bare `.sliced` capacity the Node predicate already watches (which re-fires the reconcile).
 
 ### Five-gate admission (documentation)
 | Gate | Component | Responsibility |
@@ -209,7 +211,7 @@ and consumed.
 | F2 | `Features` moves to `DevicesGroup`; `RoCE` moves to `DeviceTopology` | `DevicesGroup` gains `Features AcceleratorsFeature`; `Accelerator.Features` is gone. `DeviceTopology` gains `RoCE *DeviceEthernet`; the feature struct no longer carries `RoCE`. The two current read sites move accordingly: the allocator sizing (`pkg/deviceplugin/server.go`) and `nodeFlavorSliceable` (`pkg/worker/controllers/worker/node_flavor.go`) read `group.Features`. |
 | F3 | Detectors fill per-vendor `LogicalSliced` | Each of the six vendor detectors sets `group.Features.LogicalSliced` to the table value. NVIDIA sets it always and additionally seeds a placeholder `PhysicalSliced{7, false, 25}` (`TODO`-marked) when the card's MIG mode is enabled; the other five vendors leave `PhysicalSliced` zero. Ascend only for families `910B`/`910C`/`950`. Ascend's RoCE is written to each accelerator's `Topology.RoCE`. AMD / Iluvatar / THead remain feature-less. |
 | F4 | Allocator advertises `.sliced = cards × maxSlices`, or nothing | `pkg/deviceplugin` sizes the Sliced token pool from the group's `MaxSlices()` (was the per-accelerator `MaxPartitions`); `MaxSlices() == 0` yields an empty token list (drop the floor-to-1), so a non-sliceable group contributes no tokens and a manufacturer with no sliceable group advertises no `.sliced`. The `!opts.NoSliced` gate is unchanged; the per-group capability is the new second condition. |
-| F5 | `NodeCapacityReconciler` reads Node + Devices, gates on `.sliced`, honors overcommit | It patches the four `.sliced.*` keys for a manufacturer only while `<mfr>.sliced` is present and > 0 in `Node.status.capacity`, reverse-patching otherwise (including at exactly 0). `.sliced.cores-percentage = cards × maxSlices × 100` when the manufacturer's `CoresPercentageOvercommit` is true, else `cards × 100`; `.sliced.units`/`.memory-percentage`/`.memory-mib` are unchanged formulas. It reads `maxSlices` + overcommit from the same-named `Devices` CR and watches `Devices` so a capability change re-converges. Stale cleanup still covers all four suffixes. |
+| F5 | `NodeCapacityReconciler` reads Node + Devices, gates on `.sliced`, honors overcommit | It patches the four `.sliced.*` keys for a manufacturer only while `<mfr>.sliced` is present and > 0 in `Node.status.capacity`, reverse-patching otherwise (including at exactly 0). `.sliced.cores-percentage = cards × maxSlices × 100` when the manufacturer's `CoresPercentageOvercommit` is true, else `cards × 100`; `.sliced.units`/`.memory-percentage`/`.memory-mib` are unchanged formulas. It reads `maxSlices` + overcommit from the same-named `Devices` CR at reconcile time; no `Devices` watch is needed because the device-plugin sizes the bare `.sliced` pool as `cards × maxSlices` off the same CR, so any capability change moves the bare `.sliced` capacity the Node predicate watches. Stale cleanup still covers all four suffixes. |
 | F6 | `NodeFlavorReconciler` records `AcceleratorsFeature` in notes + injects into the derived InstanceType | The RF notes carry the group's `AcceleratorsFeature` as JSON (replacing the `sliceable` string note); `nodeFlavorSliceable` reads `group.Features` (`MaxSlices() > 0`). `authorDerivedInstanceType` injects the slicing descriptor into the InstanceType spec. |
 | F7 | InstanceType API replaces `Sliceable bool` with the structured slicing descriptor | `InstanceTypeAccelerator` drops `Sliceable bool` for a field mirroring `AcceleratorsFeature` (physical / logical sliced descriptor). The v1 proxy type + conversion, the validating/mutating webhooks (`instance_type.go`), and the `Spec.Sliceable` consumers (`webhooks/worker/instance.go`, `controllers/worker/instance.go`) migrate to the new shape (a `IsSliceable()`-style helper). `make generate` regenerates deepcopy / protobuf / CRD / conversion / apiservice. |
 | F8 | Architecture doc: five-gate admission | `docs/architecture.md`'s admission section is rewritten as the five gates above (Pod webhook / credits / AdmissionCheck / scheduler / allocator), with the `Devices` ledger described as the backing store for gate 3. The `NodeCapacityReconciler` and `MaxPartitions=512` references are updated to the per-vendor max slice count. |
@@ -276,9 +278,11 @@ and consumed.
   set); update them, regenerate, and rely on `make lint` + package tests. `Devices` needs no data migration
   (operator-detected).
 - **`NodeCapacityReconciler` reads a stale `Devices` CR** (capability changed but the reconciler did not re-fire)
-  → add a `Devices` watch enqueuing the same-named Node, and keep the reconcile level-based so a re-detect
-  re-converges; the `.sliced` presence gate reads live `Node.status.capacity`, so the coarse enable/disable signal
-  is always fresh.
+  → no `Devices` watch is needed: `maxSlices`/overcommit are fixed per-vendor constants, and the device-plugin
+  sizes the bare `.sliced` pool as `cards × maxSlices` off the same `Devices` CR, so every capability change
+  (enable / disable / resize) also moves the bare `.sliced` capacity — which the Node predicate watches — and the
+  level-based reconcile (reading `Devices` at reconcile time) re-converges. The `.sliced` presence gate reads live
+  `Node.status.capacity`, so the coarse enable/disable signal is always fresh.
 - **Ascend max 63 is not a power of two** → no problem: `.sliced` token count and `.sliced.cores-percentage` are
   multiplications, and `.sliced.units` is memory-driven; nothing requires the max slice count to divide D.
 - **NVIDIA MIG path regresses** → the NVIDIA detector sets `LogicalSliced{128}` on every card (MIG-enabled or
@@ -326,7 +330,7 @@ pkg/devicemanager/detector/hygon/device.go          # F3 LogicalSliced{4,true,1}
 pkg/devicemanager/detector/mthreads/device.go       # F3 LogicalSliced{16,false,1}
 pkg/devicemanager/detector/metax/device.go          # F3 LogicalSliced{16,false,1}
 pkg/deviceplugin/server.go, helper.go               # F4 size .sliced from group MaxSlices(); 0 → no tokens (drop floor-to-1)
-pkg/worker/controllers/worker/node_capacity.go      # F5 read Node + Devices; presence-gate on .sliced; overcommit-aware cores-percentage; watch Devices
+pkg/worker/controllers/worker/node_capacity.go      # F5 read Node + Devices; presence-gate on .sliced; overcommit-aware cores-percentage; Node predicate reacts to bare .sliced
 pkg/worker/controllers/worker/node_flavor.go        # F6 notes carry AcceleratorsFeature JSON; nodeFlavorSliceable reads group.Features; inject into derived InstanceType
 api/worker/v1/instance_type_flavor.go               # F7 InstanceTypeFlavor.Sliceable (display flavor) → structured/derived field
 pkg/worker/extensionapis/worker/instance_type_flavor.go # F7 CLI column ".spec.sliceable" needs a jsonpath-addressable field
@@ -386,13 +390,14 @@ InstanceType field must exist before the flavor can inject it). Task 5 (doc) dep
   `pkg/deviceplugin` table test shows a NVIDIA group (`MaxSlices()=128`) advertises `cards×128` `.sliced` devices
   and a feature-less group advertises 0; the Ascend sample round-trips RoCE on `topology`. **Verify:**
   `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./... && go test ./pkg/deviceplugin/... ./pkg/device/... ./api/worker/... && make generate && make lint`.
-- [ ] **Task 2 — NodeCapacityReconciler reads Node + Devices, presence-gates, honors overcommit (F5).** Read the
+- [x] **Task 2 — NodeCapacityReconciler reads Node + Devices, presence-gates, honors overcommit (F5).** Read the
   same-named `Devices` CR for each manufacturer's `MaxSlices()` + `CoresPercentageOvercommit`; patch the four
   `.sliced.*` keys for a manufacturer **only while** `<mfr>.sliced` is present and > 0 in `Node.status.capacity`,
   reverse-patching (removing) them otherwise (including at exactly 0); compute `.sliced.cores-percentage =
   cards × maxSlices × 100` when overcommit is true, else `cards × 100`; keep `.sliced.units`
-  (`cards × D`) / `.memory-percentage` (`cards × 100`) / `.memory-mib` (`Σ cards × VRAM`) formulas. Add a
-  `Devices` watch enqueuing the same-named Node; stale-cleanup still covers all four suffixes. **Accept:** an
+  (`cards × D`) / `.memory-percentage` (`cards × 100`) / `.memory-mib` (`Σ cards × VRAM`) formulas. Extend the
+  Node predicate to react to the bare `.sliced` capacity (present / absent / resized) — no `Devices` watch is
+  needed since the pool is sized off the same `Devices` CR; stale-cleanup still covers all four suffixes. **Accept:** an
   8×NVIDIA node → `nvidia.com/gpu.sliced.cores-percentage = 102400`, `.sliced.units = 12,800,000`; an 8×MThreads
   node (overcommit=false) → cores-percentage = 800; removing the manufacturer's `.sliced` reverse-patches all
   four keys. **Verify:** `go test ./pkg/worker/controllers/worker/... -run NodeCapacity && make lint`.

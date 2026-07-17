@@ -252,6 +252,18 @@ func (in AcceleratorsFeature) MaxSlices() int32 {
 	return n
 }
 
+// SlicedCoresOvercommit reports whether the slicing mode that determines MaxSlices()
+// allows each slice to claim up to 100% of the device compute. It reads the flag off
+// the mode with the larger MaxSize (the same mode MaxSlices() picks), so the per-card
+// compute budget matches the winning mode: true multiplies the compute budget by the
+// slice count, false caps it at a single whole-card 100%.
+func (in AcceleratorsFeature) SlicedCoresOvercommit() bool {
+	if in.LogicalSliced.MaxSize > in.PhysicalSliced.MaxSize {
+		return in.LogicalSliced.CoresPercentageOvercommit
+	}
+	return in.PhysicalSliced.CoresPercentageOvercommit
+}
+
 // DevicesList holds the list of Devices.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
