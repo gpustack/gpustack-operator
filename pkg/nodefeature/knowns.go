@@ -47,12 +47,13 @@ const (
 	// SlicedUnitsResourceNameSuffix is the fine-grained sliced counting key,
 	// reported per node via Patch Node and used for Kueue credits accounting.
 	SlicedUnitsResourceNameSuffix = ".sliced.units"
-	// SlicedCoresPercentageResourceNameSuffix is the per-card SM (compute) budget
-	// key for sliced allocations, reported per node as count*SlicedResourceMaxSize*100
-	// (slices may oversubscribe compute, so each of the MaxPartitions slots is worth
-	// 100%). It is a gate-2 node-level counting resource consumed by the default
-	// scheduler/kubelet and the device-plugin (CUDA_DEVICE_SM_LIMIT); it is never
-	// folded into Kueue credits.
+	// SlicedCoresPercentageResourceNameSuffix is the per-card SM (compute) budget key
+	// for sliced allocations, reported per node by the NodeCapacityReconciler and sized
+	// from the device group's max slice count and compute-overcommit flag: overcommit
+	// grants each slice a full 100% (so the per-card budget scales with the slice count),
+	// otherwise the per-card compute stays a single 100%. It is a gate-2 node-level
+	// counting resource consumed by the default scheduler/kubelet and the device-plugin
+	// (CUDA_DEVICE_SM_LIMIT); it is never folded into Kueue credits.
 	SlicedCoresPercentageResourceNameSuffix = ".sliced.cores-percentage"
 	// SlicedMemoryPercentageResourceNameSuffix is the per-card VRAM-percentage budget
 	// key for sliced allocations, reported per node as count*100. Gate-2 node-level
