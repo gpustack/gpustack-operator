@@ -1,6 +1,6 @@
 # Spec: Vendor Soft-Slicing Runtime Injection — MetaX (sysfs sGPU) and Cambricon (cnDev sMLU) Allocator Branches
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -422,7 +422,7 @@ Task 4 (sMLU lifecycle core) are Cambricon de-risk spikes; Task 5 wires them. Ea
 building/linting/green; checkpoints after **Task 2** (MetaX complete) and **Task 5** (Cambricon complete). All
 verification is local `darwin` (`GODEBUG=gotypesalias=0 CGO_ENABLED=1`); no image build, no `make generate`.
 
-- [ ] **Task 1 (MetaX de-risk spike) — sGPU translation + lifecycle core (`metax/sgpu.go`).** The `sgpuManager` seam
+- [x] **Task 1 (MetaX de-risk spike) — sGPU translation + lifecycle core (`metax/sgpu.go`).** The `sgpuManager` seam
   (`EnsureModel`/`SetSchedClass`/`Create(bdf,vramMiB)→idx`/`Remove(bdf,idx)`/`List(bdf)→[]sgpuSubdevice`) with a real
   sysfs impl + a fake root; a pure `METAX_SGPUS` encoder; marker render/parse (fail-closed, temp+atomic-rename);
   per-card lowest-free sgpu-idx derivation over the **live registry ∪ markers** under a package `allocMu`; and the
