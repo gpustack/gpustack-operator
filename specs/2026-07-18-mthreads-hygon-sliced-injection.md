@@ -1,6 +1,6 @@
 # Spec: Vendor Soft-Slicing Runtime Injection — MThreads (QoS env) and Hygon (vdev.conf) Allocator Branches
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -286,7 +286,7 @@ guard and fail-closed on-disk slot logic the cross-check flagged as the riskiest
 under `-race` with no hardware. Task 3 wires that core into the Hygon responder branch and depends on Task 2. Each
 task leaves the tree building, linting, and green; checkpoints sit after Task 1 and Task 3.
 
-- [ ] **Task 1 — MThreads sliced injection (template + harness).** In `mthreads/deviceplugin.go`, register a
+- [x] **Task 1 — MThreads sliced injection (template + harness).** In `mthreads/deviceplugin.go`, register a
   `!opts.NoSliced` Sliced server in `New()` and add an `AllocationMode==Sliced` branch to
   `GetContainerAllocateResponse` that reads `cores%` (`deviceplugin.SlicedCoresPercent`, default 100) and `memMiB`
   (`deviceplugin.SlicedMemoryMib` over `group.Memory`, error if neither memory dimension is set) and emits
