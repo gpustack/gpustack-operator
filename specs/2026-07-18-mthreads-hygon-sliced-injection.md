@@ -298,7 +298,7 @@ task leaves the tree building, linting, and green; checkpoints sit after Task 1 
   `MTHREADS_QOS_MEMORY_LIMIT=25769803776` and weight `8`; absent cores → weight `100`; no memory dimension →
   Allocate error; sliced vs exclusive/shared/visibility branches stay isolated.
   **Verify:** `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test ./pkg/devicemanager/allocator/mthreads/... && make lint`.
-- [ ] **Task 2 (de-risk spike) — Hygon translation core + C1 reconciliation.** (a) Flip the Hygon detector's
+- [x] **Task 2 (de-risk spike) — Hygon translation core + C1 reconciliation.** (a) Flip the Hygon detector's
   `CoresPercentageOvercommit` from `true` to `false` in `pkg/devicemanager/detector/hygon/device.go` (disjoint CU
   bitmask = spatial partition; `.sliced.cores-percentage` rescales to `cards × 100` via the existing
   overcommit=false branch — no `node_capacity.go` change). (b) Add `hygon/vdev.go` with pure, table-tested
@@ -312,9 +312,10 @@ task leaves the tree building, linting, and green; checkpoints sit after Task 1 
   reuse of an existing self-config for the same card + request. **Accept:** cores=25 on a 64-CU card → cuCount 16 +
   the 16 lowest free bits; a second same-card slice packs the next 16 bits + next `vdev_id` / `pipe_id`; a different
   card resets `pipe_id` but not `vdev_id`; a `-race` test with concurrent goroutine allocations on one card yields
-  distinct ids + disjoint masks; a corrupt conf fails closed; exhaustion (200 vdev / 20 pipe / CUs) errors; restart
-  reconstructs the used sets from pre-existing confs; the detector reports `CoresPercentageOvercommit=false` and
-  `MaxSlices()=4`. **Verify:** `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/devicemanager/allocator/hygon/... ./pkg/devicemanager/detector/hygon/... && make lint`.
+  distinct ids + disjoint masks; a corrupt conf / unreadable dir / `>128`-CU card / zero-compute request all fail
+  closed; exhaustion (200 vdev / 20 pipe / CUs) errors; restart reconstructs the used sets from pre-existing confs;
+  the C1 flip sets `CoresPercentageOvercommit=false` (code-review-verified — no hardware-gated detector unit test;
+  the downstream `cards × 100` rescale is covered by the existing parameterized `node_capacity` test). **Verify:** `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/devicemanager/allocator/hygon/... ./pkg/devicemanager/detector/hygon/... && make lint`.
 - [ ] **Task 3 — Hygon sliced responder branch (wiring).** In `hygon/deviceplugin.go`, register a `!opts.NoSliced`
   Sliced server in `New()` and add an `AllocationMode==Sliced` branch that, per allocated card, calls the Task-2
   core to allocate a slot + CU mask, renders one `vdev<i>.conf` into
@@ -334,9 +335,11 @@ task leaves the tree building, linting, and green; checkpoints sit after Task 1 
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
-- Update any Hygon detector test asserting `CoresPercentageOvercommit: true` (from the capability spec) to `false`
-  (C1); if a `node_capacity` test pins Hygon `.sliced.cores-percentage = cards × 4 × 100`, rescale it to
-  `cards × 100`.
+- No Hygon detector unit test exists to update (detectors are hardware-gated and untested by precedent, so a
+  literal-asserting test would be extraction-for-testing); the C1 `CoresPercentageOvercommit=false` flip is a
+  one-line change verified by code review. Its downstream — the `.sliced.cores-percentage` rescale to `cards × 100`
+  under `overcommit=false` — is already covered by the parameterized `TestDesiredSlicedCapacity` (synthetic
+  `overcommit` fixtures), which stays green unchanged.
 - Add the Ascend-style `redirectSoftSliceDirs(t)` helper (temp `OperatorLibDir` / `OperatorPodsDir`) to the Hygon
   test file so the on-disk slot scans hit a temp dir; reuse the `slicedPod` / `newSlicedServer` fixture shape.
 
@@ -349,13 +352,14 @@ Table-driven; local `darwin`, no hardware. Per-package (date 2026-07-18):
   `Cores > 128`); mask low/high-word ordering + boundary CUs 63/64/127; node-wide `vdev_id` uniqueness across cards
   + per-BDF `pipe_id` reuse-across-cards / unique-on-one; restart reconstruction + lowest-hole reuse after dir
   deletion; same-container idempotency; concurrent-goroutine `-race` (distinct ids + disjoint masks); corrupt /
-  truncated / duplicate / out-of-range conf fail-closed; atomic publication (a scanner never reads a partial file);
-  `vdev_id` exhaustion at 200 / `pipe_id` at 20 / insufficient free CUs / insufficient per-card memory.
+  truncated / duplicate / out-of-range conf fail-closed; an unreadable pod dir fails the scan closed (a walk, not
+  `filepath.Glob`, which swallows dir read errors); a `> 128`-CU card and a zero-compute request are rejected
+  loudly; atomic publication (a scanner never reads a partial file); `vdev_id` exhaustion at 200 / `pipe_id` at 20 /
+  insufficient free CUs / insufficient per-card memory.
 - `pkg/devicemanager/allocator/hygon` (branch): exact `vdev.conf` bytes + file mode 0644; mount target
   `/etc/vdev/docker/` + retained `/opt/dtk` → `/opt/hygondriver` + `/opt/hyhal` ro; expected device nodes;
   whole-card marker written (not skipped); whole-card-after-slice, slice-after-whole-card, whole-card on one card of
   a multi-card node; multi-card → one `vdev<i>.conf` per card.
-- `pkg/devicemanager/detector/hygon`: `CoresPercentageOvercommit == false` (C1) and `MaxSlices() == 4`.
 
 #### Integration tests
 - `pkg/deviceplugin` server-level (fake reconciler + temp dirs): MThreads / Hygon `New()` register the Sliced
