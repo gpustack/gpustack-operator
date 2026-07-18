@@ -1,6 +1,6 @@
 # Spec: Vendor Soft-Slicing Runtime Injection — MThreads (QoS env) and Hygon (vdev.conf) Allocator Branches
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -232,10 +232,26 @@ correct and reviewable before any hardware exists.
 - **A config-less whole-card slice is invisible to the scanner** (cross-check C3) → a whole-card slice still writes
   a full occupancy `vdev.conf`, so no card is silently double-booked on a multi-card node.
 - **Responder failure after the durable annotation strands the allocation** (cross-check H6) → pre-existing
-  framework behavior (`patchAllocatingPod` precedes the responder; shared with NVIDIA/Ascend). Mitigate by bounding
-  concurrency upstream (the `.sliced` token pool makes exhaustion unreachable in practice) and failing closed; the
-  level-based reconcile converges once the pod is removed. Fixing the framework ordering is out of this spec's
-  surgical scope.
+  framework behavior (`patchAllocatingPod` precedes the responder; shared with NVIDIA/Ascend). The responder fails
+  closed and the level-based reconcile converges once the pod is removed, but the allocation stays stranded (and its
+  `.sliced.units` charged) until then, and a kubelet retry cannot re-match it (`getAllocatingPod` skips reserved
+  pods). Fixing the framework ordering is out of this spec's surgical scope. See K1 — the C1 flip makes this strand
+  *reachable in the common case*, not just a rare edge.
+- **K1 — C1 `overcommit=false` + the default `cores% = 100` lets a Hygon slice monopolize a card's compute**
+  (end-of-build Kimi cross-check) → a sliced container that sets only `memory-percentage` leaves `cores-percentage`
+  at its default 100, so `cuCount = card cores` and one slice claims the whole CU mask. Because `cores-percentage`
+  capacity is accounted **node-wide** (`cards × 100`), not per-card, the scheduler can co-locate two default-cores
+  slices on one card; the second's `packCUMask` then fails closed **after** the durable annotation (H6) → a wedged
+  pod + leaked `.sliced.units` until deletion. **No in-scope fix** (per-card `cores` accounting, or a non-100 default
+  for `overcommit=false` vendors, lives in the capability spec / Pod webhook). Mitigation for now: **documented as an
+  open question** (below) and an operator caveat — a Hygon sliced pod should set `cores-percentage` explicitly; an
+  unset value reserves the whole card's compute. The failure is loud (not a silent overlap).
+- **K2 — a container requesting `.sliced > 1` whose tokens land on one card is under-served** (end-of-build Kimi
+  cross-check) → the responders emit one `vdev.conf` / one visible id per **physical card** (dedup by device key),
+  while the ledger charges per token, so two tokens on the same card yield one slice's isolation but a two-slice
+  charge. Only NVIDIA meaningfully supports `.sliced > 1` today; MThreads / Hygon (and Ascend / MetaX / Cambricon)
+  do not. **Control belongs in the Pod webhook** (reject `.sliced > 1` for non-NVIDIA vendors); recorded in
+  `docs/architecture.md` and as an open question — the webhook enforcement is a follow-up, not this spec.
 
 ## Design Details
 ### Commands
@@ -399,3 +415,14 @@ Table-driven; local `darwin`, no hardware. Per-package (date 2026-07-18):
   against; (b) a responder error lands after the durable allocation annotation with no rollback (shared with
   NVIDIA/Ascend); (c) `podDirGC` deletion failures are silent. None are fixed here; they are candidates for a
   framework follow-up.
+- **K1 — per-card `cores-percentage` accounting for `overcommit=false` vendors (open, deferred).** With C1, a Hygon
+  slice's `cores-percentage` is a hard per-card CU partition, but the capability spec accounts it node-wide
+  (`cards × 100`) and defaults an unset value to 100. So two default-cores slices can be scheduled onto one card and
+  the second strands (see K1 risk). The proper fix — per-card `cores` accounting and/or a non-100 default for
+  spatial-partition vendors — lives in the capability spec / Pod webhook and needs its own design discussion. Recorded
+  here as an open question; no code change in this spec.
+- **K2 — webhook enforcement of `.sliced > 1` support per vendor (open, deferred).** Only NVIDIA meaningfully serves
+  `.sliced > 1` (multiple slices co-located in one container); MThreads / Hygon / Ascend / MetaX / Cambricon emit one
+  slice per physical card, so `.sliced > 1` on a single card under-serves while over-charging. The Pod webhook should
+  reject `.sliced > 1` for non-NVIDIA vendors. Documented in `docs/architecture.md`; the webhook change is a
+  follow-up, not this spec.
