@@ -2,6 +2,8 @@ package hygon
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -13,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 const Manufacturer = nodefeature.ManufacturerHygon
@@ -25,6 +28,11 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	if !opts.NoShared {
 		servers = append(servers,
 			newServer(logger, workercore.DeviceAllocationModeShared),
+		)
+	}
+	if !opts.NoSliced {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModeSliced),
 		)
 	}
 	// The visibility server co-allocates the SSH sidecar to the same physical device(s) its
@@ -96,11 +104,17 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
-	_ *core.Pod,
-	_ *core.Container,
+	pod *core.Pod,
+	ctr *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
+	// Sliced containers get per-card vdev.conf + CU-mask isolation; exclusive/shared/
+	// visibility keep the whole-card passthrough below.
+	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
+		return s.getSlicedContainerAllocateResponse(pod, ctr, devs, allocated)
+	}
+
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
 
 	// Mount control devices.
@@ -139,6 +153,122 @@ func (s *server) GetContainerAllocateResponse(
 			}
 
 			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
+				ctrResp.Devices = append(ctrResp.Devices, pDev)
+			}
+		}
+	}
+
+	return ctrResp, nil
+}
+
+// _AllocatedAccelerator pairs an allocated DCU with its group; the group carries the CU
+// count + VRAM that drive the sliced CU mask and memory cap, and the accelerator carries
+// the PCI bus id + DRM indexes for the vdev.conf and its device nodes.
+type _AllocatedAccelerator struct {
+	group *workercore.DevicesGroup
+	accel *workercore.Accelerator
+}
+
+// In-container paths + host DTK/hyhal runtime dirs the vdev.conf slice needs.
+const (
+	ctrVdevDir    = "/etc/vdev/docker"
+	ctrHygonDrvr  = "/opt/hygondriver"
+	hostHygonPath = "/opt/dtk" // HYGONPATH default
+	hostHyhalDir  = "/opt/hyhal"
+)
+
+// getSlicedContainerAllocateResponse renders the Hygon soft-slicing injection for a sliced
+// container: one vdev.conf per allocated card carrying a cores%-derived CU bitmask and a
+// per-card VRAM cap, published into the pod work dir and mounted at /etc/vdev/docker/, plus
+// the DTK/hyhal runtime dirs and per-card device nodes. The host DTK/hyhal user-space
+// runtime reads the vdev.conf to enforce the slice. A whole-card slice still writes a
+// full-mask / full-memory vdev.conf occupancy marker (allocateVdev never skips a write), so
+// the on-disk scanner never misses a taken card.
+func (s *server) getSlicedContainerAllocateResponse(
+	pod *core.Pod,
+	ctr *core.Container,
+	devs *workercore.Devices,
+	allocated map[deviceplugin.Resource]int32,
+) (*deviceplugin.ContainerAllocateResponse, error) {
+	// Collect the allocated DCUs in devs order (= vdev0.conf, vdev1.conf, ... order).
+	var accels []_AllocatedAccelerator
+	for i := range devs.Spec.Groups {
+		devsGroup := &devs.Spec.Groups[i]
+		for j := range devsGroup.Accelerators {
+			devsAccelerator := &devsGroup.Accelerators[j]
+			res := deviceplugin.Resource{
+				Group:  devsGroup.ID,
+				Device: devsAccelerator.ID,
+			}
+			if _, existed := allocated[res]; !existed {
+				continue
+			}
+			accels = append(accels, _AllocatedAccelerator{group: devsGroup, accel: devsAccelerator})
+		}
+	}
+	if len(accels) == 0 {
+		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
+	}
+
+	coresPct := deviceplugin.SlicedCoresPercent(ctr,
+		nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer))
+	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
+	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
+
+	ctrResp := &deviceplugin.ContainerAllocateResponse{}
+
+	// Control device nodes (the compute path, shared by every allocated card).
+	for _, p := range []string{"/dev/kfd", "/dev/mkfd"} {
+		if pDev := deviceplugin.NewDevice(p, "rwm"); pDev != nil {
+			ctrResp.Devices = append(ctrResp.Devices, pDev)
+		}
+	}
+
+	// DTK/hyhal user-space runtime dirs (HYGONPATH -> /opt/hygondriver, /opt/hyhal ro).
+	if osx.Exists(hostHygonPath) {
+		ctrResp.Mounts = append(ctrResp.Mounts,
+			&deviceplugin.Mount{ContainerPath: ctrHygonDrvr, HostPath: hostHygonPath, ReadOnly: true})
+	}
+	if pMount := deviceplugin.NewROMount(hostHyhalDir); pMount != nil {
+		ctrResp.Mounts = append(ctrResp.Mounts, pMount)
+	}
+
+	// The per-pod vdev dir (holding the vdev<i>.conf files) mounted read-only at
+	// /etc/vdev/docker/: the DTK/hyhal runtime only reads it and the operator writes it
+	// host-side, so the container needs no write access. These confs are also the
+	// authoritative slot ledger allocateVdev scans, so a read-write mount would let a
+	// co-tenant tamper with another slice's CU/vdev/pipe accounting. allocateVdev creates
+	// the host dir when it writes the first conf.
+	vdevHostDir := filepath.Join(deviceplugin.PodWorkDir(string(pod.UID), ctr.Name), "etc/vdev/docker")
+	ctrResp.Mounts = append(ctrResp.Mounts,
+		&deviceplugin.Mount{ContainerPath: ctrVdevDir, HostPath: vdevHostDir, ReadOnly: true})
+
+	// One vdev.conf per allocated card, each independently slotted; a whole-card slice
+	// (cores% >= 100 && memMiB >= card VRAM) resolves to a full-mask / full-memory conf.
+	// The loop index i is the container-local device_id (the DTK device_id semantics are a
+	// hardware-validation item). A partial failure part-way through a multi-card allocation
+	// leaves the earlier cards' confs on disk: intentional under the level-based design — an
+	// idempotent kubelet retry reuses them and podDirGC reclaims them once the pod is gone,
+	// so no rollback is attempted.
+	for i := range accels {
+		group, accel := accels[i].group, accels[i].accel
+		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(group.Memory))
+		if err != nil {
+			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
+		}
+		selfPath := filepath.Join(vdevHostDir, fmt.Sprintf("vdev%d.conf", i))
+		if _, err := allocateVdev(deviceplugin.OperatorPodsDir, selfPath, accel.Topology.PciBusID, group.Cores, coresPct, memMib, i); err != nil {
+			return nil, fmt.Errorf("allocate vdev for card %s: %w", accel.Topology.PciBusID, err)
+		}
+
+		// Per-card DRM device nodes.
+		if len(accel.PhysicalIndexes) > 0 {
+			if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", accel.PhysicalIndexes[0]); pDev != nil {
+				ctrResp.Devices = append(ctrResp.Devices, pDev)
+			}
+		}
+		if len(accel.PhysicalIndexes) > 1 {
+			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", accel.PhysicalIndexes[1]); pDev != nil {
 				ctrResp.Devices = append(ctrResp.Devices, pDev)
 			}
 		}

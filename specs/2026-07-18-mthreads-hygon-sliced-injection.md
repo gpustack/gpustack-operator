@@ -1,6 +1,6 @@
 # Spec: Vendor Soft-Slicing Runtime Injection — MThreads (QoS env) and Hygon (vdev.conf) Allocator Branches
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -314,7 +314,7 @@ task leaves the tree building, linting, and green; checkpoints sit after Task 1 
   closed; exhaustion (200 vdev / 20 pipe / CUs) errors; restart reconstructs the used sets from pre-existing confs;
   the C1 flip sets `CoresPercentageOvercommit=false` (code-review-verified — no hardware-gated detector unit test;
   the downstream `cards × 100` rescale is covered by the existing parameterized `node_capacity` test). **Verify:** `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/devicemanager/allocator/hygon/... ./pkg/devicemanager/detector/hygon/... && make lint`.
-- [ ] **Task 3 — Hygon sliced responder branch (wiring).** In `hygon/deviceplugin.go`, register a `!opts.NoSliced`
+- [x] **Task 3 — Hygon sliced responder branch (wiring).** In `hygon/deviceplugin.go`, register a `!opts.NoSliced`
   Sliced server in `New()` and add an `AllocationMode==Sliced` branch that, per allocated card, calls the Task-2
   core to allocate a slot + CU mask, renders one `vdev<i>.conf` into
   `PodWorkDir(pod.UID, ctr.Name)/etc/vdev/docker/`, and returns the mounts (that dir → `/etc/vdev/docker/`,
