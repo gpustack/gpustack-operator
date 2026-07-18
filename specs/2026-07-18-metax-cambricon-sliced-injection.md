@@ -435,7 +435,7 @@ verification is local `darwin` (`GODEBUG=gotypesalias=0 CGO_ENABLED=1`); no imag
   removes only the specific marker file (never a sibling's), re-seeds registry∪markers at startup, resync-ticker
   drives a reclaim even with zero broadcast ticks; `-race` concurrent Allocate+reclaim never double-frees.
   **Verify:** `go test -race ./pkg/devicemanager/allocator/metax/... && make lint`.
-- [ ] **Task 2 — MetaX Sliced responder branch + reclaim wiring (`metax/deviceplugin.go`).** `New()` registers a
+- [x] **Task 2 — MetaX Sliced responder branch + reclaim wiring (`metax/deviceplugin.go`).** `New()` registers a
   `!opts.NoSliced` Sliced server; `aggregated.Start` spawns the reclaim loop (broadcast subscription via
   `getReconcileNotifier(Manufacturer, Sliced)` + periodic resync ticker + startup scan); the `AllocationMode==Sliced`
   branch computes `(cores%, memMiB)`, takes the whole-card vs partial path, returns `METAX_SGPUS` + `/dev/mxcd` +
