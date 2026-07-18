@@ -50,6 +50,11 @@ type (
 
 		notifiersMutex sync.RWMutex
 		notifiers      []_DevicesNotifier
+		// lastLivePodUIDs caches the most recent broadcast live pod-UID set so a notifier
+		// that subscribes after a reconcile is seeded immediately. Without it a late
+		// subscriber (a per-vendor reclaim loop registering after the initial reconcile)
+		// could stay unseeded until the next reconcile and never reclaim on its resync tick.
+		lastLivePodUIDs []string
 
 		// reservations records, keyed by pod UID, the accelerator devices a pod's
 		// workload container was allocated, so the SSH sidecar's visibility Allocate
@@ -155,22 +160,21 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Drop reservations whose pod is gone (same live set the sliced working-dir GC uses).
 	r.pruneReservations(livePodUIDs)
 
-	r.notifiersMutex.RLock()
-	if len(r.notifiers) > 0 {
-		for i := range r.notifiers {
-			notifier := &r.notifiers[i]
-			select {
-			case notifier.Channel <- livePodUIDs:
-			default:
-				logger.Error(nil,
-					"notifier channel is full, skipping notify",
-					"manufacturer", notifier.Manufacturer,
-					"mode", notifier.AllocationMode.String(),
-				)
-			}
+	r.notifiersMutex.Lock()
+	r.lastLivePodUIDs = livePodUIDs
+	for i := range r.notifiers {
+		notifier := &r.notifiers[i]
+		select {
+		case notifier.Channel <- livePodUIDs:
+		default:
+			logger.Error(nil,
+				"notifier channel is full, skipping notify",
+				"manufacturer", notifier.Manufacturer,
+				"mode", notifier.AllocationMode.String(),
+			)
 		}
 	}
-	r.notifiersMutex.RUnlock()
+	r.notifiersMutex.Unlock()
 
 	return ctrl.Result{}, nil
 }
@@ -280,6 +284,11 @@ func (r *DevicesReconciler) getReconcileNotifier(manufacturer string, allocation
 		AllocationMode: allocationMode,
 		Channel:        channel,
 	})
+	// Seed a late subscriber with the last broadcast set so its reclaim loop never stays
+	// unseeded. The channel is freshly buffered, so this send never blocks.
+	if r.lastLivePodUIDs != nil {
+		channel <- r.lastLivePodUIDs
+	}
 	return channel
 }
 
