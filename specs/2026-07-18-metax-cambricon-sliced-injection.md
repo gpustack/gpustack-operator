@@ -1,6 +1,6 @@
 # Spec: Vendor Soft-Slicing Runtime Injection — MetaX (sysfs sGPU) and Cambricon (cnDev sMLU) Allocator Branches
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -577,6 +577,13 @@ advertisement (no per-vendor isolation e2e is added here).
 - **MetaX sysfs contract (hardware).** Exact `sgpu/create` / `model` / `sched_class` sysfs paths + write format, the
   injected device-node set (control nodes + which `/dev/dri/*`), and whether the created subdevice exposes an alias
   tag the reclaim loop can read back — confirm on hardware; the seam isolates the impl so only `sgpu.go` changes.
+- **MetaX sgpu-index assignment (hardware).** The sysfs `create` node takes only the VRAM quota — the driver assigns
+  the subdevice index itself. The operator writes its predicted lowest-free `index` into the marker + `METAX_SGPUS`
+  (`#<idx>`) and reuses it for `Remove`, assuming the driver honors that slot. If a real driver assigns indices
+  differently (not lowest-free, or non-deterministically), the marker / env / `Remove` desync from the real subdevice
+  → wrong-subdevice destroy + misconfigured `METAX_SGPUS`. Confirm on hardware; if it diverges, switch the `Create`
+  seam to read the created index back from `List()` (diff before/after) before writing the marker. (Raised by the
+  PR #45 review; `sgpu.go` `Create` carries the same caveat inline.)
 - **Cambricon injection form (hardware).** Device-node injection (`/dev/cambricon_dev<slot>` / `_ipcm<slot>` /
   `cap_dev*_mi*`) vs the `--use-runtime` `VIRTUAL_DEVICES` env — which to default and how to detect `--use-runtime`;
   plus the cnDev `dynamic-smlu` version prerequisite probe.
