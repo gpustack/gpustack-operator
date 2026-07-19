@@ -444,13 +444,15 @@ verification is local `darwin` (`GODEBUG=gotypesalias=0 CGO_ENABLED=1`); no imag
   →error; sliced vs exclusive/shared/visibility isolation; a fake reconciler tick + a resync tick each reclaim a
   dead-pod slice. **Verify:** `go test -race ./pkg/devicemanager/allocator/metax/... ./pkg/deviceplugin/... && make
   lint`. **Checkpoint:** `go build ./...` + `make lint` clean; MetaX pipeline green.
-- [ ] **Task 3 (Cambricon de-risk spike) — exported cnDev sMLU wrappers (`binding/cndev/library_device.go`).**
-  Hand-write, each `so.Lookup`-guarded (build/test on darwin without the `.so`): `SetSMLUMode`/`GetSMLUMode`,
+- [x] **Task 3 (Cambricon de-risk spike) — exported cnDev sMLU wrappers (`binding/cndev/library_device.go`).**
+  Hand-write, each `so.Lookup`-guarded (build/test on darwin without the `.so`): `SetSMLUMode(enabled bool)`/`GetSMLUMode`,
   `CreateSMluProfile(SMluSet)→(profileID int32, Return)`, `DestroySMluProfile(profileID)`,
-  `CreateSMluInstance(profileID uint32, name string)→(cndevMluInstance, Return)`, `DestroySMluInstanceByName(name)`,
-  `GetAllSMluInstanceInfo()→([]SMluInfo, Return)`. **Accept:** builds on darwin; a nil-`Lookup` guard returns
-  `ERROR_FUNCTION_NOT_FOUND`; guard-path unit test; no `make generate` (hand-written, not `zz_generated`).
-  **Verify:** `go build ./binding/cndev/... && go test ./binding/cndev/... && make lint`.
+  `CreateSMluInstance(profileID uint32, name string)→Return`, `DestroySMluInstanceByName(name)`,
+  `GetAllSMluInstanceInfo()→([]SMluInfo, Return)`. The raw `cndevMluInstance` handle is **not** returned from
+  `CreateSMluInstance`: it is an unexported cnDev type (unusable across packages, trips revive `unexported-return`)
+  and the instance is addressed by name for every downstream op (destroy-by-name, list). **Accept:** builds on
+  darwin; a nil-`Lookup` guard returns `ERROR_FUNCTION_NOT_FOUND`; guard-path unit test; no `make generate`
+  (hand-written, not `zz_generated`). **Verify:** `go build ./binding/cndev/... && go test ./binding/cndev/... && make lint`.
 - [ ] **Task 4 (Cambricon de-risk spike) — sMLU lifecycle core (`cambricon/smlu.go`).** The `smluDriver` seam over
   the Task-3 wrappers (`EnsureSMLUMode`, `CreateProfileInstance(dev, cores%, memMiB, name)→instance{devNodes…}`,
   `DestroyByName(name)`, `ListInstances()→[]instance`) + a fake driver; the pure `(cores%, memMiB)→SMluSet` mapping

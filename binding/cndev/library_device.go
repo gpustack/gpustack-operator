@@ -3,6 +3,7 @@ package cndev
 import "C"
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"unsafe"
 
@@ -273,4 +274,141 @@ func (l Device) GetUtilizationInfo() (UtilizationInfo, Return) {
 	utilInfo.Version = VERSION_6
 	ret := cndevGetDeviceUtilizationInfo(&utilInfo, l.handle)
 	return utilInfo, ret
+}
+
+// GetSMLUMode reports whether sMLU mode is enabled on the device.
+func (l Device) GetSMLUMode() (SMLUMode, Return) {
+	if l.so.Lookup("cndevGetSMLUMode") != nil {
+		return SMLUMode{}, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	var mode SMLUMode
+	mode.Version = VERSION_6
+	ret := cndevGetSMLUMode(&mode, l.handle)
+	return mode, ret
+}
+
+// SetSMLUMode enables or disables sMLU mode on the device.
+func (l Device) SetSMLUMode(enabled bool) Return {
+	if l.so.Lookup("cndevSetSMLUMode") != nil {
+		return ERROR_FUNCTION_NOT_FOUND
+	}
+
+	var mode SMLUMode
+	mode.Version = VERSION_6
+	mode.SmluMode = uint32(FEATURE_DISABLED)
+	if enabled {
+		mode.SmluMode = uint32(FEATURE_ENABLED)
+	}
+	return cndevSetSMLUMode(&mode, l.handle)
+}
+
+// CreateSMluProfile creates an sMLU profile from the given quota and returns its profile ID.
+func (l Device) CreateSMluProfile(profile SMluSet) (int32, Return) {
+	if l.so.Lookup("cndevCreateSMluProfileInfo") != nil {
+		return 0, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	profile.Version = VERSION_6
+	var profileID int32
+	ret := cndevCreateSMluProfileInfo(&profile, &profileID, l.handle)
+	return profileID, ret
+}
+
+// DestroySMluProfile destroys the sMLU profile with the given profile ID.
+func (l Device) DestroySMluProfile(profileID int32) Return {
+	if l.so.Lookup("cndevDestroySMluProfileInfo") != nil {
+		return ERROR_FUNCTION_NOT_FOUND
+	}
+
+	return cndevDestroySMluProfileInfo(profileID, l.handle)
+}
+
+// CreateSMluInstance creates an sMLU instance from the given profile ID, naming it name. The
+// instance is addressed by name for every subsequent operation, so the handle is not returned.
+func (l Device) CreateSMluInstance(profileID uint32, name string) Return {
+	if l.so.Lookup("cndevCreateSMluInstanceByProfileId") != nil {
+		return ERROR_FUNCTION_NOT_FOUND
+	}
+
+	cName, cNameAllocMap := unpackPCharString(name)
+	var handle cndevMluInstance
+	ret := cndevCreateSMluInstanceByProfileId(&handle, profileID, l.handle, (*byte)(unsafe.Pointer(cName)))
+	runtime.KeepAlive(cNameAllocMap)
+	return ret
+}
+
+// DestroySMluInstanceByName destroys the sMLU instance with the given name on the device.
+func (l Device) DestroySMluInstanceByName(name string) Return {
+	if l.so.Lookup("cndevDestroySMluInstanceByInstanceName") != nil {
+		return ERROR_FUNCTION_NOT_FOUND
+	}
+
+	cName, cNameAllocMap := unpackPCharString(name)
+	ret := cndevDestroySMluInstanceByInstanceName(l.handle, (*byte)(unsafe.Pointer(cName)))
+	runtime.KeepAlive(cNameAllocMap)
+	return ret
+}
+
+// GetAllSMluInstanceInfo returns the information of every sMLU instance on the device.
+func (l Device) GetAllSMluInstanceInfo() ([]SMluInfo, Return) {
+	if l.so.Lookup("cndevGetAllSMluInstanceInfo") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	// The count parameter is in/out: a probe with no buffer reports how many instances exist, so
+	// INSUFFICIENT_SPACE from the probe is expected and is not treated as a hard failure.
+	var count int32
+	if ret := cndevGetAllSMluInstanceInfo(&count, nil, l.handle); !ret.IsSuccess() && ret != ERROR_INSUFFICIENT_SPACE {
+		return nil, ret
+	}
+	if count <= 0 {
+		return nil, SUCCESS
+	}
+
+	infos := make([]SMluInfo, count)
+	for i := range infos {
+		infos[i].Version = VERSION_6
+	}
+	ret := cndevGetAllSMluInstanceInfo(&count, &infos[0], l.handle)
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+	// Clamp to the buffer we sized, so a driver that reports a larger out-count than the
+	// in-count cannot drive a slice-out-of-range panic.
+	if int(count) > len(infos) {
+		count = int32(len(infos))
+	}
+	return infos[:count], ret
+}
+
+// GetInstanceName returns the sMLU instance name from the NUL-terminated C char array.
+func (info *SMluInfo) GetInstanceName() string {
+	return C.GoString((*C.char)(unsafe.Pointer(&info.InstanceName[0])))
+}
+
+// GetDevNodeName returns the sMLU instance device node path from the NUL-terminated C char array.
+func (info *SMluInfo) GetDevNodeName() string {
+	return C.GoString((*C.char)(unsafe.Pointer(&info.DevNodeName[0])))
+}
+
+// GetSMluProfileIds returns the IDs of every sMLU profile defined on the device.
+func (l Device) GetSMluProfileIds() ([]int32, Return) {
+	if l.so.Lookup("cndevGetSMluProfileIdInfo") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	var info SMluProfileIdInfo
+	info.Version = VERSION_6
+	ret := cndevGetSMluProfileIdInfo(&info, l.handle)
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+	n := int(info.Count)
+	if n > len(info.ProfileId) {
+		n = len(info.ProfileId)
+	}
+	ids := make([]int32, n)
+	copy(ids, info.ProfileId[:n])
+	return ids, ret
 }
