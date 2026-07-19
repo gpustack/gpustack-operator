@@ -61,12 +61,11 @@ type smluInstance struct {
 	devNode   string
 }
 
-// smluRef is the minimal identity the reclaim loop needs to destroy an instance and GC
-// its profile: the parent card, the instance name, and the profile it references.
+// smluRef is the minimal identity the reclaim loop needs to destroy an instance: the
+// parent card and the instance name.
 type smluRef struct {
-	card      string
-	name      string
-	profileID int32
+	card string
+	name string
 }
 
 // profileKey identifies an sMLU profile by its parent card and profile ID.
@@ -98,6 +97,10 @@ type smluDriver interface {
 	DestroyInstance(card, name string) error
 	// ListInstances enumerates every sMLU instance across all cards.
 	ListInstances() ([]smluInstance, error)
+	// ListProfiles enumerates every sMLU profile across all cards, so the reclaim loop
+	// can destroy a profile no instance references (including a crash orphan left when a
+	// create fell between the profile and its instance).
+	ListProfiles() ([]profileKey, error)
 }
 
 // smluSetFor maps the decoupled compute (%) and VRAM (MiB) dimensions to the cnDev sMLU
@@ -345,11 +348,13 @@ func newReclaimer(driver smluDriver, podsDir string, logger klog.Logger) *reclai
 // reconciles in two directions:
 //   - a marker whose pod is dead (per-pod decision) -> destroy its instance (tolerating
 //     an already-absent one, which covers the instance-less-marker case) and remove only
-//     that marker file (the pod dir only when empty), then GC its profile when no
-//     instance still references it;
+//     that marker file (the pod dir only when empty);
 //   - a marker-less instance whose embedded UID is dead -> destroy it; one whose embedded
 //     UID is still live (a create-before-marker crash on a reserved pod) is left intact; a
 //     name that is not operator-encoded is foreign and never touched.
+//
+// After the per-pod pass it sweeps profiles once (gcOrphanProfiles), destroying any that
+// no instance references.
 func (r *reclaimer) reconcile(livePodUIDs []string) {
 	allocMu.Lock()
 	defer allocMu.Unlock()
@@ -392,7 +397,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		m := markers[i].marker
 		t := get(m.PodUID)
 		t.markers = append(t.markers, markers[i])
-		t.instances = append(t.instances, smluRef{card: m.Card, name: m.Instance, profileID: m.ProfileID})
+		t.instances = append(t.instances, smluRef{card: m.Card, name: m.Instance})
 	}
 	for i := range instances {
 		inst := instances[i]
@@ -403,7 +408,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		if !ok {
 			continue // not operator-encoded; leave foreign instances alone
 		}
-		get(uid).instances = append(get(uid).instances, smluRef{card: inst.card, name: inst.name, profileID: inst.profileID})
+		get(uid).instances = append(get(uid).instances, smluRef{card: inst.card, name: inst.name})
 	}
 
 	// touched marks every miss key still relevant this pass; the rest are pruned below.
@@ -426,22 +431,26 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 			delete(r.misses, k)
 		}
 	}
+
+	// Sweep profiles once per pass: destroy any profile no instance references — one freed
+	// by the destroys above, or a crash orphan left when a create fell between the profile
+	// and its instance. Safe under allocMu: no in-flight Allocate holds an as-yet
+	// instance-less profile.
+	r.gcOrphanProfiles()
 }
 
 // destroy tears down one dead pod's instances: destroy each instance (idempotent), then
-// remove each marker file and its pod dir when empty, then GC any profile no instance
-// still references. A miss counter is cleared only when the whole pod is reclaimed, so a
-// partial failure retries next pass.
+// remove each marker file and its pod dir when empty. A miss counter is cleared only when
+// the whole pod is reclaimed, so a partial failure retries next pass. Freed profiles are
+// reclaimed by gcOrphanProfiles at the end of the reconcile pass.
 func (r *reclaimer) destroy(uid string, instances []smluRef, markers []markerEntry) {
 	ok := true
-	profiles := make(map[profileKey]bool)
 	for _, inst := range instances {
 		if err := r.driver.DestroyInstance(inst.card, inst.name); err != nil {
 			r.logger.Error(err, "reclaim: destroy instance", "podUID", uid, "card", inst.card, "instance", inst.name)
 			ok = false
 			continue
 		}
-		profiles[profileKey{card: inst.card, profileID: inst.profileID}] = true
 	}
 	for i := range markers {
 		if err := os.Remove(markers[i].path); err != nil && !os.IsNotExist(err) {
@@ -454,29 +463,35 @@ func (r *reclaimer) destroy(uid string, instances []smluRef, markers []markerEnt
 		removeIfEmpty(filepath.Dir(markers[i].path))
 		removeIfEmpty(filepath.Dir(filepath.Dir(markers[i].path)))
 	}
-	r.gcProfiles(profiles)
 	if ok {
 		delete(r.misses, uid)
 		r.logger.Info("reclaim: reclaimed dead pod's instances", "podUID", uid, "instances", len(instances))
 	}
 }
 
-// gcProfiles destroys each candidate profile that no surviving instance still
-// references, so a profile shared by a live instance is never torn out from under it.
-func (r *reclaimer) gcProfiles(candidates map[profileKey]bool) {
-	if len(candidates) == 0 {
+// gcOrphanProfiles destroys every profile no surviving instance references, so a profile
+// shared by a live instance is never torn out from under it while a genuinely orphaned one
+// (its instances reclaimed, or a create-before-instance crash) is freed. It fails closed:
+// a list error skips the sweep rather than acting on a partial view.
+func (r *reclaimer) gcOrphanProfiles() {
+	profiles, err := r.driver.ListProfiles()
+	if err != nil {
+		r.logger.Error(err, "reclaim: list smlu profiles for gc, skipping")
 		return
 	}
-	remaining, err := r.driver.ListInstances()
+	if len(profiles) == 0 {
+		return
+	}
+	instances, err := r.driver.ListInstances()
 	if err != nil {
 		r.logger.Error(err, "reclaim: list smlu instances for profile gc, skipping")
 		return
 	}
-	inUse := make(map[profileKey]bool, len(remaining))
-	for i := range remaining {
-		inUse[profileKey{card: remaining[i].card, profileID: remaining[i].profileID}] = true
+	inUse := make(map[profileKey]bool, len(instances))
+	for i := range instances {
+		inUse[profileKey{card: instances[i].card, profileID: instances[i].profileID}] = true
 	}
-	for pk := range candidates {
+	for _, pk := range profiles {
 		if inUse[pk] {
 			continue
 		}

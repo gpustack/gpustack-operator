@@ -1,6 +1,6 @@
 # Spec: Vendor Soft-Slicing Runtime Injection — MetaX (sysfs sGPU) and Cambricon (cnDev sMLU) Allocator Branches
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -269,6 +269,18 @@ the branch and its reclamation are correct and reviewable before any hardware ex
   cross-check over the real diff** — Codex `/codex:review` (or `/codex:adversarial-review`) and a Kimi retry — on
   (a) the reclaim loop under crash/restart + concurrent Allocate, and (b) the cnDev wrapper signatures + `SMluSet`
   field mapping, per the `crosscheck` decision procedure.
+  - **Build-stage cross-check (ran; Codex on the reclaim loop, Kimi on the wrappers/mapping).** Kimi confirmed the
+    cnDev wrappers + `SMluSet` mapping correct on all checks (guard direction, string marshaling/KeepAlive,
+    count-probe, quota field/unit, `[0]`-slot reads, `VERSION_6`). Fixed from Codex/Kimi findings: Cambricon
+    `ListInstances`/`ListProfiles` fail closed on any per-device error (a partial list could make profile GC destroy a
+    still-referenced profile); the profile sweep GCs a create-before-instance **orphan profile** (added a
+    `GetSMluProfileIds` wrapper + an all-profiles sweep); `GetAllSMluInstanceInfo` clamps its out-count against the
+    buffer; and the reconciler seeds a **late reclaim subscriber** on subscribe so its resync tick is never stuck
+    unseeded. **Documented residuals (not fixed):** a MetaX drained-card reclaim can free an *alias-less* crash orphan
+    of a pod that is still API-live but **never started** (a running slice always has a marker before Allocate
+    returns, so a running slice is never freed; full closure needs sysfs alias read-back — a hardware Open Question);
+    and a few hardware-dependent cnDev return-code tolerances (`DestroyInstance`/probe treating a missing entity as
+    `NOT_FOUND`) plus no `cndev` `Release` on shutdown — low-impact, gated on hardware validation.
 
 ### Boundaries
 - **Always:** follow the NVIDIA/Ascend/Hygon allocator template; reuse `SlicedCoresPercent` / `SlicedMemoryMib`;
@@ -474,7 +486,7 @@ verification is local `darwin` (`GODEBUG=gotypesalias=0 CGO_ENABLED=1`); no imag
   destroy a shared profile; create-failure rolls back the profile; `-race`. **Verify:**
   `go test -race ./pkg/devicemanager/allocator/cambricon/... && make lint` (clean; cambricon coverage 66.5%, climbs
   past the ≥70% target once Task 5 adds the responder tests).
-- [ ] **Task 5 — Cambricon real cnDev driver + Sliced responder branch + reclaim wiring (`cambricon/deviceplugin.go`,
+- [x] **Task 5 — Cambricon real cnDev driver + Sliced responder branch + reclaim wiring (`cambricon/deviceplugin.go`,
   `cambricon/smlu_driver_linux.go`).** Introduce the real `cndevSMLUDriver` over the Task-3 wrappers in
   `smlu_driver_linux.go` (linux build tag, so the cnDev cgo never reaches the `darwin` test binary) with a `!linux`
   stub, both behind a `newSMLUDriver()` platform seam. Then `New()` + `Start` as Task 2; the Sliced branch **rejects
