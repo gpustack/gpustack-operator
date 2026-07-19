@@ -385,7 +385,8 @@ pkg/devicemanager/allocator/metax/sgpu_test.go           # F7 NEW: encode/marker
 # Cambricon (landed second — adds cnDev CGO wrappers)
 binding/cndev/library_device.go                          # F4 add exported sMLU wrappers over generated low-level calls
 pkg/devicemanager/allocator/cambricon/deviceplugin.go    # F5 Sliced server + sMLU branch + single-card reject + reclaim wiring
-pkg/devicemanager/allocator/cambricon/smlu.go            # F5/F6 NEW: (cores%,memMiB)→SMluSet mapping, profile/instance create-reuse-destroy, marker + reclaim
+pkg/devicemanager/allocator/cambricon/smlu.go            # F5/F6 NEW: (cores%,memMiB)→quota mapping, seam + profile/instance reuse-destroy, marker + reclaim (cnDev-free core)
+pkg/devicemanager/allocator/cambricon/smlu_driver_linux.go # F4/F5 NEW (Task 5, linux-tagged): real cndevSMLUDriver over the wrappers (+ a !linux stub)
 pkg/devicemanager/allocator/cambricon/deviceplugin_test.go # F7 NEW
 pkg/devicemanager/allocator/cambricon/smlu_test.go       # F7 NEW: mapping/marker/reclaim/fail-closed (fake sMLU driver)
 ```
@@ -453,20 +454,33 @@ verification is local `darwin` (`GODEBUG=gotypesalias=0 CGO_ENABLED=1`); no imag
   and the instance is addressed by name for every downstream op (destroy-by-name, list). **Accept:** builds on
   darwin; a nil-`Lookup` guard returns `ERROR_FUNCTION_NOT_FOUND`; guard-path unit test; no `make generate`
   (hand-written, not `zz_generated`). **Verify:** `go build ./binding/cndev/... && go test ./binding/cndev/... && make lint`.
-- [ ] **Task 4 (Cambricon de-risk spike) — sMLU lifecycle core (`cambricon/smlu.go`).** The `smluDriver` seam over
-  the Task-3 wrappers (`EnsureSMLUMode`, `CreateProfileInstance(dev, cores%, memMiB, name)→instance{devNodes…}`,
-  `DestroyByName(name)`, `ListInstances()→[]instance`) + a fake driver; the pure `(cores%, memMiB)→SMluSet` mapping
-  (`MluQuota=cores%`, `MemorySize=memMiB<<20`); bounded instance-name encoding (`<prefix>:<podUID>:<shortHash(ctr)>`,
-  ≤100 B incl. NUL) + marker + `reclaim` (list instances via driver, decode UID, destroy dead-UID orphans; marker ↔
-  registry both directions; profile reuse only on exact `(quota,mem)` match; never destroy a shared profile; under
-  `allocMu`). **Accept:** fake-driver table tests — SMluSet mapping; name encode/decode round-trip incl. max UID +
-  63-char container (fits, no collision); marker fail-closed; reclaim destroys dead-pod / subdevice-less-marker /
-  marker-less-dead-UID and leaves marker-less-live-UID; idempotent reuse + changed-param→fail-closed; exact-match
-  profile reuse; `-race`. **Verify:** `go test -race ./pkg/devicemanager/allocator/cambricon/... && make lint`.
-- [ ] **Task 5 — Cambricon Sliced responder branch + reclaim wiring (`cambricon/deviceplugin.go`).** `New()` + `Start`
-  as Task 2; the Sliced branch **rejects multi-card** (Ascend pattern), computes `(cores%, memMiB)`, creates/reuses
-  the profile+instance via the Task-4 core, and injects the device nodes (`/dev/cambricon_dev<slot>`, `_ipcm<slot>`,
-  the instance `DevNodeName`) with a `VIRTUAL_DEVICES`-env fallback flag. **Accept:** single-card slice creates
+- [x] **Task 4 (Cambricon de-risk spike) — sMLU lifecycle core (`cambricon/smlu.go`).** The `smluDriver` seam
+  (`EnsureSMLUMode`, `CreateProfile`/`DestroyProfile`, `CreateInstance`/`DestroyInstance`, `ListInstances()→[]instance`)
+  + a fake driver; the pure `(cores%, memMiB)→(mluQuota, memorySize)` mapping (`mluQuota=cores%`, `memorySize=memMiB<<20`
+  bytes); bounded instance-name encoding (`<prefix>:<podUID>:<shortHash(ctr)>`, ≤100 B incl. NUL) + marker + `reclaim`
+  (list instances via driver, decode UID, destroy dead-UID orphans; marker ↔ registry both directions; profile reuse
+  only on exact `(quota,mem)` match; never destroy a shared profile; under `allocMu`). **Refinements from the plan:**
+  (a) the seam is **thin create/destroy/list over the Task-3 wrappers** rather than a combined `CreateProfileInstance`,
+  so profile find-or-create + refcount live *above* the seam (in `reserveInstance`/`reclaim`) and are testable with the
+  fake — a combined seam would push reuse into the driver, testable only against hardware; (b) the mapping returns the
+  two quota **values** (not a `cndev.SMluSet`) so `smlu.go` imports no cnDev cgo; (c) the **real `cndevSMLUDriver` moves
+  to Task 5** (`smlu_driver_linux.go`, linux-tagged, + a darwin stub) — it is dead code until the responder wires it
+  (would trip `unused`/`unparam`), and linking cnDev into the Task-4 test binary aborts at **dyld load on darwin**
+  (macOS chained fixups eagerly bind the flat-namespace `_cndev*` symbols the `.so`-less host cannot resolve), so the
+  core stays cnDev-free and fully `darwin` build+test-able. **Accept:** fake-driver table tests — mapping; name
+  encode/decode round-trip incl. max UID + 63-char container (fits, no collision); marker fail-closed; reclaim destroys
+  dead-pod / instance-less-marker / marker-less-dead-UID and leaves marker-less-live-UID + foreign names; idempotent
+  reuse + changed-param→fail-closed + reuse-missing-instance→fail-closed; exact-match profile reuse (per card) + never
+  destroy a shared profile; create-failure rolls back the profile; `-race`. **Verify:**
+  `go test -race ./pkg/devicemanager/allocator/cambricon/... && make lint` (clean; cambricon coverage 66.5%, climbs
+  past the ≥70% target once Task 5 adds the responder tests).
+- [ ] **Task 5 — Cambricon real cnDev driver + Sliced responder branch + reclaim wiring (`cambricon/deviceplugin.go`,
+  `cambricon/smlu_driver_linux.go`).** Introduce the real `cndevSMLUDriver` over the Task-3 wrappers in
+  `smlu_driver_linux.go` (linux build tag, so the cnDev cgo never reaches the `darwin` test binary) with a `!linux`
+  stub, both behind a `newSMLUDriver()` platform seam. Then `New()` + `Start` as Task 2; the Sliced branch **rejects
+  multi-card** (Ascend pattern), computes `(cores%, memMiB)`, creates/reuses the profile+instance via the Task-4 core,
+  and injects the device nodes (`/dev/cambricon_dev<slot>`, `_ipcm<slot>`, the instance `DevNodeName`) with a
+  `VIRTUAL_DEVICES`-env fallback flag. **Accept:** single-card slice creates
   instance + device nodes + marker; multi-card→error; default cores%=100; no-memory→error; sliced vs other modes
   isolated; reclaim wired. **Verify:** `go test -race ./pkg/devicemanager/allocator/cambricon/... ./pkg/deviceplugin/...
   ./binding/cndev/... && make lint`. **Checkpoint:** whole-module `go build ./...` + `make lint` clean; all in-scope
