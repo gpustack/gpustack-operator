@@ -51,6 +51,8 @@ type fakeSMLUDriver struct {
 	instanceCreates int
 	destroyedProfs  []profileKey
 	failCard        map[string]bool
+	failList        bool
+	failProfileList bool
 }
 
 func newFakeDriver() *fakeSMLUDriver {
@@ -118,9 +120,25 @@ func (f *fakeSMLUDriver) DestroyInstance(_, name string) error {
 func (f *fakeSMLUDriver) ListInstances() ([]smluInstance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failList {
+		return nil, fmt.Errorf("driver list failed")
+	}
 	out := make([]smluInstance, 0, len(f.instances))
 	for _, inst := range f.instances {
 		out = append(out, inst)
+	}
+	return out, nil
+}
+
+func (f *fakeSMLUDriver) ListProfiles() ([]profileKey, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failList || f.failProfileList {
+		return nil, fmt.Errorf("driver profile list failed")
+	}
+	out := make([]profileKey, 0, len(f.profiles))
+	for pk := range f.profiles {
+		out = append(out, pk)
 	}
 	return out, nil
 }
@@ -374,6 +392,52 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 		}
 		assert.True(t, d.hasInstance("someone-elses-instance"), "a non-operator instance is never touched")
 	})
+}
+
+// A profile with no instance (a create that crashed between the profile and its instance)
+// is reclaimed by the once-per-pass profile sweep, even though no marker or instance ever
+// referenced it.
+func Test_reclaim_orphanProfileGCd(t *testing.T) {
+	redirectSoftSliceDirs(t)
+	d := newFakeDriver()
+	id, err := d.CreateProfile(testCard0, 25, 16384) // orphan: profile created, no instance
+	require.NoError(t, err)
+
+	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
+	r.reconcile(nil)
+
+	assert.Contains(t, d.destroyedProfs, profileKey{card: testCard0, profileID: id},
+		"an instance-less orphan profile is swept")
+}
+
+// A profile-list error skips the sweep rather than destroying a profile on a partial view.
+func Test_reclaim_profileListErrorSkipsSweep(t *testing.T) {
+	redirectSoftSliceDirs(t)
+	d := newFakeDriver()
+	id, err := d.CreateProfile(testCard0, 25, 16384)
+	require.NoError(t, err)
+	d.failProfileList = true
+
+	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
+	r.reconcile(nil)
+
+	assert.NotContains(t, d.destroyedProfs, profileKey{card: testCard0, profileID: id},
+		"a profile-list error skips the sweep; nothing is destroyed on partial data")
+}
+
+// A driver list error skips the reconcile pass rather than reclaiming on partial data.
+func Test_reclaim_listErrorSkipsPass(t *testing.T) {
+	redirectSoftSliceDirs(t)
+	d := newFakeDriver()
+	name := encodeInstanceName("pod-dead", "train")
+	d.seedInstance(smluInstance{card: testCard0, name: name, profileID: 0, coresPct: 25, memMiB: 16384})
+	d.failList = true
+
+	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
+	for i := 0; i < 5; i++ {
+		r.reconcile(nil)
+	}
+	assert.True(t, d.hasInstance(name), "a driver list error skips the pass; nothing is reclaimed")
 }
 
 // A profile shared by a live instance is never destroyed; it is GC'd only once its last
