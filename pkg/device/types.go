@@ -23,6 +23,18 @@ type (
 	// AcceleratorPhysicalSlicedProfile represents one hardware partition profile of a
 	// device model, such as an NVIDIA MIG profile.
 	AcceleratorPhysicalSlicedProfile = workercore.AcceleratorPhysicalSlicedProfile
+	// AcceleratorLogicalSliced represents a card's logical (software) slicing capability.
+	AcceleratorLogicalSliced = workercore.AcceleratorLogicalSliced
+	// AcceleratorPhysicalSliced represents a card's physical (hardware) slicing capability.
+	AcceleratorPhysicalSliced = workercore.AcceleratorPhysicalSliced
+	// AcceleratorSlicedDetail represents the group-level aggregated slicing capability.
+	AcceleratorSlicedDetail = workercore.AcceleratorSlicedDetail
+	// AcceleratorSlicedLogicalDetail represents the group's aggregated logical slicing capability.
+	AcceleratorSlicedLogicalDetail = workercore.AcceleratorSlicedLogicalDetail
+	// AcceleratorSlicedPhysicalDetail represents the group's aggregated physical slicing capability.
+	AcceleratorSlicedPhysicalDetail = workercore.AcceleratorSlicedPhysicalDetail
+	// AcceleratorSlicedPhysicalDetailProfile represents one group-aggregated physical profile.
+	AcceleratorSlicedPhysicalDetailProfile = workercore.AcceleratorSlicedPhysicalDetailProfile
 	// AcceleratorsFeature represents the slicing features shared by every
 	// accelerator in a group.
 	AcceleratorsFeature = workercore.AcceleratorsFeature

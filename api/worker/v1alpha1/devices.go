@@ -79,6 +79,10 @@ type (
 
 		// AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
 		AcceleratorsFeature AcceleratorsFeature `json:"acceleratorsFeature,omitempty" yaml:"acceleratorsFeature,omitempty" protobuf:"bytes,11,opt,name=acceleratorsFeature"` // nolint: lll
+
+		// AcceleratorSlicedDetail is the aggregated slicing capability of this group's
+		// accelerators; it replaces the group-level AcceleratorsFeature.
+		AcceleratorSlicedDetail AcceleratorSlicedDetail `json:"acceleratorSlicedDetail,omitempty" yaml:"acceleratorSlicedDetail,omitempty" protobuf:"bytes,12,opt,name=acceleratorSlicedDetail"` // nolint: lll
 	}
 
 	// DeviceTopology describes the topology information of the device.
@@ -227,6 +231,30 @@ type (
 		Count int32 `json:"count" yaml:"count" protobuf:"varint,5,opt,name=count"`
 	}
 
+	// AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
+	AcceleratorLogicalSliced struct {
+		// CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
+		// device compute (time-sharing / weighted sharing); false means compute is partitioned.
+		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,1,opt,name=coresPercentageOvercommit"` // nolint: lll
+
+		// Count is the maximum number of soft slices this card can host. A card whose MIG mode
+		// is currently enabled is always 0, which excludes it from the logical capacity keys; a
+		// pending-enable card is not partitioned yet and still reports its soft-slice count.
+		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+	}
+
+	// AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
+	AcceleratorPhysicalSliced struct {
+		// Profiles is empty when the card does not support, or has not enabled, hard slicing.
+		Profiles []AcceleratorPhysicalSlicedProfile `json:"profiles,omitempty" yaml:"profiles,omitempty" protobuf:"bytes,1,rep,name=profiles"` // nolint: lll
+
+		// Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
+		// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".sliced" token pool for a
+		// MIG-enabled card, so a hard-partitioned card stays served rather than dropping out.
+		// Zero when Profiles is empty.
+		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+	}
+
 	// AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
 	AcceleratorsFeature struct {
 		// PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real
@@ -241,7 +269,54 @@ type (
 	// AcceleratorStatus describes the observed state of the accelerator device.
 	AcceleratorStatus struct {
 		// Unhealthy indicates whether the device is healthy or not.
-		Unhealthy bool `json:"unhealthy" yaml:"unhealthy" protobuf:"bytes,1,name=unhealthy"`
+		Unhealthy bool `json:"unhealthy" yaml:"unhealthy" protobuf:"varint,1,name=unhealthy"`
+
+		// LogicalSliced is the card's logical (software) slicing capability.
+		LogicalSliced AcceleratorLogicalSliced `json:"logicalSliced,omitempty" yaml:"logicalSliced,omitempty" protobuf:"bytes,2,opt,name=logicalSliced"` // nolint: lll
+
+		// PhysicalSliced is the card's physical (hardware) slicing capability.
+		PhysicalSliced AcceleratorPhysicalSliced `json:"physicalSliced,omitempty" yaml:"physicalSliced,omitempty" protobuf:"bytes,3,opt,name=physicalSliced"` // nolint: lll
+	}
+
+	// AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
+	// per-card LogicalSliced is what a card-level decision reads; this group view is what
+	// external queries read to learn whether the node accepts soft-slice requests at all
+	// (Count > 0) and whether it permits compute overcommit.
+	AcceleratorSlicedLogicalDetail struct {
+		// CoresPercentageOvercommit is a per-model property (uniform within a group), taken
+		// from any soft-sliceable card; false and meaningless when no card is soft-sliceable.
+		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,1,opt,name=coresPercentageOvercommit"` // nolint: lll
+
+		// Count is the sum of per-card LogicalSliced.Count across the group.
+		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+	}
+
+	// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.
+	AcceleratorSlicedPhysicalDetailProfile struct {
+		// Name is the profile identifier, e.g. "1g.5gb".
+		Name string `json:"name" yaml:"name" protobuf:"bytes,1,opt,name=name"`
+
+		// Count is the sum of per-card Count for this profile name across the group.
+		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+	}
+
+	// AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.
+	AcceleratorSlicedPhysicalDetail struct {
+		// Profiles is the group's physical profiles, summed by name.
+		Profiles []AcceleratorSlicedPhysicalDetailProfile `json:"profiles,omitempty" yaml:"profiles,omitempty" protobuf:"bytes,1,rep,name=profiles"` // nolint: lll
+
+		// Count is the sum of per-card PhysicalSliced.Count across the group.
+		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+	}
+
+	// AcceleratorSlicedDetail is the group-level slicing capability view that replaces the
+	// group-level AcceleratorsFeature.
+	AcceleratorSlicedDetail struct {
+		// Logical is the aggregated logical (software) slicing capability.
+		Logical AcceleratorSlicedLogicalDetail `json:"logical,omitempty" yaml:"logical,omitempty" protobuf:"bytes,1,opt,name=logical"`
+
+		// Physical is the aggregated physical (hardware) slicing capability.
+		Physical AcceleratorSlicedPhysicalDetail `json:"physical,omitempty" yaml:"physical,omitempty" protobuf:"bytes,2,opt,name=physical"`
 	}
 
 	// AcceleratorAllocation describes the allocated accelerator device.

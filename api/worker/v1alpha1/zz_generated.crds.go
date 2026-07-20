@@ -81,6 +81,62 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 														"memory",
 													},
 													Properties: map[string]v1.JSONSchemaProps{
+														"acceleratorSlicedDetail": {
+															Description: "AcceleratorSlicedDetail is the aggregated slicing capability of this group's\naccelerators; it replaces the group-level AcceleratorsFeature.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"logical": {
+																	Description: "Logical is the aggregated logical (software) slicing capability.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"coresPercentageOvercommit": {
+																			Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken\nfrom any soft-sliceable card; false and meaningless when no card is soft-sliceable.",
+																			Type:        "boolean",
+																		},
+																		"count": {
+																			Description: "Count is the sum of per-card LogicalSliced.Count across the group.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																	},
+																},
+																"physical": {
+																	Description: "Physical is the aggregated physical (hardware) slicing capability.",
+																	Type:        "object",
+																	Properties: map[string]v1.JSONSchemaProps{
+																		"count": {
+																			Description: "Count is the sum of per-card PhysicalSliced.Count across the group.",
+																			Type:        "integer",
+																			Format:      "int32",
+																		},
+																		"profiles": {
+																			Description: "Profiles is the group's physical profiles, summed by name.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the sum of per-card Count for this profile name across the group.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																		},
+																	},
+																},
+															},
+														},
 														"accelerators": {
 															Description: "Accelerators is the list of the accelerator devices in this group.",
 															Type:        "array",
@@ -122,6 +178,75 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																				"unhealthy",
 																			},
 																			Properties: map[string]v1.JSONSchemaProps{
+																				"logicalSliced": {
+																					Description: "LogicalSliced is the card's logical (software) slicing capability.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"coresPercentageOvercommit": {
+																							Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing); false means compute is partitioned.",
+																							Type:        "boolean",
+																						},
+																						"count": {
+																							Description: "Count is the maximum number of soft slices this card can host. A MIG-enabled (or\npending-enable) card is always 0, which excludes it from the logical capacity keys.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																					},
+																				},
+																				"physicalSliced": {
+																					Description: "PhysicalSliced is the card's physical (hardware) slicing capability.",
+																					Type:        "object",
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7\non A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".sliced\" token pool for a\nMIG-enabled card, so a hard-partitioned card stays served rather than dropping out.\nZero when Profiles is empty.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"profiles": {
+																							Description: "Profiles is empty when the card does not support, or has not enabled, hard slicing.",
+																							Type:        "array",
+																							Items: &v1.JSONSchemaPropsOrArray{
+																								Schema: &v1.JSONSchemaProps{
+																									Type: "object",
+																									Required: []string{
+																										"name",
+																										"memoryMib",
+																										"computeSlices",
+																										"memorySlices",
+																										"count",
+																									},
+																									Properties: map[string]v1.JSONSchemaProps{
+																										"computeSlices": {
+																											Description: "ComputeSlices is the number of compute slices one instance occupies — the request\ngranularity on the compute axis (1..7 on current hardware).",
+																											Type:        "integer",
+																											Format:      "int32",
+																										},
+																										"count": {
+																											Description: "Count is the maximum number of instances of this profile on a single card.",
+																											Type:        "integer",
+																											Format:      "int32",
+																										},
+																										"memoryMib": {
+																											Description: "MemoryMib is the memory of one instance of this profile, in MiB.",
+																											Type:        "integer",
+																											Format:      "int64",
+																										},
+																										"memorySlices": {
+																											Description: "MemorySlices is the number of memory slices one instance occupies — the request\ngranularity on the memory axis (1..8 on current hardware).",
+																											Type:        "integer",
+																											Format:      "int32",
+																										},
+																										"name": {
+																											Description: "Name is the profile identifier, e.g. \"1g.5gb\". It is the display name and the\nfuture resource-key suffix for a physical-slice request.",
+																											Type:        "string",
+																										},
+																									},
+																								},
+																							},
+																							Nullable: true,
+																						},
+																					},
+																				},
 																				"unhealthy": {
 																					Description: "Unhealthy indicates whether the device is healthy or not.",
 																					Type:        "boolean",

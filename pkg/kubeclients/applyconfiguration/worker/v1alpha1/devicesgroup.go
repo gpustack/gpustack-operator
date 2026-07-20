@@ -29,6 +29,9 @@ type DevicesGroupApplyConfiguration struct {
 	Accelerators []AcceleratorApplyConfiguration `json:"accelerators,omitempty"`
 	// AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
 	AcceleratorsFeature *AcceleratorsFeatureApplyConfiguration `json:"acceleratorsFeature,omitempty"`
+	// AcceleratorSlicedDetail is the aggregated slicing capability of this group's
+	// accelerators; it replaces the group-level AcceleratorsFeature.
+	AcceleratorSlicedDetail *AcceleratorSlicedDetailApplyConfiguration `json:"acceleratorSlicedDetail,omitempty"`
 }
 
 // DevicesGroupApplyConfiguration constructs a declarative configuration of the DevicesGroup type for use with
@@ -127,5 +130,13 @@ func (b *DevicesGroupApplyConfiguration) WithAccelerators(values ...*Accelerator
 // If called multiple times, the AcceleratorsFeature field is set to the value of the last call.
 func (b *DevicesGroupApplyConfiguration) WithAcceleratorsFeature(value *AcceleratorsFeatureApplyConfiguration) *DevicesGroupApplyConfiguration {
 	b.AcceleratorsFeature = value
+	return b
+}
+
+// WithAcceleratorSlicedDetail sets the AcceleratorSlicedDetail field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorSlicedDetail field is set to the value of the last call.
+func (b *DevicesGroupApplyConfiguration) WithAcceleratorSlicedDetail(value *AcceleratorSlicedDetailApplyConfiguration) *DevicesGroupApplyConfiguration {
+	b.AcceleratorSlicedDetail = value
 	return b
 }

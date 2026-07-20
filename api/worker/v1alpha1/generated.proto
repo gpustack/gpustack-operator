@@ -56,6 +56,29 @@ message AcceleratorAllocation {
   optional int32 remaining = 5;
 }
 
+// AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
+message AcceleratorLogicalSliced {
+  // CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
+  // device compute (time-sharing / weighted sharing); false means compute is partitioned.
+  optional bool coresPercentageOvercommit = 1;
+
+  // Count is the maximum number of soft slices this card can host. A MIG-enabled (or
+  // pending-enable) card is always 0, which excludes it from the logical capacity keys.
+  optional int32 count = 2;
+}
+
+// AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
+message AcceleratorPhysicalSliced {
+  // Profiles is empty when the card does not support, or has not enabled, hard slicing.
+  repeated AcceleratorPhysicalSlicedProfile profiles = 1;
+
+  // Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
+  // on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".sliced" token pool for a
+  // MIG-enabled card, so a hard-partitioned card stays served rather than dropping out.
+  // Zero when Profiles is empty.
+  optional int32 count = 2;
+}
+
 // AcceleratorPhysicalSlicedProfile describes one hardware partition profile of a device
 // model, such as an NVIDIA MIG profile (e.g. "1g.5gb"). The compute/memory slice counts
 // express the request granularity on each axis, one dimension richer than a scalar step.
@@ -95,10 +118,57 @@ message AcceleratorSliced {
   optional int32 memoryPercentageStep = 3;
 }
 
+// AcceleratorSlicedDetail is the group-level slicing capability view that replaces the
+// group-level AcceleratorsFeature.
+message AcceleratorSlicedDetail {
+  // Logical is the aggregated logical (software) slicing capability.
+  optional AcceleratorSlicedLogicalDetail logical = 1;
+
+  // Physical is the aggregated physical (hardware) slicing capability.
+  optional AcceleratorSlicedPhysicalDetail physical = 2;
+}
+
+// AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
+// per-card LogicalSliced is what a card-level decision reads; this group view is what
+// external queries read to learn whether the node accepts soft-slice requests at all
+// (Count > 0) and whether it permits compute overcommit.
+message AcceleratorSlicedLogicalDetail {
+  // CoresPercentageOvercommit is a per-model property (uniform within a group), taken
+  // from any soft-sliceable card; false and meaningless when no card is soft-sliceable.
+  optional bool coresPercentageOvercommit = 1;
+
+  // Count is the sum of per-card LogicalSliced.Count across the group.
+  optional int32 count = 2;
+}
+
+// AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.
+message AcceleratorSlicedPhysicalDetail {
+  // Profiles is the group's physical profiles, summed by name.
+  repeated AcceleratorSlicedPhysicalDetailProfile profiles = 1;
+
+  // Count is the sum of per-card PhysicalSliced.Count across the group.
+  optional int32 count = 2;
+}
+
+// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.
+message AcceleratorSlicedPhysicalDetailProfile {
+  // Name is the profile identifier, e.g. "1g.5gb".
+  optional string name = 1;
+
+  // Count is the sum of per-card Count for this profile name across the group.
+  optional int32 count = 2;
+}
+
 // AcceleratorStatus describes the observed state of the accelerator device.
 message AcceleratorStatus {
   // Unhealthy indicates whether the device is healthy or not.
   optional bool unhealthy = 1;
+
+  // LogicalSliced is the card's logical (software) slicing capability.
+  optional AcceleratorLogicalSliced logicalSliced = 2;
+
+  // PhysicalSliced is the card's physical (hardware) slicing capability.
+  optional AcceleratorPhysicalSliced physicalSliced = 3;
 }
 
 // AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
@@ -211,6 +281,10 @@ message DevicesGroup {
 
   // AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
   optional AcceleratorsFeature acceleratorsFeature = 11;
+
+  // AcceleratorSlicedDetail is the aggregated slicing capability of this group's
+  // accelerators; it replaces the group-level AcceleratorsFeature.
+  optional AcceleratorSlicedDetail acceleratorSlicedDetail = 12;
 }
 
 // DevicesList holds the list of Devices.

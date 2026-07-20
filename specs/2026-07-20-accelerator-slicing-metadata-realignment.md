@@ -775,7 +775,7 @@ pure, fully-tested function, since there is no local NVIDIA hardware and no NVML
 **Phase B — New capability data model (additive)**  ·  *Checkpoint after T4: data flows end-to-end, nothing
 consumes it yet; full build + test green.*
 
-[ ] **T3: add the new API types (F1), keep the old.**
+[x] **T3: add the new API types (F1), keep the old.**
     - In `api/worker/v1alpha1/devices.go`: add `AcceleratorLogicalSliced`,
       `AcceleratorPhysicalSliced` (incl. `Count`) — `AcceleratorPhysicalSlicedProfile` already landed in T1 —
       extend `AcceleratorStatus` with `LogicalSliced` /
