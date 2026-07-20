@@ -761,7 +761,7 @@ pure, fully-tested function, since there is no local NVIDIA hardware and no NVML
       Verify: `go test ./pkg/devicemanager/detector/nvidia/... ./binding/nvml/...` green; `go build ./...`
       green (accessor is additive).
 
-[ ] **T2 (independent): remove `--slicing-policy`.**
+[x] **T2 (independent): remove `--slicing-policy`.**
     - Delete the flag/field/validation/`Complete` wiring (`allocator/option.go:23,34,48,63-64,75`,
       `allocator/config.go:13`, `allocator/allocator.go:28,50`) and `pkg/device/types.go:99-144`
       (`AllocatorSlicingPolicy`, both constants, `GetAllSlicingPolicies`).

@@ -99,16 +99,12 @@ type (
 )
 
 type (
-	// AllocatorSlicingPolicy represents the policy for how devices are sliced when allocating to containers.
-	AllocatorSlicingPolicy = string
-
 	// AllocatorOptions represents the options for configuring the allocator.
 	AllocatorOptions struct {
-		Logger        klog.Logger
-		KubeSocket    string
-		NoShared      bool
-		NoSliced      bool
-		SlicingPolicy AllocatorSlicingPolicy
+		Logger     klog.Logger
+		KubeSocket string
+		NoShared   bool
+		NoSliced   bool
 	}
 
 	// Allocator is an interface for allocating devices to containers.
@@ -126,23 +122,3 @@ type (
 		Stop()
 	}
 )
-
-const (
-	// AllocatorSlicingPolicyBestEffort means the allocator will
-	// attempt to slice devices with the most suitable partitioning mode in the order:
-	// `soft`, `virtual` and `physical`.
-	AllocatorSlicingPolicyBestEffort AllocatorSlicingPolicy = "best-effort"
-
-	// AllocatorSlicingPolicyQoS means the allocator will
-	// attempt to slice devices with the most suitable partitioning mode in the order:
-	// `physical`, `virtual` and `soft`.
-	AllocatorSlicingPolicyQoS AllocatorSlicingPolicy = "qos"
-)
-
-// GetAllSlicingPolicies returns a list of all supported allocator slicing policies.
-func GetAllSlicingPolicies() []AllocatorSlicingPolicy {
-	return []AllocatorSlicingPolicy{
-		AllocatorSlicingPolicyBestEffort,
-		AllocatorSlicingPolicyQoS,
-	}
-}
