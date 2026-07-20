@@ -1,6 +1,6 @@
 # Spec: Accelerator Slicing Metadata Realignment — Per-Card Capability, Group SlicedDetail, InstanceType Observed Detail
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -712,24 +712,30 @@ pure, fully-tested function, since there is no local NVIDIA hardware and no NVML
 
 **Phase A — De-risk & independent warm-ups**
 
-[ ] **T1 (PoC / de-risk): NVML MIG profile enumeration primitive + pure derivation-and-filter function.**
-    - Add a device-level accessor to `binding/nvml/library_device.go` — e.g.
+[x] **T1 (PoC / de-risk): NVML MIG profile enumeration primitive + pure derivation-and-filter function.**
+    - Add the `AcceleratorPhysicalSlicedProfile` API type (T1's output contract) to `devices.go` + its
+      `pkg/device` alias, and run `make generate` (the remaining F1 family lands in T3). Splitting the one type
+      T1 must return keeps generate clean at every commit; no duplicate local type.
+    - Add a device-level accessor to `binding/nvml/library_device.go` —
       `func (l Device) GetGpuInstanceProfileInfo(profileId uint32) (GpuInstanceProfileInfo_v3, Return)` —
-      wrapping the already-bound cgo call (`nvmlDeviceGetGpuInstanceProfileInfo[V]` at `:567`/`:589`), reachable
-      from the detector's package (the existing handler hangs off `GpuInstance`, whose fields are unexported).
-      Prefer the V2/V3 path (carries the `Name` string) with a V1 fallback (no `Name`).
+      wrapping the already-bound cgo call (`nvmlDeviceGetGpuInstanceProfileInfoV`/legacy), reachable from the
+      detector's package (the existing handler hangs off `GpuInstance`, whose fields are unexported). Try
+      V3→V2→V1 (V2/V3 carry the `Name`). Extract the `Name [96]int8` via a
+      `(*GpuInstanceProfileInfo_v3).GetName()` method using `C.GoString` — the codebase idiom for a fixed
+      C-string field (cf. `SMluInfo.GetInstanceName`), not a hand-rolled byte loop.
     - Add a pure function (in the nvidia detector package, no NVML I/O) that takes a slice of
       `GpuInstanceProfileInfo_v3` (one per supported profile id `0..GPU_INSTANCE_PROFILE_COUNT`) and returns the
-      filtered `[]AcceleratorPhysicalSlicedProfile`: keep C==G profiles, drop `+me`/`+gfx` variants, derive
+      filtered `[]AcceleratorPhysicalSlicedProfile`: keep the plain profiles, drop any `+…` variant, derive
       `Name` (from the NVML `Name` field when present, else a `<slices>g.<mem>gb` fallback), `MemoryMib` =
       `MemorySizeMB`, `ComputeSlices` = `SliceCount`, `MemorySlices` = derived from `MemorySizeMB` vs the card's
       per-slice VRAM, `Count` = `InstanceCount`.
     - Filter predicate — **the NVML `Name` suffix is authoritative; profile IDs are NOT a stable
       cross-generation taxonomy** (cross-check R8): on A100 base ids 0/1 are the plain profiles, but on H100 the
       base ids are the `+me` variants and the `_NO_ME` ids (13/14) are the plain keepers — so a static "drop ids
-      13-16" rule keeps exactly the wrong ones. Primary rule: **drop a profile whose NVML `Name` carries a
-      `+me` or `+gfx` suffix** (V3 also exposes a GFX bit in `Capabilities`, `const.go:1067`, as a backstop);
-      keep everything else, including `_REV1`/`_REV2` (`GPU_INSTANCE_PROFILE_1_SLICE_REV1` id 7 = `1g.10gb`,
+      13-16" rule keeps exactly the wrong ones. Primary rule: **drop a profile whose NVML `Name` carries any
+      `+…` variant suffix** (`+me`, `+me.all`, `+gfx`) — only the plain `<C>g.<M>gb` profiles are kept, so the
+      discriminator is the presence of a `+` (V3 also exposes a GFX bit in `Capabilities`, `const.go:1067`, as a
+      backstop); keep everything else, including `_REV1`/`_REV2` (`GPU_INSTANCE_PROFILE_1_SLICE_REV1` id 7 = `1g.10gb`,
       confirmed by Kimi's live probe and Codex). Probe every id `0 ≤ id < GPU_INSTANCE_PROFILE_COUNT` (17) and
       skip NVML "not supported"/"invalid argument" returns; never treat a zero-valued struct as supported.
       **Deduplicate by final name before the group sums profiles** (F2), so an unfiltered `+me`/plain pair that
@@ -747,8 +753,9 @@ pure, fully-tested function, since there is no local NVIDIA hardware and no NVML
       from `MemorySizeMB/1024`, which would corrupt it).
     - Acceptance: table tests feed the full A100-40GB probe set (ids 0-4 + 7 supported; 5,6,8,9,10-16 return
       errors) and assert exactly the six-row table (`1g.5gb`×7, `1g.10gb`×4, `2g.10gb`×3, `3g.20gb`×2,
-      `4g.20gb`×1, `7g.40gb`×1) with `1g.10gb` present (id 7); an **H100 id set** (0=`+me`, 13=plain, 15=ALL_ME,
-      10-12=GFX) asserting plain kept and `+me`/`+gfx` dropped with no name-collision double-count; a
+      `4g.20gb`×1, `7g.40gb`×1) with `1g.10gb` present (id 7); an **H100 id set** (0=`+me`, 13=plain,
+      15=ALL_ME `1g.10gb+me.all`, 10-12=GFX) asserting plain kept and `+me`/`+me.all`/`+gfx` dropped with no
+      name-collision double-count; a
       V1-without-Name case asserting geometry-derived names; a `MemorySlices` rounding case. Pin the expected
       table to the NVIDIA-documented values, **not** the mig-parted mock (which gets this mapping wrong).
       Verify: `go test ./pkg/devicemanager/detector/nvidia/... ./binding/nvml/...` green; `go build ./...`
@@ -769,8 +776,9 @@ pure, fully-tested function, since there is no local NVIDIA hardware and no NVML
 consumes it yet; full build + test green.*
 
 [ ] **T3: add the new API types (F1), keep the old.**
-    - In `api/worker/v1alpha1/devices.go`: add `AcceleratorLogicalSliced`, `AcceleratorPhysicalSlicedProfile`,
-      `AcceleratorPhysicalSliced` (incl. `Count`), extend `AcceleratorStatus` with `LogicalSliced` /
+    - In `api/worker/v1alpha1/devices.go`: add `AcceleratorLogicalSliced`,
+      `AcceleratorPhysicalSliced` (incl. `Count`) — `AcceleratorPhysicalSlicedProfile` already landed in T1 —
+      extend `AcceleratorStatus` with `LogicalSliced` /
       `PhysicalSliced` (new field numbers), add the group `AcceleratorSlicedDetail` family and a new
       `DevicesGroup.AcceleratorSlicedDetail` field (new number). Do **not** remove `AcceleratorsFeature` /
       `AcceleratorSliced` / `MaxSlices()` / `SlicedCoresOvercommit()` / `MemoryPercentageStep` yet.

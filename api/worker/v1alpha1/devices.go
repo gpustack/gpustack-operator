@@ -204,6 +204,29 @@ type (
 		MemoryPercentageStep int32 `json:"memoryPercentageStep,omitempty" yaml:"memoryPercentageStep,omitempty" protobuf:"varint,3,opt,name=memoryPercentageStep"` // nolint: lll
 	}
 
+	// AcceleratorPhysicalSlicedProfile describes one hardware partition profile of a device
+	// model, such as an NVIDIA MIG profile (e.g. "1g.5gb"). The compute/memory slice counts
+	// express the request granularity on each axis, one dimension richer than a scalar step.
+	AcceleratorPhysicalSlicedProfile struct {
+		// Name is the profile identifier, e.g. "1g.5gb". It is the display name and the
+		// future resource-key suffix for a physical-slice request.
+		Name string `json:"name" yaml:"name" protobuf:"bytes,1,opt,name=name"`
+
+		// MemoryMib is the memory of one instance of this profile, in MiB.
+		MemoryMib int64 `json:"memoryMib" yaml:"memoryMib" protobuf:"varint,2,opt,name=memoryMib"`
+
+		// ComputeSlices is the number of compute slices one instance occupies — the request
+		// granularity on the compute axis (1..7 on current hardware).
+		ComputeSlices int32 `json:"computeSlices" yaml:"computeSlices" protobuf:"varint,3,opt,name=computeSlices"` // nolint: lll
+
+		// MemorySlices is the number of memory slices one instance occupies — the request
+		// granularity on the memory axis (1..8 on current hardware).
+		MemorySlices int32 `json:"memorySlices" yaml:"memorySlices" protobuf:"varint,4,opt,name=memorySlices"` // nolint: lll
+
+		// Count is the maximum number of instances of this profile on a single card.
+		Count int32 `json:"count" yaml:"count" protobuf:"varint,5,opt,name=count"`
+	}
+
 	// AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
 	AcceleratorsFeature struct {
 		// PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real

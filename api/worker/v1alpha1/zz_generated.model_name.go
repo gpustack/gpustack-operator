@@ -16,6 +16,11 @@ func (in AcceleratorAllocation) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in AcceleratorPhysicalSlicedProfile) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.AcceleratorPhysicalSlicedProfile"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in AcceleratorSliced) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.AcceleratorSliced"
 }

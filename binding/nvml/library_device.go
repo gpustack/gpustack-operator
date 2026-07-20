@@ -1,5 +1,6 @@
 package nvml
 
+import "C"
 import (
 	"fmt"
 	"unsafe"
@@ -612,6 +613,32 @@ func (l GpuInstanceProfileInfoHandler) V3() (GpuInstanceProfileInfo_v3, Return) 
 	info.Version = STRUCT_VERSION(info, 3)
 	ret := nvmlDeviceGetGpuInstanceProfileInfoV(l.device, l.gpuInstanceProfileId, (*GpuInstanceProfileInfo_v2)(unsafe.Pointer(&info)))
 	return info, ret
+}
+
+// GetGpuInstanceProfileInfo probes the GPU instance profile identified by profileId
+// directly from the device, without requiring an existing GPU instance. It prefers the
+// versioned NVML calls (which carry the profile Name) and falls back to the legacy call
+// (no Name) on older drivers, returning the first successful result or the last error.
+// An unsupported profile id surfaces as a non-success Return, which the caller skips.
+func (l Device) GetGpuInstanceProfileInfo(profileId uint32) (GpuInstanceProfileInfo_v3, Return) {
+	h := GpuInstanceProfileInfoHandler{
+		device:               l.handle,
+		gpuInstanceProfileId: profileId,
+		so:                   l.so,
+	}
+	if info, ret := h.V3(); ret.IsSuccess() {
+		return info, ret
+	}
+	if info, ret := h.V2(); ret.IsSuccess() {
+		return info, ret
+	}
+	return h.V1()
+}
+
+// GetName returns the profile name (e.g. "1g.5gb") from the NUL-terminated C char array.
+// It is empty on the legacy (V1) path, which carries no name.
+func (info *GpuInstanceProfileInfo_v3) GetName() string {
+	return C.GoString((*C.char)(unsafe.Pointer(&info.Name[0])))
 }
 
 // CreateComputeInstance creates a compute instance associated with the GPU instance using the specified profile information.

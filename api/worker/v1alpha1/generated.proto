@@ -56,6 +56,29 @@ message AcceleratorAllocation {
   optional int32 remaining = 5;
 }
 
+// AcceleratorPhysicalSlicedProfile describes one hardware partition profile of a device
+// model, such as an NVIDIA MIG profile (e.g. "1g.5gb"). The compute/memory slice counts
+// express the request granularity on each axis, one dimension richer than a scalar step.
+message AcceleratorPhysicalSlicedProfile {
+  // Name is the profile identifier, e.g. "1g.5gb". It is the display name and the
+  // future resource-key suffix for a physical-slice request.
+  optional string name = 1;
+
+  // MemoryMib is the memory of one instance of this profile, in MiB.
+  optional int64 memoryMib = 2;
+
+  // ComputeSlices is the number of compute slices one instance occupies — the request
+  // granularity on the compute axis (1..7 on current hardware).
+  optional int32 computeSlices = 3;
+
+  // MemorySlices is the number of memory slices one instance occupies — the request
+  // granularity on the memory axis (1..8 on current hardware).
+  optional int32 memorySlices = 4;
+
+  // Count is the maximum number of instances of this profile on a single card.
+  optional int32 count = 5;
+}
+
 // AcceleratorSliced describes one slicing capability of a device model.
 message AcceleratorSliced {
   // MaxSize is the maximum number of slices a single device can be split into.
