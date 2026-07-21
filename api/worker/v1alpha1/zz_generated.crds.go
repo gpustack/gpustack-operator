@@ -1104,177 +1104,15 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Description: "Arch is the architecture of the InstanceType, e.g. \"amd64\", \"arm64\".\nIt is a required admin-writable input, enforced by the validating webhook.",
 											Type:        "string",
 										},
-										"cache": {
-											Description: "Cache describes the cache information of the CPU.",
-											Type:        "object",
-											Properties: map[string]v1.JSONSchemaProps{
-												"l1d": {
-													Description: "L1D is the L1 data cache size in bytes of the CPU.",
-													Type:        "string",
-												},
-												"l1i": {
-													Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
-													Type:        "string",
-												},
-												"l2": {
-													Description: "L2 is the L2 cache size in bytes of the CPU.",
-													Type:        "string",
-												},
-												"l3": {
-													Description: "L3 is the L3 cache size in bytes of the CPU.",
-													Type:        "string",
-												},
-											},
-										},
-										"cacheLine": {
-											Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-											Type:        "string",
-										},
-										"clockSpeed": {
-											Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-											Type:        "string",
-										},
-										"computeCapability": {
-											Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-											Type:        "string",
-										},
-										"cores": {
-											Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-											Type:        "string",
-										},
-										"cpu": {
-											Description: "CPU describes the CPU information of the accelerator.",
-											Type:        "object",
-											Properties: map[string]v1.JSONSchemaProps{
-												"cache": {
-													Description: "Cache describes the cache information of the CPU.",
-													Type:        "object",
-													Properties: map[string]v1.JSONSchemaProps{
-														"l1d": {
-															Description: "L1D is the L1 data cache size in bytes of the CPU.",
-															Type:        "string",
-														},
-														"l1i": {
-															Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
-															Type:        "string",
-														},
-														"l2": {
-															Description: "L2 is the L2 cache size in bytes of the CPU.",
-															Type:        "string",
-														},
-														"l3": {
-															Description: "L3 is the L3 cache size in bytes of the CPU.",
-															Type:        "string",
-														},
-													},
-												},
-												"cacheLine": {
-													Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-													Type:        "string",
-												},
-												"clockSpeed": {
-													Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-													Type:        "string",
-												},
-												"family": {
-													Description: "Family is the family of the CPU.",
-													Type:        "string",
-												},
-												"logicalCores": {
-													Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-													Type:        "string",
-												},
-												"manufacturer": {
-													Description: "Manufacturer is the name of the CPU manufacturer, e.g. \"amd\", \"intel\".",
-													Type:        "string",
-												},
-												"maxClockSpeed": {
-													Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-													Type:        "string",
-												},
-												"physicalCores": {
-													Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-													Type:        "string",
-												},
-												"product": {
-													Description: "Product is the name of the CPU product.",
-													Type:        "string",
-												},
-												"stepping": {
-													Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-													Type:        "string",
-												},
-												"threadsPerPhysicalCore": {
-													Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
-													Type:        "string",
-												},
-											},
-										},
 										"description": {
 											Description: "Description is a free-form admin annotation for the InstanceType.",
 											Type:        "string",
 											MaxLength:   ptr.To[int64](1024),
 										},
 										"displayName": {
-											Description: "DisplayName is a human-friendly label for the InstanceType. The mutating webhook\ndefaults an empty value to Product.",
+											Description: "DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a\nderived InstanceType, stamped at derivation time.",
 											Type:        "string",
 											MaxLength:   ptr.To[int64](64),
-										},
-										"family": {
-											Description: "Family is the family of the InstanceType.",
-											Type:        "string",
-										},
-										"feature": {
-											Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the\nper-device maximum slice count, whether compute may be overcommitted, and the memory step.\nA zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's\nAcceleratorsFeature, folded in from the node-derived ResourceFlavor.\nField number 4 is reserved for the removed Sliceable bool.",
-											Type:        "object",
-											Properties: map[string]v1.JSONSchemaProps{
-												"logicalSliced": {
-													Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an\nld.preload interception library when its MaxSize is non-zero.",
-													Type:        "object",
-													Required: []string{
-														"maxSize",
-													},
-													Properties: map[string]v1.JSONSchemaProps{
-														"coresPercentageOvercommit": {
-															Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
-															Type:        "boolean",
-														},
-														"maxSize": {
-															Description: "MaxSize is the maximum number of slices a single device can be split into.",
-															Type:        "integer",
-															Format:      "int32",
-														},
-														"memoryPercentageStep": {
-															Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
-															Type:        "integer",
-															Format:      "int32",
-														},
-													},
-												},
-												"physicalSliced": {
-													Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real\nspatial partition of cores and memory — when its MaxSize is non-zero.",
-													Type:        "object",
-													Required: []string{
-														"maxSize",
-													},
-													Properties: map[string]v1.JSONSchemaProps{
-														"coresPercentageOvercommit": {
-															Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
-															Type:        "boolean",
-														},
-														"maxSize": {
-															Description: "MaxSize is the maximum number of slices a single device can be split into.",
-															Type:        "integer",
-															Format:      "int32",
-														},
-														"memoryPercentageStep": {
-															Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
-															Type:        "integer",
-															Format:      "int32",
-														},
-													},
-												},
-											},
 										},
 										"generalGroup": {
 											Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.\n\"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The\nmutating webhook defaults an empty value to \"generic\"; it participates as a scheduling\ndiscriminator only when instance-type-aware-cpu-manufacturer is enabled.",
@@ -1288,40 +1126,8 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced\nby the validating webhook, and is immutable after creation; a derived InstanceType is\nstamped with the fixed default.",
 											Type:        "string",
 										},
-										"logicalCores": {
-											Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-											Type:        "string",
-										},
-										"manufacturer": {
-											Description: "Manufacturer is the name of the InstanceType manufacturer.",
-											Type:        "string",
-										},
-										"maxClockSpeed": {
-											Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-											Type:        "string",
-										},
-										"memory": {
-											Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-											Type:        "string",
-										},
 										"os": {
 											Description: "OS is the operating system of the InstanceType, e.g. \"linux\", \"windows\".\nIt is a required admin-writable input, enforced by the validating webhook.",
-											Type:        "string",
-										},
-										"physicalCores": {
-											Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-											Type:        "string",
-										},
-										"product": {
-											Description: "Product is the name of the InstanceType product.",
-											Type:        "string",
-										},
-										"stepping": {
-											Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-											Type:        "string",
-										},
-										"threadsPerPhysicalCore": {
-											Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
 											Type:        "string",
 										},
 										"unitResources": {

@@ -702,111 +702,98 @@ message InstanceTypeResource {
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity capacity = 3;
 }
 
-// InstanceTypeSpec defines the desired spec of InstanceType.
+// InstanceTypeSpec defines the desired spec of InstanceType. Its field order and protobuf
+// numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed
+// by the immutable identity and hardware inputs.
 message InstanceTypeSpec {
+  // DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a
+  // derived InstanceType, stamped at derivation time.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is a free-form admin annotation for the InstanceType.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
+  // Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
+  // holds the backing ClusterQueue (blocks new admission without evicting running
+  // workloads); clearing it reactivates the queue. A queue stopped by any means is
+  // reflected back into Inactive=true.
+  optional bool inactive = 3;
+
   // AcceleratorGroup is the accelerator group (the acceleratable node key) of the
   // InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
   // onto and is required by the validating webhook when Acceleratable is true.
-  optional string acceleratorGroup = 1;
+  optional string acceleratorGroup = 4;
+
+  // GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+  // "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+  // mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+  // discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+  optional string generalGroup = 5;
 
   // Acceleratable indicates whether the InstanceType is acceleratable.
-  optional bool acceleratable = 2;
-
-  // Manufacturer is the name of the InstanceType manufacturer.
-  optional string manufacturer = 3;
-
-  // Product is the name of the InstanceType product.
-  optional string product = 4;
-
-  // Family is the family of the InstanceType.
-  optional string family = 5;
+  optional bool acceleratable = 6;
 
   // OS is the operating system of the InstanceType, e.g. "linux", "windows".
   //
   // It is a required admin-writable input, enforced by the validating webhook.
-  optional string os = 6;
+  optional string os = 7;
 
   // Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
   //
   // It is a required admin-writable input, enforced by the validating webhook.
-  optional string arch = 7;
-
-  // CPU describes the CPU information of the InstanceType.
-  optional InstanceTypeCPU cpu = 8;
-
-  // Accelerator describes the accelerator information of the InstanceType.
-  optional InstanceTypeAccelerator accelerator = 9;
+  optional string arch = 8;
 
   // UnitResources describes the unit resources of the InstanceType.
   //
   // It is a required admin-writable input, enforced by the validating webhook, and is
   // immutable after creation; a derived InstanceType is stamped with the fixed default.
-  optional InstanceTypeUnitResources unitResources = 10;
+  optional InstanceTypeUnitResources unitResources = 9;
 
   // LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
   //
   // It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
   // by the validating webhook, and is immutable after creation; a derived InstanceType is
   // stamped with the fixed default.
-  optional string localStorage = 11;
-
-  // GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
-  // "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
-  // mutating webhook defaults an empty value to "generic"; it participates as a scheduling
-  // discriminator only when instance-type-aware-cpu-manufacturer is enabled.
-  optional string generalGroup = 12;
-
-  // DisplayName is a human-friendly label for the InstanceType. The mutating webhook
-  // defaults an empty value to Product.
-  //
-  // +k8s:validation:maxLength=64
-  optional string displayName = 13;
-
-  // Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
-  // holds the backing ClusterQueue (blocks new admission without evicting running
-  // workloads); clearing it reactivates the queue. A queue stopped by any means is
-  // reflected back into Inactive=true.
-  optional bool inactive = 14;
-
-  // Description is a free-form admin annotation for the InstanceType.
-  //
-  // +k8s:validation:maxLength=1024
-  optional string description = 15;
+  optional string localStorage = 10;
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
 message InstanceTypeStatus {
-  // Phase is the summary of conditions.
-  optional string phase = 1;
-
-  // PhaseMessage is the message of the phase.
-  optional string phaseMessage = 2;
-
-  // Accelerator is the allocatable-as-exclusive view: whole cards that are
-  // entirely free, e.g. "1", "4".
-  optional InstanceTypeResource accelerator = 3;
-
-  // AcceleratorShared is the shareable view: per-card ownership shares (up to
-  // SharedResourceMaxSize owners per card) summed over free and already-shared
-  // cards.
-  optional InstanceTypeResource acceleratorShared = 4;
-
-  // AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
-  // hundred per card) summed over free and already-sliced cards.
-  optional InstanceTypeResource acceleratorSliced = 5;
-
-  // CPU is the CPU resource of the InstanceType, e.g. "4", "8".
-  optional InstanceTypeResource cpu = 6;
+  // Detail is the observed hardware descriptor of the InstanceType, computed by the
+  // reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+  optional InstanceTypeDetail detail = 1;
 
   // Entrance is the name of the namespaced LocalQueue that fronts this
   // InstanceType's backing ClusterQueue — the value a workload sets as its
   // "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
   // InstanceType name (see nodefeature.FormatLocalQueueName).
-  optional string entrance = 7;
+  optional string entrance = 2;
 
-  // Detail is the observed hardware descriptor of the InstanceType, computed by the
-  // reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
-  optional InstanceTypeDetail detail = 8;
+  // Phase is the summary of conditions.
+  optional string phase = 3;
+
+  // PhaseMessage is the message of the phase.
+  optional string phaseMessage = 4;
+
+  // Accelerator is the allocatable-as-exclusive view: whole cards that are
+  // entirely free, e.g. "1", "4".
+  optional InstanceTypeResource accelerator = 5;
+
+  // AcceleratorShared is the shareable view: per-card ownership shares (up to
+  // SharedResourceMaxSize owners per card) summed over free and already-shared
+  // cards.
+  optional InstanceTypeResource acceleratorShared = 6;
+
+  // AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
+  // hundred per card) summed over free and already-sliced cards.
+  optional InstanceTypeResource acceleratorSliced = 7;
+
+  // CPU is the CPU resource of the InstanceType, e.g. "4", "8".
+  optional InstanceTypeResource cpu = 8;
 }
 
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.

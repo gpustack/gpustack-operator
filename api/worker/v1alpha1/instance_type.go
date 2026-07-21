@@ -25,76 +25,63 @@ type InstanceType struct {
 
 var _ runtime.Object = (*InstanceType)(nil)
 
-// InstanceTypeSpec defines the desired spec of InstanceType.
+// InstanceTypeSpec defines the desired spec of InstanceType. Its field order and protobuf
+// numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed
+// by the immutable identity and hardware inputs.
 type InstanceTypeSpec struct {
+	// DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a
+	// derived InstanceType, stamped at derivation time.
+	//
+	// +k8s:validation:maxLength=64
+	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,1,opt,name=displayName"`
+
+	// Description is a free-form admin annotation for the InstanceType.
+	//
+	// +k8s:validation:maxLength=1024
+	Description string `json:"description,omitempty" protobuf:"bytes,2,opt,name=description"`
+
+	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
+	// holds the backing ClusterQueue (blocks new admission without evicting running
+	// workloads); clearing it reactivates the queue. A queue stopped by any means is
+	// reflected back into Inactive=true.
+	Inactive bool `json:"inactive,omitempty" protobuf:"varint,3,opt,name=inactive"`
+
 	// AcceleratorGroup is the accelerator group (the acceleratable node key) of the
 	// InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
 	// onto and is required by the validating webhook when Acceleratable is true.
-	AcceleratorGroup string `json:"acceleratorGroup,omitempty" protobuf:"bytes,1,opt,name=acceleratorGroup"`
+	AcceleratorGroup string `json:"acceleratorGroup,omitempty" protobuf:"bytes,4,opt,name=acceleratorGroup"`
+
+	// GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+	// "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,5,opt,name=generalGroup"`
 
 	// Acceleratable indicates whether the InstanceType is acceleratable.
-	Acceleratable bool `json:"acceleratable" protobuf:"bytes,2,name=acceleratable"`
-
-	// Manufacturer is the name of the InstanceType manufacturer.
-	Manufacturer string `json:"manufacturer,omitempty" protobuf:"bytes,3,opt,name=manufacturer"`
-
-	// Product is the name of the InstanceType product.
-	Product string `json:"product,omitempty" protobuf:"bytes,4,opt,name=product"`
-
-	// Family is the family of the InstanceType.
-	Family string `json:"family,omitempty" protobuf:"bytes,5,opt,name=family"`
+	Acceleratable bool `json:"acceleratable" protobuf:"varint,6,name=acceleratable"`
 
 	// OS is the operating system of the InstanceType, e.g. "linux", "windows".
 	//
 	// It is a required admin-writable input, enforced by the validating webhook.
-	OS string `json:"os" protobuf:"bytes,6,opt,name=os"`
+	OS string `json:"os" protobuf:"bytes,7,opt,name=os"`
 
 	// Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
 	//
 	// It is a required admin-writable input, enforced by the validating webhook.
-	Arch string `json:"arch" protobuf:"bytes,7,opt,name=arch"`
-
-	// CPU describes the CPU information of the InstanceType.
-	InstanceTypeCPU `json:",inline" protobuf:"bytes,8,opt,name=cpu"`
-
-	// Accelerator describes the accelerator information of the InstanceType.
-	InstanceTypeAccelerator `json:",inline" protobuf:"bytes,9,opt,name=accelerator"`
+	Arch string `json:"arch" protobuf:"bytes,8,opt,name=arch"`
 
 	// UnitResources describes the unit resources of the InstanceType.
 	//
 	// It is a required admin-writable input, enforced by the validating webhook, and is
 	// immutable after creation; a derived InstanceType is stamped with the fixed default.
-	UnitResources InstanceTypeUnitResources `json:"unitResources" protobuf:"bytes,10,opt,name=unitResources"`
+	UnitResources InstanceTypeUnitResources `json:"unitResources" protobuf:"bytes,9,opt,name=unitResources"`
 
 	// LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
 	//
 	// It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
 	// by the validating webhook, and is immutable after creation; a derived InstanceType is
 	// stamped with the fixed default.
-	LocalStorage string `json:"localStorage" protobuf:"bytes,11,opt,name=localStorage"`
-
-	// GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
-	// "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
-	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
-	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
-	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,12,opt,name=generalGroup"`
-
-	// DisplayName is a human-friendly label for the InstanceType. The mutating webhook
-	// defaults an empty value to Product.
-	//
-	// +k8s:validation:maxLength=64
-	DisplayName string `json:"displayName,omitempty" protobuf:"bytes,13,opt,name=displayName"`
-
-	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
-	// holds the backing ClusterQueue (blocks new admission without evicting running
-	// workloads); clearing it reactivates the queue. A queue stopped by any means is
-	// reflected back into Inactive=true.
-	Inactive bool `json:"inactive,omitempty" protobuf:"varint,14,opt,name=inactive"`
-
-	// Description is a free-form admin annotation for the InstanceType.
-	//
-	// +k8s:validation:maxLength=1024
-	Description string `json:"description,omitempty" protobuf:"bytes,15,opt,name=description"`
+	LocalStorage string `json:"localStorage" protobuf:"bytes,10,opt,name=localStorage"`
 }
 
 // InstanceTypeCPU describes the information of the CPU.
@@ -246,37 +233,37 @@ func (in InstanceTypeAcceleratorDetail) IsSliceable() bool {
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
 type InstanceTypeStatus struct {
-	// Phase is the summary of conditions.
-	Phase string `json:"phase" protobuf:"bytes,1,name=phase"`
-
-	// PhaseMessage is the message of the phase.
-	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,2,opt,name=phaseMessage"`
-
-	// Accelerator is the allocatable-as-exclusive view: whole cards that are
-	// entirely free, e.g. "1", "4".
-	Accelerator InstanceTypeResource `json:"accelerator" protobuf:"bytes,3,name=accelerator"`
-
-	// AcceleratorShared is the shareable view: per-card ownership shares (up to
-	// SharedResourceMaxSize owners per card) summed over free and already-shared
-	// cards.
-	AcceleratorShared InstanceTypeResource `json:"acceleratorShared" protobuf:"bytes,4,name=acceleratorShared"`
-
-	// AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
-	// hundred per card) summed over free and already-sliced cards.
-	AcceleratorSliced InstanceTypeResource `json:"acceleratorSliced" protobuf:"bytes,5,name=acceleratorSliced"`
-
-	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
-	CPU InstanceTypeResource `json:"cpu" protobuf:"bytes,6,name=cpu"`
+	// Detail is the observed hardware descriptor of the InstanceType, computed by the
+	// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+	Detail InstanceTypeDetail `json:"detail,omitempty" protobuf:"bytes,1,opt,name=detail"`
 
 	// Entrance is the name of the namespaced LocalQueue that fronts this
 	// InstanceType's backing ClusterQueue — the value a workload sets as its
 	// "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
 	// InstanceType name (see nodefeature.FormatLocalQueueName).
-	Entrance string `json:"entrance,omitempty" protobuf:"bytes,7,opt,name=entrance"`
+	Entrance string `json:"entrance,omitempty" protobuf:"bytes,2,opt,name=entrance"`
 
-	// Detail is the observed hardware descriptor of the InstanceType, computed by the
-	// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
-	Detail InstanceTypeDetail `json:"detail,omitempty" protobuf:"bytes,8,opt,name=detail"`
+	// Phase is the summary of conditions.
+	Phase string `json:"phase" protobuf:"bytes,3,name=phase"`
+
+	// PhaseMessage is the message of the phase.
+	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,4,opt,name=phaseMessage"`
+
+	// Accelerator is the allocatable-as-exclusive view: whole cards that are
+	// entirely free, e.g. "1", "4".
+	Accelerator InstanceTypeResource `json:"accelerator" protobuf:"bytes,5,name=accelerator"`
+
+	// AcceleratorShared is the shareable view: per-card ownership shares (up to
+	// SharedResourceMaxSize owners per card) summed over free and already-shared
+	// cards.
+	AcceleratorShared InstanceTypeResource `json:"acceleratorShared" protobuf:"bytes,6,name=acceleratorShared"`
+
+	// AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
+	// hundred per card) summed over free and already-sliced cards.
+	AcceleratorSliced InstanceTypeResource `json:"acceleratorSliced" protobuf:"bytes,7,name=acceleratorSliced"`
+
+	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
+	CPU InstanceTypeResource `json:"cpu" protobuf:"bytes,8,name=cpu"`
 }
 
 // InstanceTypeResource describes the resource of the InstanceType.

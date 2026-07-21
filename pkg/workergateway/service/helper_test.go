@@ -197,17 +197,10 @@ func instSpecA10G() workercore.InstanceTypeSpec {
 		GeneralGroup:     "generic",
 		AcceleratorGroup: "nvidia-a10g",
 		Acceleratable:    true,
-		Manufacturer:     "nvidia",
-		Product:          "NVIDIA-A10G",
-		Family:           "Ampere",
 		OS:               "linux",
 		Arch:             "amd64",
 		UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
 		LocalStorage:     "100Gi",
-		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
-			Memory:            "23028Mi",
-			ComputeCapability: "8.6",
-		},
 	}
 }
 
@@ -216,17 +209,10 @@ func instSpecTeslaT4() workercore.InstanceTypeSpec {
 		GeneralGroup:     "generic",
 		AcceleratorGroup: "nvidia-tesla-t4",
 		Acceleratable:    true,
-		Manufacturer:     "nvidia",
-		Product:          "Tesla-T4",
-		Family:           "Turing",
 		OS:               "linux",
 		Arch:             "amd64",
 		UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
 		LocalStorage:     "100Gi",
-		InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{
-			Memory:            "15360Mi",
-			ComputeCapability: "7.5",
-		},
 	}
 }
 

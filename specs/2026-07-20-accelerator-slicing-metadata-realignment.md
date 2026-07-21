@@ -183,7 +183,8 @@ deployment surface only exposes switches that do something.
 
 New per-card types, extending the existing per-card `Status` (the `Accelerator` type already notes
 "Field number 5 is reserved for the removed per-accelerator Features" — this spec effectively restores that
-design in a new shape, using new field numbers):
+design in a new shape; T12 later closes that field-5 gap so `Accelerator` is contiguous, per the 2026-07-21
+no-reservation decision):
 
 ```go
 // AcceleratorLogicalSliced describes the card's logical (software) slicing capability.
@@ -224,8 +225,9 @@ type AcceleratorStatus struct {
 }
 ```
 
-Group-level aggregate, replacing `AcceleratorsFeature` on `DevicesGroup` (field 11 becomes reserved; the new
-field takes 12):
+Group-level aggregate, replacing `AcceleratorsFeature` on `DevicesGroup` (the new field lands at 12 while
+`AcceleratorsFeature` still occupies 11; T12 removes 11 and renumbers this field 12→11 so the group stays
+contiguous):
 
 ```go
 // AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The two
@@ -268,8 +270,9 @@ express the request granularity exactly, one dimension richer than a scalar step
 aliases (`AcceleratorSliced`, `AcceleratorsFeature`) are replaced with aliases for the new types.
 
 **Acceptance:**
-- `make generate` regenerates CRDs/deepcopy/protobuf/applyconfigurations cleanly; removed protobuf field
-  numbers (`DevicesGroup` 11; the old `AcceleratorsFeature` message) are reserved, never reused.
+- `make generate` regenerates CRDs/deepcopy/protobuf/applyconfigurations cleanly; every message renumbered by
+  this spec (e.g. `InstanceTypeSpec`, `InstanceTypeStatus`, `DevicesGroup`) carries **contiguous** protobuf
+  field numbers (1..N, gap-free) — reservation is dropped (2026-07-21 decision).
 - `AcceleratorSlicedDetail` (contains a slice) never appears in `InstanceTypeSpec` or
   `InstanceTypeFlavorSpec` — both are map keys and must stay comparable; the detail rides only on
   status-side types.
@@ -439,26 +442,29 @@ type InstanceTypeSpec struct {
     UnitResources    InstanceTypeUnitResources
     LocalStorage     string
 }
-// Removed from Spec (protobuf 3,4,5,8,9 reserved): Manufacturer, Product, Family,
-// inline InstanceTypeCPU, inline InstanceTypeAccelerator. Description takes a new number (15).
+// Removed from Spec: Manufacturer, Product, Family, inline InstanceTypeCPU, inline
+// InstanceTypeAccelerator. The remaining fields are reordered as above and renumbered
+// contiguously (protobuf 1..10, gap-free) — no reservation (2026-07-21 decision).
 
-// InstanceTypeDetail is the observed hardware descriptor, embedded in Status.
+// InstanceTypeDetail is the observed hardware descriptor, embedded in Status. It mirrors the
+// old descriptor but carries the pool-aggregated SlicedDetail in place of the desired-state
+// Feature, so the status-side detail can hold the slice-bearing AcceleratorSlicedDetail the
+// comparable Spec must not.
 type InstanceTypeDetail struct {
     Manufacturer string
     Product      string
     Family       string
-    InstanceTypeCPU         // inline
-    InstanceTypeAccelerator // inline; its Feature field becomes:
-    //   SlicedDetail AcceleratorSlicedDetail  (new field number; old Feature number reserved,
-    //   alongside the already-reserved number 4 for the removed Sliceable bool)
+    InstanceTypeCPU               // inline
+    InstanceTypeAcceleratorDetail // inline; carries SlicedDetail AcceleratorSlicedDetail
 }
 
+// Reordered + renumbered contiguously (protobuf 1..8, gap-free): Detail first, then Entrance.
 type InstanceTypeStatus struct {
-    Detail       InstanceTypeDetail // NEW (field 8)
+    Detail       InstanceTypeDetail // field 1
+    Entrance     string             // field 2
     Phase        string
     PhaseMessage string
     Accelerator, AcceleratorShared, AcceleratorSliced, CPU InstanceTypeResource
-    Entrance     string
 }
 ```
 
@@ -567,8 +573,9 @@ generic "a Kubernetes cluster" wording).
   keys; any field added to them must be a comparable value type. `AcceleratorSlicedDetail` contains slices and
   therefore lives only on status-side types (`Devices` group spec is not a map key; `InstanceTypeDetail` is
   status-only).
-- **Protobuf discipline**: never reuse a removed field number; reserve `DevicesGroup` 11, `InstanceTypeSpec`
-  3/4/5/8/9, and `InstanceTypeAccelerator`'s old Feature number (4 is already reserved there).
+- **Protobuf discipline (2026-07-21 decision)**: this spec drops field-number reservation and instead renumbers
+  every message **contiguously** (natural-number ordering, no gaps) as fields are removed; `protobuf_reserved_test.go`
+  is deleted (T10). This is a pre-release wire break accepted deliberately.
 - **`make generate` after any `api/` or webhook change** (the `gpustack-operator-generate` skill); it must run
   from the main checkout — `go-to-protobuf` requires the working directory to end in `gpustack.ai/gpustack`.
 - **Behavior invariance** on non-MIG hardware is a review gate for every re-plumb site: same inputs, same
@@ -588,8 +595,8 @@ generic "a Kubernetes cluster" wording).
   deprecated no-op); any change that alters Kueue quota values or the Pod webhook's alignment math; touching
   the gateway REST shape beyond the F8 list.
 - **Never:** automate MIG mode switching in any controller; add a memory→profile translation layer; enable
-  `.sliced.mig-*` capacity keys in this spec; reuse reserved protobuf field numbers; reference research
-  working files from code or docs.
+  `.sliced.mig-*` capacity keys in this spec; leave a protobuf message with gap-numbered fields (renumber
+  contiguously instead); reference research working files from code or docs.
 
 ### Risks and Mitigations
 
@@ -614,11 +621,11 @@ generic "a Kubernetes cluster" wording).
   reader would make new types read non-sliceable mid-rollout (Codex Critical) → F6/T9 remove producer and last
   reader in the same change; the catalog `Sliceable` reader (T7) is removed earlier only because dropping a
   reader is always safe.
-- **Protobuf field-number reuse** — the existing "field N reserved" is a Go *comment* only; `generated.proto`
-  carries no `reserved` declaration, so a future struct tag could silently reuse a removed number (Codex) →
-  emit real `reserved` into `generated.proto` if the generator supports it; regardless, add a test/CI guard
-  asserting no live struct field uses a reserved protobuf number (`DevicesGroup` 11; `InstanceTypeSpec` 3/4/5/8/9;
-  the old accelerator Feature number).
+- **Protobuf field-number reuse** — `generated.proto` carries no `reserved` declaration and a hand-added one is
+  clobbered by `make generate`, so reservation cannot be enforced durably (Codex R11). **Resolved (2026-07-21)
+  by dropping reservation entirely:** every message is renumbered **contiguously** (natural-number ordering) as
+  fields are removed, so there are no reserved numbers to protect and `protobuf_reserved_test.go` is deleted
+  (T10). This is a deliberate pre-release wire break; no client depends on the old numbers yet.
 - **Flag removal crash-loops deployed DaemonSets** → F3's deployment-compatibility gate (verify `deploy/`,
   else deprecation shim; Ask-first).
 - **Node-vs-Devices cardinality skew** — F4 changes the card-count source from the Node `.count` label (built
@@ -790,13 +797,11 @@ consumes it yet; full build + test green.*
       `AcceleratorSliced` / `MaxSlices()` / `SlicedCoresOvercommit()` / `MemoryPercentageStep` yet.
     - Add `pkg/device/types.go` aliases for the new types.
     - Run `make generate`.
-    - **Protobuf reservation guard:** `go-to-protobuf` regenerates `generated.proto` and emits **no** `reserved`
-      statements — a hand-added `reserved` is clobbered by `make generate` (cross-check R11), so a real proto
-      declaration is not durable here. The only durable enforcement is a **tag-audit test** that parses the Go
-      struct tags and asserts the removed protobuf numbers stay unused — cover `DevicesGroup` 11 (old
-      `AcceleratorsFeature`, removed in the follow-up), `Accelerator` 5, `InstanceTypeSpec` 3/4/5/8/9,
-      `InstanceTypeAccelerator` 4 (old Sliceable) and 6 (old Feature), and v1 `InstanceTypeFlavorSpec` 8 (old
-      Sliceable, R10). Comment-only reservation is documentation, not enforcement.
+    - **Protobuf reservation guard (interim — retired in T10):** T3 added a **tag-audit test**
+      (`protobuf_reserved_test.go`) parsing the Go struct tags to assert removed protobuf numbers stayed unused
+      (`Accelerator` 5, `InstanceTypeAccelerator` 4). **Superseded by the 2026-07-21 decision:** the spec drops
+      reservation entirely and renumbers every message **contiguously** (natural-number ordering) as fields are
+      removed, so T10 deletes this test rather than growing it. Retained here as the record of what T3 built.
     - Acceptance: `make generate` clean; `go build ./...` green (new types unused). Verify: regenerated
       deepcopy/protobuf/applyconfig compile.
 
@@ -962,13 +967,20 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       string and no dead `foldCPUDetail` remain. Verify:
       `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`.
 
-[ ] **T10: remove the Spec descriptor fields; tighten immutability (F7).**
+[x] **T10: remove the Spec descriptor fields; reorder + contiguously renumber; tighten immutability (F7).**
     - Delete `Manufacturer`/`Product`/`Family`/inline `InstanceTypeCPU`/inline `InstanceTypeAccelerator` from
-      `InstanceTypeSpec` (reserve protobuf 3/4/5/8/9); add `Description` to the masked set in
-      `validateInstanceTypeSpecImmutable` (`instance_type.go:328-337`). `make generate`.
-    - Acceptance: `InstanceTypeSpec` still comparable (compiles as a map key; a `go test` that keys a map on it
-      passes); immutability freezes all but DisplayName/Description/Inactive; `make generate` clean. Verify:
-      `go build ./...`, `go test ./pkg/worker/...`.
+      `InstanceTypeSpec`. **Reorder + contiguously renumber (2026-07-21 decision):** the reserve-and-guard
+      approach is dropped spec-wide in favor of natural-number (gap-free) protobuf numbering. Reorder
+      `InstanceTypeSpec` (admin-editable DisplayName/Description/Inactive first, then AcceleratorGroup/
+      GeneralGroup/Acceleratable/OS/Arch/UnitResources/LocalStorage) and `InstanceTypeStatus` (Detail/Entrance/
+      Phase/PhaseMessage/Accelerator/AcceleratorShared/AcceleratorSliced/CPU), renumbering each `protobuf` tag
+      contiguously 1..N. **Delete `protobuf_reserved_test.go`** (the tag-audit guard is retired with the
+      reservation approach). Add `Description` to the masked set in `validateInstanceTypeSpecImmutable`.
+      `make generate`.
+    - Acceptance: `InstanceTypeSpec` still comparable (compiles as a map key — the gateway
+      `map[AggregatedInstanceTypeSpec]int` proves it); immutability freezes all but DisplayName/Description/Inactive
+      (Description now editable); `generated.proto` numbers are contiguous 1..N; `make generate` clean. Verify:
+      `go build ./...`, `go test ./pkg/worker/...`, `make lint`.
 
 **Phase E — Gateway, cleanup, docs**  ·  *Final checkpoint: grep-clean of removed symbols; full suite + lint.*
 
@@ -985,7 +997,8 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
     - **v1 `InstanceTypeFlavorSpec.Sliceable` (field 8) removal (R10):** T7 drops the extension-catalog
       `Sliceable`; the v1 API field (`api/worker/v1/instance_type_flavor.go:61`) and its embed in
       `AggregatedInstanceTypeFlavorSpec` (`service/types.go:20-25`) are removed here — a second UI-visible shape
-      change; reserve field 8 (tag-audit guard, T3) and add both v1-flavor consumers to the F8 checklist.
+      change; renumber the trailing `GeneralGroup` (9→8) so the flavor spec stays contiguous, and add both
+      v1-flavor consumers to the F8 checklist.
     - Acceptance: `Recompute` tests sum same-name profile Counts across two clusters at tier + top; two clusters
       with same hardware but different `Description` collapse to **one** aggregated item; a JSON fixture
       documents the new shape. Verify: `go test ./pkg/workergateway/...`.
@@ -993,9 +1006,11 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 [ ] **T12: delete the whole `AcceleratorsFeature` family + remove the R1 fallback (F1 cleanup).**
     - **Delete the whole `AcceleratorsFeature` family (2026-07-21 decision, R1 — within this spec, not deferred):**
       the `AcceleratorsFeature` / `AcceleratorSliced` structs, `MaxSlices()` / `SlicedCoresOvercommit()`,
-      `MemoryPercentageStep`, and the `DevicesGroup.AcceleratorsFeature` field (reserve protobuf field 11 in the
-      tag-audit guard); plus the `acceleratorFeature` note (operator-internal, gone in T9) and any
-      genuinely-unused alias. `make generate`.
+      `MemoryPercentageStep`, and the `DevicesGroup.AcceleratorsFeature` field — renumbering the trailing
+      `AcceleratorSlicedDetail` (12→11) so `DevicesGroup` stays contiguous; plus the `acceleratorFeature` note
+      (operator-internal, gone in T9) and any genuinely-unused alias. Also close the pre-existing `Accelerator`
+      field-5 gap (Status 6→5) for full contiguity; `InstanceTypeAccelerator` (orphaned once T10 dropped the
+      inline embed) is deleted outright, so its field-4 gap is moot. `make generate`.
     - **Detector rewire (all 6):** each detector stashes the vendor soft-slice capability in the group
       `AcceleratorsFeature.LogicalSliced`, which T4 copies to each card's `LogicalSliced` (e.g.
       `nvidia/device.go:183` sets it, `:221-223` copies it). Set the per-card `LogicalSliced` (Count + overcommit)
@@ -1007,7 +1022,7 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       (T6). Convert the old-format test fixtures (`node_capacity` `devicesWithSlicing`, deviceplugin
       `twoCardDevices`) to per-card fixtures.
     - Acceptance: `grep` shows no `AcceleratorsFeature`/`MaxSlices`/`SlicedCoresOvercommit`/`acceleratorFeature`
-      in non-generated, non-test Go; the tag-audit reservation guard passes (incl. `DevicesGroup` field 11);
+      in non-generated, non-test Go; `DevicesGroup`/`Accelerator` protobuf numbers are contiguous (gap-free);
       `make generate` clean; `go build ./...`, full `go test ./...`, `make lint` all green. Verify: success
       criterion 4 + 5.
 
@@ -1103,9 +1118,10 @@ Fake-client reconciler/webhook tests (the project's convention — no envtest cl
 - **Migration round-trip:** a stored InstanceType carrying the removed spec fields round-trips through a
   `/status` update (Detail backfilled, spec fields still present) and a subsequent main-resource update (fields
   pruned); reads work throughout because readers use `Status.Detail`.
-- **Immutability + comparability:** ValidateUpdate rejects a Manufacturer-era stored field change but allows
-  DisplayName/Description/Inactive; `InstanceTypeSpec` used as a map key compiles and round-trips; a test
-  asserts no live struct field reuses a reserved protobuf number.
+- **Immutability + comparability:** ValidateUpdate rejects a frozen-field change (os/arch/groups/acceleratable/
+  unitResources/localStorage) but allows DisplayName/Description/Inactive; `InstanceTypeSpec` used as a map key
+  compiles and round-trips (the gateway `map[AggregatedInstanceTypeSpec]int` is the standing compile-check);
+  `generated.proto` field numbers are contiguous 1..N.
 
 #### e2e tests
 - **Spec 1 (this spec): a non-MIG regression pass on the operator-e2e infra** (`testing/infra`) — bring up the

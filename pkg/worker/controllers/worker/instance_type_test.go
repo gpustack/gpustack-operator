@@ -460,11 +460,10 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			AcceleratorGroup:        key,
-			Acceleratable:           true,
-			OS:                      "linux",
-			Arch:                    "amd64",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Memory: "24576Mi"},
+			AcceleratorGroup: key,
+			Acceleratable:    true,
+			OS:               "linux",
+			Arch:             "amd64",
 		},
 	}
 	cli := buildInstanceTypeClient(it, cq, &dev)
@@ -515,11 +514,10 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			AcceleratorGroup:        key,
-			Acceleratable:           true,
-			OS:                      "linux",
-			Arch:                    "amd64",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Memory: "24576Mi"},
+			AcceleratorGroup: key,
+			Acceleratable:    true,
+			OS:               "linux",
+			Arch:             "amd64",
 		},
 	}
 	cli := buildInstanceTypeClient(it, cq, &dev)

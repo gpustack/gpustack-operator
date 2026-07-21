@@ -27,12 +27,6 @@ func newInstanceWebhook(objs ...ctrlcli.Object) *InstanceWebhook {
 	return &InstanceWebhook{Client: cli, APIReader: cli}
 }
 
-// sliceableFeature marks an accelerator as sliceable (a non-zero MaxSlices) for
-// InstanceType fixtures that exercise the slice-request paths.
-var sliceableFeature = workercore.AcceleratorsFeature{
-	LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128},
-}
-
 // sliceableDetail is the observed accelerator Detail that marks a fixture InstanceType as
 // slice-ready: a manufacturer (so Status.Detail.AcceleratorReady is true) plus a non-zero logical
 // slice count (so Status.Detail.IsSliceable is true). The webhook now reads sliceability and
@@ -128,9 +122,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
+					Acceleratable: true,
 				},
 				Status: workercore.InstanceTypeStatus{
 					Detail:      sliceableDetail,
@@ -358,11 +350,9 @@ func TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources(t *testing.T) 
 	sliceable := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: sliceType},
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            "nvidia",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "2", RAM: "8Gi"},
-			LocalStorage:            "64Gi",
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "2", RAM: "8Gi"},
+			LocalStorage:  "64Gi",
 		},
 		Status: workercore.InstanceTypeStatus{
 			Detail:      sliceableDetail,
@@ -505,10 +495,8 @@ func TestInstanceWebhook_Default_SlicedPercentages(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-					UnitResources:           workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					Acceleratable: true,
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
 				},
 				Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 			}
@@ -564,10 +552,8 @@ func TestInstanceWebhook_Default_SlicedUnitScaling(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-					UnitResources:           workercore.InstanceTypeUnitResources{CPU: unitCPU, RAM: unitRAM},
+					Acceleratable: true,
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: unitCPU, RAM: unitRAM},
 				},
 				Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 			}
@@ -600,10 +586,8 @@ func TestInstanceWebhook_Default_SlicedZeroAccelerator(t *testing.T) {
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: typeName},
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            "nvidia",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
 		},
 		Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 	}
@@ -647,9 +631,7 @@ func TestInstanceWebhook_ValidateCreate_SlicedAccelerator(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
+					Acceleratable: true,
 				},
 				Status: workercore.InstanceTypeStatus{
 					Detail:      sliceableDetail,
@@ -705,9 +687,7 @@ func TestInstanceWebhook_ValidateCreate_WholeCardOnSliceable(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
+					Acceleratable: true,
 				},
 				Status: workercore.InstanceTypeStatus{
 					Detail:      sliceableDetail,
@@ -743,10 +723,8 @@ func TestInstanceWebhook_Default_WholeCardScaling(t *testing.T) {
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: typeName},
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            "nvidia",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
 		},
 		Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 	}

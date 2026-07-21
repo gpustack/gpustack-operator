@@ -130,9 +130,9 @@ func TestInstanceTypeWebhook_ValidateCreateRequired(t *testing.T) {
 }
 
 // TestInstanceTypeWebhook_ValidateUpdateImmutable pins that the whole spec is frozen after
-// creation except the two admin-editable fields: displayName (rename) and inactive (take in/out
-// of service). Every other spec field — descriptors, os/arch, groups, acceleratable, unit
-// resources, local storage — is rejected on update.
+// creation except the admin-editable fields: displayName (rename), description (annotation) and
+// inactive (take in/out of service). Every other spec field — os/arch, groups, acceleratable,
+// unit resources, local storage — is rejected on update.
 func TestInstanceTypeWebhook_ValidateUpdateImmutable(t *testing.T) {
 	nonAccel := func() *workercore.InstanceType { return newInstanceType("1", "48Gi", "100Gi") }
 	// An acceleratable base isolates the acceleratable toggle through the immutability check:
@@ -154,7 +154,7 @@ func TestInstanceTypeWebhook_ValidateUpdateImmutable(t *testing.T) {
 		{"inactive toggle is allowed", nonAccel, func(it *workercore.InstanceType) { it.Spec.Inactive = true }, false},
 		{"legacy non-1 cpu displayName change is allowed", legacyNonAccel, func(it *workercore.InstanceType) { it.Spec.DisplayName = "Renamed" }, false},
 		{"legacy non-1 cpu inactive toggle is allowed", legacyNonAccel, func(it *workercore.InstanceType) { it.Spec.Inactive = true }, false},
-		{"manufacturer change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.Manufacturer = "nvidia" }, true},
+		{"description change is allowed", nonAccel, func(it *workercore.InstanceType) { it.Spec.Description = "note" }, false},
 		{"unitResources change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.UnitResources.RAM = "96Gi" }, true},
 		{"localStorage change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.LocalStorage = "200Gi" }, true},
 		{"os change is rejected", nonAccel, func(it *workercore.InstanceType) { it.Spec.OS = "windows" }, true},
@@ -229,10 +229,10 @@ func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 	})
 }
 
-// TestInstanceTypeWebhook_DefaultWritesNoDescriptor pins that Default no longer enriches the
-// hardware descriptor onto the spec: even with a matching ResourceFlavor present, the spec's
-// manufacturer/product/memory stay empty (the observed descriptor lives in Status.Detail, computed
-// by the reconciler).
+// TestInstanceTypeWebhook_DefaultWritesNoDescriptor pins that Default reads nothing from a matching
+// ResourceFlavor onto the spec: the observed hardware descriptor lives in Status.Detail (computed by
+// the reconciler) and DisplayName is stamped at derivation, so even with a matching flavor present
+// Default leaves DisplayName empty and only stamps the schedule + entrance labels.
 func TestInstanceTypeWebhook_DefaultWritesNoDescriptor(t *testing.T) {
 	accelRF := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
@@ -259,9 +259,6 @@ func TestInstanceTypeWebhook_DefaultWritesNoDescriptor(t *testing.T) {
 		},
 	}
 	require.NoError(t, wh.Default(context.Background(), it))
-	assert.Empty(t, it.Spec.Manufacturer, "Default writes no manufacturer descriptor")
-	assert.Empty(t, it.Spec.Product, "Default writes no product descriptor")
-	assert.Empty(t, it.Spec.Memory, "Default writes no per-card memory descriptor")
 	assert.Empty(t, it.Spec.DisplayName, "Default no longer defaults DisplayName (derivation stamps it)")
 	// The schedule + entrance labels are still stamped.
 	assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"])

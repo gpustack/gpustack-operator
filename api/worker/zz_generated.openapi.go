@@ -3974,12 +3974,42 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeSpec defines the desired spec of InstanceType.",
+				Description: "InstanceTypeSpec defines the desired spec of InstanceType. Its field order and protobuf numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed by the immutable identity and hardware inputs.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a derived InstanceType, stamped at derivation time.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is a free-form admin annotation for the InstanceType.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"inactive": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler holds the backing ClusterQueue (blocks new admission without evicting running workloads); clearing it reactivates the queue. A queue stopped by any means is reflected back into Inactive=true.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 					"acceleratorGroup": {
 						SchemaProps: spec.SchemaProps{
 							Description: "AcceleratorGroup is the accelerator group (the acceleratable node key) of the InstanceType, e.g. \"nvidia-a10g\". It selects the accelerator pool the type schedules onto and is required by the validating webhook when Acceleratable is true.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"generalGroup": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g. \"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The mutating webhook defaults an empty value to \"generic\"; it participates as a scheduling discriminator only when instance-type-aware-cpu-manufacturer is enabled.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -3989,27 +4019,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Description: "Acceleratable indicates whether the InstanceType is acceleratable.",
 							Default:     false,
 							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"manufacturer": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Manufacturer is the name of the InstanceType manufacturer.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"product": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Product is the name of the InstanceType product.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"family": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Family is the family of the InstanceType.",
-							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
@@ -4029,97 +4038,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"physicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"threadsPerPhysicalCore": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"logicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"stepping": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"clockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"maxClockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cacheLine": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cache": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cache describes the cache information of the CPU.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()),
-						},
-					},
-					"memory": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"computeCapability": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"feature": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the per-device maximum slice count, whether compute may be overcommitted, and the memory step. A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's AcceleratorsFeature, folded in from the node-derived ResourceFlavor.\n\nField number 4 is reserved for the removed Sliceable bool.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU describes the CPU information of the accelerator.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
-						},
-					},
 					"unitResources": {
 						SchemaProps: spec.SchemaProps{
 							Description: "UnitResources describes the unit resources of the InstanceType.\n\nIt is a required admin-writable input, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with the fixed default.",
@@ -4135,42 +4053,12 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"generalGroup": {
-						SchemaProps: spec.SchemaProps{
-							Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g. \"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The mutating webhook defaults an empty value to \"generic\"; it participates as a scheduling discriminator only when instance-type-aware-cpu-manufacturer is enabled.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"displayName": {
-						SchemaProps: spec.SchemaProps{
-							Description: "DisplayName is a human-friendly label for the InstanceType. The mutating webhook defaults an empty value to Product.",
-							MaxLength:   ptr.To[int64](64),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"inactive": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler holds the backing ClusterQueue (blocks new admission without evicting running workloads); clearing it reactivates the queue. A queue stopped by any means is reflected back into Inactive=true.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"description": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Description is a free-form admin annotation for the InstanceType.",
-							MaxLength:   ptr.To[int64](1024),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
 				},
 				Required: []string{"acceleratable", "os", "arch", "unitResources", "localStorage"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.AcceleratorsFeature{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName(), v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
+			v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
 	}
 }
 
@@ -4181,6 +4069,20 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 				Description: "InstanceTypeStatus describes the observed state of the InstanceType.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"detail": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Detail is the observed hardware descriptor of the InstanceType, computed by the reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeDetail{}.OpenAPIModelName()),
+						},
+					},
+					"entrance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Entrance is the name of the namespaced LocalQueue that fronts this InstanceType's backing ClusterQueue — the value a workload sets as its \"kueue.x-k8s.io/queue-name\" label to be admitted. It is derived from the InstanceType name (see nodefeature.FormatLocalQueueName).",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"phase": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Phase is the summary of conditions.",
@@ -4222,20 +4124,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 							Description: "CPU is the CPU resource of the InstanceType, e.g. \"4\", \"8\".",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
-						},
-					},
-					"entrance": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Entrance is the name of the namespaced LocalQueue that fronts this InstanceType's backing ClusterQueue — the value a workload sets as its \"kueue.x-k8s.io/queue-name\" label to be admitted. It is derived from the InstanceType name (see nodefeature.FormatLocalQueueName).",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"detail": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Detail is the observed hardware descriptor of the InstanceType, computed by the reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeDetail{}.OpenAPIModelName()),
 						},
 					},
 				},

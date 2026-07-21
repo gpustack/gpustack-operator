@@ -209,16 +209,18 @@ func extractPositiveNumberFromQuantity(v, suffix string) string {
 }
 
 // validateInstanceTypeSpecImmutable rejects any change to the spec after creation other than the
-// two admin-editable fields: DisplayName (rename) and Inactive (take in/out of service). The
-// spec is fully comparable, so it masks those two fields on both sides and compares the rest with
-// a single equality check — a newly added spec field is then frozen automatically.
+// admin-editable fields: DisplayName (rename), Description (free-form annotation) and Inactive
+// (take in/out of service). The spec is fully comparable, so it masks those fields on both sides
+// and compares the rest with a single equality check — a newly added spec field is then frozen
+// automatically.
 func validateInstanceTypeSpecImmutable(itOld, it *workercore.InstanceType) field.ErrorList {
 	oldSpec, newSpec := itOld.Spec, it.Spec
 	oldSpec.DisplayName, newSpec.DisplayName = "", ""
+	oldSpec.Description, newSpec.Description = "", ""
 	oldSpec.Inactive, newSpec.Inactive = false, false
 	if oldSpec != newSpec {
 		return field.ErrorList{field.Forbidden(field.NewPath("spec"),
-			"is immutable except displayName and inactive")}
+			"is immutable except displayName, description and inactive")}
 	}
 	return nil
 }
