@@ -1,6 +1,6 @@
 # Spec: Accelerator Slicing Metadata Realignment — Per-Card Capability, Group SlicedDetail, InstanceType Observed Detail
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 > **Supersedes prior design.** This spec supersedes the parts of earlier shipped specs it changes — the
