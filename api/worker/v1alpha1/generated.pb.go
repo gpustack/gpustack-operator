@@ -35,8 +35,6 @@ func (m *AcceleratorPhysicalSliced) Reset() { *m = AcceleratorPhysicalSliced{} }
 
 func (m *AcceleratorPhysicalSlicedProfile) Reset() { *m = AcceleratorPhysicalSlicedProfile{} }
 
-func (m *AcceleratorSliced) Reset() { *m = AcceleratorSliced{} }
-
 func (m *AcceleratorSlicedDetail) Reset() { *m = AcceleratorSlicedDetail{} }
 
 func (m *AcceleratorSlicedLogicalDetail) Reset() { *m = AcceleratorSlicedLogicalDetail{} }
@@ -48,8 +46,6 @@ func (m *AcceleratorSlicedPhysicalDetailProfile) Reset() {
 }
 
 func (m *AcceleratorStatus) Reset() { *m = AcceleratorStatus{} }
-
-func (m *AcceleratorsFeature) Reset() { *m = AcceleratorsFeature{} }
 
 func (m *DeviceEthernet) Reset() { *m = DeviceEthernet{} }
 
@@ -88,8 +84,6 @@ func (m *InstanceStatus) Reset() { *m = InstanceStatus{} }
 func (m *InstanceTemplate) Reset() { *m = InstanceTemplate{} }
 
 func (m *InstanceType) Reset() { *m = InstanceType{} }
-
-func (m *InstanceTypeAccelerator) Reset() { *m = InstanceTypeAccelerator{} }
 
 func (m *InstanceTypeAcceleratorCPU) Reset() { *m = InstanceTypeAcceleratorCPU{} }
 
@@ -142,7 +136,7 @@ func (m *Accelerator) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i = encodeVarintGenerated(dAtA, i, uint64(size))
 	}
 	i--
-	dAtA[i] = 0x32
+	dAtA[i] = 0x2a
 	{
 		size, err := m.Topology.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
@@ -322,43 +316,6 @@ func (m *AcceleratorPhysicalSlicedProfile) MarshalToSizedBuffer(dAtA []byte) (in
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
 	i--
 	dAtA[i] = 0xa
-	return len(dAtA) - i, nil
-}
-
-func (m *AcceleratorSliced) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *AcceleratorSliced) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *AcceleratorSliced) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	i = encodeVarintGenerated(dAtA, i, uint64(m.MemoryPercentageStep))
-	i--
-	dAtA[i] = 0x18
-	i--
-	if m.CoresPercentageOvercommit {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
-	}
-	i--
-	dAtA[i] = 0x10
-	i = encodeVarintGenerated(dAtA, i, uint64(m.MaxSize))
-	i--
-	dAtA[i] = 0x8
 	return len(dAtA) - i, nil
 }
 
@@ -558,49 +515,6 @@ func (m *AcceleratorStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	}
 	i--
 	dAtA[i] = 0x8
-	return len(dAtA) - i, nil
-}
-
-func (m *AcceleratorsFeature) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *AcceleratorsFeature) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *AcceleratorsFeature) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	{
-		size, err := m.LogicalSliced.MarshalToSizedBuffer(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = encodeVarintGenerated(dAtA, i, uint64(size))
-	}
-	i--
-	dAtA[i] = 0x12
-	{
-		size, err := m.PhysicalSliced.MarshalToSizedBuffer(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = encodeVarintGenerated(dAtA, i, uint64(size))
-	}
-	i--
-	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
 }
 
@@ -824,16 +738,6 @@ func (m *DevicesGroup) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = l
 	{
 		size, err := m.AcceleratorSlicedDetail.MarshalToSizedBuffer(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = encodeVarintGenerated(dAtA, i, uint64(size))
-	}
-	i--
-	dAtA[i] = 0x62
-	{
-		size, err := m.AcceleratorsFeature.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
 			return 0, err
 		}
@@ -1671,64 +1575,6 @@ func (m *InstanceType) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
-func (m *InstanceTypeAccelerator) Marshal() (dAtA []byte, err error) {
-	size := m.Size()
-	dAtA = make([]byte, size)
-	n, err := m.MarshalToSizedBuffer(dAtA[:size])
-	if err != nil {
-		return nil, err
-	}
-	return dAtA[:n], nil
-}
-
-func (m *InstanceTypeAccelerator) MarshalTo(dAtA []byte) (int, error) {
-	size := m.Size()
-	return m.MarshalToSizedBuffer(dAtA[:size])
-}
-
-func (m *InstanceTypeAccelerator) MarshalToSizedBuffer(dAtA []byte) (int, error) {
-	i := len(dAtA)
-	_ = i
-	var l int
-	_ = l
-	{
-		size, err := m.Feature.MarshalToSizedBuffer(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = encodeVarintGenerated(dAtA, i, uint64(size))
-	}
-	i--
-	dAtA[i] = 0x32
-	{
-		size, err := m.CPU.MarshalToSizedBuffer(dAtA[:i])
-		if err != nil {
-			return 0, err
-		}
-		i -= size
-		i = encodeVarintGenerated(dAtA, i, uint64(size))
-	}
-	i--
-	dAtA[i] = 0x2a
-	i -= len(m.ComputeCapability)
-	copy(dAtA[i:], m.ComputeCapability)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ComputeCapability)))
-	i--
-	dAtA[i] = 0x1a
-	i -= len(m.Cores)
-	copy(dAtA[i:], m.Cores)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Cores)))
-	i--
-	dAtA[i] = 0x12
-	i -= len(m.Memory)
-	copy(dAtA[i:], m.Memory)
-	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Memory)))
-	i--
-	dAtA[i] = 0xa
-	return len(dAtA) - i, nil
-}
-
 func (m *InstanceTypeAcceleratorCPU) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -2445,18 +2291,6 @@ func (m *AcceleratorPhysicalSlicedProfile) Size() (n int) {
 	return n
 }
 
-func (m *AcceleratorSliced) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	n += 1 + sovGenerated(uint64(m.MaxSize))
-	n += 2
-	n += 1 + sovGenerated(uint64(m.MemoryPercentageStep))
-	return n
-}
-
 func (m *AcceleratorSlicedDetail) Size() (n int) {
 	if m == nil {
 		return 0
@@ -2519,19 +2353,6 @@ func (m *AcceleratorStatus) Size() (n int) {
 	l = m.LogicalSliced.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.PhysicalSliced.Size()
-	n += 1 + l + sovGenerated(uint64(l))
-	return n
-}
-
-func (m *AcceleratorsFeature) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = m.PhysicalSliced.Size()
-	n += 1 + l + sovGenerated(uint64(l))
-	l = m.LogicalSliced.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -2636,8 +2457,6 @@ func (m *DevicesGroup) Size() (n int) {
 			n += 1 + l + sovGenerated(uint64(l))
 		}
 	}
-	l = m.AcceleratorsFeature.Size()
-	n += 1 + l + sovGenerated(uint64(l))
 	l = m.AcceleratorSlicedDetail.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
@@ -2915,25 +2734,6 @@ func (m *InstanceType) Size() (n int) {
 	l = m.Spec.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.Status.Size()
-	n += 1 + l + sovGenerated(uint64(l))
-	return n
-}
-
-func (m *InstanceTypeAccelerator) Size() (n int) {
-	if m == nil {
-		return 0
-	}
-	var l int
-	_ = l
-	l = len(m.Memory)
-	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.Cores)
-	n += 1 + l + sovGenerated(uint64(l))
-	l = len(m.ComputeCapability)
-	n += 1 + l + sovGenerated(uint64(l))
-	l = m.CPU.Size()
-	n += 1 + l + sovGenerated(uint64(l))
-	l = m.Feature.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -3224,18 +3024,6 @@ func (this *AcceleratorPhysicalSlicedProfile) String() string {
 	}, "")
 	return s
 }
-func (this *AcceleratorSliced) String() string {
-	if this == nil {
-		return "nil"
-	}
-	s := strings.Join([]string{`&AcceleratorSliced{`,
-		`MaxSize:` + fmt.Sprintf("%v", this.MaxSize) + `,`,
-		`CoresPercentageOvercommit:` + fmt.Sprintf("%v", this.CoresPercentageOvercommit) + `,`,
-		`MemoryPercentageStep:` + fmt.Sprintf("%v", this.MemoryPercentageStep) + `,`,
-		`}`,
-	}, "")
-	return s
-}
 func (this *AcceleratorSlicedDetail) String() string {
 	if this == nil {
 		return "nil"
@@ -3293,17 +3081,6 @@ func (this *AcceleratorStatus) String() string {
 		`Unhealthy:` + fmt.Sprintf("%v", this.Unhealthy) + `,`,
 		`LogicalSliced:` + strings.Replace(strings.Replace(this.LogicalSliced.String(), "AcceleratorLogicalSliced", "AcceleratorLogicalSliced", 1), `&`, ``, 1) + `,`,
 		`PhysicalSliced:` + strings.Replace(strings.Replace(this.PhysicalSliced.String(), "AcceleratorPhysicalSliced", "AcceleratorPhysicalSliced", 1), `&`, ``, 1) + `,`,
-		`}`,
-	}, "")
-	return s
-}
-func (this *AcceleratorsFeature) String() string {
-	if this == nil {
-		return "nil"
-	}
-	s := strings.Join([]string{`&AcceleratorsFeature{`,
-		`PhysicalSliced:` + strings.Replace(strings.Replace(this.PhysicalSliced.String(), "AcceleratorSliced", "AcceleratorSliced", 1), `&`, ``, 1) + `,`,
-		`LogicalSliced:` + strings.Replace(strings.Replace(this.LogicalSliced.String(), "AcceleratorSliced", "AcceleratorSliced", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3384,7 +3161,6 @@ func (this *DevicesGroup) String() string {
 		`ComputeCapability:` + fmt.Sprintf("%v", this.ComputeCapability) + `,`,
 		`Family:` + fmt.Sprintf("%v", this.Family) + `,`,
 		`Accelerators:` + repeatedStringForAccelerators + `,`,
-		`AcceleratorsFeature:` + strings.Replace(strings.Replace(this.AcceleratorsFeature.String(), "AcceleratorsFeature", "AcceleratorsFeature", 1), `&`, ``, 1) + `,`,
 		`AcceleratorSlicedDetail:` + strings.Replace(strings.Replace(this.AcceleratorSlicedDetail.String(), "AcceleratorSlicedDetail", "AcceleratorSlicedDetail", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
@@ -3612,20 +3388,6 @@ func (this *InstanceType) String() string {
 		`ObjectMeta:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.ObjectMeta), "ObjectMeta", "v1.ObjectMeta", 1), `&`, ``, 1) + `,`,
 		`Spec:` + strings.Replace(strings.Replace(this.Spec.String(), "InstanceTypeSpec", "InstanceTypeSpec", 1), `&`, ``, 1) + `,`,
 		`Status:` + strings.Replace(strings.Replace(this.Status.String(), "InstanceTypeStatus", "InstanceTypeStatus", 1), `&`, ``, 1) + `,`,
-		`}`,
-	}, "")
-	return s
-}
-func (this *InstanceTypeAccelerator) String() string {
-	if this == nil {
-		return "nil"
-	}
-	s := strings.Join([]string{`&InstanceTypeAccelerator{`,
-		`Memory:` + fmt.Sprintf("%v", this.Memory) + `,`,
-		`Cores:` + fmt.Sprintf("%v", this.Cores) + `,`,
-		`ComputeCapability:` + fmt.Sprintf("%v", this.ComputeCapability) + `,`,
-		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeAcceleratorCPU", "InstanceTypeAcceleratorCPU", 1), `&`, ``, 1) + `,`,
-		`Feature:` + strings.Replace(strings.Replace(this.Feature.String(), "AcceleratorsFeature", "AcceleratorsFeature", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3984,7 +3746,7 @@ func (m *Accelerator) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 6:
+		case 5:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Status", wireType)
 			}
@@ -4546,114 +4308,6 @@ func (m *AcceleratorPhysicalSlicedProfile) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *AcceleratorSliced) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowGenerated
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: AcceleratorSliced: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: AcceleratorSliced: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MaxSize", wireType)
-			}
-			m.MaxSize = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.MaxSize |= int32(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		case 2:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CoresPercentageOvercommit", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.CoresPercentageOvercommit = bool(v != 0)
-		case 3:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MemoryPercentageStep", wireType)
-			}
-			m.MemoryPercentageStep = 0
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				m.MemoryPercentageStep |= int32(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-		default:
-			iNdEx = preIndex
-			skippy, err := skipGenerated(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
 func (m *AcceleratorSlicedDetail) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -5175,122 +4829,6 @@ func (m *AcceleratorStatus) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			if err := m.PhysicalSliced.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipGenerated(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *AcceleratorsFeature) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowGenerated
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: AcceleratorsFeature: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: AcceleratorsFeature: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PhysicalSliced", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if err := m.PhysicalSliced.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field LogicalSliced", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if err := m.LogicalSliced.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -6330,39 +5868,6 @@ func (m *DevicesGroup) Unmarshal(dAtA []byte) error {
 			}
 			iNdEx = postIndex
 		case 11:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorsFeature", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if err := m.AcceleratorsFeature.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 12:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorSlicedDetail", wireType)
 			}
@@ -8667,218 +8172,6 @@ func (m *InstanceType) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			if err := m.Status.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		default:
-			iNdEx = preIndex
-			skippy, err := skipGenerated(dAtA[iNdEx:])
-			if err != nil {
-				return err
-			}
-			if (skippy < 0) || (iNdEx+skippy) < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if (iNdEx + skippy) > l {
-				return io.ErrUnexpectedEOF
-			}
-			iNdEx += skippy
-		}
-	}
-
-	if iNdEx > l {
-		return io.ErrUnexpectedEOF
-	}
-	return nil
-}
-func (m *InstanceTypeAccelerator) Unmarshal(dAtA []byte) error {
-	l := len(dAtA)
-	iNdEx := 0
-	for iNdEx < l {
-		preIndex := iNdEx
-		var wire uint64
-		for shift := uint(0); ; shift += 7 {
-			if shift >= 64 {
-				return ErrIntOverflowGenerated
-			}
-			if iNdEx >= l {
-				return io.ErrUnexpectedEOF
-			}
-			b := dAtA[iNdEx]
-			iNdEx++
-			wire |= uint64(b&0x7F) << shift
-			if b < 0x80 {
-				break
-			}
-		}
-		fieldNum := int32(wire >> 3)
-		wireType := int(wire & 0x7)
-		if wireType == 4 {
-			return fmt.Errorf("proto: InstanceTypeAccelerator: wiretype end group for non-group")
-		}
-		if fieldNum <= 0 {
-			return fmt.Errorf("proto: InstanceTypeAccelerator: illegal tag %d (wire type %d)", fieldNum, wire)
-		}
-		switch fieldNum {
-		case 1:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Memory", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Memory = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Cores", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.Cores = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ComputeCapability", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.ComputeCapability = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 5:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field CPU", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if err := m.CPU.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
-				return err
-			}
-			iNdEx = postIndex
-		case 6:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Feature", wireType)
-			}
-			var msglen int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				msglen |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			if msglen < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			postIndex := iNdEx + msglen
-			if postIndex < 0 {
-				return ErrInvalidLengthGenerated
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			if err := m.Feature.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

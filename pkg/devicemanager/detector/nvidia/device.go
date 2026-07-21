@@ -177,14 +177,6 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				ComputeCapability: stringifyComputeCapability(ccMajor, ccMinor),
 			})
 			grpIndex = len(grpList) - 1
-
-			// Soft (logical) slicing via HAMi-core ld.preload; the per-device slice count is
-			// capped at the max CUDA user processes a GPU serves (128, Volta+).
-			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-				MaxSize:                   128,
-				CoresPercentageOvercommit: true,
-				MemoryPercentageStep:      1,
-			}
 		}
 
 		var physicalIndexes []uint32
@@ -218,9 +210,11 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					Count:    maxProfileCount(profiles),
 				}
 			} else {
+				// Soft (logical) slicing via HAMi-core ld.preload; the per-card slice count is
+				// capped at the max CUDA user processes a GPU serves (128, Volta+).
 				status.LogicalSliced = device.AcceleratorLogicalSliced{
-					Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
-					CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+					Count:                     128,
+					CoresPercentageOvercommit: true,
 				}
 			}
 		}

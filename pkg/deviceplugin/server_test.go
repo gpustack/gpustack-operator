@@ -86,9 +86,8 @@ func TestResourceServer_Allocate_Sliced(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:                  "grp-0",
-				Manufacturer:        nodefeature.ManufacturerNVIDIA,
-				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{{
 					ID:    "dev-0",
 					Index: 0,
@@ -158,9 +157,8 @@ func TestResourceServer_Allocate_Sliced_RecordsUnits(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:                  "grp-0",
-				Manufacturer:        nodefeature.ManufacturerNVIDIA,
-				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{{
 					ID:    "dev-0",
 					Index: 0,
@@ -224,9 +222,8 @@ func crossModeDevices(nodeName string, statusMode workercore.DeviceAllocationMod
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:                  "grp-0",
-				Manufacturer:        nodefeature.ManufacturerNVIDIA,
-				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{{
 					ID:    "dev-0",
 					Index: 0,
@@ -368,9 +365,8 @@ func twoCardDevices(nodeName string, dev0Status workercore.DeviceAllocationMode)
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:                  "grp-0",
-				Manufacturer:        nodefeature.ManufacturerNVIDIA,
-				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{
 					{ID: "dev-0", Index: 0},
 					{ID: "dev-1", Index: 1},
@@ -432,25 +428,22 @@ func TestResourceServer_GetListAndWatch_AdvertisesByHealth(t *testing.T) {
 
 // TestResourceServer_GetListAndWatch_PerCardSlicedTokens verifies the sliced token pool is
 // sized per card from its own slicing capability: a soft card advertises LogicalSliced.Count
-// tokens, a MIG card advertises its PhysicalSliced.Count (non-zero, so it stays served rather
-// than dropping out), and an old-format card with no per-card data falls back to the group's
-// MaxSlices(). Non-sliced modes ignore the count.
+// tokens and a MIG card advertises its PhysicalSliced.Count (non-zero, so it stays served
+// rather than dropping out). Non-sliced modes ignore the count.
 func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 	const nodeName = "node-pc"
 	soft0 := Resource{Group: "grp-0", Device: "soft-0"}
 	soft1 := Resource{Group: "grp-0", Device: "soft-1"}
 	mig := Resource{Group: "grp-0", Device: "mig-0"}
 
-	// New-format group: two soft cards (128 slices each) + one MIG card (7 physical instances).
-	// The dual-written group AcceleratorsFeature (soft MaxSize 128) must NOT override the
-	// per-card MIG ceiling.
+	// Two soft cards (128 slices each) + one MIG card (7 physical instances): each card's own
+	// per-card capability sizes its token pool independently.
 	newFmt := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:                  "grp-0",
-				Manufacturer:        nodefeature.ManufacturerNVIDIA,
-				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128}},
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{
 					{ID: "soft-0", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
 					{ID: "soft-1", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
@@ -475,15 +468,6 @@ func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 		assert.Equal(t, 128, cardTokenCount(resp, soft0), "soft card advertises LogicalSliced.Count tokens")
 		assert.Equal(t, 128, cardTokenCount(resp, soft1), "soft card advertises LogicalSliced.Count tokens")
 		assert.Equal(t, 7, cardTokenCount(resp, mig), "MIG card advertises PhysicalSliced.Count tokens (stays served)")
-	})
-
-	t.Run("old-format card falls back to group MaxSlices", func(t *testing.T) {
-		// twoCardDevices has no per-card sliced data and a group MaxSize of 8.
-		resp, err := server(twoCardDevices(nodeName, workercore.DeviceAllocationModeNone),
-			workercore.DeviceAllocationModeSliced).getListAndWatchResponse(context.Background())
-		require.NoError(t, err)
-		assert.Equal(t, 8, cardTokenCount(resp, Resource{Group: "grp-0", Device: "dev-0"}), "fallback to group MaxSlices()")
-		assert.Equal(t, 8, cardTokenCount(resp, Resource{Group: "grp-0", Device: "dev-1"}), "fallback to group MaxSlices()")
 	})
 
 	t.Run("exclusive mode ignores the sliced count", func(t *testing.T) {
@@ -904,9 +888,8 @@ func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
 			Groups: []workercore.DevicesGroup{{
-				ID:                  "grp-0",
-				Manufacturer:        nodefeature.ManufacturerNVIDIA,
-				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 8}},
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{{
 					ID:    "dev-0",
 					Index: 0,
@@ -1013,36 +996,38 @@ func TestResourceServer_GetListAndWatch_Visibility(t *testing.T) {
 }
 
 // TestResourceServer_GetListAndWatch_Sliced verifies the sliced mode advertises, per card, a token
-// pool sized by the device group's MaxSlices() (from its Features), and advertises nothing for a
-// group with no slicing capability.
+// pool sized by the card's own logical slice count, and advertises nothing for a group whose cards
+// carry no slicing capability.
 func TestResourceServer_GetListAndWatch_Sliced(t *testing.T) {
 	const nodeName = "node-s"
-	twoCards := []workercore.Accelerator{{ID: "dev-0", Index: 0}, {ID: "dev-1", Index: 1}}
 	cases := []struct {
-		name     string
-		features workercore.AcceleratorsFeature
-		wantLen  int
+		name         string
+		logicalCount int32
+		wantLen      int
 	}{
 		{
-			name:     "nvidia group advertises cards x MaxSlices",
-			features: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128}},
-			wantLen:  2 * 128,
+			name:         "nvidia soft cards advertise cards x logical count",
+			logicalCount: 128,
+			wantLen:      2 * 128,
 		},
 		{
-			name:    "feature-less group advertises nothing",
+			name:    "slice-less group advertises nothing",
 			wantLen: 0,
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			twoCards := []workercore.Accelerator{
+				{ID: "dev-0", Index: 0, Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: c.logicalCount}}},
+				{ID: "dev-1", Index: 1, Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: c.logicalCount}}},
+			}
 			devs := &workercore.Devices{
 				ObjectMeta: meta.ObjectMeta{Name: nodeName},
 				Spec: workercore.DevicesSpec{
 					Groups: []workercore.DevicesGroup{{
-						ID:                  "grp-0",
-						Manufacturer:        nodefeature.ManufacturerNVIDIA,
-						AcceleratorsFeature: c.features,
-						Accelerators:        twoCards,
+						ID:           "grp-0",
+						Manufacturer: nodefeature.ManufacturerNVIDIA,
+						Accelerators: twoCards,
 					}},
 				},
 			}

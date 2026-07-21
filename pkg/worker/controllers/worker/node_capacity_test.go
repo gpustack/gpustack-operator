@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -100,35 +101,31 @@ func withSlicedPool(nd *core.Node, manufacturer string, tokens int64) *core.Node
 	return nd
 }
 
-// vendorSlicing is one device group's logical-slicing capability for a Devices fixture: the
-// group ID (which must equal the model part of the node's aKey, "${manufacturer}-${id}"), the
-// manufacturer, and the per-device slice count / overcommit. A maxSlices of 0 models a
-// non-sliceable group.
+// vendorSlicing is one device group's per-card logical-slicing capability for a Devices
+// fixture: the group ID (which must equal the model part of the node's aKey,
+// "${manufacturer}-${id}"), the manufacturer, the number of soft cards, and each card's
+// per-card slice count / overcommit. A maxSlices of 0 models a non-sliceable group (cards
+// carrying no slice budget).
 type vendorSlicing struct {
 	manufacturer string
 	id           string
+	cards        int32
 	maxSlices    int32
 	overcommit   bool
 }
 
-// devicesWithSlicing builds a same-named old-format Devices CR whose groups carry only the
-// legacy group-level AcceleratorsFeature (no per-card data), resolved by "${manufacturer}-${group
-// ID}" so desiredSlicedCapacity maps each node model to its own group. Because it has no per-card
-// data, it exercises the R1 dual-read fallback (a not-yet-upgraded DaemonSet during rollout).
+// devicesWithSlicing builds a same-named Devices CR whose groups carry per-card soft-slice
+// status, resolved by "${manufacturer}-${group ID}" so desiredSlicedCapacity maps each node
+// model to its own group. Each vendor contributes v.cards soft cards, matching the count its
+// model's ".count" label advertises on the node.
 func devicesWithSlicing(name string, vendors ...vendorSlicing) *workercore.Devices {
 	d := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: name}}
 	for _, v := range vendors {
-		d.Spec.Groups = append(d.Spec.Groups, workercore.DevicesGroup{
-			ID:           v.id,
-			Manufacturer: v.manufacturer,
-			AcceleratorsFeature: workercore.AcceleratorsFeature{
-				LogicalSliced: workercore.AcceleratorSliced{
-					MaxSize:                   v.maxSlices,
-					CoresPercentageOvercommit: v.overcommit,
-					MemoryPercentageStep:      1,
-				},
-			},
-		})
+		cards := make([]workercore.Accelerator, 0, v.cards)
+		for i := int32(0); i < v.cards; i++ {
+			cards = append(cards, softCard(strconv.Itoa(int(i)), v.maxSlices, v.overcommit))
+		}
+		d.Spec.Groups = append(d.Spec.Groups, slicedGroup(v.manufacturer, v.id, cards...))
 	}
 	return d
 }
@@ -176,10 +173,11 @@ func devicesWithGroups(name string, groups ...workercore.DevicesGroup) *workerco
 	}
 }
 
-// TestDesiredSlicedCapacity covers the R1 dual-read fallback: its fixtures are old-format
-// Devices (group-level AcceleratorsFeature, no per-card data), so the four keys must keep the
-// values today's implementation produced. TestDesiredSlicedCapacityNewFormat covers the new
-// per-card sourcing.
+// TestDesiredSlicedCapacity covers per-card sliced capacity across the aggregation and presence
+// gates: cross-model and cross-manufacturer summation, per-model memory-mib weighting, the managed
+// / sliced-pool / reported-capability gates, colliding group IDs staying isolated, and a
+// non-sliceable model contributing nothing. TestDesiredSlicedCapacityNewFormat covers the
+// mixed-logical/MIG, all-MIG, and lossy-VRAM edge cases.
 func TestDesiredSlicedCapacity(t *testing.T) {
 	cases := []struct {
 		name string
@@ -188,11 +186,11 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 		want map[string]int64 // resource name → value; nil → empty
 	}{
 		{
-			// Overcommit vendor (NVIDIA 128): cores-percentage = cards × maxSlices × 100.
-			name: "nvidia overcommit reports cards × maxSlices × 100 cores",
+			// Overcommit vendor (NVIDIA 128): cores-percentage = cards × per-card count × 100.
+			name: "nvidia overcommit reports cards × count × 100 cores",
 			node: withSlicedPool(acceleratableNode("node-5", "nvidia-a10g", "8", "24Gi", true),
 				nodefeature.ManufacturerNVIDIA, 8*128),
-			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true}),
+			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 8, 128, true}),
 			want: slicedWant(nodefeature.ManufacturerNVIDIA, 8, 8*a10gMib, 128, true),
 		},
 		{
@@ -200,21 +198,21 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 			name: "mthreads no-overcommit caps cores at cards × 100",
 			node: withSlicedPool(acceleratableNode("node-5", "mthreads-s4000", "8", "48Gi", true),
 				nodefeature.ManufacturerMThreads, 8*16),
-			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerMThreads, "s4000", 16, false}),
+			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerMThreads, "s4000", 8, 16, false}),
 			want: slicedWant(nodefeature.ManufacturerMThreads, 8, 8*mthreadsMib, 16, false),
 		},
 		{
 			name: "unmanaged node reports nothing",
 			node: withSlicedPool(acceleratableNode("node-5", "nvidia-a10g", "4", "24Gi", false),
 				nodefeature.ManufacturerNVIDIA, 4*128),
-			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true}),
+			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true}),
 			want: nil,
 		},
 		{
 			// The device-plugin advertises no ".sliced" pool → presence gate fails.
 			name: "no sliced token pool advertised is gated out",
 			node: acceleratableNode("node-5", "nvidia-a10g", "4", "24Gi", true),
-			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true}),
+			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true}),
 			want: nil,
 		},
 		{
@@ -233,8 +231,8 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 				withModel(acceleratableNode("node-5", "nvidia-a10g", "4", "24Gi", true), "nvidia-t4", "2", "16Gi"),
 				nodefeature.ManufacturerNVIDIA, 6*128),
 			devs: devicesWithSlicing("node-5",
-				vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true},
-				vendorSlicing{nodefeature.ManufacturerNVIDIA, "t4", 128, true}),
+				vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true},
+				vendorSlicing{nodefeature.ManufacturerNVIDIA, "t4", 2, 128, true}),
 			want: slicedWant(nodefeature.ManufacturerNVIDIA, 6, 4*a10gMib+2*t4Mib, 128, true),
 		},
 		{
@@ -243,15 +241,8 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 			name: "missing VRAM yields zero memory-mib, other keys intact",
 			node: withSlicedPool(acceleratableNode("node-5", "nvidia-a10g", "4", "", true),
 				nodefeature.ManufacturerNVIDIA, 4*128),
-			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true}),
+			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true}),
 			want: slicedWant(nodefeature.ManufacturerNVIDIA, 4, 0, 128, true),
-		},
-		{
-			name: "non-positive count is skipped",
-			node: withSlicedPool(acceleratableNode("node-5", "nvidia-a10g", "0", "24Gi", true),
-				nodefeature.ManufacturerNVIDIA, 128),
-			devs: devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true}),
-			want: nil,
 		},
 		{
 			// Distinct manufacturers report distinct key sets, each with its own
@@ -263,8 +254,8 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 					nodefeature.ManufacturerNVIDIA, 4*128),
 				nodefeature.ManufacturerMThreads, 2*16),
 			devs: devicesWithSlicing("node-5",
-				vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true},
-				vendorSlicing{nodefeature.ManufacturerMThreads, "s4000", 16, false}),
+				vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true},
+				vendorSlicing{nodefeature.ManufacturerMThreads, "s4000", 2, 16, false}),
 			want: mergeWant(
 				slicedWant(nodefeature.ManufacturerNVIDIA, 4, 4*a10gMib, 128, true),
 				slicedWant(nodefeature.ManufacturerMThreads, 2, 2*mthreadsMib, 16, false),
@@ -273,7 +264,7 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 		{
 			// Two manufacturers whose group IDs collide (ConstructGroupID strips the vendor
 			// prefix, so both normalize to "gpu"): keying slicing features by the full
-			// "${manufacturer}-${id}" keeps each model's own maxSlices/overcommit — a bare-ID
+			// "${manufacturer}-${id}" keeps each model's own count/overcommit — a bare-ID
 			// key would let the second group overwrite the first and cross-contaminate them.
 			name: "colliding group IDs across manufacturers stay isolated",
 			node: withSlicedPool(
@@ -282,8 +273,8 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 					nodefeature.ManufacturerNVIDIA, 4*128),
 				nodefeature.ManufacturerMThreads, 2*16),
 			devs: devicesWithSlicing("node-5",
-				vendorSlicing{nodefeature.ManufacturerNVIDIA, "gpu", 128, true},
-				vendorSlicing{nodefeature.ManufacturerMThreads, "gpu", 16, false}),
+				vendorSlicing{nodefeature.ManufacturerNVIDIA, "gpu", 4, 128, true},
+				vendorSlicing{nodefeature.ManufacturerMThreads, "gpu", 2, 16, false}),
 			want: mergeWant(
 				slicedWant(nodefeature.ManufacturerNVIDIA, 4, 4*a10gMib, 128, true),
 				slicedWant(nodefeature.ManufacturerMThreads, 2, 2*mthreadsMib, 16, false),
@@ -291,15 +282,15 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 		},
 		{
 			// A manufacturer with a sliceable model (Ascend 910B) and a non-sliceable one
-			// (Ascend 310, MaxSize 0) counts only the sliceable model's cards into ".sliced.*";
+			// (Ascend 310, count 0) counts only the sliceable model's cards into ".sliced.*";
 			// the 310's two cards are excluded even though the bare pool is manufacturer-wide.
 			name: "mixed sliceable and non-sliceable models count only the sliceable",
 			node: withSlicedPool(
 				withModel(acceleratableNode("node-5", "ascend-910b", "4", "64Gi", true), "ascend-310", "2", "24Gi"),
 				nodefeature.ManufacturerAscend, 4*63),
 			devs: devicesWithSlicing("node-5",
-				vendorSlicing{nodefeature.ManufacturerAscend, "910b", 63, true},
-				vendorSlicing{nodefeature.ManufacturerAscend, "310", 0, false}),
+				vendorSlicing{nodefeature.ManufacturerAscend, "910b", 4, 63, true},
+				vendorSlicing{nodefeature.ManufacturerAscend, "310", 2, 0, false}),
 			want: slicedWant(nodefeature.ManufacturerAscend, 4, 4*ascend910bMib, 63, true),
 		},
 	}
@@ -325,7 +316,7 @@ func TestDesiredSlicedCapacityIgnoresPartitions(t *testing.T) {
 		nodefeature.ManufacturerNVIDIA, 4*128)
 	// An invalid partitions value would have suppressed capacity before; now ignored.
 	nd.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g.sliced.partitions"] = "3"
-	devs := devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true})
+	devs := devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true})
 
 	got := desiredSlicedCapacity(nd, devs)
 	want := slicedWant(nodefeature.ManufacturerNVIDIA, 4, 4*a10gMib, 128, true)
@@ -441,8 +432,8 @@ func TestDesiredSlicedCapacityNewFormat(t *testing.T) {
 }
 
 // TestSlicedDetailChanged pins the Devices-watch predicate: it fires on a real slicing-detail
-// change (the sliceable/soft split, logical count, or the fallback inputs) and stays quiet on
-// non-slicing spec churn such as a health flip (allocation churn lives in Status, not Spec).
+// change (the sliceable/soft split or the logical count) and stays quiet on non-slicing spec
+// churn such as a health flip (allocation churn lives in Status, not Spec).
 func TestSlicedDetailChanged(t *testing.T) {
 	base := []workercore.DevicesGroup{
 		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)),
@@ -468,10 +459,6 @@ func TestSlicedDetailChanged(t *testing.T) {
 	added := append(append([]workercore.DevicesGroup{}, base...),
 		slicedGroup(nodefeature.ManufacturerMThreads, "s4000", softCard("0", 16, false)))
 	assert.True(t, slicedDetailChanged(base, added), "a new group fires")
-
-	oldA := devicesWithSlicing("n", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true}).Spec.Groups
-	oldB := devicesWithSlicing("n", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 64, true}).Spec.Groups
-	assert.True(t, slicedDetailChanged(oldA, oldB), "an old-format fallback maxSlices change fires")
 }
 
 // TestEnqueueNodeWhenDevicesChanged pins that a Devices ledger enqueues its name-identical Node.
@@ -620,7 +607,7 @@ func TestNodeCapacityReconciler_Reconcile(t *testing.T) {
 	t.Run("managed node is patched with four keys then idempotent", func(t *testing.T) {
 		nd := withSlicedPool(acceleratableNode(node, "nvidia-a10g", "4", "24Gi", true),
 			nodefeature.ManufacturerNVIDIA, 4*128)
-		devs := devicesWithSlicing(node, vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true})
+		devs := devicesWithSlicing(node, vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true})
 		cli := build(nd, devs)
 
 		require.NoError(t, reconcile(cli))
@@ -666,7 +653,7 @@ func TestNodeCapacityReconciler_Reconcile(t *testing.T) {
 			nvidiaSlicedMemPct: *resource.NewQuantity(int64(4)*100, resource.DecimalSI),
 			nvidiaSlicedMemMib: *resource.NewQuantity(wantMemMib, resource.DecimalSI),
 		}
-		devs := devicesWithSlicing(node, vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 128, true})
+		devs := devicesWithSlicing(node, vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true})
 		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).
 			WithObjects(nd, devs).WithStatusSubresource(&core.Node{}).Build()
 

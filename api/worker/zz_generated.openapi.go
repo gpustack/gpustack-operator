@@ -55,13 +55,11 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref),
 		v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref),
 		v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref),
-		v1alpha1.AcceleratorSliced{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_AcceleratorSliced(ref),
 		v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref),
 		v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref),
 		v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref),
 		v1alpha1.AcceleratorSlicedPhysicalDetailProfile{}.OpenAPIModelName(): schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(ref),
 		v1alpha1.AcceleratorStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref),
-		v1alpha1.AcceleratorsFeature{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_AcceleratorsFeature(ref),
 		v1alpha1.DeviceEthernet{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_DeviceEthernet(ref),
 		v1alpha1.DeviceTopology{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref),
 		v1alpha1.Devices{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_Devices(ref),
@@ -81,7 +79,6 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.InstanceStatus{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_InstanceStatus(ref),
 		v1alpha1.InstanceTemplate{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref),
 		v1alpha1.InstanceType{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_InstanceType(ref),
-		v1alpha1.InstanceTypeAccelerator{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref),
 		v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref),
 		v1alpha1.InstanceTypeAcceleratorDetail{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorDetail(ref),
 		v1alpha1.InstanceTypeCPU{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_InstanceTypeCPU(ref),
@@ -1850,7 +1847,7 @@ func schema_gpustack_api_worker_v1alpha1_Accelerator(ref common.ReferenceCallbac
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Status is the current status of the device. Field number 5 is reserved for the removed per-accelerator Features.",
+							Description: "Status is the current status of the device.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorStatus{}.OpenAPIModelName()),
 						},
@@ -2033,47 +2030,11 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref co
 	}
 }
 
-func schema_gpustack_api_worker_v1alpha1_AcceleratorSliced(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSliced describes one slicing capability of a device model.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"maxSize": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxSize is the maximum number of slices a single device can be split into.",
-							Default:     0,
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-					"coresPercentageOvercommit": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the device compute (time-sharing / weighted sharing), so the sum across slices may exceed one whole device; false means compute is partitioned (the sum stays within one device).",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"memoryPercentageStep": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device memory can be sliced.",
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-				},
-				Required: []string{"maxSize"},
-			},
-		},
-	}
-}
-
 func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSlicedDetail is the group-level slicing capability view that replaces the group-level AcceleratorsFeature.",
+				Description: "AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from the group's per-card slicing status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"logical": {
@@ -2225,35 +2186,6 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref common.ReferenceC
 		},
 		Dependencies: []string{
 			v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName(), v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName()},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_AcceleratorsFeature(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorsFeature describes the slicing features shared by every accelerator in a group.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"physicalSliced": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real spatial partition of cores and memory — when its MaxSize is non-zero.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorSliced{}.OpenAPIModelName()),
-						},
-					},
-					"logicalSliced": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an ld.preload interception library when its MaxSize is non-zero.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorSliced{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1alpha1.AcceleratorSliced{}.OpenAPIModelName()},
 	}
 }
 
@@ -2555,16 +2487,9 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 							},
 						},
 					},
-					"acceleratorsFeature": {
-						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorsFeature is the slicing capability shared by every accelerator in this group.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
-						},
-					},
 					"acceleratorSlicedDetail": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedDetail is the aggregated slicing capability of this group's accelerators; it replaces the group-level AcceleratorsFeature.",
+							Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its accelerators' per-card slicing status.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()),
 						},
@@ -2574,7 +2499,7 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.Accelerator{}.OpenAPIModelName(), v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName(), v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()},
+			v1alpha1.Accelerator{}.OpenAPIModelName(), v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()},
 	}
 }
 
@@ -3450,56 +3375,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceType(ref common.ReferenceCallba
 	}
 }
 
-func schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeAccelerator describes the information of the accelerator.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"memory": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"computeCapability": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"feature": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the per-device maximum slice count, whether compute may be overcommitted, and the memory step. A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's AcceleratorsFeature, folded in from the node-derived ResourceFlavor.\n\nField number 4 is reserved for the removed Sliceable bool.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU describes the CPU information of the accelerator.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1alpha1.AcceleratorsFeature{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
-	}
-}
-
 func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -3596,7 +3471,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorDetail(ref commo
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType. It mirrors InstanceTypeAccelerator but carries the pool-aggregated SlicedDetail (the observed slicing capability) in place of the desired-state Feature, so the status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.",
+				Description: "InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType. It carries the pool-aggregated SlicedDetail (the observed slicing capability), so the status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"memory": {

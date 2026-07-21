@@ -82,7 +82,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 													},
 													Properties: map[string]v1.JSONSchemaProps{
 														"acceleratorSlicedDetail": {
-															Description: "AcceleratorSlicedDetail is the aggregated slicing capability of this group's\naccelerators; it replaces the group-level AcceleratorsFeature.",
+															Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its\naccelerators' per-card slicing status.",
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"logical": {
@@ -172,7 +172,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Nullable: true,
 																		},
 																		"status": {
-																			Description: "Status is the current status of the device.\nField number 5 is reserved for the removed per-accelerator Features.",
+																			Description: "Status is the current status of the device.",
 																			Type:        "object",
 																			Required: []string{
 																				"unhealthy",
@@ -318,58 +318,6 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																"id",
 															},
 															XListType: ptr.To[string]("map"),
-														},
-														"acceleratorsFeature": {
-															Description: "AcceleratorsFeature is the slicing capability shared by every accelerator in this group.",
-															Type:        "object",
-															Properties: map[string]v1.JSONSchemaProps{
-																"logicalSliced": {
-																	Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an\nld.preload interception library when its MaxSize is non-zero.",
-																	Type:        "object",
-																	Required: []string{
-																		"maxSize",
-																	},
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"coresPercentageOvercommit": {
-																			Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
-																			Type:        "boolean",
-																		},
-																		"maxSize": {
-																			Description: "MaxSize is the maximum number of slices a single device can be split into.",
-																			Type:        "integer",
-																			Format:      "int32",
-																		},
-																		"memoryPercentageStep": {
-																			Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
-																			Type:        "integer",
-																			Format:      "int32",
-																		},
-																	},
-																},
-																"physicalSliced": {
-																	Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real\nspatial partition of cores and memory — when its MaxSize is non-zero.",
-																	Type:        "object",
-																	Required: []string{
-																		"maxSize",
-																	},
-																	Properties: map[string]v1.JSONSchemaProps{
-																		"coresPercentageOvercommit": {
-																			Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the\ndevice compute (time-sharing / weighted sharing), so the sum across slices may\nexceed one whole device; false means compute is partitioned (the sum stays within\none device).",
-																			Type:        "boolean",
-																		},
-																		"maxSize": {
-																			Description: "MaxSize is the maximum number of slices a single device can be split into.",
-																			Type:        "integer",
-																			Format:      "int32",
-																		},
-																		"memoryPercentageStep": {
-																			Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device\nmemory can be sliced.",
-																			Type:        "integer",
-																			Format:      "int32",
-																		},
-																	},
-																},
-															},
 														},
 														"computeCapability": {
 															Description: "ComputeCapability is the compute capability of the device.",

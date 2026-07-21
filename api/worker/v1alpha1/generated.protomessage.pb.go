@@ -20,8 +20,6 @@ func (*AcceleratorPhysicalSliced) ProtoMessage() {}
 
 func (*AcceleratorPhysicalSlicedProfile) ProtoMessage() {}
 
-func (*AcceleratorSliced) ProtoMessage() {}
-
 func (*AcceleratorSlicedDetail) ProtoMessage() {}
 
 func (*AcceleratorSlicedLogicalDetail) ProtoMessage() {}
@@ -31,8 +29,6 @@ func (*AcceleratorSlicedPhysicalDetail) ProtoMessage() {}
 func (*AcceleratorSlicedPhysicalDetailProfile) ProtoMessage() {}
 
 func (*AcceleratorStatus) ProtoMessage() {}
-
-func (*AcceleratorsFeature) ProtoMessage() {}
 
 func (*DeviceEthernet) ProtoMessage() {}
 
@@ -71,8 +67,6 @@ func (*InstanceStatus) ProtoMessage() {}
 func (*InstanceTemplate) ProtoMessage() {}
 
 func (*InstanceType) ProtoMessage() {}
-
-func (*InstanceTypeAccelerator) ProtoMessage() {}
 
 func (*InstanceTypeAcceleratorCPU) ProtoMessage() {}
 

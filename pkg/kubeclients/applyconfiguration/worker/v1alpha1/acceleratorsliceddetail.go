@@ -5,8 +5,8 @@ package v1alpha1
 // AcceleratorSlicedDetailApplyConfiguration represents a declarative configuration of the AcceleratorSlicedDetail type for use
 // with apply.
 //
-// AcceleratorSlicedDetail is the group-level slicing capability view that replaces the
-// group-level AcceleratorsFeature.
+// AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
+// the group's per-card slicing status.
 type AcceleratorSlicedDetailApplyConfiguration struct {
 	// Logical is the aggregated logical (software) slicing capability.
 	Logical *AcceleratorSlicedLogicalDetailApplyConfiguration `json:"logical,omitempty"`

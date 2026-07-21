@@ -17,9 +17,6 @@ type (
 	// Ethernet represents the Ethernet information of a device,
 	// including its name and PCI information.
 	Ethernet = workercore.DeviceEthernet
-	// AcceleratorSliced represents one slicing capability of a device model,
-	// including its maximum slice count and compute/memory sharing semantics.
-	AcceleratorSliced = workercore.AcceleratorSliced
 	// AcceleratorPhysicalSlicedProfile represents one hardware partition profile of a
 	// device model, such as an NVIDIA MIG profile.
 	AcceleratorPhysicalSlicedProfile = workercore.AcceleratorPhysicalSlicedProfile
@@ -35,9 +32,6 @@ type (
 	AcceleratorSlicedPhysicalDetail = workercore.AcceleratorSlicedPhysicalDetail
 	// AcceleratorSlicedPhysicalDetailProfile represents one group-aggregated physical profile.
 	AcceleratorSlicedPhysicalDetailProfile = workercore.AcceleratorSlicedPhysicalDetailProfile
-	// AcceleratorsFeature represents the slicing features shared by every
-	// accelerator in a group.
-	AcceleratorsFeature = workercore.AcceleratorsFeature
 	// AcceleratorStatus represents the status of the accelerator device,
 	// including its health status and other status information.
 	AcceleratorStatus = workercore.AcceleratorStatus

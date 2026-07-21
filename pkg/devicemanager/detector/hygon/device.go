@@ -190,16 +190,6 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				ComputeCapability: tgVer,
 			})
 			grpIndex = len(grpList) - 1
-
-			// DCU logical slicing via hy-virtual (vdev.conf + DTK/hyhal); the per-device slice
-			// count is capped at 4 (product default). The vdev.conf assigns each slice a
-			// disjoint CU bitmask, so compute is spatially partitioned (the sum stays within
-			// one card), not overcommitted.
-			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-				MaxSize:                   4,
-				CoresPercentageOvercommit: false,
-				MemoryPercentageStep:      1,
-			}
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
@@ -207,9 +197,12 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+			// DCU logical slicing via hy-virtual (vdev.conf + DTK/hyhal); the per-card slice count
+			// is capped at 4 (product default). The vdev.conf assigns each slice a disjoint CU
+			// bitmask, so compute is spatially partitioned (the sum stays within one card), not
+			// overcommitted.
 			status.LogicalSliced = device.AcceleratorLogicalSliced{
-				Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
-				CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+				Count: 4,
 			}
 		}
 

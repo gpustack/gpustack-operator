@@ -27,7 +27,6 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
-	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
@@ -133,12 +132,6 @@ func (r *NodeCapacityReconciler) Reconcile(ctx context.Context, req ctrl.Request
 // are omitted for a model with no soft cards (e.g. all-MIG), so buildSlicedCapacityPatch
 // reverse-patches any stale ones while ".sliced.units" stays.
 //
-// R1 fallback: a group carrying only the legacy AcceleratorsFeature (old-format Devices from
-// a not-yet-upgraded DaemonSet during rollout, with no per-card data) is computed the
-// previous way — cards from the ".count" label, slice count/overcommit from
-// MaxSlices()/SlicedCoresOvercommit() — so the four keys keep their current values instead
-// of nulling mid-rollout.
-//
 // The per-card VRAM stays the lossy ".memory" label (rounded to Gi), never the exact
 // DevicesGroup.Memory, so the advertised memory-mib matches the Pod-webhook anchor. A
 // manufacturer whose ".sliced" pool is absent/0, or with no sliceable model, is omitted. It
@@ -166,40 +159,23 @@ func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.Resourc
 
 		var units, cores, memoryPct, memoryMib int64
 		var logical bool
-		switch sliceable, soft := slicedCards(grp); {
-		case sliceable > 0:
-			// New-format Devices: ".sliced.units" counts every sliceable card (MIG
-			// included); the three logical keys count only the soft cards.
-			units = sliceable * nodefeature.ResourceMaxUnits
-			if soft > 0 {
-				logical = true
-				if grp.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit {
-					cores = int64(grp.AcceleratorSlicedDetail.Logical.Count) * 100
-				} else {
-					cores = soft * 100
-				}
-				memoryPct = soft * 100
-				memoryMib = soft * vram
-			}
-		case grp.AcceleratorsFeature.MaxSlices() > 0:
-			// R1 fallback: old-format Devices with no per-card data — preserve today's
-			// numbers from the ".count" label + the legacy group AcceleratorsFeature.
-			cards, err := strconvx.Atoi[int64](nd.Labels[nodeKey+".count"])
-			if err != nil || cards <= 0 {
-				continue
-			}
-			logical = true
-			units = cards * nodefeature.ResourceMaxUnits
-			if grp.AcceleratorsFeature.SlicedCoresOvercommit() {
-				cores = cards * int64(grp.AcceleratorsFeature.MaxSlices()) * 100
-			} else {
-				cores = cards * 100
-			}
-			memoryPct = cards * 100
-			memoryMib = cards * vram
-		default:
+		sliceable, soft, softSlices := slicedCards(grp)
+		if sliceable == 0 {
 			// Non-sliceable model: contributes nothing.
 			continue
+		}
+		// ".sliced.units" counts every sliceable card (MIG included); the three logical
+		// keys count only the soft cards, all sourced from the same per-card recount.
+		units = sliceable * nodefeature.ResourceMaxUnits
+		if soft > 0 {
+			logical = true
+			if grp.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit {
+				cores = softSlices * 100
+			} else {
+				cores = soft * 100
+			}
+			memoryPct = soft * 100
+			memoryMib = soft * vram
 		}
 
 		manufacturer, _, _ := strings.Cut(aKey, "-")
@@ -256,12 +232,12 @@ func devicesGroupsByAcceleratableKey(devs *workercore.Devices) map[string]*worke
 	return out
 }
 
-// slicedCards counts a Devices group's sliceable and soft-only cards from its per-card data.
-// sliceable counts cards offering any slice budget (logical ∨ physical, so MIG cards are
-// included); soft counts cards offering a logical (soft) budget only. Both are 0 for an
-// old-format group with no per-card data, which routes desiredSlicedCapacity to its
-// AcceleratorsFeature fallback.
-func slicedCards(g *workercore.DevicesGroup) (sliceable, soft int64) {
+// slicedCards counts a Devices group's sliceable and soft-only cards from its per-card data and
+// sums the soft cards' logical slice counts. sliceable counts cards offering any slice budget
+// (logical ∨ physical, so MIG cards are included); soft counts cards offering a logical (soft)
+// budget only; softSlices is Σ their LogicalSliced.Count. All are 0 for a group with no
+// sliceable cards, which contributes nothing to desiredSlicedCapacity.
+func slicedCards(g *workercore.DevicesGroup) (sliceable, soft, softSlices int64) {
 	for i := range g.Accelerators {
 		st := &g.Accelerators[i].Status
 		logical := st.LogicalSliced.Count > 0
@@ -270,9 +246,10 @@ func slicedCards(g *workercore.DevicesGroup) (sliceable, soft int64) {
 		}
 		if logical {
 			soft++
+			softSlices += int64(st.LogicalSliced.Count)
 		}
 	}
-	return sliceable, soft
+	return sliceable, soft, softSlices
 }
 
 // acceleratableCardMemoryMib parses the per-card VRAM (in MiB) from a model's
@@ -459,16 +436,13 @@ func (r *NodeCapacityReconciler) enqueueNodeWhenDevicesChanged(
 }
 
 // slicedSignature captures exactly the Devices group fields desiredSlicedCapacity consumes:
-// the per-card sliceable/soft split, the logical detail (count + overcommit), and the legacy
-// AcceleratorsFeature fallback inputs. Comparing signatures lets the Devices watch fire only
-// on a real slicing-detail change.
+// the per-card sliceable/soft split and the logical detail (count + overcommit). Comparing
+// signatures lets the Devices watch fire only on a real slicing-detail change.
 type slicedSignature struct {
-	sliceable          int64
-	soft               int64
-	logicalCount       int32
-	logicalOvercommit  bool
-	fallbackMaxSlices  int32
-	fallbackOvercommit bool
+	sliceable         int64
+	soft              int64
+	logicalCount      int32
+	logicalOvercommit bool
 }
 
 // slicedDetailChanged reports whether the slicing capability desiredSlicedCapacity consumes
@@ -485,14 +459,12 @@ func slicedSignatures(groups []workercore.DevicesGroup) map[string]slicedSignatu
 	out := make(map[string]slicedSignature, len(groups))
 	for i := range groups {
 		g := &groups[i]
-		sliceable, soft := slicedCards(g)
+		sliceable, soft, _ := slicedCards(g)
 		out[g.Manufacturer+"-"+g.ID] = slicedSignature{
-			sliceable:          sliceable,
-			soft:               soft,
-			logicalCount:       g.AcceleratorSlicedDetail.Logical.Count,
-			logicalOvercommit:  g.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit,
-			fallbackMaxSlices:  g.AcceleratorsFeature.MaxSlices(),
-			fallbackOvercommit: g.AcceleratorsFeature.SlicedCoresOvercommit(),
+			sliceable:         sliceable,
+			soft:              soft,
+			logicalCount:      g.AcceleratorSlicedDetail.Logical.Count,
+			logicalOvercommit: g.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit,
 		}
 	}
 	return out

@@ -77,12 +77,9 @@ type (
 		// +listMapKey=id
 		Accelerators []Accelerator `json:"accelerators,omitempty" yaml:"accelerators,omitempty" protobuf:"bytes,10,opt,name=accelerators"`
 
-		// AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
-		AcceleratorsFeature AcceleratorsFeature `json:"acceleratorsFeature,omitempty" yaml:"acceleratorsFeature,omitempty" protobuf:"bytes,11,opt,name=acceleratorsFeature"` // nolint: lll
-
-		// AcceleratorSlicedDetail is the aggregated slicing capability of this group's
-		// accelerators; it replaces the group-level AcceleratorsFeature.
-		AcceleratorSlicedDetail AcceleratorSlicedDetail `json:"acceleratorSlicedDetail,omitempty" yaml:"acceleratorSlicedDetail,omitempty" protobuf:"bytes,12,opt,name=acceleratorSlicedDetail"` // nolint: lll
+		// AcceleratorSlicedDetail is the group's slicing capability, aggregated from its
+		// accelerators' per-card slicing status.
+		AcceleratorSlicedDetail AcceleratorSlicedDetail `json:"acceleratorSlicedDetail,omitempty" yaml:"acceleratorSlicedDetail,omitempty" protobuf:"bytes,11,opt,name=acceleratorSlicedDetail"` // nolint: lll
 	}
 
 	// DeviceTopology describes the topology information of the device.
@@ -188,24 +185,7 @@ type (
 		Topology DeviceTopology `json:"topology" yaml:"topology" protobuf:"bytes,4,name=topology"`
 
 		// Status is the current status of the device.
-		// Field number 5 is reserved for the removed per-accelerator Features.
-		Status AcceleratorStatus `json:"status" yaml:"status" protobuf:"bytes,6,name=status"`
-	}
-
-	// AcceleratorSliced describes one slicing capability of a device model.
-	AcceleratorSliced struct {
-		// MaxSize is the maximum number of slices a single device can be split into.
-		MaxSize int32 `json:"maxSize" yaml:"maxSize" protobuf:"varint,1,opt,name=maxSize"`
-
-		// CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
-		// device compute (time-sharing / weighted sharing), so the sum across slices may
-		// exceed one whole device; false means compute is partitioned (the sum stays within
-		// one device).
-		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,2,opt,name=coresPercentageOvercommit"` // nolint: lll
-
-		// MemoryPercentageStep is the granularity, in percentage points, at which the device
-		// memory can be sliced.
-		MemoryPercentageStep int32 `json:"memoryPercentageStep,omitempty" yaml:"memoryPercentageStep,omitempty" protobuf:"varint,3,opt,name=memoryPercentageStep"` // nolint: lll
+		Status AcceleratorStatus `json:"status" yaml:"status" protobuf:"bytes,5,name=status"`
 	}
 
 	// AcceleratorPhysicalSlicedProfile describes one hardware partition profile of a device
@@ -255,17 +235,6 @@ type (
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
-	// AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
-	AcceleratorsFeature struct {
-		// PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real
-		// spatial partition of cores and memory — when its MaxSize is non-zero.
-		PhysicalSliced AcceleratorSliced `json:"physicalSliced,omitempty" yaml:"physicalSliced,omitempty" protobuf:"bytes,1,opt,name=physicalSliced"`
-
-		// LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an
-		// ld.preload interception library when its MaxSize is non-zero.
-		LogicalSliced AcceleratorSliced `json:"logicalSliced,omitempty" yaml:"logicalSliced,omitempty" protobuf:"bytes,2,opt,name=logicalSliced"`
-	}
-
 	// AcceleratorStatus describes the observed state of the accelerator device.
 	AcceleratorStatus struct {
 		// Unhealthy indicates whether the device is healthy or not.
@@ -309,8 +278,8 @@ type (
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
-	// AcceleratorSlicedDetail is the group-level slicing capability view that replaces the
-	// group-level AcceleratorsFeature.
+	// AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
+	// the group's per-card slicing status.
 	AcceleratorSlicedDetail struct {
 		// Logical is the aggregated logical (software) slicing capability.
 		Logical AcceleratorSlicedLogicalDetail `json:"logical,omitempty" yaml:"logical,omitempty" protobuf:"bytes,1,opt,name=logical"`
@@ -337,30 +306,6 @@ type (
 		Remaining int32 `json:"remaining,omitempty" yaml:"remaining,omitempty" protobuf:"varint,5,opt,name=remaining"`
 	}
 )
-
-// MaxSlices returns the maximum number of slices a single device in the group can be
-// split into: the larger of the physical (hardware) and logical (software) slice sizes.
-// A zero Size means the mode is disabled, so a group with neither capability yields 0
-// (not sliceable), and the allocator advertises no ".sliced" resource for it.
-func (in AcceleratorsFeature) MaxSlices() int32 {
-	n := in.PhysicalSliced.MaxSize
-	if in.LogicalSliced.MaxSize > n {
-		n = in.LogicalSliced.MaxSize
-	}
-	return n
-}
-
-// SlicedCoresOvercommit reports whether the slicing mode that determines MaxSlices()
-// allows each slice to claim up to 100% of the device compute. It reads the flag off
-// the mode with the larger MaxSize (the same mode MaxSlices() picks), so the per-card
-// compute budget matches the winning mode: true multiplies the compute budget by the
-// slice count, false caps it at a single whole-card 100%.
-func (in AcceleratorsFeature) SlicedCoresOvercommit() bool {
-	if in.LogicalSliced.MaxSize > in.PhysicalSliced.MaxSize {
-		return in.LogicalSliced.CoresPercentageOvercommit
-	}
-	return in.PhysicalSliced.CoresPercentageOvercommit
-}
 
 // EffectiveSlicedCount returns a card's effective sliced-token count: its logical (soft)
 // slice count when the card is logically sliceable, otherwise its physical-slice ceiling (a

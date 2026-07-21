@@ -176,14 +176,6 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 					DriverVersion: drVer,
 				})
 				grpIndex = len(grpList) - 1
-
-				// GPU logical slicing via the sGPU kmod + MTHREADS_QOS_* env; the per-device
-				// slice count is capped at 16. Compute is a relative weight (not a hard cap),
-				// so it is not overcommitted.
-				grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-					MaxSize:              16,
-					MemoryPercentageStep: 1,
-				}
 			}
 
 			physicalIndexes := []uint32{uint32(i)}
@@ -193,9 +185,11 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			var status device.AcceleratorStatus
 			{
 				status.Unhealthy = memoryUnhealthy
+				// GPU logical slicing via the sGPU kmod + MTHREADS_QOS_* env; the per-card slice
+				// count is capped at 16. Compute is a relative weight (not a hard cap), so it is
+				// not overcommitted.
 				status.LogicalSliced = device.AcceleratorLogicalSliced{
-					Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
-					CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+					Count: 16,
 				}
 			}
 

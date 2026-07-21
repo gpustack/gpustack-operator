@@ -217,18 +217,6 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					Family:         family,
 				})
 				grpIndex = len(grpList) - 1
-
-				// 910B/910C/950 support logical (soft) slicing: temporal compute sharing
-				// plus soft VRAM partitioning via vCANN-RT ld.preload. The per-device slice
-				// count is capped at the max user processes a device serves (63).
-				switch grpList[grpIndex].Family {
-				case "910B", "910C", "950":
-					grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-						MaxSize:                   63,
-						CoresPercentageOvercommit: true,
-						MemoryPercentageStep:      1,
-					}
-				}
 			}
 
 			topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
@@ -247,9 +235,15 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			var status device.AcceleratorStatus
 			{
 				status.Unhealthy = memoryUnhealthy
-				status.LogicalSliced = device.AcceleratorLogicalSliced{
-					Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
-					CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+				// 910B/910C/950 support logical (soft) slicing: temporal compute sharing plus
+				// soft VRAM partitioning via vCANN-RT ld.preload; the per-card slice count is
+				// capped at the max user processes a device serves (63).
+				switch grpList[grpIndex].Family {
+				case "910B", "910C", "950":
+					status.LogicalSliced = device.AcceleratorLogicalSliced{
+						Count:                     63,
+						CoresPercentageOvercommit: true,
+					}
 				}
 			}
 

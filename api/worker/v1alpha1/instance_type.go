@@ -126,35 +126,6 @@ type InstanceTypeCPUCache struct {
 	L3 string `json:"l3,omitempty" protobuf:"bytes,4,opt,name=l3"`
 }
 
-// InstanceTypeAccelerator describes the information of the accelerator.
-type InstanceTypeAccelerator struct {
-	// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
-	Memory string `json:"memory,omitempty" protobuf:"bytes,1,opt,name=memory"`
-
-	// Cores is the number of cores of the accelerator, e.g. "128", "256".
-	Cores string `json:"cores,omitempty" protobuf:"bytes,2,opt,name=cores"`
-
-	// ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
-	ComputeCapability string `json:"computeCapability,omitempty" protobuf:"bytes,3,opt,name=computeCapability"`
-
-	// Feature is the accelerator's slicing capability: the physical / logical slicing mode, the
-	// per-device maximum slice count, whether compute may be overcommitted, and the memory step.
-	// A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's
-	// AcceleratorsFeature, folded in from the node-derived ResourceFlavor.
-	//
-	// Field number 4 is reserved for the removed Sliceable bool.
-	Feature AcceleratorsFeature `json:"feature,omitempty" protobuf:"bytes,6,opt,name=feature"`
-
-	// CPU describes the CPU information of the accelerator.
-	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
-}
-
-// IsSliceable reports whether the accelerator can be sliced: its slicing descriptor
-// carries a non-zero maximum slice count.
-func (in InstanceTypeAccelerator) IsSliceable() bool {
-	return in.Feature.MaxSlices() > 0
-}
-
 // InstanceTypeAcceleratorCPU describes the CPU information of the accelerator.
 type InstanceTypeAcceleratorCPU struct {
 	// Manufacturer is the name of the CPU manufacturer, e.g. "amd", "intel".
@@ -205,9 +176,8 @@ func (in InstanceTypeDetail) AcceleratorReady() bool {
 }
 
 // InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
-// It mirrors InstanceTypeAccelerator but carries the pool-aggregated SlicedDetail (the observed
-// slicing capability) in place of the desired-state Feature, so the status-side detail can hold
-// the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
+// It carries the pool-aggregated SlicedDetail (the observed slicing capability), so the
+// status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
 type InstanceTypeAcceleratorDetail struct {
 	// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
 	Memory string `json:"memory,omitempty" protobuf:"bytes,1,opt,name=memory"`

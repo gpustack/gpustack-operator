@@ -1021,7 +1021,7 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       hardware but different `Description` collapse to **one** aggregated item; a JSON fixture documents the new
       shape (`Detail` only on the item status). Verify: `go test ./pkg/workergateway/...`.
 
-[ ] **T12: delete the whole `AcceleratorsFeature` family + remove the R1 fallback (F1 cleanup).**
+[x] **T12: delete the whole `AcceleratorsFeature` family + remove the R1 fallback (F1 cleanup).**
     - **Delete the whole `AcceleratorsFeature` family (2026-07-21 decision, R1 — within this spec, not deferred):**
       the `AcceleratorsFeature` / `AcceleratorSliced` structs, `MaxSlices()` / `SlicedCoresOvercommit()`,
       `MemoryPercentageStep`, and the `DevicesGroup.AcceleratorsFeature` field — renumbering the trailing

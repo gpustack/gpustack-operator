@@ -6,9 +6,8 @@ package v1alpha1
 // with apply.
 //
 // InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
-// It mirrors InstanceTypeAccelerator but carries the pool-aggregated SlicedDetail (the observed
-// slicing capability) in place of the desired-state Feature, so the status-side detail can hold
-// the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
+// It carries the pool-aggregated SlicedDetail (the observed slicing capability), so the
+// status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
 type InstanceTypeAcceleratorDetailApplyConfiguration struct {
 	// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
 	Memory *string `json:"memory,omitempty"`

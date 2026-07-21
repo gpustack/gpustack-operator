@@ -141,14 +141,6 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 				Family:         family,
 			})
 			grpIndex = len(grpList) - 1
-
-			// GPU logical slicing via sysfs sgpu/create (+ METAX_SGPUS); the per-device slice
-			// count is capped at 16 (DefaultDevCnt, operationally confirmed). Compute is
-			// spatially partitioned, so it is not overcommitted.
-			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-				MaxSize:              16,
-				MemoryPercentageStep: 1,
-			}
 		}
 
 		physicalIndexes := getPhysicalIndexes(pciBusId)
@@ -158,9 +150,11 @@ func (in *metax) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+			// GPU logical slicing via sysfs sgpu/create (+ METAX_SGPUS); the per-card slice count
+			// is capped at 16 (DefaultDevCnt, operationally confirmed). Compute is spatially
+			// partitioned, not overcommitted.
 			status.LogicalSliced = device.AcceleratorLogicalSliced{
-				Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
-				CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+				Count: 16,
 			}
 		}
 
