@@ -154,7 +154,15 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 					}),
 				}
 			}
-			ids := res.GetDeviceIds(s.AllocationMode, devGroup.AcceleratorsFeature.MaxSlices())
+			// Size the sliced token pool from the card's own per-card slicing capability
+			// (its logical soft count, or the MIG physical ceiling). R1 fallback: an
+			// old-format card with no per-card data uses the group's MaxSlices() so the
+			// pool is not zeroed mid-rollout. The count is ignored for non-sliced modes.
+			slicedCount := devAccelerator.Status.EffectiveSlicedCount()
+			if slicedCount <= 0 {
+				slicedCount = devGroup.AcceleratorsFeature.MaxSlices()
+			}
+			ids := res.GetDeviceIds(s.AllocationMode, slicedCount)
 			for k := range ids {
 				resp.Devices = append(resp.Devices,
 					&deviceplugin.Device{

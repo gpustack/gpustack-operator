@@ -862,7 +862,7 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       `.sliced.memory-mib` matches today's lossy-label value; a **label-vs-Devices skew** fixture asserting
       Devices wins for cardinality. Verify: `go test ./pkg/worker/controllers/worker/...`.
 
-[ ] **T6: device-plugin `.sliced` token pool → per-card count (F5).**
+[x] **T6: device-plugin `.sliced` token pool → per-card count (F5).**
     - Replace `devGroup.AcceleratorsFeature.MaxSlices()` at `server.go:157` with a per-card helper on
       `AcceleratorStatus` returning `LogicalSliced.Count` (logical) or `PhysicalSliced.Count` (MIG). **R1
       fallback:** when the per-card fields are absent (old-format Devices), fall back to the group

@@ -430,6 +430,70 @@ func TestResourceServer_GetListAndWatch_AdvertisesByHealth(t *testing.T) {
 		"a card held in another mode via reservation must still be advertised (health-only)")
 }
 
+// TestResourceServer_GetListAndWatch_PerCardSlicedTokens verifies the sliced token pool is
+// sized per card from its own slicing capability: a soft card advertises LogicalSliced.Count
+// tokens, a MIG card advertises its PhysicalSliced.Count (non-zero, so it stays served rather
+// than dropping out), and an old-format card with no per-card data falls back to the group's
+// MaxSlices(). Non-sliced modes ignore the count.
+func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
+	const nodeName = "node-pc"
+	soft0 := Resource{Group: "grp-0", Device: "soft-0"}
+	soft1 := Resource{Group: "grp-0", Device: "soft-1"}
+	mig := Resource{Group: "grp-0", Device: "mig-0"}
+
+	// New-format group: two soft cards (128 slices each) + one MIG card (7 physical instances).
+	// The dual-written group AcceleratorsFeature (soft MaxSize 128) must NOT override the
+	// per-card MIG ceiling.
+	newFmt := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:                  "grp-0",
+				Manufacturer:        nodefeature.ManufacturerNVIDIA,
+				AcceleratorsFeature: workercore.AcceleratorsFeature{LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128}},
+				Accelerators: []workercore.Accelerator{
+					{ID: "soft-0", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
+					{ID: "soft-1", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
+					{ID: "mig-0", Status: workercore.AcceleratorStatus{PhysicalSliced: workercore.AcceleratorPhysicalSliced{Count: 7}}},
+				},
+			}},
+		},
+	}
+
+	server := func(devs *workercore.Devices, mode workercore.DeviceAllocationMode) *ResourceServer {
+		cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(devs).Build()
+		return &ResourceServer{
+			Manufacturer:   nodefeature.ManufacturerNVIDIA,
+			AllocationMode: mode,
+			Reconciler:     &DevicesReconciler{NodeName: nodeName, Client: cli},
+		}
+	}
+
+	t.Run("soft cards get logical count, mig card gets physical ceiling", func(t *testing.T) {
+		resp, err := server(newFmt, workercore.DeviceAllocationModeSliced).getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 128, cardTokenCount(resp, soft0), "soft card advertises LogicalSliced.Count tokens")
+		assert.Equal(t, 128, cardTokenCount(resp, soft1), "soft card advertises LogicalSliced.Count tokens")
+		assert.Equal(t, 7, cardTokenCount(resp, mig), "MIG card advertises PhysicalSliced.Count tokens (stays served)")
+	})
+
+	t.Run("old-format card falls back to group MaxSlices", func(t *testing.T) {
+		// twoCardDevices has no per-card sliced data and a group MaxSize of 8.
+		resp, err := server(twoCardDevices(nodeName, workercore.DeviceAllocationModeNone),
+			workercore.DeviceAllocationModeSliced).getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 8, cardTokenCount(resp, Resource{Group: "grp-0", Device: "dev-0"}), "fallback to group MaxSlices()")
+		assert.Equal(t, 8, cardTokenCount(resp, Resource{Group: "grp-0", Device: "dev-1"}), "fallback to group MaxSlices()")
+	})
+
+	t.Run("exclusive mode ignores the sliced count", func(t *testing.T) {
+		resp, err := server(newFmt, workercore.DeviceAllocationModeExclusive).getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 1, cardTokenCount(resp, soft0), "exclusive advertises one token per card")
+		assert.Equal(t, 1, cardTokenCount(resp, mig), "exclusive advertises one token per card regardless of MIG")
+	})
+}
+
 // concurrentAllocatePod builds a pending pod requesting count units of mode's resource on node.
 func concurrentAllocatePod(nodeName, name, uid string, mode workercore.DeviceAllocationMode, count int) *core.Pod {
 	resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, mode)
