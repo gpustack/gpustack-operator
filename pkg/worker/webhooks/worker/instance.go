@@ -88,6 +88,12 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 
 	var errs field.ErrorList
 	if instRess := inst.Spec.Resources; instType != nil && instRess != nil {
+		// A slice request whose accelerator Detail is not yet computed cannot be validated;
+		// reject it with a transient (retryable) error, never a permanent Invalid, so the same
+		// request succeeds once the reconciler populates Status.Detail.
+		if slicedRequestNotReady(instType, instRess) {
+			return nil, kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
+		}
 		errs = append(errs, validateResourceRequests(instType, instRess)...)
 	}
 	switch {
@@ -223,6 +229,11 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		// per-unit RAM / local storage), not just the upper caps — a stopped Instance may have
 		// had its resources edited while stopped, when the immutability guard above is skipped.
 		if inst.Spec.Resources != nil {
+			// As on create, a slice request whose accelerator Detail is not yet computed is
+			// rejected with a transient (retryable) error, not a permanent Invalid.
+			if slicedRequestNotReady(instType, inst.Spec.Resources) {
+				return nil, kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
+			}
 			errs = append(errs, validateResourceRequests(instType, inst.Spec.Resources)...)
 		}
 	case stopping:
@@ -294,6 +305,13 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	withGeneralOvercommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
 	instRess := inst.Spec.Resources
+	// A slice request cannot be sized until the reconciler has computed the accelerator Detail:
+	// its sliceability and per-card sizing come from Status.Detail. Reject with a transient
+	// (retryable) error rather than fall through to whole-card sizing (which would silently
+	// mis-size the Pod); the same request succeeds once Detail is populated.
+	if slicedRequestNotReady(instType, instRess) {
+		return kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
+	}
 	if instType.Spec.Acceleratable {
 		if instRess.Accelerator == nil {
 			// Default a request here,
@@ -302,7 +320,7 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 		memPct := instRess.AcceleratorSlicedMemoryPercentage
 		coresPct := instRess.AcceleratorSlicedCoresPercentage
-		if instType.Spec.IsSliceable() && (memPct > 0 || coresPct > 0) {
+		if instType.Status.Detail.IsSliceable() && (memPct > 0 || coresPct > 0) {
 			// A slice is a fraction of ONE card, so default an absent or explicitly zero
 			// accelerator count to 1 (nil was already defaulted above); otherwise
 			// validation would reject it for not being exactly 1.
@@ -399,6 +417,22 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	return nil
 }
 
+// slicedRequestNotReady reports whether the request asks for a slice (a non-zero memory or compute
+// percentage) of an accelerated InstanceType whose observed accelerator Detail has not been
+// computed yet. Sliceability and per-card sizing are read from Status.Detail, so until it is ready
+// such a request can neither be sized nor validated and must be rejected as retryable — never
+// treated as a whole-card request, which would silently admit a mis-sized Pod.
+func slicedRequestNotReady(instType *worker.InstanceType, instRess *workercore.InstanceResources) bool {
+	if instRess == nil || !instType.Spec.Acceleratable {
+		return false
+	}
+	// A non-zero percentage (including a negative, which range validation later rejects only
+	// once Detail is ready) is a slice request: gate it as not-ready so an empty Detail can
+	// never fall through to whole-card sizing.
+	slice := instRess.AcceleratorSlicedMemoryPercentage != 0 || instRess.AcceleratorSlicedCoresPercentage != 0
+	return slice && !instType.Status.Detail.AcceleratorReady()
+}
+
 // validateResourceRequests checks an Instance's resource requests against its InstanceType's
 // entitlements: sign, the accelerator/CPU caps, the sliced-percentage ranges, and (via
 // capResourcesToInstanceType) the per-unit RAM / local-storage limits. Shared by ValidateCreate and
@@ -411,7 +445,7 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	// Validate accelerator request first since it may determine the validation of other resource requests.
 	if instType.Spec.Acceleratable {
 		switch {
-		case instType.Spec.IsSliceable():
+		case instType.Status.Detail.IsSliceable():
 			// The slice is requested as memory/compute percentages in [0,100] (0 disables
 			// slicing); the two budgets are independent.
 			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)

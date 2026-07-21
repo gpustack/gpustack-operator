@@ -930,7 +930,7 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       `"CPU-only"` for the collapsed generic pool). Verify: `make generate` clean;
       `go test ./pkg/worker/controllers/worker/...`.
 
-[ ] **T9: re-plumb every Spec-descriptor reader to `Status.Detail`; drop webhook enrichment + the
+[x] **T9: re-plumb every Spec-descriptor reader to `Status.Detail`; drop webhook enrichment + the
     `acceleratorFeature` note producer (F6/F7).**
     - `pkg/worker/webhooks/worker/pod.go:253` — read per-card VRAM from `it.Status.Detail.Memory`. **Empty
       Detail is an explicit, retryable admission rejection** ("instance type not yet ready"), not a silent

@@ -212,12 +212,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"memory":           flavor.Memory,
 		"cores":            flavor.Cores,
 	}
-	// Record the device group's slicing capability as JSON so the derived InstanceType and the
-	// flavor catalog can surface how (and how finely) the pool slices; a CPU flavor carries none.
-	if flavor.Acceleratable {
-		feature := r.nodeFlavorAcceleratorsFeature(ctx, node.Name, flavor.AcceleratorKey)
-		eNotes["acceleratorFeature"] = string(json.ShouldMarshal(feature))
-	}
 	// Record the raw CPU detail: always for a CPU flavor; for an accelerated flavor only when
 	// CPU-manufacturer awareness is on.
 	if !flavor.Acceleratable || cpuAware {
@@ -320,31 +314,6 @@ func featureKeyLabel(acceleratable bool, key string) string {
 // umbrella "feature.gpustack.ai/acceleratable=true" label.
 func nodeIsAccelerated(nd *core.Node) bool {
 	return kubemeta.IsLabeled(nd, nodefeature.NodeAcceleratableLabelKey, "true")
-}
-
-// nodeFlavorAcceleratorsFeature returns the slicing capability of the specific accelerator model
-// backing this flavor. It reads the node's same-named Devices object (one per node) and finds the
-// device group whose "${manufacturer}-${group ID}" key matches the flavor's accelerator key, so a
-// node hosting several models of one manufacturer (e.g. a sliceable Ascend 910B and a non-sliceable
-// 310) resolves each flavor to its own group. A missing Devices object or group yields the zero
-// feature (not sliceable); the flavor is rebuilt once the node reports.
-func (r *NodeFlavorReconciler) nodeFlavorAcceleratorsFeature(ctx context.Context, nodeName, acceleratorKey string) workercore.AcceleratorsFeature {
-	devs := new(workercore.Devices)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs,
-		ctrlcli.UnsafeDisableDeepCopy)
-	if err != nil {
-		return workercore.AcceleratorsFeature{}
-	}
-	for i := range devs.Spec.Groups {
-		g := &devs.Spec.Groups[i]
-		// Match the full "${manufacturer}-${group ID}" key: ConstructGroupID strips the
-		// vendor prefix, so a bare group ID can collide across manufacturers on a node.
-		if g.Manufacturer+"-"+g.ID != acceleratorKey {
-			continue
-		}
-		return g.AcceleratorsFeature
-	}
-	return workercore.AcceleratorsFeature{}
 }
 
 const (

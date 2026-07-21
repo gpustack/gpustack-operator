@@ -204,6 +204,19 @@ type InstanceTypeDetail struct {
 	InstanceTypeAcceleratorDetail `json:",inline" protobuf:"bytes,5,opt,name=accelerator"`
 }
 
+// AcceleratorReady reports whether the observed hardware Detail has been computed for an
+// accelerated InstanceType. The reconciler fills Manufacturer from the matched ResourceFlavor's
+// note, which an accelerated pool's flavor always carries, so a non-empty Manufacturer means the
+// Detail is populated; an empty Detail is the not-yet-synced state a reader must treat as not ready.
+//
+// The reconciler's computeDetail fills Manufacturer and the accelerator SlicedDetail in one pass
+// from a single Devices read, so a ready Manufacturer implies the slicing detail is equally
+// current: a reader keying sliceability off Status.Detail can rely on this atomicity, never
+// observing a populated Manufacturer beside a stale/empty SlicedDetail for a sliceable model.
+func (in InstanceTypeDetail) AcceleratorReady() bool {
+	return in.Manufacturer != ""
+}
+
 // InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
 // It mirrors InstanceTypeAccelerator but carries the pool-aggregated SlicedDetail (the observed
 // slicing capability) in place of the desired-state Feature, so the status-side detail can hold
@@ -223,6 +236,12 @@ type InstanceTypeAcceleratorDetail struct {
 
 	// CPU describes the CPU information of the accelerator.
 	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
+}
+
+// IsSliceable reports whether the accelerator can be sliced: the pool's aggregated slicing detail
+// carries a logical soft-slice count or at least one physical (MIG) profile.
+func (in InstanceTypeAcceleratorDetail) IsSliceable() bool {
+	return in.SlicedDetail.Logical.Count > 0 || len(in.SlicedDetail.Physical.Profiles) > 0
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.

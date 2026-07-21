@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -10,14 +9,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
-	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
-	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
-	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
-	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/webhook"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -25,16 +20,17 @@ import (
 
 // QueueEntranceLabelKey, on an InstanceType, records the name of the namespaced LocalQueue that
 // fronts its backing ClusterQueue (a workload's "kueue.x-k8s.io/queue-name" value). The Pod
-// webhook reverse-looks-up the InstanceType by this label to read the authoritative per-card VRAM
-// (spec.memory), never trusting the user-writable LocalQueue. The Default webhook stamps it with
-// nodefeature.FormatLocalQueueName(<InstanceType name>).
+// webhook reverse-looks-up the InstanceType by this label to read the observed per-card VRAM
+// (Status.Detail.Memory), never trusting the user-writable LocalQueue. The Default webhook stamps
+// it with nodefeature.FormatLocalQueueName(<InstanceType name>).
 const QueueEntranceLabelKey = "schedule." + systemname.LabelPrefix + "queue-entrance"
 
 // InstanceTypeWebhook defaults and validates a v1alpha1.InstanceType.
 //
-// The defaulting webhook enriches the descriptor spec from a matching ResourceFlavor at
-// admission, so a stored InstanceType is spec-clear from day one. The validating webhook
-// requires the admin-writable inputs on create and freezes the spec on update.
+// The defaulting webhook stamps only the schedule discriminator + entrance labels; the observed
+// hardware descriptor is computed by the reconciler into Status.Detail, not enriched onto the spec
+// at admission. The validating webhook requires the admin-writable inputs on create and freezes the
+// spec on update.
 //
 // nolint: lll
 // +k8s:webhook-gen:validating:group="worker.gpustack.ai",version="v1alpha1",resource="instancetypes",scope="Cluster"
@@ -86,16 +82,13 @@ func (r *InstanceTypeWebhook) ValidateDelete(_ context.Context, _ runtime.Object
 	return nil, nil
 }
 
-// Default stamps the InstanceType's metadata labels and enriches its descriptor spec from a
-// matching ResourceFlavor, so a stored InstanceType is spec-clear and selectable from day one.
-// From the spec identity it derives the (acceleratable, group) feature key and, with
-// kubernetes.io/os|arch, stamps the schedule discriminators the pool's Devices and ResourceFlavors
-// carry (pruning a stale feature key left by a group/acceleratable change), plus the entrance
-// label (nodefeature.FormatLocalQueueName(name)) the Pod webhook reverse-looks-up for the per-card
-// VRAM. It then lists the ResourceFlavors by those discriminators, takes the first, and fills
-// manufacturer/product/family (and, when accelerated, memory/cores + the slicing feature) from its notes.
-// Labels are stamped whenever group is set; descriptor enrichment is a snapshot at admission
-// (skipped once populated) and the reconciler does not refresh it as hardware changes.
+// Default stamps the InstanceType's metadata labels so it is selectable from day one. From the
+// spec identity it derives the (acceleratable, group) feature key and, with kubernetes.io/os|arch,
+// stamps the schedule discriminators the pool's Devices and ResourceFlavors carry (pruning a stale
+// feature key left by a group/acceleratable change), plus the entrance label
+// (nodefeature.FormatLocalQueueName(name)) the Pod webhook reverse-looks-up. It writes no hardware
+// descriptor: the observed descriptor lives in Status.Detail, computed by the reconciler as
+// hardware changes, not snapshotted onto the spec here.
 func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) error {
 	it := obj.(*workercore.InstanceType)
 
@@ -139,116 +132,10 @@ func (r *InstanceTypeWebhook) Default(ctx context.Context, obj runtime.Object) e
 		it.Labels[k] = v
 	}
 	// Advertise the fronting LocalQueue name so the Pod webhook reverse-looks-up this
-	// InstanceType for the authoritative per-card VRAM (spec.memory).
+	// InstanceType for the observed per-card VRAM (Status.Detail.Memory).
 	it.Labels[QueueEntranceLabelKey] = nodefeature.FormatLocalQueueName(it.Name)
 
-	// A CPU-manufacturer-agnostic pool (awareness off and not acceleratable) collapses many CPU
-	// kinds into one type, so no single ResourceFlavor's manufacturer/product/family is a valid
-	// representative. Clear the CPU descriptors and skip enrichment (and its flavor List) so no
-	// arbitrary flavor's identity is stamped onto the collapsed pool. An admin-provided DisplayName
-	// is preserved, but the empty Product leaves a defaulted DisplayName unset on this path.
-	if !cpuAware && !it.Spec.Acceleratable {
-		it.Spec.Manufacturer = ""
-		it.Spec.Product = ""
-		it.Spec.Family = ""
-		if it.Spec.DisplayName == "" {
-			it.Spec.DisplayName = "CPU-only"
-		}
-		return nil
-	}
-
-	// Default the descriptors only while manufacturer and product are still empty; for an
-	// accelerated type the per-card memory counts too (it feeds the ClusterQueue annotation
-	// the Pod webhook reads), so a type already carrying its VRAM is treated as populated.
-	if it.Spec.Manufacturer == "" && it.Spec.Product == "" && (!it.Spec.Acceleratable || it.Spec.Memory == "") {
-		lbs := systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels]("nodes")
-		for k, v := range sched {
-			lbs[k] = v
-		}
-
-		rfList := new(kueue.ResourceFlavorList)
-		err := r.Client.List(ctx, rfList, lbs,
-			ctrlclix.WithoutQuorum,
-			ctrlcli.UnsafeDisableDeepCopy,
-			ctrlcli.Limit(1))
-		if err != nil {
-			// The list keys on the whole schedule-discriminator set (generalGroup for a
-			// CPU-only type, acceleratorGroup for an accelerated one), and the failure is an
-			// infrastructure error rather than a bad field value, so attribute it to spec.
-			return field.InternalError(field.NewPath("spec"),
-				fmt.Errorf("list resource flavors: %w", err))
-		}
-
-		if len(rfList.Items) != 0 {
-			_, notes := systemmeta.DescribeResource(&rfList.Items[0])
-			it.Spec.Manufacturer = notes["manufacturer"]
-			it.Spec.Product = notes["product"]
-			it.Spec.Family = notes["family"]
-			// Clear the accelerator descriptors before (re)deriving them, so a non-accelerated
-			// type never keeps stale Memory/Cores/Sliceable from a prior accelerated state.
-			it.Spec.InstanceTypeAccelerator = workercore.InstanceTypeAccelerator{}
-			if it.Spec.Acceleratable {
-				it.Spec.Memory = notes["memory"]
-				it.Spec.Cores = notes["cores"]
-				// Fold the flavor's slicing-capability note into the accelerator's Feature. The
-				// note is operator-produced, but it rides on an annotation that could be corrupted
-				// out from under us, so a present-but-malformed note fails admission loudly rather
-				// than silently yielding a half-decoded descriptor; an absent note leaves the
-				// zeroed (non-sliceable) descriptor above.
-				if raw := notes["acceleratorFeature"]; raw != "" {
-					if err := json.Unmarshal([]byte(raw), &it.Spec.Feature); err != nil {
-						return field.InternalError(field.NewPath("spec", "feature"),
-							fmt.Errorf("unmarshal accelerator feature note: %w", err))
-					}
-				}
-			}
-			// Fold the raw CPU detail back into the spec only when CPU-manufacturer awareness is
-			// on (the flavor carries the cpuDetail note always for a CPU flavor, but only when
-			// aware for an accelerated one). Off leaves the CPU spec untouched.
-			if cpuAware {
-				foldCPUDetail(it, notes["cpuDetail"])
-			}
-		}
-	}
-
-	// Default the human-friendly DisplayName to the (possibly just-enriched) Product; an
-	// admin-provided DisplayName is preserved. Cap the defaulted value at the field's maxLength (64)
-	// so a long Product cannot produce a DisplayName the CRD schema would reject; an explicit
-	// over-length DisplayName is left to fail validation as user error.
-	if it.Spec.DisplayName == "" {
-		it.Spec.DisplayName = it.Spec.Product
-		if runes := []rune(it.Spec.DisplayName); len(runes) > 64 {
-			it.Spec.DisplayName = string(runes[:64])
-		}
-	}
-
 	return nil
-}
-
-// foldCPUDetail unmarshals a ResourceFlavor's cpuDetail note back into the InstanceType spec,
-// mirroring the shape the NodeFlavorReconciler stored (the single typed source). InstanceTypeSpec
-// inlines both an InstanceTypeCPU and an InstanceTypeAccelerator, so: a non-accelerated type's note
-// is a plain InstanceTypeCPU folded into the embedded InstanceTypeCPU (promoted as spec.physicalCores
-// etc.), while an accelerated type's note is an InstanceTypeAcceleratorCPU folded into spec.CPU (the
-// embedded InstanceTypeAccelerator's CPU field, which also records the CPU's own
-// manufacturer/product/family, distinct from the device's). The note is a nice-to-have, so a
-// malformed note leaves the spec unchanged (the unmarshal target is only assigned on success); an
-// empty note is a no-op.
-func foldCPUDetail(it *workercore.InstanceType, raw string) {
-	if raw == "" {
-		return
-	}
-	if it.Spec.Acceleratable {
-		var detail workercore.InstanceTypeAcceleratorCPU
-		if err := json.Unmarshal([]byte(raw), &detail); err == nil {
-			it.Spec.CPU = detail
-		}
-	} else {
-		var detail workercore.InstanceTypeCPU
-		if err := json.Unmarshal([]byte(raw), &detail); err == nil {
-			it.Spec.InstanceTypeCPU = detail
-		}
-	}
 }
 
 // validateInstanceTypeSpec collects the required-input errors: an accelerator group when

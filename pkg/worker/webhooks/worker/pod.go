@@ -225,7 +225,8 @@ func (r *PodWebhook) Default(ctx context.Context, obj runtime.Object) error {
 // webhook stamps with the LocalQueue name, so the authoritative VRAM is never taken from the
 // user-writable, namespaced LocalQueue. It falls back to a non-cached read when the controller
 // cache is not yet warm, and errors when no (or more than one) InstanceType matches, or its
-// spec.memory is missing or unparseable, so an unfoldable memory-mib request is rejected.
+// observed Status.Detail.Memory is missing (detail not yet computed) or unparseable, so an
+// unfoldable memory-mib request is rejected rather than silently mis-sized.
 func (r *PodWebhook) cardVRAMMib(ctx context.Context, pod *core.Pod) (int64, error) {
 	lqName := pod.Labels[kueuectrlconst.QueueLabel]
 	if lqName == "" {
@@ -250,9 +251,11 @@ func (r *PodWebhook) cardVRAMMib(ctx context.Context, pod *core.Pod) (int64, err
 	}
 	it := &itList.Items[0]
 
-	memStr := it.Spec.Memory
+	memStr := it.Status.Detail.Memory
 	if memStr == "" {
-		return 0, fmt.Errorf("instance type %s has no memory", it.Name)
+		// The reconciler computes the per-card VRAM into Status.Detail; an empty value is the
+		// not-yet-ready state, so reject the request as retryable rather than mis-sizing it.
+		return 0, fmt.Errorf("instance type %s has no per-card memory yet (detail not ready)", it.Name)
 	}
 	q, err := resource.ParseQuantity(memStr)
 	if err != nil {

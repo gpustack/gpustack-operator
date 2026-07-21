@@ -49,8 +49,9 @@ func slicedPod(requests map[core.ResourceName]string) *core.Pod {
 }
 
 // instanceTypeWithEntrance builds the operator-owned InstanceType that fronts
-// testLocalQueueName, carrying the authoritative per-card VRAM (spec.memory) the webhook
-// reverse-looks-up by the queue-entrance label the Default webhook stamps.
+// testLocalQueueName, carrying the observed per-card VRAM (Status.Detail.Memory) the webhook
+// reverse-looks-up by the queue-entrance label the Default webhook stamps. An empty memory models
+// the not-yet-ready state (Detail not computed).
 func instanceTypeWithEntrance(memory string) *workercore.InstanceType {
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
@@ -58,7 +59,7 @@ func instanceTypeWithEntrance(memory string) *workercore.InstanceType {
 			Labels: map[string]string{QueueEntranceLabelKey: testLocalQueueName},
 		},
 	}
-	it.Spec.Memory = memory
+	it.Status.Detail.Memory = memory
 	return it
 }
 
@@ -69,7 +70,8 @@ func TestPodWebhook_Default(t *testing.T) {
 	cases := []struct {
 		name      string
 		requests  map[core.ResourceName]string
-		itMemory  string // fronting InstanceType spec.memory; "" → no InstanceType object
+		itMemory  string // fronting InstanceType Status.Detail.Memory; "" → no InstanceType object unless itPresent
+		itPresent bool   // add a fronting InstanceType even when itMemory is empty (models Detail not ready)
 		wantUnits int64  // expected .sliced.units after Default; 0 → unset
 		wantCores int64  // expected .sliced.cores-percentage after Default; 0 → unchecked
 		wantErr   bool
@@ -111,6 +113,12 @@ func TestPodWebhook_Default(t *testing.T) {
 			wantErr:  true,
 		},
 		{
+			name:      "memory-mib rejected as retryable when Detail not ready",
+			requests:  map[core.ResourceName]string{names.card: "1", names.memMib: "4096"},
+			itPresent: true, // InstanceType exists but Status.Detail.Memory is empty
+			wantErr:   true,
+		},
+		{
 			name:     "memory-percentage over 100 is rejected (no overflow)",
 			requests: map[core.ResourceName]string{names.card: "1", names.memPct: "200"},
 			wantErr:  true,
@@ -127,7 +135,7 @@ func TestPodWebhook_Default(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			var objs []ctrlcli.Object
-			if c.itMemory != "" {
+			if c.itMemory != "" || c.itPresent {
 				objs = append(objs, instanceTypeWithEntrance(c.itMemory))
 			}
 			w := newPodWebhook(objs...)

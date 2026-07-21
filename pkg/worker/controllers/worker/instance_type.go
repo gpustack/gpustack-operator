@@ -105,7 +105,7 @@ func (r *InstanceTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		// The backing queue is mid-deletion under a live InstanceType (an admin's accidental
 		// delete). Requeue until Kueue removes it; the next reconcile then recreates it. Don't
 		// refresh status from a terminating queue.
-		logger.V(2).Info("cluster queue terminating; requeue to recreate once gone")
+		logger.V(2).Info("cluster queue terminating; requeue in 15s")
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, nil
 	}
 

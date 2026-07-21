@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,10 +16,6 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 )
-
-// acceleratorFeatureNote is a marshaled AcceleratorsFeature (LogicalSliced 128 / overcommit / step
-// 1) a sliceable pool's ResourceFlavor carries in its acceleratorFeature note.
-const acceleratorFeatureNote = `{"logicalSliced":{"maxSize":128,"coresPercentageOvercommit":true,"memoryPercentageStep":1}}`
 
 // newInstanceType builds a non-acceleratable InstanceType carrying the required admin inputs (a
 // generic linux/amd64 pool) plus the given unit spec, so the unit-spec cases exercise unit
@@ -187,119 +181,6 @@ func TestInstanceTypeWebhook_ValidateUpdateImmutable(t *testing.T) {
 	}
 }
 
-// TestInstanceTypeWebhook_DefaultEnriches pins the defaulting webhook: when spec.group is set,
-// the descriptors are empty, and a matching ResourceFlavor exists, the descriptor fields are
-// filled from its notes; it is a no-op when group is empty, no flavor matches, or the
-// descriptors are already populated (enrich-once).
-func TestInstanceTypeWebhook_DefaultEnriches(t *testing.T) {
-	accelRF := &kueue.ResourceFlavor{
-		ObjectMeta: meta.ObjectMeta{
-			Name: "gpustack--generic--nvidia-a10g-linux-amd64-2d",
-			Labels: map[string]string{
-				nodefeature.NodeAcceleratableLabelKey:                       "true",
-				nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-a10g": "true",
-				core.LabelOSStable:   "linux",
-				core.LabelArchStable: "amd64",
-			},
-		},
-	}
-	systemmeta.NoteResource(accelRF, "nodes", map[string]string{
-		"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA A10G",
-		"family": "ampere", "memory": "24Gi", "cores": "9216", "acceleratorFeature": acceleratorFeatureNote,
-	})
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(accelRF).Build()
-	wh := &InstanceTypeWebhook{Client: cli}
-
-	t.Run("accelerated type is enriched from the matching flavor", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
-			Spec: workercore.InstanceTypeSpec{
-				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
-			},
-		}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "nvidia", it.Spec.Manufacturer)
-		assert.Equal(t, "NVIDIA A10G", it.Spec.Product)
-		assert.Equal(t, "ampere", it.Spec.Family)
-		assert.Equal(t, "24Gi", it.Spec.Memory)
-		assert.Equal(t, "9216", it.Spec.Cores)
-		assert.True(t, it.Spec.IsSliceable())
-	})
-
-	t.Run("accelerated type without accelerator group is a no-op", func(t *testing.T) {
-		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: true}}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Empty(t, it.Spec.Manufacturer, "no flavor is queried without an accelerator group")
-	})
-
-	t.Run("no matching flavor leaves the spec intact", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			Spec: workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-h100", Acceleratable: true, OS: "linux", Arch: "amd64"},
-		}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Empty(t, it.Spec.Manufacturer, "an unmatched group enriches nothing")
-	})
-
-	t.Run("already-populated descriptors are left untouched (enrich-once)", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "preset"},
-			Spec: workercore.InstanceTypeSpec{
-				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
-				Manufacturer: "preset-manu", Product: "Preset Card",
-			},
-		}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "preset-manu", it.Spec.Manufacturer, "existing descriptors are not re-enriched")
-		assert.Equal(t, "Preset Card", it.Spec.Product)
-		assert.Empty(t, it.Spec.Memory, "no flavor is queried once descriptors are set")
-	})
-
-	t.Run("accelerated type already carrying memory skips enrichment", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "preset-mem"},
-			Spec: workercore.InstanceTypeSpec{
-				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
-			},
-		}
-		it.Spec.Memory = "12Gi" // an accel type with VRAM present is treated as populated
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Empty(t, it.Spec.Manufacturer, "an accel type that already has memory is not enriched")
-		assert.Equal(t, "12Gi", it.Spec.Memory, "existing memory is preserved")
-	})
-
-	t.Run("a malformed acceleratorFeature note fails admission", func(t *testing.T) {
-		// The note rides on a corruptible annotation, so the defaulting webhook decodes it with
-		// an erroring Unmarshal (not a silent best-effort) — a present-but-malformed note must
-		// fail admission rather than yield a half-decoded descriptor.
-		badRF := &kueue.ResourceFlavor{
-			ObjectMeta: meta.ObjectMeta{
-				Name: "gpustack--generic--nvidia-h100-linux-amd64-2d",
-				Labels: map[string]string{
-					nodefeature.NodeAcceleratableLabelKey:                       "true",
-					nodefeature.AcceleratableFeatureLabelPrefix + "nvidia-h100": "true",
-					core.LabelOSStable:   "linux",
-					core.LabelArchStable: "amd64",
-				},
-			},
-		}
-		systemmeta.NoteResource(badRF, "nodes", map[string]string{
-			"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA H100",
-			"memory": "80Gi", "cores": "16896", "acceleratorFeature": "{not json",
-		})
-		badCli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(badRF).Build()
-		badWH := &InstanceTypeWebhook{Client: badCli}
-
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-h100"},
-			Spec: workercore.InstanceTypeSpec{
-				AcceleratorGroup: "nvidia-h100", Acceleratable: true, OS: "linux", Arch: "amd64",
-			},
-		}
-		err := badWH.Default(context.Background(), it)
-		require.Error(t, err, "a present-but-malformed acceleratorFeature note must fail admission")
-	})
-}
-
 // TestInstanceTypeWebhook_DefaultStampsScheduleLabels pins that Default stamps the pool's
 // schedule labels (the acceleratable boolean, the feature keys, kubernetes.io/os|arch) on the
 // InstanceType from its spec identity, and prunes a stale feature key when the
@@ -348,114 +229,11 @@ func TestInstanceTypeWebhook_DefaultStampsScheduleLabels(t *testing.T) {
 	})
 }
 
-// TestInstanceTypeWebhook_FoldCPUDetail pins the cpuDetail JSON ↔ spec mapping the defaulting
-// webhook applies when awareness is on: a non-accelerated type carries the raw CPU detail as the
-// embedded spec.CPU (promoted PhysicalCores etc.), while an accelerated type carries it as
-// spec.Accelerator.CPU — which also records the CPU's own manufacturer/product/family, distinct
-// from the device's. The note is the JSON the NodeFlavorReconciler marshals (an
-// InstanceTypeAcceleratorCPU), so this round-trips the single typed source.
-func TestInstanceTypeWebhook_FoldCPUDetail(t *testing.T) {
-	detail := workercore.InstanceTypeAcceleratorCPU{
-		Manufacturer: "amd",
-		Product:      "AMD EPYC 7763",
-		Family:       "25",
-		InstanceTypeCPU: workercore.InstanceTypeCPU{
-			PhysicalCores: "64",
-			LogicalCores:  "128",
-			Cache:         workercore.InstanceTypeCPUCache{L3: "256MiB"},
-		},
-	}
-	accelRaw, err := json.Marshal(detail)
-	require.NoError(t, err)
-	// A non-accelerated flavor's cpuDetail note is a plain InstanceTypeCPU (its
-	// manufacturer/product/family are the InstanceType's top-level descriptors).
-	cpuRaw, err := json.Marshal(detail.InstanceTypeCPU)
-	require.NoError(t, err)
-
-	t.Run("non-accelerated folds an InstanceTypeCPU into the embedded spec.CPU", func(t *testing.T) {
-		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: false}}
-		foldCPUDetail(it, string(cpuRaw))
-		assert.Equal(t, "64", it.Spec.PhysicalCores, "promoted from the embedded InstanceTypeCPU")
-		assert.Equal(t, "128", it.Spec.LogicalCores)
-		assert.Equal(t, "256MiB", it.Spec.Cache.L3)
-		assert.Empty(t, it.Spec.CPU.Manufacturer, "the accelerator CPU is untouched for a non-accelerated type")
-	})
-
-	t.Run("accelerated folds an InstanceTypeAcceleratorCPU into spec.Accelerator.CPU", func(t *testing.T) {
-		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: true}}
-		foldCPUDetail(it, string(accelRaw))
-		assert.Equal(t, "amd", it.Spec.CPU.Manufacturer, "the accelerator CPU carries the CPU's own manufacturer")
-		assert.Equal(t, "AMD EPYC 7763", it.Spec.CPU.Product)
-		assert.Equal(t, "64", it.Spec.CPU.PhysicalCores)
-		assert.Empty(t, it.Spec.PhysicalCores, "the embedded top-level CPU detail is untouched for an accelerated type")
-	})
-
-	t.Run("empty note is a no-op", func(t *testing.T) {
-		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: false}}
-		foldCPUDetail(it, "")
-		assert.Empty(t, it.Spec.PhysicalCores)
-	})
-
-	t.Run("malformed note leaves the existing CPU detail unchanged", func(t *testing.T) {
-		it := &workercore.InstanceType{Spec: workercore.InstanceTypeSpec{Acceleratable: true}}
-		it.Spec.CPU = workercore.InstanceTypeAcceleratorCPU{Manufacturer: "amd", Product: "AMD EPYC 7763"}
-		foldCPUDetail(it, "{not valid json")
-		assert.Equal(t, "amd", it.Spec.CPU.Manufacturer, "a malformed note must not clobber the spec to zero")
-		assert.Equal(t, "AMD EPYC 7763", it.Spec.CPU.Product)
-	})
-}
-
-// TestInstanceTypeWebhook_DefaultClearsCPUDescriptorsWhenAgnostic pins that with CPU-manufacturer
-// awareness off (the unit binary default) a non-acceleratable type is manufacturer-agnostic: the
-// Default webhook clears its CPU descriptors and skips enrichment entirely (no flavor is stamped),
-// because the collapsed pool spans many CPU kinds and no single flavor represents it. The schedule
-// and entrance labels are still stamped — the guard runs after label stamping.
-func TestInstanceTypeWebhook_DefaultClearsCPUDescriptorsWhenAgnostic(t *testing.T) {
-	cpuRF := &kueue.ResourceFlavor{
-		ObjectMeta: meta.ObjectMeta{
-			Name: "gpustack--amd-epyc-7763-linux-amd64-8c",
-			Labels: map[string]string{
-				nodefeature.NodeAcceleratableLabelKey: "false",
-				core.LabelOSStable:                    "linux",
-				core.LabelArchStable:                  "amd64",
-			},
-		},
-	}
-	// A matching CPU flavor exists; under awareness-off the webhook must NOT stamp its manufacturer
-	// onto the agnostic pool.
-	systemmeta.NoteResource(cpuRF, "nodes", map[string]string{
-		"acceleratable": "false",
-		"manufacturer":  "amd",
-		"product":       "AMD EPYC 7763",
-		"family":        "25",
-		"cpuDetail":     `{"physicalCores":"64"}`,
-	})
-	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(cpuRF).Build()
-	wh := &InstanceTypeWebhook{Client: cli}
-
-	// A pre-set manufacturer/product/family is cleared too — an agnostic pool carries no
-	// representative CPU identity.
-	it := &workercore.InstanceType{
-		ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
-		Spec: workercore.InstanceTypeSpec{
-			GeneralGroup: "generic", OS: "linux", Arch: "amd64",
-			Manufacturer: "stale", Product: "Stale", Family: "stale",
-		},
-	}
-	require.NoError(t, wh.Default(context.Background(), it))
-	assert.Empty(t, it.Spec.Manufacturer, "manufacturer cleared (no representative for an agnostic pool)")
-	assert.Empty(t, it.Spec.Product, "product cleared")
-	assert.Empty(t, it.Spec.Family, "family cleared")
-	assert.Empty(t, it.Spec.PhysicalCores, "cpuDetail is not folded")
-	// Labels are still stamped (the guard runs after label stamping).
-	assert.Equal(t, "false", it.Labels[nodefeature.NodeAcceleratableLabelKey], "acceleratable=false discriminator stamped")
-	assert.Equal(t, nodefeature.FormatLocalQueueName("my-generic"), it.Labels[QueueEntranceLabelKey], "entrance label stamped")
-}
-
-// TestInstanceTypeWebhook_DefaultDisplayName pins the DisplayName default: it copies the
-// (possibly just-enriched) Product when absent and preserves an admin-provided value. On the
-// CPU-agnostic guard path Product is empty, so a defaulted DisplayName falls back to "CPU-only".
-func TestInstanceTypeWebhook_DefaultDisplayName(t *testing.T) {
+// TestInstanceTypeWebhook_DefaultWritesNoDescriptor pins that Default no longer enriches the
+// hardware descriptor onto the spec: even with a matching ResourceFlavor present, the spec's
+// manufacturer/product/memory stay empty (the observed descriptor lives in Status.Detail, computed
+// by the reconciler).
+func TestInstanceTypeWebhook_DefaultWritesNoDescriptor(t *testing.T) {
 	accelRF := &kueue.ResourceFlavor{
 		ObjectMeta: meta.ObjectMeta{
 			Name: "gpustack--generic--nvidia-a10g-linux-amd64-2d",
@@ -468,60 +246,24 @@ func TestInstanceTypeWebhook_DefaultDisplayName(t *testing.T) {
 		},
 	}
 	systemmeta.NoteResource(accelRF, "nodes", map[string]string{
-		"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA A10G", "memory": "24Gi",
+		"acceleratable": "true", "manufacturer": "nvidia", "product": "NVIDIA A10G",
+		"family": "ampere", "memory": "24Gi", "cores": "9216",
 	})
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(accelRF).Build()
 	wh := &InstanceTypeWebhook{Client: cli}
 
-	newAccel := func() *workercore.InstanceType {
-		return &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
-			Spec:       workercore.InstanceTypeSpec{AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64"},
-		}
+	it := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: "my-a10g"},
+		Spec: workercore.InstanceTypeSpec{
+			AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
+		},
 	}
-
-	t.Run("defaults to the enriched product on the enriched path", func(t *testing.T) {
-		it := newAccel()
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "NVIDIA A10G", it.Spec.DisplayName, "defaults to the enriched Product")
-	})
-
-	t.Run("preserves an admin-provided display name", func(t *testing.T) {
-		it := newAccel()
-		it.Spec.DisplayName = "Custom Name"
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "Custom Name", it.Spec.DisplayName, "an admin value is preserved")
-	})
-
-	t.Run("defaults to CPU-only on the CPU-agnostic guard path", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
-			Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64"},
-		}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "CPU-only", it.Spec.DisplayName, "the agnostic path defaults DisplayName to CPU-only")
-	})
-
-	t.Run("preserves an admin-provided display name on the guard path", func(t *testing.T) {
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-generic"},
-			Spec:       workercore.InstanceTypeSpec{GeneralGroup: "generic", OS: "linux", Arch: "amd64", DisplayName: "Agnostic Pool"},
-		}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, "Agnostic Pool", it.Spec.DisplayName, "an admin value survives the guard path")
-	})
-
-	t.Run("caps a defaulted display name at 64 characters", func(t *testing.T) {
-		long := strings.Repeat("x", 100)
-		it := &workercore.InstanceType{
-			ObjectMeta: meta.ObjectMeta{Name: "my-long"},
-			Spec: workercore.InstanceTypeSpec{
-				AcceleratorGroup: "nvidia-a10g", Acceleratable: true, OS: "linux", Arch: "amd64",
-				Manufacturer: "nvidia", Product: long,
-			},
-		}
-		require.NoError(t, wh.Default(context.Background(), it))
-		assert.Equal(t, strings.Repeat("x", 64), it.Spec.DisplayName,
-			"a defaulted DisplayName longer than the maxLength is capped at 64 runes")
-	})
+	require.NoError(t, wh.Default(context.Background(), it))
+	assert.Empty(t, it.Spec.Manufacturer, "Default writes no manufacturer descriptor")
+	assert.Empty(t, it.Spec.Product, "Default writes no product descriptor")
+	assert.Empty(t, it.Spec.Memory, "Default writes no per-card memory descriptor")
+	assert.Empty(t, it.Spec.DisplayName, "Default no longer defaults DisplayName (derivation stamps it)")
+	// The schedule + entrance labels are still stamped.
+	assert.Equal(t, "true", it.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g"])
+	assert.Equal(t, nodefeature.FormatLocalQueueName("my-a10g"), it.Labels[QueueEntranceLabelKey])
 }
