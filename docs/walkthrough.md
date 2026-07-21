@@ -349,9 +349,9 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi
 
 ---
 
-## 3. Requesting a sliced GPU
+## 3. Requesting a logical sliced GPU
 
-A sliceable InstanceType (A10G's `feature.logicalSliced.maxSize` is `128`) admits fractional-card workloads. Request 20 % of
+A sliceable InstanceType (the A10G reports logical soft-slicing in its observed status detail) admits fractional-card workloads. Request 20 % of
 a card's VRAM with `acceleratorSlicedMemoryPercentage`:
 
 ```yaml

@@ -1,7 +1,17 @@
 # Spec: Accelerator Slicing Metadata Realignment — Per-Card Capability, Group SlicedDetail, InstanceType Observed Detail
 
-Status: Building
+Status: Built
 Type: Feature
+
+> **Supersedes prior design.** This spec supersedes the parts of earlier shipped specs it changes — the
+> supersession is declared here, in the active spec's header, and the archived specs are left untouched:
+> - `2026-07-16-accelerator-slicing-capability-and-pool-feedback` — its group-level `AcceleratorsFeature` /
+>   `AcceleratorSliced` model and detector-`LogicalSliced` wiring are replaced by per-card
+>   `AcceleratorStatus.LogicalSliced` / `PhysicalSliced`, aggregated into the group's `AcceleratorSlicedDetail`;
+>   the `AcceleratorsFeature` family (incl. `MaxSlices()`) and the transitional old-format dual-read fallback
+>   are removed. The per-vendor soft-slice counts and detection gates that spec lists remain current.
+> - `2026-06-25-accelerator-soft-slicing-runtime-isolation` — the `--slicing-policy` knob it introduced is
+>   removed (dead).
 
 ## Summary
 Restructure how slicing capability flows through the scheduling chain, as the first of two specs on the road to
@@ -593,7 +603,8 @@ generic "a Kubernetes cluster" wording).
 - Where a task in this spec conflicts with wording in earlier shipped specs
   (`2026-06-25-accelerator-soft-slicing-runtime-isolation.md` on `slicing-policy`;
   `2026-07-16-accelerator-slicing-capability-and-pool-feedback.md` on detector `LogicalSliced` settings), this
-  spec supersedes and the stale wording is annotated, not silently contradicted.
+  spec supersedes them via the **"Supersedes prior design" declaration in this spec's header**, leaving the
+  archived specs untouched rather than silently contradicting or editing them.
 
 ### Boundaries
 
@@ -1044,13 +1055,14 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       `make generate` clean; `go build ./...`, full `go test ./...`, `make lint` all green. Verify: success
       criterion 4 + 5.
 
-[ ] **T13: MIG manual-lifecycle docs + stale-doc/spec annotations (F9 + R12).**
+[x] **T13: MIG manual-lifecycle docs + stale-doc/spec annotations (F9 + R12).**
     - Add the `docs/` page (enable/disable/reboot-recovery/no-auto-descheduling) with the profile + placement
       tables and the grounding lifecycle facts; generic "a Kubernetes cluster" wording only.
     - Update the stale docs that describe the old group-level model: `docs/architecture.md:156,178` (group
       `AcceleratorsFeature`, per-vendor `maxSlices`, group-sized token pool) and `docs/walkthrough.md:394`
-      (slice VRAM capping). Annotate the `2026-07-16-accelerator-slicing-capability-and-pool-feedback` spec's
-      detector-`LogicalSliced` wording as superseded (the Notes section promises this; no task covered it).
+      (slice VRAM capping). Declare the supersession of the
+      `2026-07-16-accelerator-slicing-capability-and-pool-feedback` spec's detector-`LogicalSliced` design in
+      **this spec's header** (the "Supersedes prior design" block), leaving the archived spec untouched.
     - Acceptance: doc renders; sequences match the grounding facts; stale architecture/walkthrough passages
       updated; no host/cloud-specific names. Verify: manual read + grep for the old symbols in `docs/`.
 
