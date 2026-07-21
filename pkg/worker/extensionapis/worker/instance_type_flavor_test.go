@@ -126,7 +126,10 @@ func TestInstanceTypeFlavorHandler_OnList(t *testing.T) {
 	assert.Equal(t, "ampere", a10g.Spec.Family)
 	assert.Equal(t, "24Gi", a10g.Spec.Memory)
 	assert.Equal(t, "9216", a10g.Spec.Cores)
-	assert.True(t, a10g.Spec.Sliceable)
+	// T7 dropped the catalog's Sliceable projection: even though the flavor carries an
+	// acceleratorFeature note, the catalog no longer surfaces a slicing flag (the field is
+	// removed entirely in T11). Slicing detail is surfaced via the InstanceType Status.Detail.
+	assert.False(t, a10g.Spec.Sliceable, "catalog no longer surfaces Sliceable")
 }
 
 // TestInstanceTypeFlavorHandler_OnGet pins that Get resolves a single flavor by name against the

@@ -18,12 +18,10 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
-	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/extensionapi"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/gox"
-	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -68,7 +66,6 @@ func (h *InstanceTypeFlavorHandler) SetupHandler(
 		instanceTypeFlavorColumn("Product", ".spec.product"),
 		instanceTypeFlavorColumn("Memory", ".spec.memory"),
 		instanceTypeFlavorColumn("Cores", ".spec.cores"),
-		instanceTypeFlavorColumn("Sliceable", ".spec.sliceable"),
 	)
 	if err != nil {
 		return gvr, srs, err
@@ -407,11 +404,6 @@ func instanceTypeFlavorSpec(notes map[string]string, cpuAware bool) worker.Insta
 			GeneralGroup: nodefeature.GeneralGroupGeneric,
 		}
 	}
-	// This is a read-only catalog projection served by the extension apiserver, not the admission
-	// path that must faithfully initialize an InstanceType, so a malformed slicing note is tolerated
-	// best-effort (ShouldUnmarshal): it just leaves the display Sliceable false.
-	var feature workercore.AcceleratorsFeature
-	json.ShouldUnmarshal([]byte(notes["acceleratorFeature"]), &feature)
 	spec := worker.InstanceTypeFlavorSpec{
 		AcceleratorGroup: notes["acceleratorGroup"],
 		Acceleratable:    true,
@@ -420,7 +412,6 @@ func instanceTypeFlavorSpec(notes map[string]string, cpuAware bool) worker.Insta
 		Family:           notes["family"],
 		Memory:           notes["memory"],
 		Cores:            notes["cores"],
-		Sliceable:        feature.MaxSlices() > 0,
 	}
 	if cpuAware {
 		spec.GeneralGroup = notes["generalGroup"]

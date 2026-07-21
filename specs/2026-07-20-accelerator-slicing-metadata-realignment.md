@@ -872,7 +872,7 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       `PhysicalSliced.Count`, other modes unaffected) + an old-format fixture asserting the fallback token count.
       Verify: `go test ./pkg/deviceplugin/...`.
 
-[ ] **T7: remove the flavor-catalog `Sliceable` reader only (F6, partial).**
+[x] **T7: remove the flavor-catalog `Sliceable` reader only (F6, partial).**
     - Remove `Sliceable` from `InstanceTypeFlavorSpec` and its note parsing
       (`extensionapis/worker/instance_type_flavor.go:411-423`); confirm no catalog consumer reads it (broad
       grep). Removing a *reader* is always safe.
