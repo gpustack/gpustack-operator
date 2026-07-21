@@ -77,8 +77,8 @@ by **zero** of the nine vendor subpackages, and `MemoryPercentageStep` is writte
 3. `kubectl get resourceflavors -o yaml` shows no `acceleratorFeature` note; a freshly derived InstanceType
    reaches `Status.Detail` populated (manufacturer/product/family/CPU/accelerator/`SlicedDetail`) within one
    reconcile of its Devices source.
-4. `grep -r "slicing-policy\|SlicingPolicy\|MemoryPercentageStep\|MaxSlices\|SlicedCoresOvercommit"` over
-   non-generated, non-test Go code returns nothing (modulo an optional one-release deprecation shim for the
+4. `grep -r "slicing-policy\|SlicingPolicy\|AcceleratorsFeature\|MemoryPercentageStep\|MaxSlices\|SlicedCoresOvercommit"`
+   over non-generated, non-test Go code returns nothing (modulo an optional one-release deprecation shim for the
    flag).
 5. `make generate` is clean (CRDs, deepcopy, protobuf, applyconfigurations regenerate without manual edits),
    `go build ./...`, `go test ./...`, and `make lint` pass.
@@ -830,16 +830,17 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 > token pool drops to 0 — **fleet-wide sliced-admission failure until each node's DaemonSet restarts**. The
 > in-process strangler does nothing for this cross-binary skew. **Mitigation:** T5 and T6 read the new fields
 > with a **fallback to `AcceleratorsFeature`/`MaxSlices()` when the new per-card/detail fields are absent** (old
-> data ⇒ preserve today's numbers, never null). Consequently the old `AcceleratorsFeature` family is **kept one
-> release** (T4 dual-writes, T5/T6 dual-read) and its deletion is a **gated follow-up** once all DaemonSets are
-> guaranteed upgraded — T12 below deletes only what is safe this release.
+> data ⇒ preserve today's numbers, never null). During the build itself the fallback keeps the four keys / token
+> pool stable whenever a new reader meets old-format Devices.
 >
-> **Decision (2026-07-21): the fallback is unwanted long-term.** The maintainer confirmed the cross-binary skew
-> is not a concern for the deployment model, so the T5/T6 dual-read is a *temporary rollout net only*. Removing
-> it — the `AcceleratorsFeature.MaxSlices()` branch in `desiredSlicedCapacity`, the device-plugin fallback, and
-> the fallback fields in the Devices-watch signature — is folded into T12's gated follow-up alongside the
-> old-field deletion, not kept indefinitely. The accepted consequence at that point: a node still serving
-> old-format Devices advertises no `.sliced.*` capacity until its DaemonSet writes the new per-card format.
+> **Decision (2026-07-21): the fallback is a within-spec transient; `AcceleratorsFeature` is deleted in T12.**
+> The maintainer confirmed the cross-binary skew is not a concern for the deployment model, so the R1 fallback
+> is **not** kept a release. **T12 (below) deletes the whole `AcceleratorsFeature` family within this spec** —
+> the fields, the `AcceleratorSliced`/`MemoryPercentageStep` types, `MaxSlices()`/`SlicedCoresOvercommit()`, the
+> T4 dual-write in every detector, and the T5/T6 fallback branches — so `AcceleratorsFeature` is gone by T13.
+> Accepted consequence: during an operator-ahead-of-DaemonSet upgrade window, a node still serving old-format
+> Devices advertises no `.sliced.*` capacity (and a 0 token pool) until its DaemonSet restarts onto the new
+> per-card format. T5/T6 keep the fallback only as a build-time transient until T12 removes it.
 
 [x] **T5: NodeCapacityReconciler → new aggregate + per-card counts + Devices watch (F4).**
     - Re-source `desiredSlicedCapacity` / `slicedFeatureByAcceleratableKey` (`node_capacity.go:131-212`) from
@@ -849,7 +850,8 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       (R-skew); resolve the model via the label key only to *find* the group.
     - **R1 dual-read fallback:** when a group has no per-card/`AcceleratorSlicedDetail` data (old-format Devices
       from a not-yet-upgraded DaemonSet during rollout), fall back to today's `AcceleratorsFeature`/`MaxSlices()`
-      computation so the four keys keep their current values instead of nulling. Keep for one release.
+      computation so the four keys keep their current values instead of nulling. Build-time transient only —
+      removed in T12 (2026-07-21 decision: `AcceleratorsFeature` is deleted within this spec, not kept a release).
     - **VRAM source (R4):** the per-card VRAM for `.sliced.memory-mib` must stay the **lossy `.memory` label**
       (`quantityx.Format`, rounds to Gi) exactly as today — do **not** switch to the exact `DevicesGroup.Memory`
       uint64, or an ECC-restored non-Gi-aligned size (e.g. 43238 MiB) changes the advertised value and desyncs
@@ -982,24 +984,26 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       with same hardware but different `Description` collapse to **one** aggregated item; a JSON fixture
       documents the new shape. Verify: `go test ./pkg/workergateway/...`.
 
-[ ] **T12: delete the safe orphans; DEFER the cross-binary old fields (F1 cleanup).**
-    - Delete this release: `MaxSlices()` / `SlicedCoresOvercommit()` methods (once T5/T6 read the fields
-      directly in their fallback), the `acceleratorFeature` note (operator-internal, gone in T9), and any
+[ ] **T12: delete the whole `AcceleratorsFeature` family + remove the R1 fallback (F1 cleanup).**
+    - **Delete the whole `AcceleratorsFeature` family (2026-07-21 decision, R1 — within this spec, not deferred):**
+      the `AcceleratorsFeature` / `AcceleratorSliced` structs, `MaxSlices()` / `SlicedCoresOvercommit()`,
+      `MemoryPercentageStep`, and the `DevicesGroup.AcceleratorsFeature` field (reserve protobuf field 11 in the
+      tag-audit guard); plus the `acceleratorFeature` note (operator-internal, gone in T9) and any
       genuinely-unused alias. `make generate`.
-    - **Keep one release (R1):** the `AcceleratorsFeature` / `AcceleratorSliced` / `MemoryPercentageStep`
-      *fields* — they are the dual-read fallback source for old-format Devices during rollout (T5/T6). Their
-      full deletion is a **gated follow-up task** once the minimum supported version guarantees every
-      DeviceManager DaemonSet writes the new format. Note this explicitly so it is not read as "cleanup
-      incomplete".
-    - **Gated follow-up also removes the fallback logic (2026-07-21 decision, R1):** the fallback is unwanted
-      long-term, so the same gated task drops the `AcceleratorsFeature.MaxSlices()` branch in
-      `desiredSlicedCapacity`, the device-plugin `server.go` fallback, and the fallback fields in the
-      Devices-watch signature — then converts the old-format test fixtures (`devicesWithSlicing`) to new
-      per-card fixtures. Kept in T5/T6 only as a temporary rollout net.
-    - Acceptance: `grep` shows no `MaxSlices`/`SlicedCoresOvercommit`/`acceleratorFeature` in non-generated,
-      non-test Go; the tag-audit reservation guard passes; `make generate` clean; `go build ./...`, full
-      `go test ./...`, `make lint` all green. (The `AcceleratorsFeature` field intentionally still present,
-      read only via the fallback.) Verify: success criterion 4 (modulo the deferred fields, called out) + 5.
+    - **Detector rewire (all 6):** each detector stashes the vendor soft-slice capability in the group
+      `AcceleratorsFeature.LogicalSliced`, which T4 copies to each card's `LogicalSliced` (e.g.
+      `nvidia/device.go:183` sets it, `:221-223` copies it). Set the per-card `LogicalSliced` (Count + overcommit)
+      **directly** from that vendor computation, dropping the group intermediate; `SetGroupSlicedDetails` still
+      aggregates the group `AcceleratorSlicedDetail` from per-card. Preserve each vendor's slicing condition
+      (e.g. Ascend 910-only).
+    - **Remove the R1 fallback:** drop the `AcceleratorsFeature.MaxSlices()` branch in `desiredSlicedCapacity`
+      and the fallback fields in the Devices-watch signature (T5), and the device-plugin `server.go` fallback
+      (T6). Convert the old-format test fixtures (`node_capacity` `devicesWithSlicing`, deviceplugin
+      `twoCardDevices`) to per-card fixtures.
+    - Acceptance: `grep` shows no `AcceleratorsFeature`/`MaxSlices`/`SlicedCoresOvercommit`/`acceleratorFeature`
+      in non-generated, non-test Go; the tag-audit reservation guard passes (incl. `DevicesGroup` field 11);
+      `make generate` clean; `go build ./...`, full `go test ./...`, `make lint` all green. Verify: success
+      criterion 4 + 5.
 
 [ ] **T13: MIG manual-lifecycle docs + stale-doc/spec annotations (F9 + R12).**
     - Add the `docs/` page (enable/disable/reboot-recovery/no-auto-descheduling) with the profile + placement
@@ -1013,8 +1017,8 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 
 **Checkpoints recap:** after T4 (data model live, unconsumed), after T7 (node/flavor migrated with the R1
 dual-read fallback, non-MIG numeric identity proven incl. an old-format fixture), after T10 (InstanceType split
-complete), after T12 (cleanup + full suite + lint; old fields intentionally retained for the rollout window).
-Each leaves the tree buildable and tested.
+complete), after T12 (cleanup incl. full `AcceleratorsFeature` deletion + R1 fallback removal; full suite +
+lint). Each leaves the tree buildable and tested.
 
 ### Test Plan
 
