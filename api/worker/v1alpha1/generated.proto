@@ -595,6 +595,27 @@ message InstanceTypeAcceleratorCPU {
   optional InstanceTypeCPU cpu = 4;
 }
 
+// InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
+// It mirrors InstanceTypeAccelerator but carries the pool-aggregated SlicedDetail (the observed
+// slicing capability) in place of the desired-state Feature, so the status-side detail can hold
+// the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
+message InstanceTypeAcceleratorDetail {
+  // Memory is the VRAM size of the accelerator, e.g. "65535Mi".
+  optional string memory = 1;
+
+  // Cores is the number of cores of the accelerator, e.g. "128", "256".
+  optional string cores = 2;
+
+  // ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
+  optional string computeCapability = 3;
+
+  // SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
+  optional AcceleratorSlicedDetail slicedDetail = 4;
+
+  // CPU describes the CPU information of the accelerator.
+  optional InstanceTypeAcceleratorCPU cpu = 5;
+}
+
 // InstanceTypeCPU describes the information of the CPU.
 message InstanceTypeCPU {
   // PhysicalCores is the number of physical cores of the CPU, e.g. "4", "8".
@@ -635,6 +656,27 @@ message InstanceTypeCPUCache {
 
   // L3 is the L3 cache size in bytes of the CPU.
   optional string l3 = 4;
+}
+
+// InstanceTypeDetail is the observed hardware descriptor of an InstanceType, computed by the
+// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger. It lives on
+// the status side: because it embeds the accelerator's AcceleratorSlicedDetail (which holds a
+// slice), it is not comparable and must never appear on the comparable, map-key InstanceTypeSpec.
+message InstanceTypeDetail {
+  // Manufacturer is the name of the InstanceType manufacturer.
+  optional string manufacturer = 1;
+
+  // Product is the name of the InstanceType product.
+  optional string product = 2;
+
+  // Family is the family of the InstanceType.
+  optional string family = 3;
+
+  // CPU describes the CPU information of the InstanceType.
+  optional InstanceTypeCPU cpu = 4;
+
+  // Accelerator describes the accelerator information of the InstanceType.
+  optional InstanceTypeAcceleratorDetail accelerator = 5;
 }
 
 // InstanceTypeList holds the list of InstanceType.
@@ -725,6 +767,11 @@ message InstanceTypeSpec {
   // workloads); clearing it reactivates the queue. A queue stopped by any means is
   // reflected back into Inactive=true.
   optional bool inactive = 14;
+
+  // Description is a free-form admin annotation for the InstanceType.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 15;
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
@@ -756,6 +803,10 @@ message InstanceTypeStatus {
   // "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
   // InstanceType name (see nodefeature.FormatLocalQueueName).
   optional string entrance = 7;
+
+  // Detail is the observed hardware descriptor of the InstanceType, computed by the
+  // reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+  optional InstanceTypeDetail detail = 8;
 }
 
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.

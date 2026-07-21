@@ -489,11 +489,13 @@ type InstanceTypeStatus struct {
   bounded by one reconcile and self-heals on retry.
 - **Webhook adjustments**: the Default webhook keeps label stamping, the GeneralGroup default, and the
   entrance label, and drops the descriptor-enrichment block (`instance_type.go:160-212`) — no observed data is
-  written at admission anymore. The DisplayName default (was `Spec.Product`, now status-side) moves to the
-  reconciler, which sets `Spec.DisplayName = Detail.Product` once while empty; DisplayName is in the
-  admin-editable set `validateInstanceTypeSpecImmutable` masks, so that Spec write passes ValidateUpdate.
-  `validateInstanceTypeSpecImmutable` (`instance_type.go:328-337`) adds `Description` to that masked set
-  (DisplayName + Description + Inactive).
+  written at admission anymore. The DisplayName default (was set at admission from `Spec.Product`) moves to the
+  **NodeFlavorReconciler's derived authoring**, which stamps `Spec.DisplayName` from the flavor's product (or the
+  `"CPU-only"` sentinel for the CPU-manufacturer-agnostic collapsed pool) once at creation. An admin-created type
+  is not auto-named. DisplayName is admin-editable, so a later rename is preserved; the InstanceTypeReconciler
+  makes no Spec write (it only writes `Status.Detail`).
+  `validateInstanceTypeSpecImmutable` (`instance_type.go:328-337`) adds `Description` to the admin-editable masked
+  set (DisplayName + Description + Inactive).
 - **Migration**: existing stored InstanceTypes carry the removed spec fields; after the CRD update those
   fields prune on the next write, and the reconciler populates `Status.Detail` on its first pass. v1alpha1
   in-place type changes follow the project's prior refactor precedent; call the upgrade note out in the
@@ -673,8 +675,8 @@ pkg/devicemanager/detector/{nvidia,hygon,metax,cambricon,mthreads,ascend}/device
 pkg/devicemanager/allocator/{option,config,allocator}.go   # F3: --slicing-policy removal
 pkg/deviceplugin/server.go                # F5: per-card token pool
 pkg/worker/controllers/worker/node_capacity.go   # F4: sourcing + Devices watch
-pkg/worker/controllers/worker/node_flavor.go     # F6: note removal
-pkg/worker/controllers/worker/instance_type.go   # F7: Status.Detail backfill (+ DisplayName default)
+pkg/worker/controllers/worker/node_flavor.go     # F6: note removal; F7: derived DisplayName stamp
+pkg/worker/controllers/worker/instance_type.go   # F7: Status.Detail backfill
 pkg/worker/controllers/worker/instance.go        # F7: IsSliceable re-plumb
 pkg/worker/webhooks/worker/instance_type.go      # F6/F7: drop enrichment; immutability mask
 pkg/worker/webhooks/worker/instance.go           # F7: IsSliceable re-plumb (two sites)
@@ -891,7 +893,7 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 **Phase D — InstanceType desired/observed split (F7)**  ·  *Checkpoint after T10: Spec slimmed, all readers on
 `Status.Detail`, immutability + comparability intact.*
 
-[ ] **T8: add `InstanceTypeDetail` + `Status.Detail` + `Description`; reconciler backfills (keep Spec fields).**
+[x] **T8: add `InstanceTypeDetail` + `Status.Detail` + `Description`; reconciler backfills (keep Spec fields).**
     - Add `InstanceTypeDetail` (Manufacturer/Product/Family + inline CPU + inline Accelerator whose `Feature`
       becomes `SlicedDetail AcceleratorSlicedDetail`), `Status.Detail`, and `Spec.Description`
       (`+k8s:validation:maxLength=1024`). Do **not** remove the Spec descriptor fields yet (readers still
@@ -911,17 +913,21 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       today deliberately clears descriptors and sets `DisplayName = "CPU-only"` (`instance_type.go:150-158`) —
       "Detail populated" is undefined there, so a naive gate deadlocks the queue forever. Define readiness as
       "Detail *computed* for this type's kind" (accelerated → accelerator Detail incl. `SlicedDetail`; CPU-only →
-      CPU Detail, which may be intentionally minimal), never "Detail non-empty". Preserve the `"CPU-only"`
-      DisplayName default in the reconciler. Set `Spec.DisplayName = Detail.Product` once while empty (a Spec
-      write that passes ValidateUpdate — DisplayName is admin-editable).
+      CPU Detail, which may be intentionally minimal), never "Detail non-empty".
+    - **DisplayName default moves to the NodeFlavorReconciler's derived authoring, not the reconciler.** A
+      derived InstanceType is stamped with `Spec.DisplayName` at creation — the flavor's product, or the
+      `"CPU-only"` sentinel for the collapsed generic pool (the flavor carries an empty product there). This keeps
+      the InstanceTypeReconciler status-only (no Spec write, no reconcile-loop dance). DisplayName is
+      admin-editable, so a later rename is preserved; an admin-created type is not auto-named.
     - The readiness gate narrows the Kueue-admitted window but does **not** close the Pod-webhook window (T9):
       the entrance label is stamped by the webhook at admission and the Pod webhook fires on that label
       regardless of whether the queue object exists (`instance_type.go:141-143`, `pod.go:229-253`). The webhook
       empty-Detail path is a retryable rejection, handled in T9.
     - Acceptance: an accelerated derived type gains accelerator `Status.Detail` within one reconcile and it is
-      **not erased on a second reconcile** (proves it lives in `computeStatus`); a CPU-only type (aware pool)
-      gains CPU Detail from the note, and a generic collapsed pool activates its queue with a minimal Detail +
-      `DisplayName = "CPU-only"` (not deadlocked). Verify: `make generate` clean;
+      **not erased on a second reconcile** (proves it lives in `computeStatus`); the `foldDetailCPU` note→Detail
+      fold is unit-covered; a generic collapsed pool activates its queue with a minimal Detail (not deadlocked);
+      and the NodeFlavorReconciler stamps the derived type's `DisplayName` at creation (flavor product, or
+      `"CPU-only"` for the collapsed generic pool). Verify: `make generate` clean;
       `go test ./pkg/worker/controllers/worker/...`.
 
 [ ] **T9: re-plumb every Spec-descriptor reader to `Status.Detail`; drop webhook enrichment + the
@@ -940,11 +946,11 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       missing RuntimeClass (`instance.go:637`, whose empty path is silent) or bogus resource names
       (`:952-975`).
     - `InstanceTypeWebhook.Default` — delete the descriptor-enrichment block, which actually spans
-      **`instance_type.go:145-252`** (not `:160-212`): the CPU-only clear + `"CPU-only"` DisplayName (`:150-158`,
-      preserve this behavior in the reconciler per T8), the flavor List + note fold incl.
-      `Spec.Feature`/`acceleratorFeature` (`:160-212`), the DisplayName-from-Product default (`:214-223`), and
-      `foldCPUDetail` (`:237-252`, which becomes dead code and must be removed or lint fails). Keep
-      label/GeneralGroup/entrance stamping.
+      **`instance_type.go:145-252`** (not `:160-212`): the CPU-only clear + `"CPU-only"` DisplayName (`:150-158`;
+      the DisplayName default now lives in the NodeFlavorReconciler's derived authoring, stamped at creation per
+      T8), the flavor List + note fold incl. `Spec.Feature`/`acceleratorFeature` (`:160-212`), the
+      DisplayName-from-Product default (`:214-223`), and `foldCPUDetail` (`:237-252`, which becomes dead code and
+      must be removed or lint fails). Keep label/GeneralGroup/entrance stamping.
     - **Now remove the `acceleratorFeature` note producer** — its last reader is gone: delete the note write
       (`node_flavor.go:218-219`) and the `nodeFlavorAcceleratorsFeature` helper (`node_flavor.go:331-348`, which
       returns `workercore.AcceleratorsFeature` — leaving it would break T12's type deletion). The
@@ -1044,7 +1050,7 @@ after the implementation PR merges):
 - `pkg/devicemanager/allocator`: `2026-07-20` - target: keep current % after `--slicing-policy` removal (no behavior change)
 - `pkg/deviceplugin`: `2026-07-20` - target `75%` (`getListAndWatchResponse` per-card token count: non-MIG=`LogicalSliced.Count`, MIG=`PhysicalSliced.Count`, other modes unaffected)
 - `pkg/worker/controllers/worker` (node_capacity): `2026-07-20` - target `80%` (non-MIG identity; mixed group units-vs-logical split; all-MIG; Devices-watch enqueue)
-- `pkg/worker/controllers/worker` (instance_type): `2026-07-20` - target `80%` (Detail computed inside computeStatus + not stomped on re-reconcile; ResourceFlavor-note + Devices sourcing incl. CPU-only; per-type readiness incl. generic-pool `"CPU-only"`; DisplayName default)
+- `pkg/worker/controllers/worker` (instance_type): `2026-07-20` - target `80%` (Detail computed inside computeStatus + not stomped on re-reconcile; ResourceFlavor-note + Devices sourcing incl. CPU-only; per-type readiness incl. generic-pool empty Detail; `foldDetailCPU` unit-covered; derived DisplayName stamped in node_flavor, not the reconciler)
 - `pkg/worker/webhooks/worker` (instance_type / pod / instance): `2026-07-20` - target `80%` (Default drops the `:145-252` enrichment + dead foldCPUDetail; immutability masks Description; Pod VRAM from Status.Detail with empty→retryable-reject; sliced Instance CREATE rejected on empty Detail, not whole-card-defaulted)
 - `pkg/worker/extensionapis/worker`: `2026-07-20` - target: keep current % after `Sliceable` field removal
 - `pkg/workergateway/service`: `2026-07-20` - target `80%` (Recompute direct-sum of profile Counts at tier + top; Manufacturer/etc. read from Detail)
@@ -1087,9 +1093,10 @@ Fake-client reconciler/webhook tests (the project's convention — no envtest cl
   creates **no Pod** while Detail is empty. After one reconcile, all succeed with slice-scaled sizing.
 - **`computeStatus` does not stomp Detail (R7):** reconcile twice; assert the second pass keeps `Status.Detail`
   (proving Detail is computed inside `computeStatus`, not a separate `/status` write).
-- **CPU-only Detail source + readiness (R2):** an aware CPU pool gains CPU `Status.Detail` from the `cpuDetail`
-  note and reaches ready; a generic collapsed pool activates its queue with a minimal Detail +
-  `DisplayName = "CPU-only"` (not deadlocked behind the readiness gate).
+- **CPU-only Detail source + readiness (R2):** the `cpuDetail` note→Detail fold is unit-covered (`foldDetailCPU`,
+  both the accelerated and CPU-only branches); a generic collapsed pool activates its queue with a minimal Detail
+  (not deadlocked behind the readiness gate). The derived DisplayName (`"CPU-only"` for the collapsed pool) is
+  asserted in the NodeFlavorReconciler derived-authoring test, not the reconciler.
 - **MIG-mode matrix (current-keyed):** `current==ENABLE` (any pending) → physical only; `current==DISABLE`
   incl. pending-enable `(0,1)` → logical; `GetMigMode` not-supported/error → logical (a non-MIG-capable card
   keeps its soft slicing — this is the common V100/T4/RTX case, superseding the earlier R5 exclude-on-error).
@@ -1147,8 +1154,9 @@ the decisions are traceable:
 3. **InstanceType write path** — resolved: all observed-hardware backfill detaches from the mutating webhook
    and moves to the InstanceTypeReconciler writing `Status.Detail` via the `/status` subresource (which does
    not pass through the admission webhooks, so no immutability conflict). The operator seeds Spec fields at
-   Create; the DisplayName default (`= Detail.Product`, once, while empty) moves to the reconciler and passes
-   ValidateUpdate because DisplayName is in the admin-editable masked set. (F7)
+   Create; the DisplayName default (the flavor product, or `"CPU-only"` for the collapsed generic pool) is
+   stamped once at derivation by the NodeFlavorReconciler, keeping the InstanceTypeReconciler status-only.
+   DisplayName is admin-editable, so a later rename is preserved. (F7)
 4. **Gateway tier `Detail` vs standalone `AcceleratorSlicedDetail`** — resolved: pure direct summation at every
    level; both the `Detail`-embedded `SlicedDetail` and the standalone field carry the identical Σ of profile
    counts. (F8)

@@ -21,12 +21,14 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
@@ -341,7 +343,10 @@ func (r *InstanceTypeReconciler) teardownInstanceType(
 // computeStatus builds the InstanceType status: the accelerated three-view is a
 // per-card bin-packing projection of the pool's Devices ledger, the CPU view comes
 // from the ClusterQueue; a draining queue reports zero (its status views stay at
-// their zero value). The phase mirrors the ClusterQueue conditions.
+// their zero value). The observed hardware Detail is computed here — not via a separate
+// /status write — because the reconciler assigns the whole status wholesale, so a
+// separately-written Detail would be stomped on the next pass. The phase mirrors the
+// ClusterQueue conditions.
 func (r *InstanceTypeReconciler) computeStatus(
 	ctx context.Context, it *workercore.InstanceType, cq *kueue.ClusterQueue, withOvercommit bool,
 ) workercore.InstanceTypeStatus {
@@ -349,17 +354,126 @@ func (r *InstanceTypeReconciler) computeStatus(
 	draining := ptr.Deref(cq.Spec.StopPolicy, kueue.None) == kueue.HoldAndDrain
 
 	var st workercore.InstanceTypeStatus
+	var devices []workercore.Devices
+	if acceleratable {
+		devices = r.listFlavorPoolDevices(ctx, cq)
+	}
 	if !draining {
 		if acceleratable {
-			devices := r.listFlavorPoolDevices(ctx, cq)
 			st.Accelerator, st.AcceleratorShared, st.AcceleratorSliced = getAcceleratorResources(devices)
 		} else {
 			st.CPU = getCPUResource(cq, withOvercommit)
 		}
 	}
+	st.Detail = r.computeDetail(ctx, it, devices)
 	st.Entrance = nodefeature.FormatLocalQueueName(cq.Name)
 	st.Phase, st.PhaseMessage = apistatus.GetSummaryOfClusterQueue(cq)
 	return st
+}
+
+// isGenericCollapsedPool reports whether the InstanceType is the CPU-manufacturer-agnostic
+// collapsed pool: not acceleratable with CPU-manufacturer awareness off. Such a pool folds many
+// CPU kinds into one type, so no single ResourceFlavor identity represents it — its Detail stays
+// minimal (the NodeFlavorReconciler stamps its DisplayName as "CPU-only" at derivation).
+func isGenericCollapsedPool(ctx context.Context, it *workercore.InstanceType) bool {
+	return !it.Spec.Acceleratable &&
+		!settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
+}
+
+// computeDetail builds the observed hardware descriptor of the InstanceType, mirroring the
+// sources the mutating webhook uses at admission: manufacturer/product/family (and, for an
+// accelerated type, per-card memory/cores + the CPU cpuDetail) from the matched ResourceFlavor's
+// notes, plus the pool's Devices group AcceleratorSlicedDetail for the accelerator's slicing
+// detail. It resolves the flavor by the schedule labels derived from the spec identity (not the
+// ClusterQueue's labels), so Detail is computable independently of the queue. A collapsed generic
+// pool has no representative flavor identity, so its Detail stays empty; a not-yet-synced flavor
+// likewise yields an empty Detail, refreshed on a later reconcile.
+func (r *InstanceTypeReconciler) computeDetail(
+	ctx context.Context, it *workercore.InstanceType, devices []workercore.Devices,
+) workercore.InstanceTypeDetail {
+	if isGenericCollapsedPool(ctx, it) {
+		return workercore.InstanceTypeDetail{}
+	}
+
+	lbs := systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels](_ResourceFlavorResType)
+	for k, v := range instanceTypeScheduleLabels(ctx, it) {
+		lbs[k] = v
+	}
+	rfList := new(kueue.ResourceFlavorList)
+	err := r.Client.List(ctx, rfList, lbs,
+		ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy, ctrlcli.Limit(1))
+	if err != nil {
+		ctrllog.FromContext(ctx).Error(err, "list resource flavor for instance type detail")
+		return workercore.InstanceTypeDetail{}
+	}
+	if len(rfList.Items) == 0 {
+		ctrllog.FromContext(ctx).V(3).
+			Info("no matching resource flavor for instance type detail; refresh on later reconcile")
+		return workercore.InstanceTypeDetail{}
+	}
+	_, notes := systemmeta.DescribeResource(&rfList.Items[0])
+
+	detail := workercore.InstanceTypeDetail{
+		Manufacturer: notes["manufacturer"],
+		Product:      notes["product"],
+		Family:       notes["family"],
+	}
+	if it.Spec.Acceleratable {
+		detail.Memory = notes["memory"]
+		detail.Cores = notes["cores"]
+		detail.SlicedDetail = poolAcceleratorSlicedDetail(devices, it.Spec.AcceleratorGroup)
+		// The cpuDetail note rides an accelerated flavor only when CPU-manufacturer awareness is
+		// on (a CPU flavor always carries it), matching how the flavor reconciler records it.
+		if settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx) {
+			foldDetailCPU(&detail, notes["cpuDetail"], true)
+		}
+	} else {
+		foldDetailCPU(&detail, notes["cpuDetail"], false)
+	}
+	return detail
+}
+
+// foldDetailCPU folds a ResourceFlavor's cpuDetail note into the Detail, mirroring the shape the
+// NodeFlavorReconciler stored: an accelerated flavor's note is an InstanceTypeAcceleratorCPU (the
+// CPU's own manufacturer/product/family plus inline CPU detail) folded into the accelerator's
+// CPU; a CPU flavor's note is a plain InstanceTypeCPU folded into the top-level CPU. A malformed
+// or empty note leaves the Detail unchanged.
+func foldDetailCPU(detail *workercore.InstanceTypeDetail, raw string, acceleratable bool) {
+	if raw == "" {
+		return
+	}
+	if acceleratable {
+		var d workercore.InstanceTypeAcceleratorCPU
+		if err := json.Unmarshal([]byte(raw), &d); err == nil {
+			detail.CPU = d
+		}
+	} else {
+		var d workercore.InstanceTypeCPU
+		if err := json.Unmarshal([]byte(raw), &d); err == nil {
+			detail.InstanceTypeCPU = d
+		}
+	}
+}
+
+// poolAcceleratorSlicedDetail aggregates the pool's slicing capability for the accelerator group
+// across every backing node: it flattens the matching group's cards from each node's Devices
+// ledger and re-aggregates, so the pool sum mirrors the detector's card→group aggregation one
+// level up and stays consistent with the pool-summed resource views. The group is matched by the
+// full "${manufacturer}-${group ID}" key (ConstructGroupID strips the vendor prefix, so a bare ID
+// can collide across manufacturers); no matching group yields the zero detail.
+func poolAcceleratorSlicedDetail(
+	devices []workercore.Devices, acceleratorKey string,
+) workercore.AcceleratorSlicedDetail {
+	var cards []workercore.Accelerator
+	for i := range devices {
+		for j := range devices[i].Spec.Groups {
+			g := &devices[i].Spec.Groups[j]
+			if g.Manufacturer+"-"+g.ID == acceleratorKey {
+				cards = append(cards, g.Accelerators...)
+			}
+		}
+	}
+	return device.AggregateAcceleratorSlicedDetail(cards)
 }
 
 // instanceTypeScheduleLabels builds the schedule discriminator labels stamped on the backing
@@ -386,7 +500,10 @@ func (r *InstanceTypeReconciler) listFlavorPoolDevices(ctx context.Context, cq *
 		return nil
 	}
 	list := new(workercore.DevicesList)
-	if err := r.Client.List(ctx, list, ctrlcli.MatchingLabels(sel)); err != nil {
+	// The listed Devices are read-only here (getAcceleratorResources and poolAcceleratorSlicedDetail
+	// only read them), so serve them straight from the informer cache without a deep copy.
+	if err := r.Client.List(ctx, list, ctrlcli.MatchingLabels(sel),
+		ctrlclix.WithoutQuorum, ctrlcli.UnsafeDisableDeepCopy); err != nil {
 		return nil
 	}
 	return list.Items

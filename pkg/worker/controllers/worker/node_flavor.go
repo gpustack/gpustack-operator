@@ -352,19 +352,35 @@ const (
 	// from the node-fed ResourceFlavors (instance-type-derived-from-node); it is a provenance marker
 	// only — a derived type is never auto-removed.
 	_InstanceTypeDerivedFromNodeLabel = "schedule.gpustack.ai/derived-from-node"
+
+	// cpuOnlyDisplayName is the DisplayName a derived CPU-manufacturer-agnostic collapsed pool
+	// carries, since no single pooled node's product represents it.
+	cpuOnlyDisplayName = "CPU-only"
 )
 
 // authorDerivedInstanceType creates the pool's operator-owned InstanceType from a synced flavor.
 // It stamps the setting-correct pool identity (general/accelerator group + acceleratable/os/arch)
-// + the fixed default unit spec + the derived marker; the defaulting webhook enriches the
-// descriptor spec. It only ever creates — an existing type (admin- or operator-owned) is left
-// untouched, so an AlreadyExists is a no-op.
+// + the fixed default unit spec + the derived marker + the human-friendly DisplayName (the
+// flavor's product, or the "CPU-only" sentinel for the CPU-manufacturer-agnostic collapsed pool).
+// DisplayName is admin-editable, so this creation-time default never fights a later admin rename;
+// an admin-created type is not auto-named. It only ever creates — an existing type (admin- or
+// operator-owned) is left untouched, so an AlreadyExists is a no-op.
 func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, flavor *nodefeature.NodeFlavor) error {
 	logger := ctrllog.FromContext(ctx)
 
 	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
 	name, generalGroup, acceleratorGroup := flavor.DerivedInstanceTypeIdentity(cpuAware)
 	unitCpu, unitRam, stg := defaultResources(flavor.Acceleratable)
+
+	// The collapsed generic pool folds many CPUs into one type, so no single node's product
+	// represents it (the flavor carries an empty product there anyway); label it "CPU-only".
+	displayName := flavor.Product
+	if !flavor.Acceleratable && !cpuAware {
+		displayName = cpuOnlyDisplayName
+	}
+	if runes := []rune(displayName); len(runes) > 64 {
+		displayName = string(runes[:64])
+	}
 
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
@@ -377,6 +393,7 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 			Acceleratable:    flavor.Acceleratable,
 			OS:               flavor.OS,
 			Arch:             flavor.Arch,
+			DisplayName:      displayName,
 			UnitResources:    workercore.InstanceTypeUnitResources{CPU: unitCpu, RAM: unitRam},
 			LocalStorage:     stg,
 		},

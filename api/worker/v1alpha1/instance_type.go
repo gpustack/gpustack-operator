@@ -90,6 +90,11 @@ type InstanceTypeSpec struct {
 	// workloads); clearing it reactivates the queue. A queue stopped by any means is
 	// reflected back into Inactive=true.
 	Inactive bool `json:"inactive,omitempty" protobuf:"varint,14,opt,name=inactive"`
+
+	// Description is a free-form admin annotation for the InstanceType.
+	//
+	// +k8s:validation:maxLength=1024
+	Description string `json:"description,omitempty" protobuf:"bytes,15,opt,name=description"`
 }
 
 // InstanceTypeCPU describes the information of the CPU.
@@ -178,6 +183,48 @@ type InstanceTypeAcceleratorCPU struct {
 	InstanceTypeCPU `json:",inline" protobuf:"bytes,4,opt,name=cpu"`
 }
 
+// InstanceTypeDetail is the observed hardware descriptor of an InstanceType, computed by the
+// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger. It lives on
+// the status side: because it embeds the accelerator's AcceleratorSlicedDetail (which holds a
+// slice), it is not comparable and must never appear on the comparable, map-key InstanceTypeSpec.
+type InstanceTypeDetail struct {
+	// Manufacturer is the name of the InstanceType manufacturer.
+	Manufacturer string `json:"manufacturer,omitempty" protobuf:"bytes,1,opt,name=manufacturer"`
+
+	// Product is the name of the InstanceType product.
+	Product string `json:"product,omitempty" protobuf:"bytes,2,opt,name=product"`
+
+	// Family is the family of the InstanceType.
+	Family string `json:"family,omitempty" protobuf:"bytes,3,opt,name=family"`
+
+	// CPU describes the CPU information of the InstanceType.
+	InstanceTypeCPU `json:",inline" protobuf:"bytes,4,opt,name=cpu"`
+
+	// Accelerator describes the accelerator information of the InstanceType.
+	InstanceTypeAcceleratorDetail `json:",inline" protobuf:"bytes,5,opt,name=accelerator"`
+}
+
+// InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
+// It mirrors InstanceTypeAccelerator but carries the pool-aggregated SlicedDetail (the observed
+// slicing capability) in place of the desired-state Feature, so the status-side detail can hold
+// the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
+type InstanceTypeAcceleratorDetail struct {
+	// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
+	Memory string `json:"memory,omitempty" protobuf:"bytes,1,opt,name=memory"`
+
+	// Cores is the number of cores of the accelerator, e.g. "128", "256".
+	Cores string `json:"cores,omitempty" protobuf:"bytes,2,opt,name=cores"`
+
+	// ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
+	ComputeCapability string `json:"computeCapability,omitempty" protobuf:"bytes,3,opt,name=computeCapability"`
+
+	// SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
+	SlicedDetail AcceleratorSlicedDetail `json:"slicedDetail,omitempty" protobuf:"bytes,4,opt,name=slicedDetail"`
+
+	// CPU describes the CPU information of the accelerator.
+	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
+}
+
 // InstanceTypeStatus describes the observed state of the InstanceType.
 type InstanceTypeStatus struct {
 	// Phase is the summary of conditions.
@@ -207,6 +254,10 @@ type InstanceTypeStatus struct {
 	// "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
 	// InstanceType name (see nodefeature.FormatLocalQueueName).
 	Entrance string `json:"entrance,omitempty" protobuf:"bytes,7,opt,name=entrance"`
+
+	// Detail is the observed hardware descriptor of the InstanceType, computed by the
+	// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+	Detail InstanceTypeDetail `json:"detail,omitempty" protobuf:"bytes,8,opt,name=detail"`
 }
 
 // InstanceTypeResource describes the resource of the InstanceType.

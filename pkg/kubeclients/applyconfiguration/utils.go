@@ -1342,10 +1342,14 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAcceleratorCPU"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorCPUApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAcceleratorDetail"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorDetailApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeCPU"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeCPUCache"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUCacheApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeDetail"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeDetailApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeResource"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeResourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeSpec"):

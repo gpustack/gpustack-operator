@@ -93,9 +93,13 @@ func (m *InstanceTypeAccelerator) Reset() { *m = InstanceTypeAccelerator{} }
 
 func (m *InstanceTypeAcceleratorCPU) Reset() { *m = InstanceTypeAcceleratorCPU{} }
 
+func (m *InstanceTypeAcceleratorDetail) Reset() { *m = InstanceTypeAcceleratorDetail{} }
+
 func (m *InstanceTypeCPU) Reset() { *m = InstanceTypeCPU{} }
 
 func (m *InstanceTypeCPUCache) Reset() { *m = InstanceTypeCPUCache{} }
+
+func (m *InstanceTypeDetail) Reset() { *m = InstanceTypeDetail{} }
 
 func (m *InstanceTypeList) Reset() { *m = InstanceTypeList{} }
 
@@ -1773,6 +1777,64 @@ func (m *InstanceTypeAcceleratorCPU) MarshalToSizedBuffer(dAtA []byte) (int, err
 	return len(dAtA) - i, nil
 }
 
+func (m *InstanceTypeAcceleratorDetail) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *InstanceTypeAcceleratorDetail) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *InstanceTypeAcceleratorDetail) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	{
+		size, err := m.CPU.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x2a
+	{
+		size, err := m.SlicedDetail.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x22
+	i -= len(m.ComputeCapability)
+	copy(dAtA[i:], m.ComputeCapability)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ComputeCapability)))
+	i--
+	dAtA[i] = 0x1a
+	i -= len(m.Cores)
+	copy(dAtA[i:], m.Cores)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Cores)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Memory)
+	copy(dAtA[i:], m.Memory)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Memory)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *InstanceTypeCPU) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -1879,6 +1941,64 @@ func (m *InstanceTypeCPUCache) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i -= len(m.L1I)
 	copy(dAtA[i:], m.L1I)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.L1I)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *InstanceTypeDetail) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *InstanceTypeDetail) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *InstanceTypeDetail) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	{
+		size, err := m.InstanceTypeAcceleratorDetail.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x2a
+	{
+		size, err := m.InstanceTypeCPU.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x22
+	i -= len(m.Family)
+	copy(dAtA[i:], m.Family)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Family)))
+	i--
+	dAtA[i] = 0x1a
+	i -= len(m.Product)
+	copy(dAtA[i:], m.Product)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Product)))
+	i--
+	dAtA[i] = 0x12
+	i -= len(m.Manufacturer)
+	copy(dAtA[i:], m.Manufacturer)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Manufacturer)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -2004,6 +2124,11 @@ func (m *InstanceTypeSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.Description)
+	copy(dAtA[i:], m.Description)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Description)))
+	i--
+	dAtA[i] = 0x7a
 	i--
 	if m.Inactive {
 		dAtA[i] = 1
@@ -2118,6 +2243,16 @@ func (m *InstanceTypeStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	{
+		size, err := m.Detail.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x42
 	i -= len(m.Entrance)
 	copy(dAtA[i:], m.Entrance)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Entrance)))
@@ -2855,6 +2990,25 @@ func (m *InstanceTypeAcceleratorCPU) Size() (n int) {
 	return n
 }
 
+func (m *InstanceTypeAcceleratorDetail) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Memory)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Cores)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.ComputeCapability)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.SlicedDetail.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.CPU.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
 func (m *InstanceTypeCPU) Size() (n int) {
 	if m == nil {
 		return 0
@@ -2893,6 +3047,25 @@ func (m *InstanceTypeCPUCache) Size() (n int) {
 	l = len(m.L2)
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.L3)
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *InstanceTypeDetail) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Manufacturer)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Product)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = len(m.Family)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.InstanceTypeCPU.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.InstanceTypeAcceleratorDetail.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -2961,6 +3134,8 @@ func (m *InstanceTypeSpec) Size() (n int) {
 	l = len(m.DisplayName)
 	n += 1 + l + sovGenerated(uint64(l))
 	n += 2
+	l = len(m.Description)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -2983,6 +3158,8 @@ func (m *InstanceTypeStatus) Size() (n int) {
 	l = m.CPU.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Entrance)
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.Detail.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -3511,6 +3688,20 @@ func (this *InstanceTypeAcceleratorCPU) String() string {
 	}, "")
 	return s
 }
+func (this *InstanceTypeAcceleratorDetail) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&InstanceTypeAcceleratorDetail{`,
+		`Memory:` + fmt.Sprintf("%v", this.Memory) + `,`,
+		`Cores:` + fmt.Sprintf("%v", this.Cores) + `,`,
+		`ComputeCapability:` + fmt.Sprintf("%v", this.ComputeCapability) + `,`,
+		`SlicedDetail:` + strings.Replace(strings.Replace(this.SlicedDetail.String(), "AcceleratorSlicedDetail", "AcceleratorSlicedDetail", 1), `&`, ``, 1) + `,`,
+		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeAcceleratorCPU", "InstanceTypeAcceleratorCPU", 1), `&`, ``, 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *InstanceTypeCPU) String() string {
 	if this == nil {
 		return "nil"
@@ -3537,6 +3728,20 @@ func (this *InstanceTypeCPUCache) String() string {
 		`L1D:` + fmt.Sprintf("%v", this.L1D) + `,`,
 		`L2:` + fmt.Sprintf("%v", this.L2) + `,`,
 		`L3:` + fmt.Sprintf("%v", this.L3) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *InstanceTypeDetail) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&InstanceTypeDetail{`,
+		`Manufacturer:` + fmt.Sprintf("%v", this.Manufacturer) + `,`,
+		`Product:` + fmt.Sprintf("%v", this.Product) + `,`,
+		`Family:` + fmt.Sprintf("%v", this.Family) + `,`,
+		`InstanceTypeCPU:` + strings.Replace(strings.Replace(this.InstanceTypeCPU.String(), "InstanceTypeCPU", "InstanceTypeCPU", 1), `&`, ``, 1) + `,`,
+		`InstanceTypeAcceleratorDetail:` + strings.Replace(strings.Replace(this.InstanceTypeAcceleratorDetail.String(), "InstanceTypeAcceleratorDetail", "InstanceTypeAcceleratorDetail", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3588,6 +3793,7 @@ func (this *InstanceTypeSpec) String() string {
 		`GeneralGroup:` + fmt.Sprintf("%v", this.GeneralGroup) + `,`,
 		`DisplayName:` + fmt.Sprintf("%v", this.DisplayName) + `,`,
 		`Inactive:` + fmt.Sprintf("%v", this.Inactive) + `,`,
+		`Description:` + fmt.Sprintf("%v", this.Description) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3604,6 +3810,7 @@ func (this *InstanceTypeStatus) String() string {
 		`AcceleratorSliced:` + strings.Replace(strings.Replace(this.AcceleratorSliced.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`Entrance:` + fmt.Sprintf("%v", this.Entrance) + `,`,
+		`Detail:` + strings.Replace(strings.Replace(this.Detail.String(), "InstanceTypeDetail", "InstanceTypeDetail", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -8925,6 +9132,218 @@ func (m *InstanceTypeAcceleratorCPU) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
+func (m *InstanceTypeAcceleratorDetail) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: InstanceTypeAcceleratorDetail: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: InstanceTypeAcceleratorDetail: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Memory", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Memory = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Cores", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Cores = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ComputeCapability", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ComputeCapability = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field SlicedDetail", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.SlicedDetail.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CPU", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.CPU.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
 func (m *InstanceTypeCPU) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
@@ -9388,6 +9807,218 @@ func (m *InstanceTypeCPUCache) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.L3 = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *InstanceTypeDetail) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: InstanceTypeDetail: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: InstanceTypeDetail: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Manufacturer", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Manufacturer = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Product", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Product = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Family", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Family = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InstanceTypeCPU", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.InstanceTypeCPU.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InstanceTypeAcceleratorDetail", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.InstanceTypeAcceleratorDetail.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -10132,6 +10763,38 @@ func (m *InstanceTypeSpec) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.Inactive = bool(v != 0)
+		case 15:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Description", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Description = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -10409,6 +11072,39 @@ func (m *InstanceTypeStatus) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.Entrance = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Detail", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.Detail.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex

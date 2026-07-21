@@ -28,6 +28,9 @@ type InstanceTypeStatusApplyConfiguration struct {
 	// "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
 	// InstanceType name (see nodefeature.FormatLocalQueueName).
 	Entrance *string `json:"entrance,omitempty"`
+	// Detail is the observed hardware descriptor of the InstanceType, computed by the
+	// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+	Detail *InstanceTypeDetailApplyConfiguration `json:"detail,omitempty"`
 }
 
 // InstanceTypeStatusApplyConfiguration constructs a declarative configuration of the InstanceTypeStatus type for use with
@@ -89,5 +92,13 @@ func (b *InstanceTypeStatusApplyConfiguration) WithCPU(value *InstanceTypeResour
 // If called multiple times, the Entrance field is set to the value of the last call.
 func (b *InstanceTypeStatusApplyConfiguration) WithEntrance(value string) *InstanceTypeStatusApplyConfiguration {
 	b.Entrance = &value
+	return b
+}
+
+// WithDetail sets the Detail field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Detail field is set to the value of the last call.
+func (b *InstanceTypeStatusApplyConfiguration) WithDetail(value *InstanceTypeDetailApplyConfiguration) *InstanceTypeStatusApplyConfiguration {
+	b.Detail = value
 	return b
 }

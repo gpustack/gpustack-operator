@@ -1210,6 +1210,11 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 												},
 											},
 										},
+										"description": {
+											Description: "Description is a free-form admin annotation for the InstanceType.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](1024),
+										},
 										"displayName": {
 											Description: "DisplayName is a human-friendly label for the InstanceType. The mutating webhook\ndefaults an empty value to Product.",
 											Type:        "string",
@@ -1522,6 +1527,210 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 														},
 													},
 													XIntOrString: true,
+												},
+											},
+										},
+										"detail": {
+											Description: "Detail is the observed hardware descriptor of the InstanceType, computed by the\nreconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"cache": {
+													Description: "Cache describes the cache information of the CPU.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"l1d": {
+															Description: "L1D is the L1 data cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l1i": {
+															Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l2": {
+															Description: "L2 is the L2 cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+														"l3": {
+															Description: "L3 is the L3 cache size in bytes of the CPU.",
+															Type:        "string",
+														},
+													},
+												},
+												"cacheLine": {
+													Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+													Type:        "string",
+												},
+												"clockSpeed": {
+													Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+													Type:        "string",
+												},
+												"computeCapability": {
+													Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+													Type:        "string",
+												},
+												"cores": {
+													Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+													Type:        "string",
+												},
+												"cpu": {
+													Description: "CPU describes the CPU information of the accelerator.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"cache": {
+															Description: "Cache describes the cache information of the CPU.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"l1d": {
+																	Description: "L1D is the L1 data cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+																"l1i": {
+																	Description: "L1I is the L1 instruction cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+																"l2": {
+																	Description: "L2 is the L2 cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+																"l3": {
+																	Description: "L3 is the L3 cache size in bytes of the CPU.",
+																	Type:        "string",
+																},
+															},
+														},
+														"cacheLine": {
+															Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+															Type:        "string",
+														},
+														"clockSpeed": {
+															Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+															Type:        "string",
+														},
+														"family": {
+															Description: "Family is the family of the CPU.",
+															Type:        "string",
+														},
+														"logicalCores": {
+															Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+															Type:        "string",
+														},
+														"manufacturer": {
+															Description: "Manufacturer is the name of the CPU manufacturer, e.g. \"amd\", \"intel\".",
+															Type:        "string",
+														},
+														"maxClockSpeed": {
+															Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+															Type:        "string",
+														},
+														"physicalCores": {
+															Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+															Type:        "string",
+														},
+														"product": {
+															Description: "Product is the name of the CPU product.",
+															Type:        "string",
+														},
+														"stepping": {
+															Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+															Type:        "string",
+														},
+														"threadsPerPhysicalCore": {
+															Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+															Type:        "string",
+														},
+													},
+												},
+												"family": {
+													Description: "Family is the family of the InstanceType.",
+													Type:        "string",
+												},
+												"logicalCores": {
+													Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+													Type:        "string",
+												},
+												"manufacturer": {
+													Description: "Manufacturer is the name of the InstanceType manufacturer.",
+													Type:        "string",
+												},
+												"maxClockSpeed": {
+													Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+													Type:        "string",
+												},
+												"memory": {
+													Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+													Type:        "string",
+												},
+												"physicalCores": {
+													Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+													Type:        "string",
+												},
+												"product": {
+													Description: "Product is the name of the InstanceType product.",
+													Type:        "string",
+												},
+												"slicedDetail": {
+													Description: "SlicedDetail is the pool's aggregated slicing capability for this accelerator group.",
+													Type:        "object",
+													Properties: map[string]v1.JSONSchemaProps{
+														"logical": {
+															Description: "Logical is the aggregated logical (software) slicing capability.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"coresPercentageOvercommit": {
+																	Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken\nfrom any soft-sliceable card; false and meaningless when no card is soft-sliceable.",
+																	Type:        "boolean",
+																},
+																"count": {
+																	Description: "Count is the sum of per-card LogicalSliced.Count across the group.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+															},
+														},
+														"physical": {
+															Description: "Physical is the aggregated physical (hardware) slicing capability.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"count": {
+																	Description: "Count is the sum of per-card PhysicalSliced.Count across the group.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"profiles": {
+																	Description: "Profiles is the group's physical profiles, summed by name.",
+																	Type:        "array",
+																	Items: &v1.JSONSchemaPropsOrArray{
+																		Schema: &v1.JSONSchemaProps{
+																			Type: "object",
+																			Required: []string{
+																				"name",
+																			},
+																			Properties: map[string]v1.JSONSchemaProps{
+																				"count": {
+																					Description: "Count is the sum of per-card Count for this profile name across the group.",
+																					Type:        "integer",
+																					Format:      "int32",
+																				},
+																				"name": {
+																					Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
+																					Type:        "string",
+																				},
+																			},
+																		},
+																	},
+																	Nullable: true,
+																},
+															},
+														},
+													},
+												},
+												"stepping": {
+													Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+													Type:        "string",
+												},
+												"threadsPerPhysicalCore": {
+													Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+													Type:        "string",
 												},
 											},
 										},

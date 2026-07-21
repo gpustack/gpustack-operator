@@ -76,9 +76,13 @@ func (*InstanceTypeAccelerator) ProtoMessage() {}
 
 func (*InstanceTypeAcceleratorCPU) ProtoMessage() {}
 
+func (*InstanceTypeAcceleratorDetail) ProtoMessage() {}
+
 func (*InstanceTypeCPU) ProtoMessage() {}
 
 func (*InstanceTypeCPUCache) ProtoMessage() {}
+
+func (*InstanceTypeDetail) ProtoMessage() {}
 
 func (*InstanceTypeList) ProtoMessage() {}
 

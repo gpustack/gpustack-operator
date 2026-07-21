@@ -55,6 +55,8 @@ type InstanceTypeSpecApplyConfiguration struct {
 	// workloads); clearing it reactivates the queue. A queue stopped by any means is
 	// reflected back into Inactive=true.
 	Inactive *bool `json:"inactive,omitempty"`
+	// Description is a free-form admin annotation for the InstanceType.
+	Description *string `json:"description,omitempty"`
 }
 
 // InstanceTypeSpecApplyConfiguration constructs a declarative configuration of the InstanceTypeSpec type for use with
@@ -260,5 +262,13 @@ func (b *InstanceTypeSpecApplyConfiguration) WithDisplayName(value string) *Inst
 // If called multiple times, the Inactive field is set to the value of the last call.
 func (b *InstanceTypeSpecApplyConfiguration) WithInactive(value bool) *InstanceTypeSpecApplyConfiguration {
 	b.Inactive = &value
+	return b
+}
+
+// WithDescription sets the Description field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Description field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithDescription(value string) *InstanceTypeSpecApplyConfiguration {
+	b.Description = &value
 	return b
 }
