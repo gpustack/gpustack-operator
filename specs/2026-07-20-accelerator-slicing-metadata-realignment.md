@@ -518,24 +518,34 @@ populated Detail and fail safe (treat as not-sliceable-yet, not panic) for an em
   `AcceleratorSlicedDetail workercore.AcceleratorSlicedDetail` (from the cluster InstanceType's
   `Status.Detail`).
 - `AggregatedInstanceTypeOnceMaxRequestTier` (`:96-116`) becomes
-  `{Detail workercore.InstanceTypeDetail, OnceMaxRequest, Remaining, Candidates, AcceleratorSlicedDetail}` —
-  the tier aggregate sums candidates (same-name profile Counts added).
-- `AggregatedInstanceTypeStatus` (`:51-77`) becomes `{Detail, OnceMaxRequest, Remaining, Tiers}` (top-level
-  aggregate folded into Detail).
+  `{OnceMaxRequest, Remaining, Candidates, AcceleratorSlicedDetail}` — a tier groups candidates by accelerator
+  `OnceMaxRequest` and carries **no identity descriptor**; its `AcceleratorSlicedDetail` is the direct Σ of its
+  candidates (same-name profile Counts added).
+- `AggregatedInstanceTypeStatus` (`:51-77`) becomes `{Detail, OnceMaxRequest, Remaining, Tiers}`. `Detail` is
+  the **single place the observed descriptor lives** — tiers group candidates and candidates are the per-cluster
+  members, neither carries identity. `Detail.SlicedDetail` is the direct Σ of every tier's slicing capability.
 - `Recompute` aggregates level-by-level, mirroring the detector's card→group aggregation. **The slicing
   aggregation is pure direct summation** (not the winning-candidate/representative selection that
-  `OnceMaxRequest` uses): every profile `Count` is summed by name across candidates into the tier, and across
-  tiers into the top level. Both the `SlicedDetail` embedded in `Detail` and the standalone
-  `AcceleratorSlicedDetail` field carry this same Σ — the descriptive identity fields of `Detail`
-  (manufacturer/product/family/CPU/per-card memory·cores) are shared across a tier's candidates and carried
-  as-is, while every numeric count in it is the direct sum, so the two views stay consistent by construction.
+  `OnceMaxRequest` uses): every profile `Count` is summed by name across candidates into the tier
+  (`tier.AcceleratorSlicedDetail`), and across tiers into `Status.Detail.SlicedDetail`. Counts are summed
+  regardless of candidate `Phase` — it is a hardware capability descriptor, not a live requestable resource.
+- `Status.Detail`'s **identity fields** (manufacturer/product/family/CPU/per-card memory·cores) are uniform
+  across an item's candidates (same hardware) and are **maintained at the status level, adopted at ingestion**
+  from any reconciled candidate (`Detail.AcceleratorReady()`, i.e. non-empty Manufacturer). This self-heals a
+  descriptor first seen during the pre-reconcile window: as soon as any candidate reports its hardware (a
+  co-tier ready candidate, or the original candidate's own reconcile `Modified`), the identity populates.
+  `Recompute` owns only `Detail.SlicedDetail` and never overwrites the adopted identity.
 - `AggregatedInstanceTypeSpec` is an alias of `workercore.InstanceTypeSpec` (`:44`): every consumer that read
   Manufacturer/Product/Family off the aggregated Spec must switch to `Status.Detail` (coordinate with UI/API
-  consumers; the gateway REST shape changes).
+  consumers; the gateway REST shape changes). Post-T10 the aggregated Spec no longer carries those fields, so no
+  in-tree reader survives — the F8 checklist verifies this and re-sources any needed descriptor from
+  `Status.Detail`.
 
-**Acceptance:** `Recompute` unit tests — two clusters with the same profile name sum Counts at tier and top
-level (both `Detail.…SlicedDetail` and the standalone `AcceleratorSlicedDetail` hold the identical Σ); a
-consumer-visible JSON fixture documents the new shape.
+**Acceptance:** `Recompute` unit tests — two clusters with the same profile name sum Counts at tier
+(`tier.AcceleratorSlicedDetail`) and top level (`Status.Detail.SlicedDetail`); the status descriptor identity
+self-heals from a not-yet-reconciled first candidate once a reconciled candidate arrives; a consumer-visible
+JSON fixture documents the new shape (`Detail` only on the item status; standalone `AcceleratorSlicedDetail` on
+each tier and candidate).
 
 #### F9 — MIG manual-lifecycle operations documentation
 
@@ -984,24 +994,32 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 
 **Phase E — Gateway, cleanup, docs**  ·  *Final checkpoint: grep-clean of removed symbols; full suite + lint.*
 
-[ ] **T11: WorkerGateway aggregation (F8).**
-    - Add `AcceleratorSlicedDetail` to the candidate; change the tier to `{Detail, OnceMaxRequest, Remaining,
-      Candidates, AcceleratorSlicedDetail}` and the status to `{Detail, OnceMaxRequest, Remaining, Tiers}`
-      (`service/types.go`). `Recompute` aggregates by **direct summation** (profile Counts summed by name at
-      candidate→tier→top; both `Detail`-embedded `SlicedDetail` and the standalone field carry the identical Σ).
+[x] **T11: WorkerGateway aggregation (F8).**
+    - Add `AcceleratorSlicedDetail` to the candidate and the tier; add `Detail` **only** to the status
+      (`service/types.go`). A tier carries no identity — it groups candidates and holds a per-tier
+      `AcceleratorSlicedDetail`; the observed descriptor lives solely on `Status.Detail`. `Recompute` aggregates
+      by **direct summation** (profile Counts summed by name at candidate→tier→`Status.Detail.SlicedDetail`,
+      Phase-independent).
+    - **Maintain `Status.Detail` identity at ingestion (self-heal):** `adoptDetailIdentity` adopts a reconciled
+      candidate's descriptor (`AcceleratorReady()`) at each ingestion site (`Next` + the `Handle` add/update
+      paths); `Recompute` owns only `Detail.SlicedDetail`. A descriptor first seen empty (pre-reconcile window)
+      self-heals once any candidate reports its hardware.
     - Re-plumb gateway readers of `AggregatedInstanceTypeSpec` Manufacturer/Product/Family to `Status.Detail`.
+      Post-T10 the aggregated Spec no longer has those fields (build stays green ⇒ no in-tree reader survives),
+      so this is a verify-none-remain step.
     - **Normalize `Description` (R9):** `normalizeAggregatedInstanceTypeSpec` (`helper.go:26-30`) zeroes only
-      `Inactive`/`DisplayName` before the `map[AggregatedInstanceTypeSpec]int` collapse (`helper.go:470,479`);
-      `Description` is the same per-cluster admin annotation and must be zeroed too, or identical hardware splits
-      into N aggregated items.
-    - **v1 `InstanceTypeFlavorSpec.Sliceable` (field 8) removal (R10):** T7 drops the extension-catalog
-      `Sliceable`; the v1 API field (`api/worker/v1/instance_type_flavor.go:61`) and its embed in
-      `AggregatedInstanceTypeFlavorSpec` (`service/types.go:20-25`) are removed here — a second UI-visible shape
-      change; renumber the trailing `GeneralGroup` (9→8) so the flavor spec stays contiguous, and add both
-      v1-flavor consumers to the F8 checklist.
-    - Acceptance: `Recompute` tests sum same-name profile Counts across two clusters at tier + top; two clusters
-      with same hardware but different `Description` collapse to **one** aggregated item; a JSON fixture
-      documents the new shape. Verify: `go test ./pkg/workergateway/...`.
+      `Inactive`/`DisplayName` before the `map[AggregatedInstanceTypeSpec]int` collapse; `Description` is the
+      same per-cluster admin annotation and must be zeroed too, or identical hardware splits into N aggregated
+      items.
+    - **v1 `InstanceTypeFlavorSpec.Sliceable` (field 8) removal (R10):** T7 dropped the extension-catalog
+      `Sliceable`; the v1 API field (`api/worker/v1/instance_type_flavor.go:61`) is removed here — a second
+      UI-visible shape change. It flows through `AggregatedInstanceTypeFlavorSpec`'s inline embed, so no separate
+      aggregate field changes; renumber the trailing `GeneralGroup` (9→8) so the flavor spec stays contiguous,
+      `make generate`, and clean the extensionapis `instance_type_flavor_test.go` `Sliceable` assertion.
+    - Acceptance: `Recompute` tests sum same-name profile Counts across two clusters at tier + top; the
+      `Status.Detail` identity self-heals from a not-yet-reconciled first candidate; two clusters with same
+      hardware but different `Description` collapse to **one** aggregated item; a JSON fixture documents the new
+      shape (`Detail` only on the item status). Verify: `go test ./pkg/workergateway/...`.
 
 [ ] **T12: delete the whole `AcceleratorsFeature` family + remove the R1 fallback (F1 cleanup).**
     - **Delete the whole `AcceleratorsFeature` family (2026-07-21 decision, R1 — within this spec, not deferred):**

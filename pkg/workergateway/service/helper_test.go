@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -1290,6 +1291,210 @@ func TestListAggregateInstanceTypes_GroupingIgnoresInactiveAndDisplayName(t *tes
 	require.Len(t, item.Status.Tiers, 1)
 	require.Len(t, item.Status.Tiers[0].Candidates, 2)
 	assert.Equal(t, "A10G Prod", item.Spec.DisplayName, "stored DisplayName is the first-seen one")
+}
+
+// withDetail sets an instance type's observed Status.Detail (identity + slicing capability); it is
+// the per-cluster input the gateway sums level-by-level into the tier and item slicing views.
+func withDetail(it *worker.InstanceType, detail workercore.InstanceTypeDetail) *worker.InstanceType {
+	it.Status.Detail = detail
+	return it
+}
+
+// gpuDetail builds an accelerator Status.Detail: identity fields plus a slicing capability of the
+// given logical soft-slice count/overcommit and physical (MIG) profiles (Physical.Count is their sum).
+func gpuDetail(product string, logical int32, overcommit bool, profiles ...workercore.AcceleratorSlicedPhysicalDetailProfile) workercore.InstanceTypeDetail {
+	var d workercore.InstanceTypeDetail
+	d.Manufacturer = "nvidia"
+	d.Product = product
+	d.Family = "ampere"
+	d.SlicedDetail.Logical.Count = logical
+	d.SlicedDetail.Logical.CoresPercentageOvercommit = overcommit
+	for _, p := range profiles {
+		d.SlicedDetail.Physical.Profiles = append(d.SlicedDetail.Physical.Profiles, p)
+		d.SlicedDetail.Physical.Count += p.Count
+	}
+	return d
+}
+
+func slicedProfile(name string, count int32) workercore.AcceleratorSlicedPhysicalDetailProfile {
+	return workercore.AcceleratorSlicedPhysicalDetailProfile{Name: name, Count: count}
+}
+
+func physicalProfileCounts(profiles []workercore.AcceleratorSlicedPhysicalDetailProfile) map[string]int32 {
+	m := make(map[string]int32, len(profiles))
+	for _, p := range profiles {
+		m[p.Name] = p.Count
+	}
+	return m
+}
+
+// TestListAggregateInstanceTypes_SlicedDetailAggregation covers the pure direct summation of the
+// slicing capability: profile Counts summed by name across candidates into the tier, and across
+// tiers into the item, with both the standalone AcceleratorSlicedDetail and Detail.SlicedDetail
+// carrying the identical Σ.
+func TestListAggregateInstanceTypes_SlicedDetailAggregation(t *testing.T) {
+	t.Run("logical counts sum across clusters at tier and item", func(t *testing.T) {
+		a := withDetail(a10gInst("inst-a", "1"), gpuDetail("NVIDIA A10G", 10, true))
+		b := withDetail(a10gInst("inst-b", "1"), gpuDetail("NVIDIA A10G", 10, true))
+
+		state := buildState(t,
+			seed{cluster: "cluster-a", obj: a},
+			seed{cluster: "cluster-b", obj: b},
+		)
+
+		require.Len(t, state.Items, 1)
+		item := state.Items[0]
+		require.Len(t, item.Status.Tiers, 1)
+		tier := item.Status.Tiers[0]
+
+		assert.Equal(t, int32(20), tier.AcceleratorSlicedDetail.Logical.Count, "tier sums candidate logical counts")
+		assert.True(t, tier.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit)
+
+		assert.Equal(t, int32(20), item.Status.Detail.SlicedDetail.Logical.Count, "item folds the tier sum into Detail")
+		assert.Equal(t, tier.AcceleratorSlicedDetail, item.Status.Detail.SlicedDetail, "single tier: item Σ equals the tier Σ")
+		assert.Equal(t, "NVIDIA A10G", item.Status.Detail.Product, "identity is adopted at the status level")
+		assert.Equal(t, "nvidia", item.Status.Detail.Manufacturer)
+	})
+
+	t.Run("physical profiles sum by name across clusters", func(t *testing.T) {
+		a := withDetail(a10gInst("inst-a", "1"), gpuDetail("NVIDIA A10G", 0, false, slicedProfile("1g.5gb", 7), slicedProfile("2g.10gb", 3)))
+		b := withDetail(a10gInst("inst-b", "1"), gpuDetail("NVIDIA A10G", 0, false, slicedProfile("1g.5gb", 7), slicedProfile("2g.10gb", 3)))
+
+		state := buildState(t,
+			seed{cluster: "cluster-a", obj: a},
+			seed{cluster: "cluster-b", obj: b},
+		)
+
+		require.Len(t, state.Items, 1)
+		tier := state.Items[0].Status.Tiers[0]
+
+		got := physicalProfileCounts(tier.AcceleratorSlicedDetail.Physical.Profiles)
+		assert.Equal(t, int32(14), got["1g.5gb"], "same-name profile Counts add")
+		assert.Equal(t, int32(6), got["2g.10gb"])
+		assert.Equal(t, int32(20), tier.AcceleratorSlicedDetail.Physical.Count)
+
+		itemGot := physicalProfileCounts(state.Items[0].Status.Detail.SlicedDetail.Physical.Profiles)
+		assert.Equal(t, int32(14), itemGot["1g.5gb"], "item mirrors the by-name sum")
+	})
+
+	t.Run("sums across tiers into the item", func(t *testing.T) {
+		// Two accelerator OnceMaxRequest values split into two tiers of one item; the item folds
+		// both tiers' slicing capability.
+		a := withDetail(a10gInst("inst-a", "1"), gpuDetail("NVIDIA A10G", 10, false))
+		b := withDetail(a10gInst("inst-b", "2"), gpuDetail("NVIDIA A10G", 30, false))
+
+		state := buildState(t,
+			seed{cluster: "cluster-a", obj: a},
+			seed{cluster: "cluster-b", obj: b},
+		)
+
+		require.Len(t, state.Items, 1)
+		item := state.Items[0]
+		require.Len(t, item.Status.Tiers, 2)
+		assert.Equal(t, int32(40), item.Status.Detail.SlicedDetail.Logical.Count, "item sums across tiers (10+30)")
+	})
+}
+
+// TestHandleAggregatedInstanceType_DetailIdentitySelfHeals pins that the item descriptor identity,
+// maintained at the status level, self-heals: an item first seen from a not-yet-reconciled candidate
+// (empty Detail) adopts the identity as soon as any candidate reports reconciled hardware — via a
+// co-tier ready candidate or the original candidate's own reconcile (Modified).
+func TestHandleAggregatedInstanceType_DetailIdentitySelfHeals(t *testing.T) {
+	t.Run("a later ready candidate populates the empty identity", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t))
+
+		// cluster-a arrives before its reconciler filled Status.Detail.
+		h.Handle(&manager.WorkerEvent{Type: manager.WorkerEventAdded, Cluster: "cluster-a", Object: a10gInst("inst-a", "1")})
+		require.NotNil(t, findItem(h.state, itemNameA10G))
+		assert.Empty(t, findItem(h.state, itemNameA10G).Status.Detail.Manufacturer, "identity is empty during the pre-reconcile window")
+
+		// cluster-b joins the same tier with reconciled hardware.
+		h.Handle(&manager.WorkerEvent{Type: manager.WorkerEventAdded, Cluster: "cluster-b", Object: withDetail(a10gInst("inst-b", "1"), gpuDetail("NVIDIA A10G", 10, true))})
+		item := findItem(h.state, itemNameA10G)
+		require.NotNil(t, item)
+		assert.Equal(t, "nvidia", item.Status.Detail.Manufacturer, "identity self-heals from the ready candidate")
+		assert.Equal(t, "NVIDIA A10G", item.Status.Detail.Product)
+		assert.Equal(t, int32(10), item.Status.Detail.SlicedDetail.Logical.Count)
+	})
+
+	t.Run("the original candidate reconciling populates the empty identity", func(t *testing.T) {
+		h := OpHandleAggregatedInstanceType(buildState(t))
+
+		h.Handle(&manager.WorkerEvent{Type: manager.WorkerEventAdded, Cluster: "cluster-a", Object: a10gInst("inst-a", "1")})
+		assert.Empty(t, findItem(h.state, itemNameA10G).Status.Detail.Manufacturer)
+
+		// The same object, now reconciled, arrives as a Modified.
+		h.Handle(&manager.WorkerEvent{Type: manager.WorkerEventModified, Cluster: "cluster-a", Object: withDetail(a10gInst("inst-a", "1"), gpuDetail("NVIDIA A10G", 8, false))})
+		item := findItem(h.state, itemNameA10G)
+		require.NotNil(t, item)
+		assert.Equal(t, "nvidia", item.Status.Detail.Manufacturer, "identity self-heals when the candidate reconciles")
+		assert.Equal(t, int32(8), item.Status.Detail.SlicedDetail.Logical.Count)
+	})
+}
+
+// TestListAggregateInstanceTypes_GroupingIgnoresDescription pins R9: Description is a per-cluster
+// admin annotation, so identical hardware with differing Description collapses to one item.
+func TestListAggregateInstanceTypes_GroupingIgnoresDescription(t *testing.T) {
+	a := a10gInst("inst-a", "1")
+	a.Spec.Description = "cluster A pool"
+	b := a10gInst("inst-b", "1")
+	b.Spec.Description = "cluster B pool"
+
+	state := buildState(t,
+		seed{cluster: "cluster-a", obj: a},
+		seed{cluster: "cluster-b", obj: b},
+	)
+
+	require.Len(t, state.Items, 1, "same hardware must not split on Description")
+	require.Len(t, state.Items[0].Status.Tiers, 1)
+	require.Len(t, state.Items[0].Status.Tiers[0].Candidates, 2)
+}
+
+// TestListAggregateInstanceTypes_StatusJSONShape is the consumer-visible fixture for the F8 shape:
+// Detail (identity + folded SlicedDetail) rides only the item status, while each tier and candidate
+// carries a standalone AcceleratorSlicedDetail. It pins the JSON a REST consumer observes.
+func TestListAggregateInstanceTypes_StatusJSONShape(t *testing.T) {
+	it := newInstType("gpustack-nvidia-a10g-", "inst-a", instSpecA10G(), workercore.InstanceTypeStatus{
+		Phase:             "Active",
+		Detail:            gpuDetail("NVIDIA A10G", 8, true),
+		Accelerator:       instTypeRes("1", "1", "1"),
+		CPU:               instTypeRes("4", "4", "4"),
+		AcceleratorShared: instTypeRes("0", "0", "0"),
+		AcceleratorSliced: instTypeRes("8", "8", "8"),
+	})
+	state := buildState(t, seed{cluster: "cluster-a", obj: it})
+
+	data, err := json.Marshal(state.Items[0].Status)
+	require.NoError(t, err)
+
+	const want = `{
+      "detail": {
+        "manufacturer": "nvidia", "product": "NVIDIA A10G", "family": "ampere",
+        "cache": {}, "cpu": {"cache": {}},
+        "slicedDetail": {"logical": {"coresPercentageOvercommit": true, "count": 8}, "physical": {}}
+      },
+      "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+      "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+      "tiers": [
+        {
+          "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+          "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+          "candidates": [
+            {
+              "cluster": "cluster-a", "name": "inst-a", "phase": "Active",
+              "accelerator": {"onceMaxRequest": "1", "remaining": "1", "capacity": "1"},
+              "acceleratorShared": {"onceMaxRequest": "0", "remaining": "0", "capacity": "0"},
+              "acceleratorSliced": {"onceMaxRequest": "8", "remaining": "8", "capacity": "8"},
+              "cpu": {"onceMaxRequest": "4", "remaining": "4", "capacity": "4"},
+              "acceleratorSlicedDetail": {"logical": {"coresPercentageOvercommit": true, "count": 8}, "physical": {}}
+            }
+          ],
+          "acceleratorSlicedDetail": {"logical": {"coresPercentageOvercommit": true, "count": 8}, "physical": {}}
+        }
+      ]
+    }`
+
+	require.JSONEq(t, want, string(data))
 }
 
 func newFlavor(name string, spec worker.InstanceTypeFlavorSpec) *worker.InstanceTypeFlavor {

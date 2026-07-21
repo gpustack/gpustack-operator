@@ -49,6 +49,14 @@ type (
 	// AggregatedInstanceTypeStatus represents the status of an AggregatedInstanceType,
 	// including resource availability and tier information.
 	AggregatedInstanceTypeStatus struct {
+		// Detail is the observed hardware descriptor of the AggregatedInstanceType — the single place
+		// the descriptor lives (tiers group candidates, candidates are the per-cluster members; neither
+		// carries identity). Its identity fields (manufacturer/product/family/CPU/per-card memory·cores)
+		// are the hardware shared by all candidates, adopted from any reconciled candidate at ingestion;
+		// its SlicedDetail is the direct Σ of every tier's slicing capability (profile Counts summed by
+		// name), so the whole-fleet slicing view is folded into the descriptor.
+		Detail workercore.InstanceTypeDetail `json:"detail,omitempty"`
+
 		// OnceMaxRequest is the once max request overview resource of the AggregatedInstanceType.
 		//
 		// It is the resource bundle of the tier that wins on the primary dimension:
@@ -113,6 +121,10 @@ type (
 		// All candidates in the same tier share the same accelerator OnceMaxRequest,
 		// but may differ on AcceleratorShared/AcceleratorSliced/CPU.
 		Candidates []AggregatedInstanceTypeOnceMaxRequestCandidate `json:"candidates"`
+
+		// AcceleratorSlicedDetail is the direct Σ of the candidates' slicing capability (identical to
+		// Detail.SlicedDetail): logical/physical counts added and physical profiles summed by name.
+		AcceleratorSlicedDetail workercore.AcceleratorSlicedDetail `json:"acceleratorSlicedDetail,omitempty"`
 	}
 
 	// AggregatedInstanceTypeOnceMaxRequestCandidate represents a candidate of the max request tier of the AggregatedInstanceType.
@@ -140,6 +152,10 @@ type (
 
 		// CPU is the CPU once max request resource of the candidate, e.g. "4", "8".
 		CPU AggregatedInstanceTypeResource `json:"cpu"`
+
+		// AcceleratorSlicedDetail is the candidate's observed slicing capability, taken from the
+		// cluster InstanceType's Status.Detail. The tier and item sum these by profile name.
+		AcceleratorSlicedDetail workercore.AcceleratorSlicedDetail `json:"acceleratorSlicedDetail,omitempty"`
 	}
 
 	// AggregatedInstanceTypeList represents a list of AggregatedInstanceType.

@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
@@ -21,11 +22,13 @@ import (
 const instanceTypePhaseActive = "Active"
 
 // normalizeAggregatedInstanceTypeSpec zeroes the fields that must not split the cross-cluster
-// grouping identity. Inactive and DisplayName describe an administrative/presentation state that
-// varies per cluster, so the same hardware collapses into one aggregated item regardless of them.
+// grouping identity. Inactive, DisplayName and Description describe an administrative/presentation
+// state that varies per cluster, so the same hardware collapses into one aggregated item regardless
+// of them.
 func normalizeAggregatedInstanceTypeSpec(spec AggregatedInstanceTypeSpec) AggregatedInstanceTypeSpec {
 	spec.Inactive = false
 	spec.DisplayName = ""
+	spec.Description = ""
 	return spec
 }
 
@@ -397,6 +400,16 @@ func (in *AggregatedInstanceType) Recompute() {
 
 	in.Status.OnceMaxRequest = newOnceMaxRequest
 	in.Status.Remaining = newRemaining
+
+	// Fold the whole-fleet slicing view into Detail.SlicedDetail: the direct Σ of every tier's slicing
+	// capability. The identity fields are owned by adoptDetailIdentity (set at ingestion) and left
+	// untouched here; only SlicedDetail is rebuilt, from a fresh sum that aliases no tier's slice.
+	var newSliced workercore.AcceleratorSlicedDetail
+	profileIndex := make(map[string]int)
+	for i := range in.Status.Tiers {
+		addAcceleratorSlicedDetail(&newSliced, in.Status.Tiers[i].AcceleratorSlicedDetail, profileIndex)
+	}
+	in.Status.Detail.SlicedDetail = newSliced
 }
 
 // overviewResourceIsZero reports whether every dimension of an overview bundle is zero, i.e. the
@@ -463,6 +476,92 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 
 	in.OnceMaxRequest = newOnceMaxRequest
 	in.Remaining = newRemaining
+
+	// Sum every candidate's slicing capability by profile name into the tier-level view — a pure
+	// capability aggregate, so unlike OnceMaxRequest/Remaining it counts all candidates regardless of
+	// Phase. The item folds these tier sums into Status.Detail.SlicedDetail.
+	var newSliced workercore.AcceleratorSlicedDetail
+	profileIndex := make(map[string]int)
+	for i := range in.Candidates {
+		addAcceleratorSlicedDetail(&newSliced, in.Candidates[i].AcceleratorSlicedDetail, profileIndex)
+	}
+	in.AcceleratorSlicedDetail = newSliced
+}
+
+// newAggregatedTier builds a candidate-less tier seeded from an InstanceType's status: OnceMaxRequest/
+// Remaining are the candidate's raw values (Recompute later replaces them with the tier aggregate).
+// A tier groups candidates by accelerator OnceMaxRequest and carries no identity — the observed
+// descriptor lives only on the item Status.Detail. The caller appends candidates.
+func newAggregatedTier(instType *worker.InstanceType) AggregatedInstanceTypeOnceMaxRequestTier {
+	return AggregatedInstanceTypeOnceMaxRequestTier{
+		OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+			Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
+			CPU:               instType.Status.CPU.OnceMaxRequest,
+			AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
+			AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
+		},
+		Remaining: AggregatedInstanceTypeOverviewResource{
+			Accelerator:       instType.Status.Accelerator.Remaining,
+			CPU:               instType.Status.CPU.Remaining,
+			AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
+			AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
+		},
+	}
+}
+
+// adoptDetailIdentity maintains the item's observed descriptor identity at the status level. It adopts
+// an ingested candidate's descriptor whenever that candidate has reconciled hardware (a non-empty
+// Manufacturer, the API's not-yet-synced signal), so a descriptor first seen during the pre-reconcile
+// window self-heals as soon as any candidate reports its hardware. Identity is uniform across an
+// item's candidates (same hardware), so adopting any ready one is deterministic; the existing
+// SlicedDetail Σ (owned by Recompute) is preserved.
+func adoptDetailIdentity(status *AggregatedInstanceTypeStatus, instType *worker.InstanceType) {
+	if !instType.Status.Detail.AcceleratorReady() {
+		return
+	}
+	sliced := status.Detail.SlicedDetail
+	status.Detail = instType.Status.Detail
+	status.Detail.SlicedDetail = sliced
+}
+
+// newAggregatedCandidate builds a candidate from an InstanceType's status, carrying its observed
+// slicing capability (Status.Detail.SlicedDetail) so the tier and item can sum it by profile name.
+func newAggregatedCandidate(cluster, name string, instType *worker.InstanceType) AggregatedInstanceTypeOnceMaxRequestCandidate {
+	return AggregatedInstanceTypeOnceMaxRequestCandidate{
+		Cluster:                 cluster,
+		Name:                    name,
+		Phase:                   instType.Status.Phase,
+		Accelerator:             instType.Status.Accelerator,
+		CPU:                     instType.Status.CPU,
+		AcceleratorShared:       instType.Status.AcceleratorShared,
+		AcceleratorSliced:       instType.Status.AcceleratorSliced,
+		AcceleratorSlicedDetail: instType.Status.Detail.SlicedDetail,
+	}
+}
+
+// addAcceleratorSlicedDetail folds src into dst by direct summation: logical/physical counts add,
+// physical profiles sum by name (profileIndex tracks each name's slot in dst.Physical.Profiles), and
+// the logical overcommit flag is OR-ed from any soft-sliceable contributor. It lifts the detector's
+// card→group aggregation (device.AggregateAcceleratorSlicedDetail) one level up, so a tier/item
+// slicing view is the plain sum of its members' capability, independent of candidate Phase.
+func addAcceleratorSlicedDetail(dst *workercore.AcceleratorSlicedDetail, src workercore.AcceleratorSlicedDetail, profileIndex map[string]int) {
+	dst.Logical.Count += src.Logical.Count
+	if src.Logical.Count > 0 && src.Logical.CoresPercentageOvercommit {
+		dst.Logical.CoresPercentageOvercommit = true
+	}
+
+	dst.Physical.Count += src.Physical.Count
+	for _, p := range src.Physical.Profiles {
+		if idx, ok := profileIndex[p.Name]; ok {
+			dst.Physical.Profiles[idx].Count += p.Count
+			continue
+		}
+		profileIndex[p.Name] = len(dst.Physical.Profiles)
+		dst.Physical.Profiles = append(dst.Physical.Profiles, workercore.AcceleratorSlicedPhysicalDetailProfile{
+			Name:  p.Name,
+			Count: p.Count,
+		})
+	}
 }
 
 type ListAggregateInstanceTypes struct {
@@ -504,39 +603,19 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 	item := &in.list.Items[itemIndex]
 	tierIndexer := in.itemTierIndexer[itemIndex]
 
+	// Maintain the item descriptor identity at the status level from any reconciled candidate.
+	adoptDetailIdentity(&item.Status, instType)
+
 	tierIndexKey := instType.Status.Accelerator.OnceMaxRequest.String()
 	tierIndex, existed := tierIndexer[tierIndexKey]
 	if !existed {
 		tierIndex = len(item.Status.Tiers)
 		tierIndexer[tierIndexKey] = tierIndex
-		tier := AggregatedInstanceTypeOnceMaxRequestTier{
-			OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-				Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
-				CPU:               instType.Status.CPU.OnceMaxRequest,
-				AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
-				AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
-			},
-			Remaining: AggregatedInstanceTypeOverviewResource{
-				Accelerator:       instType.Status.Accelerator.Remaining,
-				CPU:               instType.Status.CPU.Remaining,
-				AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
-				AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
-			},
-		}
-		item.Status.Tiers = append(item.Status.Tiers, tier)
+		item.Status.Tiers = append(item.Status.Tiers, newAggregatedTier(instType))
 	}
 
 	tier := &item.Status.Tiers[tierIndex]
-	candidate := AggregatedInstanceTypeOnceMaxRequestCandidate{
-		Cluster:           cluster,
-		Name:              instType.Name,
-		Phase:             instType.Status.Phase,
-		Accelerator:       instType.Status.Accelerator,
-		CPU:               instType.Status.CPU,
-		AcceleratorShared: instType.Status.AcceleratorShared,
-		AcceleratorSliced: instType.Status.AcceleratorSliced,
-	}
-	tier.Candidates = append(tier.Candidates, candidate)
+	tier.Candidates = append(tier.Candidates, newAggregatedCandidate(cluster, instType.Name, instType))
 
 	return nil
 }
@@ -666,6 +745,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 		item := &in.state.Items[index[0]]
 
+		// Maintain the item descriptor identity at the status level from any reconciled candidate; a
+		// delete carries no fresher hardware, so it never changes the descriptor.
+		if evt.Type != manager.WorkerEventDeleted {
+			adoptDetailIdentity(&item.Status, instType)
+		}
+
 		for j := 0; j < len(item.Status.Tiers); j++ {
 			tier := &item.Status.Tiers[j]
 			// Match tiers on a candidate's raw accelerator OnceMaxRequest (which Recompute never
@@ -727,19 +812,11 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				return evts
 			}
 
-			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
-				Cluster:           evt.Cluster,
-				Name:              instType.Name,
-				Phase:             instType.Status.Phase,
-				Accelerator:       instType.Status.Accelerator,
-				CPU:               instType.Status.CPU,
-				AcceleratorShared: instType.Status.AcceleratorShared,
-				AcceleratorSliced: instType.Status.AcceleratorSliced,
-			}
+			candidate := newAggregatedCandidate(evt.Cluster, instType.Name, instType)
 
 			if tier.Candidates[0].Accelerator.OnceMaxRequest.Equal(candidate.Accelerator.OnceMaxRequest) {
 				// If the once max request has not changed, update the candidate in place.
-				tier.Candidates[index[2]] = *candidate
+				tier.Candidates[index[2]] = candidate
 
 				// Recompute the tier.
 				tier.Recompute(item.Spec.Acceleratable)
@@ -767,28 +844,15 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 				if newTierIndex != -1 {
 					// Move to the new tier.
 					tier = &item.Status.Tiers[newTierIndex]
-					tier.Candidates = append(tier.Candidates, *candidate)
+					tier.Candidates = append(tier.Candidates, candidate)
 
 					// Recompute the tier.
 					tier.Recompute(item.Spec.Acceleratable)
 				} else {
 					// Append a new tier if not found.
-					item.Status.Tiers = append(item.Status.Tiers,
-						AggregatedInstanceTypeOnceMaxRequestTier{
-							OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-								Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
-								CPU:               instType.Status.CPU.OnceMaxRequest,
-								AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
-								AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
-							},
-							Remaining: AggregatedInstanceTypeOverviewResource{
-								Accelerator:       instType.Status.Accelerator.Remaining,
-								CPU:               instType.Status.CPU.Remaining,
-								AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
-								AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
-							},
-							Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{*candidate},
-						})
+					newTier := newAggregatedTier(instType)
+					newTier.Candidates = []AggregatedInstanceTypeOnceMaxRequestCandidate{candidate}
+					item.Status.Tiers = append(item.Status.Tiers, newTier)
 
 					// Recompute the just-appended tier so a moved non-Active candidate does not leak
 					// its raw capacity into the item overview, and the sort key is Phase-filtered.
@@ -820,17 +884,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 
 			tier := &item.Status.Tiers[index[1]]
 
-			candidate := &AggregatedInstanceTypeOnceMaxRequestCandidate{
-				Cluster:           evt.Cluster,
-				Name:              instType.Name,
-				Phase:             instType.Status.Phase,
-				Accelerator:       instType.Status.Accelerator,
-				CPU:               instType.Status.CPU,
-				AcceleratorShared: instType.Status.AcceleratorShared,
-				AcceleratorSliced: instType.Status.AcceleratorSliced,
-			}
-
-			tier.Candidates = append(tier.Candidates, *candidate)
+			tier.Candidates = append(tier.Candidates, newAggregatedCandidate(evt.Cluster, instType.Name, instType))
 
 			// Recompute the tier.
 			tier.Recompute(item.Spec.Acceleratable)
@@ -852,30 +906,9 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 	}
 
 	if evt.Type != manager.WorkerEventDeleted {
-		tier := AggregatedInstanceTypeOnceMaxRequestTier{
-			OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-				Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
-				CPU:               instType.Status.CPU.OnceMaxRequest,
-				AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
-				AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
-			},
-			Remaining: AggregatedInstanceTypeOverviewResource{
-				Accelerator:       instType.Status.Accelerator.Remaining,
-				CPU:               instType.Status.CPU.Remaining,
-				AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
-				AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
-			},
-			Candidates: []AggregatedInstanceTypeOnceMaxRequestCandidate{
-				{
-					Cluster:           evt.Cluster,
-					Name:              instType.Name,
-					Phase:             instType.Status.Phase,
-					Accelerator:       instType.Status.Accelerator,
-					CPU:               instType.Status.CPU,
-					AcceleratorShared: instType.Status.AcceleratorShared,
-					AcceleratorSliced: instType.Status.AcceleratorSliced,
-				},
-			},
+		tier := newAggregatedTier(instType)
+		tier.Candidates = []AggregatedInstanceTypeOnceMaxRequestCandidate{
+			newAggregatedCandidate(evt.Cluster, instType.Name, instType),
 		}
 
 		// Found the same item but not in any tier.
@@ -901,14 +934,21 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			return evts
 		}
 
-		// Recompute the tier so a non-Active first candidate does not seed the new item's overview.
+		// Recompute the tier so a non-Active first candidate does not seed the new item's overview,
+		// and its AcceleratorSlicedDetail holds the candidate's slicing sum before it is folded up.
 		tier.Recompute(instType.Spec.Acceleratable)
+
+		// The item descriptor identity comes from this first candidate (empty during its pre-reconcile
+		// window, self-healed by a later adopt), and its SlicedDetail is the single tier's Σ.
+		detail := instType.Status.Detail
+		detail.SlicedDetail = tier.AcceleratorSlicedDetail
 
 		// Not found the same item, tier and candidate, create a new item with a new tier and candidate.
 		in.state.Items = append(in.state.Items, AggregatedInstanceType{
 			Name: buildAggregatedInstanceTypeName(instType.Spec),
 			Spec: instType.Spec,
 			Status: AggregatedInstanceTypeStatus{
+				Detail:         detail,
 				OnceMaxRequest: tier.OnceMaxRequest,
 				Remaining:      tier.Remaining,
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{

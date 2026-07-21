@@ -1590,13 +1590,6 @@ func schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"sliceable": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Sliceable reports whether the accelerator can be sliced; false for a generic pool.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
 					"generalGroup": {
 						SchemaProps: spec.SchemaProps{
 							Description: "GeneralGroup is the general(CPU) group of the pool: the real CPU key when instance-type-aware-cpu-manufacturer is on, or the \"generic\" sentinel for a collapsed (unaware) generic pool; empty for an accelerated pool when awareness is off.",
