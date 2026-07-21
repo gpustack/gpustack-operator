@@ -1291,15 +1291,7 @@ func (m *InstanceTypeFlavorSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	copy(dAtA[i:], m.GeneralGroup)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.GeneralGroup)))
 	i--
-	dAtA[i] = 0x4a
-	i--
-	if m.Sliceable {
-		dAtA[i] = 1
-	} else {
-		dAtA[i] = 0
-	}
-	i--
-	dAtA[i] = 0x40
+	dAtA[i] = 0x42
 	i -= len(m.Cores)
 	copy(dAtA[i:], m.Cores)
 	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Cores)))
@@ -1951,7 +1943,6 @@ func (m *InstanceTypeFlavorSpec) Size() (n int) {
 	n += 1 + l + sovGenerated(uint64(l))
 	l = len(m.Cores)
 	n += 1 + l + sovGenerated(uint64(l))
-	n += 2
 	l = len(m.GeneralGroup)
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
@@ -2381,7 +2372,6 @@ func (this *InstanceTypeFlavorSpec) String() string {
 		`Family:` + fmt.Sprintf("%v", this.Family) + `,`,
 		`Memory:` + fmt.Sprintf("%v", this.Memory) + `,`,
 		`Cores:` + fmt.Sprintf("%v", this.Cores) + `,`,
-		`Sliceable:` + fmt.Sprintf("%v", this.Sliceable) + `,`,
 		`GeneralGroup:` + fmt.Sprintf("%v", this.GeneralGroup) + `,`,
 		`}`,
 	}, "")
@@ -6055,26 +6045,6 @@ func (m *InstanceTypeFlavorSpec) Unmarshal(dAtA []byte) error {
 			m.Cores = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 8:
-			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Sliceable", wireType)
-			}
-			var v int
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowGenerated
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				v |= int(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			m.Sliceable = bool(v != 0)
-		case 9:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field GeneralGroup", wireType)
 			}

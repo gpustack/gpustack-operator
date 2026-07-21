@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,10 +27,17 @@ func newInstanceWebhook(objs ...ctrlcli.Object) *InstanceWebhook {
 	return &InstanceWebhook{Client: cli, APIReader: cli}
 }
 
-// sliceableFeature marks an accelerator as sliceable (a non-zero MaxSlices) for
-// InstanceType fixtures that exercise the slice-request paths.
-var sliceableFeature = workercore.AcceleratorsFeature{
-	LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128},
+// sliceableDetail is the observed accelerator Detail that marks a fixture InstanceType as
+// slice-ready: a manufacturer (so Status.Detail.AcceleratorReady is true) plus a non-zero logical
+// slice count (so Status.Detail.IsSliceable is true). The webhook now reads sliceability and
+// readiness from Status.Detail, so a slice-path fixture must set it.
+var sliceableDetail = workercore.InstanceTypeDetail{
+	Manufacturer: "nvidia",
+	InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+		SlicedDetail: workercore.AcceleratorSlicedDetail{
+			Logical: workercore.AcceleratorSlicedLogicalDetail{Count: 128},
+		},
+	},
 }
 
 // webhookInstance builds a valid Instance (with a volume so non-type validation
@@ -113,11 +122,10 @@ func TestInstanceWebhook_ValidateCreate_SlicedPercentages(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
+					Acceleratable: true,
 				},
 				Status: workercore.InstanceTypeStatus{
+					Detail:      sliceableDetail,
 					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
 				},
 			}
@@ -342,13 +350,12 @@ func TestInstanceWebhook_ValidateUpdate_StartRevalidatesResources(t *testing.T) 
 	sliceable := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: sliceType},
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            "nvidia",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "2", RAM: "8Gi"},
-			LocalStorage:            "64Gi",
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "2", RAM: "8Gi"},
+			LocalStorage:  "64Gi",
 		},
 		Status: workercore.InstanceTypeStatus{
+			Detail:      sliceableDetail,
 			Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("1")},
 		},
 	}
@@ -488,11 +495,10 @@ func TestInstanceWebhook_Default_SlicedPercentages(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-					UnitResources:           workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					Acceleratable: true,
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
 				},
+				Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 			}
 			w := newInstanceWebhook(instType)
 
@@ -546,11 +552,10 @@ func TestInstanceWebhook_Default_SlicedUnitScaling(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-					UnitResources:           workercore.InstanceTypeUnitResources{CPU: unitCPU, RAM: unitRAM},
+					Acceleratable: true,
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: unitCPU, RAM: unitRAM},
 				},
+				Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 			}
 			w := newInstanceWebhook(instType)
 
@@ -581,11 +586,10 @@ func TestInstanceWebhook_Default_SlicedZeroAccelerator(t *testing.T) {
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: typeName},
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            "nvidia",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
 		},
+		Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 	}
 	w := newInstanceWebhook(instType)
 
@@ -627,11 +631,10 @@ func TestInstanceWebhook_ValidateCreate_SlicedAccelerator(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
+					Acceleratable: true,
 				},
 				Status: workercore.InstanceTypeStatus{
+					Detail:      sliceableDetail,
 					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
 				},
 			}
@@ -684,11 +687,10 @@ func TestInstanceWebhook_ValidateCreate_WholeCardOnSliceable(t *testing.T) {
 			instType := &worker.InstanceType{
 				ObjectMeta: meta.ObjectMeta{Name: typeName},
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           true,
-					Manufacturer:            "nvidia",
-					InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
+					Acceleratable: true,
 				},
 				Status: workercore.InstanceTypeStatus{
+					Detail:      sliceableDetail,
 					Accelerator: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4")},
 				},
 			}
@@ -721,11 +723,10 @@ func TestInstanceWebhook_Default_WholeCardScaling(t *testing.T) {
 	instType := &worker.InstanceType{
 		ObjectMeta: meta.ObjectMeta{Name: typeName},
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            "nvidia",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Feature: sliceableFeature},
-			UnitResources:           workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
 		},
+		Status: workercore.InstanceTypeStatus{Detail: sliceableDetail},
 	}
 	w := newInstanceWebhook(instType)
 
@@ -737,4 +738,74 @@ func TestInstanceWebhook_Default_WholeCardScaling(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, int64(48), inst.Spec.Resources.CPU.Value(), "cpu scales by card count")
 	assert.Equal(t, int64(120)<<30, inst.Spec.Resources.RAM.Value(), "ram scales by card count")
+}
+
+// TestInstanceWebhook_SlicedRequestNotReadyRejected pins the R3-High fail-safe: a slice request (a
+// non-zero slice percentage) on an accelerated InstanceType whose Status.Detail is not yet computed
+// is rejected as retryable, never silently sized or validated as a whole-card request. Both the
+// mutating Default (which would otherwise fall through to whole-card CPU/RAM scaling) and the
+// validating path must reject it.
+func TestInstanceWebhook_SlicedRequestNotReadyRejected(t *testing.T) {
+	// Default reads the overcommit setting through the loopback client; point it at an empty fake
+	// cluster so it falls back to its default.
+	system.LoopbackCtrlClient.Configure(ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+
+	const typeName = "sliced-not-ready"
+	// Accelerated, but Status.Detail is empty — the reconciler has not computed it yet.
+	instType := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+		},
+	}
+	w := newInstanceWebhook(instType)
+
+	newSliceInstance := func() *workercore.Instance {
+		inst := webhookInstance("a", typeName)
+		acc := resource.MustParse("1")
+		inst.Spec.Resources = &workercore.InstanceResources{
+			Accelerator:                       &acc,
+			AcceleratorSlicedMemoryPercentage: 50,
+		}
+		return inst
+	}
+
+	// Default must reject with a transient (retryable) error, not fall through to whole-card sizing.
+	derr := w.Default(context.Background(), newSliceInstance())
+	require.Error(t, derr, "Default must reject a slice request while Detail is not ready")
+	assert.True(t, kerrors.IsInternalError(derr),
+		"Default rejection is a transient (retryable) error, not a permanent Invalid")
+
+	// ValidateCreate must reject with a transient error, not treat it as a whole-card request.
+	_, cerr := w.ValidateCreate(context.Background(), newSliceInstance())
+	require.Error(t, cerr, "ValidateCreate must reject a slice request while Detail is not ready")
+	assert.True(t, kerrors.IsInternalError(cerr),
+		"ValidateCreate rejection is a transient (retryable) error, not a permanent Invalid")
+
+	// ValidateUpdate on the start (resume) path likewise rejects with a transient error.
+	old := newSliceInstance()
+	old.Spec.Stop = true
+	old.Status.Phase = workerctrl.InstancePhaseStopped
+	neu := newSliceInstance()
+	neu.Spec.Stop = false
+	neu.Status.Phase = workerctrl.InstancePhaseStopped
+	_, uerr := w.ValidateUpdate(context.Background(), old, neu)
+	require.Error(t, uerr, "ValidateUpdate start must reject a slice request while Detail is not ready")
+	assert.True(t, kerrors.IsInternalError(uerr),
+		"ValidateUpdate start rejection is a transient (retryable) error, not a permanent Invalid")
+
+	// A negative slice percentage is still a slice request: the readiness gate keys on a
+	// non-zero (not merely positive) percentage, so it is rejected as retryable rather than
+	// falling through to whole-card sizing while Detail is not ready.
+	negInst := webhookInstance("a", typeName)
+	negAcc := resource.MustParse("1")
+	negInst.Spec.Resources = &workercore.InstanceResources{
+		Accelerator:                       &negAcc,
+		AcceleratorSlicedMemoryPercentage: -1,
+	}
+	nerr := w.Default(context.Background(), negInst)
+	require.Error(t, nerr, "Default must reject a negative slice percentage while Detail is not ready")
+	assert.True(t, kerrors.IsInternalError(nerr),
+		"negative-percentage rejection is a transient (retryable) error, not a whole-card fallthrough")
 }

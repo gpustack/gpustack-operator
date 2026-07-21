@@ -1284,10 +1284,20 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.AcceleratorApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorAllocation"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorAllocationApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorsFeature"):
-		return &applyconfigurationworkerv1alpha1.AcceleratorsFeatureApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSliced"):
-		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorLogicalSliced"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorLogicalSlicedApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorPhysicalSliced"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorPhysicalSlicedApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorPhysicalSlicedProfile"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorPhysicalSlicedProfileApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSlicedDetail"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedDetailApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSlicedLogicalDetail"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedLogicalDetailApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSlicedPhysicalDetail"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedPhysicalDetailApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSlicedPhysicalDetailProfile"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorSlicedPhysicalDetailProfileApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorStatus"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorStatusApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("DeviceEthernet"):
@@ -1324,14 +1334,16 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.InstanceTemplateApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceType"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAccelerator"):
-		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAcceleratorCPU"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorCPUApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeAcceleratorDetail"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeAcceleratorDetailApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeCPU"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeCPUCache"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUCacheApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeDetail"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypeDetailApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeResource"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeResourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeSpec"):

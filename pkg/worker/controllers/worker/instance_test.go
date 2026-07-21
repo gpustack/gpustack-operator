@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -25,18 +26,16 @@ import (
 // qty parses a quantity for terse fixture construction.
 func qty(s string) resource.Quantity { return resource.MustParse(s) }
 
-// sliceableAccelerator builds an InstanceTypeAccelerator whose Feature marks it sliceable
-// (a non-zero MaxSlices) or not, so fixtures can toggle IsSliceable() without hand-writing
-// the slicing descriptor.
-func sliceableAccelerator(sliceable bool) workercore.InstanceTypeAccelerator {
-	if !sliceable {
-		return workercore.InstanceTypeAccelerator{}
+// slicedDetail builds the observed accelerator Status.Detail a fixture InstanceType carries: the
+// manufacturer (which getResourceRequirements reads for the accelerator resource names) and, when
+// sliceable, a non-zero logical slice count so Status.Detail.IsSliceable() is true. The Pod-sizing
+// path reads sliceability and manufacturer from Status.Detail, not the spec.
+func slicedDetail(manufacturer string, sliceable bool) workercore.InstanceTypeDetail {
+	d := workercore.InstanceTypeDetail{Manufacturer: manufacturer}
+	if sliceable {
+		d.SlicedDetail.Logical.Count = 128
 	}
-	return workercore.InstanceTypeAccelerator{
-		Feature: workercore.AcceleratorsFeature{
-			LogicalSliced: workercore.AcceleratorSliced{MaxSize: 128},
-		},
-	}
+	return d
 }
 
 // qtyEqual compares quantities by value (Cmp) so the assertion does not depend
@@ -87,7 +86,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		// InstanceType fixture.
 		acceleratable bool
 		manufacturer  string
-		sliceable     bool // → Spec.Feature (true → the accelerator can be sliced)
+		sliceable     bool // → Status.Detail slicing (true → the accelerator can be sliced)
 
 		// getResourceRequirements flags.
 		withGeneral, withGeneralOvercommit, withAccelerator, withVisibility bool
@@ -312,9 +311,10 @@ func TestGetResourceRequirements(t *testing.T) {
 
 			instType := &worker.InstanceType{
 				Spec: workercore.InstanceTypeSpec{
-					Acceleratable:           c.acceleratable,
-					Manufacturer:            c.manufacturer,
-					InstanceTypeAccelerator: sliceableAccelerator(c.sliceable),
+					Acceleratable: c.acceleratable,
+				},
+				Status: workercore.InstanceTypeStatus{
+					Detail: slicedDetail(c.manufacturer, c.sliceable),
 				},
 			}
 
@@ -518,9 +518,10 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 	}
 	instType := &worker.InstanceType{
 		Spec: workercore.InstanceTypeSpec{
-			Acceleratable:           true,
-			Manufacturer:            nodefeature.ManufacturerNVIDIA,
-			InstanceTypeAccelerator: sliceableAccelerator(true),
+			Acceleratable: true,
+		},
+		Status: workercore.InstanceTypeStatus{
+			Detail: slicedDetail(nodefeature.ManufacturerNVIDIA, true),
 		},
 	}
 
@@ -543,4 +544,35 @@ func TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain(t *testing.T
 	visQ, sshdHasVis := sshd.Resources.Limits[visRes]
 	assert.True(t, sshdHasVis, "sshd must carry the device-only visibility resource")
 	assert.Equal(t, "1", visQ.String(), "sidecar visibility quantity equals main's card count")
+}
+
+// TestInstanceReconciler_AcceleratedDetailNotReadyRequeues pins the R3-High controller fail-safe:
+// a running Instance whose accelerated InstanceType has no computed Status.Detail yet creates NO
+// Pod and requeues, so a Pod never lands with a missing RuntimeClass or empty-manufacturer resource
+// names. A later reconcile proceeds once Detail is populated.
+func TestInstanceReconciler_AcceleratedDetailNotReadyRequeues(t *testing.T) {
+	const typeName = "accel-type"
+	inst := newReadyInstance("default", "inst", typeName)
+	// Accelerated, but Status.Detail is empty — the reconciler has not computed it yet.
+	it := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec:       workercore.InstanceTypeSpec{Acceleratable: true},
+	}
+	cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+	cli := buildInstanceClient(inst, it, cq)
+
+	res, err := reconcileInstance(t, cli, "default", "inst")
+	require.NoError(t, err)
+	assert.Positive(t, res.RequeueAfter, "reconcile requeues while Detail is not ready")
+
+	// No Pod was created while Detail is not ready.
+	pod := &core.Pod{}
+	err = cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, pod)
+	assert.True(t, kerrors.IsNotFound(err), "no Pod is created while Detail is not ready")
+
+	// A not-ready (but healthy) type does not stop the instance.
+	got := &workercore.Instance{}
+	require.NoError(t, cli.Get(context.Background(),
+		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
+	assert.False(t, got.Spec.Stop, "a not-ready type does not stop the instance")
 }

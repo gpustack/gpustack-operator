@@ -212,12 +212,6 @@ func (r *NodeFlavorReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		"memory":           flavor.Memory,
 		"cores":            flavor.Cores,
 	}
-	// Record the device group's slicing capability as JSON so the derived InstanceType and the
-	// flavor catalog can surface how (and how finely) the pool slices; a CPU flavor carries none.
-	if flavor.Acceleratable {
-		feature := r.nodeFlavorAcceleratorsFeature(ctx, node.Name, flavor.AcceleratorKey)
-		eNotes["acceleratorFeature"] = string(json.ShouldMarshal(feature))
-	}
 	// Record the raw CPU detail: always for a CPU flavor; for an accelerated flavor only when
 	// CPU-manufacturer awareness is on.
 	if !flavor.Acceleratable || cpuAware {
@@ -322,49 +316,40 @@ func nodeIsAccelerated(nd *core.Node) bool {
 	return kubemeta.IsLabeled(nd, nodefeature.NodeAcceleratableLabelKey, "true")
 }
 
-// nodeFlavorAcceleratorsFeature returns the slicing capability of the specific accelerator model
-// backing this flavor. It reads the node's same-named Devices object (one per node) and finds the
-// device group whose "${manufacturer}-${group ID}" key matches the flavor's accelerator key, so a
-// node hosting several models of one manufacturer (e.g. a sliceable Ascend 910B and a non-sliceable
-// 310) resolves each flavor to its own group. A missing Devices object or group yields the zero
-// feature (not sliceable); the flavor is rebuilt once the node reports.
-func (r *NodeFlavorReconciler) nodeFlavorAcceleratorsFeature(ctx context.Context, nodeName, acceleratorKey string) workercore.AcceleratorsFeature {
-	devs := new(workercore.Devices)
-	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, devs,
-		ctrlcli.UnsafeDisableDeepCopy)
-	if err != nil {
-		return workercore.AcceleratorsFeature{}
-	}
-	for i := range devs.Spec.Groups {
-		g := &devs.Spec.Groups[i]
-		// Match the full "${manufacturer}-${group ID}" key: ConstructGroupID strips the
-		// vendor prefix, so a bare group ID can collide across manufacturers on a node.
-		if g.Manufacturer+"-"+g.ID != acceleratorKey {
-			continue
-		}
-		return g.AcceleratorsFeature
-	}
-	return workercore.AcceleratorsFeature{}
-}
-
 const (
 	// _InstanceTypeDerivedFromNodeLabel marks an InstanceType the operator authored by deriving it
 	// from the node-fed ResourceFlavors (instance-type-derived-from-node); it is a provenance marker
 	// only — a derived type is never auto-removed.
 	_InstanceTypeDerivedFromNodeLabel = "schedule.gpustack.ai/derived-from-node"
+
+	// cpuOnlyDisplayName is the DisplayName a derived CPU-manufacturer-agnostic collapsed pool
+	// carries, since no single pooled node's product represents it.
+	cpuOnlyDisplayName = "CPU-only"
 )
 
 // authorDerivedInstanceType creates the pool's operator-owned InstanceType from a synced flavor.
 // It stamps the setting-correct pool identity (general/accelerator group + acceleratable/os/arch)
-// + the fixed default unit spec + the derived marker; the defaulting webhook enriches the
-// descriptor spec. It only ever creates — an existing type (admin- or operator-owned) is left
-// untouched, so an AlreadyExists is a no-op.
+// + the fixed default unit spec + the derived marker + the human-friendly DisplayName (the
+// flavor's product, or the "CPU-only" sentinel for the CPU-manufacturer-agnostic collapsed pool).
+// DisplayName is admin-editable, so this creation-time default never fights a later admin rename;
+// an admin-created type is not auto-named. It only ever creates — an existing type (admin- or
+// operator-owned) is left untouched, so an AlreadyExists is a no-op.
 func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, flavor *nodefeature.NodeFlavor) error {
 	logger := ctrllog.FromContext(ctx)
 
 	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
 	name, generalGroup, acceleratorGroup := flavor.DerivedInstanceTypeIdentity(cpuAware)
 	unitCpu, unitRam, stg := defaultResources(flavor.Acceleratable)
+
+	// The collapsed generic pool folds many CPUs into one type, so no single node's product
+	// represents it (the flavor carries an empty product there anyway); label it "CPU-only".
+	displayName := flavor.Product
+	if !flavor.Acceleratable && !cpuAware {
+		displayName = cpuOnlyDisplayName
+	}
+	if runes := []rune(displayName); len(runes) > 64 {
+		displayName = string(runes[:64])
+	}
 
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
@@ -377,6 +362,7 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 			Acceleratable:    flavor.Acceleratable,
 			OS:               flavor.OS,
 			Arch:             flavor.Arch,
+			DisplayName:      displayName,
 			UnitResources:    workercore.InstanceTypeUnitResources{CPU: unitCpu, RAM: unitRam},
 			LocalStorage:     stg,
 		},

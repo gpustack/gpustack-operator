@@ -5,20 +5,31 @@ package v1alpha1
 // InstanceTypeSpecApplyConfiguration represents a declarative configuration of the InstanceTypeSpec type for use
 // with apply.
 //
-// InstanceTypeSpec defines the desired spec of InstanceType.
+// InstanceTypeSpec defines the desired spec of InstanceType. Its field order and protobuf
+// numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed
+// by the immutable identity and hardware inputs.
 type InstanceTypeSpecApplyConfiguration struct {
+	// DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a
+	// derived InstanceType, stamped at derivation time.
+	DisplayName *string `json:"displayName,omitempty"`
+	// Description is a free-form admin annotation for the InstanceType.
+	Description *string `json:"description,omitempty"`
+	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
+	// holds the backing ClusterQueue (blocks new admission without evicting running
+	// workloads); clearing it reactivates the queue. A queue stopped by any means is
+	// reflected back into Inactive=true.
+	Inactive *bool `json:"inactive,omitempty"`
 	// AcceleratorGroup is the accelerator group (the acceleratable node key) of the
 	// InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
 	// onto and is required by the validating webhook when Acceleratable is true.
 	AcceleratorGroup *string `json:"acceleratorGroup,omitempty"`
+	// GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+	// "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+	GeneralGroup *string `json:"generalGroup,omitempty"`
 	// Acceleratable indicates whether the InstanceType is acceleratable.
 	Acceleratable *bool `json:"acceleratable,omitempty"`
-	// Manufacturer is the name of the InstanceType manufacturer.
-	Manufacturer *string `json:"manufacturer,omitempty"`
-	// Product is the name of the InstanceType product.
-	Product *string `json:"product,omitempty"`
-	// Family is the family of the InstanceType.
-	Family *string `json:"family,omitempty"`
 	// OS is the operating system of the InstanceType, e.g. "linux", "windows".
 	//
 	// It is a required admin-writable input, enforced by the validating webhook.
@@ -27,10 +38,6 @@ type InstanceTypeSpecApplyConfiguration struct {
 	//
 	// It is a required admin-writable input, enforced by the validating webhook.
 	Arch *string `json:"arch,omitempty"`
-	// CPU describes the CPU information of the InstanceType.
-	InstanceTypeCPUApplyConfiguration `json:",inline"`
-	// Accelerator describes the accelerator information of the InstanceType.
-	InstanceTypeAcceleratorApplyConfiguration `json:",inline"`
 	// UnitResources describes the unit resources of the InstanceType.
 	//
 	// It is a required admin-writable input, enforced by the validating webhook, and is
@@ -42,25 +49,36 @@ type InstanceTypeSpecApplyConfiguration struct {
 	// by the validating webhook, and is immutable after creation; a derived InstanceType is
 	// stamped with the fixed default.
 	LocalStorage *string `json:"localStorage,omitempty"`
-	// GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
-	// "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
-	// mutating webhook defaults an empty value to "generic"; it participates as a scheduling
-	// discriminator only when instance-type-aware-cpu-manufacturer is enabled.
-	GeneralGroup *string `json:"generalGroup,omitempty"`
-	// DisplayName is a human-friendly label for the InstanceType. The mutating webhook
-	// defaults an empty value to Product.
-	DisplayName *string `json:"displayName,omitempty"`
-	// Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
-	// holds the backing ClusterQueue (blocks new admission without evicting running
-	// workloads); clearing it reactivates the queue. A queue stopped by any means is
-	// reflected back into Inactive=true.
-	Inactive *bool `json:"inactive,omitempty"`
 }
 
 // InstanceTypeSpecApplyConfiguration constructs a declarative configuration of the InstanceTypeSpec type for use with
 // apply.
 func InstanceTypeSpec() *InstanceTypeSpecApplyConfiguration {
 	return &InstanceTypeSpecApplyConfiguration{}
+}
+
+// WithDisplayName sets the DisplayName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the DisplayName field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithDisplayName(value string) *InstanceTypeSpecApplyConfiguration {
+	b.DisplayName = &value
+	return b
+}
+
+// WithDescription sets the Description field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Description field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithDescription(value string) *InstanceTypeSpecApplyConfiguration {
+	b.Description = &value
+	return b
+}
+
+// WithInactive sets the Inactive field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Inactive field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithInactive(value bool) *InstanceTypeSpecApplyConfiguration {
+	b.Inactive = &value
+	return b
 }
 
 // WithAcceleratorGroup sets the AcceleratorGroup field in the declarative configuration to the given value
@@ -71,35 +89,19 @@ func (b *InstanceTypeSpecApplyConfiguration) WithAcceleratorGroup(value string) 
 	return b
 }
 
+// WithGeneralGroup sets the GeneralGroup field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the GeneralGroup field is set to the value of the last call.
+func (b *InstanceTypeSpecApplyConfiguration) WithGeneralGroup(value string) *InstanceTypeSpecApplyConfiguration {
+	b.GeneralGroup = &value
+	return b
+}
+
 // WithAcceleratable sets the Acceleratable field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Acceleratable field is set to the value of the last call.
 func (b *InstanceTypeSpecApplyConfiguration) WithAcceleratable(value bool) *InstanceTypeSpecApplyConfiguration {
 	b.Acceleratable = &value
-	return b
-}
-
-// WithManufacturer sets the Manufacturer field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Manufacturer field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithManufacturer(value string) *InstanceTypeSpecApplyConfiguration {
-	b.Manufacturer = &value
-	return b
-}
-
-// WithProduct sets the Product field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Product field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithProduct(value string) *InstanceTypeSpecApplyConfiguration {
-	b.Product = &value
-	return b
-}
-
-// WithFamily sets the Family field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Family field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithFamily(value string) *InstanceTypeSpecApplyConfiguration {
-	b.Family = &value
 	return b
 }
 
@@ -119,110 +121,6 @@ func (b *InstanceTypeSpecApplyConfiguration) WithArch(value string) *InstanceTyp
 	return b
 }
 
-// WithPhysicalCores sets the PhysicalCores field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the PhysicalCores field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithPhysicalCores(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.PhysicalCores = &value
-	return b
-}
-
-// WithThreadsPerPhysicalCore sets the ThreadsPerPhysicalCore field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ThreadsPerPhysicalCore field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithThreadsPerPhysicalCore(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.ThreadsPerPhysicalCore = &value
-	return b
-}
-
-// WithLogicalCores sets the LogicalCores field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the LogicalCores field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithLogicalCores(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.LogicalCores = &value
-	return b
-}
-
-// WithStepping sets the Stepping field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Stepping field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithStepping(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.Stepping = &value
-	return b
-}
-
-// WithClockSpeed sets the ClockSpeed field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ClockSpeed field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithClockSpeed(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.ClockSpeed = &value
-	return b
-}
-
-// WithMaxClockSpeed sets the MaxClockSpeed field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the MaxClockSpeed field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithMaxClockSpeed(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.MaxClockSpeed = &value
-	return b
-}
-
-// WithCacheLine sets the CacheLine field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the CacheLine field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithCacheLine(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.CacheLine = &value
-	return b
-}
-
-// WithCache sets the Cache field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Cache field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithCache(value *InstanceTypeCPUCacheApplyConfiguration) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeCPUApplyConfiguration.Cache = value
-	return b
-}
-
-// WithMemory sets the Memory field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Memory field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithMemory(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeAcceleratorApplyConfiguration.Memory = &value
-	return b
-}
-
-// WithCores sets the Cores field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Cores field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithCores(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeAcceleratorApplyConfiguration.Cores = &value
-	return b
-}
-
-// WithComputeCapability sets the ComputeCapability field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the ComputeCapability field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithComputeCapability(value string) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeAcceleratorApplyConfiguration.ComputeCapability = &value
-	return b
-}
-
-// WithFeature sets the Feature field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Feature field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithFeature(value *AcceleratorsFeatureApplyConfiguration) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeAcceleratorApplyConfiguration.Feature = value
-	return b
-}
-
-// WithCPU sets the CPU field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the CPU field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithCPU(value *InstanceTypeAcceleratorCPUApplyConfiguration) *InstanceTypeSpecApplyConfiguration {
-	b.InstanceTypeAcceleratorApplyConfiguration.CPU = value
-	return b
-}
-
 // WithUnitResources sets the UnitResources field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the UnitResources field is set to the value of the last call.
@@ -236,29 +134,5 @@ func (b *InstanceTypeSpecApplyConfiguration) WithUnitResources(value *InstanceTy
 // If called multiple times, the LocalStorage field is set to the value of the last call.
 func (b *InstanceTypeSpecApplyConfiguration) WithLocalStorage(value string) *InstanceTypeSpecApplyConfiguration {
 	b.LocalStorage = &value
-	return b
-}
-
-// WithGeneralGroup sets the GeneralGroup field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the GeneralGroup field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithGeneralGroup(value string) *InstanceTypeSpecApplyConfiguration {
-	b.GeneralGroup = &value
-	return b
-}
-
-// WithDisplayName sets the DisplayName field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the DisplayName field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithDisplayName(value string) *InstanceTypeSpecApplyConfiguration {
-	b.DisplayName = &value
-	return b
-}
-
-// WithInactive sets the Inactive field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Inactive field is set to the value of the last call.
-func (b *InstanceTypeSpecApplyConfiguration) WithInactive(value bool) *InstanceTypeSpecApplyConfiguration {
-	b.Inactive = &value
 	return b
 }

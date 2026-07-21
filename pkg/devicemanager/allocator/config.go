@@ -10,7 +10,6 @@ type Config struct {
 	KubeSocket              string
 	NoShared                bool
 	NoSliced                bool
-	SlicingPolicy           string
 	DetectedManufacturersCh <-chan sets.Set[string]
 }
 

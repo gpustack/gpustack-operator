@@ -2,38 +2,35 @@
 
 package v1alpha1
 
-// InstanceTypeAcceleratorApplyConfiguration represents a declarative configuration of the InstanceTypeAccelerator type for use
+// InstanceTypeAcceleratorDetailApplyConfiguration represents a declarative configuration of the InstanceTypeAcceleratorDetail type for use
 // with apply.
 //
-// InstanceTypeAccelerator describes the information of the accelerator.
-type InstanceTypeAcceleratorApplyConfiguration struct {
+// InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
+// It carries the pool-aggregated SlicedDetail (the observed slicing capability), so the
+// status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
+type InstanceTypeAcceleratorDetailApplyConfiguration struct {
 	// Memory is the VRAM size of the accelerator, e.g. "65535Mi".
 	Memory *string `json:"memory,omitempty"`
 	// Cores is the number of cores of the accelerator, e.g. "128", "256".
 	Cores *string `json:"cores,omitempty"`
 	// ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
 	ComputeCapability *string `json:"computeCapability,omitempty"`
-	// Feature is the accelerator's slicing capability: the physical / logical slicing mode, the
-	// per-device maximum slice count, whether compute may be overcommitted, and the memory step.
-	// A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's
-	// AcceleratorsFeature, folded in from the node-derived ResourceFlavor.
-	//
-	// Field number 4 is reserved for the removed Sliceable bool.
-	Feature *AcceleratorsFeatureApplyConfiguration `json:"feature,omitempty"`
+	// SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
+	SlicedDetail *AcceleratorSlicedDetailApplyConfiguration `json:"slicedDetail,omitempty"`
 	// CPU describes the CPU information of the accelerator.
 	CPU *InstanceTypeAcceleratorCPUApplyConfiguration `json:"cpu,omitempty"`
 }
 
-// InstanceTypeAcceleratorApplyConfiguration constructs a declarative configuration of the InstanceTypeAccelerator type for use with
+// InstanceTypeAcceleratorDetailApplyConfiguration constructs a declarative configuration of the InstanceTypeAcceleratorDetail type for use with
 // apply.
-func InstanceTypeAccelerator() *InstanceTypeAcceleratorApplyConfiguration {
-	return &InstanceTypeAcceleratorApplyConfiguration{}
+func InstanceTypeAcceleratorDetail() *InstanceTypeAcceleratorDetailApplyConfiguration {
+	return &InstanceTypeAcceleratorDetailApplyConfiguration{}
 }
 
 // WithMemory sets the Memory field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Memory field is set to the value of the last call.
-func (b *InstanceTypeAcceleratorApplyConfiguration) WithMemory(value string) *InstanceTypeAcceleratorApplyConfiguration {
+func (b *InstanceTypeAcceleratorDetailApplyConfiguration) WithMemory(value string) *InstanceTypeAcceleratorDetailApplyConfiguration {
 	b.Memory = &value
 	return b
 }
@@ -41,7 +38,7 @@ func (b *InstanceTypeAcceleratorApplyConfiguration) WithMemory(value string) *In
 // WithCores sets the Cores field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Cores field is set to the value of the last call.
-func (b *InstanceTypeAcceleratorApplyConfiguration) WithCores(value string) *InstanceTypeAcceleratorApplyConfiguration {
+func (b *InstanceTypeAcceleratorDetailApplyConfiguration) WithCores(value string) *InstanceTypeAcceleratorDetailApplyConfiguration {
 	b.Cores = &value
 	return b
 }
@@ -49,23 +46,23 @@ func (b *InstanceTypeAcceleratorApplyConfiguration) WithCores(value string) *Ins
 // WithComputeCapability sets the ComputeCapability field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the ComputeCapability field is set to the value of the last call.
-func (b *InstanceTypeAcceleratorApplyConfiguration) WithComputeCapability(value string) *InstanceTypeAcceleratorApplyConfiguration {
+func (b *InstanceTypeAcceleratorDetailApplyConfiguration) WithComputeCapability(value string) *InstanceTypeAcceleratorDetailApplyConfiguration {
 	b.ComputeCapability = &value
 	return b
 }
 
-// WithFeature sets the Feature field in the declarative configuration to the given value
+// WithSlicedDetail sets the SlicedDetail field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Feature field is set to the value of the last call.
-func (b *InstanceTypeAcceleratorApplyConfiguration) WithFeature(value *AcceleratorsFeatureApplyConfiguration) *InstanceTypeAcceleratorApplyConfiguration {
-	b.Feature = value
+// If called multiple times, the SlicedDetail field is set to the value of the last call.
+func (b *InstanceTypeAcceleratorDetailApplyConfiguration) WithSlicedDetail(value *AcceleratorSlicedDetailApplyConfiguration) *InstanceTypeAcceleratorDetailApplyConfiguration {
+	b.SlicedDetail = value
 	return b
 }
 
 // WithCPU sets the CPU field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the CPU field is set to the value of the last call.
-func (b *InstanceTypeAcceleratorApplyConfiguration) WithCPU(value *InstanceTypeAcceleratorCPUApplyConfiguration) *InstanceTypeAcceleratorApplyConfiguration {
+func (b *InstanceTypeAcceleratorDetailApplyConfiguration) WithCPU(value *InstanceTypeAcceleratorCPUApplyConfiguration) *InstanceTypeAcceleratorDetailApplyConfiguration {
 	b.CPU = value
 	return b
 }

@@ -7,6 +7,14 @@ package v1alpha1
 //
 // InstanceTypeStatus describes the observed state of the InstanceType.
 type InstanceTypeStatusApplyConfiguration struct {
+	// Detail is the observed hardware descriptor of the InstanceType, computed by the
+	// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+	Detail *InstanceTypeDetailApplyConfiguration `json:"detail,omitempty"`
+	// Entrance is the name of the namespaced LocalQueue that fronts this
+	// InstanceType's backing ClusterQueue — the value a workload sets as its
+	// "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
+	// InstanceType name (see nodefeature.FormatLocalQueueName).
+	Entrance *string `json:"entrance,omitempty"`
 	// Phase is the summary of conditions.
 	Phase *string `json:"phase,omitempty"`
 	// PhaseMessage is the message of the phase.
@@ -23,17 +31,28 @@ type InstanceTypeStatusApplyConfiguration struct {
 	AcceleratorSliced *InstanceTypeResourceApplyConfiguration `json:"acceleratorSliced,omitempty"`
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
 	CPU *InstanceTypeResourceApplyConfiguration `json:"cpu,omitempty"`
-	// Entrance is the name of the namespaced LocalQueue that fronts this
-	// InstanceType's backing ClusterQueue — the value a workload sets as its
-	// "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
-	// InstanceType name (see nodefeature.FormatLocalQueueName).
-	Entrance *string `json:"entrance,omitempty"`
 }
 
 // InstanceTypeStatusApplyConfiguration constructs a declarative configuration of the InstanceTypeStatus type for use with
 // apply.
 func InstanceTypeStatus() *InstanceTypeStatusApplyConfiguration {
 	return &InstanceTypeStatusApplyConfiguration{}
+}
+
+// WithDetail sets the Detail field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Detail field is set to the value of the last call.
+func (b *InstanceTypeStatusApplyConfiguration) WithDetail(value *InstanceTypeDetailApplyConfiguration) *InstanceTypeStatusApplyConfiguration {
+	b.Detail = value
+	return b
+}
+
+// WithEntrance sets the Entrance field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the Entrance field is set to the value of the last call.
+func (b *InstanceTypeStatusApplyConfiguration) WithEntrance(value string) *InstanceTypeStatusApplyConfiguration {
+	b.Entrance = &value
+	return b
 }
 
 // WithPhase sets the Phase field in the declarative configuration to the given value
@@ -81,13 +100,5 @@ func (b *InstanceTypeStatusApplyConfiguration) WithAcceleratorSliced(value *Inst
 // If called multiple times, the CPU field is set to the value of the last call.
 func (b *InstanceTypeStatusApplyConfiguration) WithCPU(value *InstanceTypeResourceApplyConfiguration) *InstanceTypeStatusApplyConfiguration {
 	b.CPU = value
-	return b
-}
-
-// WithEntrance sets the Entrance field in the declarative configuration to the given value
-// and returns the receiver, so that objects can be built by chaining "With" function invocations.
-// If called multiple times, the Entrance field is set to the value of the last call.
-func (b *InstanceTypeStatusApplyConfiguration) WithEntrance(value string) *InstanceTypeStatusApplyConfiguration {
-	b.Entrance = &value
 	return b
 }

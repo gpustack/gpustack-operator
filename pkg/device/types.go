@@ -17,12 +17,21 @@ type (
 	// Ethernet represents the Ethernet information of a device,
 	// including its name and PCI information.
 	Ethernet = workercore.DeviceEthernet
-	// AcceleratorSliced represents one slicing capability of a device model,
-	// including its maximum slice count and compute/memory sharing semantics.
-	AcceleratorSliced = workercore.AcceleratorSliced
-	// AcceleratorsFeature represents the slicing features shared by every
-	// accelerator in a group.
-	AcceleratorsFeature = workercore.AcceleratorsFeature
+	// AcceleratorPhysicalSlicedProfile represents one hardware partition profile of a
+	// device model, such as an NVIDIA MIG profile.
+	AcceleratorPhysicalSlicedProfile = workercore.AcceleratorPhysicalSlicedProfile
+	// AcceleratorLogicalSliced represents a card's logical (software) slicing capability.
+	AcceleratorLogicalSliced = workercore.AcceleratorLogicalSliced
+	// AcceleratorPhysicalSliced represents a card's physical (hardware) slicing capability.
+	AcceleratorPhysicalSliced = workercore.AcceleratorPhysicalSliced
+	// AcceleratorSlicedDetail represents the group-level aggregated slicing capability.
+	AcceleratorSlicedDetail = workercore.AcceleratorSlicedDetail
+	// AcceleratorSlicedLogicalDetail represents the group's aggregated logical slicing capability.
+	AcceleratorSlicedLogicalDetail = workercore.AcceleratorSlicedLogicalDetail
+	// AcceleratorSlicedPhysicalDetail represents the group's aggregated physical slicing capability.
+	AcceleratorSlicedPhysicalDetail = workercore.AcceleratorSlicedPhysicalDetail
+	// AcceleratorSlicedPhysicalDetailProfile represents one group-aggregated physical profile.
+	AcceleratorSlicedPhysicalDetailProfile = workercore.AcceleratorSlicedPhysicalDetailProfile
 	// AcceleratorStatus represents the status of the accelerator device,
 	// including its health status and other status information.
 	AcceleratorStatus = workercore.AcceleratorStatus
@@ -96,16 +105,12 @@ type (
 )
 
 type (
-	// AllocatorSlicingPolicy represents the policy for how devices are sliced when allocating to containers.
-	AllocatorSlicingPolicy = string
-
 	// AllocatorOptions represents the options for configuring the allocator.
 	AllocatorOptions struct {
-		Logger        klog.Logger
-		KubeSocket    string
-		NoShared      bool
-		NoSliced      bool
-		SlicingPolicy AllocatorSlicingPolicy
+		Logger     klog.Logger
+		KubeSocket string
+		NoShared   bool
+		NoSliced   bool
 	}
 
 	// Allocator is an interface for allocating devices to containers.
@@ -123,23 +128,3 @@ type (
 		Stop()
 	}
 )
-
-const (
-	// AllocatorSlicingPolicyBestEffort means the allocator will
-	// attempt to slice devices with the most suitable partitioning mode in the order:
-	// `soft`, `virtual` and `physical`.
-	AllocatorSlicingPolicyBestEffort AllocatorSlicingPolicy = "best-effort"
-
-	// AllocatorSlicingPolicyQoS means the allocator will
-	// attempt to slice devices with the most suitable partitioning mode in the order:
-	// `physical`, `virtual` and `soft`.
-	AllocatorSlicingPolicyQoS AllocatorSlicingPolicy = "qos"
-)
-
-// GetAllSlicingPolicies returns a list of all supported allocator slicing policies.
-func GetAllSlicingPolicies() []AllocatorSlicingPolicy {
-	return []AllocatorSlicingPolicy{
-		AllocatorSlicingPolicyBestEffort,
-		AllocatorSlicingPolicyQoS,
-	}
-}

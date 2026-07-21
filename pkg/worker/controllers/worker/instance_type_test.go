@@ -24,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -459,11 +460,10 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			AcceleratorGroup:        key,
-			Acceleratable:           true,
-			OS:                      "linux",
-			Arch:                    "amd64",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Memory: "24576Mi"},
+			AcceleratorGroup: key,
+			Acceleratable:    true,
+			OS:               "linux",
+			Arch:             "amd64",
 		},
 	}
 	cli := buildInstanceTypeClient(it, cq, &dev)
@@ -514,11 +514,10 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 			Finalizers: []string{systemmeta.LockedResourceFinalizer},
 		},
 		Spec: workercore.InstanceTypeSpec{
-			AcceleratorGroup:        key,
-			Acceleratable:           true,
-			OS:                      "linux",
-			Arch:                    "amd64",
-			InstanceTypeAccelerator: workercore.InstanceTypeAccelerator{Memory: "24576Mi"},
+			AcceleratorGroup: key,
+			Acceleratable:    true,
+			OS:               "linux",
+			Arch:             "amd64",
 		},
 	}
 	cli := buildInstanceTypeClient(it, cq, &dev)
@@ -551,6 +550,141 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 	reconcileInstanceTypeN(t, cli, name, 2)
 	assert.Equal(t, int64(8), getInstanceType(t, cli, name).Status.Accelerator.Remaining.Value(),
 		"free restores the exclusive view to 8")
+}
+
+// TestInstanceTypeReconciler_ComputesDetail pins the observed Status.Detail backfill (T8): an
+// accelerated type gains its hardware descriptor (manufacturer/product/family + per-card
+// memory/cores + the pool-aggregated SlicedDetail) from the matched ResourceFlavor's notes and
+// the Devices ledger, the DisplayName defaults to the observed Product, and the Detail is
+// recomputed every reconcile (it lives in computeStatus, so a second pass never erases it). A
+// CPU-manufacturer-agnostic collapsed pool has no representative flavor, so its Detail stays empty
+// and its DisplayName defaults to the "CPU-only" sentinel — its queue still activates.
+func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
+	t.Run("accelerated type gains accelerator Detail and it persists across reconciles", func(t *testing.T) {
+		key := "nvidia-a10g"
+		name := nodeQueueName(key)
+		featureKey := featureKeyLabel(true, key)
+		poolLabels := map[string]string{
+			featureKey:           "true",
+			core.LabelOSStable:   "linux",
+			core.LabelArchStable: "amd64",
+		}
+
+		cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: name, Labels: poolLabels}}
+		systemmeta.NoteResource(cq, _ClusterQueueResType, nil)
+
+		rf := newNodesFlavor("gpustack-nvidia-a10g-linux-amd64-2d", key, 2, 2,
+			accelerated(nodefeature.ManufacturerNVIDIA),
+			withNotes(map[string]string{
+				"product": "A10G", "family": "Ampere", "memory": "24576Mi", "cores": "9216",
+			}))
+
+		// The Devices ledger carries the per-card slicing detail (Spec.Groups) the reconciler
+		// aggregates into SlicedDetail, plus the pool labels listFlavorPoolDevices selects on. The
+		// group ID is the bare model ("a10g"); Manufacturer+"-"+ID reconstructs the accelerator key.
+		dev := devicesWithGroups("node-a", slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
+			softCard("0", 128, true), softCard("1", 128, true)))
+		dev.Labels = map[string]string{
+			featureKey:                 "true",
+			core.LabelOSStable:         "linux",
+			core.LabelArchStable:       "amd64",
+			systemname.ManagedLabelKey: "true",
+		}
+
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{
+				Name:       name,
+				Labels:     poolLabels,
+				Finalizers: []string{systemmeta.LockedResourceFinalizer},
+			},
+			Spec: workercore.InstanceTypeSpec{
+				AcceleratorGroup: key, Acceleratable: true, OS: "linux", Arch: "amd64",
+			},
+		}
+		cli := buildInstanceTypeClient(it, cq, rf, dev)
+		reconcileInstanceTypeN(t, cli, name, 4)
+
+		got := getInstanceType(t, cli, name)
+		d := got.Status.Detail
+		assert.Equal(t, nodefeature.ManufacturerNVIDIA, d.Manufacturer, "manufacturer from the flavor note")
+		assert.Equal(t, "A10G", d.Product, "product from the flavor note")
+		assert.Equal(t, "Ampere", d.Family, "family from the flavor note")
+		assert.Equal(t, "24576Mi", d.Memory, "per-card VRAM from the flavor note")
+		assert.Equal(t, "9216", d.Cores, "cores from the flavor note")
+		assert.Equal(t, int32(256), d.SlicedDetail.Logical.Count,
+			"SlicedDetail sums the two soft cards' logical counts (2×128)")
+		assert.True(t, d.SlicedDetail.Logical.CoresPercentageOvercommit,
+			"SlicedDetail carries the overcommit flag")
+
+		// The Detail lives in computeStatus, so later reconciles recompute it identically — never
+		// erase it — and a stable status writes nothing (the DeepEqual guard).
+		rv := got.ResourceVersion
+		reconcileInstanceTypeN(t, cli, name, 2)
+		again := getInstanceType(t, cli, name)
+		assert.Equal(t, rv, again.ResourceVersion, "a stable Detail writes nothing (DeepEqual guard)")
+		assert.Equal(t, "A10G", again.Status.Detail.Product, "Detail is not erased on a later reconcile")
+		assert.Equal(t, int32(256), again.Status.Detail.SlicedDetail.Logical.Count,
+			"SlicedDetail is not erased on a later reconcile")
+	})
+
+	t.Run("generic collapsed pool: empty Detail, queue activates (not deadlocked)", func(t *testing.T) {
+		key := "generic"
+		name := nodeQueueName(key)
+		it := &workercore.InstanceType{
+			ObjectMeta: meta.ObjectMeta{Name: name, Finalizers: []string{systemmeta.LockedResourceFinalizer}},
+			Spec: workercore.InstanceTypeSpec{
+				GeneralGroup: key, OS: "linux", Arch: "amd64",
+				UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+				LocalStorage:  "100Gi",
+			},
+		}
+		cli := buildInstanceTypeClient(it)
+		reconcileInstanceTypeN(t, cli, name, 4)
+
+		got := getInstanceType(t, cli, name)
+		assert.Equal(t, workercore.InstanceTypeDetail{}, got.Status.Detail,
+			"a collapsed generic pool has no representative flavor, so Detail stays empty")
+
+		cq, err := getClusterQueue(t, cli, name)
+		require.NoError(t, err, "the queue is created despite the empty Detail (not deadlocked)")
+		require.NotNil(t, cq.Spec.StopPolicy)
+		assert.Equal(t, kueue.None, *cq.Spec.StopPolicy, "queue is active")
+	})
+}
+
+// TestFoldDetailCPU pins the cpuDetail note → Status.Detail folding: an accelerated flavor's note
+// (an InstanceTypeAcceleratorCPU carrying the CPU's own manufacturer/product/family) folds into
+// the accelerator's CPU; a CPU flavor's note (a plain InstanceTypeCPU) folds into the top-level
+// CPU; a malformed or empty note leaves the Detail untouched. (The awareness gate that selects
+// which branch runs mirrors the flavor reconciler's cpuDetail producer, covered there.)
+func TestFoldDetailCPU(t *testing.T) {
+	t.Run("accelerated note folds into the accelerator CPU", func(t *testing.T) {
+		note := string(json.ShouldMarshal(workercore.InstanceTypeAcceleratorCPU{
+			Manufacturer:    "amd",
+			Product:         "EPYC 7763",
+			InstanceTypeCPU: workercore.InstanceTypeCPU{PhysicalCores: "64"},
+		}))
+		var d workercore.InstanceTypeDetail
+		foldDetailCPU(&d, note, true)
+		assert.Equal(t, "amd", d.CPU.Manufacturer)
+		assert.Equal(t, "EPYC 7763", d.CPU.Product)
+		assert.Equal(t, "64", d.CPU.PhysicalCores)
+		assert.Empty(t, d.PhysicalCores, "the top-level CPU is untouched on the accelerated path")
+	})
+	t.Run("cpu-only note folds into the top-level CPU", func(t *testing.T) {
+		note := string(json.ShouldMarshal(workercore.InstanceTypeCPU{PhysicalCores: "32", LogicalCores: "64"}))
+		var d workercore.InstanceTypeDetail
+		foldDetailCPU(&d, note, false)
+		assert.Equal(t, "32", d.PhysicalCores)
+		assert.Equal(t, "64", d.LogicalCores)
+	})
+	t.Run("empty and malformed notes leave the detail untouched", func(t *testing.T) {
+		var d workercore.InstanceTypeDetail
+		foldDetailCPU(&d, "", false)
+		foldDetailCPU(&d, "{not json", false)
+		foldDetailCPU(&d, "{not json", true)
+		assert.Equal(t, workercore.InstanceTypeDetail{}, d)
+	})
 }
 
 // TestInstanceTypeReconciler_TeardownFinalizer pins the delete handshake: deleting an
@@ -730,6 +864,16 @@ func accelerated(manufacturer string) flavorOpt {
 	return func(notes map[string]string) {
 		notes["acceleratable"] = "true"
 		notes["manufacturer"] = manufacturer
+	}
+}
+
+// withNotes overlays additional flavor notes (product/family/memory/cores/cpuDetail), so a
+// fixture can carry the descriptor the reconciler folds into Status.Detail.
+func withNotes(kv map[string]string) flavorOpt {
+	return func(notes map[string]string) {
+		for k, v := range kv {
+			notes[k] = v
+		}
 	}
 }
 

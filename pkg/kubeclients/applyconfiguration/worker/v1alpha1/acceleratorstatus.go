@@ -9,6 +9,10 @@ package v1alpha1
 type AcceleratorStatusApplyConfiguration struct {
 	// Unhealthy indicates whether the device is healthy or not.
 	Unhealthy *bool `json:"unhealthy,omitempty"`
+	// LogicalSliced is the card's logical (software) slicing capability.
+	LogicalSliced *AcceleratorLogicalSlicedApplyConfiguration `json:"logicalSliced,omitempty"`
+	// PhysicalSliced is the card's physical (hardware) slicing capability.
+	PhysicalSliced *AcceleratorPhysicalSlicedApplyConfiguration `json:"physicalSliced,omitempty"`
 }
 
 // AcceleratorStatusApplyConfiguration constructs a declarative configuration of the AcceleratorStatus type for use with
@@ -22,5 +26,21 @@ func AcceleratorStatus() *AcceleratorStatusApplyConfiguration {
 // If called multiple times, the Unhealthy field is set to the value of the last call.
 func (b *AcceleratorStatusApplyConfiguration) WithUnhealthy(value bool) *AcceleratorStatusApplyConfiguration {
 	b.Unhealthy = &value
+	return b
+}
+
+// WithLogicalSliced sets the LogicalSliced field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the LogicalSliced field is set to the value of the last call.
+func (b *AcceleratorStatusApplyConfiguration) WithLogicalSliced(value *AcceleratorLogicalSlicedApplyConfiguration) *AcceleratorStatusApplyConfiguration {
+	b.LogicalSliced = value
+	return b
+}
+
+// WithPhysicalSliced sets the PhysicalSliced field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the PhysicalSliced field is set to the value of the last call.
+func (b *AcceleratorStatusApplyConfiguration) WithPhysicalSliced(value *AcceleratorPhysicalSlicedApplyConfiguration) *AcceleratorStatusApplyConfiguration {
+	b.PhysicalSliced = value
 	return b
 }

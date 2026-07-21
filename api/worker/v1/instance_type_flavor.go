@@ -57,13 +57,10 @@ type InstanceTypeFlavorSpec struct {
 	// Cores is the per-card accelerator core count, e.g. "9216"; empty for a generic pool.
 	Cores string `json:"cores,omitempty" protobuf:"bytes,7,opt,name=cores"`
 
-	// Sliceable reports whether the accelerator can be sliced; false for a generic pool.
-	Sliceable bool `json:"sliceable,omitempty" protobuf:"varint,8,opt,name=sliceable"`
-
 	// GeneralGroup is the general(CPU) group of the pool: the real CPU key when
 	// instance-type-aware-cpu-manufacturer is on, or the "generic" sentinel for a collapsed
 	// (unaware) generic pool; empty for an accelerated pool when awareness is off.
-	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,9,opt,name=generalGroup"`
+	GeneralGroup string `json:"generalGroup,omitempty" protobuf:"bytes,8,opt,name=generalGroup"`
 }
 
 // InstanceTypeFlavorList holds the list of InstanceTypeFlavor.

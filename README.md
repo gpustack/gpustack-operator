@@ -89,6 +89,7 @@ worked example cluster.
 - [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
 - [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
+- [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) — the administrator runbook for enabling/disabling NVIDIA MIG on a node, reboot recovery, and the no-automatic-descheduling policy.
 - [Migrating from v0.5.x](./docs/migration/from-v0.5.md) — upgrading an existing install to a higher version across the scheduling-chain refactor.
 
 ## License

@@ -423,13 +423,10 @@ message InstanceTypeFlavorSpec {
   // Cores is the per-card accelerator core count, e.g. "9216"; empty for a generic pool.
   optional string cores = 7;
 
-  // Sliceable reports whether the accelerator can be sliced; false for a generic pool.
-  optional bool sliceable = 8;
-
   // GeneralGroup is the general(CPU) group of the pool: the real CPU key when
   // instance-type-aware-cpu-manufacturer is on, or the "generic" sentinel for a collapsed
   // (unaware) generic pool; empty for an accelerated pool when awareness is off.
-  optional string generalGroup = 9;
+  optional string generalGroup = 8;
 }
 
 // InstanceTypeList holds the list of InstanceType.

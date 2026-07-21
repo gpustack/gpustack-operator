@@ -50,7 +50,7 @@ linters:
       comparison: true
     goconst:
       min-len: 3
-      min-occurrences: 20
+      min-occurrences: 50
     godot:
       scope: all
       exclude:

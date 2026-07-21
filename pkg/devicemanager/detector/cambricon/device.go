@@ -158,14 +158,6 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 				RuntimeVersion: device.NormalizeVersion(rtVer),
 			})
 			grpIndex = len(grpList) - 1
-
-			// MLU logical slicing via the cnDev sMLU profile; the per-device slice count is
-			// capped at 16 (operationally confirmed). Compute is spatially partitioned, so it
-			// is not overcommitted.
-			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-				MaxSize:              16,
-				MemoryPercentageStep: 1,
-			}
 		}
 
 		physicalIndexes := []uint32{uint32(i)}
@@ -175,6 +167,11 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+			// MLU logical slicing via the cnDev sMLU profile; the per-card slice count is capped
+			// at 16 (operationally confirmed). Compute is spatially partitioned, not overcommitted.
+			status.LogicalSliced = device.AcceleratorLogicalSliced{
+				Count: 16,
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -189,6 +186,8 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 		)
 		index++
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }

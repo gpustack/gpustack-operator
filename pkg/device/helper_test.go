@@ -90,22 +90,3 @@ func TestRuntimeMajor(t *testing.T) {
 		assert.Equal(t, c.want, RuntimeMajor(c.ver, c.fallback))
 	}
 }
-
-func TestAcceleratorsFeature_MaxSlices(t *testing.T) {
-	cases := []struct {
-		name    string
-		feature AcceleratorsFeature
-		want    int32
-	}{
-		{"no capability", AcceleratorsFeature{}, 0},
-		{"logical only", AcceleratorsFeature{LogicalSliced: AcceleratorSliced{MaxSize: 128}}, 128},
-		{"physical only", AcceleratorsFeature{PhysicalSliced: AcceleratorSliced{MaxSize: 7}}, 7},
-		{"both, physical larger", AcceleratorsFeature{PhysicalSliced: AcceleratorSliced{MaxSize: 63}, LogicalSliced: AcceleratorSliced{MaxSize: 16}}, 63},
-		{"both, logical larger", AcceleratorsFeature{PhysicalSliced: AcceleratorSliced{MaxSize: 4}, LogicalSliced: AcceleratorSliced{MaxSize: 16}}, 16},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, c.feature.MaxSlices())
-		})
-	}
-}

@@ -3,13 +3,10 @@ package allocator
 import (
 	"context"
 	"errors"
-	"fmt"
-	"slices"
 
 	"github.com/spf13/pflag"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
-	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
@@ -18,9 +15,8 @@ type Options struct {
 	KubeSocket string
 
 	// Control.
-	NoShared      bool
-	NoSliced      bool
-	SlicingPolicy string
+	NoShared bool
+	NoSliced bool
 }
 
 func NewOptions() *Options {
@@ -29,9 +25,8 @@ func NewOptions() *Options {
 		KubeSocket: deviceplugin.KubeletSocket,
 
 		// Control.
-		NoShared:      false,
-		NoSliced:      false,
-		SlicingPolicy: "best-effort",
+		NoShared: false,
+		NoSliced: false,
 	}
 }
 
@@ -45,9 +40,6 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"whether to disable creating shared devices.")
 	fs.BoolVar(&o.NoSliced, "no-sliced", o.NoSliced,
 		"whether to disable creating sliced devices.")
-	fs.StringVar(&o.SlicingPolicy, "slicing-policy", o.SlicingPolicy,
-		"the device slicing policy to use. "+
-			fmt.Sprintf("Valid values are: %v.", device.GetAllSlicingPolicies()))
 }
 
 func (o *Options) Validate(_ context.Context) error {
@@ -59,19 +51,13 @@ func (o *Options) Validate(_ context.Context) error {
 		return errors.New("--kube-socket: not existed or not a socket")
 	}
 
-	// Control.
-	if !slices.Contains(device.GetAllSlicingPolicies(), o.SlicingPolicy) {
-		return errors.New("--slicing-policy: invalid value")
-	}
-
 	return nil
 }
 
 func (o *Options) Complete(_ context.Context) (*Config, error) {
 	return &Config{
-		KubeSocket:    o.KubeSocket,
-		NoShared:      o.NoShared,
-		NoSliced:      o.NoSliced,
-		SlicingPolicy: o.SlicingPolicy,
+		KubeSocket: o.KubeSocket,
+		NoShared:   o.NoShared,
+		NoSliced:   o.NoSliced,
 	}, nil
 }

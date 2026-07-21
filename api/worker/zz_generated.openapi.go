@@ -21,361 +21,367 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
-		v1.Devices{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_Devices(ref),
-		v1.DevicesList{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_DevicesList(ref),
-		v1.Instance{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_Instance(ref),
-		v1.InstanceEvents{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceEvents(ref),
-		v1.InstanceImagePullSecret{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref),
-		v1.InstanceImagePullSecretList{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref),
-		v1.InstanceImagePullSecretSpec{}.OpenAPIModelName():           schema_gpustack_api_worker_v1_InstanceImagePullSecretSpec(ref),
-		v1.InstanceList{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceList(ref),
-		v1.InstanceLog{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_InstanceLog(ref),
-		v1.InstanceLogOptions{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceLogOptions(ref),
-		v1.InstancePersistentVolume{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
-		v1.InstancePersistentVolumeEvents{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeEvents(ref),
-		v1.InstancePersistentVolumeList{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
-		v1.InstancePersistentVolumeSource{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeSource(ref),
-		v1.InstancePersistentVolumeSpec{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref),
-		v1.InstancePersistentVolumeStatus{}.OpenAPIModelName():        schema_gpustack_api_worker_v1_InstancePersistentVolumeStatus(ref),
-		v1.InstancePersistentVolumeType{}.OpenAPIModelName():          schema_gpustack_api_worker_v1_InstancePersistentVolumeType(ref),
-		v1.InstancePersistentVolumeTypeList{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeList(ref),
-		v1.InstancePersistentVolumeTypeSpec{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeSpec(ref),
-		v1.InstanceSSHPublicKey{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref),
-		v1.InstanceSSHPublicKeyList{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref),
-		v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName():              schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref),
-		v1.InstanceType{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1_InstanceType(ref),
-		v1.InstanceTypeFlavor{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1_InstanceTypeFlavor(ref),
-		v1.InstanceTypeFlavorList{}.OpenAPIModelName():                schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref),
-		v1.InstanceTypeFlavorSpec{}.OpenAPIModelName():                schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref),
-		v1.InstanceTypeList{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceTypeList(ref),
-		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():     schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
-		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():      schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
-		v1alpha1.Accelerator{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
-		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
-		v1alpha1.AcceleratorSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorSliced(ref),
-		v1alpha1.AcceleratorStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref),
-		v1alpha1.AcceleratorsFeature{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_AcceleratorsFeature(ref),
-		v1alpha1.DeviceEthernet{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_DeviceEthernet(ref),
-		v1alpha1.DeviceTopology{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref),
-		v1alpha1.Devices{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_Devices(ref),
-		v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_DevicesAllocationGroup(ref),
-		v1alpha1.DevicesGroup{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref),
-		v1alpha1.DevicesList{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_DevicesList(ref),
-		v1alpha1.DevicesSpec{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_DevicesSpec(ref),
-		v1alpha1.DevicesStatus{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref),
-		v1alpha1.Instance{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_Instance(ref),
-		v1alpha1.InstanceEnvVar{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref),
-		v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_InstanceEphemeralVolume(ref),
-		v1alpha1.InstanceList{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceList(ref),
-		v1alpha1.InstancePort{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstancePort(ref),
-		v1alpha1.InstanceResources{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_InstanceResources(ref),
-		v1alpha1.InstanceServicePort{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_InstanceServicePort(ref),
-		v1alpha1.InstanceSpec{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref),
-		v1alpha1.InstanceStatus{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceStatus(ref),
-		v1alpha1.InstanceTemplate{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref),
-		v1alpha1.InstanceType{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceType(ref),
-		v1alpha1.InstanceTypeAccelerator{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref),
-		v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName():      schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref),
-		v1alpha1.InstanceTypeCPU{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_InstanceTypeCPU(ref),
-		v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_InstanceTypeCPUCache(ref),
-		v1alpha1.InstanceTypeList{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref),
-		v1alpha1.InstanceTypeResource{}.OpenAPIModelName():            schema_gpustack_api_worker_v1alpha1_InstanceTypeResource(ref),
-		v1alpha1.InstanceTypeSpec{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref),
-		v1alpha1.InstanceTypeStatus{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref),
-		v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_InstanceTypeUnitResources(ref),
-		v1alpha1.InstanceVolume{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_InstanceVolume(ref),
-		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():  schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
-		corev1.Affinity{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_Affinity(ref),
-		corev1.AppArmorProfile{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_AppArmorProfile(ref),
-		corev1.AttachedVolume{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_AttachedVolume(ref),
-		corev1.AvoidPods{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_AvoidPods(ref),
-		corev1.AzureDiskVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_AzureDiskVolumeSource(ref),
-		corev1.AzureFilePersistentVolumeSource{}.OpenAPIModelName():   schema_k8sio_api_core_v1_AzureFilePersistentVolumeSource(ref),
-		corev1.AzureFileVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_AzureFileVolumeSource(ref),
-		corev1.Binding{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_Binding(ref),
-		corev1.CSIPersistentVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_CSIPersistentVolumeSource(ref),
-		corev1.CSIVolumeSource{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_CSIVolumeSource(ref),
-		corev1.Capabilities{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_Capabilities(ref),
-		corev1.CephFSPersistentVolumeSource{}.OpenAPIModelName():      schema_k8sio_api_core_v1_CephFSPersistentVolumeSource(ref),
-		corev1.CephFSVolumeSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_CephFSVolumeSource(ref),
-		corev1.CinderPersistentVolumeSource{}.OpenAPIModelName():      schema_k8sio_api_core_v1_CinderPersistentVolumeSource(ref),
-		corev1.CinderVolumeSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_CinderVolumeSource(ref),
-		corev1.ClientIPConfig{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ClientIPConfig(ref),
-		corev1.ClusterTrustBundleProjection{}.OpenAPIModelName():      schema_k8sio_api_core_v1_ClusterTrustBundleProjection(ref),
-		corev1.ComponentCondition{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ComponentCondition(ref),
-		corev1.ComponentStatus{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_ComponentStatus(ref),
-		corev1.ComponentStatusList{}.OpenAPIModelName():               schema_k8sio_api_core_v1_ComponentStatusList(ref),
-		corev1.ConfigMap{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_ConfigMap(ref),
-		corev1.ConfigMapEnvSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ConfigMapEnvSource(ref),
-		corev1.ConfigMapKeySelector{}.OpenAPIModelName():              schema_k8sio_api_core_v1_ConfigMapKeySelector(ref),
-		corev1.ConfigMapList{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ConfigMapList(ref),
-		corev1.ConfigMapNodeConfigSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_ConfigMapNodeConfigSource(ref),
-		corev1.ConfigMapProjection{}.OpenAPIModelName():               schema_k8sio_api_core_v1_ConfigMapProjection(ref),
-		corev1.ConfigMapVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ConfigMapVolumeSource(ref),
-		corev1.Container{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_Container(ref),
-		corev1.ContainerExtendedResourceRequest{}.OpenAPIModelName():  schema_k8sio_api_core_v1_ContainerExtendedResourceRequest(ref),
-		corev1.ContainerImage{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ContainerImage(ref),
-		corev1.ContainerPort{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ContainerPort(ref),
-		corev1.ContainerResizePolicy{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ContainerResizePolicy(ref),
-		corev1.ContainerRestartRule{}.OpenAPIModelName():              schema_k8sio_api_core_v1_ContainerRestartRule(ref),
-		corev1.ContainerRestartRuleOnExitCodes{}.OpenAPIModelName():   schema_k8sio_api_core_v1_ContainerRestartRuleOnExitCodes(ref),
-		corev1.ContainerState{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ContainerState(ref),
-		corev1.ContainerStateRunning{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ContainerStateRunning(ref),
-		corev1.ContainerStateTerminated{}.OpenAPIModelName():          schema_k8sio_api_core_v1_ContainerStateTerminated(ref),
-		corev1.ContainerStateWaiting{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ContainerStateWaiting(ref),
-		corev1.ContainerStatus{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_ContainerStatus(ref),
-		corev1.ContainerUser{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ContainerUser(ref),
-		corev1.DaemonEndpoint{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_DaemonEndpoint(ref),
-		corev1.DownwardAPIProjection{}.OpenAPIModelName():             schema_k8sio_api_core_v1_DownwardAPIProjection(ref),
-		corev1.DownwardAPIVolumeFile{}.OpenAPIModelName():             schema_k8sio_api_core_v1_DownwardAPIVolumeFile(ref),
-		corev1.DownwardAPIVolumeSource{}.OpenAPIModelName():           schema_k8sio_api_core_v1_DownwardAPIVolumeSource(ref),
-		corev1.EmptyDirVolumeSource{}.OpenAPIModelName():              schema_k8sio_api_core_v1_EmptyDirVolumeSource(ref),
-		corev1.EndpointAddress{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_EndpointAddress(ref),
-		corev1.EndpointPort{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_EndpointPort(ref),
-		corev1.EndpointSubset{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_EndpointSubset(ref),
-		corev1.Endpoints{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_Endpoints(ref),
-		corev1.EndpointsList{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_EndpointsList(ref),
-		corev1.EnvFromSource{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_EnvFromSource(ref),
-		corev1.EnvVar{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_EnvVar(ref),
-		corev1.EnvVarSource{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_EnvVarSource(ref),
-		corev1.EphemeralContainer{}.OpenAPIModelName():                schema_k8sio_api_core_v1_EphemeralContainer(ref),
-		corev1.EphemeralContainerCommon{}.OpenAPIModelName():          schema_k8sio_api_core_v1_EphemeralContainerCommon(ref),
-		corev1.EphemeralVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_EphemeralVolumeSource(ref),
-		corev1.Event{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_Event(ref),
-		corev1.EventList{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_EventList(ref),
-		corev1.EventSeries{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_EventSeries(ref),
-		corev1.EventSource{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_EventSource(ref),
-		corev1.ExecAction{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_ExecAction(ref),
-		corev1.FCVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_FCVolumeSource(ref),
-		corev1.FileKeySelector{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_FileKeySelector(ref),
-		corev1.FlexPersistentVolumeSource{}.OpenAPIModelName():        schema_k8sio_api_core_v1_FlexPersistentVolumeSource(ref),
-		corev1.FlexVolumeSource{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_FlexVolumeSource(ref),
-		corev1.FlockerVolumeSource{}.OpenAPIModelName():               schema_k8sio_api_core_v1_FlockerVolumeSource(ref),
-		corev1.GCEPersistentDiskVolumeSource{}.OpenAPIModelName():     schema_k8sio_api_core_v1_GCEPersistentDiskVolumeSource(ref),
-		corev1.GRPCAction{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_GRPCAction(ref),
-		corev1.GitRepoVolumeSource{}.OpenAPIModelName():               schema_k8sio_api_core_v1_GitRepoVolumeSource(ref),
-		corev1.GlusterfsPersistentVolumeSource{}.OpenAPIModelName():   schema_k8sio_api_core_v1_GlusterfsPersistentVolumeSource(ref),
-		corev1.GlusterfsVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_GlusterfsVolumeSource(ref),
-		corev1.HTTPGetAction{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_HTTPGetAction(ref),
-		corev1.HTTPHeader{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_HTTPHeader(ref),
-		corev1.HostAlias{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_HostAlias(ref),
-		corev1.HostIP{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_HostIP(ref),
-		corev1.HostPathVolumeSource{}.OpenAPIModelName():              schema_k8sio_api_core_v1_HostPathVolumeSource(ref),
-		corev1.ISCSIPersistentVolumeSource{}.OpenAPIModelName():       schema_k8sio_api_core_v1_ISCSIPersistentVolumeSource(ref),
-		corev1.ISCSIVolumeSource{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_ISCSIVolumeSource(ref),
-		corev1.ImageVolumeSource{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_ImageVolumeSource(ref),
-		corev1.KeyToPath{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_KeyToPath(ref),
-		corev1.Lifecycle{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_Lifecycle(ref),
-		corev1.LifecycleHandler{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_LifecycleHandler(ref),
-		corev1.LimitRange{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_LimitRange(ref),
-		corev1.LimitRangeItem{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_LimitRangeItem(ref),
-		corev1.LimitRangeList{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_LimitRangeList(ref),
-		corev1.LimitRangeSpec{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_LimitRangeSpec(ref),
-		corev1.LinuxContainerUser{}.OpenAPIModelName():                schema_k8sio_api_core_v1_LinuxContainerUser(ref),
-		corev1.List{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_List(ref),
-		corev1.LoadBalancerIngress{}.OpenAPIModelName():               schema_k8sio_api_core_v1_LoadBalancerIngress(ref),
-		corev1.LoadBalancerStatus{}.OpenAPIModelName():                schema_k8sio_api_core_v1_LoadBalancerStatus(ref),
-		corev1.LocalObjectReference{}.OpenAPIModelName():              schema_k8sio_api_core_v1_LocalObjectReference(ref),
-		corev1.LocalVolumeSource{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_LocalVolumeSource(ref),
-		corev1.ModifyVolumeStatus{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ModifyVolumeStatus(ref),
-		corev1.NFSVolumeSource{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_NFSVolumeSource(ref),
-		corev1.Namespace{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_Namespace(ref),
-		corev1.NamespaceCondition{}.OpenAPIModelName():                schema_k8sio_api_core_v1_NamespaceCondition(ref),
-		corev1.NamespaceList{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_NamespaceList(ref),
-		corev1.NamespaceSpec{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_NamespaceSpec(ref),
-		corev1.NamespaceStatus{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_NamespaceStatus(ref),
-		corev1.Node{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_Node(ref),
-		corev1.NodeAddress{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_NodeAddress(ref),
-		corev1.NodeAffinity{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_NodeAffinity(ref),
-		corev1.NodeCondition{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_NodeCondition(ref),
-		corev1.NodeConfigSource{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_NodeConfigSource(ref),
-		corev1.NodeConfigStatus{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_NodeConfigStatus(ref),
-		corev1.NodeDaemonEndpoints{}.OpenAPIModelName():               schema_k8sio_api_core_v1_NodeDaemonEndpoints(ref),
-		corev1.NodeFeatures{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_NodeFeatures(ref),
-		corev1.NodeList{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_NodeList(ref),
-		corev1.NodeProxyOptions{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_NodeProxyOptions(ref),
-		corev1.NodeRuntimeHandler{}.OpenAPIModelName():                schema_k8sio_api_core_v1_NodeRuntimeHandler(ref),
-		corev1.NodeRuntimeHandlerFeatures{}.OpenAPIModelName():        schema_k8sio_api_core_v1_NodeRuntimeHandlerFeatures(ref),
-		corev1.NodeSelector{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_NodeSelector(ref),
-		corev1.NodeSelectorRequirement{}.OpenAPIModelName():           schema_k8sio_api_core_v1_NodeSelectorRequirement(ref),
-		corev1.NodeSelectorTerm{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_NodeSelectorTerm(ref),
-		corev1.NodeSpec{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_NodeSpec(ref),
-		corev1.NodeStatus{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_NodeStatus(ref),
-		corev1.NodeSwapStatus{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_NodeSwapStatus(ref),
-		corev1.NodeSystemInfo{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_NodeSystemInfo(ref),
-		corev1.ObjectFieldSelector{}.OpenAPIModelName():               schema_k8sio_api_core_v1_ObjectFieldSelector(ref),
-		corev1.ObjectReference{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_ObjectReference(ref),
-		corev1.PersistentVolume{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_PersistentVolume(ref),
-		corev1.PersistentVolumeClaim{}.OpenAPIModelName():             schema_k8sio_api_core_v1_PersistentVolumeClaim(ref),
-		corev1.PersistentVolumeClaimCondition{}.OpenAPIModelName():    schema_k8sio_api_core_v1_PersistentVolumeClaimCondition(ref),
-		corev1.PersistentVolumeClaimList{}.OpenAPIModelName():         schema_k8sio_api_core_v1_PersistentVolumeClaimList(ref),
-		corev1.PersistentVolumeClaimSpec{}.OpenAPIModelName():         schema_k8sio_api_core_v1_PersistentVolumeClaimSpec(ref),
-		corev1.PersistentVolumeClaimStatus{}.OpenAPIModelName():       schema_k8sio_api_core_v1_PersistentVolumeClaimStatus(ref),
-		corev1.PersistentVolumeClaimTemplate{}.OpenAPIModelName():     schema_k8sio_api_core_v1_PersistentVolumeClaimTemplate(ref),
-		corev1.PersistentVolumeClaimVolumeSource{}.OpenAPIModelName(): schema_k8sio_api_core_v1_PersistentVolumeClaimVolumeSource(ref),
-		corev1.PersistentVolumeList{}.OpenAPIModelName():              schema_k8sio_api_core_v1_PersistentVolumeList(ref),
-		corev1.PersistentVolumeSource{}.OpenAPIModelName():            schema_k8sio_api_core_v1_PersistentVolumeSource(ref),
-		corev1.PersistentVolumeSpec{}.OpenAPIModelName():              schema_k8sio_api_core_v1_PersistentVolumeSpec(ref),
-		corev1.PersistentVolumeStatus{}.OpenAPIModelName():            schema_k8sio_api_core_v1_PersistentVolumeStatus(ref),
-		corev1.PhotonPersistentDiskVolumeSource{}.OpenAPIModelName():  schema_k8sio_api_core_v1_PhotonPersistentDiskVolumeSource(ref),
-		corev1.Pod{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_Pod(ref),
-		corev1.PodAffinity{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_PodAffinity(ref),
-		corev1.PodAffinityTerm{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodAffinityTerm(ref),
-		corev1.PodAntiAffinity{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodAntiAffinity(ref),
-		corev1.PodAttachOptions{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_PodAttachOptions(ref),
-		corev1.PodCertificateProjection{}.OpenAPIModelName():          schema_k8sio_api_core_v1_PodCertificateProjection(ref),
-		corev1.PodCondition{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_PodCondition(ref),
-		corev1.PodDNSConfig{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_PodDNSConfig(ref),
-		corev1.PodDNSConfigOption{}.OpenAPIModelName():                schema_k8sio_api_core_v1_PodDNSConfigOption(ref),
-		corev1.PodExecOptions{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_PodExecOptions(ref),
-		corev1.PodExtendedResourceClaimStatus{}.OpenAPIModelName():    schema_k8sio_api_core_v1_PodExtendedResourceClaimStatus(ref),
-		corev1.PodIP{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_PodIP(ref),
-		corev1.PodList{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_PodList(ref),
-		corev1.PodLogOptions{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_PodLogOptions(ref),
-		corev1.PodOS{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_PodOS(ref),
-		corev1.PodPortForwardOptions{}.OpenAPIModelName():             schema_k8sio_api_core_v1_PodPortForwardOptions(ref),
-		corev1.PodProxyOptions{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodProxyOptions(ref),
-		corev1.PodReadinessGate{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_PodReadinessGate(ref),
-		corev1.PodResourceClaim{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_PodResourceClaim(ref),
-		corev1.PodResourceClaimStatus{}.OpenAPIModelName():            schema_k8sio_api_core_v1_PodResourceClaimStatus(ref),
-		corev1.PodSchedulingGate{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_PodSchedulingGate(ref),
-		corev1.PodSecurityContext{}.OpenAPIModelName():                schema_k8sio_api_core_v1_PodSecurityContext(ref),
-		corev1.PodSignature{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_PodSignature(ref),
-		corev1.PodSpec{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_PodSpec(ref),
-		corev1.PodStatus{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_PodStatus(ref),
-		corev1.PodStatusResult{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodStatusResult(ref),
-		corev1.PodTemplate{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_PodTemplate(ref),
-		corev1.PodTemplateList{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodTemplateList(ref),
-		corev1.PodTemplateSpec{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodTemplateSpec(ref),
-		corev1.PortStatus{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_PortStatus(ref),
-		corev1.PortworxVolumeSource{}.OpenAPIModelName():              schema_k8sio_api_core_v1_PortworxVolumeSource(ref),
-		corev1.PreferAvoidPodsEntry{}.OpenAPIModelName():              schema_k8sio_api_core_v1_PreferAvoidPodsEntry(ref),
-		corev1.PreferredSchedulingTerm{}.OpenAPIModelName():           schema_k8sio_api_core_v1_PreferredSchedulingTerm(ref),
-		corev1.Probe{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_Probe(ref),
-		corev1.ProbeHandler{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ProbeHandler(ref),
-		corev1.ProjectedVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ProjectedVolumeSource(ref),
-		corev1.QuobyteVolumeSource{}.OpenAPIModelName():               schema_k8sio_api_core_v1_QuobyteVolumeSource(ref),
-		corev1.RBDPersistentVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_RBDPersistentVolumeSource(ref),
-		corev1.RBDVolumeSource{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_RBDVolumeSource(ref),
-		corev1.RangeAllocation{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_RangeAllocation(ref),
-		corev1.ReplicationController{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ReplicationController(ref),
-		corev1.ReplicationControllerCondition{}.OpenAPIModelName():    schema_k8sio_api_core_v1_ReplicationControllerCondition(ref),
-		corev1.ReplicationControllerList{}.OpenAPIModelName():         schema_k8sio_api_core_v1_ReplicationControllerList(ref),
-		corev1.ReplicationControllerSpec{}.OpenAPIModelName():         schema_k8sio_api_core_v1_ReplicationControllerSpec(ref),
-		corev1.ReplicationControllerStatus{}.OpenAPIModelName():       schema_k8sio_api_core_v1_ReplicationControllerStatus(ref),
-		corev1.ResourceClaim{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ResourceClaim(ref),
-		corev1.ResourceFieldSelector{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ResourceFieldSelector(ref),
-		corev1.ResourceHealth{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ResourceHealth(ref),
-		corev1.ResourceQuota{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ResourceQuota(ref),
-		corev1.ResourceQuotaList{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_ResourceQuotaList(ref),
-		corev1.ResourceQuotaSpec{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_ResourceQuotaSpec(ref),
-		corev1.ResourceQuotaStatus{}.OpenAPIModelName():               schema_k8sio_api_core_v1_ResourceQuotaStatus(ref),
-		corev1.ResourceRequirements{}.OpenAPIModelName():              schema_k8sio_api_core_v1_ResourceRequirements(ref),
-		corev1.ResourceStatus{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ResourceStatus(ref),
-		corev1.SELinuxOptions{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_SELinuxOptions(ref),
-		corev1.ScaleIOPersistentVolumeSource{}.OpenAPIModelName():     schema_k8sio_api_core_v1_ScaleIOPersistentVolumeSource(ref),
-		corev1.ScaleIOVolumeSource{}.OpenAPIModelName():               schema_k8sio_api_core_v1_ScaleIOVolumeSource(ref),
-		corev1.ScopeSelector{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ScopeSelector(ref),
-		corev1.ScopedResourceSelectorRequirement{}.OpenAPIModelName(): schema_k8sio_api_core_v1_ScopedResourceSelectorRequirement(ref),
-		corev1.SeccompProfile{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_SeccompProfile(ref),
-		corev1.Secret{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_Secret(ref),
-		corev1.SecretEnvSource{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_SecretEnvSource(ref),
-		corev1.SecretKeySelector{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_SecretKeySelector(ref),
-		corev1.SecretList{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_SecretList(ref),
-		corev1.SecretProjection{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_SecretProjection(ref),
-		corev1.SecretReference{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_SecretReference(ref),
-		corev1.SecretVolumeSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_SecretVolumeSource(ref),
-		corev1.SecurityContext{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_SecurityContext(ref),
-		corev1.SerializedReference{}.OpenAPIModelName():               schema_k8sio_api_core_v1_SerializedReference(ref),
-		corev1.Service{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_Service(ref),
-		corev1.ServiceAccount{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ServiceAccount(ref),
-		corev1.ServiceAccountList{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ServiceAccountList(ref),
-		corev1.ServiceAccountTokenProjection{}.OpenAPIModelName():     schema_k8sio_api_core_v1_ServiceAccountTokenProjection(ref),
-		corev1.ServiceList{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ServiceList(ref),
-		corev1.ServicePort{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ServicePort(ref),
-		corev1.ServiceProxyOptions{}.OpenAPIModelName():               schema_k8sio_api_core_v1_ServiceProxyOptions(ref),
-		corev1.ServiceSpec{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ServiceSpec(ref),
-		corev1.ServiceStatus{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ServiceStatus(ref),
-		corev1.SessionAffinityConfig{}.OpenAPIModelName():             schema_k8sio_api_core_v1_SessionAffinityConfig(ref),
-		corev1.SleepAction{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_SleepAction(ref),
-		corev1.StorageOSPersistentVolumeSource{}.OpenAPIModelName():   schema_k8sio_api_core_v1_StorageOSPersistentVolumeSource(ref),
-		corev1.StorageOSVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_StorageOSVolumeSource(ref),
-		corev1.Sysctl{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_Sysctl(ref),
-		corev1.TCPSocketAction{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_TCPSocketAction(ref),
-		corev1.Taint{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_Taint(ref),
-		corev1.Toleration{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_Toleration(ref),
-		corev1.TopologySelectorLabelRequirement{}.OpenAPIModelName():  schema_k8sio_api_core_v1_TopologySelectorLabelRequirement(ref),
-		corev1.TopologySelectorTerm{}.OpenAPIModelName():              schema_k8sio_api_core_v1_TopologySelectorTerm(ref),
-		corev1.TopologySpreadConstraint{}.OpenAPIModelName():          schema_k8sio_api_core_v1_TopologySpreadConstraint(ref),
-		corev1.TypedLocalObjectReference{}.OpenAPIModelName():         schema_k8sio_api_core_v1_TypedLocalObjectReference(ref),
-		corev1.TypedObjectReference{}.OpenAPIModelName():              schema_k8sio_api_core_v1_TypedObjectReference(ref),
-		corev1.Volume{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_Volume(ref),
-		corev1.VolumeDevice{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_VolumeDevice(ref),
-		corev1.VolumeMount{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_VolumeMount(ref),
-		corev1.VolumeMountStatus{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_VolumeMountStatus(ref),
-		corev1.VolumeNodeAffinity{}.OpenAPIModelName():                schema_k8sio_api_core_v1_VolumeNodeAffinity(ref),
-		corev1.VolumeProjection{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_VolumeProjection(ref),
-		corev1.VolumeResourceRequirements{}.OpenAPIModelName():        schema_k8sio_api_core_v1_VolumeResourceRequirements(ref),
-		corev1.VolumeSource{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_VolumeSource(ref),
-		corev1.VsphereVirtualDiskVolumeSource{}.OpenAPIModelName():    schema_k8sio_api_core_v1_VsphereVirtualDiskVolumeSource(ref),
-		corev1.WeightedPodAffinityTerm{}.OpenAPIModelName():           schema_k8sio_api_core_v1_WeightedPodAffinityTerm(ref),
-		corev1.WindowsSecurityContextOptions{}.OpenAPIModelName():     schema_k8sio_api_core_v1_WindowsSecurityContextOptions(ref),
-		corev1.WorkloadReference{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_WorkloadReference(ref),
-		resource.Quantity{}.OpenAPIModelName():                        schema_apimachinery_pkg_api_resource_Quantity(ref),
-		metav1.APIGroup{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_APIGroup(ref),
-		metav1.APIGroupList{}.OpenAPIModelName():                      schema_pkg_apis_meta_v1_APIGroupList(ref),
-		metav1.APIResource{}.OpenAPIModelName():                       schema_pkg_apis_meta_v1_APIResource(ref),
-		metav1.APIResourceList{}.OpenAPIModelName():                   schema_pkg_apis_meta_v1_APIResourceList(ref),
-		metav1.APIVersions{}.OpenAPIModelName():                       schema_pkg_apis_meta_v1_APIVersions(ref),
-		metav1.ApplyOptions{}.OpenAPIModelName():                      schema_pkg_apis_meta_v1_ApplyOptions(ref),
-		metav1.Condition{}.OpenAPIModelName():                         schema_pkg_apis_meta_v1_Condition(ref),
-		metav1.CreateOptions{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_CreateOptions(ref),
-		metav1.DeleteOptions{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_DeleteOptions(ref),
-		metav1.Duration{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_Duration(ref),
-		metav1.FieldSelectorRequirement{}.OpenAPIModelName():          schema_pkg_apis_meta_v1_FieldSelectorRequirement(ref),
-		metav1.FieldsV1{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_FieldsV1(ref),
-		metav1.GetOptions{}.OpenAPIModelName():                        schema_pkg_apis_meta_v1_GetOptions(ref),
-		metav1.GroupKind{}.OpenAPIModelName():                         schema_pkg_apis_meta_v1_GroupKind(ref),
-		metav1.GroupResource{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_GroupResource(ref),
-		metav1.GroupVersion{}.OpenAPIModelName():                      schema_pkg_apis_meta_v1_GroupVersion(ref),
-		metav1.GroupVersionForDiscovery{}.OpenAPIModelName():          schema_pkg_apis_meta_v1_GroupVersionForDiscovery(ref),
-		metav1.GroupVersionKind{}.OpenAPIModelName():                  schema_pkg_apis_meta_v1_GroupVersionKind(ref),
-		metav1.GroupVersionResource{}.OpenAPIModelName():              schema_pkg_apis_meta_v1_GroupVersionResource(ref),
-		metav1.InternalEvent{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_InternalEvent(ref),
-		metav1.LabelSelector{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_LabelSelector(ref),
-		metav1.LabelSelectorRequirement{}.OpenAPIModelName():          schema_pkg_apis_meta_v1_LabelSelectorRequirement(ref),
-		metav1.List{}.OpenAPIModelName():                              schema_pkg_apis_meta_v1_List(ref),
-		metav1.ListMeta{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_ListMeta(ref),
-		metav1.ListOptions{}.OpenAPIModelName():                       schema_pkg_apis_meta_v1_ListOptions(ref),
-		metav1.ManagedFieldsEntry{}.OpenAPIModelName():                schema_pkg_apis_meta_v1_ManagedFieldsEntry(ref),
-		metav1.MicroTime{}.OpenAPIModelName():                         schema_pkg_apis_meta_v1_MicroTime(ref),
-		metav1.ObjectMeta{}.OpenAPIModelName():                        schema_pkg_apis_meta_v1_ObjectMeta(ref),
-		metav1.OwnerReference{}.OpenAPIModelName():                    schema_pkg_apis_meta_v1_OwnerReference(ref),
-		metav1.PartialObjectMetadata{}.OpenAPIModelName():             schema_pkg_apis_meta_v1_PartialObjectMetadata(ref),
-		metav1.PartialObjectMetadataList{}.OpenAPIModelName():         schema_pkg_apis_meta_v1_PartialObjectMetadataList(ref),
-		metav1.Patch{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_Patch(ref),
-		metav1.PatchOptions{}.OpenAPIModelName():                      schema_pkg_apis_meta_v1_PatchOptions(ref),
-		metav1.Preconditions{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_Preconditions(ref),
-		metav1.RootPaths{}.OpenAPIModelName():                         schema_pkg_apis_meta_v1_RootPaths(ref),
-		metav1.ServerAddressByClientCIDR{}.OpenAPIModelName():         schema_pkg_apis_meta_v1_ServerAddressByClientCIDR(ref),
-		metav1.Status{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_Status(ref),
-		metav1.StatusCause{}.OpenAPIModelName():                       schema_pkg_apis_meta_v1_StatusCause(ref),
-		metav1.StatusDetails{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_StatusDetails(ref),
-		metav1.Table{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_Table(ref),
-		metav1.TableColumnDefinition{}.OpenAPIModelName():             schema_pkg_apis_meta_v1_TableColumnDefinition(ref),
-		metav1.TableOptions{}.OpenAPIModelName():                      schema_pkg_apis_meta_v1_TableOptions(ref),
-		metav1.TableRow{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_TableRow(ref),
-		metav1.TableRowCondition{}.OpenAPIModelName():                 schema_pkg_apis_meta_v1_TableRowCondition(ref),
-		metav1.Time{}.OpenAPIModelName():                              schema_pkg_apis_meta_v1_Time(ref),
-		metav1.Timestamp{}.OpenAPIModelName():                         schema_pkg_apis_meta_v1_Timestamp(ref),
-		metav1.TypeMeta{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_TypeMeta(ref),
-		metav1.UpdateOptions{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_UpdateOptions(ref),
-		metav1.WatchEvent{}.OpenAPIModelName():                        schema_pkg_apis_meta_v1_WatchEvent(ref),
-		runtime.RawExtension{}.OpenAPIModelName():                     schema_k8sio_apimachinery_pkg_runtime_RawExtension(ref),
-		runtime.TypeMeta{}.OpenAPIModelName():                         schema_k8sio_apimachinery_pkg_runtime_TypeMeta(ref),
-		runtime.Unknown{}.OpenAPIModelName():                          schema_k8sio_apimachinery_pkg_runtime_Unknown(ref),
-		intstr.IntOrString{}.OpenAPIModelName():                       schema_apimachinery_pkg_util_intstr_IntOrString(ref),
-		version.Info{}.OpenAPIModelName():                             schema_k8sio_apimachinery_pkg_version_Info(ref),
+		v1.Devices{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1_Devices(ref),
+		v1.DevicesList{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_DevicesList(ref),
+		v1.Instance{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1_Instance(ref),
+		v1.InstanceEvents{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceEvents(ref),
+		v1.InstanceImagePullSecret{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref),
+		v1.InstanceImagePullSecretList{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref),
+		v1.InstanceImagePullSecretSpec{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceImagePullSecretSpec(ref),
+		v1.InstanceList{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1_InstanceList(ref),
+		v1.InstanceLog{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_InstanceLog(ref),
+		v1.InstanceLogOptions{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_InstanceLogOptions(ref),
+		v1.InstancePersistentVolume{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
+		v1.InstancePersistentVolumeEvents{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstancePersistentVolumeEvents(ref),
+		v1.InstancePersistentVolumeList{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
+		v1.InstancePersistentVolumeSource{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstancePersistentVolumeSource(ref),
+		v1.InstancePersistentVolumeSpec{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1_InstancePersistentVolumeSpec(ref),
+		v1.InstancePersistentVolumeStatus{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstancePersistentVolumeStatus(ref),
+		v1.InstancePersistentVolumeType{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1_InstancePersistentVolumeType(ref),
+		v1.InstancePersistentVolumeTypeList{}.OpenAPIModelName():             schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeList(ref),
+		v1.InstancePersistentVolumeTypeSpec{}.OpenAPIModelName():             schema_gpustack_api_worker_v1_InstancePersistentVolumeTypeSpec(ref),
+		v1.InstanceSSHPublicKey{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1_InstanceSSHPublicKey(ref),
+		v1.InstanceSSHPublicKeyList{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstanceSSHPublicKeyList(ref),
+		v1.InstanceSSHPublicKeySpec{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstanceSSHPublicKeySpec(ref),
+		v1.InstanceType{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1_InstanceType(ref),
+		v1.InstanceTypeFlavor{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_InstanceTypeFlavor(ref),
+		v1.InstanceTypeFlavorList{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1_InstanceTypeFlavorList(ref),
+		v1.InstanceTypeFlavorSpec{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref),
+		v1.InstanceTypeList{}.OpenAPIModelName():                             schema_gpustack_api_worker_v1_InstanceTypeList(ref),
+		v1.NFSInstancePersistentVolumeSource{}.OpenAPIModelName():            schema_gpustack_api_worker_v1_NFSInstancePersistentVolumeSource(ref),
+		v1.S3InstancePersistentVolumeSource{}.OpenAPIModelName():             schema_gpustack_api_worker_v1_S3InstancePersistentVolumeSource(ref),
+		v1alpha1.Accelerator{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
+		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
+		v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref),
+		v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref),
+		v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref),
+		v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref),
+		v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref),
+		v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref),
+		v1alpha1.AcceleratorSlicedPhysicalDetailProfile{}.OpenAPIModelName(): schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(ref),
+		v1alpha1.AcceleratorStatus{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref),
+		v1alpha1.DeviceEthernet{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_DeviceEthernet(ref),
+		v1alpha1.DeviceTopology{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_DeviceTopology(ref),
+		v1alpha1.Devices{}.OpenAPIModelName():                                schema_gpustack_api_worker_v1alpha1_Devices(ref),
+		v1alpha1.DevicesAllocationGroup{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1alpha1_DevicesAllocationGroup(ref),
+		v1alpha1.DevicesGroup{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref),
+		v1alpha1.DevicesList{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_DevicesList(ref),
+		v1alpha1.DevicesSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_DevicesSpec(ref),
+		v1alpha1.DevicesStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref),
+		v1alpha1.Instance{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_Instance(ref),
+		v1alpha1.InstanceEnvVar{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref),
+		v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceEphemeralVolume(ref),
+		v1alpha1.InstanceList{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_InstanceList(ref),
+		v1alpha1.InstancePort{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_InstancePort(ref),
+		v1alpha1.InstanceResources{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1alpha1_InstanceResources(ref),
+		v1alpha1.InstanceServicePort{}.OpenAPIModelName():                    schema_gpustack_api_worker_v1alpha1_InstanceServicePort(ref),
+		v1alpha1.InstanceSpec{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref),
+		v1alpha1.InstanceStatus{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_InstanceStatus(ref),
+		v1alpha1.InstanceTemplate{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref),
+		v1alpha1.InstanceType{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_InstanceType(ref),
+		v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName():             schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref),
+		v1alpha1.InstanceTypeAcceleratorDetail{}.OpenAPIModelName():          schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorDetail(ref),
+		v1alpha1.InstanceTypeCPU{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1alpha1_InstanceTypeCPU(ref),
+		v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_InstanceTypeCPUCache(ref),
+		v1alpha1.InstanceTypeDetail{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_InstanceTypeDetail(ref),
+		v1alpha1.InstanceTypeList{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref),
+		v1alpha1.InstanceTypeResource{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_InstanceTypeResource(ref),
+		v1alpha1.InstanceTypeSpec{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref),
+		v1alpha1.InstanceTypeStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref),
+		v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_InstanceTypeUnitResources(ref),
+		v1alpha1.InstanceVolume{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_InstanceVolume(ref),
+		corev1.AWSElasticBlockStoreVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_AWSElasticBlockStoreVolumeSource(ref),
+		corev1.Affinity{}.OpenAPIModelName():                                 schema_k8sio_api_core_v1_Affinity(ref),
+		corev1.AppArmorProfile{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_AppArmorProfile(ref),
+		corev1.AttachedVolume{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_AttachedVolume(ref),
+		corev1.AvoidPods{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_AvoidPods(ref),
+		corev1.AzureDiskVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_AzureDiskVolumeSource(ref),
+		corev1.AzureFilePersistentVolumeSource{}.OpenAPIModelName():          schema_k8sio_api_core_v1_AzureFilePersistentVolumeSource(ref),
+		corev1.AzureFileVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_AzureFileVolumeSource(ref),
+		corev1.Binding{}.OpenAPIModelName():                                  schema_k8sio_api_core_v1_Binding(ref),
+		corev1.CSIPersistentVolumeSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_CSIPersistentVolumeSource(ref),
+		corev1.CSIVolumeSource{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_CSIVolumeSource(ref),
+		corev1.Capabilities{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_Capabilities(ref),
+		corev1.CephFSPersistentVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_CephFSPersistentVolumeSource(ref),
+		corev1.CephFSVolumeSource{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_CephFSVolumeSource(ref),
+		corev1.CinderPersistentVolumeSource{}.OpenAPIModelName():             schema_k8sio_api_core_v1_CinderPersistentVolumeSource(ref),
+		corev1.CinderVolumeSource{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_CinderVolumeSource(ref),
+		corev1.ClientIPConfig{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_ClientIPConfig(ref),
+		corev1.ClusterTrustBundleProjection{}.OpenAPIModelName():             schema_k8sio_api_core_v1_ClusterTrustBundleProjection(ref),
+		corev1.ComponentCondition{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ComponentCondition(ref),
+		corev1.ComponentStatus{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_ComponentStatus(ref),
+		corev1.ComponentStatusList{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ComponentStatusList(ref),
+		corev1.ConfigMap{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_ConfigMap(ref),
+		corev1.ConfigMapEnvSource{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ConfigMapEnvSource(ref),
+		corev1.ConfigMapKeySelector{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ConfigMapKeySelector(ref),
+		corev1.ConfigMapList{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ConfigMapList(ref),
+		corev1.ConfigMapNodeConfigSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ConfigMapNodeConfigSource(ref),
+		corev1.ConfigMapProjection{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ConfigMapProjection(ref),
+		corev1.ConfigMapVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ConfigMapVolumeSource(ref),
+		corev1.Container{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_Container(ref),
+		corev1.ContainerExtendedResourceRequest{}.OpenAPIModelName():         schema_k8sio_api_core_v1_ContainerExtendedResourceRequest(ref),
+		corev1.ContainerImage{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_ContainerImage(ref),
+		corev1.ContainerPort{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ContainerPort(ref),
+		corev1.ContainerResizePolicy{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ContainerResizePolicy(ref),
+		corev1.ContainerRestartRule{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ContainerRestartRule(ref),
+		corev1.ContainerRestartRuleOnExitCodes{}.OpenAPIModelName():          schema_k8sio_api_core_v1_ContainerRestartRuleOnExitCodes(ref),
+		corev1.ContainerState{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_ContainerState(ref),
+		corev1.ContainerStateRunning{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ContainerStateRunning(ref),
+		corev1.ContainerStateTerminated{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_ContainerStateTerminated(ref),
+		corev1.ContainerStateWaiting{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ContainerStateWaiting(ref),
+		corev1.ContainerStatus{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_ContainerStatus(ref),
+		corev1.ContainerUser{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ContainerUser(ref),
+		corev1.DaemonEndpoint{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_DaemonEndpoint(ref),
+		corev1.DownwardAPIProjection{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_DownwardAPIProjection(ref),
+		corev1.DownwardAPIVolumeFile{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_DownwardAPIVolumeFile(ref),
+		corev1.DownwardAPIVolumeSource{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_DownwardAPIVolumeSource(ref),
+		corev1.EmptyDirVolumeSource{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_EmptyDirVolumeSource(ref),
+		corev1.EndpointAddress{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_EndpointAddress(ref),
+		corev1.EndpointPort{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_EndpointPort(ref),
+		corev1.EndpointSubset{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_EndpointSubset(ref),
+		corev1.Endpoints{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_Endpoints(ref),
+		corev1.EndpointsList{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_EndpointsList(ref),
+		corev1.EnvFromSource{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_EnvFromSource(ref),
+		corev1.EnvVar{}.OpenAPIModelName():                                   schema_k8sio_api_core_v1_EnvVar(ref),
+		corev1.EnvVarSource{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_EnvVarSource(ref),
+		corev1.EphemeralContainer{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_EphemeralContainer(ref),
+		corev1.EphemeralContainerCommon{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_EphemeralContainerCommon(ref),
+		corev1.EphemeralVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_EphemeralVolumeSource(ref),
+		corev1.Event{}.OpenAPIModelName():                                    schema_k8sio_api_core_v1_Event(ref),
+		corev1.EventList{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_EventList(ref),
+		corev1.EventSeries{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_EventSeries(ref),
+		corev1.EventSource{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_EventSource(ref),
+		corev1.ExecAction{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_ExecAction(ref),
+		corev1.FCVolumeSource{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_FCVolumeSource(ref),
+		corev1.FileKeySelector{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_FileKeySelector(ref),
+		corev1.FlexPersistentVolumeSource{}.OpenAPIModelName():               schema_k8sio_api_core_v1_FlexPersistentVolumeSource(ref),
+		corev1.FlexVolumeSource{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_FlexVolumeSource(ref),
+		corev1.FlockerVolumeSource{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_FlockerVolumeSource(ref),
+		corev1.GCEPersistentDiskVolumeSource{}.OpenAPIModelName():            schema_k8sio_api_core_v1_GCEPersistentDiskVolumeSource(ref),
+		corev1.GRPCAction{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_GRPCAction(ref),
+		corev1.GitRepoVolumeSource{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_GitRepoVolumeSource(ref),
+		corev1.GlusterfsPersistentVolumeSource{}.OpenAPIModelName():          schema_k8sio_api_core_v1_GlusterfsPersistentVolumeSource(ref),
+		corev1.GlusterfsVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_GlusterfsVolumeSource(ref),
+		corev1.HTTPGetAction{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_HTTPGetAction(ref),
+		corev1.HTTPHeader{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_HTTPHeader(ref),
+		corev1.HostAlias{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_HostAlias(ref),
+		corev1.HostIP{}.OpenAPIModelName():                                   schema_k8sio_api_core_v1_HostIP(ref),
+		corev1.HostPathVolumeSource{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_HostPathVolumeSource(ref),
+		corev1.ISCSIPersistentVolumeSource{}.OpenAPIModelName():              schema_k8sio_api_core_v1_ISCSIPersistentVolumeSource(ref),
+		corev1.ISCSIVolumeSource{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_ISCSIVolumeSource(ref),
+		corev1.ImageVolumeSource{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_ImageVolumeSource(ref),
+		corev1.KeyToPath{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_KeyToPath(ref),
+		corev1.Lifecycle{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_Lifecycle(ref),
+		corev1.LifecycleHandler{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_LifecycleHandler(ref),
+		corev1.LimitRange{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_LimitRange(ref),
+		corev1.LimitRangeItem{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_LimitRangeItem(ref),
+		corev1.LimitRangeList{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_LimitRangeList(ref),
+		corev1.LimitRangeSpec{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_LimitRangeSpec(ref),
+		corev1.LinuxContainerUser{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_LinuxContainerUser(ref),
+		corev1.List{}.OpenAPIModelName():                                     schema_k8sio_api_core_v1_List(ref),
+		corev1.LoadBalancerIngress{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_LoadBalancerIngress(ref),
+		corev1.LoadBalancerStatus{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_LoadBalancerStatus(ref),
+		corev1.LocalObjectReference{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_LocalObjectReference(ref),
+		corev1.LocalVolumeSource{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_LocalVolumeSource(ref),
+		corev1.ModifyVolumeStatus{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ModifyVolumeStatus(ref),
+		corev1.NFSVolumeSource{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_NFSVolumeSource(ref),
+		corev1.Namespace{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_Namespace(ref),
+		corev1.NamespaceCondition{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_NamespaceCondition(ref),
+		corev1.NamespaceList{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_NamespaceList(ref),
+		corev1.NamespaceSpec{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_NamespaceSpec(ref),
+		corev1.NamespaceStatus{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_NamespaceStatus(ref),
+		corev1.Node{}.OpenAPIModelName():                                     schema_k8sio_api_core_v1_Node(ref),
+		corev1.NodeAddress{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_NodeAddress(ref),
+		corev1.NodeAffinity{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_NodeAffinity(ref),
+		corev1.NodeCondition{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_NodeCondition(ref),
+		corev1.NodeConfigSource{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_NodeConfigSource(ref),
+		corev1.NodeConfigStatus{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_NodeConfigStatus(ref),
+		corev1.NodeDaemonEndpoints{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_NodeDaemonEndpoints(ref),
+		corev1.NodeFeatures{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_NodeFeatures(ref),
+		corev1.NodeList{}.OpenAPIModelName():                                 schema_k8sio_api_core_v1_NodeList(ref),
+		corev1.NodeProxyOptions{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_NodeProxyOptions(ref),
+		corev1.NodeRuntimeHandler{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_NodeRuntimeHandler(ref),
+		corev1.NodeRuntimeHandlerFeatures{}.OpenAPIModelName():               schema_k8sio_api_core_v1_NodeRuntimeHandlerFeatures(ref),
+		corev1.NodeSelector{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_NodeSelector(ref),
+		corev1.NodeSelectorRequirement{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_NodeSelectorRequirement(ref),
+		corev1.NodeSelectorTerm{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_NodeSelectorTerm(ref),
+		corev1.NodeSpec{}.OpenAPIModelName():                                 schema_k8sio_api_core_v1_NodeSpec(ref),
+		corev1.NodeStatus{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_NodeStatus(ref),
+		corev1.NodeSwapStatus{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_NodeSwapStatus(ref),
+		corev1.NodeSystemInfo{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_NodeSystemInfo(ref),
+		corev1.ObjectFieldSelector{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ObjectFieldSelector(ref),
+		corev1.ObjectReference{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_ObjectReference(ref),
+		corev1.PersistentVolume{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_PersistentVolume(ref),
+		corev1.PersistentVolumeClaim{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_PersistentVolumeClaim(ref),
+		corev1.PersistentVolumeClaimCondition{}.OpenAPIModelName():           schema_k8sio_api_core_v1_PersistentVolumeClaimCondition(ref),
+		corev1.PersistentVolumeClaimList{}.OpenAPIModelName():                schema_k8sio_api_core_v1_PersistentVolumeClaimList(ref),
+		corev1.PersistentVolumeClaimSpec{}.OpenAPIModelName():                schema_k8sio_api_core_v1_PersistentVolumeClaimSpec(ref),
+		corev1.PersistentVolumeClaimStatus{}.OpenAPIModelName():              schema_k8sio_api_core_v1_PersistentVolumeClaimStatus(ref),
+		corev1.PersistentVolumeClaimTemplate{}.OpenAPIModelName():            schema_k8sio_api_core_v1_PersistentVolumeClaimTemplate(ref),
+		corev1.PersistentVolumeClaimVolumeSource{}.OpenAPIModelName():        schema_k8sio_api_core_v1_PersistentVolumeClaimVolumeSource(ref),
+		corev1.PersistentVolumeList{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_PersistentVolumeList(ref),
+		corev1.PersistentVolumeSource{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PersistentVolumeSource(ref),
+		corev1.PersistentVolumeSpec{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_PersistentVolumeSpec(ref),
+		corev1.PersistentVolumeStatus{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PersistentVolumeStatus(ref),
+		corev1.PhotonPersistentDiskVolumeSource{}.OpenAPIModelName():         schema_k8sio_api_core_v1_PhotonPersistentDiskVolumeSource(ref),
+		corev1.Pod{}.OpenAPIModelName():                                      schema_k8sio_api_core_v1_Pod(ref),
+		corev1.PodAffinity{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_PodAffinity(ref),
+		corev1.PodAffinityTerm{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_PodAffinityTerm(ref),
+		corev1.PodAntiAffinity{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_PodAntiAffinity(ref),
+		corev1.PodAttachOptions{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_PodAttachOptions(ref),
+		corev1.PodCertificateProjection{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_PodCertificateProjection(ref),
+		corev1.PodCondition{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_PodCondition(ref),
+		corev1.PodDNSConfig{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_PodDNSConfig(ref),
+		corev1.PodDNSConfigOption{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_PodDNSConfigOption(ref),
+		corev1.PodExecOptions{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_PodExecOptions(ref),
+		corev1.PodExtendedResourceClaimStatus{}.OpenAPIModelName():           schema_k8sio_api_core_v1_PodExtendedResourceClaimStatus(ref),
+		corev1.PodIP{}.OpenAPIModelName():                                    schema_k8sio_api_core_v1_PodIP(ref),
+		corev1.PodList{}.OpenAPIModelName():                                  schema_k8sio_api_core_v1_PodList(ref),
+		corev1.PodLogOptions{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_PodLogOptions(ref),
+		corev1.PodOS{}.OpenAPIModelName():                                    schema_k8sio_api_core_v1_PodOS(ref),
+		corev1.PodPortForwardOptions{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_PodPortForwardOptions(ref),
+		corev1.PodProxyOptions{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_PodProxyOptions(ref),
+		corev1.PodReadinessGate{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_PodReadinessGate(ref),
+		corev1.PodResourceClaim{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_PodResourceClaim(ref),
+		corev1.PodResourceClaimStatus{}.OpenAPIModelName():                   schema_k8sio_api_core_v1_PodResourceClaimStatus(ref),
+		corev1.PodSchedulingGate{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_PodSchedulingGate(ref),
+		corev1.PodSecurityContext{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_PodSecurityContext(ref),
+		corev1.PodSignature{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_PodSignature(ref),
+		corev1.PodSpec{}.OpenAPIModelName():                                  schema_k8sio_api_core_v1_PodSpec(ref),
+		corev1.PodStatus{}.OpenAPIModelName():                                schema_k8sio_api_core_v1_PodStatus(ref),
+		corev1.PodStatusResult{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_PodStatusResult(ref),
+		corev1.PodTemplate{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_PodTemplate(ref),
+		corev1.PodTemplateList{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_PodTemplateList(ref),
+		corev1.PodTemplateSpec{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_PodTemplateSpec(ref),
+		corev1.PortStatus{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_PortStatus(ref),
+		corev1.PortworxVolumeSource{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_PortworxVolumeSource(ref),
+		corev1.PreferAvoidPodsEntry{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_PreferAvoidPodsEntry(ref),
+		corev1.PreferredSchedulingTerm{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_PreferredSchedulingTerm(ref),
+		corev1.Probe{}.OpenAPIModelName():                                    schema_k8sio_api_core_v1_Probe(ref),
+		corev1.ProbeHandler{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_ProbeHandler(ref),
+		corev1.ProjectedVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ProjectedVolumeSource(ref),
+		corev1.QuobyteVolumeSource{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_QuobyteVolumeSource(ref),
+		corev1.RBDPersistentVolumeSource{}.OpenAPIModelName():                schema_k8sio_api_core_v1_RBDPersistentVolumeSource(ref),
+		corev1.RBDVolumeSource{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_RBDVolumeSource(ref),
+		corev1.RangeAllocation{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_RangeAllocation(ref),
+		corev1.ReplicationController{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ReplicationController(ref),
+		corev1.ReplicationControllerCondition{}.OpenAPIModelName():           schema_k8sio_api_core_v1_ReplicationControllerCondition(ref),
+		corev1.ReplicationControllerList{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ReplicationControllerList(ref),
+		corev1.ReplicationControllerSpec{}.OpenAPIModelName():                schema_k8sio_api_core_v1_ReplicationControllerSpec(ref),
+		corev1.ReplicationControllerStatus{}.OpenAPIModelName():              schema_k8sio_api_core_v1_ReplicationControllerStatus(ref),
+		corev1.ResourceClaim{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ResourceClaim(ref),
+		corev1.ResourceFieldSelector{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_ResourceFieldSelector(ref),
+		corev1.ResourceHealth{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_ResourceHealth(ref),
+		corev1.ResourceQuota{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ResourceQuota(ref),
+		corev1.ResourceQuotaList{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_ResourceQuotaList(ref),
+		corev1.ResourceQuotaSpec{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_ResourceQuotaSpec(ref),
+		corev1.ResourceQuotaStatus{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ResourceQuotaStatus(ref),
+		corev1.ResourceRequirements{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_ResourceRequirements(ref),
+		corev1.ResourceStatus{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_ResourceStatus(ref),
+		corev1.SELinuxOptions{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_SELinuxOptions(ref),
+		corev1.ScaleIOPersistentVolumeSource{}.OpenAPIModelName():            schema_k8sio_api_core_v1_ScaleIOPersistentVolumeSource(ref),
+		corev1.ScaleIOVolumeSource{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ScaleIOVolumeSource(ref),
+		corev1.ScopeSelector{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ScopeSelector(ref),
+		corev1.ScopedResourceSelectorRequirement{}.OpenAPIModelName():        schema_k8sio_api_core_v1_ScopedResourceSelectorRequirement(ref),
+		corev1.SeccompProfile{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_SeccompProfile(ref),
+		corev1.Secret{}.OpenAPIModelName():                                   schema_k8sio_api_core_v1_Secret(ref),
+		corev1.SecretEnvSource{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_SecretEnvSource(ref),
+		corev1.SecretKeySelector{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_SecretKeySelector(ref),
+		corev1.SecretList{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_SecretList(ref),
+		corev1.SecretProjection{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_SecretProjection(ref),
+		corev1.SecretReference{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_SecretReference(ref),
+		corev1.SecretVolumeSource{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_SecretVolumeSource(ref),
+		corev1.SecurityContext{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_SecurityContext(ref),
+		corev1.SerializedReference{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_SerializedReference(ref),
+		corev1.Service{}.OpenAPIModelName():                                  schema_k8sio_api_core_v1_Service(ref),
+		corev1.ServiceAccount{}.OpenAPIModelName():                           schema_k8sio_api_core_v1_ServiceAccount(ref),
+		corev1.ServiceAccountList{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_ServiceAccountList(ref),
+		corev1.ServiceAccountTokenProjection{}.OpenAPIModelName():            schema_k8sio_api_core_v1_ServiceAccountTokenProjection(ref),
+		corev1.ServiceList{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_ServiceList(ref),
+		corev1.ServicePort{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_ServicePort(ref),
+		corev1.ServiceProxyOptions{}.OpenAPIModelName():                      schema_k8sio_api_core_v1_ServiceProxyOptions(ref),
+		corev1.ServiceSpec{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_ServiceSpec(ref),
+		corev1.ServiceStatus{}.OpenAPIModelName():                            schema_k8sio_api_core_v1_ServiceStatus(ref),
+		corev1.SessionAffinityConfig{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_SessionAffinityConfig(ref),
+		corev1.SleepAction{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_SleepAction(ref),
+		corev1.StorageOSPersistentVolumeSource{}.OpenAPIModelName():          schema_k8sio_api_core_v1_StorageOSPersistentVolumeSource(ref),
+		corev1.StorageOSVolumeSource{}.OpenAPIModelName():                    schema_k8sio_api_core_v1_StorageOSVolumeSource(ref),
+		corev1.Sysctl{}.OpenAPIModelName():                                   schema_k8sio_api_core_v1_Sysctl(ref),
+		corev1.TCPSocketAction{}.OpenAPIModelName():                          schema_k8sio_api_core_v1_TCPSocketAction(ref),
+		corev1.Taint{}.OpenAPIModelName():                                    schema_k8sio_api_core_v1_Taint(ref),
+		corev1.Toleration{}.OpenAPIModelName():                               schema_k8sio_api_core_v1_Toleration(ref),
+		corev1.TopologySelectorLabelRequirement{}.OpenAPIModelName():         schema_k8sio_api_core_v1_TopologySelectorLabelRequirement(ref),
+		corev1.TopologySelectorTerm{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_TopologySelectorTerm(ref),
+		corev1.TopologySpreadConstraint{}.OpenAPIModelName():                 schema_k8sio_api_core_v1_TopologySpreadConstraint(ref),
+		corev1.TypedLocalObjectReference{}.OpenAPIModelName():                schema_k8sio_api_core_v1_TypedLocalObjectReference(ref),
+		corev1.TypedObjectReference{}.OpenAPIModelName():                     schema_k8sio_api_core_v1_TypedObjectReference(ref),
+		corev1.Volume{}.OpenAPIModelName():                                   schema_k8sio_api_core_v1_Volume(ref),
+		corev1.VolumeDevice{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_VolumeDevice(ref),
+		corev1.VolumeMount{}.OpenAPIModelName():                              schema_k8sio_api_core_v1_VolumeMount(ref),
+		corev1.VolumeMountStatus{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_VolumeMountStatus(ref),
+		corev1.VolumeNodeAffinity{}.OpenAPIModelName():                       schema_k8sio_api_core_v1_VolumeNodeAffinity(ref),
+		corev1.VolumeProjection{}.OpenAPIModelName():                         schema_k8sio_api_core_v1_VolumeProjection(ref),
+		corev1.VolumeResourceRequirements{}.OpenAPIModelName():               schema_k8sio_api_core_v1_VolumeResourceRequirements(ref),
+		corev1.VolumeSource{}.OpenAPIModelName():                             schema_k8sio_api_core_v1_VolumeSource(ref),
+		corev1.VsphereVirtualDiskVolumeSource{}.OpenAPIModelName():           schema_k8sio_api_core_v1_VsphereVirtualDiskVolumeSource(ref),
+		corev1.WeightedPodAffinityTerm{}.OpenAPIModelName():                  schema_k8sio_api_core_v1_WeightedPodAffinityTerm(ref),
+		corev1.WindowsSecurityContextOptions{}.OpenAPIModelName():            schema_k8sio_api_core_v1_WindowsSecurityContextOptions(ref),
+		corev1.WorkloadReference{}.OpenAPIModelName():                        schema_k8sio_api_core_v1_WorkloadReference(ref),
+		resource.Quantity{}.OpenAPIModelName():                               schema_apimachinery_pkg_api_resource_Quantity(ref),
+		metav1.APIGroup{}.OpenAPIModelName():                                 schema_pkg_apis_meta_v1_APIGroup(ref),
+		metav1.APIGroupList{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_APIGroupList(ref),
+		metav1.APIResource{}.OpenAPIModelName():                              schema_pkg_apis_meta_v1_APIResource(ref),
+		metav1.APIResourceList{}.OpenAPIModelName():                          schema_pkg_apis_meta_v1_APIResourceList(ref),
+		metav1.APIVersions{}.OpenAPIModelName():                              schema_pkg_apis_meta_v1_APIVersions(ref),
+		metav1.ApplyOptions{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_ApplyOptions(ref),
+		metav1.Condition{}.OpenAPIModelName():                                schema_pkg_apis_meta_v1_Condition(ref),
+		metav1.CreateOptions{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_CreateOptions(ref),
+		metav1.DeleteOptions{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_DeleteOptions(ref),
+		metav1.Duration{}.OpenAPIModelName():                                 schema_pkg_apis_meta_v1_Duration(ref),
+		metav1.FieldSelectorRequirement{}.OpenAPIModelName():                 schema_pkg_apis_meta_v1_FieldSelectorRequirement(ref),
+		metav1.FieldsV1{}.OpenAPIModelName():                                 schema_pkg_apis_meta_v1_FieldsV1(ref),
+		metav1.GetOptions{}.OpenAPIModelName():                               schema_pkg_apis_meta_v1_GetOptions(ref),
+		metav1.GroupKind{}.OpenAPIModelName():                                schema_pkg_apis_meta_v1_GroupKind(ref),
+		metav1.GroupResource{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_GroupResource(ref),
+		metav1.GroupVersion{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_GroupVersion(ref),
+		metav1.GroupVersionForDiscovery{}.OpenAPIModelName():                 schema_pkg_apis_meta_v1_GroupVersionForDiscovery(ref),
+		metav1.GroupVersionKind{}.OpenAPIModelName():                         schema_pkg_apis_meta_v1_GroupVersionKind(ref),
+		metav1.GroupVersionResource{}.OpenAPIModelName():                     schema_pkg_apis_meta_v1_GroupVersionResource(ref),
+		metav1.InternalEvent{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_InternalEvent(ref),
+		metav1.LabelSelector{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_LabelSelector(ref),
+		metav1.LabelSelectorRequirement{}.OpenAPIModelName():                 schema_pkg_apis_meta_v1_LabelSelectorRequirement(ref),
+		metav1.List{}.OpenAPIModelName():                                     schema_pkg_apis_meta_v1_List(ref),
+		metav1.ListMeta{}.OpenAPIModelName():                                 schema_pkg_apis_meta_v1_ListMeta(ref),
+		metav1.ListOptions{}.OpenAPIModelName():                              schema_pkg_apis_meta_v1_ListOptions(ref),
+		metav1.ManagedFieldsEntry{}.OpenAPIModelName():                       schema_pkg_apis_meta_v1_ManagedFieldsEntry(ref),
+		metav1.MicroTime{}.OpenAPIModelName():                                schema_pkg_apis_meta_v1_MicroTime(ref),
+		metav1.ObjectMeta{}.OpenAPIModelName():                               schema_pkg_apis_meta_v1_ObjectMeta(ref),
+		metav1.OwnerReference{}.OpenAPIModelName():                           schema_pkg_apis_meta_v1_OwnerReference(ref),
+		metav1.PartialObjectMetadata{}.OpenAPIModelName():                    schema_pkg_apis_meta_v1_PartialObjectMetadata(ref),
+		metav1.PartialObjectMetadataList{}.OpenAPIModelName():                schema_pkg_apis_meta_v1_PartialObjectMetadataList(ref),
+		metav1.Patch{}.OpenAPIModelName():                                    schema_pkg_apis_meta_v1_Patch(ref),
+		metav1.PatchOptions{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_PatchOptions(ref),
+		metav1.Preconditions{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_Preconditions(ref),
+		metav1.RootPaths{}.OpenAPIModelName():                                schema_pkg_apis_meta_v1_RootPaths(ref),
+		metav1.ServerAddressByClientCIDR{}.OpenAPIModelName():                schema_pkg_apis_meta_v1_ServerAddressByClientCIDR(ref),
+		metav1.Status{}.OpenAPIModelName():                                   schema_pkg_apis_meta_v1_Status(ref),
+		metav1.StatusCause{}.OpenAPIModelName():                              schema_pkg_apis_meta_v1_StatusCause(ref),
+		metav1.StatusDetails{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_StatusDetails(ref),
+		metav1.Table{}.OpenAPIModelName():                                    schema_pkg_apis_meta_v1_Table(ref),
+		metav1.TableColumnDefinition{}.OpenAPIModelName():                    schema_pkg_apis_meta_v1_TableColumnDefinition(ref),
+		metav1.TableOptions{}.OpenAPIModelName():                             schema_pkg_apis_meta_v1_TableOptions(ref),
+		metav1.TableRow{}.OpenAPIModelName():                                 schema_pkg_apis_meta_v1_TableRow(ref),
+		metav1.TableRowCondition{}.OpenAPIModelName():                        schema_pkg_apis_meta_v1_TableRowCondition(ref),
+		metav1.Time{}.OpenAPIModelName():                                     schema_pkg_apis_meta_v1_Time(ref),
+		metav1.Timestamp{}.OpenAPIModelName():                                schema_pkg_apis_meta_v1_Timestamp(ref),
+		metav1.TypeMeta{}.OpenAPIModelName():                                 schema_pkg_apis_meta_v1_TypeMeta(ref),
+		metav1.UpdateOptions{}.OpenAPIModelName():                            schema_pkg_apis_meta_v1_UpdateOptions(ref),
+		metav1.WatchEvent{}.OpenAPIModelName():                               schema_pkg_apis_meta_v1_WatchEvent(ref),
+		runtime.RawExtension{}.OpenAPIModelName():                            schema_k8sio_apimachinery_pkg_runtime_RawExtension(ref),
+		runtime.TypeMeta{}.OpenAPIModelName():                                schema_k8sio_apimachinery_pkg_runtime_TypeMeta(ref),
+		runtime.Unknown{}.OpenAPIModelName():                                 schema_k8sio_apimachinery_pkg_runtime_Unknown(ref),
+		intstr.IntOrString{}.OpenAPIModelName():                              schema_apimachinery_pkg_util_intstr_IntOrString(ref),
+		version.Info{}.OpenAPIModelName():                                    schema_k8sio_apimachinery_pkg_version_Info(ref),
 	}
 }
 
@@ -1581,13 +1587,6 @@ func schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"sliceable": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Sliceable reports whether the accelerator can be sliced; false for a generic pool.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
 					"generalGroup": {
 						SchemaProps: spec.SchemaProps{
 							Description: "GeneralGroup is the general(CPU) group of the pool: the real CPU key when instance-type-aware-cpu-manufacturer is on, or the \"generic\" sentinel for a collapsed (unaware) generic pool; empty for an accelerated pool when awareness is off.",
@@ -1848,7 +1847,7 @@ func schema_gpustack_api_worker_v1alpha1_Accelerator(ref common.ReferenceCallbac
 					},
 					"status": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Status is the current status of the device. Field number 5 is reserved for the removed per-accelerator Features.",
+							Description: "Status is the current status of the device.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorStatus{}.OpenAPIModelName()),
 						},
@@ -1914,37 +1913,239 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 	}
 }
 
-func schema_gpustack_api_worker_v1alpha1_AcceleratorSliced(ref common.ReferenceCallback) common.OpenAPIDefinition {
+func schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSliced describes one slicing capability of a device model.",
+				Description: "AcceleratorLogicalSliced describes a card's logical (software) slicing capability.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"maxSize": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxSize is the maximum number of slices a single device can be split into.",
-							Default:     0,
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
 					"coresPercentageOvercommit": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the device compute (time-sharing / weighted sharing), so the sum across slices may exceed one whole device; false means compute is partitioned (the sum stays within one device).",
+							Description: "CoresPercentageOvercommit reports whether each slice may claim up to 100% of the device compute (time-sharing / weighted sharing); false means compute is partitioned.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
 					},
-					"memoryPercentageStep": {
+					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryPercentageStep is the granularity, in percentage points, at which the device memory can be sliced.",
+							Description: "Count is the maximum number of soft slices this card can host. A MIG-enabled (or pending-enable) card is always 0, which excludes it from the logical capacity keys.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
 				},
-				Required: []string{"maxSize"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"profiles": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Profiles is empty when the card does not support, or has not enabled, hard slicing.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".sliced\" token pool for a MIG-enabled card, so a hard-partitioned card stays served rather than dropping out. Zero when Profiles is empty.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorPhysicalSlicedProfile describes one hardware partition profile of a device model, such as an NVIDIA MIG profile (e.g. \"1g.5gb\"). The compute/memory slice counts express the request granularity on each axis, one dimension richer than a scalar step.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the profile identifier, e.g. \"1g.5gb\". It is the display name and the future resource-key suffix for a physical-slice request.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"memoryMib": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryMib is the memory of one instance of this profile, in MiB.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"computeSlices": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ComputeSlices is the number of compute slices one instance occupies — the request granularity on the compute axis (1..7 on current hardware).",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"memorySlices": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemorySlices is the number of memory slices one instance occupies — the request granularity on the memory axis (1..8 on current hardware).",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the maximum number of instances of this profile on a single card.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"name", "memoryMib", "computeSlices", "memorySlices", "count"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from the group's per-card slicing status.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"logical": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Logical is the aggregated logical (software) slicing capability.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName()),
+						},
+					},
+					"physical": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Physical is the aggregated physical (hardware) slicing capability.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName(), v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The per-card LogicalSliced is what a card-level decision reads; this group view is what external queries read to learn whether the node accepts soft-slice requests at all (Count > 0) and whether it permits compute overcommit.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"coresPercentageOvercommit": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from any soft-sliceable card; false and meaningless when no card is soft-sliceable.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the sum of per-card LogicalSliced.Count across the group.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"profiles": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Profiles is the group's physical profiles, summed by name.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorSlicedPhysicalDetailProfile{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the sum of per-card PhysicalSliced.Count across the group.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorSlicedPhysicalDetailProfile{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the sum of per-card Count for this profile name across the group.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"name"},
 			},
 		},
 	}
@@ -1965,39 +2166,26 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref common.ReferenceC
 							Format:      "",
 						},
 					},
+					"logicalSliced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LogicalSliced is the card's logical (software) slicing capability.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName()),
+						},
+					},
+					"physicalSliced": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhysicalSliced is the card's physical (hardware) slicing capability.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName()),
+						},
+					},
 				},
 				Required: []string{"unhealthy"},
 			},
 		},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_AcceleratorsFeature(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorsFeature describes the slicing features shared by every accelerator in a group.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"physicalSliced": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real spatial partition of cores and memory — when its MaxSize is non-zero.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorSliced{}.OpenAPIModelName()),
-						},
-					},
-					"logicalSliced": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an ld.preload interception library when its MaxSize is non-zero.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorSliced{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
 		Dependencies: []string{
-			v1alpha1.AcceleratorSliced{}.OpenAPIModelName()},
+			v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName(), v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName()},
 	}
 }
 
@@ -2299,11 +2487,11 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 							},
 						},
 					},
-					"acceleratorsFeature": {
+					"acceleratorSlicedDetail": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorsFeature is the slicing capability shared by every accelerator in this group.",
+							Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its accelerators' per-card slicing status.",
 							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
+							Ref:         ref(v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()),
 						},
 					},
 				},
@@ -2311,7 +2499,7 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.Accelerator{}.OpenAPIModelName(), v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()},
+			v1alpha1.Accelerator{}.OpenAPIModelName(), v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()},
 	}
 }
 
@@ -3187,56 +3375,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceType(ref common.ReferenceCallba
 	}
 }
 
-func schema_gpustack_api_worker_v1alpha1_InstanceTypeAccelerator(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeAccelerator describes the information of the accelerator.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"memory": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"computeCapability": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"feature": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the per-device maximum slice count, whether compute may be overcommitted, and the memory step. A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's AcceleratorsFeature, folded in from the node-derived ResourceFlavor.\n\nField number 4 is reserved for the removed Sliceable bool.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU describes the CPU information of the accelerator.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
-						},
-					},
-				},
-			},
-		},
-		Dependencies: []string{
-			v1alpha1.AcceleratorsFeature{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
-	}
-}
-
 func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -3326,6 +3464,56 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorCPU(ref common.R
 		},
 		Dependencies: []string{
 			v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeAcceleratorDetail(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType. It carries the pool-aggregated SlicedDetail (the observed slicing capability), so the status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"memory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"computeCapability": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"slicedDetail": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SlicedDetail is the pool's aggregated slicing capability for this accelerator group.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()),
+						},
+					},
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU describes the CPU information of the accelerator.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()},
 	}
 }
 
@@ -3441,6 +3629,133 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeCPUCache(ref common.Referen
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_InstanceTypeDetail(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypeDetail is the observed hardware descriptor of an InstanceType, computed by the reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger. It lives on the status side: because it embeds the accelerator's AcceleratorSlicedDetail (which holds a slice), it is not comparable and must never appear on the comparable, map-key InstanceTypeSpec.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"manufacturer": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Manufacturer is the name of the InstanceType manufacturer.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"product": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Product is the name of the InstanceType product.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"family": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Family is the family of the InstanceType.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"physicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"threadsPerPhysicalCore": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"logicalCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"stepping": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"clockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"maxClockSpeed": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cacheLine": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cache": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cache describes the cache information of the CPU.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()),
+						},
+					},
+					"memory": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"cores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"computeCapability": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"slicedDetail": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SlicedDetail is the pool's aggregated slicing capability for this accelerator group.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()),
+						},
+					},
+					"cpu": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPU describes the CPU information of the accelerator.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -3527,12 +3842,42 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypeSpec defines the desired spec of InstanceType.",
+				Description: "InstanceTypeSpec defines the desired spec of InstanceType. Its field order and protobuf numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed by the immutable identity and hardware inputs.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"displayName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a derived InstanceType, stamped at derivation time.",
+							MaxLength:   ptr.To[int64](64),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"description": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Description is a free-form admin annotation for the InstanceType.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"inactive": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler holds the backing ClusterQueue (blocks new admission without evicting running workloads); clearing it reactivates the queue. A queue stopped by any means is reflected back into Inactive=true.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
 					"acceleratorGroup": {
 						SchemaProps: spec.SchemaProps{
 							Description: "AcceleratorGroup is the accelerator group (the acceleratable node key) of the InstanceType, e.g. \"nvidia-a10g\". It selects the accelerator pool the type schedules onto and is required by the validating webhook when Acceleratable is true.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"generalGroup": {
+						SchemaProps: spec.SchemaProps{
+							Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g. \"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The mutating webhook defaults an empty value to \"generic\"; it participates as a scheduling discriminator only when instance-type-aware-cpu-manufacturer is enabled.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -3542,27 +3887,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Description: "Acceleratable indicates whether the InstanceType is acceleratable.",
 							Default:     false,
 							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
-					"manufacturer": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Manufacturer is the name of the InstanceType manufacturer.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"product": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Product is the name of the InstanceType product.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"family": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Family is the family of the InstanceType.",
-							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
@@ -3582,97 +3906,6 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"physicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalCores is the number of physical cores of the CPU, e.g. \"4\", \"8\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"threadsPerPhysicalCore": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ThreadsPerPhysicalCore is the number of threads per physical core of the CPU, e.g. \"2\", \"4\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"logicalCores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "LogicalCores is the number of logical cores of the CPU, e.g. \"8\", \"16\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"stepping": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Stepping is the stepping of the CPU, e.g. \"0\", \"1\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"clockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ClockSpeed is the speed in Hz of the CPU, e.g. \"2000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"maxClockSpeed": {
-						SchemaProps: spec.SchemaProps{
-							Description: "MaxClockSpeed is the maximum speed in Hz of the CPU, e.g. \"3000\"",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cacheLine": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CacheLine is the cache line size in bytes of the CPU, e.g. \"64\", \"128\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cache": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cache describes the cache information of the CPU.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName()),
-						},
-					},
-					"memory": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the VRAM size of the accelerator, e.g. \"65535Mi\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"cores": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the number of cores of the accelerator, e.g. \"128\", \"256\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"computeCapability": {
-						SchemaProps: spec.SchemaProps{
-							Description: "ComputeCapability is the compute capability of the accelerator, e.g. \"8.0\", \"7.0\".",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"feature": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Feature is the accelerator's slicing capability: the physical / logical slicing mode, the per-device maximum slice count, whether compute may be overcommitted, and the memory step. A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's AcceleratorsFeature, folded in from the node-derived ResourceFlavor.\n\nField number 4 is reserved for the removed Sliceable bool.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.AcceleratorsFeature{}.OpenAPIModelName()),
-						},
-					},
-					"cpu": {
-						SchemaProps: spec.SchemaProps{
-							Description: "CPU describes the CPU information of the accelerator.",
-							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName()),
-						},
-					},
 					"unitResources": {
 						SchemaProps: spec.SchemaProps{
 							Description: "UnitResources describes the unit resources of the InstanceType.\n\nIt is a required admin-writable input, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with the fixed default.",
@@ -3688,34 +3921,12 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 							Format:      "",
 						},
 					},
-					"generalGroup": {
-						SchemaProps: spec.SchemaProps{
-							Description: "GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g. \"amd-epyc-7763\", or the literal \"generic\" for a CPU-manufacturer-agnostic pool. The mutating webhook defaults an empty value to \"generic\"; it participates as a scheduling discriminator only when instance-type-aware-cpu-manufacturer is enabled.",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"displayName": {
-						SchemaProps: spec.SchemaProps{
-							Description: "DisplayName is a human-friendly label for the InstanceType. The mutating webhook defaults an empty value to Product.",
-							MaxLength:   ptr.To[int64](64),
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
-					"inactive": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler holds the backing ClusterQueue (blocks new admission without evicting running workloads); clearing it reactivates the queue. A queue stopped by any means is reflected back into Inactive=true.",
-							Type:        []string{"boolean"},
-							Format:      "",
-						},
-					},
 				},
 				Required: []string{"acceleratable", "os", "arch", "unitResources", "localStorage"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.AcceleratorsFeature{}.OpenAPIModelName(), v1alpha1.InstanceTypeAcceleratorCPU{}.OpenAPIModelName(), v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName(), v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
+			v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()},
 	}
 }
 
@@ -3726,6 +3937,20 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 				Description: "InstanceTypeStatus describes the observed state of the InstanceType.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
+					"detail": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Detail is the observed hardware descriptor of the InstanceType, computed by the reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeDetail{}.OpenAPIModelName()),
+						},
+					},
+					"entrance": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Entrance is the name of the namespaced LocalQueue that fronts this InstanceType's backing ClusterQueue — the value a workload sets as its \"kueue.x-k8s.io/queue-name\" label to be admitted. It is derived from the InstanceType name (see nodefeature.FormatLocalQueueName).",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 					"phase": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Phase is the summary of conditions.",
@@ -3769,19 +3994,12 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
 						},
 					},
-					"entrance": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Entrance is the name of the namespaced LocalQueue that fronts this InstanceType's backing ClusterQueue — the value a workload sets as its \"kueue.x-k8s.io/queue-name\" label to be admitted. It is derived from the InstanceType name (see nodefeature.FormatLocalQueueName).",
-							Type:        []string{"string"},
-							Format:      "",
-						},
-					},
 				},
 				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "cpu"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceTypeResource{}.OpenAPIModelName()},
+			v1alpha1.InstanceTypeDetail{}.OpenAPIModelName(), v1alpha1.InstanceTypeResource{}.OpenAPIModelName()},
 	}
 }
 

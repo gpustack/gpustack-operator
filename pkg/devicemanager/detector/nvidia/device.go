@@ -177,24 +177,6 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 				ComputeCapability: stringifyComputeCapability(ccMajor, ccMinor),
 			})
 			grpIndex = len(grpList) - 1
-
-			// Soft (logical) slicing via HAMi-core ld.preload; the per-device slice count is
-			// capped at the max CUDA user processes a GPU serves (128, Volta+).
-			grpList[grpIndex].AcceleratorsFeature.LogicalSliced = device.AcceleratorSliced{
-				MaxSize:                   128,
-				CoresPercentageOvercommit: true,
-				MemoryPercentageStep:      1,
-			}
-			// MIG (physical) hard partitioning is seeded as a placeholder when the card has
-			// MIG mode enabled; the real max size / memory step come from the MIG profile in
-			// a follow-up.
-			migModeCurrent, migModePending, _ := dev.GetMigMode()
-			if migModeCurrent == nvml.DEVICE_MIG_ENABLE || migModePending == nvml.DEVICE_MIG_ENABLE {
-				grpList[grpIndex].AcceleratorsFeature.PhysicalSliced = device.AcceleratorSliced{
-					MaxSize:              7,  // TODO gain max size from MIG profile later
-					MemoryPercentageStep: 25, // TODO complete step from MIG profile later
-				}
-			}
 		}
 
 		var physicalIndexes []uint32
@@ -212,6 +194,29 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+
+			// Logical (soft) and physical (MIG) slicing are mutually exclusive per card, keyed
+			// on the current MIG mode: a card that is currently MIG-enabled is hard-partitioned
+			// and reports only its physical MIG profiles. Every other card — MIG off, MIG
+			// unsupported (GetMigMode returns not-supported on non-MIG cards), or the mode
+			// unreadable — reports the group's logical soft-slice capability. A pending-mode
+			// transition is not partitioned yet and is re-detected after the administrator's
+			// reset + DeviceManager restart. This runs per card, fixing the old placeholder's
+			// first-card-only-seed defect.
+			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == nvml.DEVICE_MIG_ENABLE {
+				profiles := detectMigProfiles(dev, memory)
+				status.PhysicalSliced = device.AcceleratorPhysicalSliced{
+					Profiles: profiles,
+					Count:    maxProfileCount(profiles),
+				}
+			} else {
+				// Soft (logical) slicing via HAMi-core ld.preload; the per-card slice count is
+				// capped at the max CUDA user processes a GPU serves (128, Volta+).
+				status.LogicalSliced = device.AcceleratorLogicalSliced{
+					Count:                     128,
+					CoresPercentageOvercommit: true,
+				}
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -226,6 +231,8 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		)
 		index++
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }

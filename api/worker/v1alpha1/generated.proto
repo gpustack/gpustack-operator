@@ -34,8 +34,7 @@ message Accelerator {
   optional DeviceTopology topology = 4;
 
   // Status is the current status of the device.
-  // Field number 5 is reserved for the removed per-accelerator Features.
-  optional AcceleratorStatus status = 6;
+  optional AcceleratorStatus status = 5;
 }
 
 // AcceleratorAllocation describes the allocated accelerator device.
@@ -56,37 +55,103 @@ message AcceleratorAllocation {
   optional int32 remaining = 5;
 }
 
-// AcceleratorSliced describes one slicing capability of a device model.
-message AcceleratorSliced {
-  // MaxSize is the maximum number of slices a single device can be split into.
-  optional int32 maxSize = 1;
-
+// AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
+message AcceleratorLogicalSliced {
   // CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
-  // device compute (time-sharing / weighted sharing), so the sum across slices may
-  // exceed one whole device; false means compute is partitioned (the sum stays within
-  // one device).
-  optional bool coresPercentageOvercommit = 2;
+  // device compute (time-sharing / weighted sharing); false means compute is partitioned.
+  optional bool coresPercentageOvercommit = 1;
 
-  // MemoryPercentageStep is the granularity, in percentage points, at which the device
-  // memory can be sliced.
-  optional int32 memoryPercentageStep = 3;
+  // Count is the maximum number of soft slices this card can host. A MIG-enabled (or
+  // pending-enable) card is always 0, which excludes it from the logical capacity keys.
+  optional int32 count = 2;
+}
+
+// AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
+message AcceleratorPhysicalSliced {
+  // Profiles is empty when the card does not support, or has not enabled, hard slicing.
+  repeated AcceleratorPhysicalSlicedProfile profiles = 1;
+
+  // Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
+  // on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".sliced" token pool for a
+  // MIG-enabled card, so a hard-partitioned card stays served rather than dropping out.
+  // Zero when Profiles is empty.
+  optional int32 count = 2;
+}
+
+// AcceleratorPhysicalSlicedProfile describes one hardware partition profile of a device
+// model, such as an NVIDIA MIG profile (e.g. "1g.5gb"). The compute/memory slice counts
+// express the request granularity on each axis, one dimension richer than a scalar step.
+message AcceleratorPhysicalSlicedProfile {
+  // Name is the profile identifier, e.g. "1g.5gb". It is the display name and the
+  // future resource-key suffix for a physical-slice request.
+  optional string name = 1;
+
+  // MemoryMib is the memory of one instance of this profile, in MiB.
+  optional int64 memoryMib = 2;
+
+  // ComputeSlices is the number of compute slices one instance occupies — the request
+  // granularity on the compute axis (1..7 on current hardware).
+  optional int32 computeSlices = 3;
+
+  // MemorySlices is the number of memory slices one instance occupies — the request
+  // granularity on the memory axis (1..8 on current hardware).
+  optional int32 memorySlices = 4;
+
+  // Count is the maximum number of instances of this profile on a single card.
+  optional int32 count = 5;
+}
+
+// AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
+// the group's per-card slicing status.
+message AcceleratorSlicedDetail {
+  // Logical is the aggregated logical (software) slicing capability.
+  optional AcceleratorSlicedLogicalDetail logical = 1;
+
+  // Physical is the aggregated physical (hardware) slicing capability.
+  optional AcceleratorSlicedPhysicalDetail physical = 2;
+}
+
+// AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
+// per-card LogicalSliced is what a card-level decision reads; this group view is what
+// external queries read to learn whether the node accepts soft-slice requests at all
+// (Count > 0) and whether it permits compute overcommit.
+message AcceleratorSlicedLogicalDetail {
+  // CoresPercentageOvercommit is a per-model property (uniform within a group), taken
+  // from any soft-sliceable card; false and meaningless when no card is soft-sliceable.
+  optional bool coresPercentageOvercommit = 1;
+
+  // Count is the sum of per-card LogicalSliced.Count across the group.
+  optional int32 count = 2;
+}
+
+// AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.
+message AcceleratorSlicedPhysicalDetail {
+  // Profiles is the group's physical profiles, summed by name.
+  repeated AcceleratorSlicedPhysicalDetailProfile profiles = 1;
+
+  // Count is the sum of per-card PhysicalSliced.Count across the group.
+  optional int32 count = 2;
+}
+
+// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.
+message AcceleratorSlicedPhysicalDetailProfile {
+  // Name is the profile identifier, e.g. "1g.5gb".
+  optional string name = 1;
+
+  // Count is the sum of per-card Count for this profile name across the group.
+  optional int32 count = 2;
 }
 
 // AcceleratorStatus describes the observed state of the accelerator device.
 message AcceleratorStatus {
   // Unhealthy indicates whether the device is healthy or not.
   optional bool unhealthy = 1;
-}
 
-// AcceleratorsFeature describes the slicing features shared by every accelerator in a group.
-message AcceleratorsFeature {
-  // PhysicalSliced enables physical (hardware) slicing such as NVIDIA MIG — a real
-  // spatial partition of cores and memory — when its MaxSize is non-zero.
-  optional AcceleratorSliced physicalSliced = 1;
+  // LogicalSliced is the card's logical (software) slicing capability.
+  optional AcceleratorLogicalSliced logicalSliced = 2;
 
-  // LogicalSliced enables logical (software) slicing via a vendor vGPU scheme or an
-  // ld.preload interception library when its MaxSize is non-zero.
-  optional AcceleratorSliced logicalSliced = 2;
+  // PhysicalSliced is the card's physical (hardware) slicing capability.
+  optional AcceleratorPhysicalSliced physicalSliced = 3;
 }
 
 // DeviceEthernet describes the Ethernet information of the device.
@@ -186,8 +251,9 @@ message DevicesGroup {
   // +listMapKey=id
   repeated Accelerator accelerators = 10;
 
-  // AcceleratorsFeature is the slicing capability shared by every accelerator in this group.
-  optional AcceleratorsFeature acceleratorsFeature = 11;
+  // AcceleratorSlicedDetail is the group's slicing capability, aggregated from its
+  // accelerators' per-card slicing status.
+  optional AcceleratorSlicedDetail acceleratorSlicedDetail = 11;
 }
 
 // DevicesList holds the list of Devices.
@@ -460,29 +526,6 @@ message InstanceType {
   optional InstanceTypeStatus status = 3;
 }
 
-// InstanceTypeAccelerator describes the information of the accelerator.
-message InstanceTypeAccelerator {
-  // Memory is the VRAM size of the accelerator, e.g. "65535Mi".
-  optional string memory = 1;
-
-  // Cores is the number of cores of the accelerator, e.g. "128", "256".
-  optional string cores = 2;
-
-  // ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
-  optional string computeCapability = 3;
-
-  // Feature is the accelerator's slicing capability: the physical / logical slicing mode, the
-  // per-device maximum slice count, whether compute may be overcommitted, and the memory step.
-  // A zero MaxSlices means the accelerator cannot be sliced. It mirrors the device group's
-  // AcceleratorsFeature, folded in from the node-derived ResourceFlavor.
-  //
-  // Field number 4 is reserved for the removed Sliceable bool.
-  optional AcceleratorsFeature feature = 6;
-
-  // CPU describes the CPU information of the accelerator.
-  optional InstanceTypeAcceleratorCPU cpu = 5;
-}
-
 // InstanceTypeAcceleratorCPU describes the CPU information of the accelerator.
 message InstanceTypeAcceleratorCPU {
   // Manufacturer is the name of the CPU manufacturer, e.g. "amd", "intel".
@@ -496,6 +539,26 @@ message InstanceTypeAcceleratorCPU {
 
   // Detail inlines the CPU details of the CPU.
   optional InstanceTypeCPU cpu = 4;
+}
+
+// InstanceTypeAcceleratorDetail describes the observed accelerator information of an InstanceType.
+// It carries the pool-aggregated SlicedDetail (the observed slicing capability), so the
+// status-side detail can hold the slice-bearing AcceleratorSlicedDetail the comparable Spec must not.
+message InstanceTypeAcceleratorDetail {
+  // Memory is the VRAM size of the accelerator, e.g. "65535Mi".
+  optional string memory = 1;
+
+  // Cores is the number of cores of the accelerator, e.g. "128", "256".
+  optional string cores = 2;
+
+  // ComputeCapability is the compute capability of the accelerator, e.g. "8.0", "7.0".
+  optional string computeCapability = 3;
+
+  // SlicedDetail is the pool's aggregated slicing capability for this accelerator group.
+  optional AcceleratorSlicedDetail slicedDetail = 4;
+
+  // CPU describes the CPU information of the accelerator.
+  optional InstanceTypeAcceleratorCPU cpu = 5;
 }
 
 // InstanceTypeCPU describes the information of the CPU.
@@ -540,6 +603,27 @@ message InstanceTypeCPUCache {
   optional string l3 = 4;
 }
 
+// InstanceTypeDetail is the observed hardware descriptor of an InstanceType, computed by the
+// reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger. It lives on
+// the status side: because it embeds the accelerator's AcceleratorSlicedDetail (which holds a
+// slice), it is not comparable and must never appear on the comparable, map-key InstanceTypeSpec.
+message InstanceTypeDetail {
+  // Manufacturer is the name of the InstanceType manufacturer.
+  optional string manufacturer = 1;
+
+  // Product is the name of the InstanceType product.
+  optional string product = 2;
+
+  // Family is the family of the InstanceType.
+  optional string family = 3;
+
+  // CPU describes the CPU information of the InstanceType.
+  optional InstanceTypeCPU cpu = 4;
+
+  // Accelerator describes the accelerator information of the InstanceType.
+  optional InstanceTypeAcceleratorDetail accelerator = 5;
+}
+
 // InstanceTypeList holds the list of InstanceType.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -563,102 +647,98 @@ message InstanceTypeResource {
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity capacity = 3;
 }
 
-// InstanceTypeSpec defines the desired spec of InstanceType.
+// InstanceTypeSpec defines the desired spec of InstanceType. Its field order and protobuf
+// numbering group the admin-editable fields (DisplayName, Description, Inactive) first, followed
+// by the immutable identity and hardware inputs.
 message InstanceTypeSpec {
+  // DisplayName is a human-friendly label for the InstanceType. It is admin-editable and, for a
+  // derived InstanceType, stamped at derivation time.
+  //
+  // +k8s:validation:maxLength=64
+  optional string displayName = 1;
+
+  // Description is a free-form admin annotation for the InstanceType.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string description = 2;
+
+  // Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
+  // holds the backing ClusterQueue (blocks new admission without evicting running
+  // workloads); clearing it reactivates the queue. A queue stopped by any means is
+  // reflected back into Inactive=true.
+  optional bool inactive = 3;
+
   // AcceleratorGroup is the accelerator group (the acceleratable node key) of the
   // InstanceType, e.g. "nvidia-a10g". It selects the accelerator pool the type schedules
   // onto and is required by the validating webhook when Acceleratable is true.
-  optional string acceleratorGroup = 1;
+  optional string acceleratorGroup = 4;
+
+  // GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
+  // "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
+  // mutating webhook defaults an empty value to "generic"; it participates as a scheduling
+  // discriminator only when instance-type-aware-cpu-manufacturer is enabled.
+  optional string generalGroup = 5;
 
   // Acceleratable indicates whether the InstanceType is acceleratable.
-  optional bool acceleratable = 2;
-
-  // Manufacturer is the name of the InstanceType manufacturer.
-  optional string manufacturer = 3;
-
-  // Product is the name of the InstanceType product.
-  optional string product = 4;
-
-  // Family is the family of the InstanceType.
-  optional string family = 5;
+  optional bool acceleratable = 6;
 
   // OS is the operating system of the InstanceType, e.g. "linux", "windows".
   //
   // It is a required admin-writable input, enforced by the validating webhook.
-  optional string os = 6;
+  optional string os = 7;
 
   // Arch is the architecture of the InstanceType, e.g. "amd64", "arm64".
   //
   // It is a required admin-writable input, enforced by the validating webhook.
-  optional string arch = 7;
-
-  // CPU describes the CPU information of the InstanceType.
-  optional InstanceTypeCPU cpu = 8;
-
-  // Accelerator describes the accelerator information of the InstanceType.
-  optional InstanceTypeAccelerator accelerator = 9;
+  optional string arch = 8;
 
   // UnitResources describes the unit resources of the InstanceType.
   //
   // It is a required admin-writable input, enforced by the validating webhook, and is
   // immutable after creation; a derived InstanceType is stamped with the fixed default.
-  optional InstanceTypeUnitResources unitResources = 10;
+  optional InstanceTypeUnitResources unitResources = 9;
 
   // LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
   //
   // It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
   // by the validating webhook, and is immutable after creation; a derived InstanceType is
   // stamped with the fixed default.
-  optional string localStorage = 11;
-
-  // GeneralGroup is the general(CPU) group (the general node key) of the InstanceType, e.g.
-  // "amd-epyc-7763", or the literal "generic" for a CPU-manufacturer-agnostic pool. The
-  // mutating webhook defaults an empty value to "generic"; it participates as a scheduling
-  // discriminator only when instance-type-aware-cpu-manufacturer is enabled.
-  optional string generalGroup = 12;
-
-  // DisplayName is a human-friendly label for the InstanceType. The mutating webhook
-  // defaults an empty value to Product.
-  //
-  // +k8s:validation:maxLength=64
-  optional string displayName = 13;
-
-  // Inactive takes the InstanceType out of service. When true, the InstanceTypeReconciler
-  // holds the backing ClusterQueue (blocks new admission without evicting running
-  // workloads); clearing it reactivates the queue. A queue stopped by any means is
-  // reflected back into Inactive=true.
-  optional bool inactive = 14;
+  optional string localStorage = 10;
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
 message InstanceTypeStatus {
-  // Phase is the summary of conditions.
-  optional string phase = 1;
-
-  // PhaseMessage is the message of the phase.
-  optional string phaseMessage = 2;
-
-  // Accelerator is the allocatable-as-exclusive view: whole cards that are
-  // entirely free, e.g. "1", "4".
-  optional InstanceTypeResource accelerator = 3;
-
-  // AcceleratorShared is the shareable view: per-card ownership shares (up to
-  // SharedResourceMaxSize owners per card) summed over free and already-shared
-  // cards.
-  optional InstanceTypeResource acceleratorShared = 4;
-
-  // AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
-  // hundred per card) summed over free and already-sliced cards.
-  optional InstanceTypeResource acceleratorSliced = 5;
-
-  // CPU is the CPU resource of the InstanceType, e.g. "4", "8".
-  optional InstanceTypeResource cpu = 6;
+  // Detail is the observed hardware descriptor of the InstanceType, computed by the
+  // reconciler from the matched ResourceFlavor's notes and the pool's Devices ledger.
+  optional InstanceTypeDetail detail = 1;
 
   // Entrance is the name of the namespaced LocalQueue that fronts this
   // InstanceType's backing ClusterQueue — the value a workload sets as its
   // "kueue.x-k8s.io/queue-name" label to be admitted. It is derived from the
   // InstanceType name (see nodefeature.FormatLocalQueueName).
-  optional string entrance = 7;
+  optional string entrance = 2;
+
+  // Phase is the summary of conditions.
+  optional string phase = 3;
+
+  // PhaseMessage is the message of the phase.
+  optional string phaseMessage = 4;
+
+  // Accelerator is the allocatable-as-exclusive view: whole cards that are
+  // entirely free, e.g. "1", "4".
+  optional InstanceTypeResource accelerator = 5;
+
+  // AcceleratorShared is the shareable view: per-card ownership shares (up to
+  // SharedResourceMaxSize owners per card) summed over free and already-shared
+  // cards.
+  optional InstanceTypeResource acceleratorShared = 6;
+
+  // AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
+  // hundred per card) summed over free and already-sliced cards.
+  optional InstanceTypeResource acceleratorSliced = 7;
+
+  // CPU is the CPU resource of the InstanceType, e.g. "4", "8".
+  optional InstanceTypeResource cpu = 8;
 }
 
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.

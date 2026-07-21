@@ -16,7 +16,6 @@ type AcceleratorApplyConfiguration struct {
 	// Topology is the topology information of the device.
 	Topology *DeviceTopologyApplyConfiguration `json:"topology,omitempty"`
 	// Status is the current status of the device.
-	// Field number 5 is reserved for the removed per-accelerator Features.
 	Status *AcceleratorStatusApplyConfiguration `json:"status,omitempty"`
 }
 

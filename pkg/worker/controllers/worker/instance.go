@@ -279,6 +279,15 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Create the Pod if not exists.
 	if pod == nil {
+		// An accelerated type sizes its Pod (accelerator resource names, RuntimeClass, and the
+		// sliced-vs-whole-card shape) from Status.Detail. Creating a Pod before the reconciler has
+		// computed Detail would stamp a missing RuntimeClass and bogus resource names, so requeue
+		// until it is ready — the periodic requeue re-checks as the InstanceType status populates.
+		if instType.Spec.Acceleratable && !instType.Status.Detail.AcceleratorReady() {
+			logger.V(2).Info("instance type accelerator detail not ready; requeue in 2s")
+			return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		}
+
 		// If the instance is marked as stopping/stopped/ready, mark it as starting first
 		// to avoid racing with other controllers or users to update the instance status.
 		if inst.Status.Phase == InstancePhaseStopping ||
@@ -634,7 +643,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	// Ensure runtime class.
 	if instType.Spec.Acceleratable {
-		rn := nodefeature.GetAcceleratableRuntimeName(instType.Spec.Manufacturer)
+		rn := nodefeature.GetAcceleratableRuntimeName(instType.Status.Detail.Manufacturer)
 		if rn != "" {
 			rc := new(node.RuntimeClass)
 			err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: rn}, rc,
@@ -944,14 +953,14 @@ func getResourceRequirements(
 		cardQ := *inst.Spec.Resources.Accelerator
 		switch {
 		case withAccelerator:
-			if instType.Spec.IsSliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
+			if instType.Status.Detail.IsSliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
 				// A sliced request emits the bare card count C (.sliced, which Kueue
 				// folds into credits via multiplyBy) plus the per-card memory/compute
 				// percentages. The Pod webhook folds .sliced.memory-percentage into the
 				// credit-counting .sliced.units before the Pod is persisted.
-				slicedResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeSliced)
-				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(instType.Spec.Manufacturer)
-				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(instType.Spec.Manufacturer)
+				slicedResName := nodefeature.GetAcceleratableResourceName(instType.Status.Detail.Manufacturer, workercore.DeviceAllocationModeSliced)
+				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(instType.Status.Detail.Manufacturer)
+				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(instType.Status.Detail.Manufacturer)
 				memQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
 				coresQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
 				rr.Limits[slicedResName] = cardQ
@@ -963,7 +972,7 @@ func getResourceRequirements(
 			} else {
 				// A non-sliced type, or a 0% request on a sliced type, is an exclusive
 				// whole-card request.
-				resName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeExclusive)
+				resName := nodefeature.GetAcceleratableResourceName(instType.Status.Detail.Manufacturer, workercore.DeviceAllocationModeExclusive)
 				rr.Limits[resName] = cardQ
 				rr.Requests[resName] = cardQ
 			}
@@ -972,7 +981,7 @@ func getResourceRequirements(
 			// card count (never the slice percentages — it grants device access, not a
 			// slice). The device-plugin resolves it to main's already-allocated
 			// device(s) on the node, giving the sidecar a narrow device-cgroup grant.
-			visResName := nodefeature.GetAcceleratableResourceName(instType.Spec.Manufacturer, workercore.DeviceAllocationModeVisibility)
+			visResName := nodefeature.GetAcceleratableResourceName(instType.Status.Detail.Manufacturer, workercore.DeviceAllocationModeVisibility)
 			rr.Limits[visResName] = cardQ
 			rr.Requests[visResName] = cardQ
 		}
