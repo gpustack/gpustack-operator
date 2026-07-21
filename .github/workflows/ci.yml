@@ -234,21 +234,21 @@ jobs:
           #
           # Stories:
           # CACHE_FROM_REF
-          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
-          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
-          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
-          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
-          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
+          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, if not found, fallback to ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
           # CACHE_TO_REF
           #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
           #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
+          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
           #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-dev
+          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
           #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
           #
-          DEFAULT_BRANCH="dev"
+          DEFAULT_BRANCH="main"
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             REF="${GITHUB_REF#refs/tags/}"
             IFS="." read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${REF}"
