@@ -44,8 +44,8 @@ by **zero** of the nine vendor subpackages, and `MemoryPercentageStep` is writte
 
 ### Goals
 - **Truthful per-card capability.** Every card records its own `LogicalSliced` (soft-slice count + overcommit
-  flag) and `PhysicalSliced` (real MIG profile inventory). A MIG-enabled (or pending-enable) card has
-  `LogicalSliced.Count == 0` and non-empty `Profiles`; a non-MIG card has the inverse. "A MIG card does not
+  flag) and `PhysicalSliced` (real MIG profile inventory). A currently MIG-enabled card has
+  `LogicalSliced.Count == 0` and non-empty `Profiles`; every other card has the inverse. "A MIG card does not
   participate in soft slicing" becomes a property of the data, not a runtime policy check.
 - **Real NVML profile enumeration on NVIDIA.** Replace the placeholder seed with per-card GI-profile
   enumeration, filtered to C==G profiles and excluding `+me`/`+gfx` variants (the same rule NVIDIA's
@@ -282,11 +282,14 @@ Today all six detectors write the group-level `LogicalSliced` once, in the "new 
 
 1. Fill each card's `Status.LogicalSliced` (same values they use today: e.g. NVIDIA
    `{Count: 128, CoresPercentageOvercommit: true}`) — per card, not per group-creation.
-2. NVIDIA only: for a card whose MIG mode is enabled **or pending enable** (`dev.GetMigMode()`), set
-   `LogicalSliced.Count = 0` and enumerate `PhysicalSliced.Profiles` via NVML
-   (`GetGpuInstanceProfileInfo` probing), filtered to C==G profiles and excluding `+me`/`+gfx` GI-profile-ID
-   variants; fill `Name`, `MemoryMib`, `ComputeSlices`, `MemorySlices`, `Count` from the profile info. A
-   non-MIG card keeps `Profiles` empty. This replaces the placeholder seed at
+2. NVIDIA only: logical and physical are mutually exclusive per card, keyed on the **current** MIG mode
+   (`dev.GetMigMode()` `migCurrent == DEVICE_MIG_ENABLE`). A currently MIG-enabled card sets **only**
+   `PhysicalSliced` — profiles enumerated via NVML (`GetGpuInstanceProfileInfo` probing), filtered to the plain
+   profiles (any `+…` variant dropped), filling `Name`/`MemoryMib`/`ComputeSlices`/`MemorySlices`/`Count` plus
+   the `Count` ceiling — and leaves `LogicalSliced` empty. Every other card — MIG off, MIG **unsupported**
+   (`GetMigMode` returns not-supported on non-MIG cards such as V100/T4/RTX, which **must** stay soft-sliceable),
+   or the mode unreadable — sets **only** `LogicalSliced`. A pending-mode transition is not partitioned yet and
+   is re-detected after the administrator's reset + DeviceManager restart. This replaces the placeholder seed at
    `nvidia/device.go:188-197` and fixes its first-card-only-seed defect (per-card logic runs for every card).
 3. As the shared final step of `DetectAccelerator`, aggregate the group's `AcceleratorSlicedDetail` from its
    cards: `Logical.Count = Σ`; `Logical.CoresPercentageOvercommit` = the flag from any soft-sliceable card
@@ -297,8 +300,9 @@ Today all six detectors write the group-level `LogicalSliced` once, in the "new 
 - Table-driven detector tests: a mixed group (2 non-MIG + 1 MIG-enabled NVIDIA card) yields per-card records
   with the structural mutual exclusion (`Count==0 ⟺ Profiles non-empty`) and a group detail of
   `Logical.Count == 256`, `Physical.Profiles` equal to one card's profile table.
-- The pending-enable state (mode flip done, reset not yet performed) is treated as MIG-enabled — the card
-  already must not host new soft slices.
+- Keying on the current mode: a pending-enable card (`current==DISABLE`) is still soft-sliceable (logical); a
+  pending-disable card (`current==ENABLE`) still reports physical; a `GetMigMode` error/not-supported card
+  reports logical (a non-MIG-capable card such as V100/T4/RTX must never lose its soft-slice capability).
 
 #### F3 — Remove `--slicing-policy`
 
@@ -686,8 +690,8 @@ API types follow the existing `devices.go` conventions — exported fields with 
 json/yaml/protobuf tags, `// nolint: lll` where a tag line runs long:
 
 ```go
-// Count is the maximum number of soft slices this card can host. A MIG-enabled
-// (or pending-enable) card is always 0, which excludes it from the three logical
+// Count is the maximum number of soft slices this card can host. A currently
+// MIG-enabled card is always 0, which excludes it from the three logical
 // capacity keys; its ".sliced" token pool is sized from PhysicalSliced.Count instead.
 Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 ```
@@ -794,20 +798,22 @@ consumes it yet; full build + test green.*
     - Acceptance: `make generate` clean; `go build ./...` green (new types unused). Verify: regenerated
       deepcopy/protobuf/applyconfig compile.
 
-[ ] **T4: all six detectors report per-card + aggregate the group detail (F2), NVIDIA wires T1.**
+[x] **T4: all six detectors report per-card + aggregate the group detail (F2), NVIDIA wires T1.**
     - Each of `nvidia/hygon/metax/cambricon/mthreads/ascend/device.go`: set each card's
       `Status.LogicalSliced` (same values as today's group `LogicalSliced`); as a shared final step of
       `DetectAccelerator`, aggregate the group `AcceleratorSlicedDetail` (Logical.Count = Σ, overcommit from any
       soft-sliceable card, Physical.Profiles summed by name, Physical.Count = Σ per-card ceiling). **Keep writing
       the old `AcceleratorsFeature`** so existing consumers still work.
-    - NVIDIA additionally: for a card with MIG mode enabled or pending (`GetMigMode()` current==ENABLE ||
-      pending==ENABLE), set `LogicalSliced.Count = 0` and fill `PhysicalSliced` (`Profiles` via the T1
-      enumeration over `0..GPU_INSTANCE_PROFILE_COUNT`, `Count` = max profile Count); replaces the placeholder at
-      `device.go:188-197` and its first-card-only-seed defect (per-card loop now). **Fail-safe on
-      `GetMigMode` error** (today the Return is swallowed at `device.go:191`): log it and do **not** default a
-      possibly-MIG card to `LogicalSliced.Count = 128` — exclude it from the soft pool (empty `Profiles`,
-      `Count = 0`) so a driver hiccup can't re-advertise 128 soft tokens on hard-partitioned hardware
-      (cross-check R5).
+    - NVIDIA additionally: key on the **current** MIG mode (`GetMigMode()` `migCurrent == DEVICE_MIG_ENABLE`).
+      A currently MIG-enabled card sets **only** `PhysicalSliced` (`Profiles` via the T1 enumeration over
+      `0..GPU_INSTANCE_PROFILE_COUNT`, `Count` = max profile Count) and no `LogicalSliced`; replaces the
+      placeholder at `device.go:188-197` and its first-card-only-seed defect (per-card loop now). **Every other
+      card sets only `LogicalSliced`** — MIG off, MIG unsupported, or the mode unreadable. Keying on `migCurrent`
+      (not pending, and NOT an error fail-safe) is deliberate (supersedes the earlier R5 "exclude on error"):
+      `GetMigMode` returns not-supported on every non-MIG NVIDIA card (V100/T4/RTX), so treating error/unsupported
+      as "exclude from the soft pool" would wrongly strip soft slicing from all of them — the common case. A
+      pending-mode transition is not partitioned yet and is re-detected after the admin's reset + DeviceManager
+      restart.
     - Acceptance: per-vendor table tests — a card carries `LogicalSliced`; a NVIDIA mixed group (2 non-MIG + 1
       MIG-enabled) yields the mutual exclusion (`Count==0 ⟺ Profiles non-empty`), group `Logical.Count == 256`,
       `Physical.Profiles` = one card's table, `Physical.Count == 7`. Verify: `go test ./pkg/devicemanager/...`.
@@ -1017,7 +1023,7 @@ code solid enough prior to committing the changes necessary to implement this en
 Per-package coverage targets (percentages are targets to meet or exceed; concrete test names/coverage recorded
 after the implementation PR merges):
 - `binding/nvml`: `2026-07-20` - device-level profile accessor smoke (build-level; real call is hardware-only) - target `None` new % (thin cgo wrapper)
-- `pkg/devicemanager/detector/nvidia`: `2026-07-20` - target `80%` (pure profile derivation/filter: A100 set → six-row table + H100 set proving `+me`/`+gfx` dropped with no name-collision; V1-without-Name geometry names; `MemorySlices` rounding; MIG vs non-MIG per-card; `GetMigMode`-error fail-safe; group aggregation)
+- `pkg/devicemanager/detector/nvidia`: `2026-07-20` - target `80%` (pure profile derivation/filter: A100 set → six-row table + H100 set proving `+me`/`+gfx` dropped with no name-collision; V1-without-Name geometry names; `MemorySlices` rounding; MIG vs non-MIG per-card keyed on current mode; group aggregation)
 - `pkg/devicemanager/detector/{hygon,metax,cambricon,mthreads,ascend}`: `2026-07-20` - target `70%` (per-card `LogicalSliced` + group aggregation)
 - `pkg/devicemanager/allocator`: `2026-07-20` - target: keep current % after `--slicing-policy` removal (no behavior change)
 - `pkg/deviceplugin`: `2026-07-20` - target `75%` (`getListAndWatchResponse` per-card token count: non-MIG=`LogicalSliced.Count`, MIG=`PhysicalSliced.Count`, other modes unaffected)
@@ -1068,8 +1074,9 @@ Fake-client reconciler/webhook tests (the project's convention — no envtest cl
 - **CPU-only Detail source + readiness (R2):** an aware CPU pool gains CPU `Status.Detail` from the `cpuDetail`
   note and reaches ready; a generic collapsed pool activates its queue with a minimal Detail +
   `DisplayName = "CPU-only"` (not deadlocked behind the readiness gate).
-- **MIG-mode matrix (R5):** pending-enable `(0,1)` → MIG; pending-disable `(1,0)` → still MIG; `GetMigMode`
-  error → card excluded from the soft pool (not defaulted to 128 tokens), logged.
+- **MIG-mode matrix (current-keyed):** `current==ENABLE` (any pending) → physical only; `current==DISABLE`
+  incl. pending-enable `(0,1)` → logical; `GetMigMode` not-supported/error → logical (a non-MIG-capable card
+  keeps its soft slicing — this is the common V100/T4/RTX case, superseding the earlier R5 exclude-on-error).
 - **Migration round-trip:** a stored InstanceType carrying the removed spec fields round-trips through a
   `/status` update (Detail backfilled, spec fields still present) and a subsequent main-resource update (fields
   pruned); reads work throughout because readers use `Status.Detail`.

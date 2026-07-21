@@ -193,6 +193,10 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			var status device.AcceleratorStatus
 			{
 				status.Unhealthy = memoryUnhealthy
+				status.LogicalSliced = device.AcceleratorLogicalSliced{
+					Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
+					CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+				}
 			}
 
 			grpList[grpIndex].Accelerators = append(
@@ -208,6 +212,8 @@ func (in *mthreads) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			index++
 		}()
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }

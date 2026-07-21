@@ -207,6 +207,10 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+			status.LogicalSliced = device.AcceleratorLogicalSliced{
+				Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
+				CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -221,6 +225,8 @@ func (in *hygon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		)
 		index++
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }

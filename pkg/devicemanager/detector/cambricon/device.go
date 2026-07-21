@@ -175,6 +175,10 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+			status.LogicalSliced = device.AcceleratorLogicalSliced{
+				Count:                     grpList[grpIndex].AcceleratorsFeature.LogicalSliced.MaxSize,
+				CoresPercentageOvercommit: grpList[grpIndex].AcceleratorsFeature.LogicalSliced.CoresPercentageOvercommit,
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -189,6 +193,8 @@ func (in *cambricon) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLi
 		)
 		index++
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }

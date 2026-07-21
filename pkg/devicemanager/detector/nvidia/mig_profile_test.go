@@ -93,3 +93,16 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		})
 	}
 }
+
+func TestMaxProfileCount(t *testing.T) {
+	// The A100-40GB ceiling is 7 (from 7x 1g.5gb).
+	a100 := []device.AcceleratorPhysicalSlicedProfile{
+		{Name: "1g.5gb", Count: 7}, {Name: "2g.10gb", Count: 3}, {Name: "7g.40gb", Count: 1},
+	}
+	if got := maxProfileCount(a100); got != 7 {
+		t.Errorf("maxProfileCount(a100) = %d, want 7", got)
+	}
+	if got := maxProfileCount(nil); got != 0 {
+		t.Errorf("maxProfileCount(nil) = %d, want 0", got)
+	}
+}

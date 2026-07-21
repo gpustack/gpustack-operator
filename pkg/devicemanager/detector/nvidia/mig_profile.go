@@ -71,3 +71,30 @@ func isMediaOrGraphicsVariant(info nvml.GpuInstanceProfileInfo_v3, name string) 
 	}
 	return info.Id >= nvml.GPU_INSTANCE_PROFILE_1_SLICE_GFX
 }
+
+// detectMigProfiles probes every GPU instance profile id on the device and returns the card's
+// physical-slice profile inventory (filtered and derived by deriveSlicedProfiles). Unsupported
+// ids surface as non-success returns and are skipped.
+func detectMigProfiles(dev nvml.Device, cardMemoryMiB uint64) []device.AcceleratorPhysicalSlicedProfile {
+	var infos []nvml.GpuInstanceProfileInfo_v3
+	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
+		info, ret := dev.GetGpuInstanceProfileInfo(id)
+		if !ret.IsSuccess() {
+			continue
+		}
+		infos = append(infos, info)
+	}
+	return deriveSlicedProfiles(infos, cardMemoryMiB)
+}
+
+// maxProfileCount returns the card's physical-slice ceiling — the largest per-profile Count
+// (e.g. 7 on A100, from 7x 1g.5gb). Zero for an empty profile list.
+func maxProfileCount(profiles []device.AcceleratorPhysicalSlicedProfile) int32 {
+	var ceiling int32
+	for _, p := range profiles {
+		if p.Count > ceiling {
+			ceiling = p.Count
+		}
+	}
+	return ceiling
+}
