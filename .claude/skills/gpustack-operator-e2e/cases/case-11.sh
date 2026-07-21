@@ -55,13 +55,14 @@ echo "[case-11] spread target: ${SLICE_NODE} with ${NCARDS} sliced card(s); subm
 # The sliceable accelerated InstanceType whose POOL this node belongs to (its name carries the node's
 # accelerator group id, e.g. "tesla-t4"), its entrance LocalQueue, and its per-card memory (MiB). This
 # must match the target node, or the queue would route the slice to a different pool's nodes.
-read -r IT LQ CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | GID="$GROUPID" python3 -c "
+read -r IT LQ CARDMEM MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | GID="$GROUPID" python3 -c "
 import json,sys,os
 gid=os.environ.get('GID','')
 for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{}); name=it['metadata']['name']
-    if s.get('acceleratable') and s.get('sliceable') and gid and gid in name:
-        print(name, it.get('status',{}).get('entrance',''), s.get('memory','')); break
+    s=it.get('spec',{}); name=it['metadata']['name']; st=it.get('status',{}); d=st.get('detail',{}); sd=d.get('slicedDetail',{})
+    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0 or len(sd.get('physical',{}).get('profiles',[]) or [])>0
+    if s.get('acceleratable') and sliceable and gid and gid in name:
+        print(name, st.get('entrance',''), d.get('memory',''), d.get('manufacturer','')); break
 ")"
 [ -n "$IT" ] && [ -n "$LQ" ] || { echo "no sliceable accelerated InstanceType with an entrance LocalQueue found"; exit 1; }
 PHYS_MIB=$(python3 -c "
@@ -70,6 +71,14 @@ m=re.match(r'\s*(\d+)\s*([GM])i?', '${CARDMEM}')
 print(int(m.group(1))*(1024 if m.group(2)=='G' else 1) if m else 0)
 " 2>/dev/null)
 echo "[case-11] sliceable InstanceType ${IT} (card ${CARDMEM}=${PHYS_MIB}MiB) via LocalQueue ${LQ}"
+
+# The soft-slicing runtime (HAMi libvgpu.so, LD_PRELOAD-injected at Allocate) needs the vendor
+# runtimeClass to mount its driver-lib dependencies — a bare image without it exits 127. Derive it
+# from the pool manufacturer (identity map: nvidia->nvidia, mthreads->mthreads); guard on existence.
+RUNTIMECLASS=""
+if [ -n "$MANUF" ] && kubectl get runtimeclass.node.k8s.io "$MANUF" >/dev/null 2>&1; then RUNTIMECLASS="$MANUF"; fi
+RTC_LINE=""; [ -n "$RUNTIMECLASS" ] && RTC_LINE="runtimeClassName: ${RUNTIMECLASS}"
+echo "[case-11] slice pods runtimeClass: ${RUNTIMECLASS:-<none>}"
 
 restore() {
   echo
@@ -92,6 +101,7 @@ kind: Pod
 metadata: { name: ${PODPFX}-$i, namespace: default, labels: { kueue.x-k8s.io/queue-name: ${LQ} } }
 spec:
   schedulerName: default-scheduler
+  ${RTC_LINE}
   restartPolicy: Never
   nodeSelector: { kubernetes.io/hostname: ${SLICE_NODE} }
   containers:

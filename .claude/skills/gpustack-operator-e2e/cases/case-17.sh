@@ -13,8 +13,8 @@
 #                 feature.gpustack.ai/acceleratable boolean + kubernetes.io/os|arch schedule labels
 #                 AND the queue-entrance label, so a stored type is selectable and reverse-lookup-able
 #                 (the Pod webhook reads per-card VRAM off it) from day one;
-#              C: the unit spec is frozen on UPDATE (changing unitResources / localStorage is rejected),
-#                 while spec.generalGroup (a schedule discriminator) stays mutable and persists.
+#              C: the whole spec is frozen on UPDATE (changing unitResources / localStorage / generalGroup
+#                 is rejected — only displayName / description / inactive stay editable).
 # Environment: Any cluster with a materialized general pool (the webhook chain must be up). No GPU.
 #              CPU-manufacturer awareness is assumed off (the default), so the non-accelerated stamp is
 #              the acceleratable boolean + os/arch, not a general.* CPU key.
@@ -29,8 +29,8 @@
 #                manifests;
 #              - B — the Default webhook stamps feature.gpustack.ai/acceleratable=false + os=linux +
 #                arch=amd64 + a gpustack- queue-entrance label;
-#              - C — the unitResources and localStorage patches are REJECTED (immutable) and do not
-#                persist, while the generalGroup patch is accepted and persists.
+#              - C — the unitResources, localStorage AND generalGroup patches are all REJECTED (immutable)
+#                and do not persist.
 # Cleanup:     Trap force-strips the throwaway's finalizer if present, deletes the throwaway type + its
 #              ClusterQueue.
 set -uo pipefail
@@ -129,7 +129,7 @@ else
   record FAIL "Default stamps schedule + entrance labels" "${stamp#*|} — Default webhook must stamp the acceleratable boolean + os/arch + queue-entrance"
 fi
 
-# --- C. UPDATE freezes the unit spec; generalGroup stays mutable (REAL patches on a throwaway type). ---
+# --- C. UPDATE freezes the whole spec — unitResources, localStorage AND generalGroup (REAL patches on a throwaway type). ---
 kubectl apply -f - >/dev/null 2>&1 <<EOF
 apiVersion: worker.gpustack.ai/v1alpha1
 kind: InstanceType
@@ -161,11 +161,11 @@ stgNow=$(kubectl get instancetype "$UPD" -o jsonpath='{.spec.localStorage}' 2>/d
   && record PASS "UPDATE freezes localStorage" "localStorage change rejected, stored still 100Gi" \
   || record FAIL "UPDATE freezes localStorage" "err='${errStg:0:70}' stored='${stgNow}' — a localStorage change must be rejected and not persist"
 
-okGroup=$(kubectl patch instancetype "$UPD" --type=merge -p '{"spec":{"generalGroup":"e2e17upd2"}}' 2>&1)
+errGroup=$(kubectl patch instancetype "$UPD" --type=merge -p '{"spec":{"generalGroup":"e2e17upd2"}}' 2>&1)
 grpNow=$(kubectl get instancetype "$UPD" -o jsonpath='{.spec.generalGroup}' 2>/dev/null)
-[ "$grpNow" = "e2e17upd2" ] \
-  && record PASS "UPDATE allows generalGroup change (mutable)" "generalGroup changed + persisted (e2e17upd -> e2e17upd2)" \
-  || record FAIL "UPDATE allows generalGroup change (mutable)" "err='${okGroup:0:70}' storedGroup='${grpNow}' — generalGroup is a discriminator, must be mutable"
+{ echo "$errGroup" | grep -qiE 'immutable|Forbidden' && [ "$grpNow" = "e2e17upd" ]; } \
+  && record PASS "UPDATE freezes generalGroup (immutable)" "generalGroup change rejected, stored still e2e17upd" \
+  || record FAIL "UPDATE freezes generalGroup (immutable)" "err='${errGroup:0:70}' storedGroup='${grpNow}' — generalGroup is part of pool identity, must be frozen"
 
 echo
 echo "== CASE 17 — InstanceType declarative admission =="

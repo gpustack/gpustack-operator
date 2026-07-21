@@ -35,14 +35,15 @@ sig() {
 }
 
 # --- Skip gate: a real SLICEABLE accelerated pool (derived InstanceType, sliced capacity > 0). ---
-read -r DERIVED AKEY OS ARCH LQ <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
+read -r DERIVED AKEY OS ARCH LQ MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{}); st=it.get('status',{}); n=it['metadata']['name']
+    s=it.get('spec',{}); st=it.get('status',{}); n=it['metadata']['name']; d=st.get('detail',{}); sd=d.get('slicedDetail',{})
     sliced=st.get('acceleratorSliced',{}).get('capacity','0')
+    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0 or len(sd.get('physical',{}).get('profiles',[]) or [])>0
     if n.startswith('e2e-case20'): continue  # skip this case's own throwaways (e.g. a prior aborted run)
-    if s.get('acceleratable') and s.get('acceleratorGroup') and s.get('sliceable') and sliced not in ('','0') and st.get('entrance'):
-        print(n, s['acceleratorGroup'], s.get('os',''), s.get('arch',''), st['entrance']); break
+    if s.get('acceleratable') and s.get('acceleratorGroup') and sliceable and sliced not in ('','0') and st.get('entrance'):
+        print(n, s['acceleratorGroup'], s.get('os',''), s.get('arch',''), st['entrance'], d.get('manufacturer','')); break
 ")"
 if [ -z "${DERIVED:-}" ] || [ -z "${LQ:-}" ]; then
   echo "== CASE 20 — SKIPPED =="
@@ -63,6 +64,14 @@ for n in json.load(sys.stdin).get('items',[]):
 ")"
 [ -n "${SLICED:-}" ] || { echo "[case-20] no *.sliced resource advertised on a node carrying ${AKEY}"; exit 1; }
 echo "[case-20] pool: derived=${DERIVED} acceleratorGroup=${AKEY} os/arch=${OS}/${ARCH} entrance=${LQ} sliced=${SLICED}"
+
+# The sliced load Pod runs the HAMi soft-slicing runtime (libvgpu.so via LD_PRELOAD) — without the
+# vendor runtimeClass mounting its driver-lib dependencies a bare image exits 127 and never runs.
+# Derive it from the pool manufacturer (identity map: nvidia->nvidia, mthreads->mthreads).
+RUNTIMECLASS=""
+if [ -n "$MANUF" ] && kubectl get runtimeclass.node.k8s.io "$MANUF" >/dev/null 2>&1; then RUNTIMECLASS="$MANUF"; fi
+RTC_LINE=""; [ -n "$RUNTIMECLASS" ] && RTC_LINE="runtimeClassName: ${RUNTIMECLASS}"
+echo "[case-20] load Pod runtimeClass: ${RUNTIMECLASS:-<none>}"
 
 cleanup() {
   echo
@@ -122,6 +131,7 @@ kind: Pod
 metadata: { name: ${POD}, namespace: default, labels: { kueue.x-k8s.io/queue-name: ${LQ} } }
 spec:
   schedulerName: default-scheduler
+  ${RTC_LINE}
   restartPolicy: Never
   containers:
     - name: main

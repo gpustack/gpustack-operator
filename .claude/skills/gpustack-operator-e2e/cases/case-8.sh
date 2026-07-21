@@ -48,12 +48,13 @@ fi
 echo "[case-8] real sliced accelerator found on ${sliced_node}"
 
 # A sliceable accelerated InstanceType, its entrance LocalQueue, and its per-card memory.
-read -r IT LQ CARDMEM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
+read -r IT LQ CARDMEM MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{})
-    if s.get('acceleratable') and s.get('sliceable'):
-        print(it['metadata']['name'], it.get('status',{}).get('entrance',''), s.get('memory','')); break
+    s=it.get('spec',{}); st=it.get('status',{}); d=st.get('detail',{}); sd=d.get('slicedDetail',{})
+    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0 or len(sd.get('physical',{}).get('profiles',[]) or [])>0
+    if s.get('acceleratable') and sliceable:
+        print(it['metadata']['name'], st.get('entrance',''), d.get('memory',''), d.get('manufacturer','')); break
 ")"
 [ -n "$IT" ] && [ -n "$LQ" ] || { echo "no sliceable accelerated InstanceType with an entrance LocalQueue found"; exit 1; }
 # Physical card memory in MiB (from the InstanceType card memory, e.g. "24Gi") for the below-physical
@@ -64,6 +65,15 @@ m = re.match(r'\s*(\d+)\s*([GM])i?', '${CARDMEM}')
 print(int(m.group(1)) * (1024 if m.group(2) == 'G' else 1) if m else 0)
 " 2>/dev/null)
 echo "[case-8] sliceable InstanceType ${IT} (card memory ${CARDMEM} = ${PHYS_MIB}MiB) via LocalQueue ${LQ}"
+
+# The soft-slicing runtime (HAMi libvgpu.so, LD_PRELOAD-injected at Allocate) needs the vendor
+# runtimeClass to mount the driver libs it depends on — a bare image without it exits 127. The
+# operator's Instance controller injects this automatically; a raw Pod must set it too. Derive it
+# from the pool manufacturer (identity map: nvidia->nvidia, mthreads->mthreads).
+RUNTIMECLASS=""
+if [ -n "$MANUF" ] && kubectl get runtimeclass.node.k8s.io "$MANUF" >/dev/null 2>&1; then RUNTIMECLASS="$MANUF"; fi
+RTC_LINE=""; [ -n "$RUNTIMECLASS" ] && RTC_LINE="runtimeClassName: ${RUNTIMECLASS}"
+echo "[case-8] slice pods runtimeClass: ${RUNTIMECLASS:-<none>}"
 
 restore() {
   echo
@@ -94,6 +104,7 @@ kind: Pod
 metadata: { name: ${POD_PCT}, namespace: default, labels: { kueue.x-k8s.io/queue-name: ${LQ} } }
 spec:
   schedulerName: default-scheduler
+  ${RTC_LINE}
   restartPolicy: Never
   containers:
     - name: main
@@ -127,6 +138,7 @@ kind: Pod
 metadata: { name: ${POD_MIB}, namespace: default, labels: { kueue.x-k8s.io/queue-name: ${LQ} } }
 spec:
   schedulerName: default-scheduler
+  ${RTC_LINE}
   restartPolicy: Never
   containers:
     - name: main
