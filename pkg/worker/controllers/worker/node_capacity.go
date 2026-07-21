@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"maps"
 	"strings"
+	"time"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +24,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemname"
+	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
@@ -29,22 +32,22 @@ import (
 )
 
 // NodeCapacityReconciler reconciles the per-card ".sliced.*" extended resources on a
-// managed Kubernetes Node's status.capacity, driven by Node feature-label and capacity
-// changes:
+// managed Kubernetes Node's status.capacity, driven by Node feature-label/capacity changes
+// and by the same-named Devices ledger's slicing detail:
 //   - For every acceleratable manufacturer whose bare ".sliced" token pool the
-//     device-plugin advertises (> 0), the node advertises four counting keys —
-//     ".sliced.units" (D × cards), ".sliced.cores-percentage" (overcommit →
-//     cards × maxSlices × 100, else cards × 100), ".sliced.memory-percentage" (100 ×
-//     cards) and ".sliced.memory-mib" (Σ per-card VRAM) — the keys the
-//     scheduler/kubelet count and the device-plugin reads to size each slice. The max
-//     slice count and the compute-overcommit flag are read from the same-named Devices
-//     CR at reconcile time.
-//   - The four keys are presence-gated: they are reverse-patched (removed) once a
-//     manufacturer's ".sliced" pool disappears or reaches 0. Because the device-plugin
-//     sizes that pool as cards × maxSlices off the same Devices CR, every slicing
-//     capability change (enable / disable / resize) also moves the bare ".sliced"
-//     capacity the Node predicate already watches — so no separate Devices watch is
-//     needed.
+//     device-plugin advertises (> 0), the node advertises up to four counting keys —
+//     ".sliced.units" (D × every sliceable card, MIG included) plus, for a model with
+//     soft-sliceable cards, ".sliced.cores-percentage", ".sliced.memory-percentage" and
+//     ".sliced.memory-mib" — the keys the scheduler/kubelet count and the device-plugin
+//     reads to size each slice. The per-card slice counts and the compute-overcommit flag
+//     are read from the same-named Devices CR at reconcile time; see desiredSlicedCapacity
+//     for the sliceable-vs-soft split.
+//   - The keys are presence-gated: they are reverse-patched (removed) once a manufacturer's
+//     ".sliced" pool disappears or reaches 0, and the three logical keys drop for a model
+//     whose cards are all MIG (no soft budget) while ".sliced.units" stays.
+//   - It watches the Devices ledger so a MIG mode change — which re-splits the per-card
+//     sliceable/soft populations without necessarily moving the bare ".sliced" pool the
+//     Node predicate already watches — enqueues the owning node.
 //   - It re-applies level-based after a kubelet restart wipes the capacity.
 //
 // The large magnitude of these keys (notably ".sliced.units" = D × cards) is reported
@@ -109,65 +112,107 @@ func (r *NodeCapacityReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return ctrl.Result{}, nil
 }
 
-// desiredSlicedCapacity computes the per-card ".sliced.*" extended-resource capacity
-// a managed node should advertise. It sums, per manufacturer, over that manufacturer's
-// models whose same-named Devices group actually reports a slicing capability (so a
-// non-sliceable model — e.g. an Ascend 310 sharing a node with a sliceable 910B — adds
-// nothing), while the manufacturer's bare ".sliced" token pool the device-plugin
-// advertises is present and > 0:
-//   - ".sliced.units"             = Σ cards × D
-//   - ".sliced.cores-percentage"  = Σ cards × maxSlices × 100 for a model whose compute
-//     may be overcommitted (each of its maxSlices slots may claim 100%), else Σ cards ×
-//     100 (compute is a single partitioned per-card budget)
-//   - ".sliced.memory-percentage" = Σ cards × 100
-//   - ".sliced.memory-mib"        = Σ cards × per-card VRAM MiB
+// desiredSlicedCapacity computes the per-card ".sliced.*" extended-resource capacity a
+// managed node should advertise, summed per manufacturer over that manufacturer's models
+// whose same-named Devices group reports a slicing capability (so a non-sliceable model —
+// e.g. an Ascend 310 sharing a node with a sliceable 910B — adds nothing), while the
+// manufacturer's bare ".sliced" token pool the device-plugin advertises is present and > 0.
+// The card population is split by slicing kind, because ".sliced.units" — the universal
+// Kueue quota unit, consumed by both logical and physical/MIG requests — counts every
+// sliceable card, while the three logical-only keys count only logically-sliceable (soft)
+// cards:
+//   - ".sliced.units"             = Σ sliceableCards × D   (logical ∨ physical; MIG included)
+//   - ".sliced.cores-percentage"  = Σ Detail.Logical.Count × 100 (overcommit) else Σ softCards × 100
+//   - ".sliced.memory-percentage" = Σ softCards × 100
+//   - ".sliced.memory-mib"        = Σ softCards × per-card VRAM MiB
 //
-// Each model's slice count and overcommit flag are read from its own Devices group,
-// matched by the full acceleratable node key ("${manufacturer}-${group
-// ID}"), so models of one manufacturer that differ in VRAM (or, in principle, in slice
-// count / overcommit) are summed correctly. A manufacturer whose ".sliced" pool is
-// absent/0, or with no sliceable model, is omitted, so buildSlicedCapacityPatch
-// reverse-patches any stale keys. It returns nil for an unmanaged node.
+// All card counts come from the Devices ledger's per-card data as the single source of
+// truth — never mixed with the Node ".count" label — resolved to each model by the full
+// acceleratable node key ("${manufacturer}-${group ID}"), so models of one manufacturer that
+// differ in VRAM (or slice count / overcommit) are summed correctly. The three logical keys
+// are omitted for a model with no soft cards (e.g. all-MIG), so buildSlicedCapacityPatch
+// reverse-patches any stale ones while ".sliced.units" stays.
+//
+// R1 fallback: a group carrying only the legacy AcceleratorsFeature (old-format Devices from
+// a not-yet-upgraded DaemonSet during rollout, with no per-card data) is computed the
+// previous way — cards from the ".count" label, slice count/overcommit from
+// MaxSlices()/SlicedCoresOvercommit() — so the four keys keep their current values instead
+// of nulling mid-rollout.
+//
+// The per-card VRAM stays the lossy ".memory" label (rounded to Gi), never the exact
+// DevicesGroup.Memory, so the advertised memory-mib matches the Pod-webhook anchor. A
+// manufacturer whose ".sliced" pool is absent/0, or with no sliceable model, is omitted. It
+// returns nil for an unmanaged node.
 func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.ResourceList {
 	if !kubemeta.IsLabeled(nd, systemname.ManagedLabelKey, "true") {
 		return nil
 	}
-	featuresByKey := slicedFeatureByAcceleratableKey(devs)
+	groupsByKey := devicesGroupsByAcceleratableKey(devs)
 	type tally struct {
-		units     int64
-		cores     int64
-		memoryPct int64
-		memoryMib int64
+		units      int64
+		cores      int64
+		memoryPct  int64
+		memoryMib  int64
+		hasLogical bool // any soft-sliceable contribution → emit the three logical keys
 	}
 	byManufacturer := make(map[string]*tally)
 	for _, aKey := range nodefeature.ExtractAcceleratableNodeKeys(nd) {
-		nodeKey := nodefeature.AcceleratableFeatureLabelPrefix + aKey
-		cards, err := strconvx.Atoi[int64](nd.Labels[nodeKey+".count"])
-		if err != nil || cards <= 0 {
-			continue
-		}
-		// The acceleratable node key is "${manufacturer}-${group ID}"; resolve this
-		// model's own Devices group by that full key (not the bare group ID, which can
-		// collide across manufacturers) and skip it unless the group reports a slicing
-		// capability, so a non-sliceable model contributes no ".sliced.*".
-		feature, ok := featuresByKey[aKey]
+		grp, ok := groupsByKey[aKey]
 		if !ok {
 			continue
 		}
+		nodeKey := nodefeature.AcceleratableFeatureLabelPrefix + aKey
+		vram := acceleratableCardMemoryMib(nd, nodeKey)
+
+		var units, cores, memoryPct, memoryMib int64
+		var logical bool
+		switch sliceable, soft := slicedCards(grp); {
+		case sliceable > 0:
+			// New-format Devices: ".sliced.units" counts every sliceable card (MIG
+			// included); the three logical keys count only the soft cards.
+			units = sliceable * nodefeature.ResourceMaxUnits
+			if soft > 0 {
+				logical = true
+				if grp.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit {
+					cores = int64(grp.AcceleratorSlicedDetail.Logical.Count) * 100
+				} else {
+					cores = soft * 100
+				}
+				memoryPct = soft * 100
+				memoryMib = soft * vram
+			}
+		case grp.AcceleratorsFeature.MaxSlices() > 0:
+			// R1 fallback: old-format Devices with no per-card data — preserve today's
+			// numbers from the ".count" label + the legacy group AcceleratorsFeature.
+			cards, err := strconvx.Atoi[int64](nd.Labels[nodeKey+".count"])
+			if err != nil || cards <= 0 {
+				continue
+			}
+			logical = true
+			units = cards * nodefeature.ResourceMaxUnits
+			if grp.AcceleratorsFeature.SlicedCoresOvercommit() {
+				cores = cards * int64(grp.AcceleratorsFeature.MaxSlices()) * 100
+			} else {
+				cores = cards * 100
+			}
+			memoryPct = cards * 100
+			memoryMib = cards * vram
+		default:
+			// Non-sliceable model: contributes nothing.
+			continue
+		}
+
 		manufacturer, _, _ := strings.Cut(aKey, "-")
 		t := byManufacturer[manufacturer]
 		if t == nil {
 			t = &tally{}
 			byManufacturer[manufacturer] = t
 		}
-		t.units += cards * nodefeature.ResourceMaxUnits
-		if feature.SlicedCoresOvercommit() {
-			t.cores += cards * int64(feature.MaxSlices()) * 100
-		} else {
-			t.cores += cards * 100
-		}
-		t.memoryPct += cards * 100
-		t.memoryMib += cards * acceleratableCardMemoryMib(nd, nodeKey)
+		t.units += units
+		t.cores += cores
+		t.memoryPct += memoryPct
+		t.memoryMib += memoryMib
+		t.hasLogical = t.hasLogical || logical
 	}
 	if len(byManufacturer) == 0 {
 		return nil
@@ -182,6 +227,11 @@ func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.Resourc
 			continue
 		}
 		out[nodefeature.GetAcceleratableSlicedUnitsResourceName(manufacturer)] = *resource.NewQuantity(t.units, resource.DecimalSI)
+		if !t.hasLogical {
+			// Every card is hard-partitioned (MIG): the logical keys carry no soft budget,
+			// so omit them while ".sliced.units" still counts the MIG cards.
+			continue
+		}
 		out[nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(manufacturer)] = *resource.NewQuantity(t.cores, resource.DecimalSI)
 		out[nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)] = *resource.NewQuantity(t.memoryPct, resource.DecimalSI)
 		out[nodefeature.GetAcceleratableSlicedMemoryMibResourceName(manufacturer)] = *resource.NewQuantity(t.memoryMib, resource.DecimalSI)
@@ -189,26 +239,40 @@ func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.Resourc
 	return out
 }
 
-// slicedFeatureByAcceleratableKey indexes a node's Devices groups that report a slicing
-// capability (MaxSlices() > 0) by their "${manufacturer}-${group ID}" key, so
-// desiredSlicedCapacity can resolve each acceleratable model to its own capability. The key
-// is manufacturer-qualified because ConstructGroupID strips the vendor prefix, so a bare
-// group ID can collide across manufacturers on a node. A group with no slicing capability is
-// omitted, so its cards contribute no ".sliced.*". It returns nil when devs is nil (no
-// ledger reported yet).
-func slicedFeatureByAcceleratableKey(devs *workercore.Devices) map[string]workercore.AcceleratorsFeature {
+// devicesGroupsByAcceleratableKey indexes a node's Devices groups by their
+// "${manufacturer}-${group ID}" acceleratable key, so desiredSlicedCapacity resolves each
+// node model to its own group's per-card slicing data. The key is manufacturer-qualified
+// because ConstructGroupID strips the vendor prefix, so a bare group ID can collide across
+// manufacturers on one node. It returns nil when devs is nil (no ledger reported yet).
+func devicesGroupsByAcceleratableKey(devs *workercore.Devices) map[string]*workercore.DevicesGroup {
 	if devs == nil {
 		return nil
 	}
-	out := make(map[string]workercore.AcceleratorsFeature, len(devs.Spec.Groups))
+	out := make(map[string]*workercore.DevicesGroup, len(devs.Spec.Groups))
 	for i := range devs.Spec.Groups {
 		g := &devs.Spec.Groups[i]
-		if g.AcceleratorsFeature.MaxSlices() <= 0 {
-			continue
-		}
-		out[g.Manufacturer+"-"+g.ID] = g.AcceleratorsFeature
+		out[g.Manufacturer+"-"+g.ID] = g
 	}
 	return out
+}
+
+// slicedCards counts a Devices group's sliceable and soft-only cards from its per-card data.
+// sliceable counts cards offering any slice budget (logical ∨ physical, so MIG cards are
+// included); soft counts cards offering a logical (soft) budget only. Both are 0 for an
+// old-format group with no per-card data, which routes desiredSlicedCapacity to its
+// AcceleratorsFeature fallback.
+func slicedCards(g *workercore.DevicesGroup) (sliceable, soft int64) {
+	for i := range g.Accelerators {
+		st := &g.Accelerators[i].Status
+		logical := st.LogicalSliced.Count > 0
+		if logical || st.PhysicalSliced.Count > 0 {
+			sliceable++
+		}
+		if logical {
+			soft++
+		}
+	}
+	return sliceable, soft
 }
 
 // acceleratableCardMemoryMib parses the per-card VRAM (in MiB) from a model's
@@ -309,6 +373,8 @@ func slicedFamilyCapacityChanged(oldCap, newCap core.ResourceList) bool {
 func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {
 	r.Client = opts.Manager.GetClient()
 
+	dedupWindow := ctrlhandlerx.NewDedupWindow[ctrlreconcile.Request]()
+
 	return ctrl.NewControllerManagedBy(opts.Manager).
 		Named("nodecapacity").
 		For(
@@ -319,9 +385,10 @@ func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts control
 				// - updated if its managed/acceleratable feature labels changed
 				//   (model added/removed or card count changed), or a ".sliced"-family
 				//   capacity entry changed — either the device-plugin's bare ".sliced"
-				//   token pool appearing/disappearing/resizing (the presence gate and the
-				//   sole signal of a slicing-capability change) or an owned ".sliced.*"
-				//   key (self-heal after a kubelet restart wipes it).
+				//   token pool appearing/disappearing/resizing (the presence gate) or an
+				//   owned ".sliced.*" key (self-heal after a kubelet restart wipes it). A
+				//   change to the per-card slicing detail itself arrives via the Devices
+				//   watch below.
 				ctrlpredicate.Funcs{
 					DeleteFunc: func(ctrlevent.DeleteEvent) bool {
 						return false
@@ -341,5 +408,92 @@ func (r *NodeCapacityReconciler) SetupController(_ context.Context, opts control
 				},
 			),
 		).
+		Watches(
+			// A Devices ledger's slicing detail change — notably a MIG mode toggle that
+			// re-splits the per-card sliceable/soft populations — moves the desired
+			// ".sliced.*" capacity without necessarily moving the bare ".sliced" pool the
+			// Node predicate watches, so enqueue the name-identical node. The 3s dedup
+			// window coalesces bursts of detection writes.
+			&workercore.Devices{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
+				3*time.Second,
+				dedupWindow,
+				r.enqueueNodeWhenDevicesChanged,
+			),
+			ctrlbuilder.WithPredicates(ctrlpredicate.Funcs{
+				// A managed Devices' slicing detail: on create/delete the whole capability
+				// appears/vanishes; on update fire only when the spec slicing detail changed,
+				// never on Status (allocation) churn or non-slicing spec fields like health.
+				CreateFunc: func(e ctrlevent.CreateEvent) bool {
+					return isManagedDevices(e.Object)
+				},
+				DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
+					return isManagedDevices(e.Object)
+				},
+				UpdateFunc: func(e ctrlevent.UpdateEvent) bool {
+					oldDevs, newDevs := e.ObjectOld.(*workercore.Devices), e.ObjectNew.(*workercore.Devices)
+					if !isManagedDevices(newDevs) {
+						return false
+					}
+					return slicedDetailChanged(oldDevs.Spec.Groups, newDevs.Spec.Groups)
+				},
+			}),
+		).
 		Complete(r)
+}
+
+// isManagedDevices reports whether a Devices ledger belongs to an operator-managed node.
+func isManagedDevices(obj ctrlcli.Object) bool {
+	return obj.GetLabels()[systemname.ManagedLabelKey] == "true"
+}
+
+// enqueueNodeWhenDevicesChanged maps a changed Devices ledger to its name-identical Node
+// (both are cluster-scoped and share the node name), so a per-card slicing detail change
+// reconciles that node's ".sliced.*" capacity.
+func (r *NodeCapacityReconciler) enqueueNodeWhenDevicesChanged(
+	ctx context.Context, obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	req := ctrlreconcile.Request{NamespacedName: ctrlcli.ObjectKey{Name: obj.GetName()}}
+	ctrllog.FromContext(ctx).V(2).Info("enqueued node from devices", "request", req)
+	return []ctrlreconcile.Request{req}
+}
+
+// slicedSignature captures exactly the Devices group fields desiredSlicedCapacity consumes:
+// the per-card sliceable/soft split, the logical detail (count + overcommit), and the legacy
+// AcceleratorsFeature fallback inputs. Comparing signatures lets the Devices watch fire only
+// on a real slicing-detail change.
+type slicedSignature struct {
+	sliceable          int64
+	soft               int64
+	logicalCount       int32
+	logicalOvercommit  bool
+	fallbackMaxSlices  int32
+	fallbackOvercommit bool
+}
+
+// slicedDetailChanged reports whether the slicing capability desiredSlicedCapacity consumes
+// changed between two Devices spec snapshots. It reads only Spec.Groups (never Status, where
+// allocation churn lives) and projects each group to its slicing signature, so a status
+// update or a non-slicing spec change (e.g. a health flip) does not fire the watch (R7).
+func slicedDetailChanged(oldGroups, newGroups []workercore.DevicesGroup) bool {
+	return !maps.Equal(slicedSignatures(oldGroups), slicedSignatures(newGroups))
+}
+
+// slicedSignatures projects a Devices spec's groups to their slicing signatures, keyed by the
+// "${manufacturer}-${group ID}" acceleratable key.
+func slicedSignatures(groups []workercore.DevicesGroup) map[string]slicedSignature {
+	out := make(map[string]slicedSignature, len(groups))
+	for i := range groups {
+		g := &groups[i]
+		sliceable, soft := slicedCards(g)
+		out[g.Manufacturer+"-"+g.ID] = slicedSignature{
+			sliceable:          sliceable,
+			soft:               soft,
+			logicalCount:       g.AcceleratorSlicedDetail.Logical.Count,
+			logicalOvercommit:  g.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit,
+			fallbackMaxSlices:  g.AcceleratorsFeature.MaxSlices(),
+			fallbackOvercommit: g.AcceleratorsFeature.SlicedCoresOvercommit(),
+		}
+	}
+	return out
 }

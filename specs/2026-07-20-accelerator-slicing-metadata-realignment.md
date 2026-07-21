@@ -833,8 +833,15 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
 > data ⇒ preserve today's numbers, never null). Consequently the old `AcceleratorsFeature` family is **kept one
 > release** (T4 dual-writes, T5/T6 dual-read) and its deletion is a **gated follow-up** once all DaemonSets are
 > guaranteed upgraded — T12 below deletes only what is safe this release.
+>
+> **Decision (2026-07-21): the fallback is unwanted long-term.** The maintainer confirmed the cross-binary skew
+> is not a concern for the deployment model, so the T5/T6 dual-read is a *temporary rollout net only*. Removing
+> it — the `AcceleratorsFeature.MaxSlices()` branch in `desiredSlicedCapacity`, the device-plugin fallback, and
+> the fallback fields in the Devices-watch signature — is folded into T12's gated follow-up alongside the
+> old-field deletion, not kept indefinitely. The accepted consequence at that point: a node still serving
+> old-format Devices advertises no `.sliced.*` capacity until its DaemonSet writes the new per-card format.
 
-[ ] **T5: NodeCapacityReconciler → new aggregate + per-card counts + Devices watch (F4).**
+[x] **T5: NodeCapacityReconciler → new aggregate + per-card counts + Devices watch (F4).**
     - Re-source `desiredSlicedCapacity` / `slicedFeatureByAcceleratableKey` (`node_capacity.go:131-212`) from
       `AcceleratorSlicedDetail` and per-card data: `sliceableCards` (logical∨physical) drives `.sliced.units`;
       `softCards` (logical only) drives the three logical keys; overcommit from `Detail.Logical`. **All counts
@@ -984,6 +991,11 @@ node_capacity, device-plugin, and the flavor note all off the old symbols.*
       full deletion is a **gated follow-up task** once the minimum supported version guarantees every
       DeviceManager DaemonSet writes the new format. Note this explicitly so it is not read as "cleanup
       incomplete".
+    - **Gated follow-up also removes the fallback logic (2026-07-21 decision, R1):** the fallback is unwanted
+      long-term, so the same gated task drops the `AcceleratorsFeature.MaxSlices()` branch in
+      `desiredSlicedCapacity`, the device-plugin `server.go` fallback, and the fallback fields in the
+      Devices-watch signature — then converts the old-format test fixtures (`devicesWithSlicing`) to new
+      per-card fixtures. Kept in T5/T6 only as a temporary rollout net.
     - Acceptance: `grep` shows no `MaxSlices`/`SlicedCoresOvercommit`/`acceleratorFeature` in non-generated,
       non-test Go; the tag-audit reservation guard passes; `make generate` clean; `go build ./...`, full
       `go test ./...`, `make lint` all green. (The `AcceleratorsFeature` field intentionally still present,
