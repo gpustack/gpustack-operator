@@ -537,9 +537,13 @@ pre-existing gap this spec closes for the MIG keys, noted for the soft keys):
   (`Detail.Physical.Profiles[name].Count` summed across cards). The pool is reached the **same way the webhook
   reads VRAM today — LocalQueue → InstanceType `Status.Detail` (`cardVRAMMib`, `pod.go:230-269`); the webhook
   does not read Devices**, so the profile inventory (with its `MemoryMib`) must be on the InstanceType Detail
-  — which is why F2 enriches the group aggregate. A static violation is a **rejection**; the Instance webhook
-  mirrors these checks and, on an empty `Status.Detail` (pre-reconcile window from spec 1), returns the same
-  retryable "not ready" rejection spec 1 defined — never a whole-card default.
+  — which is why F2 enriches the group aggregate. A static violation is a **rejection**; a not-yet-computed
+  `Status.Detail` (pre-reconcile window from spec 1) is a **retryable** rejection (the same not-ready contract
+  the soft `.sliced.memory-mib` path already returns), never a whole-card default. **The Instance object cannot
+  carry a physical request** — `InstanceResources` exposes only the logical percentage budgets (no memory-mib,
+  no profile field) and its controller emits only the logical `.sliced.*` keys, so a MIG request reaches the
+  cluster exclusively as a raw Pod on a LocalQueue (Story 1's path). The Instance webhook is therefore left
+  unchanged for MIG; its existing `slicedRequestNotReady` already gives the percentage path the not-ready reject.
 - **Default (units folding):** compute `units = MemoryMibToUnits(profile.MemoryMib, cardVRAMMib)` from the
   profile's `MemoryMib` (read off the InstanceType Detail's enriched aggregate, F2) — the **exact same fold**
   the soft `.sliced.memory-mib` path already uses — and fold it into `.sliced.units`, so Kueue ClusterQueue
@@ -861,7 +865,7 @@ pkg/deviceplugin/controller.go            # F3: reconciler annotation-merge → 
 pkg/deviceplugin/server.go                # F4: mig branch in Allocate; reclaim; MIG UUID injection; annotation write
 pkg/devicemanager/allocator/nvidia/...    # F4: incremental GI/CI create/destroy actuator (_linux/_other seam)
 pkg/worker/webhooks/worker/pod.go         # F5: mig-<profile> validation + units folding; initContainers
-pkg/worker/webhooks/worker/instance.go    # F5: mirror validation; empty-Detail retryable reject
+                                          #     (Instance webhook untouched — the Instance model can't carry MIG)
 pkg/worker/controllers/worker/node_devices_admission.go  # F6: profile dimension + mig feasibility branch
 pkg/nodefeature/knowns.go                 # F7: GetAcceleratableSlicedMigResourceName + suffix registration
 pkg/worker/controllers/worker/node_capacity.go           # F7: advertise .sliced.mig-<profile> capacity keys
@@ -981,12 +985,14 @@ there too (Open Question 1).
 
 **Phase C — Admission path (validate + gate), still no on-node create**
 
-[ ] **T5: F5 — Pod + Instance webhook validation + units fold.**
-    - `pod.go`/`instance.go`: `mig-<profile>` in the sliced family; value==1; mutually exclusive with the three
+[x] **T5: F5 — Pod webhook MIG validation + units fold.**
+    - `pod.go`: `mig-<profile>` in the sliced family; value==1; mutually exclusive with the three
       logical keys; **≤1 distinct profile per Pod** (containers + initContainers); profile exists in the pool's
       Instance-Type-Detail `Physical.Profiles` + count ≤ ceiling → else reject; fold `units =
       MemoryMibToUnits(profile.MemoryMib, cardVRAM)` from the Detail (same fold as the soft memory-mib path);
-      cover initContainers; empty-Detail → retryable reject.
+      cover initContainers; empty-Detail → retryable reject. **Instance webhook is not touched** — the Instance
+      model (`InstanceResources`) exposes only logical percentage budgets and cannot express a MIG profile, so a
+      MIG request reaches the cluster only as a raw Pod on a LocalQueue.
     - Acceptance: F5 table tests (valid fold; `mig:2` reject; mig+memMib reject; two-profile Pod reject; unknown
       profile reject; initContainer validated; empty-Detail retryable). Verify: `go test ./pkg/worker/webhooks/worker/...`.
 

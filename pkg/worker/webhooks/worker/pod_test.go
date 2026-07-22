@@ -63,6 +63,26 @@ func instanceTypeWithEntrance(memory string) *workercore.InstanceType {
 	return it
 }
 
+// instanceTypeWithPhysicalProfiles builds the fronting InstanceType a MIG request reads: a computed
+// Detail (a non-empty Manufacturer marks it ready) carrying the per-card VRAM and the pool's
+// aggregated physical-slice profile inventory (name → per-instance MemoryMib + pool ceiling Count).
+func instanceTypeWithPhysicalProfiles(
+	memory string, profiles ...workercore.AcceleratorSlicedPhysicalDetailProfile,
+) *workercore.InstanceType {
+	it := instanceTypeWithEntrance(memory)
+	it.Status.Detail.Manufacturer = nodefeature.ManufacturerNVIDIA
+	it.Status.Detail.SlicedDetail.Physical.Profiles = profiles
+	return it
+}
+
+// physicalProfiles is the canonical H100-80GB inventory the MIG tests fold against.
+func physicalProfiles() []workercore.AcceleratorSlicedPhysicalDetailProfile {
+	return []workercore.AcceleratorSlicedPhysicalDetailProfile{
+		{Name: "1g.10gb", Count: 7, MemoryMib: 10240},
+		{Name: "2g.20gb", Count: 3, MemoryMib: 20480},
+	}
+}
+
 func TestPodWebhook_Default(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
 	names := slicedResourceNamesForBase(nvidiaBase)
@@ -261,6 +281,241 @@ func TestPodWebhook_ValidateCreate(t *testing.T) {
 				assert.NoError(t, err)
 			}
 		})
+	}
+}
+
+func TestPodWebhook_DefaultPhysicalSliced(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := slicedResourceNamesForBase(nvidiaBase)
+	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+	unknownKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "9g.99gb")
+
+	cases := []struct {
+		name      string
+		requests  map[core.ResourceName]string
+		it        *workercore.InstanceType
+		wantUnits int64
+		wantErr   bool
+	}{
+		{
+			// 10Gi / 80Gi × D = D/8 = 200000, identical to a soft .sliced.memory-mib: 10Gi request.
+			name:      "profile folds units from its VRAM",
+			requests:  map[core.ResourceName]string{names.card: "2", physicalKey: "1"},
+			it:        instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...),
+			wantUnits: 200000,
+		},
+		{
+			name:     "unknown profile rejected",
+			requests: map[core.ResourceName]string{names.card: "1", unknownKey: "1"},
+			it:       instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...),
+			wantErr:  true,
+		},
+		{
+			name:     "detail not ready rejected (retryable)",
+			requests: map[core.ResourceName]string{names.card: "1", physicalKey: "1"},
+			it:       instanceTypeWithEntrance("81920Mi"), // Manufacturer empty → not ready
+			wantErr:  true,
+		},
+		{
+			name:     "card count over the pool ceiling rejected",
+			requests: map[core.ResourceName]string{names.card: "8", physicalKey: "1"}, // ceiling 7
+			it:       instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...),
+			wantErr:  true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newPodWebhook(c.it)
+			pod := slicedPod(c.requests)
+
+			err := w.Default(context.Background(), pod)
+			if c.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+
+			ctr := &pod.Spec.Containers[0]
+			reqUnits := ctr.Resources.Requests[names.units]
+			assert.Equal(t, c.wantUnits, reqUnits.Value(), "units request")
+			// A MIG request takes none of the logical budget keys.
+			_, hasCores := ctr.Resources.Requests[names.coresPct]
+			assert.False(t, hasCores, "mig request must not default cores-percentage")
+		})
+	}
+}
+
+// TestPodWebhook_PhysicalSlicedUnitsParity guards the non-conflict property: a mig-<profile> request and
+// a soft .sliced.memory-mib request of the profile's VRAM fold to the identical .sliced.units.
+func TestPodWebhook_PhysicalSlicedUnitsParity(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := slicedResourceNamesForBase(nvidiaBase)
+	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+
+	physicalPod := slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1"})
+	softPod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "10240"}) // 10Gi
+	w := newPodWebhook(instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...))
+
+	assert.NoError(t, w.Default(context.Background(), physicalPod))
+	assert.NoError(t, w.Default(context.Background(), softPod))
+
+	physicalUnits := physicalPod.Spec.Containers[0].Resources.Requests[names.units]
+	softUnits := softPod.Spec.Containers[0].Resources.Requests[names.units]
+	assert.Equal(t, softUnits.Value(), physicalUnits.Value(), "mig and same-VRAM soft slice fold identically")
+}
+
+func TestPodWebhook_ValidateCreatePhysicalSliced(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := slicedResourceNamesForBase(nvidiaBase)
+	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+	physicalKey2 := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "2g.20gb")
+
+	cases := []struct {
+		name    string
+		pod     *core.Pod
+		wantErr bool
+	}{
+		{
+			name: "valid mig on 2 cards",
+			pod:  slicedPod(map[core.ResourceName]string{names.card: "2", physicalKey: "1"}),
+		},
+		{
+			name:    "mig value 2 rejected",
+			pod:     slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "2"}),
+			wantErr: true,
+		},
+		{
+			name:    "mig without card rejected",
+			pod:     slicedPod(map[core.ResourceName]string{physicalKey: "1"}),
+			wantErr: true,
+		},
+		{
+			name:    "mig plus memory-mib rejected",
+			pod:     slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1", names.memMib: "4096"}),
+			wantErr: true,
+		},
+		{
+			name:    "mig plus memory-percentage rejected",
+			pod:     slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1", names.memPct: "20"}),
+			wantErr: true,
+		},
+		{
+			name:    "two containers naming different profiles rejected",
+			pod:     physicalTwoProfilePod(names.card, physicalKey, physicalKey2),
+			wantErr: true,
+		},
+		{
+			name: "init container mig validated (value 1 passes)",
+			pod:  physicalInitPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1"}),
+		},
+		{
+			name:    "init container mig validated (value 2 rejected, not skipped)",
+			pod:     physicalInitPod(map[core.ResourceName]string{names.card: "1", physicalKey: "2"}),
+			wantErr: true,
+		},
+		{
+			name:    "init-container mig plus app-container exclusive rejected (cross-mode)",
+			pod:     physicalInitMigPlusAppExclusivePod(names.card, physicalKey, nvidiaBase),
+			wantErr: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newPodWebhook()
+			_, err := w.ValidateCreate(context.Background(), c.pod)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestPodWebhook_MigProfileMissingMemoryIsRetryable pins that a MIG profile present in the fronting
+// InstanceType's inventory but with MemoryMib not yet populated (partial detail during detection /
+// rollout skew) yields a retryable not-ready error from Default, not a permanent zero-units rejection.
+func TestPodWebhook_MigProfileMissingMemoryIsRetryable(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := slicedResourceNamesForBase(nvidiaBase)
+	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+
+	// The profile is offered but its per-instance MemoryMib is still 0 (detail not fully computed).
+	it := instanceTypeWithPhysicalProfiles("81920Mi",
+		workercore.AcceleratorSlicedPhysicalDetailProfile{Name: "1g.10gb", Count: 7, MemoryMib: 0})
+	w := newPodWebhook(it)
+
+	pod := slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1"})
+	err := w.Default(context.Background(), pod)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not ready",
+		"a MIG profile with MemoryMib==0 must be a retryable not-ready rejection, not a permanent zero-units error")
+}
+
+// physicalTwoProfilePod builds a Pod whose two app containers each name a distinct MIG profile — the
+// unattributable multi-profile shape ValidateCreate rejects.
+func physicalTwoProfilePod(card, profileA, profileB core.ResourceName) *core.Pod {
+	rlA := core.ResourceList{card: resource.MustParse("1"), profileA: resource.MustParse("1")}
+	rlB := core.ResourceList{card: resource.MustParse("1"), profileB: resource.MustParse("1")}
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default", Name: "p",
+			Labels: map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+		},
+		Spec: core.PodSpec{
+			Containers: []core.Container{
+				{Name: "main", Resources: core.ResourceRequirements{Requests: rlA, Limits: rlA.DeepCopy()}},
+				{Name: "aux", Resources: core.ResourceRequirements{Requests: rlB, Limits: rlB.DeepCopy()}},
+			},
+		},
+	}
+}
+
+// physicalInitPod builds a queue-routed Pod whose sliced request lives on an init container, so the
+// webhook must validate init containers (getAllocatingPod attributes across both).
+func physicalInitPod(requests map[core.ResourceName]string) *core.Pod {
+	rl := core.ResourceList{}
+	for n, v := range requests {
+		rl[n] = resource.MustParse(v)
+	}
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default", Name: "p",
+			Labels: map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+		},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "init", Resources: core.ResourceRequirements{Requests: rl, Limits: rl.DeepCopy()}},
+			},
+			Containers: []core.Container{{Name: "main"}},
+		},
+	}
+}
+
+// physicalInitMigPlusAppExclusivePod builds a Pod with a MIG (sliced) request on an init container
+// and a whole-card exclusive request on an app container — two allocation modes across the Pod.
+// ValidateCreate must reject it, which requires the one-mode-per-Pod check to scan init containers
+// too (not only app containers).
+func physicalInitMigPlusAppExclusivePod(card, migKey, exclusiveKey core.ResourceName) *core.Pod {
+	initRL := core.ResourceList{card: resource.MustParse("1"), migKey: resource.MustParse("1")}
+	appRL := core.ResourceList{exclusiveKey: resource.MustParse("1")}
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default", Name: "p",
+			Labels: map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+		},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "init", Resources: core.ResourceRequirements{Requests: initRL, Limits: initRL.DeepCopy()}},
+			},
+			Containers: []core.Container{
+				{Name: "main", Resources: core.ResourceRequirements{Requests: appRL, Limits: appRL.DeepCopy()}},
+			},
+		},
 	}
 }
 
