@@ -9,7 +9,7 @@ variable "ssh_public_key" {
   # already opens port 22). pathexpand() handles the leading "~".
   description = "Path to the SSH public key registered as the EC2 key pair for node access."
   type        = string
-  default     = "~/.ssh/id_rsa.pub"
+  default     = "~/.ssh/id_ed25519.pub"
 }
 
 variable "vpc_cidr" {
