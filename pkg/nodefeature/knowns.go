@@ -317,6 +317,25 @@ func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	return _AcceleratableResourceNameSet.Has(name)
 }
 
+// SlicedMigProfileOf returns the physical-slice (MIG) profile name encoded in a
+// "<base>.sliced.mig-<profile>" resource key of a known accelerator base, and whether name is
+// such a key. It is the reverse of GetAcceleratableSlicedMigResourceName.
+func SlicedMigProfileOf(name core.ResourceName) (string, bool) {
+	s := string(name)
+	i := strings.Index(s, SlicedMigResourceNameInfix)
+	if i < 0 {
+		return "", false
+	}
+	if !_AcceleratableResourceNameSet.Has(core.ResourceName(s[:i])) {
+		return "", false
+	}
+	profile := s[i+len(SlicedMigResourceNameInfix):]
+	if profile == "" {
+		return "", false
+	}
+	return profile, true
+}
+
 // GetAcceleratableRuntimeName returns the accelerator runtime name for the given manufacturer,
 // usually, it's used as the container runtime class name for the accelerator resource.
 func GetAcceleratableRuntimeName(manufacturer string) string {

@@ -996,7 +996,7 @@ there too (Open Question 1).
     - Acceptance: F5 table tests (valid fold; `mig:2` reject; mig+memMib reject; two-profile Pod reject; unknown
       profile reject; initContainer validated; empty-Detail retryable). Verify: `go test ./pkg/worker/webhooks/worker/...`.
 
-[ ] **T6: F6 — AdmissionCheck profile-aware feasibility (Retry-only).**
+[x] **T6: F6 — AdmissionCheck profile-aware feasibility (Retry-only).**
     - `node_devices_admission.go`: `cardRequest.profile` (scan Containers + InitContainers); mig feasibility
       branch (`PhysicalSliced.Profiles` non-empty ∧ `Mode∈{None,Sliced}` ∧ `RemainingProfiles[profile]≥1`); "ledger
       not ready" Retry; logical branch excludes MIG cards.
