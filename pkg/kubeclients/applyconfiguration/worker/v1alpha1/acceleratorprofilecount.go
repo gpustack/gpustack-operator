@@ -6,8 +6,8 @@ package v1alpha1
 // with apply.
 //
 // AcceleratorProfileCount pairs a physical-slice profile name with a count of
-// instances — allocated (bound) or remaining (still buildable) per the field carrying it.
-// It is a status-only type (never a map key), so the profile ledger and the
+// instances — allocated (bound) or remaining (still buildable) per the field carrying
+// it. It is a status-only type (never a map key), so the profile ledger and the
 // capability inventory (AcceleratorSlicedPhysicalDetailProfile) stay independently
 // evolvable.
 type AcceleratorProfileCountApplyConfiguration struct {

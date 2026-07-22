@@ -12,13 +12,13 @@ Type: Feature
 > aggregate, real-NVML profile enumeration, and the "MIG card carries `LogicalSliced.Count == 0`" structural
 > mutual exclusion are exactly the typed facts this spec consumes. The one deliberate deferral spec 1 made —
 > that the bare `.sliced` token pool plus the scalar `.sliced.units` cannot express heterogeneous per-profile
-> placeability — is resolved here by the per-card placement-aware `Free` ledger and the profile-anchored
+> placeability — is resolved here by the per-card placement-aware `Remaining` ledger and the profile-anchored
 > AdmissionCheck, precisely where spec 1 said that gating belonged.
 
 ## Summary
 Turn the per-card MIG capability inventory spec 1 landed into a working allocation path. A currently
 MIG-enabled card gains a per-card **profile ledger** in `Devices.Status` (`Allocated` = instances live and
-bound, `Free` = instances still buildable given the card's current geometry and NVML placement slots),
+bound, `Remaining` = instances still buildable given the card's current geometry and NVML placement slots),
 computed on-node by the DeviceManager and consumed by the Kueue AdmissionCheck for placement-aware, per-card
 profile filtering. Users request a hardware partition by **profile name** — `nvidia.com/gpu.sliced.mig-1g.10gb`
 alongside the existing `nvidia.com/gpu.sliced` card-count key — mirroring NVIDIA's `mixed` strategy and the DRA
@@ -66,7 +66,7 @@ in-use cards and never automating the mode switch.
 - **A schedulable profile resource.** A workload requests `nvidia.com/gpu.sliced.mig-<profile>: 1` per card
   alongside `nvidia.com/gpu.sliced: <cards>`; the request is validated at ingress, gated by an admission check
   that understands per-card profile placeability, and actuated by the device-plugin creating the instance.
-- **A per-card placement-aware `Free` ledger.** The DeviceManager publishes, per MIG card, how many instances
+- **A per-card placement-aware `Remaining` ledger.** The DeviceManager publishes, per MIG card, how many instances
   of each profile are currently allocated and how many more can still be built given the occupied placement
   slots — folding the hardcoded NVML placement rules into a number the scheduler side consumes directly, which
   is the placement awareness `mig-parted` itself does not do.
@@ -80,16 +80,16 @@ in-use cards and never automating the mode switch.
 - **Zero behavior change for non-MIG and soft-slice paths.** Exclusive / shared / soft-sliced allocation, Kueue
   quota semantics, and the four existing `.sliced.*` capacity keys are untouched; a node with no MIG-enabled
   card advertises no `.sliced.mig-*` keys and behaves identically to today.
-- **Real-hardware validation on Hopper+ (H100).** GI/CI create/destroy, the `Free` ledger, and end-to-end
+- **Real-hardware validation on Hopper+ (H100).** GI/CI create/destroy, the `Remaining` ledger, and end-to-end
   admission of a `mig-<profile>` workload are validated on an H100 (reset-free mode enable; mode
   non-persistent across reboot). The A100 (Ampere, reset-required) mode path is documented but validated by the
   administrator, not in this environment.
 
 **Success criteria (measurable):**
 1. On an H100 with MIG mode enabled on a card, `Devices.Status` shows that card's per-profile `Allocated` and
-   `Free` counts, and after a `mig-1g.10gb` workload is admitted the card hosts exactly one `1g.10gb` GI+CI,
-   the workload container sees exactly that MIG device via `nvidia-smi`, and `Free[1g.10gb]` has decremented.
-2. On Pod exit the instance is destroyed (CI then GI) and — absent a residual `IN_USE` process — `Free` returns
+   `Remaining` counts, and after a `mig-1g.10gb` workload is admitted the card hosts exactly one `1g.10gb` GI+CI,
+   the workload container sees exactly that MIG device via `nvidia-smi`, and `Remaining[1g.10gb]` has decremented.
+2. On Pod exit the instance is destroyed (CI then GI) and — absent a residual `IN_USE` process — `Remaining` returns
    to its pre-allocation value within one reclaim cycle; a destroy that races an `IN_USE` retries with bounds
    (surfacing an operator-visible condition at the bound) and never blocks allocation on sibling cards.
 3. A `mig-<profile>` request whose profile is absent from the target pool's `AcceleratorSlicedDetail.Physical`
@@ -112,7 +112,7 @@ in-use cards and never automating the mode switch.
   DeviceManager restart to re-detect). Capability changes enter only via DeviceManager re-detection.
 - **Geometry-level dynamism** — whole-card re-slicing, defragmentation, or any operation requiring an idle
   card. Rejected permanently, not deferred: re-slicing is eviction by another name. Fragmentation is relieved
-  only as instances naturally release; the `Free` ledger keeps the scheduler from attempting an impossible
+  only as instances naturally release; the `Remaining` ledger keeps the scheduler from attempting an impossible
   placement.
 - **A memory→profile translation layer.** A physical request names its profile explicitly. No fraction variant
   is offered; "users must know profile names" is an accepted cost, matching NVIDIA `mixed` and the DRA driver.
@@ -134,7 +134,7 @@ in-use cards and never automating the mode switch.
 ## Proposal
 
 Add one new schedulable resource (`.sliced.mig-<profile>`) and the four pieces that make it work — a per-card
-`Free`/`Allocated` profile ledger (published by the DeviceManager, consumed by the AdmissionCheck), an ingress
+`Remaining`/`Allocated` profile ledger (published by the DeviceManager, consumed by the AdmissionCheck), an ingress
 validation + units-folding step in the Pod webhook, a profile-aware AdmissionCheck feasibility branch, and an
 incremental GI/CI create/destroy actuator in the device-plugin `Allocate`/reclaim path built on completed
 `binding/nvml` wrappers — while leaving every non-MIG and soft-slice behavior byte-for-byte unchanged.
@@ -168,8 +168,10 @@ profile name the card actually reports (enumerated by spec 1's NVML derivation),
 because there is no 8th compute slice to pair with the 8th memory slice; `3g.20gb` starts 0 or 4 (size 4);
 `4g.20gb` start 0 only (size 4); `7g.40gb` start 0 (size 8). Combination legality = the occupied slot
 intervals do not overlap. Example: a card already holding `1×3g.20gb@slot0` can still build
-`{1g.5gb:3, 1g.10gb:2, 2g.10gb:1, 3g.20gb:1}`. This per-card `Free` map is exactly what the DeviceManager
-computes from NVML possible-placements and publishes; the scheduler side never re-derives placement.
+`{1g.5gb:3, 1g.10gb:2, 2g.10gb:1, 3g.20gb:1}`. The DeviceManager enumerates these legal slots from NVML **once
+at detect time** and caches them (F2 `Placements`); the reconciler then subtracts the occupied intervals it
+reconstructs from Pod annotations to publish this per-card `Remaining` map (F3), so the scheduler side never
+re-derives placement and no NVML runs per reconcile.
 
 **Incremental GI/CI create/destroy — the NVML sequence** (from `mig-parted`'s `nvmlMigConfigManager`,
 `pkg/mig/config/config.go`, adapted to be incremental and placement-aware instead of clear-and-permute).
@@ -217,9 +219,13 @@ proposed the AdmissionCheck pass the chosen (card, profile) to the device-plugin
 couples an operator-side decision to a fragile Workload→Pod annotation-propagation path. It is unnecessary: the
 profile is already in the container's own `.sliced.mig-<profile>` request, which the device-plugin reads from
 the Pod during `Allocate`; card+slot selection is the device-plugin's own concern under the per-card lock (F4).
-The AdmissionCheck only gates *feasibility* (does a node with enough `Free[profile]` cards exist). No
-cross-object annotation is introduced (an on-disk ownership marker, F4, records the Pod→GI/CI binding for
-reclaim).
+The AdmissionCheck only gates *feasibility* (does a node with enough `Remaining[profile]` cards exist). No
+*downward* steering annotation is introduced. What F3/F4 do add is the reverse, *upward* direction — the
+device-plugin records the slot it chose into the Pod's **existing** allocation annotation (the same
+`AllocatedAcceleratorAnnoKey` the scalar allocation already uses), which the reconciler reads to derive the
+ledger (Decision 2). That is a plugin→Status record of a decision already made, not an operator→plugin
+instruction, so it carries none of the rejected sketch's coupling. An on-disk ownership marker (F4) additionally
+records the Pod→GI/CI binding for reclaim.
 
 ### User Stories
 
@@ -249,7 +255,7 @@ boundary — and the container image carries no extra NVIDIA CLI pinned to a ver
 
 ### Core Features & Acceptance Criteria
 
-#### F1 — Complete the `binding/nvml` MIG lifecycle wrappers (`binding/nvml/library_device.go`)
+#### F1 — Complete the `binding/nvml` MIG lifecycle wrappers + placement geometry (`binding/nvml/`)
 
 The generated `nvml.go` already emits every cgo symbol this spec needs (`nvmlGpuInstanceDestroy`,
 `nvmlComputeInstanceDestroy`, `nvmlDeviceGetGpuInstancePossiblePlacements`, `nvmlDeviceGetGpuInstances`,
@@ -283,9 +289,27 @@ the process is to confirm it in `nvml.h` and re-run `make generate nvml`. Note t
 binding types (`GpuInstancePlacement`, `ComputeInstanceProfileInfo`) — distinct from the operator's
 `AcceleratorPhysicalSlicedProfile` (F2/F5), which is the type carrying `MemorySlices`.
 
+**MIG geometry splits by layer (Decision 1, refined for the platform link constraint).** The compute-slice-count
+→ NVML GI/CI profile-id lookup (`MigProfileIDsForComputeSlices` + its maps) genuinely depends on NVML profile-id
+constants, so it lands beside the wrappers in `binding/nvml` (a hand-maintained `mig_placement.go`) — consumed by
+the detector's detect-time placement enumeration (F3) and the T7 allocator slot-pick. The **pure free-count math**
+(`ComputeRemainingProfiles(occupied, possible)` + the half-open-interval overlap test) is *not* NVML-bound — it is
+plain interval arithmetic on `{Start, Size}` — and its consumer is the reconciler (F3), which lives in
+`pkg/deviceplugin`. That package transitively links Go's `plugin` package (via kueue/prometheus), forcing a
+flat-namespace darwin test binary in which importing the cgo `binding/nvml` aborts at load on the unresolved NVML
+symbols (verified: `dyld symbol not found in flat namespace '_nvmlComputeInstanceDestroy'`). So the free-count
+math lives **operator-side** in `pkg/device` (a pure `mig_placement.go`, on the operator `AcceleratorPhysicalPlacement`
+type), which the reconciler imports with zero cgo. **Hard layering rule (unchanged):** `binding/*` is the
+foundational vendored cgo layer and must **not** import `api/worker` or `pkg/device`; anything producing operator
+API types (`AcceleratorProfileCount`, `AcceleratorPhysicalPlacement`) stays above it (F2/F3). This *relocates* the
+geometry the earlier T1 landed in `pkg/devicemanager/detector/nvidia`: the id maps move to `binding/nvml`, the
+free-count moves to `pkg/device` (rewritten onto the operator interval type). It is a pure move; `make generate
+nvml` still no-ops the generated files.
+
 **Acceptance:** `make generate nvml` re-emits the generated files with no diff attributable to these wrappers
-(they live in the hand-file); `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./...` and
-`go test ./binding/nvml/...` green (build-level; the real calls are hardware-only, exercised in F8 e2e).
+(all hand-maintained); the id-map table tests pass under `binding/nvml`, the `ComputeRemainingProfiles` table tests
+under `pkg/device`; `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./...`, `go test ./binding/nvml/...`, and
+`go test ./pkg/device/...` green (the real NVML calls are hardware-only, exercised in F8 e2e).
 
 #### F2 — Per-card MIG profile ledger in `Devices.Status` (`api/worker/v1alpha1/devices.go`)
 
@@ -313,17 +337,44 @@ type AcceleratorAllocation struct {
     // AllocatedProfiles lists the MIG instances currently created and bound on this
     // card, by profile name. Empty for a non-MIG card.
     AllocatedProfiles []AcceleratorProfileCount
-    // FreeProfiles lists, by profile name, how many more instances of each profile can
+    // RemainingProfiles lists, by profile name, how many more instances of each profile can
     // still be created given the card's occupied placement slots. Empty for a non-MIG
     // card. This is the placement-aware number the AdmissionCheck gates on.
-    FreeProfiles []AcceleratorProfileCount
+    RemainingProfiles []AcceleratorProfileCount
 }
 ```
 
 Protobuf numbers are assigned contiguously after the existing fields (no reservation, per the 2026-07-21
-project decision — `AcceleratorAllocation` uses 1–5, so `AllocatedProfiles`/`FreeProfiles` take 6 and 7;
+project decision — `AcceleratorAllocation` uses 1–5, so `AllocatedProfiles`/`RemainingProfiles` take 6 and 7;
 `AcceleratorProfileCount` takes 1–2). `AcceleratorAllocation` is status-only (never a map key and never
 `==`-compared — only `DeepEqual` paths touch it), so adding slice fields is safe.
+
+**Placement transport for the annotation-merged ledger (Decision 2 — the mechanism is F3).** The ledger is
+computed by the reconciler from Pod annotations plus a detect-time placement cache — **no live NVML in the
+reconciler** — so two more shapes are added:
+
+```go
+// AcceleratorPhysicalPlacement is one memory-slice interval [Start, Start+Length).
+type AcceleratorPhysicalPlacement struct {
+    Start  int32 `protobuf:"varint,1,opt"`
+    Length int32 `protobuf:"varint,2,opt"` // "Length" not "Size" — avoids the protobuf Size() method
+}
+```
+
+- On the **capability** `AcceleratorPhysicalSlicedProfile` (`Devices.Spec`): add `Placements []AcceleratorPhysicalPlacement`
+  (contiguous field 6) — the profile's **full empty-card legal-slot set**, enumerated once by the detector (F3,
+  via `Device.GetGpuInstancePossiblePlacements` on a fresh card) and cached. The reconciler subtracts occupied
+  from this cached set to derive `Remaining`, so caching the *full* set is correct whether or not NVML's
+  possible-placements call is itself occupancy-aware. This type lives only under `Devices` (verified: **not** an
+  `InstanceTypeSpec`/`FlavorSpec` map key, and its containers already hold slices), so the new slice is
+  comparability-safe.
+- On `AcceleratorAllocation` (the **annotation transport**): the device-plugin `Allocate` records the single MIG
+  instance a Pod holds on a card as a scalar `AllocatedPhysicalProfile` (the profile name, contiguous field 8) plus
+  `AllocatedPhysicalPlacements []AcceleratorPhysicalPlacement` (its occupied interval(s), contiguous field 9) — both carried
+  in the Pod's `device.gpustack.ai/accelerator.allocated` annotation (a Pod holds one instance per card, but a
+  slice keeps the merge uniform). The reconciler unions these across all the node's Pods into the per-card
+  occupied set (`AllocatedProfiles`/`RemainingProfiles` counts are what it then writes to Status; these transport
+  fields are annotation-side only, empty/omitted in the aggregated Status).
 
 **Enrich the spec-1 group aggregate with the profile's memory (a required spec-1 refinement).** Spec 1's group
 aggregate `AcceleratorSlicedPhysicalDetailProfile` carries only `{Name, Count}`, but F5's units fold needs the
@@ -342,47 +393,68 @@ the aggregate is not a map key, so the field is safe, and the detector's group-a
 carries `MemoryMib` through (uniform per profile name within a group).
 
 **Acceptance:** `make generate` regenerates deepcopy/protobuf/applyconfigurations cleanly with contiguous
-numbers; a non-MIG card serializes with empty profile maps (omitempty), so existing fixtures are
-byte-identical; the enriched aggregate round-trips `MemoryMib` from the detector to the InstanceType Detail.
+numbers; a non-MIG card serializes with empty profile maps + empty `AllocatedPhysicalPlacements` (omitempty), so
+existing fixtures are byte-identical; the enriched aggregate round-trips `MemoryMib` from the detector to the
+InstanceType Detail; the capability round-trips `Placements` from the detector into `Devices.Spec`.
 
-#### F3 — DeviceManager computes and publishes the ledger (`pkg/devicemanager/...`)
+#### F3 — DeviceManager publishes the ledger by annotation-merge + detect-time cache (`pkg/devicemanager/...`)
 
-On the node, for each MIG-enabled card, the DeviceManager derives the ledger from **live NVML ground truth**
-(not from Pod annotations) and publishes it to `Devices.Status`:
+**The `DevicesReconciler` stays a pure annotation-merge; it does NO live NVML (Decision 2).** The reconciler is a
+level-based controller that fires on every Pod add/delete/annotation-change on the node and rebuilds
+`Devices.Status` wholesale from `Devices.Spec` + each Pod's allocation annotation. Injecting synchronous NVML I/O
+(~50 ioctls per MIG card per reconcile, and NVML can block under driver contention or a concurrent `Allocate`'s
+create/destroy) into that hot path would stall **every** mode's Status update on the node — an anti-pattern for a
+reconciler that is otherwise pure K8s object arithmetic. So the MIG ledger is derived the same way the scalar
+`Allocated`/`Remaining` already are: from the Pod annotations, folded **inside** the single wholesale Status
+build (never a second write — the R7/dual-writer lesson still holds).
 
-- **Occupied intervals**: `Device.GetGpuInstances(profileId)` over the card's supported profile ids yields the
-  live GI handles; each handle's `GpuInstance.GetInfo().Placement` (`{Start, Size}`) gives its occupied
-  interval. Counting the GIs by profile name (spec 1's `deriveSlicedProfiles` name derivation, reused) builds
-  **`Allocated`**.
-- **`Free`**: for each supported profile, `Device.GetGpuInstancePossiblePlacements(profileId)` gives the legal
-  slots; count those whose `[start, start+size)` does not overlap any occupied interval → `Free[profile]`.
-  Cross-check against `GetGpuInstanceRemainingCapacity` where available.
-- **Fold into the wholesale Status computation, do not write a parallel path (NEW: dual-writer safety).**
-  `DevicesReconciler.Reconcile` rebuilds the entire `Devices.Status` from Spec + Pod annotations on every pass,
-  guarded only by a `DeepEqual`. A separate NVML-derived write would be stomped on the next annotation-driven
-  reconcile (spec 1 hit this exact lesson with `InstanceType.Status.Detail` — R7: compute inside the wholesale
-  status, never a second write). So the MIG ledger is computed **inside** that single Status computation, via a
-  vendor NVML hook (the NVIDIA allocator/Responder exposes `profileLedger(card)`; the generic reconciler calls
-  it while building each `AcceleratorAllocation`). NVML is NVIDIA-only, so the hook is nil for other vendors.
-- Publish **debounced** so a burst of create/destroy coalesces (reuse the registry/debounce reclaim-loop the
-  MetaX/Cambricon allocators use), and serialize the NVML read with the per-card lock (F4) so a ledger read
-  during an in-flight `Allocate` is consistent.
-- **Rollout skew (NEW):** a not-yet-upgraded (spec-1-format) DaemonSet publishes no `FreeProfiles`. A MIG
-  request on such a node would otherwise Retry forever with a misleading verdict. The AdmissionCheck (F6)
-  distinguishes "no `FreeProfiles` on any candidate card ⇒ ledger not ready" and Retries with an explicit
-  "instance-type/ledger not ready" message; document the upgrade ordering (roll the DaemonSet with or before
-  the operator).
+Two inputs feed the fold, both already present on the objects the reconciler reads:
 
-Because capability (spec 1's `PhysicalSliced.Profiles`) is enumerated at detect time and the ledger is
-recomputed on every reconcile from live NVML, "the card is MIG-enabled" and "here is what's on it" stay in sync
-without a mode state machine, and an orphan GI left by a crashed create is reflected as occupied on the very
-next pass.
+- **`Placements` (the legal-slot cache)** — enumerated **once at detect time** by the DeviceManager
+  (`Device.GetGpuInstancePossiblePlacements(profileId)` on the card) and stored in the capability
+  `Devices.Spec…PhysicalSliced.Profiles[].Placements` (F2). It is static for a fixed MIG mode (re-enumerated only
+  on re-detect), so it is read, not queried, per reconcile. Caching the **full empty-card** set means subtracting
+  occupied gives the right `Remaining` regardless of whether NVML's call is occupancy-aware.
+- **Occupied intervals** — the device-plugin `Allocate` (F4) records each MIG instance's chosen
+  `{profile, start:size}` into the Pod's `device.gpustack.ai/accelerator.allocated` annotation
+  (`AllocatedPhysicalPlacements`, F2), an *upward* record in the exact annotation the reconciler already reads (this is
+  the reverse direction of the AdmissionCheck→plugin steering the spec rejects — see Proposal). The reconciler
+  unions every live Pod's placements per card → the occupied set.
 
-**Acceptance:** unit tests over a pure `computeFreeProfiles(occupied []placement, possible []placement) map`
-function (no NVML I/O) asserting the A100 worked example (`1×3g.20gb@slot0` → `{1g.5gb:3, 1g.10gb:2, 2g.10gb:1,
-3g.20gb:1}`) and an empty-card case (`Free` = the full per-profile ceiling); a fixture asserting a non-MIG card
-gets empty ledgers; a `computeStatus`-level test asserting the ledger **survives** a second, annotation-driven
-reconcile (not stomped). Real enumeration is F8 e2e.
+Then, per MIG-enabled card, folded into `applyAllocatedStatus`'s pass:
+- **`Allocated`** = count the unioned placements by profile name.
+- **`Remaining[profile]`** = `device.ComputeRemainingProfiles(occupied, Placements)` (the F1 pure geometry, in `pkg/device` —
+  the reconciler must not import the cgo `binding/nvml`): count the cached legal slots whose
+  `[start, start+size)` overlaps no occupied interval. Pure arithmetic, zero NVML.
+
+**Accuracy trade-off vs the old live-NVML design (user-accepted).** Annotation-derived occupied only sees GIs
+GPUStack allocated. It misses (a) instances an administrator created out of band and (b) crash-orphan GIs (created
+but the annotation not yet written, or the Pod gone while the GI leaked). Those consume slots the ledger will not
+count, so `Remaining` can **transiently overstate** → the AdmissionCheck admits → `Allocate`'s per-card lock, which
+re-reads **live** NVML as the final arbiter (F4), fails → Pod recreate; the reclaim loop (F4/T8) GCs the orphan.
+The churn is bounded and safe. This **replaces** the old design's "an orphan is reflected as occupied on the very
+next pass" property: orphans are now caught at `Allocate` + reclaim, not in the reconciler. Crucially, the fold
+can only **overstate** `Remaining` (missing occupancy → more free), never **understate** it (which would falsely strand
+capacity): every placement the reconciler *does* see is subtracted, and the cached `Placements` is the full legal
+set, so a seen instance never inflates `Remaining`.
+
+- **Rollout skew (NEW):** a not-yet-upgraded DaemonSet writes no `Placements` (capability) and no
+  `AllocatedPhysicalPlacements` (annotations), so a MIG card carries no `RemainingProfiles`. The AdmissionCheck (F6)
+  distinguishes "no `RemainingProfiles`/`Placements` on any candidate card ⇒ ledger not ready" and Retries with an
+  explicit "ledger not ready" message; document the upgrade ordering (roll the DaemonSet with or before the
+  operator).
+
+Because capability + `Placements` are enumerated at detect time and the ledger is recomputed every reconcile from
+annotations, "the card is MIG-enabled" and "what Kueue-scheduled work sits on it" stay in sync with no NVML in the
+reconciler and no mode state machine.
+
+**Acceptance:** unit tests over the pure `ComputeRemainingProfiles(occupied, possible)` (in `pkg/device`, F1);
+a reconciler-level (fake-client) test asserting: a MIG card's annotated placements fold to the right
+`AllocatedProfiles`/`RemainingProfiles` (A100 `1×3g.20gb@slot0` → `Remaining{1g.5gb:3, 1g.10gb:2, 2g.10gb:1, 3g.20gb:1}`
+against the cached `Placements`); a non-MIG card gets empty ledgers; the ledger **survives** a second reconcile
+(recomputed inside the wholesale build, not stomped); occupied reconstructed from **two** same-profile Pods at
+different slots reflects their real placements, not the empty-card ceiling; and `Remaining` never drops below the true
+value for the placements seen (overstate-only). No NVML runs in these tests.
 
 #### F4 — Incremental GI/CI create + reclaim in the device-plugin `Allocate` path (`pkg/deviceplugin/server.go`, allocator)
 
@@ -395,28 +467,38 @@ This spec adds a **per-card lock** that guards MIG GI/CI create+destroy+marker-w
 the *same* card serialize their slot selection while sibling cards proceed in parallel; the node `allocateMutex`
 keeps its short reserve role only.
 
-1. Under `allocateMutex`, pick a card on this node that is MIG-enabled and has `Free[profile] ≥ 1` (the same
+1. Under `allocateMutex`, pick a card on this node that is MIG-enabled and has `Remaining[profile] ≥ 1` (the same
    ledger the AdmissionCheck used) and reserve it; release the node mutex.
 2. Under the **per-card lock**, re-read the card's live state (final arbiter of the non-atomic reservation
    race): if a **free existing instance** of `profile` is present (an unbound GI — see the marker rule below),
    bind it; else create one incrementally (F1 sequence: possible-placements → pick lowest non-overlapping slot
    → `CreateGpuInstanceWithPlacement` → `GetComputeInstanceProfileInfo` → `CreateComputeInstance`).
 3. **Persist ownership durably (NEW), in the same per-card critical section, before `Allocate` returns**: write
-   an on-disk marker `podUID → {card, giId, ciId, migUUID}` (atomic write, fail-closed parse), mirroring the
-   MetaX/Cambricon `metax-sgpu.json`/`cambricon-smlu.json` pattern under the pods dir. NVML enumeration alone
-   cannot reconstruct Pod ownership; the marker is what lets reclaim destroy the *exact* instance and lets step
-   2 tell a reusable-unbound GI from a bound one. The marker is written **inside** the create critical section
-   so a crashed-then-retried `Allocate` (kubelet retries) rebinds its own GI rather than double-creating, and so
-   the reclaim GC (below) cannot treat a just-created GI as an orphan mid-retry.
+   an on-disk marker `podUID → {card, giId, ciId, migUUID, profile, start:size}` (atomic write, fail-closed
+   parse), mirroring the MetaX/Cambricon `metax-sgpu.json`/`cambricon-smlu.json` pattern under the pods dir. The
+   marker is what lets reclaim destroy the *exact* instance and lets step 2 tell a reusable-unbound GI from a
+   bound one. It is written **inside** the create critical section so a crashed-then-retried `Allocate` (kubelet
+   retries) rebinds its own GI rather than double-creating, and so the reclaim GC (below) cannot treat a
+   just-created GI as an orphan mid-retry.
+   **Also record the placement in the Pod annotation (Decision 2):** the Responder's `Allocate` result carries the
+   chosen `{profile, start:size}` into the Pod's `device.gpustack.ai/accelerator.allocated` annotation
+   (`AllocatedPhysicalPlacements`, F2) — the *upward* record the reconciler reads to reconstruct occupied and derive
+   the ledger (F3). This is the same annotation the existing scalar allocation already uses; the MIG placement is
+   an added field, patched by the same `patchAllocatingPod` path.
 4. Inject **only** `NVIDIA_VISIBLE_DEVICES=<MIG UUID>` (hardware isolation) — do **not** inject `libvgpu.so` or
-   the `CUDA_DEVICE_*_LIMIT` env the soft-slice path uses (the NVIDIA Responder gets a MIG branch).
-5. The ledger (`Allocated`/`Free`) is republished by the next `DevicesReconciler` pass from live NVML (F3), not
-   written imperatively here.
+   the `CUDA_DEVICE_*_LIMIT` env the soft-slice path uses (the NVIDIA Responder gets a MIG branch). The NVML
+   create/destroy calls this step and reclaim make live only on linux, so the actuator lives behind a
+   `_linux.go`/`_other.go` build-tag seam (a darwin test binary links Go's `plugin` package, which forces a flat
+   namespace where unresolved NVML symbols abort at load — the same reason MetaX/Cambricon split their vendor
+   cgo). The pure slot-pick + marker logic stays platform-independent and seam-testable.
+5. The ledger (`Allocated`/`Remaining`) is recomputed by the next `DevicesReconciler` pass from the **annotation this
+   `Allocate` just wrote** (F3), not from live NVML and not written imperatively here.
 6. **Transaction boundary**: if `CreateComputeInstance` fails, destroy the just-created GI (mirroring
-   `mig-parted`'s cleanup); if the process dies between GI-create and marker-write, the GI is a **marker-less
-   orphan** — reflected as occupied by F3's live enumeration (so `Free` is never over-stated) and reclaimed by
-   the orphan-GC below when the card next drains. If the marker write or annotation patch fails, roll back
-   (destroy the GI) so no half-owned instance persists.
+   `mig-parted`'s cleanup); if the process dies between GI-create and marker/annotation-write, the GI is a
+   **marker-less orphan** the annotation-merged ledger does **not** count, so `Remaining` transiently overstates until
+   `Allocate`'s live per-card re-read (step 2) rejects a colliding placement and the orphan-GC (below) reclaims it
+   when the card next drains — the user-accepted churn (F3). If the marker write or annotation patch fails, roll
+   back (destroy the GI) so no half-owned instance persists.
 7. **Reclaim** (separate worker, per-card locks — never the node mutex, so sibling cards are unblocked): reuse
    `RunSlicedReclaimLoop` + the `reclaimer` registry/`reclaimMaxMisses` debounce. On a Pod leaving the live set
    for `reclaimMaxMisses` consecutive passes, look up its marker and destroy the CI then the GI (F1 reverse
@@ -427,7 +509,7 @@ keeps its short reserve role only.
    never destroys an instance a *running* Pod holds. Marker-less GIs are GC'd only when the card is fully
    drained (as MetaX does for unidentifiable orphans). Size the GC debounce (`reclaimMaxMisses` × resync) to
    exceed the kubelet Allocate-retry window.
-8. `Free[profile] == 0` at step 2 → allocation fails (should not happen: the AdmissionCheck pre-gated; this is
+8. `Remaining[profile] == 0` at step 2 → allocation fails (should not happen: the AdmissionCheck pre-gated; this is
    the safety net for the reservation race, surfacing as a normal device-plugin allocation error → Pod recreate).
 
 **Acceptance:** the slot-pick, the reuse-vs-create decision, and the marker round-trip are pure/seam-testable
@@ -464,7 +546,7 @@ pre-existing gap this spec closes for the MIG keys, noted for the soft keys):
   quota and `.sliced.units` accounting need **zero** change and a MIG instance charges identical credits to a
   soft slice of the same VRAM. Any client-supplied `.sliced.units` is ignored and recomputed.
 - **`.sliced.units` for MIG is quota pricing ONLY, not a feasibility bound (semantics, per cross-check).** It is
-  a loose VRAM-anchored charge for Kueue ClusterQueue accounting; feasibility/placeability is the `Free` ledger
+  a loose VRAM-anchored charge for Kueue ClusterQueue accounting; feasibility/placeability is the `Remaining` ledger
   (F6), not units. There is **no hardcoded slice denominator** — the fold is `MemoryMib/cardVRAM`, generation-
   agnostic, so it is correct on asymmetric (A100/H100: 8 memory vs 7 compute slices) and symmetric cards alike;
   `Physical.Count` (the finest-profile max-instance ceiling) is deliberately **not** the fold denominator (it
@@ -472,7 +554,7 @@ pre-existing gap this spec closes for the MIG keys, noted for the soft keys):
   compute-limited profiles under-charge (a card fully sliced into the finest profile does not consume all its
   VRAM — e.g. H100 `7×1g.10gb` ≈ 7/8·D; compute is unpriced, so same-memory profiles like `1g.20gb`/`2g.20gb`
   charge identically), so a ClusterQueue sized at `cards × D` can admit a workload on quota that then Retries on
-  `Free==0` — designed-in head-of-line churn, an accepted quota-sizing property, not a silent bug (see the
+  `Remaining==0` — designed-in head-of-line churn, an accepted quota-sizing property, not a silent bug (see the
   worked example after F8).
 
 **Acceptance:** table tests — a valid `mig-1g.10gb: 1` on 2 cards folds `.sliced.units` to
@@ -491,23 +573,26 @@ only ever returns Ready or Retry):
 parseCardRequest: also read the .sliced.mig-<profile> sub-key → request.profile (the profile name), when
   present. Scan BOTH Containers and InitContainers (NEW): getAllocatingPod already scans InitContainers, and F5
   validates+folds them, so an init-only mig request must be visible to feasibility too — else it is folded and
-  admitted but never Free-gated. F5 guarantees a single distinct profile per Pod, so request.profile is
+  admitted but never Remaining-gated. F5 guarantees a single distinct profile per Pod, so request.profile is
   unambiguous.
 
 nodeDevicesFeasibility (mig branch, request.profile != ""):
   candidate card = a card in the assigned pool's Devices where:
     1. PhysicalSliced.Profiles is non-empty            // MIG enabled (structural, from spec 1)
     2. Mode ∈ {None, Sliced}                            // not held whole-card by exclusive/shared
-    3. Status FreeProfiles[profile] ≥ 1                 // placement-aware, from F2/F3
+    3. Status RemainingProfiles[profile] ≥ 1                 // placement-aware, from F2/F3
   fit ≥ request.count → Ready ; else Retry (existing 30s backoff, never Reject)
-  NB: no candidate card carries any FreeProfiles at all ⇒ "ledger not ready" (rollout skew, F3) → Retry with an
-      explicit message, distinct from "profile full".
+  NB (readiness signal, Decision 2): a MIG card whose capability carries cached Placements has a ready ledger —
+      empty RemainingProfiles then means "profile full" (Retry). Only when NO candidate MIG card has Placements cached
+      (rollout skew: old DaemonSet) is the ledger "not ready" → Retry with a distinct explicit message. Keying
+      readiness on Placements-cached (capability), not on RemainingProfiles-present (status), separates "full" from
+      "not ready" (a full card also has empty RemainingProfiles).
 
 logical-sliced branch: additionally EXCLUDE MIG-enabled cards (PhysicalSliced.Profiles non-empty) from the
   candidate set — the structural "an enabled MIG card offers no soft budget" gate at the admission layer.
 ```
 
-The check-then-allocate window is not atomic (two Workloads can pass on the same `Free` snapshot); the
+The check-then-allocate window is not atomic (two Workloads can pass on the same `Remaining` snapshot); the
 device-plugin per-card lock (F4 step 2) is the final arbiter, and a loser fails `Allocate` → Pod recreate. No
 soft reservation state is added in this spec (kept simple; revisit only if the race proves material).
 
@@ -520,11 +605,12 @@ feasibility is re-evaluated. The cost to accept and document: each cycle is an *
 `slicedDetailChanged`, correct — it feeds F7's static keys, not this gate); a status-ledger-filtered Devices
 watch to speed this up is an **Ask-first** optimization, not a correctness requirement.
 
-**Acceptance:** table tests over `nodeDevicesFeasibility` — a pool with `Free[1g.10gb]` on N cards admits a
-request for ≤N and Retries for >N; a request for a profile with `Free == 0` everywhere Retries (does not
-Reject); a candidate set with no `FreeProfiles` at all → "ledger not ready" Retry (distinct message); a MIG
-card is excluded from a logical-sliced candidate set; a card `Mode == Exclusive` is not a MIG candidate even
-with `Free ≥ 1`; an init-container-only `mig-*` request is counted by feasibility.
+**Acceptance:** table tests over `nodeDevicesFeasibility` — a pool with `Remaining[1g.10gb]` on N cards admits a
+request for ≤N and Retries for >N; a request for a profile with `Remaining == 0` everywhere (Placements cached)
+Retries as "profile full" (does not Reject); a candidate set with no `Placements` cached on any MIG card →
+"ledger not ready" Retry (distinct message); a MIG card is excluded from a logical-sliced candidate set; a card
+`Mode == Exclusive` is not a MIG candidate even with `Remaining ≥ 1`; an init-container-only `mig-*` request is
+counted by feasibility.
 
 #### F7 — `.sliced.mig-<profile>` node capacity key + resource-name plumbing (`pkg/nodefeature`, `pkg/worker/controllers/worker/node_capacity.go`)
 
@@ -544,7 +630,7 @@ with `Free ≥ 1`; an init-container-only `mig-*` request is counted by feasibil
 - **NodeCapacity's Devices watch stays capability-only and that is correct** (cross-check refuted the earlier
   claim it was insufficient): these mig capacity keys are sourced from the **Spec-side** `AcceleratorSlicedDetail`
   (spec 1's `slicedDetailChanged` predicate, `node_capacity.go:441-471`), which the watch already fires on;
-  extend the signature to include the profile geometry so a capability change re-enqueues. The **`Free`-ledger**
+  extend the signature to include the profile geometry so a capability change re-enqueues. The **`Remaining`-ledger**
   (Status) drives the AdmissionCheck (F6), a separate concern with its own convergence — do not conflate.
 - **Kueue ClusterQueue coverage (NEW — verify, match the soft keys).** The managed CQ's `buildResourceGroups`
   (`node_queue.go:260-289`) covers the **credits** resource (`GetAcceleratableCreditsResourceName`), not the
@@ -568,9 +654,9 @@ Kueue-coverage path is asserted end-to-end in F8.
   MIG-must-go-through-Kueue usage limit, and the reclaim/`IN_USE` behavior. Copy the profile + placement tables
   in (no link to research working files).
 - **H100 real-card e2e** (Hopper+, reset-free): enable MIG mode on a card, restart the DeviceManager, assert
-  the `Free` ledger appears; submit a `mig-1g.10gb` LocalQueue workload, assert it admits, the container sees
-  exactly the `1g.10gb` MIG device via `nvidia-smi`, `libvgpu.so` is absent, and `Free` decrements; delete the
-  workload, assert the instance is destroyed and `Free` restores; note the mode is non-persistent across reboot.
+  the `Remaining` ledger appears; submit a `mig-1g.10gb` LocalQueue workload, assert it admits, the container sees
+  exactly the `1g.10gb` MIG device via `nvidia-smi`, `libvgpu.so` is absent, and `Remaining` decrements; delete the
+  workload, assert the instance is destroyed and `Remaining` restores; note the mode is non-persistent across reboot.
 - The **A100 (Ampere, reset-required)** mode path is documented for administrators; its reset-required enable
   sequence is validated externally, not in this environment.
 
@@ -624,13 +710,18 @@ deflates the credit budget. The three logical keys scale by `softCards` (MIG car
 `LogicalSliced.Count == 0`); `.sliced.mig-*` scales by the MIG cards; both draw from the same shared `4·D`
 credit pool via the identical `MemoryMibToUnits` fold, so a mixed node (C) shares its budget coherently with no
 double-count. Scenario B illustrates C7: `mig-7g.80gb` costs D → 4 fit (= physical); `mig-1g.10gb` costs D/8 →
-credits allow 32 but `Free` caps at 28, the 4 excess Retry (the accepted compute-limited under-charge).
+credits allow 32 but `Remaining` caps at 28, the 4 excess Retry (the accepted compute-limited under-charge).
 
 ### Notes / Constraints / Caveats
 
 - **`binding/nvml` completion is additive hand-written wrappers**, not a regeneration: the cgo symbols already
   exist in the generated `nvml.go`; the new methods go in `library_device.go`. `make generate nvml` (c-for-go
   over `gen/binding/nvml`) must still produce a no-op diff for the generated files.
+- **The reconciler must not import the cgo `binding/nvml`.** `pkg/deviceplugin` transitively links Go's `plugin`
+  package (via kueue/prometheus), forcing a flat-namespace darwin test binary in which `binding/nvml`'s
+  unresolved NVML symbols abort at load (verified). So the reconciler's placement-aware `Remaining` math is pure
+  operator-side code in `pkg/device`; only genuinely NVML-constant-bound geometry (profile-id maps) lives in
+  `binding/nvml`, consumed by the detector (detect-cache) and the T7 allocator, which do not link `plugin`.
 - **`AcceleratorAllocation` is status-only** — the new slice fields are safe there; do not let any profile-slice
   type leak into a map-key type (`InstanceTypeSpec`/`InstanceTypeFlavorSpec`), per spec 1's comparability
   constraint.
@@ -662,16 +753,17 @@ credits allow 32 but `Free` caps at 28, the 4 excess Retry (the accepted compute
 
 ### Risks and Mitigations
 
-- **Non-atomic check-then-allocate race** → two Workloads pass the AdmissionCheck on one `Free` snapshot and
-  collide at `Allocate`. Mitigation: the per-node `allocateMutex` re-checks `Free[profile]` live and is the
+- **Non-atomic check-then-allocate race** → two Workloads pass the AdmissionCheck on one `Remaining` snapshot and
+  collide at `Allocate`. Mitigation: the per-node `allocateMutex` re-checks `Remaining[profile]` live and is the
   sole arbiter; the loser fails allocation and recreates through normal scheduling; the ledger is recomputed
   after every create so the next snapshot is fresh. Covered by a concurrent-Allocate test on a fake seam.
 - **`Destroy` returns `IN_USE` from a residual process** → a straggler on the instance blocks reclaim.
   Mitigation: bounded retry with backoff on that instance only, never blocking sibling-card allocation; surface
   a condition/metric after the bound; reuse the MetaX/Cambricon reclaim-loop debounce so retries don't storm.
-- **Ledger patch amplification** → recomputing/patching `Devices.Status` on every create/destroy could churn.
-  Mitigation: debounce the publish (coalesce a burst), and gate the Devices watch predicate on a real ledger
-  change so the AdmissionCheck/NodeCapacity enqueue only when `Free` actually moved.
+- **Ledger patch amplification** → recomputing `Devices.Status` on every reconcile could churn writes.
+  Mitigation: the ledger rides the reconciler's existing `DeepEqual`-gated Status update — it is recomputed
+  in-memory each pass but written only when it actually changed (the same gate the scalar allocation already
+  uses); no separate publish, no NVML, so there is no extra write path to amplify.
 - **`.sliced.mig-*` as a Node extended resource without a device-plugin provider** → kubelet must admit a Pod
   requesting it. Mitigation: these keys follow the exact merge-patch-onto-Node-capacity model the four existing
   `.sliced.*` keys already use (scheduler-accounted integer resources, not device-plugin resources); the bare
@@ -688,9 +780,19 @@ credits allow 32 but `Free` caps at 28, the 4 excess Retry (the accepted compute
   the existing soft keys); the device-plugin `Allocate` still fails safe (no free slot ⇒ allocation error)
   rather than corrupting the card.
 - **Dual-writer stomp on `Devices.Status`** → `DevicesReconciler.Reconcile` rebuilds Status wholesale each pass;
-  a parallel NVML-derived ledger write would be erased on the next annotation-driven reconcile (spec 1's R7
-  lesson). Mitigation: compute the MIG ledger **inside** that single Status computation via the vendor NVML hook
-  (F3), never a second write; a test asserts the ledger survives a second reconcile.
+  any second, out-of-band ledger write would be erased on the next reconcile (spec 1's R7 lesson). Mitigation:
+  the MIG ledger is derived **inside** that single Status computation from Pod annotations + the cached
+  `Placements` (F3), exactly like the scalar allocation merge — no NVML, no second write; a test asserts the
+  ledger survives a second reconcile.
+- **Reconciler device-I/O anti-pattern (Decision 2)** → doing live NVML per reconcile (an earlier design) put
+  ~50 blockable ioctls per MIG card into a hot, frequently-firing, level-based reconciler, stalling all modes'
+  Status updates. Mitigation: the reconciler is pure annotation-merge + arithmetic; NVML lives only at detect
+  time (cache `Placements` once) and on the `Allocate`/reclaim path (F4), never in the reconciler.
+- **Annotation-derived `Remaining` overstates (accepted)** → occupied is reconstructed only from Pod annotations, so
+  out-of-band or crash-orphan GIs are uncounted and `Remaining` can transiently overstate → admit-then-fail churn.
+  Mitigation: `Remaining` can only **overstate** (never understate → never falsely strand capacity); `Allocate`'s
+  per-card lock re-reads live NVML as the final arbiter and reclaim GCs orphans; a test asserts the overstate-only
+  direction. User-accepted, bounded churn (F3).
 - **Reuse-vs-orphan-GC race** → a GI left by a crashed-then-retried `Allocate` is simultaneously "reusable"
   (F4 step 2) and "collectable orphan" (F4 step 7). Mitigation: write the ownership marker in the same per-card
   critical section as the GI create, before `Allocate` returns, and size the GC debounce (`reclaimMaxMisses` ×
@@ -704,11 +806,11 @@ credits allow 32 but `Free` caps at 28, the 4 excess Retry (the accepted compute
   Mitigation: F7 verifies MIG keys get the same credits-based Kueue treatment as the soft `.sliced.*` keys and
   asserts a mig workload reaches admission in the F8 e2e; extend `buildResourceGroups` only if the soft keys are
   found to be individually CQ-covered.
-- **Rollout skew (operator ahead of DaemonSet)** → a spec-1-format DaemonSet publishes no `FreeProfiles`, so a
-  mig workload would Retry forever with a misleading verdict while F5 (Spec-side) passes and F7 advertises the
-  keys. Mitigation: F6 distinguishes "ledger not ready" (no `FreeProfiles` on any candidate) with an explicit
-  Retry message; document the upgrade ordering (roll the DaemonSet with or before the operator). Transient,
-  self-heals once the DaemonSet rolls.
+- **Rollout skew (operator ahead of DaemonSet)** → a spec-1-format DaemonSet caches no `Placements` and writes no
+  MIG annotation, so a mig workload would Retry forever with a misleading verdict while F5 (Spec-side) passes and
+  F7 advertises the keys. Mitigation: F6 distinguishes "ledger not ready" (no `Placements` cached on any candidate
+  MIG card) with an explicit Retry message; document the upgrade ordering (roll the DaemonSet with or before the
+  operator). Transient, self-heals once the DaemonSet rolls.
 - **Retry convergence cost (head-of-line)** → the AdmissionCheck converges a freed slot via Kueue's
   eviction+full-requeue (≥30s per cycle), and the retrying Workload holds its quota reservation through the
   backoff. Mitigation: accepted and documented as the convergence cost; a status-ledger Devices watch to
@@ -749,11 +851,15 @@ make lint
 ```
 binding/nvml/library_device.go            # F1: Destroy / PossiblePlacements / GetGpuInstances /
                                           #     GetComputeInstanceProfileInfo / GetComputeInstances / MIG UUID
-api/worker/v1alpha1/devices.go            # F2: AcceleratorProfileCount; AcceleratorAllocation ledger fields
-pkg/device/types.go                       # F2: alias for the new status type if the package needs it
-pkg/devicemanager/...                     # F3: computeFreeProfiles + ledger publish (debounced, allocateMutex)
-pkg/deviceplugin/server.go                # F4: mig branch in Allocate; reclaim; MIG UUID injection
-pkg/devicemanager/allocator/nvidia/...    # F4: incremental GI/CI create/destroy actuator (new file)
+binding/nvml/mig_placement.go             # F1: NVML-native geometry — profile-id maps (+ T7 slot-pick overlap)
+pkg/device/physical_placement.go               # F1/F3: pure free-count geometry (ComputeRemainingProfiles) on operator types
+api/worker/v1alpha1/devices.go            # F2: AcceleratorProfileCount + ledger fields; AcceleratorPhysicalPlacement;
+                                          #     capability Placements; annotation AllocatedPhysicalPlacements
+pkg/device/types.go                       # F2: aliases for the new status/placement types
+pkg/devicemanager/detector/nvidia/...     # F3: detect-time enumerate + cache Placements into Devices.Spec
+pkg/deviceplugin/controller.go            # F3: reconciler annotation-merge → Allocated/Remaining (no NVML)
+pkg/deviceplugin/server.go                # F4: mig branch in Allocate; reclaim; MIG UUID injection; annotation write
+pkg/devicemanager/allocator/nvidia/...    # F4: incremental GI/CI create/destroy actuator (_linux/_other seam)
 pkg/worker/webhooks/worker/pod.go         # F5: mig-<profile> validation + units folding; initContainers
 pkg/worker/webhooks/worker/instance.go    # F5: mirror validation; empty-Detail retryable reject
 pkg/worker/controllers/worker/node_devices_admission.go  # F6: profile dimension + mig feasibility branch
@@ -795,7 +901,7 @@ details.
 
 **Dependency graph & strategy.** F1 (binding wrappers) and F2 (ledger types + resource-name plumbing) are
 additive foundations with no consumers, so they land first. F3 (publish the ledger) needs F1+F2. The admission
-path (F5 validate/fold, F6 gate) needs F2's enriched aggregate and F3's `Free`. The actuator (F4 create, then
+path (F5 validate/fold, F6 gate) needs F2's enriched aggregate and F3's `Remaining`. The actuator (F4 create, then
 reclaim) needs F1+F3 and is the riskiest, hardware-only-verifiable piece. The user-visible capacity key (F7)
 lands **after** the actuator works, so we never advertise a schedulable `.sliced.mig-*` whose data path isn't
 ready. The tree builds and tests green at every checkpoint. The de-risk-first task is the pure placement/free
@@ -805,16 +911,19 @@ there too (Open Question 1).
 **Phase A — De-risk & foundations**
 
 [x] **T1 (PoC / de-risk): pure placement-free math + profile↔NVML-id mapping + units fold.**
-    - Add, in the nvidia detector/allocator package (no NVML I/O): `computeFreeProfiles(occupied []Placement,
-      possible map[profileName][]Placement) map[profileName]int` (count non-overlapping legal slots per
-      profile); the `profileName ↔ {GI profile id, CI profile id, CI eng profile id}` table for the kept C==G
-      profiles (pin against `mig-parted`'s `SetMigConfig` sequence + NVML `const.go` ids — Open Question 1). The
-      units fold **reuses the existing `nodefeature.MemoryMibToUnits`** (no new fold function, no `/8` constant).
+    - Add (no NVML I/O): `ComputeRemainingProfiles(occupied []Placement, possible map[profileName][]Placement)
+      map[profileName]int` (count non-overlapping legal slots per profile); the `profileName ↔ {GI profile id,
+      CI profile id, CI eng profile id}` table for the kept C==G profiles (pin against `mig-parted`'s
+      `SetMigConfig` sequence + NVML `const.go` ids — Open Question 1). The units fold **reuses the existing
+      `nodefeature.MemoryMibToUnits`** (no new fold function, no `/8` constant).
     - Acceptance: table tests — A100 worked example (`1×3g.20gb@slot0` → `{1g.5gb:3, 1g.10gb:2, 2g.10gb:1,
       3g.20gb:1}`), empty card → per-profile ceilings, a fully-fragmented card → the correct reduced map; the
       CI mapping covers `1g.5gb/1g.10gb/2g.10gb/3g.20gb/4g.20gb/7g.40gb`; the fold equals
       `MemoryMibToUnits(profile.MemoryMib, cardVRAM)` (identical to a same-VRAM soft request).
       Verify: `go test ./pkg/devicemanager/...`.
+    - **Re-plan (Decision 1, refined in T4):** this geometry landed in `pkg/devicemanager/detector/nvidia`. T4
+      splits it by layer — the NVML-constant-bound id maps to `binding/nvml`, the pure interval free-count to
+      `pkg/device` (the reconciler cannot import the cgo `binding/nvml`; see F1/T4).
 
 [x] **T2: F1 — complete the `binding/nvml` MIG wrappers.**
     - Add the wrappers listed in F1 to `library_device.go` (Destroy×2, `GetGpuInstancePossiblePlacements` with
@@ -825,7 +934,7 @@ there too (Open Question 1).
 
 [x] **T3: F2 — ledger API types + aggregate memory enrichment + resource-name plumbing.**
     - `api/worker/v1alpha1/devices.go`: add `AcceleratorProfileCount{Name,Count}`, `AllocatedProfiles`/
-      `FreeProfiles` on `AcceleratorAllocation` (contiguous fields 6/7), and `MemoryMib` (field 3) on the
+      `RemainingProfiles` on `AcceleratorAllocation` (contiguous fields 6/7), and `MemoryMib` (field 3) on the
       group aggregate `AcceleratorSlicedPhysicalDetailProfile` (the fold input; `MemorySlices` stays a per-card
       field for placement); `pkg/device/types.go` alias if needed.
     - `pkg/nodefeature/knowns.go`: `GetAcceleratableSlicedMigResourceName(manufacturer, profile)` +
@@ -838,18 +947,37 @@ there too (Open Question 1).
 
 > **Checkpoint A:** foundations in place, no consumer yet; full build + `go test ./...` green.
 
-**Phase B — Publish the ledger (nothing allocates yet)**
+**Phase B — Publish the ledger by annotation-merge + detect cache (nothing allocates yet)**
 
-[ ] **T4: F3 — DeviceManager computes+publishes the per-card `Allocated`/`Free`, folded into `computeStatus`.**
-    - Add the vendor NVML hook (NVIDIA allocator exposes `profileLedger(card)`), call it **inside**
-      `DevicesReconciler.Reconcile`'s wholesale Status build (`controller.go:100-157`) so the ledger is not
-      stomped (NEW-5); build occupied intervals from `GetGpuInstances`→`GetInfo().Placement`, `Free` via T1;
-      debounce the publish; the "ledger not ready" (no `FreeProfiles`) rollout-skew state is representable.
-    - Acceptance: pure-fn wiring test + a fixture asserting a non-MIG card → empty ledgers and a MIG card →
-      the T1 map; a **second (annotation-driven) reconcile does not erase** the ledger. Verify:
-      `go test ./pkg/deviceplugin/... ./pkg/devicemanager/...`.
+[x] **T4: F1(geometry)+F2(placement fields)+F3 — reconciler annotation-merge ledger, no NVML hook.**
+    This is the re-planned T4 (Decisions 1 & 2); it supersedes the earlier NVML-hook build (drop the
+    `ProfileLedgerFunc`/`RegisterProfileLedger` hook, the `detector.ProfileLedger` NVML read, and the allocator
+    `_linux/_other` ledger seam). Steps:
+    - **Relocate the T1 geometry by layer** (Decision 1, refined): the profile-id maps
+      (`MigProfileIDsForComputeSlices` + its maps) → `binding/nvml/mig_placement.go`; the pure free-count
+      (`ComputeRemainingProfiles` + overlap) → `pkg/device/physical_placement.go` on the operator `AcceleratorPhysicalPlacement`
+      type. The reconciler (`pkg/deviceplugin`) links Go's `plugin` package and cannot import the cgo
+      `binding/nvml` (verified darwin load abort), so the free-count it consumes stays operator-side. Move the
+      table tests with each; delete the detector's `mig_placement.go`; update importers.
+    - **API additions (F2):** `AcceleratorPhysicalPlacement{Start,Length}` (Length not Size — avoids the protobuf
+      `Size()` collision); capability `AcceleratorPhysicalSlicedProfile.Placements []AcceleratorPhysicalPlacement`
+      (field 6); annotation-transport `AcceleratorAllocation.AllocatedPhysicalProfile` (field 8) +
+      `AllocatedPhysicalPlacements` (field 9). `make generate` (from the main checkout), contiguous numbers.
+    - **Detect-time cache (F3):** the NVIDIA detector enumerates each MIG profile's full empty-card
+      `GetGpuInstancePossiblePlacements` once and stores it in `Placements` (goes into `Devices.Spec`).
+    - **Reconciler (F3):** in `DevicesReconciler.Reconcile`'s wholesale Status build (the `applyAllocatedStatus`
+      pass), for each MIG card union the live Pods' `AllocatedPhysicalPlacements` → occupied, set `AllocatedProfiles`
+      (count by profile) and `RemainingProfiles = device.ComputeRemainingProfiles(occupied, Placements)`. **No NVML; pure
+      arithmetic**, folded inside the single Status write (not stomped).
+    - Acceptance: id-map table tests pass under `binding/nvml`, free-count table tests under `pkg/device`; a
+      reconciler (fake-client) test — non-MIG card → empty ledgers; a MIG card with cached `Placements` and two
+      annotated same-profile placements at different slots → correct `AllocatedProfiles`/`RemainingProfiles` (matches
+      the A100 worked example); ledger **survives a second reconcile**; `Remaining` overstate-only (never below the
+      true value for seen placements); no NVML in tests. Verify:
+      `go test ./binding/nvml/... ./pkg/device/... ./pkg/deviceplugin/... ./pkg/devicemanager/...`.
 
-> **Checkpoint B:** the ledger flows end-to-end into `Devices.Status`; still nothing consumes it for placement.
+> **Checkpoint B:** the ledger flows into `Devices.Status` by annotation-merge + arithmetic (empty occupied until
+> T7 writes placements); the reconciler does no device I/O. Nothing consumes the ledger for placement yet.
 
 **Phase C — Admission path (validate + gate), still no on-node create**
 
@@ -864,9 +992,9 @@ there too (Open Question 1).
 
 [ ] **T6: F6 — AdmissionCheck profile-aware feasibility (Retry-only).**
     - `node_devices_admission.go`: `cardRequest.profile` (scan Containers + InitContainers); mig feasibility
-      branch (`PhysicalSliced.Profiles` non-empty ∧ `Mode∈{None,Sliced}` ∧ `FreeProfiles[profile]≥1`); "ledger
+      branch (`PhysicalSliced.Profiles` non-empty ∧ `Mode∈{None,Sliced}` ∧ `RemainingProfiles[profile]≥1`); "ledger
       not ready" Retry; logical branch excludes MIG cards.
-    - Acceptance: F6 table tests (≤N Ready / >N Retry; `Free==0` Retry not Reject; ledger-not-ready distinct
+    - Acceptance: F6 table tests (≤N Ready / >N Retry; `Remaining==0` Retry not Reject; ledger-not-ready distinct
       Retry; MIG excluded from logical; Exclusive card not a mig candidate; init-only counted). Verify:
       `go test ./pkg/worker/controllers/worker/...`.
 
@@ -877,11 +1005,15 @@ there too (Open Question 1).
 
 [ ] **T7: F4 — device-plugin `Allocate` MIG branch (create/reuse under per-card lock + ownership marker).**
     - Per-card lock guarding create/marker-write; reuse-or-`CreateGpuInstanceWithPlacement`+`CreateComputeInstance`
-      (T1 slot-pick, T2 wrappers); atomic on-disk marker `podUID→{card,giId,ciId,migUUID}` written in-section;
-      NVIDIA Responder MIG branch injects only `NVIDIA_VISIBLE_DEVICES=<MIG UUID>` (no libvgpu/CUDA_DEVICE_*);
-      CI-fail → destroy GI; roll back on marker/patch failure.
-    - Acceptance: seam tests for slot-pick, reuse-vs-create, marker round-trip; concurrent same-card Allocate →
-      no double-create/collision, sibling not blocked; crash-then-retry rebinds. Verify:
+      (T1 slot-pick now from `binding/nvml`, T2 wrappers); atomic on-disk marker
+      `podUID→{card,giId,ciId,migUUID,profile,start:size}` written in-section; **record the chosen
+      `{profile, start:size}` into the Pod's allocation annotation (`AllocatedPhysicalPlacements`) — the occupied
+      source T4's reconciler reads to derive `Remaining`**; NVIDIA Responder MIG branch injects only
+      `NVIDIA_VISIBLE_DEVICES=<MIG UUID>` (no libvgpu/CUDA_DEVICE_*); CI-fail → destroy GI; roll back on
+      marker/annotation-patch failure. The NVML create/destroy lives behind a `_linux.go`/`_other.go` seam (the
+      pure slot-pick + marker + annotation-encode logic is platform-independent + seam-testable).
+    - Acceptance: seam tests for slot-pick, reuse-vs-create, marker + annotation round-trip; concurrent same-card
+      Allocate → no double-create/collision, sibling not blocked; crash-then-retry rebinds. Verify:
       `go test ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/nvidia/...`.
 
 [ ] **T8: F4 — reclaim loop (destroy CI→GI, bounded IN_USE retry, attribution self-check, orphan GC).**
@@ -911,9 +1043,9 @@ there too (Open Question 1).
     - Docs: allocation user contract (request shape, profile-name requirement, value==1 / one-profile-per-Pod,
       MIG-must-go-through-Kueue, reclaim/IN_USE), with the profile + placement tables copied in (no research
       links).
-    - H100 e2e on `testing/infra`: enable MIG → restart DeviceManager → `Free` appears → submit `mig-1g.10gb`
+    - H100 e2e on `testing/infra`: enable MIG → restart DeviceManager → `Remaining` appears → submit `mig-1g.10gb`
       LocalQueue workload → admits, scheduler-fit + kubelet admission verified, container sees the MIG device
-      via `nvidia-smi`, `libvgpu.so` absent, `Free` decrements → delete → instance destroyed, `Free` restores;
+      via `nvidia-smi`, `libvgpu.so` absent, `Remaining` decrements → delete → instance destroyed, `Remaining` restores;
       assert the `/8` denominator on the actual card generation. A100 reset path documented, validated externally.
     - Acceptance: doc renders (generic "a Kubernetes cluster"); H100 e2e passes on the H100 host.
 
@@ -925,24 +1057,30 @@ there too (Open Question 1).
 code solid enough prior to committing the changes necessary to implement this enhancement.
 
 #### Prerequisite testing updates
-- **Factor the novel logic into pure functions (T1)** — placement-free math, the profile↔GI/CI-id mapping, and
-  the units fold — since there is no local MIG hardware and NVML create/destroy is hardware-only. The NVML I/O
-  wrappers (F1) are build-level only locally.
-- **Add a fake NVML/ledger seam** for the DeviceManager MIG hook (F3) and the device-plugin MIG Allocate/reclaim
-  (F4), so create/reuse/destroy decisions, the ownership-marker round-trip, and the reclaim debounce are
-  table-testable without hardware (mirror the MetaX/Cambricon reclaimer seam + temp marker dir).
+- **Factor the novel logic into pure functions** — the profile↔GI/CI-id mapping (`binding/nvml`), the pure
+  free-count math (`pkg/device`), and the units fold — since there is no local MIG hardware and NVML
+  create/destroy is hardware-only. The NVML I/O wrappers (F1) are build-level only locally.
+- **The F3 ledger is fake-client-testable with NO seam** — the reconciler derives it from `Devices.Spec`
+  (cached `Placements`) + Pod annotations (`AllocatedPhysicalPlacements`), pure arithmetic; the test injects those as
+  fixtures. **Add a fake NVML seam only for the device-plugin MIG Allocate/reclaim (F4)** so create/reuse/destroy
+  decisions, the marker + annotation round-trip, and the reclaim debounce are table-testable without hardware
+  (mirror the MetaX/Cambricon reclaimer seam + temp marker dir).
 - **Snapshot the pre-change non-MIG `.sliced.*` output** for a representative fixture before T9, to prove the
   four keys and admission verdicts are byte-identical after (criterion 4).
 
 #### Unit tests
 Per-package targets (percentages are targets to meet or exceed; concrete names recorded after the PR merges):
-- `binding/nvml`: `2026-07-22` - `None` new % (thin cgo wrappers; build-level, real calls hardware-only)
-- `pkg/devicemanager/detector/nvidia` (or the allocator pkg holding T1): `2026-07-22` - `80%` (computeFreeProfiles
-  A100 worked example / empty / fragmented; profile↔id mapping for all six kept profiles; units fold)
-- `pkg/devicemanager/allocator/nvidia`: `2026-07-22` - `75%` (MIG create/reuse decision, marker round-trip,
-  reclaim destroy/IN_USE/self-check/orphan-GC on the fake seam; MIG env injection = MIG UUID only, no libvgpu)
-- `pkg/deviceplugin`: `2026-07-22` - `75%` (Allocate mig branch under per-card lock; ledger folded into the
-  wholesale Status build and not stomped on a second reconcile; concurrent same-card no-collision)
+- `binding/nvml`: `2026-07-22` - `80%` for the profile↔GI/CI-id mapping (all six kept profiles); the cgo
+  wrappers stay build-level (real calls hardware-only)
+- `pkg/device`: `2026-07-22` - `80%` for the pure free-count geometry (ComputeRemainingProfiles A100 worked example /
+  empty / fragmented; ProfileCountSlice name-sort + nil-empty)
+- `pkg/devicemanager/detector/nvidia`: `2026-07-22` - `80%` (detect-time `Placements` enumeration/caching; the
+  units fold; profile derivation — geometry now lives in `binding/nvml`)
+- `pkg/devicemanager/allocator/nvidia`: `2026-07-22` - `75%` (MIG create/reuse decision, marker + annotation
+  round-trip, reclaim destroy/IN_USE/self-check/orphan-GC on the fake seam; MIG env = MIG UUID only, no libvgpu)
+- `pkg/deviceplugin`: `2026-07-22` - `75%` (reconciler MIG ledger by annotation-merge + `ComputeRemainingProfiles`,
+  folded into the wholesale Status build and not stomped on a second reconcile, overstate-only; Allocate mig
+  branch under per-card lock; concurrent same-card no-collision)
 - `pkg/worker/webhooks/worker`: `2026-07-22` - `80%` (F5: fold, value==1, mig/logical exclusivity, ≤1 profile
   per Pod, unknown-profile reject, initContainers, empty-Detail retryable)
 - `pkg/worker/controllers/worker` (node_devices_admission): `2026-07-22` - `80%` (F6 feasibility matrix,
@@ -957,15 +1095,18 @@ Per-package targets (percentages are targets to meet or exceed; concrete names r
 Fake-client reconciler/webhook tests (project convention — no envtest cluster):
 - **Non-MIG numeric identity (regression guard):** a non-MIG NVIDIA group → the four `.sliced.*` keys and
   exclusive/shared/soft-sliced admission are byte-identical to pre-change (criterion 4).
-- **Ledger not stomped (NEW-5):** compute the MIG ledger, then trigger an annotation-driven reconcile; assert
-  `FreeProfiles`/`AllocatedProfiles` survive the wholesale Status rebuild.
-- **Occupied-interval reconstruction (C3):** two same-profile GIs at different legal slots (fake seam) →
-  `Free` reflects their actual placements, not the empty-card ceiling.
+- **Ledger not stomped (NEW-5):** a MIG card with cached `Placements` + Pod MIG annotations reconciles to a
+  ledger; a second reconcile (extra non-MIG Pod annotation) recomputes it in the wholesale build — assert
+  `RemainingProfiles`/`AllocatedProfiles` survive (recomputed, not a stompable second write).
+- **Occupied-interval reconstruction (C3):** two same-profile Pods annotated at different legal slots →
+  per-card `Remaining` reflects their actual placements, not the empty-card ceiling. Pure arithmetic, no NVML.
+- **`Remaining` overstate-only (NEW):** for the placements the reconciler sees, computed `Remaining` never drops below the
+  true value (missing occupancy only inflates `Remaining`), so the AdmissionCheck never falsely strands capacity.
 - **Ownership + restart (C2):** create GI+CI + marker; simulate Allocate response loss / process restart before
   the response; retry Allocate → rebinds the same GI, no double-create, no orphan.
 - **Reuse-vs-GC ordering (NEW-4):** crash after GI create but before the response; on kubelet retry the GI is
   rebound and the reclaim loop does not destroy it mid-retry (debounce > retry window).
-- **Concurrent same-card Allocate (C4):** two Allocates for one profile on one card with `Free==1` → per-card
+- **Concurrent same-card Allocate (C4):** two Allocates for one profile on one card with `Remaining==1` → per-card
   lock admits one, the other fails safe → recreate; a sibling card is not blocked while card A creates.
 - **Reclaim matrix (C10):** dead-Pod GI destroyed after debounce; residual `IN_USE` → bounded retry + condition,
   sibling-card Allocate proceeds; node-reboot (NVML zero GIs, stale markers) → ledger realigns, markers GC'd;
@@ -973,12 +1114,13 @@ Fake-client reconciler/webhook tests (project convention — no envtest cluster)
 - **Units-fold quota semantics (C7) + MIG↔logical parity:** a MIG `mig-<profile>` and a soft
   `.sliced.memory-mib` request of the profile's VRAM fold to the **identical** `.sliced.units`/credits (the
   non-conflict property); and, matching the worked example, on an H100 with CQ quota `= cards×D`, 8× `1g.10gb`
-  on one card → 7 admit, the 8th quota-fits (credits) but Retries on `Free==0` — assert this documented
+  on one card → 7 admit, the 8th quota-fits (credits) but Retries on `Remaining==0` — assert this documented
   compute-limited under-charge; same-memory profiles (`1g.20gb`/`2g.20gb`) charge identically.
 - **Multi-profile Pod reject (C8):** a Pod with two containers naming different profiles, and an init-container
   profile ≠ app-container profile → ingress reject.
-- **Rollout skew (NEW-17):** operator at spec-2, DaemonSet at spec-1 format (no `FreeProfiles`) → mig workload
-  Retries with a "ledger not ready" message (no Reject), then admits once the DaemonSet rolls.
+- **Rollout skew (NEW-17):** operator at spec-2, DaemonSet at spec-1 format (no `Placements` cached, no MIG
+  annotation) → mig workload Retries with a "ledger not ready" message (no Reject), then admits once the
+  DaemonSet rolls.
 - **Kueue coverage (NEW-9):** a mig workload on a LocalQueue whose CQ gives the manufacturer credits quota →
   reaches F5/F6 (not stranded in flavor assignment); the mig key gets the soft keys' credits-based treatment.
 - **Comparability/contiguity (from spec 1):** `InstanceTypeSpec` still a valid map key; `AcceleratorAllocation`
@@ -986,10 +1128,10 @@ Fake-client reconciler/webhook tests (project convention — no envtest cluster)
 
 #### e2e tests
 - **H100 real-card (Hopper+, reset-free) — the load-bearing proof:** on `testing/infra`, enable MIG on a card,
-  restart the DeviceManager, assert `Free` appears; submit a `mig-1g.10gb` LocalQueue workload; assert
+  restart the DeviceManager, assert `Remaining` appears; submit a `mig-1g.10gb` LocalQueue workload; assert
   scheduler-fit + kubelet admission + `Devices.Status` accounting, the container sees exactly the `1g.10gb` MIG
-  device via `nvidia-smi`, `libvgpu.so` is absent, `Free[1g.10gb]` decrements; delete → instance destroyed,
-  `Free` restores; assert the MIG `.sliced.units` fold equals `MemoryMibToUnits(profile.MemoryMib, cardVRAM)`
+  device via `nvidia-smi`, `libvgpu.so` is absent, `Remaining[1g.10gb]` decrements; delete → instance destroyed,
+  `Remaining` restores; assert the MIG `.sliced.units` fold equals `MemoryMibToUnits(profile.MemoryMib, cardVRAM)`
   (identical to a same-VRAM soft request) on the actual card generation; note the mode is non-persistent across
   reboot (Hopper+). This is the observable proof of criteria 1/2/5/6 and the Kueue-coverage
   path (NEW-9) + capacity-key allocatable path (C6).
@@ -1015,9 +1157,14 @@ Fake-client reconciler/webhook tests (project convention — no envtest cluster)
   The profile is already in the container's `.sliced.mig-*` request; card+slot selection is the device-plugin's
   own concern under `allocateMutex`. An annotation would couple the decision to a fragile Workload→Pod
   propagation path for no benefit.
-- **Store the placement `Free` map statically in the capability type** — rejected. Free depends on live
-  occupancy; storing it statically would immediately go stale. It is recomputed on-node from NVML
-  possible-placements and published to `Status` (observed), where it belongs.
+- **Store the placement `Remaining` map statically in the capability type** — rejected. `Remaining` depends on live
+  occupancy; storing it statically would immediately go stale. What *is* cached in the capability is the static,
+  occupancy-independent **possible-placement set** (`Placements`, F2); `Remaining` is recomputed every reconcile from
+  it minus the annotation-derived occupied (F3) and published to `Status` (observed), where it belongs.
+- **Compute `Remaining` from live NVML inside the reconciler** — rejected (Decision 2). It is accurate (catches
+  out-of-band/orphan GIs immediately) but puts ~50 blockable NVML ioctls per MIG card into the level-based
+  reconciler's hot path, stalling all modes' Status updates. The annotation-merge + detect-cache path keeps the
+  reconciler pure arithmetic; the accepted cost is transient `Remaining` overstatement caught at `Allocate`/reclaim.
 - **Add a soft reservation/TTL layer to the AdmissionCheck for the race** — deferred, not built. The existing
   `allocateMutex` arbitrates; a reservation layer is added only if real-hardware contention proves it
   necessary (Ask-first boundary).
@@ -1028,17 +1175,17 @@ Fake-client reconciler/webhook tests (project convention — no envtest cluster)
    `NVML_COMPUTE_INSTANCE_PROFILE_*` / `NVML_COMPUTE_INSTANCE_ENGINE_PROFILE_*` constants for each C==G profile
    are pinned in T1's mapping table against `mig-parted`'s observed sequence + the NVML `const.go` ids, and
    confirmed on the H100 e2e (T10). (F1/F4)
-2. **Ledger publish cadence** — the debounce window and the "publish only on real `Free` change" predicate may
-   need tuning to avoid patch amplification under rapid create/destroy; an implementation-time measurement,
-   settled in T4 / the e2e. (F3)
+2. **Ledger publish cadence** — resolved by Decision 2: the ledger is recomputed each reconcile from annotations
+   + cached `Placements` and written only through the existing `DeepEqual` gate, so there is no separate publish
+   cadence or NVML burst to tune. (F3)
 3. **Reclaim ownership** — resolved: reclaim runs in a **separate worker** (`RunSlicedReclaimLoop`, as
    MetaX/Cambricon do) with per-card locks, not co-located with `Allocate`, so an `IN_USE` retry never blocks a
    sibling card's allocation (T8/F4). (F4)
 4. **A100 e2e coverage** — the Ampere reset-required mode path is documented but validated externally; if an
    A100 becomes available, add its reset-orchestration e2e as a follow-up (not blocking this spec). (F8)
 5. **A status-ledger Devices watch for faster AdmissionCheck convergence** — deferred, Ask-first: F6 converges
-   via Kueue's eviction+requeue (correct but ≥30s/cycle with quota held). A Status-`FreeProfiles`-filtered watch
+   via Kueue's eviction+requeue (correct but ≥30s/cycle with quota held). A Status-`RemainingProfiles`-filtered watch
    enqueuing affected Workloads would cut the latency; add only if the eviction-cycle cost proves material. (F6)
 6. **DRA / KEP-4815 evolution** — if/when the mig-* extended-resource route migrates to ResourceClaim + counter
-   sets, whether the per-card `Free` ledger maps directly onto counter-set accounting is a future-direction
+   sets, whether the per-card `Remaining` ledger maps directly onto counter-set accounting is a future-direction
    question, not built here.

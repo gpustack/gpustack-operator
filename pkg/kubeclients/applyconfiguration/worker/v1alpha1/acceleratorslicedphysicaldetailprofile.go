@@ -15,7 +15,9 @@ type AcceleratorSlicedPhysicalDetailProfileApplyConfiguration struct {
 	// per profile name within a group, so it is carried through (not summed). It is the
 	// VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
 	// for a MIG request, which is why the aggregate — reachable from the InstanceType
-	// Detail, unlike per-card Devices — must carry it.
+	// Detail, unlike per-card Devices — must carry it. Optional in the schema (a real
+	// profile always carries a non-zero value); the Pod webhook treats a not-yet-populated
+	// detail as a retryable not-ready state rather than relying on schema-required presence.
 	MemoryMib *int64 `json:"memoryMib,omitempty"`
 }
 

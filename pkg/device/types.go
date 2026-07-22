@@ -32,6 +32,11 @@ type (
 	AcceleratorSlicedPhysicalDetail = workercore.AcceleratorSlicedPhysicalDetail
 	// AcceleratorSlicedPhysicalDetailProfile represents one group-aggregated physical profile.
 	AcceleratorSlicedPhysicalDetailProfile = workercore.AcceleratorSlicedPhysicalDetailProfile
+	// AcceleratorProfileCount pairs a physical-slice profile name with an instance count
+	// (allocated or free), as carried in a card's per-card MIG ledger.
+	AcceleratorProfileCount = workercore.AcceleratorProfileCount
+	// AcceleratorPhysicalPlacement is one memory-slice interval a hardware GPU partition occupies on a card.
+	AcceleratorPhysicalPlacement = workercore.AcceleratorPhysicalPlacement
 	// AcceleratorStatus represents the status of the accelerator device,
 	// including its health status and other status information.
 	AcceleratorStatus = workercore.AcceleratorStatus
