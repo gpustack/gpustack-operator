@@ -34,3 +34,36 @@ resource "nebius_vpc_v1_subnet" "this" {
   }
 }
 
+resource "nebius_vpc_v1_security_group" "this" {
+  parent_id  = var.parent_id
+  name       = local.vm_name
+  network_id = nebius_vpc_v1_network.this.id
+}
+
+resource "nebius_vpc_v1_security_rule" "ssh_ingress" {
+  parent_id = nebius_vpc_v1_security_group.this.id
+  name      = "ssh-ingress"
+  access    = "ALLOW"
+  protocol  = "TCP"
+  priority  = 100
+  type      = "STATEFUL"
+
+  ingress = {
+    source_cidrs      = var.ssh_source_cidrs
+    destination_ports = [22]
+  }
+}
+
+resource "nebius_vpc_v1_security_rule" "egress" {
+  parent_id = nebius_vpc_v1_security_group.this.id
+  name      = "egress"
+  access    = "ALLOW"
+  protocol  = "ANY"
+  priority  = 200
+  type      = "STATEFUL"
+
+  egress = {
+    destination_cidrs = ["0.0.0.0/0"]
+  }
+}
+

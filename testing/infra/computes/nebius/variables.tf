@@ -27,3 +27,14 @@ variable "vm_name_prefix" {
   type        = string
   default     = "gpustack-nebius"
 }
+
+variable "ssh_source_cidrs" {
+  description = "CIDR blocks allowed to SSH (TCP/22) into the VM."
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+
+  validation {
+    condition     = alltrue([for c in var.ssh_source_cidrs : can(cidrhost(c, 0))])
+    error_message = "ssh_source_cidrs must be valid CIDR blocks (e.g. '0.0.0.0/0')."
+  }
+}
