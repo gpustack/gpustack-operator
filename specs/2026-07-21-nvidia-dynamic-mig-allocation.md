@@ -816,7 +816,7 @@ there too (Open Question 1).
       `MemoryMibToUnits(profile.MemoryMib, cardVRAM)` (identical to a same-VRAM soft request).
       Verify: `go test ./pkg/devicemanager/...`.
 
-[ ] **T2: F1 — complete the `binding/nvml` MIG wrappers.**
+[x] **T2: F1 — complete the `binding/nvml` MIG wrappers.**
     - Add the wrappers listed in F1 to `library_device.go` (Destroy×2, `GetGpuInstancePossiblePlacements` with
       `_v2`-preferred fallback, `GetGpuInstances`, `GetComputeInstanceProfileInfo`, `GetComputeInstances`, the
       MIG-device UUID accessor; confirm `GpuInstance.GetInfo().Placement` exposes `{Start,Size}`).

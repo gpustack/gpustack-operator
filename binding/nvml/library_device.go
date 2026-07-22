@@ -3,6 +3,7 @@ package nvml
 import "C"
 import (
 	"fmt"
+	"strings"
 	"unsafe"
 
 	"gpustack.ai/gpustack/binding"
@@ -395,6 +396,10 @@ type MigDevice interface {
 	// GetGpuInstance retrieves the GPU instance associated with the device,
 	// returning the GPU instance and a Return value indicating the success or failure of the operation.
 	GetGpuInstance() (GpuInstance, Return)
+	// GetGpuInstanceId returns the id of the GPU instance that owns this MIG device handle.
+	// Unlike GetGpuInstance it does not resolve the full instance (which needs the parent
+	// device handle), so it is valid to call directly on a MIG device handle.
+	GetGpuInstanceId() (uint32, Return)
 	// GpmQueryDeviceSupportV retrieves the support information for GPU performance metrics (GPM) on the device,
 	// returning a handler that can be used to access different versions of the GPM support information.
 	GpmQueryDeviceSupportV() GpmSupportHandler
@@ -491,6 +496,15 @@ func (l Device) CreateGpuInstanceWithPlacement(info *GpuInstanceProfileInfo, pla
 
 // GetGpuInstance retrieves the GPU instance associated with the device,
 // returning the GPU instance and a Return value indicating the success or failure of the operation.
+func (l Device) GetGpuInstanceId() (uint32, Return) {
+	if l.so.Lookup("nvmlDeviceGetGpuInstanceId") != nil {
+		return 0, ERROR_FUNCTION_NOT_FOUND
+	}
+	var gpuInstanceId uint32
+	ret := nvmlDeviceGetGpuInstanceId(l.handle, &gpuInstanceId)
+	return gpuInstanceId, ret
+}
+
 func (l Device) GetGpuInstance() (GpuInstance, Return) {
 	var gpuInstanceId uint32
 	ret := nvmlDeviceGetGpuInstanceId(l.handle, &gpuInstanceId)
@@ -620,13 +634,18 @@ func (l GpuInstanceProfileInfoHandler) V3() (GpuInstanceProfileInfo_v3, Return) 
 // versioned NVML calls (which carry the profile Name) and falls back to the legacy call
 // (no Name) on older drivers, returning the first successful result or the last error.
 // An unsupported profile id surfaces as a non-success Return, which the caller skips.
+//
+// The V3 result is accepted only when it actually carries a Name: some drivers dispatch
+// the versioned call purely on the (v2==v3) struct size and write the v2 layout, leaving
+// the v3-offset Name empty; in that case V2 is queried, which returns the same profile
+// with its Name populated.
 func (l Device) GetGpuInstanceProfileInfo(profileId uint32) (GpuInstanceProfileInfo_v3, Return) {
 	h := GpuInstanceProfileInfoHandler{
 		device:               l.handle,
 		gpuInstanceProfileId: profileId,
 		so:                   l.so,
 	}
-	if info, ret := h.V3(); ret.IsSuccess() {
+	if info, ret := h.V3(); ret.IsSuccess() && info.GetName() != "" {
 		return info, ret
 	}
 	if info, ret := h.V2(); ret.IsSuccess() {
@@ -635,10 +654,12 @@ func (l Device) GetGpuInstanceProfileInfo(profileId uint32) (GpuInstanceProfileI
 	return h.V1()
 }
 
-// GetName returns the profile name (e.g. "1g.5gb") from the NUL-terminated C char array.
-// It is empty on the legacy (V1) path, which carries no name.
+// GetName returns the canonical profile name (e.g. "1g.5gb") from the NUL-terminated C
+// char array. NVML reports it with a "MIG " prefix (e.g. "MIG 1g.5gb"), which is stripped
+// so the name matches the profile identifiers used in resource keys and user requests. It
+// is empty on the legacy (V1) path, which carries no name.
 func (info *GpuInstanceProfileInfo_v3) GetName() string {
-	return C.GoString((*C.char)(unsafe.Pointer(&info.Name[0])))
+	return strings.TrimPrefix(C.GoString((*C.char)(unsafe.Pointer(&info.Name[0]))), "MIG ")
 }
 
 // CreateComputeInstance creates a compute instance associated with the GPU instance using the specified profile information.
@@ -843,4 +864,186 @@ func (l ComputeInstanceProfileInfoHandler) V3() (ComputeInstanceProfileInfo_v3, 
 		(*ComputeInstanceProfileInfo_v2)(unsafe.Pointer(&info)),
 	)
 	return info, ret
+}
+
+// Destroy destroys the GPU instance. It returns ERROR_IN_USE while the instance
+// still holds compute instances or active processes, so the caller destroys the
+// compute instances first (GetComputeInstances then ComputeInstance.Destroy) and
+// retries with bounds on IN_USE.
+func (l GpuInstance) Destroy() Return {
+	if l.so.Lookup("nvmlGpuInstanceDestroy") != nil {
+		return ERROR_FUNCTION_NOT_FOUND
+	}
+	return nvmlGpuInstanceDestroy(l.gpuInstance)
+}
+
+// Destroy destroys the compute instance. It returns ERROR_IN_USE while the instance
+// still has active processes, so the caller retries with bounds on IN_USE.
+func (l ComputeInstance) Destroy() Return {
+	if l.so.Lookup("nvmlComputeInstanceDestroy") != nil {
+		return ERROR_FUNCTION_NOT_FOUND
+	}
+	return nvmlComputeInstanceDestroy(l.computeInstance)
+}
+
+// gpuInstancePossiblePlacementsCall matches the base and _v2 NVML
+// possible-placements symbols, which share a signature, so
+// GetGpuInstancePossiblePlacements can prefer _v2 and fall back to the base with a
+// single count-then-fill implementation.
+type gpuInstancePossiblePlacementsCall func(nvmlDevice, uint32, *GpuInstancePlacement, *uint32) Return
+
+func (l Device) gpuInstancePossiblePlacements(symbol string, call gpuInstancePossiblePlacementsCall, profileId uint32) ([]GpuInstancePlacement, Return) {
+	if l.so.Lookup(symbol) != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+	var count uint32
+	if ret := call(l.handle, profileId, nil, &count); !ret.IsSuccess() {
+		return nil, ret
+	}
+	if count == 0 {
+		return nil, SUCCESS
+	}
+	placements := make([]GpuInstancePlacement, count)
+	ret := call(l.handle, profileId, &placements[0], &count)
+	return placements[:count], ret
+}
+
+// GetGpuInstancePossiblePlacements returns the legal placements (start:size in
+// memory-slice units) for the given GPU instance profile on this device. It queries
+// the count first, then fills the slice, and prefers the _v2 symbol with a base
+// fallback, mirroring the V1/V2/V3 profile-info handlers.
+func (l Device) GetGpuInstancePossiblePlacements(profileId uint32) ([]GpuInstancePlacement, Return) {
+	placements, ret := l.gpuInstancePossiblePlacements(
+		"nvmlDeviceGetGpuInstancePossiblePlacements_v2", nvmlDeviceGetGpuInstancePossiblePlacements_v2, profileId)
+	if ret == ERROR_FUNCTION_NOT_FOUND {
+		return l.gpuInstancePossiblePlacements(
+			"nvmlDeviceGetGpuInstancePossiblePlacements", nvmlDeviceGetGpuInstancePossiblePlacements, profileId)
+	}
+	return placements, ret
+}
+
+// GetGpuInstances returns the live GPU instances of the given profile on this
+// device. Each handle's info is read so the returned GpuInstance carries its occupied
+// placement — GetInfo().Placement, which the ledger uses to build the occupied intervals.
+//
+// The result buffer is sized from the profile's legal-placement count (its per-card
+// instance ceiling), obtained via GetGpuInstancePossiblePlacements, which takes this
+// creation profileId. It must NOT be sized via GetGpuInstanceProfileInfo(profileId):
+// that call takes a profile ENUM INDEX (0..GPU_INSTANCE_PROFILE_COUNT-1), not a creation
+// Id, and the two differ on real hardware (e.g. H100 "1g.10gb" has creation Id 19 while
+// the enum count is 17), so passing the creation Id there fails and drops every live
+// instance — silently emptying the occupancy ledger, which double-books placement slots
+// on allocation and hides instances from reclaim.
+func (l Device) GetGpuInstances(profileId uint32) ([]GpuInstance, Return) {
+	if l.so.Lookup("nvmlDeviceGetGpuInstances") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+	placements, ret := l.GetGpuInstancePossiblePlacements(profileId)
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+	if len(placements) == 0 {
+		return nil, SUCCESS
+	}
+
+	if l.so.Lookup("nvmlGpuInstanceGetInfo") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+	handles := make([]nvmlGpuInstance, len(placements))
+	// count is the in/out buffer-capacity argument (in: array size, out: number written), so
+	// initialize it to the allocated handle count — never leave it 0, which asks NVML to fill a
+	// zero-capacity buffer and can return an error / empty set on drivers that enforce the in size.
+	count := uint32(len(handles))
+	if ret := nvmlDeviceGetGpuInstances(l.handle, profileId, &handles[0], &count); !ret.IsSuccess() {
+		return nil, ret
+	}
+	instances := make([]GpuInstance, 0, count)
+	for i := uint32(0); i < count; i++ {
+		var info nvmlGpuInstanceInfo
+		if ret := nvmlGpuInstanceGetInfo(handles[i], &info); !ret.IsSuccess() {
+			return nil, ret
+		}
+		instances = append(instances, GpuInstance{
+			device:               l.handle,
+			gpuInstanceId:        info.Id,
+			gpuInstanceProfileId: info.ProfileId,
+			gpuInstancePlacement: info.Placement,
+			gpuInstance:          handles[i],
+			so:                   l.so,
+		})
+	}
+	return instances, SUCCESS
+}
+
+// GetComputeInstanceProfileInfo probes the compute-instance profile identified by
+// ciProfileId and ciEngProfileId on this GPU instance, without requiring an existing
+// compute instance. It is called before CreateComputeInstance to obtain the profile
+// info a compute instance is built from; for the kept "<C>g.<M>gb" profiles the
+// compute instance spans the whole GPU instance (slice-count-matched CI profile,
+// SHARED engine profile).
+func (l GpuInstance) GetComputeInstanceProfileInfo(ciProfileId, ciEngProfileId uint32) (ComputeInstanceProfileInfo, Return) {
+	if l.so.Lookup("nvmlGpuInstanceGetComputeInstanceProfileInfo") != nil {
+		return ComputeInstanceProfileInfo{}, ERROR_FUNCTION_NOT_FOUND
+	}
+	var info ComputeInstanceProfileInfo
+	ret := nvmlGpuInstanceGetComputeInstanceProfileInfo(l.gpuInstance, ciProfileId, ciEngProfileId, &info)
+	return info, ret
+}
+
+// GetComputeInstances returns the live compute instances of the given profile on
+// this GPU instance. The buffer is sized from the profile's InstanceCount, queried
+// with the SHARED engine profile — the only engine profile GPUStack creates — and
+// each handle's info is read to populate the returned ComputeInstance values. Reclaim
+// uses this to destroy a GPU instance's compute instances before the instance itself.
+func (l GpuInstance) GetComputeInstances(ciProfileId uint32) ([]ComputeInstance, Return) {
+	if l.so.Lookup("nvmlGpuInstanceGetComputeInstances") != nil {
+		return nil, ERROR_FUNCTION_NOT_FOUND
+	}
+	profileInfo, ret := l.GetComputeInstanceProfileInfo(ciProfileId, COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED)
+	if !ret.IsSuccess() {
+		return nil, ret
+	}
+	if profileInfo.InstanceCount == 0 {
+		return nil, SUCCESS
+	}
+
+	handles := make([]nvmlComputeInstance, profileInfo.InstanceCount)
+	// count is the in/out buffer-capacity argument; initialize it to the allocated handle count
+	// (see GetGpuInstances) so NVML is never handed a zero-capacity buffer.
+	count := uint32(len(handles))
+	if ret := nvmlGpuInstanceGetComputeInstances(l.gpuInstance, ciProfileId, &handles[0], &count); !ret.IsSuccess() {
+		return nil, ret
+	}
+	instances := make([]ComputeInstance, 0, count)
+	for i := uint32(0); i < count; i++ {
+		var info nvmlComputeInstanceInfo
+		if l.so.Lookup("nvmlComputeInstanceGetInfo_v2") == nil {
+			ret = nvmlComputeInstanceGetInfo_v2(handles[i], &info)
+		} else {
+			ret = nvmlComputeInstanceGetInfo(handles[i], &info)
+		}
+		if !ret.IsSuccess() {
+			return nil, ret
+		}
+		instances = append(instances, ComputeInstance{
+			GpuInstance:              l,
+			computeInstanceId:        info.Id,
+			computeInstanceProfileId: info.ProfileId,
+			computeInstancePlacement: info.Placement,
+			computeInstance:          handles[i],
+		})
+	}
+	return instances, SUCCESS
+}
+
+// GetGpuInstanceRemainingCapacity returns how many more GPU instances of the given
+// profile can still be created on this device, as NVML reports it directly — a
+// cross-check against the placement-derived free count the ledger computes.
+func (l Device) GetGpuInstanceRemainingCapacity(profileId uint32) (uint32, Return) {
+	if l.so.Lookup("nvmlDeviceGetGpuInstanceRemainingCapacity") != nil {
+		return 0, ERROR_FUNCTION_NOT_FOUND
+	}
+	var count uint32
+	ret := nvmlDeviceGetGpuInstanceRemainingCapacity(l.handle, profileId, &count)
+	return count, ret
 }
