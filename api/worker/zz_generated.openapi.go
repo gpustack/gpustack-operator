@@ -55,6 +55,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref),
 		v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref),
 		v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref),
+		v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorProfileCount(ref),
 		v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref),
 		v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref),
 		v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref),
@@ -1906,10 +1907,40 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							Format:      "int32",
 						},
 					},
+					"allocatedProfiles": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedProfiles lists the MIG instances currently created and bound on this card, by profile name. Empty (omitted) for a non-MIG card, so a non-MIG card serializes byte-identically to before this field existed.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"remainingProfiles": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can still be created given the card's occupied placement slots. Empty (omitted) for a non-MIG card. This is the placement-aware number the AdmissionCheck gates on.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"id", "index", "mode"},
 			},
 		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()},
 	}
 }
 
@@ -1929,7 +1960,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref common.Ref
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the maximum number of soft slices this card can host. A MIG-enabled (or pending-enable) card is always 0, which excludes it from the logical capacity keys.",
+							Description: "Count is the maximum number of soft slices this card can host. A card whose MIG mode is currently enabled is always 0, which excludes it from the logical capacity keys; a pending-enable card is not partitioned yet and still reports its soft-slice count.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -2025,6 +2056,35 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref co
 					},
 				},
 				Required: []string{"name", "memoryMib", "computeSlices", "memorySlices", "count"},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorProfileCount(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorProfileCount pairs a physical-slice profile name with a count of instances — allocated (bound) or remaining (still buildable) per the field carrying it. It is a status-only type (never a map key), so the profile ledger and the capability inventory (AcceleratorSlicedPhysicalDetailProfile) stay independently evolvable.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the number of instances of this profile.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"name"},
 			},
 		},
 	}
@@ -2144,8 +2204,16 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(
 							Format:      "int32",
 						},
 					},
+					"memoryMib": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform per profile name within a group, so it is carried through (not summed). It is the VRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits) for a MIG request, which is why the aggregate — reachable from the InstanceType Detail, unlike per-card Devices — must carry it.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
 				},
-				Required: []string{"name"},
+				Required: []string{"name", "memoryMib"},
 			},
 		},
 	}

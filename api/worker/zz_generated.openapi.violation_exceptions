@@ -3,6 +3,8 @@ API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,Instanc
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,NFSInstancePersistentVolumeSource,MountOptions
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1,S3InstancePersistentVolumeSource,MountOptions
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,Accelerator,PhysicalIndexes
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorAllocation,AllocatedProfiles
+API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorAllocation,RemainingProfiles
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorPhysicalSliced,Profiles
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,AcceleratorSlicedPhysicalDetail,Profiles
 API rule violation: list_type_missing,gpustack.ai/gpustack/api/worker/v1alpha1,InstanceStatus,AccessAddresses

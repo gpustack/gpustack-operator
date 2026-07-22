@@ -21,6 +21,14 @@ type AcceleratorAllocationApplyConfiguration struct {
 	Allocated *int32 `json:"allocated,omitempty"`
 	// Remaining is the remaining allocatable units of the device.
 	Remaining *int32 `json:"remaining,omitempty"`
+	// AllocatedProfiles lists the MIG instances currently created and bound on this
+	// card, by profile name. Empty (omitted) for a non-MIG card, so a non-MIG card
+	// serializes byte-identically to before this field existed.
+	AllocatedProfiles []AcceleratorProfileCountApplyConfiguration `json:"allocatedProfiles,omitempty"`
+	// RemainingProfiles lists, by profile name, how many more instances of each profile can
+	// still be created given the card's occupied placement slots. Empty (omitted) for a
+	// non-MIG card. This is the placement-aware number the AdmissionCheck gates on.
+	RemainingProfiles []AcceleratorProfileCountApplyConfiguration `json:"remainingProfiles,omitempty"`
 }
 
 // AcceleratorAllocationApplyConfiguration constructs a declarative configuration of the AcceleratorAllocation type for use with
@@ -66,5 +74,31 @@ func (b *AcceleratorAllocationApplyConfiguration) WithAllocated(value int32) *Ac
 // If called multiple times, the Remaining field is set to the value of the last call.
 func (b *AcceleratorAllocationApplyConfiguration) WithRemaining(value int32) *AcceleratorAllocationApplyConfiguration {
 	b.Remaining = &value
+	return b
+}
+
+// WithAllocatedProfiles adds the given value to the AllocatedProfiles field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AllocatedProfiles field.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedProfiles(values ...*AcceleratorProfileCountApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAllocatedProfiles")
+		}
+		b.AllocatedProfiles = append(b.AllocatedProfiles, *values[i])
+	}
+	return b
+}
+
+// WithRemainingProfiles adds the given value to the RemainingProfiles field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the RemainingProfiles field.
+func (b *AcceleratorAllocationApplyConfiguration) WithRemainingProfiles(values ...*AcceleratorProfileCountApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithRemainingProfiles")
+		}
+		b.RemainingProfiles = append(b.RemainingProfiles, *values[i])
+	}
 	return b
 }

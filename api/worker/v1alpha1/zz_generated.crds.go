@@ -117,12 +117,18 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Type: "object",
 																					Required: []string{
 																						"name",
+																						"memoryMib",
 																					},
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"count": {
 																							Description: "Count is the sum of per-card Count for this profile name across the group.",
 																							Type:        "integer",
 																							Format:      "int32",
+																						},
+																						"memoryMib": {
+																							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-card Devices — must carry it.",
+																							Type:        "integer",
+																							Format:      "int64",
 																						},
 																						"name": {
 																							Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
@@ -187,7 +193,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																							Type:        "boolean",
 																						},
 																						"count": {
-																							Description: "Count is the maximum number of soft slices this card can host. A MIG-enabled (or\npending-enable) card is always 0, which excludes it from the logical capacity keys.",
+																							Description: "Count is the maximum number of soft slices this card can host. A card whose MIG mode\nis currently enabled is always 0, which excludes it from the logical capacity keys; a\npending-enable card is not partitioned yet and still reports its soft-slice count.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
@@ -399,6 +405,30 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
+																		"allocatedProfiles": {
+																			Description: "AllocatedProfiles lists the MIG instances currently created and bound on this\ncard, by profile name. Empty (omitted) for a non-MIG card, so a non-MIG card\nserializes byte-identically to before this field existed.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",
 																			Type:        "string",
@@ -417,6 +447,30 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Description: "Remaining is the remaining allocatable units of the device.",
 																			Type:        "integer",
 																			Format:      "int32",
+																		},
+																		"remainingProfiles": {
+																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the card's occupied placement slots. Empty (omitted) for a\nnon-MIG card. This is the placement-aware number the AdmissionCheck gates on.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
 																		},
 																	},
 																},
@@ -837,6 +891,30 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
+																		"allocatedProfiles": {
+																			Description: "AllocatedProfiles lists the MIG instances currently created and bound on this\ncard, by profile name. Empty (omitted) for a non-MIG card, so a non-MIG card\nserializes byte-identically to before this field existed.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",
 																			Type:        "string",
@@ -855,6 +933,30 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Description: "Remaining is the remaining allocatable units of the device.",
 																			Type:        "integer",
 																			Format:      "int32",
+																		},
+																		"remainingProfiles": {
+																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the card's occupied placement slots. Empty (omitted) for a\nnon-MIG card. This is the placement-aware number the AdmissionCheck gates on.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
 																		},
 																	},
 																},
@@ -1458,12 +1560,18 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 																			Type: "object",
 																			Required: []string{
 																				"name",
+																				"memoryMib",
 																			},
 																			Properties: map[string]v1.JSONSchemaProps{
 																				"count": {
 																					Description: "Count is the sum of per-card Count for this profile name across the group.",
 																					Type:        "integer",
 																					Format:      "int32",
+																				},
+																				"memoryMib": {
+																					Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-card Devices — must carry it.",
+																					Type:        "integer",
+																					Format:      "int64",
 																				},
 																				"name": {
 																					Description: "Name is the profile identifier, e.g. \"1g.5gb\".",

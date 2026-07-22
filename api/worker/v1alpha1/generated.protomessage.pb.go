@@ -20,6 +20,8 @@ func (*AcceleratorPhysicalSliced) ProtoMessage() {}
 
 func (*AcceleratorPhysicalSlicedProfile) ProtoMessage() {}
 
+func (*AcceleratorProfileCount) ProtoMessage() {}
+
 func (*AcceleratorSlicedDetail) ProtoMessage() {}
 
 func (*AcceleratorSlicedLogicalDetail) ProtoMessage() {}

@@ -267,6 +267,13 @@ type (
 
 		// Count is the sum of per-card Count for this profile name across the group.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+
+		// MemoryMib is the memory of one instance of this profile, in MiB. It is uniform
+		// per profile name within a group, so it is carried through (not summed). It is the
+		// VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
+		// for a MIG request, which is why the aggregate — reachable from the InstanceType
+		// Detail, unlike per-card Devices — must carry it.
+		MemoryMib int64 `json:"memoryMib" yaml:"memoryMib" protobuf:"varint,3,opt,name=memoryMib"`
 	}
 
 	// AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.
@@ -288,6 +295,19 @@ type (
 		Physical AcceleratorSlicedPhysicalDetail `json:"physical,omitempty" yaml:"physical,omitempty" protobuf:"bytes,2,opt,name=physical"`
 	}
 
+	// AcceleratorProfileCount pairs a physical-slice profile name with a count of
+	// instances — allocated (bound) or remaining (still buildable) per the field carrying it.
+	// It is a status-only type (never a map key), so the profile ledger and the
+	// capability inventory (AcceleratorSlicedPhysicalDetailProfile) stay independently
+	// evolvable.
+	AcceleratorProfileCount struct {
+		// Name is the profile identifier, e.g. "1g.10gb".
+		Name string `json:"name" yaml:"name" protobuf:"bytes,1,opt,name=name"`
+
+		// Count is the number of instances of this profile.
+		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
+	}
+
 	// AcceleratorAllocation describes the allocated accelerator device.
 	AcceleratorAllocation struct {
 		// ID is the universally unique identifier for this device.
@@ -304,6 +324,16 @@ type (
 
 		// Remaining is the remaining allocatable units of the device.
 		Remaining int32 `json:"remaining,omitempty" yaml:"remaining,omitempty" protobuf:"varint,5,opt,name=remaining"`
+
+		// AllocatedProfiles lists the MIG instances currently created and bound on this
+		// card, by profile name. Empty (omitted) for a non-MIG card, so a non-MIG card
+		// serializes byte-identically to before this field existed.
+		AllocatedProfiles []AcceleratorProfileCount `json:"allocatedProfiles,omitempty" yaml:"allocatedProfiles,omitempty" protobuf:"bytes,6,rep,name=allocatedProfiles"` // nolint: lll
+
+		// RemainingProfiles lists, by profile name, how many more instances of each profile can
+		// still be created given the card's occupied placement slots. Empty (omitted) for a
+		// non-MIG card. This is the placement-aware number the AdmissionCheck gates on.
+		RemainingProfiles []AcceleratorProfileCount `json:"remainingProfiles,omitempty" yaml:"remainingProfiles,omitempty" protobuf:"bytes,7,rep,name=remainingProfiles"` // nolint: lll
 	}
 )
 

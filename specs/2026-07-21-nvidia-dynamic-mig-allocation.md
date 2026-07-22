@@ -823,7 +823,7 @@ there too (Open Question 1).
     - Acceptance: `make generate nvml` produces a no-op diff for the generated files (wrappers live in the hand
       file); `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./...` and `go test ./binding/nvml/...` green.
 
-[ ] **T3: F2 — ledger API types + aggregate memory enrichment + resource-name plumbing.**
+[x] **T3: F2 — ledger API types + aggregate memory enrichment + resource-name plumbing.**
     - `api/worker/v1alpha1/devices.go`: add `AcceleratorProfileCount{Name,Count}`, `AllocatedProfiles`/
       `FreeProfiles` on `AcceleratorAllocation` (contiguous fields 6/7), and `MemoryMib` (field 3) on the
       group aggregate `AcceleratorSlicedPhysicalDetailProfile` (the fold input; `MemorySlices` stays a per-card

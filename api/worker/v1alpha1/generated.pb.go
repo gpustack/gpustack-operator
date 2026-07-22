@@ -35,6 +35,8 @@ func (m *AcceleratorPhysicalSliced) Reset() { *m = AcceleratorPhysicalSliced{} }
 
 func (m *AcceleratorPhysicalSlicedProfile) Reset() { *m = AcceleratorPhysicalSlicedProfile{} }
 
+func (m *AcceleratorProfileCount) Reset() { *m = AcceleratorProfileCount{} }
+
 func (m *AcceleratorSlicedDetail) Reset() { *m = AcceleratorSlicedDetail{} }
 
 func (m *AcceleratorSlicedLogicalDetail) Reset() { *m = AcceleratorSlicedLogicalDetail{} }
@@ -185,6 +187,34 @@ func (m *AcceleratorAllocation) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if len(m.RemainingProfiles) > 0 {
+		for iNdEx := len(m.RemainingProfiles) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.RemainingProfiles[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x3a
+		}
+	}
+	if len(m.AllocatedProfiles) > 0 {
+		for iNdEx := len(m.AllocatedProfiles) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.AllocatedProfiles[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x32
+		}
+	}
 	i = encodeVarintGenerated(dAtA, i, uint64(m.Remaining))
 	i--
 	dAtA[i] = 0x28
@@ -309,6 +339,37 @@ func (m *AcceleratorPhysicalSlicedProfile) MarshalToSizedBuffer(dAtA []byte) (in
 	i--
 	dAtA[i] = 0x18
 	i = encodeVarintGenerated(dAtA, i, uint64(m.MemoryMib))
+	i--
+	dAtA[i] = 0x10
+	i -= len(m.Name)
+	copy(dAtA[i:], m.Name)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.Name)))
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *AcceleratorProfileCount) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *AcceleratorProfileCount) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *AcceleratorProfileCount) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.Count))
 	i--
 	dAtA[i] = 0x10
 	i -= len(m.Name)
@@ -456,6 +517,9 @@ func (m *AcceleratorSlicedPhysicalDetailProfile) MarshalToSizedBuffer(dAtA []byt
 	_ = i
 	var l int
 	_ = l
+	i = encodeVarintGenerated(dAtA, i, uint64(m.MemoryMib))
+	i--
+	dAtA[i] = 0x18
 	i = encodeVarintGenerated(dAtA, i, uint64(m.Count))
 	i--
 	dAtA[i] = 0x10
@@ -2246,6 +2310,18 @@ func (m *AcceleratorAllocation) Size() (n int) {
 	n += 1 + sovGenerated(uint64(m.Mode))
 	n += 1 + sovGenerated(uint64(m.Allocated))
 	n += 1 + sovGenerated(uint64(m.Remaining))
+	if len(m.AllocatedProfiles) > 0 {
+		for _, e := range m.AllocatedProfiles {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.RemainingProfiles) > 0 {
+		for _, e := range m.RemainingProfiles {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
 	return n
 }
 
@@ -2287,6 +2363,18 @@ func (m *AcceleratorPhysicalSlicedProfile) Size() (n int) {
 	n += 1 + sovGenerated(uint64(m.MemoryMib))
 	n += 1 + sovGenerated(uint64(m.ComputeSlices))
 	n += 1 + sovGenerated(uint64(m.MemorySlices))
+	n += 1 + sovGenerated(uint64(m.Count))
+	return n
+}
+
+func (m *AcceleratorProfileCount) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.Name)
+	n += 1 + l + sovGenerated(uint64(l))
 	n += 1 + sovGenerated(uint64(m.Count))
 	return n
 }
@@ -2340,6 +2428,7 @@ func (m *AcceleratorSlicedPhysicalDetailProfile) Size() (n int) {
 	l = len(m.Name)
 	n += 1 + l + sovGenerated(uint64(l))
 	n += 1 + sovGenerated(uint64(m.Count))
+	n += 1 + sovGenerated(uint64(m.MemoryMib))
 	return n
 }
 
@@ -2973,12 +3062,24 @@ func (this *AcceleratorAllocation) String() string {
 	if this == nil {
 		return "nil"
 	}
+	repeatedStringForAllocatedProfiles := "[]AcceleratorProfileCount{"
+	for _, f := range this.AllocatedProfiles {
+		repeatedStringForAllocatedProfiles += strings.Replace(strings.Replace(f.String(), "AcceleratorProfileCount", "AcceleratorProfileCount", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForAllocatedProfiles += "}"
+	repeatedStringForRemainingProfiles := "[]AcceleratorProfileCount{"
+	for _, f := range this.RemainingProfiles {
+		repeatedStringForRemainingProfiles += strings.Replace(strings.Replace(f.String(), "AcceleratorProfileCount", "AcceleratorProfileCount", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForRemainingProfiles += "}"
 	s := strings.Join([]string{`&AcceleratorAllocation{`,
 		`ID:` + fmt.Sprintf("%v", this.ID) + `,`,
 		`Index:` + fmt.Sprintf("%v", this.Index) + `,`,
 		`Mode:` + fmt.Sprintf("%v", this.Mode) + `,`,
 		`Allocated:` + fmt.Sprintf("%v", this.Allocated) + `,`,
 		`Remaining:` + fmt.Sprintf("%v", this.Remaining) + `,`,
+		`AllocatedProfiles:` + repeatedStringForAllocatedProfiles + `,`,
+		`RemainingProfiles:` + repeatedStringForRemainingProfiles + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3019,6 +3120,17 @@ func (this *AcceleratorPhysicalSlicedProfile) String() string {
 		`MemoryMib:` + fmt.Sprintf("%v", this.MemoryMib) + `,`,
 		`ComputeSlices:` + fmt.Sprintf("%v", this.ComputeSlices) + `,`,
 		`MemorySlices:` + fmt.Sprintf("%v", this.MemorySlices) + `,`,
+		`Count:` + fmt.Sprintf("%v", this.Count) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *AcceleratorProfileCount) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&AcceleratorProfileCount{`,
+		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Count:` + fmt.Sprintf("%v", this.Count) + `,`,
 		`}`,
 	}, "")
@@ -3069,6 +3181,7 @@ func (this *AcceleratorSlicedPhysicalDetailProfile) String() string {
 	s := strings.Join([]string{`&AcceleratorSlicedPhysicalDetailProfile{`,
 		`Name:` + fmt.Sprintf("%v", this.Name) + `,`,
 		`Count:` + fmt.Sprintf("%v", this.Count) + `,`,
+		`MemoryMib:` + fmt.Sprintf("%v", this.MemoryMib) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3937,6 +4050,74 @@ func (m *AcceleratorAllocation) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllocatedProfiles", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AllocatedProfiles = append(m.AllocatedProfiles, AcceleratorProfileCount{})
+			if err := m.AllocatedProfiles[len(m.AllocatedProfiles)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RemainingProfiles", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RemainingProfiles = append(m.RemainingProfiles, AcceleratorProfileCount{})
+			if err := m.RemainingProfiles[len(m.RemainingProfiles)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -4269,6 +4450,107 @@ func (m *AcceleratorPhysicalSlicedProfile) Unmarshal(dAtA []byte) error {
 				}
 			}
 		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Count", wireType)
+			}
+			m.Count = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.Count |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *AcceleratorProfileCount) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: AcceleratorProfileCount: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: AcceleratorProfileCount: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Name", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Name = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Count", wireType)
 			}
@@ -4692,6 +4974,25 @@ func (m *AcceleratorSlicedPhysicalDetailProfile) Unmarshal(dAtA []byte) error {
 				b := dAtA[iNdEx]
 				iNdEx++
 				m.Count |= int32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryMib", wireType)
+			}
+			m.MemoryMib = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.MemoryMib |= int64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
