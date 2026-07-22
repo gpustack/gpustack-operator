@@ -14,6 +14,10 @@ resource "random_string" "suffix" {
 
 locals {
   vm_name = "${var.vm_name_prefix}-${random_string.suffix.result}"
+
+  # Nebius returns network interface addresses as a CIDR (e.g. "1.2.3.4/32"); strip the suffix.
+  public_ip  = split("/", nebius_compute_v1_instance.this.status.network_interfaces[0].public_ip_address.address)[0]
+  private_ip = split("/", nebius_compute_v1_instance.this.status.network_interfaces[0].ip_address.address)[0]
 }
 
 resource "nebius_vpc_v1_network" "this" {
@@ -72,8 +76,8 @@ resource "nebius_compute_v1_instance" "this" {
   name      = local.vm_name
 
   resources = {
-    platform = var.platform
-    preset   = var.preset
+    platform = var.platform_preset_image.platform
+    preset   = var.platform_preset_image.preset
   }
 
   boot_disk = {
@@ -84,7 +88,7 @@ resource "nebius_compute_v1_instance" "this" {
         type           = var.boot_disk_type
         size_gibibytes = var.boot_disk_size_gibibytes
         source_image_family = {
-          image_family = var.image_family
+          image_family = var.platform_preset_image.image_family
         }
       }
     }

@@ -22,8 +22,8 @@ Provision a single Nebius AI Cloud VM with a public IP reachable over SSH.
    export NEBIUS_AUTHKEY_PUBLIC_ID="publickey-..."
    export NEBIUS_AUTHKEY_PRIVATE_PATH="$HOME/.nebius/authkey/private.pem"
    ```
-3. An SSH public key on disk (default `~/.ssh/id_rsa.pub`) — injected into the
-   VM via cloud-init. Override the path with `-var='ssh_public_key=...'`.
+3. An SSH public key on disk (default `~/.ssh/id_ed25519.pub`) — injected into
+   the VM via cloud-init. Override the path with `-var='ssh_public_key=...'`.
 4. A Nebius project ID (`parent_id`, e.g. `project-...`) — its region fixes
    VM placement and platform availability (see the reference table below).
 
@@ -37,7 +37,7 @@ terraform plan  -var='parent_id=project-...'
 terraform apply -var='parent_id=project-...'
 
 terraform output -raw ssh_command
-# ssh <ssh_username>@<public_ip>
+# ssh -i <ssh_private_key> <ssh_username>@<public_ip>
 
 terraform destroy -var='parent_id=project-...'
 ```
@@ -48,12 +48,10 @@ terraform destroy -var='parent_id=project-...'
 |---|---|---|
 | `parent_id` | Nebius project ID (required); its region fixes VM placement & platform availability | *(required)* |
 | `vm_name_prefix` | Prefix for the VM and its network/subnet/security-group names (a random suffix is appended) | `gpustack-nebius` |
-| `ssh_public_key` | Path to the SSH public key injected into the VM via cloud-init | `~/.ssh/id_rsa.pub` |
+| `ssh_public_key` | Path to the SSH public key injected into the VM via cloud-init | `~/.ssh/id_ed25519.pub` |
 | `ssh_username` | Username created on the VM with the SSH public key as an authorized key | `ubuntu` |
 | `ssh_source_cidrs` | CIDR blocks allowed to SSH (TCP/22) into the VM | `["0.0.0.0/0"]` |
-| `platform` | Nebius compute platform (see the platform/preset table below) | `cpu-e2` |
-| `preset` | Nebius compute preset (vCPU/RAM shape) matching `platform` | `2vcpu-8gb` |
-| `image_family` | Boot disk source image family | `ubuntu24.04` |
+| `platform_preset_image` | Nebius platform/preset/image_family triple (see the reference table below) | `{ platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb", image_family = "ubuntu24.04-cuda13.0" }` |
 | `boot_disk_type` | Boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `boot_disk_size_gibibytes` | Boot disk size, in GiB | `64` |
 
@@ -66,7 +64,7 @@ terraform destroy -var='parent_id=project-...'
 | `private_ip` | Private IPv4 address of the VM |
 | `ssh_command` | Ready-to-run SSH command to reach the VM |
 
-## Platform / preset / region reference
+## Platform / preset / image_family / region reference
 
 Region is implied by `parent_id`'s project — Nebius resources take no
 `region` field. Platform availability varies by region:
@@ -79,20 +77,27 @@ Region is implied by `parent_id`'s project — Nebius resources take no
 | `uk-south1` | `cpu-d3`, `gpu-b300-sxm` |
 | `us-central1` | `cpu-d3`, `gpu-b200-sxm`, `gpu-h200-sxm`, `gpu-rtx6000` |
 
-The default `platform = cpu-e2` / `preset = 2vcpu-8gb` is the smallest CPU box
-but exists only in `eu-north1`; for a project in another region use `cpu-d3`
-(the sole CPU platform available in all regions, minimum `4vcpu-16gb`).
+The default `platform_preset_image` is `gpu-h100-sxm` / `1gpu-16vcpu-200gb` /
+`ubuntu24.04-cuda13.0` (available in `eu-north1`); for a CPU box in any
+region use `cpu-d3` (the sole CPU platform available in all regions, minimum
+`4vcpu-16gb`).
 
-Example — `eu-north1` (richest availability), platform -> presets:
+Example — `eu-north1` (richest availability), platform -> preset -> image_family:
 
-| Platform | Presets |
-|---|---|
-| `cpu-e2` | `2vcpu-8gb` (default), `4vcpu-16gb`, ... `80vcpu-320gb` |
-| `cpu-d3` | `4vcpu-16gb`, ... `128vcpu-512gb` |
-| `gpu-h100-sxm` | `1gpu-16vcpu-200gb`, `8gpu-128vcpu-1600gb` |
-| `gpu-h200-sxm` | `1gpu-16vcpu-200gb`, `8gpu-128vcpu-1600gb` |
-| `gpu-l40s-a` | `1gpu-8vcpu-32gb`, ... `1gpu-40vcpu-160gb` |
-| `gpu-l40s-d` | `1gpu-16vcpu-96gb`, ... `4gpu-192vcpu-1152gb` |
+| Platform | Presets | Image family |
+|---|---|---|
+| `cpu-e2` | `2vcpu-8gb`, `4vcpu-16gb`, ... `80vcpu-320gb` | `ubuntu24.04-driverless` |
+| `cpu-d3` | `4vcpu-16gb`, ... `128vcpu-512gb` | `ubuntu24.04-driverless` |
+| `gpu-h100-sxm` | `1gpu-16vcpu-200gb` (default), `8gpu-128vcpu-1600gb` | `ubuntu24.04-cuda13.0` (default) |
+| `gpu-h200-sxm` | `1gpu-16vcpu-200gb`, `8gpu-128vcpu-1600gb` | `ubuntu24.04-cuda13.0` |
+| `gpu-l40s-a` | `1gpu-8vcpu-32gb`, ... `1gpu-40vcpu-160gb` | `ubuntu24.04-cuda13.0` |
+| `gpu-l40s-d` | `1gpu-16vcpu-96gb`, ... `4gpu-192vcpu-1152gb` | `ubuntu24.04-cuda13.0` |
 
-See `variables.tf` for the full platform -> preset catalog (all CPU and GPU
-shapes across all regions).
+See `variables.tf` for the full platform / preset / image_family catalog
+(all CPU and GPU shapes across all regions) and the object syntax to
+override a combo, e.g.:
+
+```bash
+terraform apply -var='parent_id=project-...' \
+  -var='platform_preset_image={platform="cpu-d3",preset="4vcpu-16gb",image_family="ubuntu24.04-driverless"}'
+```

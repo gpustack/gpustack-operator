@@ -5,15 +5,15 @@ output "vm_name" {
 
 output "public_ip" {
   description = "Public IPv4 address of the VM"
-  value       = nebius_compute_v1_instance.this.status.network_interfaces[0].public_ip_address.address
+  value       = local.public_ip
 }
 
 output "private_ip" {
   description = "Private IPv4 address of the VM"
-  value       = nebius_compute_v1_instance.this.status.network_interfaces[0].ip_address.address
+  value       = local.private_ip
 }
 
 output "ssh_command" {
   description = "Ready-to-run SSH command to reach the VM"
-  value       = "ssh ${var.ssh_username}@${nebius_compute_v1_instance.this.status.network_interfaces[0].public_ip_address.address}"
+  value       = "ssh -i ${trimsuffix(var.ssh_public_key, ".pub")} ${var.ssh_username}@${local.public_ip}"
 }

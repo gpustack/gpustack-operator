@@ -24,7 +24,7 @@ local kubeconfig at it.
    and run `aws configure` to set your access key / secret key (the identity
    needs permission to create VPC/EKS/EC2/IAM resources).
 2. Install `terraform` and `kubectl`.
-3. An SSH public key on disk (default `~/.ssh/id_rsa.pub`) — it is registered as
+3. An SSH public key on disk (default `~/.ssh/id_ed25519.pub`) — it is registered as
    the nodes' EC2 key pair for SSH access. Override the path with
    `-var='ssh_public_key=...'`.
 
@@ -65,7 +65,7 @@ terraform destroy
 | Variable | Description | Default |
 |---|---|---|
 | `region` | AWS region | `us-east-1` |
-| `ssh_public_key` | Path to the SSH public key registered as the node EC2 key pair | `~/.ssh/id_rsa.pub` |
+| `ssh_public_key` | Path to the SSH public key registered as the node EC2 key pair | `~/.ssh/id_ed25519.pub` |
 | `vpc_cidr` | VPC CIDR | `172.31.0.0/16` |
 | `eks_name_prefix` | Cluster name prefix (a random suffix is appended) | `gpustack-eks` |
 | `eks_version` | EKS version | `1.34` |

@@ -43,7 +43,7 @@ variable "ssh_public_key" {
   # pathexpand() handles the leading "~".
   description = "Path to the SSH public key injected into the VM via cloud-init."
   type        = string
-  default     = "~/.ssh/id_rsa.pub"
+  default     = "~/.ssh/id_ed25519.pub"
 
   validation {
     condition     = fileexists(pathexpand(var.ssh_public_key))
@@ -64,42 +64,34 @@ variable "ssh_username" {
   }
 }
 
-# platform -> preset.name  (pick a matching pair; an invalid platform/preset combo fails at apply).
-# Default: cpu-e2 / 2vcpu-8gb (smallest CPU box; eu-north1 only -- for other regions use cpu-d3).
+# platform / preset / image_family combos (pick one matching triple; an invalid combo fails at apply).
+# parent_id's region gates platform availability (see the region table above).
+# Default: gpu-h100-sxm / 1gpu-16vcpu-200gb / ubuntu24.04-cuda13.0.
 #
-# CPU:
-#   cpu-d3  [AMD Epyc Genoa, all regions] : 4vcpu-16gb, 8vcpu-32gb, 16vcpu-64gb, 32vcpu-128gb,
-#                                           48vcpu-192gb, 64vcpu-256gb, 96vcpu-384gb, 128vcpu-512gb
-#   cpu-e2  [Intel Ice Lake, eu-north1]   : 2vcpu-8gb, 4vcpu-16gb, 8vcpu-32gb, 16vcpu-64gb,
-#                                           32vcpu-128gb, 48vcpu-192gb, 64vcpu-256gb, 80vcpu-320gb
-# GPU:
-#   gpu-h100-sxm   [H100 NVLink]  : 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb
-#   gpu-h200-sxm   [H200 NVLink]  : 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb
-#   gpu-l40s-a     [L40S/IceLake] : 1gpu-8vcpu-32gb, 1gpu-16vcpu-64gb, 1gpu-24vcpu-96gb,
-#                                   1gpu-32vcpu-128gb, 1gpu-40vcpu-160gb
-#   gpu-l40s-d     [L40S/Genoa]   : 1gpu-16vcpu-96gb, 1gpu-32vcpu-192gb, 1gpu-48vcpu-288gb,
-#                                   2gpu-64vcpu-384gb, 2gpu-96vcpu-576gb, 4gpu-128vcpu-768gb,
-#                                   4gpu-192vcpu-1152gb
-#   gpu-b200-sxm   [B200 NVLink]  : 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb
-#   gpu-b200-sxm-a [B200 NVLink]  : 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb
-#   gpu-b300-sxm   [B300 NVLink]  : 1gpu-24vcpu-346gb, 8gpu-192vcpu-2768gb
-#   gpu-rtx6000    [RTX PRO 6000] : 1gpu-24vcpu-218gb, 8gpu-192vcpu-1744gb
-variable "platform" {
-  description = "Nebius compute platform (see the platform -> preset table above); availability depends on parent_id's region."
-  type        = string
-  default     = "cpu-e2"
-}
-
-variable "preset" {
-  description = "Nebius compute preset (vCPU/RAM shape) matching var.platform (see the platform -> preset table above)."
-  type        = string
-  default     = "2vcpu-8gb"
-}
-
-variable "image_family" {
-  description = "Boot disk source image family."
-  type        = string
-  default     = "ubuntu24.04"
+# | Platform         | Notes                    | Presets                                                | Image family          |
+# |------------------|--------------------------|---------------------------------------------------------|-----------------------|
+# | cpu-d3           | AMD Epyc Genoa, all regions | 4vcpu-16gb, 8vcpu-32gb, 16vcpu-64gb, 32vcpu-128gb, 48vcpu-192gb, 64vcpu-256gb, 96vcpu-384gb, 128vcpu-512gb | ubuntu24.04-driverless |
+# | cpu-e2           | Intel Ice Lake, eu-north1 only | 2vcpu-8gb, 4vcpu-16gb, 8vcpu-32gb, 16vcpu-64gb, 32vcpu-128gb, 48vcpu-192gb, 64vcpu-256gb, 80vcpu-320gb | ubuntu24.04-driverless |
+# | gpu-h100-sxm     | H100 NVLink              | 1gpu-16vcpu-200gb (default), 8gpu-128vcpu-1600gb        | ubuntu24.04-cuda13.0 (default) |
+# | gpu-h200-sxm     | H200 NVLink              | 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb                  | ubuntu24.04-cuda13.0  |
+# | gpu-l40s-a       | L40S / Ice Lake          | 1gpu-8vcpu-32gb, 1gpu-16vcpu-64gb, 1gpu-24vcpu-96gb, 1gpu-32vcpu-128gb, 1gpu-40vcpu-160gb | ubuntu24.04-cuda13.0  |
+# | gpu-l40s-d       | L40S / Genoa             | 1gpu-16vcpu-96gb, 1gpu-32vcpu-192gb, 1gpu-48vcpu-288gb, 2gpu-64vcpu-384gb, 2gpu-96vcpu-576gb, 4gpu-128vcpu-768gb, 4gpu-192vcpu-1152gb | ubuntu24.04-cuda13.0  |
+# | gpu-b200-sxm     | B200 NVLink              | 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb                  | ubuntu24.04-cuda13.0  |
+# | gpu-b200-sxm-a   | B200 NVLink              | 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb                  | ubuntu24.04-cuda13.0  |
+# | gpu-b300-sxm     | B300 NVLink              | 1gpu-24vcpu-346gb, 8gpu-192vcpu-2768gb                  | ubuntu24.04-cuda13.0 (cuda12 families unsupported here, need nvidia_gpu_drivers 580.x) |
+# | gpu-rtx6000      | RTX PRO 6000             | 1gpu-24vcpu-218gb, 8gpu-192vcpu-1744gb                  | ubuntu24.04-cuda13.0 (cuda12 families unsupported here, need nvidia_gpu_drivers 580.x) |
+variable "platform_preset_image" {
+  description = "Nebius platform/preset/image_family triple (see the table above); pick a matching combo."
+  type = object({
+    platform     = string
+    preset       = string
+    image_family = string
+  })
+  default = {
+    platform     = "gpu-h100-sxm"
+    preset       = "1gpu-16vcpu-200gb"
+    image_family = "ubuntu24.04-cuda13.0"
+  }
 }
 
 variable "boot_disk_type" {
