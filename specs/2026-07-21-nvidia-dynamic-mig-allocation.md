@@ -1,6 +1,6 @@
 # Spec: NVIDIA Dynamic MIG Allocation — Per-Card Profile Ledger, Incremental GI/CI Create/Destroy, Profile-Anchored Scheduling
 
-Status: Planned
+Status: Building
 Type: Feature
 
 > **Second of two specs.** This is the follow-up "dynamic MIG implementation" spec that
@@ -804,7 +804,7 @@ there too (Open Question 1).
 
 **Phase A — De-risk & foundations**
 
-[ ] **T1 (PoC / de-risk): pure placement-free math + profile↔NVML-id mapping + units fold.**
+[x] **T1 (PoC / de-risk): pure placement-free math + profile↔NVML-id mapping + units fold.**
     - Add, in the nvidia detector/allocator package (no NVML I/O): `computeFreeProfiles(occupied []Placement,
       possible map[profileName][]Placement) map[profileName]int` (count non-overlapping legal slots per
       profile); the `profileName ↔ {GI profile id, CI profile id, CI eng profile id}` table for the kept C==G
