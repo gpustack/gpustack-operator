@@ -67,3 +67,45 @@ resource "nebius_vpc_v1_security_rule" "egress" {
   }
 }
 
+resource "nebius_compute_v1_instance" "this" {
+  parent_id = var.parent_id
+  name      = local.vm_name
+
+  resources = {
+    platform = var.platform
+    preset   = var.preset
+  }
+
+  boot_disk = {
+    attach_mode = "READ_WRITE"
+    managed_disk = {
+      name = "${local.vm_name}-boot"
+      spec = {
+        type           = var.boot_disk_type
+        size_gibibytes = var.boot_disk_size_gibibytes
+        source_image_family = {
+          image_family = var.image_family
+        }
+      }
+    }
+  }
+
+  network_interfaces = [{
+    name              = "eth0"
+    subnet_id         = nebius_vpc_v1_subnet.this.id
+    ip_address        = {}
+    public_ip_address = {}
+    security_groups   = [{ id = nebius_vpc_v1_security_group.this.id }]
+  }]
+
+  cloud_init_user_data = <<-EOT
+    #cloud-config
+    users:
+      - name: ${var.ssh_username}
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        ssh_authorized_keys:
+          - "${trimspace(file(pathexpand(var.ssh_public_key)))}"
+  EOT
+}
+
