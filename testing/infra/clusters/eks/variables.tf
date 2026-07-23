@@ -48,17 +48,6 @@ variable "gpu_instance_types" {
   # default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"], g5 = ["g5.xlarge", "g5.12xlarge"], g6 = ["g6.xlarge", "g6.12xlarge"] }
 }
 
-variable "node_boot_disk_size_gb" {
-  description = "Node root (boot) volume size, in GiB. Under this module's custom launch template, block_device_mappings.xvda IS the boot disk (disk_size is ignored)."
-  type        = number
-  default     = 100
-
-  validation {
-    condition     = var.node_boot_disk_size_gb > 0 && var.node_boot_disk_size_gb == floor(var.node_boot_disk_size_gb)
-    error_message = "node_boot_disk_size_gb must be a positive whole number."
-  }
-}
-
 variable "node_boot_disk_type" {
   # iops/throughput are optional so overriding volume_type to a non-gp3/io* type
   # doesn't force incompatible values onto the block_device_mappings.xvda.ebs block.
@@ -78,5 +67,16 @@ variable "node_boot_disk_type" {
   validation {
     condition     = var.node_boot_disk_type.throughput == null || (var.node_boot_disk_type.throughput == floor(var.node_boot_disk_type.throughput) && var.node_boot_disk_type.throughput > 0)
     error_message = "node_boot_disk_type.throughput, when set, must be a positive whole number."
+  }
+}
+
+variable "node_boot_disk_size_gb" {
+  description = "Node root (boot) volume size, in GiB. Under this module's custom launch template, block_device_mappings.xvda IS the boot disk (disk_size is ignored)."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.node_boot_disk_size_gb > 0 && var.node_boot_disk_size_gb == floor(var.node_boot_disk_size_gb)
+    error_message = "node_boot_disk_size_gb must be a positive whole number."
   }
 }

@@ -71,8 +71,8 @@ terraform destroy
 | `release` | EKS version | `1.34` |
 | `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
-| `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
+| `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
 
 ## Outputs
 
