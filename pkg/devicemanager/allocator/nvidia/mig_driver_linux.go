@@ -189,6 +189,55 @@ func (d *nvmlMigDriver) CreateInstance(
 	}, nil
 }
 
+// ListInstances enumerates every live GPU instance on every MIG-capable card, resolving each
+// one's MIG-device UUID, so reclaim's orphan GC can find a marker-less GI on a drained card. It
+// mirrors CardState's Live loop but across all cards and without the per-profile possible
+// placements (orphan destroy needs only the ids + compute slices, not a slot to fill).
+func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
+	if !d.initRet.IsSuccess() {
+		return nil, fmt.Errorf("nvml init failed: %s", d.initRet)
+	}
+	count, ret := d.lib.DeviceGetCount()
+	if !ret.IsSuccess() {
+		return nil, fmt.Errorf("get device count: %s", ret)
+	}
+	var out []migLiveInstance
+	for i := 0; i < count; i++ {
+		dev, ret := d.lib.DeviceGetHandleByIndex(i)
+		if !ret.IsSuccess() {
+			continue
+		}
+		cardUUID, ret := dev.GetUUID()
+		if !ret.IsSuccess() {
+			continue
+		}
+		uuidByGI := d.migUUIDs(dev)
+		for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
+			info, ret := dev.GetGpuInstanceProfileInfo(id)
+			if !ret.IsSuccess() {
+				continue
+			}
+			gis, ret := dev.GetGpuInstances(info.Id)
+			if !ret.IsSuccess() {
+				continue
+			}
+			for j := range gis {
+				gi := gis[j].GetInfo()
+				out = append(out, migLiveInstance{
+					Card: cardUUID,
+					Inst: migInstance{
+						GiID:          gi.Id,
+						ComputeSlices: int32(info.SliceCount),
+						Placement:     migPlacement{Start: int32(gi.Placement.Start), Length: int32(gi.Placement.Size)},
+						UUID:          uuidByGI[gi.Id],
+					},
+				})
+			}
+		}
+	}
+	return out, nil
+}
+
 func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error {
 	dev, err := d.device(cardUUID)
 	if err != nil {
@@ -218,11 +267,17 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 			if ret.IsSuccess() {
 				for k := range cis {
 					if r := cis[k].Destroy(); !r.IsSuccess() {
+						if r == nvml.ERROR_IN_USE {
+							return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, errInstanceInUse)
+						}
 						return fmt.Errorf("card %s: destroy compute instance: %s", cardUUID, r)
 					}
 				}
 			}
 			if r := gis[j].Destroy(); !r.IsSuccess() {
+				if r == nvml.ERROR_IN_USE {
+					return fmt.Errorf("card %s: destroy gpu instance %d: %w", cardUUID, inst.GiID, errInstanceInUse)
+				}
 				return fmt.Errorf("card %s: destroy gpu instance %d: %s", cardUUID, inst.GiID, r)
 			}
 			return nil

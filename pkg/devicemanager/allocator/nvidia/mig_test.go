@@ -30,6 +30,10 @@ type fakeMigDriver struct {
 	createCalls int
 	createErr   error
 	destroyed   []migInstance
+	// inUseGiIDs marks GPU-instance ids whose DestroyInstance fails with errInstanceInUse (a
+	// residual process), so the reclaim loop's bounded-retry path is table-tested.
+	inUseGiIDs map[uint32]bool
+	listErr    error
 }
 
 func newFakeMigDriver() *fakeMigDriver {
@@ -70,6 +74,9 @@ func (f *fakeMigDriver) CreateInstance(cardUUID, _ string, computeSlices, _ int3
 func (f *fakeMigDriver) DestroyInstance(cardUUID string, inst migInstance) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.inUseGiIDs[inst.GiID] {
+		return fmt.Errorf("card %s: destroy gpu instance %d: %w", cardUUID, inst.GiID, errInstanceInUse)
+	}
 	f.destroyed = append(f.destroyed, inst)
 	kept := f.live[cardUUID][:0]
 	for _, l := range f.live[cardUUID] {
@@ -79,6 +86,22 @@ func (f *fakeMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 	}
 	f.live[cardUUID] = kept
 	return nil
+}
+
+// ListInstances returns every seeded live instance across all cards (the reclaim orphan-GC seam).
+func (f *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []migLiveInstance
+	for card, insts := range f.live {
+		for _, inst := range insts {
+			out = append(out, migLiveInstance{Card: card, Inst: inst})
+		}
+	}
+	return out, nil
 }
 
 // seedLive appends a live instance to a card (an out-of-band / reusable partition).

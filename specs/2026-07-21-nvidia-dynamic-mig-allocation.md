@@ -1031,7 +1031,7 @@ there too (Open Question 1).
       Allocate → no double-create/collision, sibling not blocked; crash-then-retry rebinds. Verify:
       `go test ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/nvidia/...`.
 
-[ ] **T8: F4 — reclaim loop (destroy CI→GI, bounded IN_USE retry, attribution self-check, orphan GC).**
+[x] **T8: F4 — reclaim loop (destroy CI→GI, bounded IN_USE retry, attribution self-check, orphan GC).**
     - Extend `RunSlicedReclaimLoop`/`reclaimer` for MIG: destroy from marker with `reclaimMaxMisses` debounce;
       IN_USE → partial-failure retry (miss counter not cleared) + condition at the bound; self-check marker
       `podUID` vs Pod annotation before destroy; marker-less GI GC only when card drained; per-card locks so

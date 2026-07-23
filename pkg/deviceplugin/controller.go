@@ -621,6 +621,34 @@ func foldPhysicalLedger(
 	}
 }
 
+// LivePhysicalOccupied lists, per accelerator resource, the physical-slice placements that live
+// (non-terminating) Pods on this node currently claim by annotation — the same annotation-derived
+// occupied set the ledger fold uses. A per-vendor reclaim loop consults it as an attribution
+// self-check, so a mis-attributed ownership marker never destroys an instance a running Pod still
+// holds. It reads the informer cache (no device I/O).
+func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resource][]workercore.AcceleratorPhysicalPlacement, error) {
+	podList := new(core.PodList)
+	if err := r.Client.List(ctx, podList,
+		ctrlcli.MatchingFields{IndexingPodsByNodeName: r.NodeName},
+		ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	occupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
+	allocated := make(map[Resource]map[string]int32)
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		podDevsStatus, err := extractAllocatedStatusFromPod(pod)
+		if err != nil {
+			continue
+		}
+		accumulatePhysicalOccupied(podDevsStatus, occupied, allocated)
+	}
+	return occupied, nil
+}
+
 func extractPreferredAcceleratorIDsFromPod(pod *core.Pod, devices *workercore.Devices) sets.Set[string] {
 	if pod != nil && pod.Annotations != nil {
 		str, ok := pod.Annotations[_PreferredAcceleratorIDAnnoKey]

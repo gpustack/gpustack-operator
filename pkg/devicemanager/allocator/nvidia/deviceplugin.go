@@ -48,6 +48,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 		logger:     logger,
 		servers:    servers,
 		kubeSocket: opts.KubeSocket,
+		sliced:     !opts.NoSliced,
 	}
 }
 
@@ -55,6 +56,8 @@ type aggregated struct {
 	logger     klog.Logger
 	servers    []deviceplugin.Server
 	kubeSocket string
+	// sliced reports whether a Sliced server is registered, gating the per-vendor MIG reclaim loop.
+	sliced bool
 }
 
 func (aggregated) Name() string {
@@ -71,7 +74,39 @@ func (in aggregated) Start(ctx context.Context) error {
 			return srv.Start(ctx, in.kubeSocket)
 		})
 	}
+	// A sliced pool has no Release callback, so MIG GPU/compute instances are reclaimed by a
+	// level-based loop fed the reconciler's broadcast live-pod set plus a resync ticker.
+	if in.sliced {
+		gp.Go(func(ctx context.Context) error {
+			reconciler := controllers.Get[*deviceplugin.DevicesReconciler]()
+			r := newReclaimer(newMigDriver(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"),
+				liveClaimsFrom(ctx, reconciler))
+			deviceplugin.RunSlicedReclaimLoop(ctx, reconciler, Manufacturer, r.reconcile)
+			return nil
+		})
+	}
 	return gp.Wait()
+}
+
+// liveClaimsFrom adapts the reconciler's annotation-derived live physical-slice occupancy into
+// the reclaimer's per-card-UUID placement view (the Resource Device field is the card UUID for
+// NVIDIA). It is the attribution self-check source: reclaim never destroys an instance a running
+// Pod still claims.
+func liveClaimsFrom(ctx context.Context, reconciler *deviceplugin.DevicesReconciler) func() (map[string][]migPlacement, error) {
+	return func() (map[string][]migPlacement, error) {
+		occupied, err := reconciler.LivePhysicalOccupied(ctx)
+		if err != nil {
+			return nil, err
+		}
+		claims := make(map[string][]migPlacement, len(occupied))
+		for res, placements := range occupied {
+			for i := range placements {
+				claims[res.Device] = append(claims[res.Device],
+					migPlacement{Start: placements[i].Start, Length: placements[i].Length})
+			}
+		}
+		return claims, nil
+	}
 }
 
 func (in aggregated) Stop() {
