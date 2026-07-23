@@ -103,4 +103,33 @@ for s in "$worker_cert_secret" gpustack-settings; do
   kubectl -n "$NS" delete secret "$s" --ignore-not-found 2>/dev/null || true
 done
 
+# 7. E2E-ONLY (NOT part of the cleanup.sh mirror): reverse-patch the Node extended resources GPUStack
+#    advertised, so the NEXT case sees a pristine node. Node extended resources do not self-remove when
+#    their advertiser is gone: the NodeCapacityReconciler's "<vendor>.com/gpu.sliced.*" keys clear on the
+#    reconciler's own convergence at shutdown, but the device-plugin keys ("<vendor>.com/gpu.shared",
+#    "<vendor>.com/gpu.sliced", "device.gpustack.ai/<vendor>.visibility") only zero out and linger on the
+#    Node object until a kubelet restart. Sweep the GPUStack-OWNED keys from status.capacity+allocatable on
+#    every node: device.gpustack.ai/*, any "/gpu.sliced" key (the sliced pool + the per-profile
+#    ".sliced.mig-<profile>" + ".sliced.units"/percentage/mib), and "*/gpu.shared". The bare whole-card
+#    "<vendor>.com/gpu" is deliberately LEFT ALONE — it is name-identical to a real vendor device-plugin's
+#    resource, so removing it generically is unsafe; it zeroes out on the GPUStack plugin's exit. Requires
+#    python3 (already a hard dependency of the case scripts) and a kubectl new enough for --subresource.
+for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+  patch=$(kubectl get node "$node" -o json 2>/dev/null | python3 -c '
+import json, sys
+o = json.load(sys.stdin); ops = []
+esc = lambda k: k.replace("~", "~0").replace("/", "~1")
+owned = lambda k: k.startswith("device.gpustack.ai/") or "/gpu.sliced" in k or k.endswith("/gpu.shared")
+for sect in ("capacity", "allocatable"):
+    for k in o.get("status", {}).get(sect, {}):
+        if owned(k):
+            ops.append({"op": "remove", "path": "/status/%s/%s" % (sect, esc(k))})
+print(json.dumps(ops))
+' 2>/dev/null)
+  if [ -n "$patch" ] && [ "$patch" != "[]" ]; then
+    echo "[teardown] reverse-patching gpustack extended resources on node ${node}"
+    kubectl patch node "$node" --subresource=status --type=json -p "$patch" >/dev/null 2>&1 || true
+  fi
+done
+
 echo "[teardown] done (namespace ${NS} kept on purpose)"

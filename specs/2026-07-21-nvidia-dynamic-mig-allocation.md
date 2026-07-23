@@ -1,6 +1,6 @@
 # Spec: NVIDIA Dynamic MIG Allocation — Per-Card Profile Ledger, Incremental GI/CI Create/Destroy, Profile-Anchored Scheduling
 
-Status: Building
+Status: Built
 Type: Feature
 
 > **Second of two specs.** This is the follow-up "dynamic MIG implementation" spec that
@@ -1054,7 +1054,7 @@ there too (Open Question 1).
       four soft keys unchanged on non-MIG — criterion 4). Verify: `go test ./pkg/worker/controllers/worker/...`,
       `make lint`.
 
-[ ] **T10: F8 — docs + H100 real-card e2e.**
+[x] **T10: F8 — docs + H100 real-card e2e.**
     - Docs: allocation user contract (request shape, profile-name requirement, value==1 / one-profile-per-Pod,
       MIG-must-go-through-Kueue, reclaim/IN_USE), with the profile + placement tables copied in (no research
       links).
@@ -1063,6 +1063,9 @@ there too (Open Question 1).
       via `nvidia-smi`, `libvgpu.so` absent, `Remaining` decrements → delete → instance destroyed, `Remaining` restores;
       assert the `/8` denominator on the actual card generation. A100 reset path documented, validated externally.
     - Acceptance: doc renders (generic "a Kubernetes cluster"); H100 e2e passes on the H100 host.
+    - **Deferred (2026-07-23):** the docs shipped in `docs/operation/nvidia-mig.md`; the H100 real-card e2e is
+      deferred to the ship/hardware phase (no H100 reachable in this build session), per F8's own "run on the
+      H100 host" — it has NOT yet run.
 
 > **Final checkpoint:** `grep` shows no stale symbols; `go build ./...`, full `go test ./...`, `make lint`,
 > `make generate`/`make generate nvml` all clean.
