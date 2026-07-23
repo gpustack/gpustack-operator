@@ -98,3 +98,39 @@ variable "service_cidr" {
     error_message = "service_cidr must be a CIDR, or comma-separated CIDRs for dual-stack (e.g. '10.43.0.0/16')."
   }
 }
+
+variable "server_https_listen_port" {
+  # Passed to every server install as --https-listen-port; threaded through the
+  # server URL, join/agent readiness probes, and the kubeconfig server-URL rewrite.
+  description = "Kubernetes apiserver (HTTPS) port, passed to k3s servers as --https-listen-port."
+  type        = number
+  default     = 6443
+
+  validation {
+    condition     = var.server_https_listen_port == floor(var.server_https_listen_port) && var.server_https_listen_port >= 1 && var.server_https_listen_port <= 65535
+    error_message = "server_https_listen_port must be a whole number between 1 and 65535."
+  }
+}
+
+variable "service_node_port_range" {
+  # Passed to every server install as --service-node-port-range.
+  description = "NodePort Service port range, passed to k3s servers as --service-node-port-range (format '<lo>-<hi>')."
+  type        = string
+  default     = "30000-32767"
+
+  validation {
+    condition     = can(regex("^[0-9]+-[0-9]+$", var.service_node_port_range))
+    error_message = "service_node_port_range must be in the form '<lo>-<hi>' (e.g. '30000-32767')."
+  }
+
+  validation {
+    # Short-circuits on the shape check first, so a malformed value (already caught by the
+    # validation above) never reaches tonumber() and crashes instead of failing cleanly.
+    condition = can(regex("^[0-9]+-[0-9]+$", var.service_node_port_range)) && (
+      tonumber(split("-", var.service_node_port_range)[0]) >= 1 &&
+      tonumber(split("-", var.service_node_port_range)[1]) <= 65535 &&
+      tonumber(split("-", var.service_node_port_range)[0]) <= tonumber(split("-", var.service_node_port_range)[1])
+    )
+    error_message = "service_node_port_range bounds must satisfy 1 <= lo <= hi <= 65535."
+  }
+}

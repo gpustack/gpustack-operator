@@ -19,7 +19,7 @@ locals {
   join_servers = { for s in slice(local.servers, 1, length(local.servers)) : s.host => s }
   agent_hosts  = { for a in local.agents : a.host => a }
 
-  server_url = "https://${local.first_server.host}:6443"
+  server_url = "https://${local.first_server.host}:${var.server_https_listen_port}"
 
   # kubectl context/cluster/user name for the fetched kubeconfig. The raw
   # k3s.yaml names everything "default", so we namespace it to the first server
@@ -43,14 +43,16 @@ resource "random_string" "token" {
 # only reference self) can reuse them.
 resource "null_resource" "server_init" {
   triggers = {
-    host            = local.first_server.host
-    user            = local.first_server.user
-    port            = var.server_ssh_port
-    key_path        = pathexpand(var.ssh_private_key)
-    version         = var.release
-    flannel_backend = var.flannel_backend
-    cluster_cidr    = var.cluster_cidr
-    service_cidr    = var.service_cidr
+    host                     = local.first_server.host
+    user                     = local.first_server.user
+    port                     = var.server_ssh_port
+    key_path                 = pathexpand(var.ssh_private_key)
+    version                  = var.release
+    flannel_backend          = var.flannel_backend
+    cluster_cidr             = var.cluster_cidr
+    service_cidr             = var.service_cidr
+    server_https_listen_port = var.server_https_listen_port
+    service_node_port_range  = var.service_node_port_range
   }
 
   connection {
@@ -78,7 +80,7 @@ resource "null_resource" "server_init" {
       # the routes under the configured cluster CIDR (var.cluster_cidr, split for
       # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
-      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${local.first_server.host}",
+      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${local.first_server.host} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range}",
     ]
   }
 
@@ -111,11 +113,13 @@ resource "null_resource" "server_join" {
     key_path = pathexpand(var.ssh_private_key)
     # Re-run the install when the release, backend, or join target changes, so
     # every member reacts together instead of only the first server.
-    version         = var.release
-    server          = local.server_url
-    flannel_backend = var.flannel_backend
-    cluster_cidr    = var.cluster_cidr
-    service_cidr    = var.service_cidr
+    version                  = var.release
+    server                   = local.server_url
+    flannel_backend          = var.flannel_backend
+    cluster_cidr             = var.cluster_cidr
+    service_cidr             = var.service_cidr
+    server_https_listen_port = var.server_https_listen_port
+    service_node_port_range  = var.service_node_port_range
   }
 
   connection {
@@ -138,8 +142,8 @@ resource "null_resource" "server_join" {
       # the routes under the configured cluster CIDR (var.cluster_cidr, split for
       # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
-      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/6443) 2>/dev/null; do sleep 3; done'",
-      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${each.value.host}",
+      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/${var.server_https_listen_port}) 2>/dev/null; do sleep 3; done'",
+      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${each.value.host} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range}",
     ]
   }
 
@@ -170,8 +174,9 @@ resource "null_resource" "agent" {
     key_path = pathexpand(var.ssh_private_key)
     # Re-run the install when the release or the server URL changes, so agents
     # track the servers instead of only the first server being reinstalled.
-    version = var.release
-    server  = local.server_url
+    version                  = var.release
+    server                   = local.server_url
+    server_https_listen_port = var.server_https_listen_port
     # Tracked so this agent re-provisions when the pod network changes, and so the
     # destroy-time route flush can read the CIDR off self.triggers.
     cluster_cidr = var.cluster_cidr
@@ -197,7 +202,7 @@ resource "null_resource" "agent" {
       # the routes under the configured cluster CIDR (var.cluster_cidr, split for
       # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
-      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/6443) 2>/dev/null; do sleep 3; done'",
+      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/${var.server_https_listen_port}) 2>/dev/null; do sleep 3; done'",
       "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' K3S_URL='${local.server_url}' sh -s - agent",
     ]
   }
@@ -225,8 +230,9 @@ resource "null_resource" "kubeconfig" {
   depends_on = [null_resource.server_init]
 
   triggers = {
-    host    = local.first_server.host
-    context = local.context_name
+    host                     = local.first_server.host
+    context                  = local.context_name
+    server_https_listen_port = var.server_https_listen_port
     # Re-fetch when the first server is reinstalled (new certificates), so
     # ~/.kube/config never keeps stale credentials.
     server_init = null_resource.server_init.id
@@ -246,7 +252,7 @@ resource "null_resource" "kubeconfig" {
              'sudo test -s /etc/rancher/k3s/k3s.yaml && sudo cat /etc/rancher/k3s/k3s.yaml' 2>/dev/null \
              > "$raw" && test -s "$raw"; then
           sed -E \
-            -e 's|https://127.0.0.1:6443|https://${local.first_server.host}:6443|' \
+            -e 's|https://127\.0\.0\.1:[0-9]+|https://${local.first_server.host}:${var.server_https_listen_port}|' \
             -e 's|^  name: default$|  name: ${local.context_name}|' \
             -e 's|^    cluster: default$|    cluster: ${local.context_name}|' \
             -e 's|^    user: default$|    user: ${local.context_name}|' \

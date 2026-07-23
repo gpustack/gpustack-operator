@@ -51,6 +51,9 @@ terraform apply \
 - `release`: the K3s version, e.g. `v1.34.9+k3s1`.
 - `cluster_cidr` / `service_cidr`: pod / service networks (default
   `10.42.0.0/16` / `10.43.0.0/16`; comma-separate two CIDRs for dual-stack).
+- `server_https_listen_port`: Kubernetes apiserver port (default `6443`).
+- `service_node_port_range`: NodePort Service port range (default
+  `30000-32767`).
 
 After apply:
 
@@ -81,6 +84,8 @@ terraform destroy \
 | `flannel_backend` | `vxlan` / `host-gw` / `wireguard-native` / `none` | `vxlan` |
 | `cluster_cidr` | Pod network (`--cluster-cidr`, comma-separated for dual-stack) | `10.42.0.0/16` |
 | `service_cidr` | Service network (`--service-cidr`, comma-separated for dual-stack) | `10.43.0.0/16` |
+| `server_https_listen_port` | Kubernetes apiserver port (`--https-listen-port`) | `6443` |
+| `service_node_port_range` | NodePort Service port range (`--service-node-port-range`) | `30000-32767` |
 
 ## Outputs
 
