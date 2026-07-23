@@ -76,6 +76,57 @@ var podStatusPaths = kubeapistatus.NewSummarizer(
 
 // GetSummaryOfPod summarizes the given status by pod flow,
 // and returns the phase and phase message.
+//
+// When the summarized phase is "Initializing" or "Starting", the container waiting states
+// refine the result: the phase message is replaced with the waiting message of the first
+// waiting container, surfacing the real reason, e.g. an image pull failure, instead of
+// the generic startup hint; and the phase degrades to "NotReady" when the waiting reason
+// indicates an image pull failure, which hardly recovers without user intervention.
 func GetSummaryOfPod(podStatus *core.PodStatus) (phase, phaseMessage string) {
-	return podStatusPaths.GetSummary(podStatus)
+	phase, phaseMessage = podStatusPaths.GetSummary(podStatus)
+	if phase != "Initializing" && phase != "Starting" {
+		return phase, phaseMessage
+	}
+	waiting := getFirstWaitingContainerState(podStatus)
+	if waiting == nil {
+		return phase, phaseMessage
+	}
+	if waiting.Message != "" {
+		phaseMessage = waiting.Message
+	}
+	if isImagePullWaitingReason(waiting.Reason) {
+		phase = "NotReady"
+	}
+	return phase, phaseMessage
+}
+
+// getFirstWaitingContainerState returns the waiting state of the first waiting container,
+// preferring one whose reason indicates an image pull failure.
+func getFirstWaitingContainerState(podStatus *core.PodStatus) *core.ContainerStateWaiting {
+	var first *core.ContainerStateWaiting
+	for _, statuses := range [2][]core.ContainerStatus{podStatus.InitContainerStatuses, podStatus.ContainerStatuses} {
+		for i := range statuses {
+			waiting := statuses[i].State.Waiting
+			if waiting == nil {
+				continue
+			}
+			if isImagePullWaitingReason(waiting.Reason) {
+				return waiting
+			}
+			if first == nil {
+				first = waiting
+			}
+		}
+	}
+	return first
+}
+
+// isImagePullWaitingReason reports whether the given container waiting reason indicates
+// that the container image cannot be pulled.
+func isImagePullWaitingReason(reason string) bool {
+	switch reason {
+	case "ErrImagePull", "ImagePullBackOff", "InvalidImageName":
+		return true
+	}
+	return false
 }
