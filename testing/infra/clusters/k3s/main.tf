@@ -19,7 +19,7 @@ locals {
   join_servers = { for s in slice(local.servers, 1, length(local.servers)) : s.host => s }
   agent_hosts  = { for a in local.agents : a.host => a }
 
-  server_url = "https://${local.first_server.host}:6443"
+  server_url = "https://${local.first_server.host}:${var.server_https_listen_port}"
 
   # kubectl context/cluster/user name for the fetched kubeconfig. The raw
   # k3s.yaml names everything "default", so we namespace it to the first server
@@ -28,6 +28,35 @@ locals {
 
   # Standalone rewritten kubeconfig kept in the module dir; also merged into ~/.kube/config.
   kubeconfig_path = "${path.module}/kubeconfig"
+
+  # Every managed node (servers and agents), keyed by host, with its connection
+  # details, service name, and the install resource that must land first.
+  containerd_nodes = merge(
+    {
+      (local.first_server.host) = {
+        user       = local.first_server.user
+        port       = var.server_ssh_port
+        service    = "k3s"
+        install_id = null_resource.server_init.id
+      }
+    },
+    {
+      for host, s in local.join_servers : host => {
+        user       = s.user
+        port       = var.server_ssh_port
+        service    = "k3s"
+        install_id = null_resource.server_join[host].id
+      }
+    },
+    {
+      for host, a in local.agent_hosts : host => {
+        user       = a.user
+        port       = var.agent_ssh_port
+        service    = "k3s-agent"
+        install_id = null_resource.agent[host].id
+      }
+    },
+  )
 }
 
 # Shared join token so additional servers and agents authenticate against the
@@ -43,14 +72,16 @@ resource "random_string" "token" {
 # only reference self) can reuse them.
 resource "null_resource" "server_init" {
   triggers = {
-    host            = local.first_server.host
-    user            = local.first_server.user
-    port            = var.server_ssh_port
-    key_path        = pathexpand(var.ssh_private_key)
-    version         = var.release
-    flannel_backend = var.flannel_backend
-    cluster_cidr    = var.cluster_cidr
-    service_cidr    = var.service_cidr
+    host                     = local.first_server.host
+    user                     = local.first_server.user
+    port                     = var.server_ssh_port
+    key_path                 = pathexpand(var.ssh_private_key)
+    version                  = var.release
+    flannel_backend          = var.flannel_backend
+    cluster_cidr             = var.cluster_cidr
+    service_cidr             = var.service_cidr
+    server_https_listen_port = var.server_https_listen_port
+    service_node_port_range  = var.service_node_port_range
   }
 
   connection {
@@ -78,7 +109,7 @@ resource "null_resource" "server_init" {
       # the routes under the configured cluster CIDR (var.cluster_cidr, split for
       # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
-      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${local.first_server.host}",
+      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --cluster-init --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${local.first_server.host} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range}",
     ]
   }
 
@@ -111,11 +142,13 @@ resource "null_resource" "server_join" {
     key_path = pathexpand(var.ssh_private_key)
     # Re-run the install when the release, backend, or join target changes, so
     # every member reacts together instead of only the first server.
-    version         = var.release
-    server          = local.server_url
-    flannel_backend = var.flannel_backend
-    cluster_cidr    = var.cluster_cidr
-    service_cidr    = var.service_cidr
+    version                  = var.release
+    server                   = local.server_url
+    flannel_backend          = var.flannel_backend
+    cluster_cidr             = var.cluster_cidr
+    service_cidr             = var.service_cidr
+    server_https_listen_port = var.server_https_listen_port
+    service_node_port_range  = var.service_node_port_range
   }
 
   connection {
@@ -138,8 +171,8 @@ resource "null_resource" "server_join" {
       # the routes under the configured cluster CIDR (var.cluster_cidr, split for
       # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
-      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/6443) 2>/dev/null; do sleep 3; done'",
-      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${each.value.host}",
+      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/${var.server_https_listen_port}) 2>/dev/null; do sleep 3; done'",
+      "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' sh -s - server --server ${local.server_url} --flannel-backend ${var.flannel_backend} --cluster-cidr ${var.cluster_cidr} --service-cidr ${var.service_cidr} --tls-san ${each.value.host} --https-listen-port ${var.server_https_listen_port} --service-node-port-range ${var.service_node_port_range}",
     ]
   }
 
@@ -170,8 +203,9 @@ resource "null_resource" "agent" {
     key_path = pathexpand(var.ssh_private_key)
     # Re-run the install when the release or the server URL changes, so agents
     # track the servers instead of only the first server being reinstalled.
-    version = var.release
-    server  = local.server_url
+    version                  = var.release
+    server                   = local.server_url
+    server_https_listen_port = var.server_https_listen_port
     # Tracked so this agent re-provisions when the pod network changes, and so the
     # destroy-time route flush can read the CIDR off self.triggers.
     cluster_cidr = var.cluster_cidr
@@ -197,7 +231,7 @@ resource "null_resource" "agent" {
       # the routes under the configured cluster CIDR (var.cluster_cidr, split for
       # dual-stack) so fresh flannel rebuilds a clean table. No-op for vxlan.
       "for c in $(echo '${var.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
-      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/6443) 2>/dev/null; do sleep 3; done'",
+      "timeout 180 bash -c 'until (exec 3<>/dev/tcp/${local.first_server.host}/${var.server_https_listen_port}) 2>/dev/null; do sleep 3; done'",
       "curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${var.release}' K3S_TOKEN='${random_string.token.result}' K3S_URL='${local.server_url}' sh -s - agent",
     ]
   }
@@ -216,6 +250,70 @@ resource "null_resource" "agent" {
   }
 }
 
+# Give each node's k3s containerd the same custom runtimes (e.g. ascend) as its
+# Docker daemon.json, dropped for nvidia (k3s auto-detects and wires that one
+# itself). daemon.json is fetched over SSH to the local machine and parsed with
+# local jq (scripts/render-containerd-runtimes.sh), since the remote host is not
+# guaranteed to have jq. Re-derives whenever the node is (re)installed; an empty
+# result removes any previously-written templates and restarts only on change.
+resource "null_resource" "containerd_config" {
+  for_each   = local.containerd_nodes
+  depends_on = [null_resource.server_init, null_resource.server_join, null_resource.agent]
+
+  triggers = {
+    host       = each.key
+    user       = each.value.user
+    port       = each.value.port
+    key_path   = pathexpand(var.ssh_private_key)
+    service    = each.value.service
+    install_id = each.value.install_id
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -uo pipefail
+      dir=/var/lib/rancher/k3s/agent/etc/containerd
+
+      daemon_json="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' 'sudo cat /etc/docker/daemon.json 2>/dev/null' || true)"
+      rendered="$(printf '%s' "$daemon_json" | bash '${path.module}/scripts/render-containerd-runtimes.sh' || true)"
+      existing="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo cat $dir/config.toml.tmpl 2>/dev/null" || true)"
+      existing_v3="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo cat $dir/config-v3.toml.tmpl 2>/dev/null" || true)"
+
+      if [ "$rendered" = "$existing" ] && [ "$rendered" = "$existing_v3" ]; then
+        echo "containerd runtime template on ${self.triggers.host} unchanged"
+        exit 0
+      fi
+
+      if [ -z "$rendered" ]; then
+        ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+          -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+          '${self.triggers.user}@${self.triggers.host}' \
+          "sudo rm -f $dir/config.toml.tmpl $dir/config-v3.toml.tmpl && sudo systemctl restart ${self.triggers.service}"
+        echo "removed stale containerd runtime template on ${self.triggers.host}"
+        exit 0
+      fi
+
+      ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo mkdir -p $dir"
+      printf '%s\n' "$rendered" | ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo tee $dir/config.toml.tmpl $dir/config-v3.toml.tmpl > /dev/null"
+      ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo systemctl restart ${self.triggers.service}"
+      echo "wrote containerd runtime template on ${self.triggers.host} and restarted ${self.triggers.service}"
+    EOT
+  }
+}
+
 # Fetch the kubeconfig via sudo (k3s writes it root-only at mode 600), namespace
 # its "default" identifiers to a per-cluster context, repoint the server URL from
 # 127.0.0.1 to the reachable host, and flatten-merge it into ~/.kube/config. Retries because
@@ -225,8 +323,9 @@ resource "null_resource" "kubeconfig" {
   depends_on = [null_resource.server_init]
 
   triggers = {
-    host    = local.first_server.host
-    context = local.context_name
+    host                     = local.first_server.host
+    context                  = local.context_name
+    server_https_listen_port = var.server_https_listen_port
     # Re-fetch when the first server is reinstalled (new certificates), so
     # ~/.kube/config never keeps stale credentials.
     server_init = null_resource.server_init.id
@@ -246,7 +345,7 @@ resource "null_resource" "kubeconfig" {
              'sudo test -s /etc/rancher/k3s/k3s.yaml && sudo cat /etc/rancher/k3s/k3s.yaml' 2>/dev/null \
              > "$raw" && test -s "$raw"; then
           sed -E \
-            -e 's|https://127.0.0.1:6443|https://${local.first_server.host}:6443|' \
+            -e 's|https://127\.0\.0\.1:[0-9]+|https://${local.first_server.host}:${var.server_https_listen_port}|' \
             -e 's|^  name: default$|  name: ${local.context_name}|' \
             -e 's|^    cluster: default$|    cluster: ${local.context_name}|' \
             -e 's|^    user: default$|    user: ${local.context_name}|' \
@@ -287,5 +386,41 @@ resource "null_resource" "kubeconfig" {
       kubectl config delete-cluster '${self.triggers.context}' || true
       kubectl config unset 'users.${self.triggers.context}' || true
     EOT
+  }
+}
+
+# Records the last SUCCESSFUL apply's inputs; Terraform auto-loads *.auto.tfvars.json on every
+# command (incl. destroy), and command-line -var still overrides it on apply. A managed
+# hashicorp/local local_file is not used here: it is deleted during destroy, which would strand
+# a failed/interrupted destroy retry with no values for server (a required variable).
+resource "null_resource" "last_apply" {
+  depends_on = [
+    null_resource.server_init,
+    null_resource.server_join,
+    null_resource.agent,
+    null_resource.containerd_config,
+    null_resource.kubeconfig,
+  ]
+
+  triggers = {
+    snapshot = jsonencode({
+      server                   = var.server
+      agent                    = var.agent
+      server_ssh_port          = var.server_ssh_port
+      agent_ssh_port           = var.agent_ssh_port
+      ssh_user                 = var.ssh_user
+      ssh_private_key          = var.ssh_private_key
+      release                  = var.release
+      flannel_backend          = var.flannel_backend
+      cluster_cidr             = var.cluster_cidr
+      service_cidr             = var.service_cidr
+      server_https_listen_port = var.server_https_listen_port
+      service_node_port_range  = var.service_node_port_range
+    })
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = "cat > '${path.module}/.last-apply.auto.tfvars.json' <<'EOF'\n${self.triggers.snapshot}\nEOF"
   }
 }

@@ -14,6 +14,16 @@ Terraform, and merge the cluster's kubeconfig into your local `~/.kube/config`.
 - Fetches the cluster kubeconfig, renames its context/cluster/user to
   `k3s-<first-server>`, merges it into `~/.kube/config`, and makes it the
   current context; on destroy it removes that context/cluster/user.
+- For every node, fetches `/etc/docker/daemon.json` to the local machine and
+  parses it locally with `jq` (the remote host is never required to have
+  `jq`). Any custom runtime found there (e.g. `ascend`) gets a matching k3s
+  containerd runtime class, written to both `config.toml.tmpl` and
+  `config-v3.toml.tmpl` under `/var/lib/rancher/k3s/agent/etc/containerd/`
+  (containerd 2, the default on k3s v1.34+, prefers the v3 name). `nvidia` is
+  always dropped -- k3s auto-detects and wires it itself. A node with no
+  `daemon.json` or no non-`nvidia` runtimes is left alone; if a previously
+  written template disappears from `daemon.json`, it is removed and the
+  service restarted.
 
 ## Prerequisites
 
@@ -51,6 +61,9 @@ terraform apply \
 - `release`: the K3s version, e.g. `v1.34.9+k3s1`.
 - `cluster_cidr` / `service_cidr`: pod / service networks (default
   `10.42.0.0/16` / `10.43.0.0/16`; comma-separate two CIDRs for dual-stack).
+- `server_https_listen_port`: Kubernetes apiserver port (default `6443`).
+- `service_node_port_range`: NodePort Service port range (default
+  `30000-32767`).
 
 After apply:
 
@@ -59,13 +72,10 @@ kubectl config use-context "$(terraform output -raw context_name)"
 kubectl get nodes
 ```
 
-Tear down (pass the same host variables):
+Tear down (no `-var` needed -- reuses the last apply's variables):
 
 ```bash
-terraform destroy \
-  -var='server=["192.168.1.10"]' \
-  -var='agent=["192.168.1.11"]' \
-  -var='ssh_user=ubuntu'
+terraform destroy
 ```
 
 ## Variables
@@ -81,6 +91,8 @@ terraform destroy \
 | `flannel_backend` | `vxlan` / `host-gw` / `wireguard-native` / `none` | `vxlan` |
 | `cluster_cidr` | Pod network (`--cluster-cidr`, comma-separated for dual-stack) | `10.42.0.0/16` |
 | `service_cidr` | Service network (`--service-cidr`, comma-separated for dual-stack) | `10.43.0.0/16` |
+| `server_https_listen_port` | Kubernetes apiserver port (`--https-listen-port`) | `6443` |
+| `service_node_port_range` | NodePort Service port range (`--service-node-port-range`) | `30000-32767` |
 
 ## Outputs
 
