@@ -1,6 +1,6 @@
 # Spec: NVIDIA Dynamic MIG Allocation — Per-Card Profile Ledger, Incremental GI/CI Create/Destroy, Profile-Anchored Scheduling
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 > **Second of two specs.** This is the follow-up "dynamic MIG implementation" spec that
@@ -819,6 +819,12 @@ credits allow 32 but `Remaining` caps at 28, the 4 excess Retry (the accepted co
   eviction+full-requeue (≥30s per cycle), and the retrying Workload holds its quota reservation through the
   backoff. Mitigation: accepted and documented as the convergence cost; a status-ledger Devices watch to
   shorten it is an Ask-first optimization, not built here.
+- **Transient NVML enumeration failure orphans a live partition (deferred hardening)** → in the reclaim/list
+  path a transient failure of the per-profile `GetGpuInstances` enumeration makes a live instance look absent,
+  so its marker is removed and the partition is orphaned until the card next fully drains (marker-less GC).
+  Mitigation (not built): distinguish an enumeration error from a clean "gone" before removing the marker.
+  Deferred to a follow-up (ship cross-check finding, Medium); the leak is bounded (single card, GC on drain)
+  and was not observed in the H100 e2e.
 
 ## Design Details
 
@@ -1063,9 +1069,44 @@ there too (Open Question 1).
       via `nvidia-smi`, `libvgpu.so` absent, `Remaining` decrements → delete → instance destroyed, `Remaining` restores;
       assert the `/8` denominator on the actual card generation. A100 reset path documented, validated externally.
     - Acceptance: doc renders (generic "a Kubernetes cluster"); H100 e2e passes on the H100 host.
-    - **Deferred (2026-07-23):** the docs shipped in `docs/operation/nvidia-mig.md`; the H100 real-card e2e is
-      deferred to the ship/hardware phase (no H100 reachable in this build session), per F8's own "run on the
-      H100 host" — it has NOT yet run.
+    - **Ship-phase result (2026-07-23):** the docs shipped in `docs/operation/nvidia-mig.md`; the H100 real-card
+      e2e then ran on a provisioned H100 80GB HBM3 (driver 570.211.01, Hopper, MIG mode enabled reset-free) and
+      **passed** — the per-profile `Remaining` ledger appeared with canonical names, a Kueue LocalQueue
+      `nvidia.com/gpu.sliced.mig-3g.40gb` workload admitted, the container saw exactly one `MIG 3g.40gb` device
+      via `nvidia-smi -L` (MIG-device UUID injected), and deleting the workload destroyed the GI/CI and restored
+      the ledger. The run surfaced three blocking defects plus one hardening, all fixed and committed in this
+      ship:
+      - **ECC memory restore mis-applied on HBM cards** (pre-existing on `main`, commit 13b6ee4): the
+        unconditional `memory * 16 / 15` ECC restore inflated the H100 to 86996 MiB (over the 80 GB nominal) and
+        corrupted every MIG profile name/geometry (`3g.42gb`, `7g.73gb`). ECC parity costs user-visible memory
+        only on **GDDR** GPUs; **HBM** keeps ECC in a hardware-reserved region and already reports full capacity,
+        and this split is by memory type, not architecture (Ampere spans both: A100 HBM vs A40 GDDR; Pascal too:
+        P100 HBM vs P40 GDDR). NVML exposes no memory-type field, so the restore is now gated on the memory bus
+        width (`nvmlDeviceGetMemoryBusWidth`): data-center HBM stacks are >=1024-bit (H100 5120, A100 5120, A30
+        3072) while GDDR parts are <=384-bit, so a bus width below 1024 bits (with ECC enabled) restores the loss.
+      - **MIG profile name empty on driver 570** — `GetGpuInstanceProfileInfo` accepted a V3 result that returns
+        SUCCESS with an empty Name (the driver dispatches the versioned call on the identical v2==v3 struct size
+        and writes the v2 layout, so the v3-offset Name reads junk), shadowing the V2 result that carries the
+        name and forcing a synthesized name. Now V3 is accepted only when it carries a Name (else V2), and
+        `GetName` strips NVML's `"MIG "` prefix so keys/requests use the canonical `3g.40gb`.
+      - **MIG-device UUID unresolved on the Allocate path** — `migUUIDs` resolved the owning GI via
+        `GetGpuInstance()`, which calls `nvmlDeviceGetGpuInstanceById` with the MIG (not parent) handle and
+        returns INVALID_ARGUMENT, so every created instance reported "no mig-device uuid". Resolved via a new
+        lightweight `GetGpuInstanceId()` valid on a MIG device handle.
+      - **Hardening (cross-check):** a marker rebind now verifies the live instance's MIG-device UUID still
+        matches the marker before reusing it, failing closed on GPU-instance-id reuse.
+      - **Multi-instance placement double-booking (found in the post-ship re-test):** `GetGpuInstances(profileId)`
+        sized its result buffer via `GetGpuInstanceProfileInfo(profileId)`, but that call takes a profile **enum
+        index** (0..`GPU_INSTANCE_PROFILE_COUNT`-1) while `profileId` is the creation `.Id`; on H100 the two
+        diverge (`1g.10gb` creation Id 19 >= count 17), so the call failed and the live-instance enumeration
+        returned empty. With the occupancy ledger silently empty, a second same-profile instance re-picked the
+        already-occupied start-0 slot -> `nvmlGpuInstanceCreate` `INSUFFICIENT_RESOURCES` -> kubelet
+        `UnexpectedAdmissionError` (and reclaim could not find such an instance to destroy -> leak). NVML's
+        possible-placements call is not occupancy-aware, so the ledger is the sole slot-exclusion source, which is
+        why an empty one double-books. Masked for `3g.40gb` (Id 9 < 17) so the single-instance H100 e2e passed.
+        Fixed by sizing the buffer from `GetGpuInstancePossiblePlacements(profileId)` (which takes the creation Id
+        and whose length is the per-card ceiling); a same-profile multi-instance case (7x `1g.10gb` fill, then a
+        whole-card `7g.80gb` recompose) was added to the e2e to cover it.
 
 > **Final checkpoint:** `grep` shows no stale symbols; `go build ./...`, full `go test ./...`, `make lint`,
 > `make generate`/`make generate nvml` all clean.
