@@ -97,7 +97,11 @@ func (l GpmMetricsGetHandler) V1(duration time.Duration, metricIds ...GpmMetricI
 	}
 
 	var gpmMetrics nvmlGpmMetricsGetType
-	gpmMetrics.Version = STRUCT_VERSION(gpmMetrics, 1)
+	// GPM uses a plain version number (nvml.h: `#define NVML_GPM_METRICS_GET_VERSION 1`), NOT the
+	// size-encoded STRUCT_VERSION scheme the size-versioned structs (memory-info, profile-info) use.
+	// Sending the size-encoded value makes nvmlGpmMetricsGet reject the call with
+	// ARGUMENT_VERSION_MISMATCH, so GPM never returns metrics.
+	gpmMetrics.Version = GPM_METRICS_GET_VERSION
 	gpmMetrics.NumMetrics = uint32(len(metricIds))
 	for i := range metricIds {
 		gpmMetrics.Metrics[i].MetricId = uint32(metricIds[i])
