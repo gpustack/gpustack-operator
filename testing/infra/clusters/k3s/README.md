@@ -14,6 +14,16 @@ Terraform, and merge the cluster's kubeconfig into your local `~/.kube/config`.
 - Fetches the cluster kubeconfig, renames its context/cluster/user to
   `k3s-<first-server>`, merges it into `~/.kube/config`, and makes it the
   current context; on destroy it removes that context/cluster/user.
+- For every node, fetches `/etc/docker/daemon.json` to the local machine and
+  parses it locally with `jq` (the remote host is never required to have
+  `jq`). Any custom runtime found there (e.g. `ascend`) gets a matching k3s
+  containerd runtime class, written to both `config.toml.tmpl` and
+  `config-v3.toml.tmpl` under `/var/lib/rancher/k3s/agent/etc/containerd/`
+  (containerd 2, the default on k3s v1.34+, prefers the v3 name). `nvidia` is
+  always dropped -- k3s auto-detects and wires it itself. A node with no
+  `daemon.json` or no non-`nvidia` runtimes is left alone; if a previously
+  written template disappears from `daemon.json`, it is removed and the
+  service restarted.
 
 ## Prerequisites
 

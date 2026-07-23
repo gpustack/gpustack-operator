@@ -28,6 +28,35 @@ locals {
 
   # Standalone rewritten kubeconfig kept in the module dir; also merged into ~/.kube/config.
   kubeconfig_path = "${path.module}/kubeconfig"
+
+  # Every managed node (servers and agents), keyed by host, with its connection
+  # details, service name, and the install resource that must land first.
+  containerd_nodes = merge(
+    {
+      (local.first_server.host) = {
+        user       = local.first_server.user
+        port       = var.server_ssh_port
+        service    = "k3s"
+        install_id = null_resource.server_init.id
+      }
+    },
+    {
+      for host, s in local.join_servers : host => {
+        user       = s.user
+        port       = var.server_ssh_port
+        service    = "k3s"
+        install_id = null_resource.server_join[host].id
+      }
+    },
+    {
+      for host, a in local.agent_hosts : host => {
+        user       = a.user
+        port       = var.agent_ssh_port
+        service    = "k3s-agent"
+        install_id = null_resource.agent[host].id
+      }
+    },
+  )
 }
 
 # Shared join token so additional servers and agents authenticate against the
@@ -218,6 +247,70 @@ resource "null_resource" "agent" {
       # Destroy provisioners may reference only self, so read the CIDR off triggers.
       "for c in $(echo '${self.triggers.cluster_cidr}' | tr ',' ' '); do sudo ip route flush root \"$c\" || true; done",
     ]
+  }
+}
+
+# Give each node's k3s containerd the same custom runtimes (e.g. ascend) as its
+# Docker daemon.json, dropped for nvidia (k3s auto-detects and wires that one
+# itself). daemon.json is fetched over SSH to the local machine and parsed with
+# local jq (scripts/render-containerd-runtimes.sh), since the remote host is not
+# guaranteed to have jq. Re-derives whenever the node is (re)installed; an empty
+# result removes any previously-written templates and restarts only on change.
+resource "null_resource" "containerd_config" {
+  for_each   = local.containerd_nodes
+  depends_on = [null_resource.server_init, null_resource.server_join, null_resource.agent]
+
+  triggers = {
+    host       = each.key
+    user       = each.value.user
+    port       = each.value.port
+    key_path   = pathexpand(var.ssh_private_key)
+    service    = each.value.service
+    install_id = each.value.install_id
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -uo pipefail
+      dir=/var/lib/rancher/k3s/agent/etc/containerd
+
+      daemon_json="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' 'sudo cat /etc/docker/daemon.json 2>/dev/null' || true)"
+      rendered="$(printf '%s' "$daemon_json" | bash '${path.module}/scripts/render-containerd-runtimes.sh' || true)"
+      existing="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo cat $dir/config.toml.tmpl 2>/dev/null" || true)"
+      existing_v3="$(ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo cat $dir/config-v3.toml.tmpl 2>/dev/null" || true)"
+
+      if [ "$rendered" = "$existing" ] && [ "$rendered" = "$existing_v3" ]; then
+        echo "containerd runtime template on ${self.triggers.host} unchanged"
+        exit 0
+      fi
+
+      if [ -z "$rendered" ]; then
+        ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+          -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+          '${self.triggers.user}@${self.triggers.host}' \
+          "sudo rm -f $dir/config.toml.tmpl $dir/config-v3.toml.tmpl && sudo systemctl restart ${self.triggers.service}"
+        echo "removed stale containerd runtime template on ${self.triggers.host}"
+        exit 0
+      fi
+
+      ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo mkdir -p $dir"
+      printf '%s\n' "$rendered" | ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo tee $dir/config.toml.tmpl $dir/config-v3.toml.tmpl > /dev/null"
+      ssh -i '${pathexpand(var.ssh_private_key)}' -p ${self.triggers.port} \
+        -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
+        '${self.triggers.user}@${self.triggers.host}' "sudo systemctl restart ${self.triggers.service}"
+      echo "wrote containerd runtime template on ${self.triggers.host} and restarted ${self.triggers.service}"
+    EOT
   }
 }
 
