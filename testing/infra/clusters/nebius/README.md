@@ -11,9 +11,10 @@ node groups, and point your local kubeconfig at it.
 - Creates a security group (`nebius_vpc_v1_security_group`) with an SSH
   ingress rule (`TCP/22` from `0.0.0.0/0`) and an egress rule (allow all).
 - Creates a `nebius_mk8s_v1_cluster` with a public control-plane endpoint.
-- Creates one `nebius_mk8s_v1_node_group` per `node_groups` key: a `cpu` group
-  by default, plus any GPU groups you declare (each node gets a public IP and
-  cloud-init injecting an SSH user + key, same idiom as `computes/nebius`).
+- Creates a `cpu` `nebius_mk8s_v1_node_group` (shaped by `cpu_instance_types`),
+  plus one `gpu-<name>` group per `gpu_instance_types` key (each node gets a
+  public IP and cloud-init injecting an SSH user + key, same idiom as
+  `computes/nebius`).
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
   into `~/.kube/config` as a new context; on destroy it removes that
   context/cluster/user.
@@ -54,10 +55,12 @@ kubectl --context "$(terraform output -raw context_name)" get nodes -o wide
 terraform destroy   # no -var needed -- reuses the last apply's variables
 ```
 
-The default `node_groups` provisions a `cpu` group (`cpu-e2`/`4vcpu-16gb`) and
-a `gpu-h100` group (`gpu-h100-sxm`/`1gpu-16vcpu-200gb`, CUDA 12.8), each with
-one fixed node. Override with `-var='node_groups={...}'` to change shapes,
-counts, or add/remove groups; each map key becomes that node group's name.
+The default `cpu_instance_types` (`cpu-e2`/`4vcpu-16gb`) and `gpu_instance_types`
+(a `h100` entry: `gpu-h100-sxm`/`1gpu-16vcpu-200gb`, CUDA 12.8) provision one
+`cpu` node and one `gpu-h100` node. Override `-var='cpu_instance_types={...}'`
+to reshape the CPU group, or `-var='gpu_instance_types={...}'` to change,
+add, or remove GPU groups; each `gpu_instance_types` map key becomes that
+group's `gpu-<key>` name.
 
 Node groups don't expose per-node IPs in Terraform state, so reach individual
 nodes via `kubectl ... get nodes -o wide` -> `ssh ubuntu@<ExternalIP>`; the SSH
@@ -74,7 +77,8 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `ssh_public_key` | Path to the SSH public key injected into every node via cloud-init | `~/.ssh/id_rsa.pub` |
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
-| `node_groups` | Node groups keyed by name: `instance_type {platform, preset}`, `os`, `fixed_node_count`, optional `gpu {drivers_preset}` | `cpu` (`cpu-e2`/`4vcpu-16gb`) + `gpu-h100` (`gpu-h100-sxm`/`1gpu-16vcpu-200gb`, CUDA 12.8) |
+| `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os}` | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
+| `gpu_instance_types` | GPU node groups as a `map(object)` keyed by group name (each becomes `gpu-<name>`): `{instance_type {platform, preset}, os, gpu {drivers_preset}}` | `{ h100 = { instance_type = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }, os = "ubuntu24.04", gpu = { drivers_preset = "cuda12.8" } } }` |
 
 ## Outputs
 

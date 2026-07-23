@@ -62,15 +62,25 @@ variable "node_boot_disk_type" {
   }
 }
 
-# Each node group becomes a nebius_mk8s_v1_node_group named after its map key (a "cpu" group and
-# any number of GPU groups, mirroring clusters/eks's gpu-<name> convention -- prefix a GPU key
-# with "gpu-" yourself, e.g. "gpu-h100"). instance_type has no image_family: unlike a standalone
-# compute VM (computes/nebius), the mk8s node template picks its image from `os` + (for GPU groups)
-# `gpu.drivers_preset`, per the platform/Kubernetes-version/os/driver matrix:
+# The (singular) CPU node group's shape, mirroring clusters/eks's cpu_instance_types. No
+# image_family: unlike a standalone compute VM (computes/nebius), the mk8s node template picks
+# its image from `os` alone for a driverless (CPU) platform.
+variable "cpu_instance_types" {
+  description = "Instance type for the CPU node group: platform/preset (see the region table above) plus os."
+  type = object({
+    platform = string
+    preset   = string
+    os       = string
+  })
+  default = { platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }
+}
+
+# Keyed by group name so each GPU node group has a stable key (gpu-<name>), mirroring
+# clusters/eks's gpu_instance_types map(list(string)) convention. os + gpu.drivers_preset must
+# match a supported combination for the group's platform and var.release:
 #
-#   gpu-l40s-a, gpu-l40s-d, gpu-h100-sxm, gpu-h200-sxm, cpu-e1, cpu-e2, cpu-d3:
-#     drivers_preset = ""       : 1.30 -> os "ubuntu22.04" | 1.31 -> "ubuntu22.04" (default), "ubuntu24.04"
 #   gpu-l40s-a, gpu-l40s-d, gpu-h100-sxm, gpu-h200-sxm:
+#     drivers_preset = ""         : 1.30 -> os "ubuntu22.04" | 1.31 -> "ubuntu22.04" (default), "ubuntu24.04"
 #     drivers_preset = "cuda12"   (CUDA 12.4) : 1.30, 1.31 -> os "ubuntu22.04"
 #     drivers_preset = "cuda12.4"             : 1.31       -> os "ubuntu22.04"
 #     drivers_preset = "cuda12.8"             : 1.31       -> os "ubuntu24.04"
@@ -81,30 +91,23 @@ variable "node_boot_disk_type" {
 #   gpu-b200-sxm-a:
 #     drivers_preset = ""                     : 1.31 -> os "ubuntu24.04"
 #     drivers_preset = "cuda12.8"              : 1.31 -> os "ubuntu24.04"
-variable "node_groups" {
-  description = "Node groups keyed by name; instance_type/os per the platform/Kubernetes-version/os/driver matrix above, gpu.drivers_preset required for GPU platforms."
+variable "gpu_instance_types" {
+  description = "GPU node groups as a map(object) keyed by group name (each becomes gpu-<name>); os/gpu.drivers_preset per the platform/Kubernetes-version/os/driver matrix above."
   type = map(object({
     instance_type = object({
       platform = string
       preset   = string
     })
-    os               = string
-    fixed_node_count = number
-    gpu = optional(object({
+    os = string
+    gpu = object({
       drivers_preset = string
-    }))
+    })
   }))
   default = {
-    cpu = {
-      instance_type    = { platform = "cpu-e2", preset = "4vcpu-16gb" }
-      os               = "ubuntu24.04"
-      fixed_node_count = 1
-    }
-    gpu-h100 = {
-      instance_type    = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
-      os               = "ubuntu24.04"
-      fixed_node_count = 1
-      gpu              = { drivers_preset = "cuda12.8" }
+    h100 = {
+      instance_type = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
+      os            = "ubuntu24.04"
+      gpu           = { drivers_preset = "cuda12.8" }
     }
   }
 }

@@ -15,6 +15,24 @@ resource "random_string" "suffix" {
 locals {
   cluster_name = "${var.name_prefix}-${random_string.suffix.result}"
   context_name = local.cluster_name
+
+  node_groups = merge(
+    {
+      cpu = {
+        instance_type = { platform = var.cpu_instance_types.platform, preset = var.cpu_instance_types.preset }
+        os            = var.cpu_instance_types.os
+        gpu           = null
+      }
+    },
+    {
+      for name, cfg in var.gpu_instance_types :
+      "gpu-${name}" => {
+        instance_type = cfg.instance_type
+        os            = cfg.os
+        gpu           = cfg.gpu
+      }
+    },
+  )
 }
 
 resource "nebius_vpc_v1_network" "this" {
@@ -85,11 +103,11 @@ resource "nebius_mk8s_v1_cluster" "this" {
 }
 
 resource "nebius_mk8s_v1_node_group" "this" {
-  for_each  = var.node_groups
+  for_each  = local.node_groups
   parent_id = nebius_mk8s_v1_cluster.this.id
   name      = each.key
 
-  fixed_node_count = each.value.fixed_node_count
+  fixed_node_count = 1
 
   template = {
     resources = {
@@ -166,7 +184,8 @@ resource "null_resource" "last_apply" {
       ssh_public_key         = var.ssh_public_key
       node_boot_disk_size_gb = var.node_boot_disk_size_gb
       node_boot_disk_type    = var.node_boot_disk_type
-      node_groups            = var.node_groups
+      cpu_instance_types     = var.cpu_instance_types
+      gpu_instance_types     = var.gpu_instance_types
     })
   }
 
