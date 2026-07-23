@@ -8,7 +8,7 @@ import (
 func card(logicalCount int32, overcommit bool, physicalCeiling int32, profiles ...AcceleratorSlicedPhysicalDetailProfile) Accelerator {
 	physical := make([]AcceleratorPhysicalSlicedProfile, 0, len(profiles))
 	for _, p := range profiles {
-		physical = append(physical, AcceleratorPhysicalSlicedProfile{Name: p.Name, Count: p.Count})
+		physical = append(physical, AcceleratorPhysicalSlicedProfile{Name: p.Name, Count: p.Count, MemoryMib: p.MemoryMib})
 	}
 	return Accelerator{
 		Status: AcceleratorStatus{
@@ -67,6 +67,21 @@ func TestAggregateAcceleratorSlicedDetail(t *testing.T) {
 				Physical: AcceleratorSlicedPhysicalDetail{
 					Count:    14,
 					Profiles: []AcceleratorSlicedPhysicalDetailProfile{prof("1g.5gb", 14), prof("2g.10gb", 6)},
+				},
+			},
+		},
+		{
+			// MemoryMib rides through the aggregation: it is uniform per profile name (one
+			// instance's VRAM), so it is carried once while Count sums across the group's cards.
+			name: "mig carries per-profile memory",
+			cards: []Accelerator{
+				card(0, false, 7, AcceleratorSlicedPhysicalDetailProfile{Name: "1g.10gb", Count: 7, MemoryMib: 10240}),
+				card(0, false, 7, AcceleratorSlicedPhysicalDetailProfile{Name: "1g.10gb", Count: 7, MemoryMib: 10240}),
+			},
+			want: AcceleratorSlicedDetail{
+				Physical: AcceleratorSlicedPhysicalDetail{
+					Count:    14,
+					Profiles: []AcceleratorSlicedPhysicalDetailProfile{{Name: "1g.10gb", Count: 14, MemoryMib: 10240}},
 				},
 			},
 		},

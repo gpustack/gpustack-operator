@@ -16,9 +16,13 @@ func (*AcceleratorAllocation) ProtoMessage() {}
 
 func (*AcceleratorLogicalSliced) ProtoMessage() {}
 
+func (*AcceleratorPhysicalPlacement) ProtoMessage() {}
+
 func (*AcceleratorPhysicalSliced) ProtoMessage() {}
 
 func (*AcceleratorPhysicalSlicedProfile) ProtoMessage() {}
+
+func (*AcceleratorProfileCount) ProtoMessage() {}
 
 func (*AcceleratorSlicedDetail) ProtoMessage() {}
 

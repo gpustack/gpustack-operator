@@ -121,10 +121,171 @@ func TestNodeDevicesFeasibility(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			got := nodeDevicesFeasibility(c.devices, c.mode, c.count, c.slicedUnits)
+			got, _ := nodeDevicesFeasibility(c.devices, cardRequest{mode: c.mode, count: c.count, slicedUnits: c.slicedUnits})
 			assert.Equal(t, c.want, got)
 		})
 	}
+}
+
+// physicalCard describes one MIG-enabled card for a feasibility fixture: its allocation Mode,
+// its scalar remaining units, its RemainingProfiles ledger (profile → free instance count), and
+// whether its capability carries cached Placements (the ledger-ready signal).
+type physicalCard struct {
+	id                string
+	mode              workercore.DeviceAllocationMode
+	remaining         int32
+	remainingProfiles map[string]int32
+	placementsCached  bool
+}
+
+// physicalDevices builds one Devices ledger whose group lists each MIG-enabled card twice — the
+// Spec-side capability (a physical-slice profile, with Placements when cached) and the Status-side
+// allocation (mode + scalar remaining + RemainingProfiles) — matched by accelerator ID, the shape
+// physicalSlicedFeasibility joins.
+func physicalDevices(cards ...physicalCard) workercore.Devices {
+	specAccels := make([]workercore.Accelerator, len(cards))
+	statusAccels := make([]workercore.AcceleratorAllocation, len(cards))
+	for i, c := range cards {
+		prof := workercore.AcceleratorPhysicalSlicedProfile{Name: "cap", Count: 7}
+		if c.placementsCached {
+			prof.Placements = []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 1}}
+		}
+		specAccels[i] = workercore.Accelerator{
+			ID: c.id, Index: uint32(i),
+			Status: workercore.AcceleratorStatus{
+				PhysicalSliced: workercore.AcceleratorPhysicalSliced{
+					Profiles: []workercore.AcceleratorPhysicalSlicedProfile{prof},
+				},
+			},
+		}
+		rem := make([]workercore.AcceleratorProfileCount, 0, len(c.remainingProfiles))
+		for name, cnt := range c.remainingProfiles {
+			rem = append(rem, workercore.AcceleratorProfileCount{Name: name, Count: cnt})
+		}
+		statusAccels[i] = workercore.AcceleratorAllocation{
+			ID: c.id, Index: uint32(i), Mode: c.mode, Remaining: c.remaining, RemainingProfiles: rem,
+		}
+	}
+	return workercore.Devices{
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{ID: "g0", Manufacturer: "nvidia", Accelerators: specAccels}},
+		},
+		Status: workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{ID: "g0", Manufacturer: "nvidia", Accelerators: statusAccels}},
+		},
+	}
+}
+
+func TestNodeDevicesFeasibilityPhysicalSliced(t *testing.T) {
+	none := workercore.DeviceAllocationModeNone
+	sliced := workercore.DeviceAllocationModeSliced
+	exclusive := workercore.DeviceAllocationModeExclusive
+
+	cases := []struct {
+		name    string
+		devices []workercore.Devices
+		profile string
+		count   int32
+		want    kueue.CheckState
+	}{
+		{
+			name: "enough cards with a free placement is ready",
+			devices: []workercore.Devices{physicalDevices(
+				physicalCard{id: "g0", mode: none, remainingProfiles: map[string]int32{"1g.10gb": 7}, placementsCached: true},
+				physicalCard{id: "g1", mode: sliced, remainingProfiles: map[string]int32{"1g.10gb": 4}, placementsCached: true},
+			)},
+			profile: "1g.10gb", count: 2, want: kueue.CheckStateReady,
+		},
+		{
+			name: "profile full everywhere retries (not reject)",
+			devices: []workercore.Devices{physicalDevices(
+				physicalCard{id: "g0", mode: sliced, remainingProfiles: map[string]int32{"1g.10gb": 0}, placementsCached: true},
+			)},
+			profile: "1g.10gb", count: 1, want: kueue.CheckStateRetry,
+		},
+		{
+			name: "no placements cached is ledger-not-ready retry",
+			devices: []workercore.Devices{physicalDevices(
+				physicalCard{id: "g0", mode: none, remainingProfiles: map[string]int32{}, placementsCached: false},
+			)},
+			profile: "1g.10gb", count: 1, want: kueue.CheckStateRetry,
+		},
+		{
+			name: "exclusive-held mig card is not a candidate",
+			devices: []workercore.Devices{physicalDevices(
+				physicalCard{id: "g0", mode: exclusive, remainingProfiles: map[string]int32{"1g.10gb": 7}, placementsCached: true},
+			)},
+			profile: "1g.10gb", count: 1, want: kueue.CheckStateRetry,
+		},
+		{
+			name: "short by one card retries",
+			devices: []workercore.Devices{physicalDevices(
+				physicalCard{id: "g0", mode: none, remainingProfiles: map[string]int32{"1g.10gb": 1}, placementsCached: true},
+			)},
+			profile: "1g.10gb", count: 2, want: kueue.CheckStateRetry,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got, _ := nodeDevicesFeasibility(c.devices, cardRequest{mode: sliced, count: c.count, profile: c.profile})
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
+// TestNodeDevicesFeasibilityPhysicalMessages pins that "ledger not ready" carries a message
+// distinct from a genuine "profile full", so an operator can tell an upgrade window from real
+// contention.
+func TestNodeDevicesFeasibilityPhysicalMessages(t *testing.T) {
+	notReady := []workercore.Devices{physicalDevices(
+		physicalCard{id: "g0", mode: workercore.DeviceAllocationModeNone, placementsCached: false},
+	)}
+	full := []workercore.Devices{physicalDevices(
+		physicalCard{id: "g0", mode: workercore.DeviceAllocationModeSliced, remainingProfiles: map[string]int32{"1g.10gb": 0}, placementsCached: true},
+	)}
+
+	// A pool with NO MIG-enabled card at all (no physical-slice profiles on any card) is a
+	// different condition from a rollout window, and must carry its own message.
+	noMig := []workercore.Devices{{
+		Spec: workercore.DevicesSpec{Groups: []workercore.DevicesGroup{{
+			ID: "g0", Manufacturer: "nvidia",
+			Accelerators: []workercore.Accelerator{{ID: "g0", Index: 0}}, // no PhysicalSliced.Profiles
+		}}},
+		Status: workercore.DevicesStatus{Groups: []workercore.DevicesAllocationGroup{{
+			ID: "g0", Manufacturer: "nvidia",
+			Accelerators: []workercore.AcceleratorAllocation{{ID: "g0", Index: 0, Mode: workercore.DeviceAllocationModeNone}},
+		}}},
+	}}
+
+	_, notReadyMsg := nodeDevicesFeasibility(notReady, cardRequest{count: 1, profile: "1g.10gb"})
+	_, fullMsg := nodeDevicesFeasibility(full, cardRequest{count: 1, profile: "1g.10gb"})
+	_, noMigMsg := nodeDevicesFeasibility(noMig, cardRequest{count: 1, profile: "1g.10gb"})
+
+	assert.Equal(t, physicalLedgerNotReadyMessage, notReadyMsg)
+	assert.NotEqual(t, notReadyMsg, fullMsg, "ledger-not-ready and profile-full messages must differ")
+	assert.NotEqual(t, physicalLedgerNotReadyMessage, noMigMsg,
+		"a pool with no MIG-enabled card must not reuse the device-manager-rollout message")
+	assert.Contains(t, noMigMsg, "no MIG-enabled card")
+}
+
+// TestNodeDevicesFeasibilityExcludesMigFromLogicalSliced pins that a soft-slice request never
+// lands on a MIG-enabled card, even when that card's scalar remaining would otherwise fit.
+func TestNodeDevicesFeasibilityExcludesMigFromLogicalSliced(t *testing.T) {
+	half := int32(nodefeature.ResourceMaxUnits / 2)
+	whole := int32(nodefeature.ResourceMaxUnits)
+	sliced := workercore.DeviceAllocationModeSliced
+
+	migCard := []workercore.Devices{physicalDevices(
+		physicalCard{id: "g0", mode: workercore.DeviceAllocationModeNone, remaining: whole, placementsCached: true},
+	)}
+	gotMig, _ := nodeDevicesFeasibility(migCard, cardRequest{mode: sliced, count: 1, slicedUnits: half})
+	assert.Equal(t, kueue.CheckStateRetry, gotMig, "a soft slice must not count a MIG-enabled card")
+
+	softCard := []workercore.Devices{devicesWithRemaining(whole)}
+	gotSoft, _ := nodeDevicesFeasibility(softCard, cardRequest{mode: sliced, count: 1, slicedUnits: half})
+	assert.Equal(t, kueue.CheckStateReady, gotSoft, "the same remaining on a non-MIG card fits")
 }
 
 // workloadRequesting builds a single-podset Workload whose one container requests
@@ -155,6 +316,7 @@ func TestParseCardRequest(t *testing.T) {
 	slicedUnits := base + nodefeature.SlicedUnitsResourceNameSuffix
 	slicedCores := base + nodefeature.SlicedCoresPercentageResourceNameSuffix
 	sharedCard := base + nodefeature.SharedResourceNameSuffix
+	slicedMig := string(nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb"))
 
 	cases := []struct {
 		name     string
@@ -189,6 +351,16 @@ func TestParseCardRequest(t *testing.T) {
 			podCount: 1,
 			reqs:     map[core.ResourceName]string{core.ResourceName(sharedCard): "3"},
 			want:     cardRequest{mode: workercore.DeviceAllocationModeShared, count: 3},
+		},
+		{
+			name:     "physical-sliced (mig) reads profile and card count, mode sliced",
+			podCount: 1,
+			reqs: map[core.ResourceName]string{
+				core.ResourceName(slicedCard):  "2",
+				core.ResourceName(slicedMig):   "1",
+				core.ResourceName(slicedUnits): "200000",
+			},
+			want: cardRequest{mode: workercore.DeviceAllocationModeSliced, count: 2, slicedUnits: 200000, profile: "1g.10gb"},
 		},
 		{
 			name:     "no accelerator request",
@@ -230,6 +402,60 @@ func TestParseCardRequest_TakesStrictestSlicedUnits(t *testing.T) {
 	assert.Equal(t, workercore.DeviceAllocationModeSliced, got.mode)
 	assert.Equal(t, int32(2), got.count, "cards summed across containers")
 	assert.Equal(t, int32(480000), got.slicedUnits, "strictest (max) per-card units, not last-wins")
+}
+
+// TestParseCardRequest_InitContainerMig pins that a MIG request carried only on an init container
+// is still parsed (profile + card count), so feasibility gates it — getAllocatingPod attributes
+// init containers too, and the Pod webhook folds them.
+func TestParseCardRequest_InitContainerMig(t *testing.T) {
+	base := string(nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive))
+	slicedCard := core.ResourceName(base + nodefeature.SlicedResourceNameSuffix)
+	slicedMig := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+
+	wl := &kueue.Workload{Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+		Name:  "main",
+		Count: 1,
+		Template: core.PodTemplateSpec{Spec: core.PodSpec{
+			InitContainers: []core.Container{{Name: "init", Resources: core.ResourceRequirements{Requests: core.ResourceList{
+				slicedCard: resource.MustParse("1"),
+				slicedMig:  resource.MustParse("1"),
+			}}}},
+			Containers: []core.Container{{Name: "main"}},
+		}},
+	}}}}
+
+	got := parseCardRequest(wl)
+	assert.Equal(t, workercore.DeviceAllocationModeSliced, got.mode)
+	assert.Equal(t, int32(1), got.count, "card count read from the init container")
+	assert.Equal(t, "1g.10gb", got.profile)
+}
+
+// TestParseCardRequest_LimitsOnly pins that accelerator keys specified only under
+// resources.limits (the conventional place for extended resources) are still parsed — a
+// requests-only scan would miss them and wrongly mark feasibility Ready.
+func TestParseCardRequest_LimitsOnly(t *testing.T) {
+	base := string(nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive))
+	slicedCard := core.ResourceName(base + nodefeature.SlicedResourceNameSuffix)
+	slicedUnits := core.ResourceName(base + nodefeature.SlicedUnitsResourceNameSuffix)
+	slicedMig := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+
+	wl := &kueue.Workload{Spec: kueue.WorkloadSpec{PodSets: []kueue.PodSet{{
+		Name:  "main",
+		Count: 1,
+		Template: core.PodTemplateSpec{Spec: core.PodSpec{
+			Containers: []core.Container{{Name: "main", Resources: core.ResourceRequirements{Limits: core.ResourceList{
+				slicedCard:  resource.MustParse("2"),
+				slicedMig:   resource.MustParse("1"),
+				slicedUnits: resource.MustParse("200000"),
+			}}}},
+		}},
+	}}}}
+
+	got := parseCardRequest(wl)
+	assert.Equal(t, workercore.DeviceAllocationModeSliced, got.mode)
+	assert.Equal(t, int32(2), got.count, "card count read from limits-only request")
+	assert.Equal(t, int32(200000), got.slicedUnits)
+	assert.Equal(t, "1g.10gb", got.profile)
 }
 
 func TestCandidateDevices(t *testing.T) {

@@ -86,7 +86,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := deriveSlicedProfiles(tc.infos, tc.cardMemoryMiB)
+			got := deriveSlicedProfiles(tc.infos, tc.cardMemoryMiB, nil)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("deriveSlicedProfiles() mismatch\n got: %+v\nwant: %+v", got, tc.want)
 			}
@@ -104,5 +104,47 @@ func TestMaxProfileCount(t *testing.T) {
 	}
 	if got := maxProfileCount(nil); got != 0 {
 		t.Errorf("maxProfileCount(nil) = %d, want 0", got)
+	}
+}
+
+func TestDeriveSlicedProfilesCachesPlacementsByID(t *testing.T) {
+	// 1g.5gb (id 0) and 1g.10gb (id 7) both span one compute slice; the placement cache
+	// must key on the profile's own probed id, not the shared slice count, so each keeps
+	// its own legal slots.
+	placementsByID := map[uint32][]device.AcceleratorPhysicalPlacement{
+		0: {{Start: 0, Length: 1}, {Start: 1, Length: 1}},
+		7: {{Start: 0, Length: 2}, {Start: 2, Length: 2}},
+	}
+	infos := []nvml.GpuInstanceProfileInfo_v3{
+		{Id: 0, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 4864, Name: profileName("1g.5gb")},
+		{Id: 7, SliceCount: 1, InstanceCount: 4, MemorySizeMB: 9856, Name: profileName("1g.10gb")},
+	}
+	got := deriveSlicedProfiles(infos, 40960, func(id uint32) []device.AcceleratorPhysicalPlacement {
+		return placementsByID[id]
+	})
+
+	want := map[string][]device.AcceleratorPhysicalPlacement{
+		"1g.5gb":  {{Start: 0, Length: 1}, {Start: 1, Length: 1}},
+		"1g.10gb": {{Start: 0, Length: 2}, {Start: 2, Length: 2}},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d profiles, want %d", len(got), len(want))
+	}
+	for i := range got {
+		p := got[i]
+		if !reflect.DeepEqual(p.Placements, want[p.Name]) {
+			t.Errorf("%s placements = %+v, want %+v", p.Name, p.Placements, want[p.Name])
+		}
+	}
+}
+
+func TestMigPlacementsFromNVML(t *testing.T) {
+	got := migPlacementsFromNVML([]nvml.GpuInstancePlacement{{Start: 0, Size: 2}, {Start: 4, Size: 2}})
+	want := []device.AcceleratorPhysicalPlacement{{Start: 0, Length: 2}, {Start: 4, Length: 2}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("migPlacementsFromNVML() = %+v, want %+v", got, want)
+	}
+	if migPlacementsFromNVML(nil) != nil {
+		t.Errorf("migPlacementsFromNVML(nil) = non-nil, want nil")
 	}
 }

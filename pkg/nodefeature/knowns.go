@@ -64,6 +64,13 @@ const (
 	// node-level only (drives CUDA_DEVICE_MEMORY_LIMIT_IN_BYTES; the webhook folds it
 	// into .sliced.units via floor(mib/cardVRAM*M)); never folded into Kueue credits.
 	SlicedMemoryMibResourceNameSuffix = ".sliced.memory-mib"
+	// SlicedMigResourceNameInfix precedes the profile name in a physical-slice (MIG)
+	// request key, e.g. "nvidia.com/gpu.sliced.mig-1g.10gb". The profile name is the
+	// card's own hardware-reported name, so the key is variable-tailed (unlike the fixed
+	// soft-slice sub-keys above) and never encodes a hardcoded profile table. A MIG
+	// request names its profile explicitly and is mutually exclusive with the logical
+	// sub-keys on one container.
+	SlicedMigResourceNameInfix = ".sliced.mig-"
 
 	// VisibilityResourceNamePrefix and VisibilityResourceNameSuffix compose the device-only
 	// "visibility" resource the SSH sidecar requests to co-allocate the same physical
@@ -283,6 +290,14 @@ func GetAcceleratableSlicedMemoryMibResourceName(manufacturer string) core.Resou
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMemoryMibResourceNameSuffix
 }
 
+// GetAcceleratableSlicedMigResourceName returns the physical-slice (MIG) request key
+// for the given manufacturer and profile name — e.g. profile "1g.10gb" for nvidia
+// yields "nvidia.com/gpu.sliced.mig-1g.10gb". The profile name is the card's own
+// hardware-reported name, so the key carries no hardcoded profile table.
+func GetAcceleratableSlicedMigResourceName(manufacturer, profile string) core.ResourceName {
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMigResourceNameInfix + core.ResourceName(profile)
+}
+
 // IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
 func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	switch {
@@ -290,10 +305,35 @@ func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 		name = name[:len(name)-len(SharedResourceNameSuffix)]
 	case stringx.HasSuffix(name, SlicedUnitsResourceNameSuffix):
 		name = name[:len(name)-len(SlicedUnitsResourceNameSuffix)]
+	case strings.Contains(string(name), SlicedMigResourceNameInfix):
+		// A MIG key is variable-tailed (<base>.sliced.mig-<profile>); it is known only when
+		// the base is a known accelerator AND the profile part is non-empty. SlicedMigProfileOf
+		// enforces both, so an empty "<base>.sliced.mig-" suffix is correctly not known.
+		_, ok := SlicedMigProfileOf(name)
+		return ok
 	case stringx.HasSuffix(name, SlicedResourceNameSuffix):
 		name = name[:len(name)-len(SlicedResourceNameSuffix)]
 	}
 	return _AcceleratableResourceNameSet.Has(name)
+}
+
+// SlicedMigProfileOf returns the physical-slice (MIG) profile name encoded in a
+// "<base>.sliced.mig-<profile>" resource key of a known accelerator base, and whether name is
+// such a key. It is the reverse of GetAcceleratableSlicedMigResourceName.
+func SlicedMigProfileOf(name core.ResourceName) (string, bool) {
+	s := string(name)
+	i := strings.Index(s, SlicedMigResourceNameInfix)
+	if i < 0 {
+		return "", false
+	}
+	if !_AcceleratableResourceNameSet.Has(core.ResourceName(s[:i])) {
+		return "", false
+	}
+	profile := s[i+len(SlicedMigResourceNameInfix):]
+	if profile == "" {
+		return "", false
+	}
+	return profile, true
 }
 
 // GetAcceleratableRuntimeName returns the accelerator runtime name for the given manufacturer,

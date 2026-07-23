@@ -22,6 +22,14 @@ type AcceleratorPhysicalSlicedProfileApplyConfiguration struct {
 	MemorySlices *int32 `json:"memorySlices,omitempty"`
 	// Count is the maximum number of instances of this profile on a single card.
 	Count *int32 `json:"count,omitempty"`
+	// Placements is the profile's full empty-card legal placement set (start:size in
+	// memory-slice units), enumerated once at detect time. The reconciler subtracts the
+	// occupied intervals it reconstructs from Pod annotations from this cached set to
+	// derive the card's RemainingProfiles, so no device query runs per reconcile. Caching the
+	// full empty-card set makes the subtraction correct regardless of whether the vendor's
+	// possible-placements query is itself occupancy-aware. Empty for a card with no
+	// physical-slice profiles.
+	Placements []AcceleratorPhysicalPlacementApplyConfiguration `json:"placements,omitempty"`
 }
 
 // AcceleratorPhysicalSlicedProfileApplyConfiguration constructs a declarative configuration of the AcceleratorPhysicalSlicedProfile type for use with
@@ -67,5 +75,18 @@ func (b *AcceleratorPhysicalSlicedProfileApplyConfiguration) WithMemorySlices(va
 // If called multiple times, the Count field is set to the value of the last call.
 func (b *AcceleratorPhysicalSlicedProfileApplyConfiguration) WithCount(value int32) *AcceleratorPhysicalSlicedProfileApplyConfiguration {
 	b.Count = &value
+	return b
+}
+
+// WithPlacements adds the given value to the Placements field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the Placements field.
+func (b *AcceleratorPhysicalSlicedProfileApplyConfiguration) WithPlacements(values ...*AcceleratorPhysicalPlacementApplyConfiguration) *AcceleratorPhysicalSlicedProfileApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithPlacements")
+		}
+		b.Placements = append(b.Placements, *values[i])
+	}
 	return b
 }

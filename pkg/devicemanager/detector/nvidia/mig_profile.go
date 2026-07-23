@@ -16,7 +16,17 @@ import (
 // infos holds one entry per successfully probed GI profile id; the caller skips ids that
 // NVML reports as unsupported. cardMemoryMiB is the card's total memory in MiB, used to
 // express a profile's memory size in memory-slice units (a slice is 1/8 of the card).
-func deriveSlicedProfiles(infos []nvml.GpuInstanceProfileInfo_v3, cardMemoryMiB uint64) []device.AcceleratorPhysicalSlicedProfile {
+//
+// placementsFor, when non-nil, returns a profile's full empty-card legal placement set to
+// cache in Placements, keyed by the profile's own probed GI profile id (info.Id) — the
+// authoritative id that distinguishes the same-compute-slice REV profiles (1g.5gb id 0 vs
+// 1g.10gb id 7) a compute-slice count alone cannot. It is injected so this derivation
+// stays hardware-free and unit-testable; detectMigProfiles passes a live-NVML closure.
+func deriveSlicedProfiles(
+	infos []nvml.GpuInstanceProfileInfo_v3,
+	cardMemoryMiB uint64,
+	placementsFor func(giProfileID uint32) []device.AcceleratorPhysicalPlacement,
+) []device.AcceleratorPhysicalSlicedProfile {
 	perSlice := cardMemoryMiB / 8
 
 	seen := make(map[string]struct{}, len(infos))
@@ -45,15 +55,36 @@ func deriveSlicedProfiles(infos []nvml.GpuInstanceProfileInfo_v3, cardMemoryMiB 
 		}
 		seen[name] = struct{}{}
 
-		profiles = append(profiles, device.AcceleratorPhysicalSlicedProfile{
+		p := device.AcceleratorPhysicalSlicedProfile{
 			Name:          name,
 			MemoryMib:     int64(info.MemorySizeMB),
 			ComputeSlices: int32(info.SliceCount),
 			MemorySlices:  memorySlices,
 			Count:         int32(info.InstanceCount),
-		})
+		}
+		if placementsFor != nil {
+			p.Placements = placementsFor(info.Id)
+		}
+		profiles = append(profiles, p)
 	}
 	return profiles
+}
+
+// migPlacementsFromNVML converts NVML GPU-instance placement slots to the operator
+// placement type. It returns nil for an empty input so a profile with no enumerated
+// placements omits the field.
+func migPlacementsFromNVML(slots []nvml.GpuInstancePlacement) []device.AcceleratorPhysicalPlacement {
+	if len(slots) == 0 {
+		return nil
+	}
+	out := make([]device.AcceleratorPhysicalPlacement, len(slots))
+	for i := range slots {
+		out[i] = device.AcceleratorPhysicalPlacement{
+			Start:  int32(slots[i].Start),
+			Length: int32(slots[i].Size),
+		}
+	}
+	return out
 }
 
 // isMediaOrGraphicsVariant reports whether a probed profile is a media-engine (+me,
@@ -84,7 +115,19 @@ func detectMigProfiles(dev nvml.Device, cardMemoryMiB uint64) []device.Accelerat
 		}
 		infos = append(infos, info)
 	}
-	return deriveSlicedProfiles(infos, cardMemoryMiB)
+
+	// Cache each profile's empty-card legal placement set at detect time so the reconciler
+	// can derive RemainingProfiles by pure arithmetic (subtracting annotation-derived occupied)
+	// without any per-reconcile NVML. Queried by the profile's own probed id, which
+	// distinguishes the same-compute-slice REV profiles a slice count cannot.
+	placementsFor := func(giProfileID uint32) []device.AcceleratorPhysicalPlacement {
+		slots, ret := dev.GetGpuInstancePossiblePlacements(giProfileID)
+		if !ret.IsSuccess() {
+			return nil
+		}
+		return migPlacementsFromNVML(slots)
+	}
+	return deriveSlicedProfiles(infos, cardMemoryMiB, placementsFor)
 }
 
 // maxProfileCount returns the card's physical-slice ceiling — the largest per-profile Count

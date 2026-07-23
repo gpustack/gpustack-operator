@@ -25,6 +25,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -123,6 +124,13 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Merge allocated accelerators, and in the same pass collect the live pod-UUID
 	// set this node hands to the sliced per-pod working-dir GC (empty/nil ⇒ no pods;
 	// non-sliced consumers ignore the payload).
+	//
+	// physicalOccupied/physicalAllocated reconstruct each physical-slice card's occupied
+	// placement intervals and per-profile instance counts from the same Pod annotations,
+	// keyed by card, to feed the placement-aware ledger fold below (pure arithmetic, no
+	// device access).
+	physicalOccupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
+	physicalAllocated := make(map[Resource]map[string]int32)
 	livePodUIDs := make([]string, 0, len(podList.Items))
 	for i := range podList.Items {
 		pod := &podList.Items[i]
@@ -146,7 +154,15 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			logger.Error(err, "merge allocated accelerators into devices status", "pod", ctrlcli.ObjectKeyFromObject(pod))
 			continue
 		}
+
+		accumulatePhysicalOccupied(podDevsStatus, physicalOccupied, physicalAllocated)
 	}
+
+	// Fold the per-card physical-slice profile ledger into the same wholesale Status build
+	// (never a second, stompable write), computed by pure arithmetic from the
+	// annotation-derived occupied set and the detect-time-cached empty-card Placements.
+	// The upward transport → aggregated output bridge lives in foldPhysicalLedger.
+	foldPhysicalLedger(devs, &eDevsStatus, physicalOccupied, physicalAllocated)
 
 	if !kubemeta.DeepEqual(devs.Status, eDevsStatus) {
 		devs.Status = eDevsStatus
@@ -535,6 +551,102 @@ func applyAllocatedStatus(allocatedStatus, remainingStatus workercore.DevicesSta
 	}
 
 	return remainingStatus, nil
+}
+
+// accumulatePhysicalOccupied folds a Pod's annotation-recorded physical-slice placements
+// into the per-card occupied-interval set and per-profile instance counts, keyed by
+// (group, device). A Pod records at most one instance per card (AllocatedPhysicalProfile +
+// AllocatedPhysicalPlacements — the upward transport); unioning across the node's Pods
+// yields each card's live occupancy with no device access.
+func accumulatePhysicalOccupied(
+	podStatus workercore.DevicesStatus,
+	occupied map[Resource][]workercore.AcceleratorPhysicalPlacement,
+	allocated map[Resource]map[string]int32,
+) {
+	for i := range podStatus.Groups {
+		grp := &podStatus.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if acc.AllocatedPhysicalProfile == "" || len(acc.AllocatedPhysicalPlacements) == 0 {
+				continue
+			}
+			res := Resource{Group: grp.ID, Device: acc.ID}
+			occupied[res] = append(occupied[res], acc.AllocatedPhysicalPlacements...)
+			if allocated[res] == nil {
+				allocated[res] = make(map[string]int32)
+			}
+			// A Pod holds exactly one instance of its profile per card, so count the
+			// instance (one per accelerator entry), not its placement intervals.
+			allocated[res][acc.AllocatedPhysicalProfile]++
+		}
+	}
+}
+
+// foldPhysicalLedger sets the aggregated OUTPUT AllocatedProfiles/RemainingProfiles on each
+// physical-slice-enabled card in the wholesale Status, from the annotation-reconstructed
+// occupied set (occupied/allocated — the upward transport accumulatePhysicalOccupied built)
+// and the card's detect-time-cached empty-card Placements. A card is physical-slice-enabled
+// when its capability carries physical-slice profiles (e.g. NVIDIA MIG); RemainingProfiles
+// is the count of each profile's cached legal placements that overlap no occupied interval.
+// The status accelerators are built 1:1 from devs.Spec by the caller, so they are indexed
+// positionally. A card whose capability has no cached Placements (a not-yet-upgraded
+// DaemonSet) yields empty RemainingProfiles — the "ledger not ready" state the
+// AdmissionCheck distinguishes from "profile full".
+func foldPhysicalLedger(
+	devs *workercore.Devices,
+	status *workercore.DevicesStatus,
+	occupied map[Resource][]workercore.AcceleratorPhysicalPlacement,
+	allocated map[Resource]map[string]int32,
+) {
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			profiles := acc.Status.PhysicalSliced.Profiles
+			if len(profiles) == 0 {
+				continue
+			}
+			possible := make(map[string][]workercore.AcceleratorPhysicalPlacement, len(profiles))
+			for k := range profiles {
+				p := &profiles[k]
+				if len(p.Placements) > 0 {
+					possible[p.Name] = p.Placements
+				}
+			}
+			res := Resource{Group: grp.ID, Device: acc.ID}
+			dst := &status.Groups[i].Accelerators[j]
+			dst.AllocatedProfiles = device.ProfileCountSlice(allocated[res])
+			dst.RemainingProfiles = device.ProfileCountSlice(device.ComputeRemainingProfiles(occupied[res], possible))
+		}
+	}
+}
+
+// LivePhysicalOccupied lists, per accelerator resource, the physical-slice placements that live
+// (non-terminating) Pods on this node currently claim by annotation — the same annotation-derived
+// occupied set the ledger fold uses. A per-vendor reclaim loop consults it as an attribution
+// self-check, so a mis-attributed ownership marker never destroys an instance a running Pod still
+// holds. It reads the informer cache (no device I/O).
+func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resource][]workercore.AcceleratorPhysicalPlacement, error) {
+	podList := new(core.PodList)
+	if err := r.Client.List(ctx, podList,
+		ctrlcli.MatchingFields{IndexingPodsByNodeName: r.NodeName},
+		ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	occupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
+	allocated := make(map[Resource]map[string]int32)
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		podDevsStatus, err := extractAllocatedStatusFromPod(pod)
+		if err != nil {
+			continue
+		}
+		accumulatePhysicalOccupied(podDevsStatus, occupied, allocated)
+	}
+	return occupied, nil
 }
 
 func extractPreferredAcceleratorIDsFromPod(pod *core.Pod, devices *workercore.Devices) sets.Set[string] {

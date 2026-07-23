@@ -11,6 +11,14 @@ type AcceleratorSlicedPhysicalDetailProfileApplyConfiguration struct {
 	Name *string `json:"name,omitempty"`
 	// Count is the sum of per-card Count for this profile name across the group.
 	Count *int32 `json:"count,omitempty"`
+	// MemoryMib is the memory of one instance of this profile, in MiB. It is uniform
+	// per profile name within a group, so it is carried through (not summed). It is the
+	// VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
+	// for a MIG request, which is why the aggregate — reachable from the InstanceType
+	// Detail, unlike per-card Devices — must carry it. Optional in the schema (a real
+	// profile always carries a non-zero value); the Pod webhook treats a not-yet-populated
+	// detail as a retryable not-ready state rather than relying on schema-required presence.
+	MemoryMib *int64 `json:"memoryMib,omitempty"`
 }
 
 // AcceleratorSlicedPhysicalDetailProfileApplyConfiguration constructs a declarative configuration of the AcceleratorSlicedPhysicalDetailProfile type for use with
@@ -32,5 +40,13 @@ func (b *AcceleratorSlicedPhysicalDetailProfileApplyConfiguration) WithName(valu
 // If called multiple times, the Count field is set to the value of the last call.
 func (b *AcceleratorSlicedPhysicalDetailProfileApplyConfiguration) WithCount(value int32) *AcceleratorSlicedPhysicalDetailProfileApplyConfiguration {
 	b.Count = &value
+	return b
+}
+
+// WithMemoryMib sets the MemoryMib field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the MemoryMib field is set to the value of the last call.
+func (b *AcceleratorSlicedPhysicalDetailProfileApplyConfiguration) WithMemoryMib(value int64) *AcceleratorSlicedPhysicalDetailProfileApplyConfiguration {
+	b.MemoryMib = &value
 	return b
 }

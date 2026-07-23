@@ -34,6 +34,11 @@ func TestAcceleratableResourceNames(t *testing.T) {
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.memory-mib"),
 		GetAcceleratableSlicedMemoryMibResourceName(ManufacturerNVIDIA))
 
+	// The physical-slice (MIG) request key layers the card's own profile name under
+	// ".sliced.mig-"; the profile name is variable (and may itself contain a dot).
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.mig-1g.10gb"),
+		GetAcceleratableSlicedMigResourceName(ManufacturerNVIDIA, "1g.10gb"))
+
 	// The SSH sidecar's device-only visibility resource lives under a distinct domain,
 	// outside the accelerator families, so admission does not read it as a mode.
 	assert.Equal(t, core.ResourceName("device.gpustack.ai/nvidia.visibility"),
@@ -50,6 +55,10 @@ func TestIsKnownAcceleratableResourceName(t *testing.T) {
 		{"shared", "nvidia.com/gpu.shared", true},
 		{"sliced units", "nvidia.com/gpu.sliced.units", true},
 		{"sliced card", "nvidia.com/gpu.sliced", true},
+		{"mig profile (dotted name)", "nvidia.com/gpu.sliced.mig-1g.10gb", true},
+		{"mig profile amd", "amd.com/gpu.sliced.mig-1g.10gb", true},
+		{"mig profile unknown base", "example.com/foo.sliced.mig-1g.10gb", false},
+		{"mig profile empty suffix", "nvidia.com/gpu.sliced.mig-", false},
 		{"amd exclusive", "amd.com/gpu", true},
 		{"unknown", "example.com/foo", false},
 		{"credits is not a device resource", "credits.gpustack.ai/nvidia", false},

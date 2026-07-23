@@ -401,6 +401,13 @@ NVIDIA A10G, 4912 MiB
 
 Deleting the Instance releases the slice (the A10G row returns to `1/1 10/10 100/100`).
 
+> **Physical (MIG) slicing.** The A10G soft-slices *logically* — a runtime caps a shared card, and the
+> three-view above tracks the per-card credit budget. A MIG-capable card (A100 / H100) instead
+> hard-partitions into fixed hardware instances the operator materializes on demand. MIG *mode* is
+> driven by the administrator with `nvidia-smi`, so it has its own request contract and a worked
+> enable → request → reclaim → disable walkthrough (with real `kubectl` output at every step) in
+> [NVIDIA MIG Operations](./operation/nvidia-mig.md).
+
 ---
 
 ## 4. Managing a custom InstanceType

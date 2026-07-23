@@ -49,4 +49,41 @@ type (
 			map[Resource]int32,
 		) (*ContainerAllocateResponse, error)
 	}
+
+	// PhysicalSlicedActuator is an optional capability of a ContainerAllocateResponder that
+	// materializes a hardware GPU partition (e.g. an NVIDIA MIG instance) for a sliced
+	// container carrying a ".sliced.mig-<profile>" request. The server invokes it — under the
+	// vendor's own per-card lock — after reserving the cards and before patching the allocation
+	// annotation, so the chosen placement is recorded upward (AllocatedPhysicalProfile /
+	// AllocatedPhysicalPlacements) for the reconciler's placement-aware ledger. A responder that
+	// does not implement it cannot serve physical-slice requests.
+	PhysicalSlicedActuator interface {
+		ActuatePhysicalSliced(
+			context.Context,
+			*core.Pod,
+			*core.Container,
+			*workercore.Devices,
+			map[Resource]int32,
+			string,
+		) (*PhysicalSlicedAllocation, error)
+	}
 )
+
+// PhysicalSlicedAllocation is the outcome of materializing a physical GPU partition for a
+// container: the per-card placements to record upward into the Pod's allocation annotation
+// and the container response carrying the partition's visible-devices env.
+type PhysicalSlicedAllocation struct {
+	// Profile is the physical-slice profile that was materialized (e.g. "1g.10gb").
+	Profile string
+	// Placements maps each allocated card to the memory-slice interval(s) its partition
+	// occupies. The server folds these into the allocation annotation as the reconciler
+	// ledger's occupied source.
+	Placements map[Resource][]workercore.AcceleratorPhysicalPlacement
+	// Response carries the vendor visible-devices env for the partitions (no soft-slice
+	// artifacts). The server returns it in place of GetContainerAllocateResponse.
+	Response *ContainerAllocateResponse
+	// Rollback tears down whatever this allocation created; a no-op for a fully reused
+	// partition. The server calls it when the post-actuation annotation patch fails, so no
+	// half-owned partition persists.
+	Rollback func()
+}

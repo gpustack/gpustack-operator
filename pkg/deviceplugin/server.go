@@ -535,21 +535,58 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, err
 	}
 
+	// Physical-slice (e.g. MIG) request: materialize the hardware partition(s) via the
+	// responder's actuator — under its own per-card lock — and record each chosen placement
+	// upward in allocatedStatus BEFORE the annotation patch, so the reconciler's ledger can
+	// reconstruct the card's occupied set. The mutex is already released; the per-card lock
+	// (not the node mutex) serializes only same-card creates, so sibling cards proceed in
+	// parallel. A responder that cannot actuate fails the allocation rather than starting a
+	// container with no partition.
+	var physical *PhysicalSlicedAllocation
+	if profile, ok := physicalSlicedProfileOf(ctr); ok {
+		actuator, canActuate := s.Responder.(PhysicalSlicedActuator)
+		if !canActuate {
+			s.Reconciler.releaseReservation(pod.UID)
+			return nil, grpcstatus.Errorf(grpccodes.Internal,
+				"responder cannot actuate physical-slice profile %q", profile)
+		}
+		var actErr error
+		physical, actErr = actuator.ActuatePhysicalSliced(ctx, pod, ctr, devs, allocatedAllocation, profile)
+		if actErr != nil {
+			s.Reconciler.releaseReservation(pod.UID)
+			s.Logger.Error(actErr, "actuate physical-slice for allocation", "pod", kubemeta.GetNamespacedNameKey(pod))
+			return nil, grpcstatus.Errorf(grpccodes.Internal, "actuate physical-slice: %v", actErr)
+		}
+		applyPhysicalPlacements(&allocatedStatus, physical.Profile, physical.Placements)
+	}
+
 	// Persist the durable allocation annotation outside the mutex (I/O). On failure roll back the
 	// reservation written above: with the annotation absent, the Pod-delete watch (gated on it)
 	// would never enqueue a prune, so the card would stay stranded for the opposite mode. Kubelet
 	// does not start the container on this error, so freeing the reservation now is safe and keeps
-	// the release counting honest.
+	// the release counting honest. A physical partition materialized above is also torn down, so
+	// no half-owned instance persists past a failed patch.
 	if err := s.Reconciler.patchAllocatingPod(ctx, pod, allocatedStatus); err != nil {
+		if physical != nil && physical.Rollback != nil {
+			physical.Rollback()
+		}
 		s.Reconciler.releaseReservation(pod.UID)
 		s.Logger.Error(err, "patch allocating pod for allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 	}
 
-	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
-	if err != nil {
-		s.Logger.Error(err, "get container allocate response")
-		return nil, err
+	// A physical-slice allocation injects only the partition's visible-devices env the actuator
+	// already assembled (no soft-slice artifacts), so it bypasses the soft-slice responder.
+	var ctrResp *ContainerAllocateResponse
+	if physical != nil {
+		ctrResp = physical.Response
+	} else {
+		var err error
+		ctrResp, err = s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
+		if err != nil {
+			s.Logger.Error(err, "get container allocate response")
+			return nil, err
+		}
 	}
 
 	resp := &AllocateResponse{
@@ -559,6 +596,39 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		"pod", kubemeta.GetNamespacedNameKey(pod),
 		"response", resp)
 	return resp, nil
+}
+
+// physicalSlicedProfileOf returns the single ".sliced.mig-<profile>" profile a container
+// requests, and whether it requests one. The Pod webhook (F5) guarantees at most one distinct
+// profile per Pod, so the first match is authoritative.
+func physicalSlicedProfileOf(ctr *core.Container) (string, bool) {
+	for name := range ctr.Resources.Limits {
+		if profile, ok := nodefeature.SlicedMigProfileOf(name); ok {
+			return profile, true
+		}
+	}
+	return "", false
+}
+
+// applyPhysicalPlacements records the actuator's chosen per-card placement into the allocation
+// status accelerators, so the annotation patch carries the physical ledger's occupied source
+// (AllocatedPhysicalProfile + AllocatedPhysicalPlacements, unioned by the reconciler).
+func applyPhysicalPlacements(
+	status *workercore.DevicesStatus,
+	profile string,
+	placements map[Resource][]workercore.AcceleratorPhysicalPlacement,
+) {
+	for i := range status.Groups {
+		grp := &status.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			res := Resource{Group: grp.ID, Device: acc.ID}
+			if p, ok := placements[res]; ok {
+				acc.AllocatedPhysicalProfile = profile
+				acc.AllocatedPhysicalPlacements = p
+			}
+		}
+	}
 }
 
 // allocateVisibility serves the SSH sidecar's visibility request: it does not select a

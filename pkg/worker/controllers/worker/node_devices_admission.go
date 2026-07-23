@@ -2,9 +2,11 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 
+	core "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -41,29 +43,60 @@ const (
 )
 
 // cardRequest is the accelerator demand a Workload places on its assigned pool:
-// the allocation mode, the total cards summed across its pods and containers, and
-// the per-card sliced units (zero for exclusive/shared).
+// the allocation mode, the total cards summed across its pods and containers, the
+// per-card sliced units (zero for exclusive/shared), and — for a physical-slice
+// (MIG) request — the profile name it anchors on (empty otherwise).
 type cardRequest struct {
 	mode        workercore.DeviceAllocationMode
 	count       int32
 	slicedUnits int32
+	profile     string
 }
 
 // parseCardRequest reads the accelerator request off a Workload's pod templates.
 // Each podset contributes Count × (cards summed across its containers); the mode
 // and per-card sliced units come from the requested resource names — the card key
 // (<base> exclusive, <base>.shared, <base>.sliced) sets the mode and adds to the
-// count, while <base>.sliced.units carries the per-card units. The percentage and
-// MiB sliced sub-keys are ignored: the Pod webhook already folded them into units.
+// count, while <base>.sliced.units carries the per-card units. A physical-slice
+// (MIG) key <base>.sliced.mig-<profile> sets the sliced mode and the profile the
+// request anchors on (its own value is per-card, so it does not add to the count;
+// the count comes from the sibling <base>.sliced key). Init containers are scanned
+// as well as app containers so an init-only MIG request is gated too. The percentage
+// and MiB sliced sub-keys are ignored: the Pod webhook already folded them into units.
 // A Workload requesting no known accelerator returns mode None.
 func parseCardRequest(wl *kueue.Workload) cardRequest {
 	var req cardRequest
 	for i := range wl.Spec.PodSets {
 		ps := &wl.Spec.PodSets[i]
 		var perPod int32
+		containers := make([]*core.Container, 0, len(ps.Template.Spec.InitContainers)+len(ps.Template.Spec.Containers))
+		for ci := range ps.Template.Spec.InitContainers {
+			containers = append(containers, &ps.Template.Spec.InitContainers[ci])
+		}
 		for ci := range ps.Template.Spec.Containers {
-			for name, qty := range ps.Template.Spec.Containers[ci].Resources.Requests {
+			containers = append(containers, &ps.Template.Spec.Containers[ci])
+		}
+		for _, ctr := range containers {
+			// Scan requests AND limits: extended resources (including MIG keys) are commonly set
+			// only under limits, so a requests-only scan would miss the request and wrongly mark
+			// feasibility Ready. Merge with requests taking precedence so each resource is counted once.
+			merged := ctr.Resources.Requests
+			if len(ctr.Resources.Limits) > 0 {
+				merged = make(core.ResourceList, len(ctr.Resources.Requests)+len(ctr.Resources.Limits))
+				for name, qty := range ctr.Resources.Limits {
+					merged[name] = qty
+				}
+				for name, qty := range ctr.Resources.Requests {
+					merged[name] = qty
+				}
+			}
+			for name, qty := range merged {
 				switch {
+				case strings.Contains(string(name), nodefeature.SlicedMigResourceNameInfix):
+					if profile, ok := nodefeature.SlicedMigProfileOf(name); ok {
+						req.mode = workercore.DeviceAllocationModeSliced
+						req.profile = profile
+					}
 				case strings.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix):
 					// Keep the strictest per-card demand across containers/podsets, so
 					// feasibility is never checked against an undersized slice.
@@ -121,31 +154,133 @@ func unitsPerCardFor(mode workercore.DeviceAllocationMode, slicedUnits int32) in
 	}
 }
 
-// nodeDevicesFeasibility reports whether count cards — each with at least the
-// per-card demand still free — exist across the candidate devices (already scoped
-// to one flavor pool by label). The status ledger seeds every card at
-// ResourceMaxUnits and subtracts each pod's allocation, so a card carrying any
-// allocation has Remaining below a whole card and never satisfies an exclusive
-// request. Returns Ready once enough cards fit, otherwise Retry: the shortage is
-// transient and re-checked as capacity frees, never rejected.
-func nodeDevicesFeasibility(devices []workercore.Devices, mode workercore.DeviceAllocationMode, count, slicedUnits int32) kueue.CheckState {
-	demand := unitsPerCardFor(mode, slicedUnits)
-	var fit int32
+// cardLedger is a per-card view joining the Spec-side capability (the physical-slice
+// profiles + their cached placements) with the Status-side allocation (mode, scalar
+// remaining, and the per-profile remaining ledger), matched by accelerator ID. A
+// card with a non-empty physicalProfiles is MIG-enabled.
+type cardLedger struct {
+	mode              workercore.DeviceAllocationMode
+	remaining         int32
+	remainingProfiles []workercore.AcceleratorProfileCount
+	physicalProfiles  []workercore.AcceleratorPhysicalSlicedProfile
+}
+
+// eachCard invokes fn for every accelerator across the candidate devices, joining
+// each Status allocation with its Spec capability by accelerator ID.
+func eachCard(devices []workercore.Devices, fn func(cardLedger)) {
 	for i := range devices {
-		groups := devices[i].Status.Groups
-		for gi := range groups {
-			accelerators := groups[gi].Accelerators
-			for ai := range accelerators {
-				if accelerators[ai].Remaining >= demand {
-					fit++
-				}
+		d := &devices[i]
+		capByID := make(map[string][]workercore.AcceleratorPhysicalSlicedProfile)
+		for gi := range d.Spec.Groups {
+			accs := d.Spec.Groups[gi].Accelerators
+			for ai := range accs {
+				capByID[accs[ai].ID] = accs[ai].Status.PhysicalSliced.Profiles
+			}
+		}
+		for gi := range d.Status.Groups {
+			accs := d.Status.Groups[gi].Accelerators
+			for ai := range accs {
+				fn(cardLedger{
+					mode:              accs[ai].Mode,
+					remaining:         accs[ai].Remaining,
+					remainingProfiles: accs[ai].RemainingProfiles,
+					physicalProfiles:  capByID[accs[ai].ID],
+				})
 			}
 		}
 	}
-	if fit >= count {
-		return kueue.CheckStateReady
+}
+
+// nodeDevicesFeasibility reports whether the request can currently be placed across
+// the candidate devices (already scoped to one flavor pool by label), returning the
+// check state and the message explaining it. A physical-slice (MIG) request is gated
+// on the per-card RemainingProfiles ledger; every other mode is gated on the scalar
+// remaining ledger. The shortage is always transient — Retry, never Reject.
+func nodeDevicesFeasibility(devices []workercore.Devices, req cardRequest) (kueue.CheckState, string) {
+	if req.profile != "" {
+		return physicalSlicedFeasibility(devices, req.profile, req.count)
 	}
-	return kueue.CheckStateRetry
+	return scalarFeasibility(devices, req.mode, req.count, req.slicedUnits)
+}
+
+// scalarFeasibility gates an exclusive/shared/soft-sliced request on the scalar per-card
+// remaining ledger, which seeds every card at ResourceMaxUnits and subtracts each pod's
+// allocation, so a card carrying any allocation has Remaining below a whole card and never
+// satisfies an exclusive request. A soft-slice request additionally excludes MIG-enabled cards
+// (a hard-partitioned card offers no soft budget). Ready once enough cards fit, otherwise Retry.
+func scalarFeasibility(devices []workercore.Devices, mode workercore.DeviceAllocationMode, count, slicedUnits int32) (kueue.CheckState, string) {
+	demand := unitsPerCardFor(mode, slicedUnits)
+	var fit int32
+	eachCard(devices, func(c cardLedger) {
+		if mode == workercore.DeviceAllocationModeSliced && len(c.physicalProfiles) > 0 {
+			return // a soft slice never lands on a MIG-enabled card
+		}
+		if c.remaining >= demand {
+			fit++
+		}
+	})
+	if fit >= count {
+		return kueue.CheckStateReady, verdictMessage(kueue.CheckStateReady)
+	}
+	return kueue.CheckStateRetry, verdictMessage(kueue.CheckStateRetry)
+}
+
+// physicalSlicedFeasibility gates a MIG request on the per-card placement-aware ledger: a
+// candidate card is MIG-enabled (its capability lists physical-slice profiles), is not held
+// whole-card (Mode None or Sliced), and still has a free placement for the profile
+// (RemainingProfiles[profile] >= 1). A pool with no MIG-enabled card at all, and a pool whose MIG
+// cards have not yet published cached Placements (rollout skew), each get their own distinct Retry
+// message (separate from "the profile is momentarily full") so an operator can tell the three apart.
+// Never Reject.
+func physicalSlicedFeasibility(devices []workercore.Devices, profile string, count int32) (kueue.CheckState, string) {
+	var migCards, ledgerReady, fit int32
+	eachCard(devices, func(c cardLedger) {
+		if len(c.physicalProfiles) == 0 {
+			return // not MIG-enabled
+		}
+		migCards++
+		if physicalProfilesHavePlacements(c.physicalProfiles) {
+			ledgerReady++
+		}
+		if c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced {
+			return // held whole-card by an exclusive/shared allocation
+		}
+		if remainingProfileCount(c.remainingProfiles, profile) >= 1 {
+			fit++
+		}
+	})
+	if migCards == 0 {
+		return kueue.CheckStateRetry, physicalNoMigCardsMessage(profile)
+	}
+	if ledgerReady == 0 {
+		return kueue.CheckStateRetry, physicalLedgerNotReadyMessage
+	}
+	if fit >= count {
+		return kueue.CheckStateReady, physicalVerdictMessage(kueue.CheckStateReady, profile)
+	}
+	return kueue.CheckStateRetry, physicalVerdictMessage(kueue.CheckStateRetry, profile)
+}
+
+// physicalProfilesHavePlacements reports whether any capability profile carries a cached
+// placement set — the signal that the device manager has published a MIG placement ledger.
+func physicalProfilesHavePlacements(profiles []workercore.AcceleratorPhysicalSlicedProfile) bool {
+	for i := range profiles {
+		if len(profiles[i].Placements) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// remainingProfileCount returns how many more instances of profile the card can still build,
+// from its RemainingProfiles ledger (zero when the profile is absent).
+func remainingProfileCount(profiles []workercore.AcceleratorProfileCount, profile string) int32 {
+	for i := range profiles {
+		if profiles[i].Name == profile {
+			return profiles[i].Count
+		}
+	}
+	return 0
 }
 
 // NodeDevicesAdmissionReconciler is the external Kueue AdmissionCheck controller
@@ -206,14 +341,14 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		logger.Error(err, "list candidate devices")
 		return ctrl.Result{}, err
 	}
-	state := nodeDevicesFeasibility(devices, request.mode, request.count, request.slicedUnits)
+	state, message := nodeDevicesFeasibility(devices, request)
 
-	if err := r.applyVerdict(ctx, wl, checks, state); err != nil {
+	if err := r.applyVerdict(ctx, wl, checks, state, message); err != nil {
 		logger.Error(err, "patch admission check state")
 		return ctrl.Result{}, err
 	}
 	logger.V(2).Info("evaluated node-devices admission",
-		"state", state, "mode", request.mode.String(), "cards", request.count)
+		"state", state, "mode", request.mode.String(), "cards", request.count, "profile", request.profile)
 	return ctrl.Result{}, nil
 }
 
@@ -281,6 +416,7 @@ func (r *NodeDevicesAdmissionReconciler) applyVerdict(
 	wl *kueue.Workload,
 	checks []kueue.AdmissionCheckReference,
 	state kueue.CheckState,
+	message string,
 ) error {
 	return kueueworkload.PatchStatus(ctx, r.Client, wl, ctrlcli.FieldOwner(_NodeDevicesFieldOwner),
 		func(w *kueue.Workload) (bool, error) {
@@ -292,7 +428,7 @@ func (r *NodeDevicesAdmissionReconciler) applyVerdict(
 				acs := kueue.AdmissionCheckState{
 					Name:    name,
 					State:   state,
-					Message: verdictMessage(state),
+					Message: message,
 				}
 				if state == kueue.CheckStateRetry {
 					acs.RequeueAfterSeconds = ptr.To(_NodeDevicesRetryAfterSeconds)
@@ -309,6 +445,27 @@ func verdictMessage(state kueue.CheckState) string {
 		return "the assigned flavor pool has enough free cards to place the request"
 	}
 	return "no node in the assigned flavor pool currently has enough free cards; will retry as capacity frees"
+}
+
+// physicalLedgerNotReadyMessage is the distinct Retry message for a MIG request whose pool
+// carries no cached placement ledger yet — the device manager has not published it (rollout
+// skew). It is separated from a genuine "profile full" so an operator can tell a transient
+// upgrade window from real contention.
+const physicalLedgerNotReadyMessage = "the MIG placement ledger is not ready on the assigned flavor pool (device manager rolling out); will retry"
+
+func physicalVerdictMessage(state kueue.CheckState, profile string) string {
+	if state == kueue.CheckStateReady {
+		return fmt.Sprintf("the assigned flavor pool has enough MIG cards with a free %q placement", profile)
+	}
+	return fmt.Sprintf("no MIG card in the assigned flavor pool currently has a free %q placement; will retry as capacity frees", profile)
+}
+
+// physicalNoMigCardsMessage is the Retry message when the assigned flavor pool has no MIG-enabled
+// card at all — distinct from physicalLedgerNotReadyMessage (a device-manager rollout window on a
+// pool that IS MIG-enabled), so an operator is not misled into waiting on a rollout that will never
+// make a non-MIG pool eligible; the fix is to enable MIG on a card in the pool.
+func physicalNoMigCardsMessage(profile string) string {
+	return fmt.Sprintf("the assigned flavor pool has no MIG-enabled card for profile %q; enable MIG on a card in this pool (will retry)", profile)
 }
 
 func (r *NodeDevicesAdmissionReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {

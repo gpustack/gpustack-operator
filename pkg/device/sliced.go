@@ -23,8 +23,9 @@ func AggregateAcceleratorSlicedDetail(accelerators []Accelerator) AcceleratorSli
 			}
 			profileIndex[p.Name] = len(detail.Physical.Profiles)
 			detail.Physical.Profiles = append(detail.Physical.Profiles, AcceleratorSlicedPhysicalDetailProfile{
-				Name:  p.Name,
-				Count: p.Count,
+				Name:      p.Name,
+				Count:     p.Count,
+				MemoryMib: p.MemoryMib,
 			})
 		}
 	}

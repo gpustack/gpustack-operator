@@ -53,6 +53,43 @@ message AcceleratorAllocation {
 
   // Remaining is the remaining allocatable units of the device.
   optional int32 remaining = 5;
+
+  // AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the
+  // AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod
+  // AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning
+  // every Pod's occupied slots on this card). Both are empty (omitted) for a card with no
+  // physical-slice profiles, so it serializes byte-identically to before they existed.
+  //
+  // AllocatedProfiles lists, by profile name, how many instances are currently created
+  // and bound on this card (the count of the Pods' recorded placements).
+  //
+  // +listType=map
+  // +listMapKey=name
+  repeated AcceleratorProfileCount allocatedProfiles = 6;
+
+  // RemainingProfiles lists, by profile name, how many more instances of each profile can
+  // still be created given the card's occupied placement slots — the placement-aware
+  // remaining capacity (the per-profile analog of the scalar Remaining) the
+  // AdmissionCheck gates on.
+  //
+  // +listType=map
+  // +listMapKey=name
+  repeated AcceleratorProfileCount remainingProfiles = 7;
+
+  // AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation
+  // TRANSPORT the reconciler consumes to build the ledger above — not status output. The
+  // device-plugin Allocate records, in the Pod's own allocation annotation, the single
+  // physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its
+  // profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in
+  // the aggregated Devices.Status. A Pod holds one instance of one profile per card.
+  optional string allocatedPhysicalProfile = 8;
+
+  // AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition
+  // occupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the
+  // node's Pods into each card's occupied set to derive RemainingProfiles.
+  //
+  // +listType=atomic
+  repeated AcceleratorPhysicalPlacement allocatedPhysicalPlacements = 9;
 }
 
 // AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
@@ -61,14 +98,32 @@ message AcceleratorLogicalSliced {
   // device compute (time-sharing / weighted sharing); false means compute is partitioned.
   optional bool coresPercentageOvercommit = 1;
 
-  // Count is the maximum number of soft slices this card can host. A MIG-enabled (or
-  // pending-enable) card is always 0, which excludes it from the logical capacity keys.
+  // Count is the maximum number of soft slices this card can host. A card whose MIG mode
+  // is currently enabled is always 0, which excludes it from the logical capacity keys; a
+  // pending-enable card is not partitioned yet and still reports its soft-slice count.
   optional int32 count = 2;
+}
+
+// AcceleratorPhysicalPlacement is one memory-slice interval [Start, Start+Size) a hardware
+// GPU partition (e.g. an NVIDIA MIG GPU instance) occupies on a card, in memory-slice
+// units. It is the placement geometry both the capability's empty-card legal-slot cache
+// and the annotation-transported occupied slot are expressed in.
+message AcceleratorPhysicalPlacement {
+  // Start is the first memory slice the interval covers (0-based).
+  optional int32 start = 1;
+
+  // Length is the number of memory slices the interval spans; the interval is
+  // [Start, Start+Length). Named Length, not Size, to avoid colliding with the
+  // protobuf-generated Size() method on this message.
+  optional int32 length = 2;
 }
 
 // AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
 message AcceleratorPhysicalSliced {
   // Profiles is empty when the card does not support, or has not enabled, hard slicing.
+  //
+  // +listType=map
+  // +listMapKey=name
   repeated AcceleratorPhysicalSlicedProfile profiles = 1;
 
   // Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
@@ -99,6 +154,30 @@ message AcceleratorPhysicalSlicedProfile {
 
   // Count is the maximum number of instances of this profile on a single card.
   optional int32 count = 5;
+
+  // Placements is the profile's full empty-card legal placement set (start:size in
+  // memory-slice units), enumerated once at detect time. The reconciler subtracts the
+  // occupied intervals it reconstructs from Pod annotations from this cached set to
+  // derive the card's RemainingProfiles, so no device query runs per reconcile. Caching the
+  // full empty-card set makes the subtraction correct regardless of whether the vendor's
+  // possible-placements query is itself occupancy-aware. Empty for a card with no
+  // physical-slice profiles.
+  //
+  // +listType=atomic
+  repeated AcceleratorPhysicalPlacement placements = 6;
+}
+
+// AcceleratorProfileCount pairs a physical-slice profile name with a count of
+// instances — allocated (bound) or remaining (still buildable) per the field carrying
+// it. It is a status-only type (never a map key), so the profile ledger and the
+// capability inventory (AcceleratorSlicedPhysicalDetailProfile) stay independently
+// evolvable.
+message AcceleratorProfileCount {
+  // Name is the profile identifier, e.g. "1g.10gb".
+  optional string name = 1;
+
+  // Count is the number of instances of this profile.
+  optional int32 count = 2;
 }
 
 // AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
@@ -127,6 +206,9 @@ message AcceleratorSlicedLogicalDetail {
 // AcceleratorSlicedPhysicalDetail aggregates the group's physical slicing capability.
 message AcceleratorSlicedPhysicalDetail {
   // Profiles is the group's physical profiles, summed by name.
+  //
+  // +listType=map
+  // +listMapKey=name
   repeated AcceleratorSlicedPhysicalDetailProfile profiles = 1;
 
   // Count is the sum of per-card PhysicalSliced.Count across the group.
@@ -140,6 +222,15 @@ message AcceleratorSlicedPhysicalDetailProfile {
 
   // Count is the sum of per-card Count for this profile name across the group.
   optional int32 count = 2;
+
+  // MemoryMib is the memory of one instance of this profile, in MiB. It is uniform
+  // per profile name within a group, so it is carried through (not summed). It is the
+  // VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
+  // for a MIG request, which is why the aggregate — reachable from the InstanceType
+  // Detail, unlike per-card Devices — must carry it. Optional in the schema (a real
+  // profile always carries a non-zero value); the Pod webhook treats a not-yet-populated
+  // detail as a retryable not-ready state rather than relying on schema-required presence.
+  optional int64 memoryMib = 3;
 }
 
 // AcceleratorStatus describes the observed state of the accelerator device.

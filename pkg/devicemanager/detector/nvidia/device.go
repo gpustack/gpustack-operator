@@ -19,6 +19,11 @@ import (
 
 const Manufacturer = nodefeature.ManufacturerNVIDIA
 
+// hbmMemoryBusWidthBits is the memory bus width (bits) at or above which a GPU is HBM rather
+// than GDDR. Data-center HBM stacks are >=1024-bit (e.g. A30 3072, A100/H100 5120) while GDDR
+// data-center parts top out at 384-bit, so the threshold separates them with a wide margin.
+const hbmMemoryBusWidthBits = 1024
+
 var _PciVendor string
 
 func init() {
@@ -138,12 +143,17 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			}
 			memory = device.ConvertBytesToMiB(memInfo.Total)
 
-			// When ECC is enabled the GPU reserves ~6.25% of physical
-			// memory for parity, so NVML reports the reduced usable
-			// capacity. Restore the loss so the advertised Memory
-			// matches the physical (marketing) size.
-			if cur, _, ret := dev.GetEccMode(); ret.IsSuccess() && cur == nvml.FEATURE_ENABLED {
-				memory = memory * 16 / 15
+			// ECC parity bits are carved out of user-visible memory only on GDDR
+			// GPUs; HBM keeps ECC in a hardware-reserved region and already reports
+			// full capacity. The memory bus width is the NVML-native discriminator —
+			// data-center HBM stacks are >=1024-bit (H100 5120, A100 5120, A30 3072)
+			// while GDDR parts are <=384-bit — so restore the ~1/16 ECC loss (to the
+			// physical/marketing size) only on a narrow (GDDR) bus with ECC enabled.
+			// When the bus width is unreadable (older driver) no restore is applied.
+			if bw, ret := dev.GetMemoryBusWidth(); ret.IsSuccess() && bw > 0 && bw < hbmMemoryBusWidthBits {
+				if cur, _, ret := dev.GetEccMode(); ret.IsSuccess() && cur == nvml.FEATURE_ENABLED {
+					memory = memory * 16 / 15
+				}
 			}
 
 			memEccDramUE, ret := dev.GetMemoryErrorCounter(

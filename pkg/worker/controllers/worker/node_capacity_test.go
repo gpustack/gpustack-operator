@@ -154,6 +154,32 @@ func migCard(id string, physicalCount int32) workercore.Accelerator {
 	}
 }
 
+// migCardWithProfiles builds one MIG-enabled accelerator carrying per-card physical profiles
+// (name→count), so the group aggregate produces Detail.Physical.Profiles that NodeCapacity
+// advertises as ".sliced.mig-<profile>" keys. PhysicalSliced.Count is the largest profile count
+// (the pool ceiling), keeping the card sliceable.
+func migCardWithProfiles(id string, profiles map[string]int32) workercore.Accelerator {
+	ps := make([]workercore.AcceleratorPhysicalSlicedProfile, 0, len(profiles))
+	var ceiling int32
+	for name, count := range profiles {
+		ps = append(ps, workercore.AcceleratorPhysicalSlicedProfile{Name: name, Count: count})
+		if count > ceiling {
+			ceiling = count
+		}
+	}
+	return workercore.Accelerator{
+		ID: id,
+		Status: workercore.AcceleratorStatus{
+			PhysicalSliced: workercore.AcceleratorPhysicalSliced{Profiles: ps, Count: ceiling},
+		},
+	}
+}
+
+// nvidiaMig is the NVIDIA ".sliced.mig-<profile>" capacity key name for a profile.
+func nvidiaMig(profile string) string {
+	return string(nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, profile))
+}
+
 // slicedGroup builds a new-format Devices group from its per-card statuses, deriving the
 // aggregated AcceleratorSlicedDetail exactly as the detector's SetGroupSlicedDetails does.
 func slicedGroup(mfr, id string, cards ...workercore.Accelerator) workercore.DevicesGroup {
@@ -378,6 +404,40 @@ func TestDesiredSlicedCapacityNewFormat(t *testing.T) {
 			want: map[string]int64{string(nvidiaSlicedUnits): unitsFor(2)},
 		},
 		{
+			// All-MIG group with profiles: units counts the MIG cards, and one
+			// ".sliced.mig-<profile>" key per profile equals Detail.Physical.Profiles[name].Count
+			// (summed across cards); the three logical keys stay omitted (no soft budget).
+			name: "all-mig advertises per-profile keys equal to the aggregate counts",
+			node: withSlicedPool(acceleratableNode(node, "nvidia-a100", "2", "40Gi", true),
+				nodefeature.ManufacturerNVIDIA, 2*7),
+			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a100",
+				migCardWithProfiles("0", map[string]int32{"1g.5gb": 7, "2g.10gb": 3, "3g.20gb": 2}),
+				migCardWithProfiles("1", map[string]int32{"1g.5gb": 7, "2g.10gb": 3, "3g.20gb": 2}))),
+			want: map[string]int64{
+				string(nvidiaSlicedUnits): unitsFor(2),
+				nvidiaMig("1g.5gb"):       14,
+				nvidiaMig("2g.10gb"):      6,
+				nvidiaMig("3g.20gb"):      4,
+			},
+		},
+		{
+			// Mixed soft + MIG in one group: ".sliced.units" counts all 3 cards, the three logical
+			// keys count the 2 soft cards, and the MIG card contributes its per-profile key.
+			name: "mixed soft + mig advertises both the logical keys and the mig key",
+			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
+				nodefeature.ManufacturerNVIDIA, 3*128),
+			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
+				softCard("0", 128, true), softCard("1", 128, true),
+				migCardWithProfiles("2", map[string]int32{"1g.10gb": 7}))),
+			want: map[string]int64{
+				string(nvidiaSlicedUnits):  unitsFor(3),
+				string(nvidiaSlicedCores):  2 * 128 * 100,
+				string(nvidiaSlicedMemPct): 2 * 100,
+				string(nvidiaSlicedMemMib): 2 * a10gMib,
+				nvidiaMig("1g.10gb"):       7,
+			},
+		},
+		{
 			// Non-overcommit (partition) model: cores = softCards × 100, not Detail.Logical.Count.
 			name: "non-overcommit soft cards cap cores at softCards × 100",
 			node: withSlicedPool(acceleratableNode(node, "mthreads-s4000", "4", "48Gi", true),
@@ -459,6 +519,17 @@ func TestSlicedDetailChanged(t *testing.T) {
 	added := append(append([]workercore.DevicesGroup{}, base...),
 		slicedGroup(nodefeature.ManufacturerMThreads, "s4000", softCard("0", 16, false)))
 	assert.True(t, slicedDetailChanged(base, added), "a new group fires")
+
+	// A MIG re-slice keeps the sliceable card count (1) but changes the profile inventory, which
+	// the sliceable/soft split alone would miss — the profile signature must fire it.
+	reslice := []workercore.DevicesGroup{
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", map[string]int32{"1g.10gb": 7})),
+	}
+	resliced := []workercore.DevicesGroup{
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", map[string]int32{"2g.20gb": 3})),
+	}
+	assert.False(t, slicedDetailChanged(reslice, reslice), "identical mig profiles do not fire")
+	assert.True(t, slicedDetailChanged(reslice, resliced), "a mig re-slice (profile set change) fires")
 }
 
 // TestEnqueueNodeWhenDevicesChanged pins that a Devices ledger enqueues its name-identical Node.
@@ -469,6 +540,32 @@ func TestEnqueueNodeWhenDevicesChanged(t *testing.T) {
 	require.Len(t, reqs, 1)
 	assert.Equal(t, "node-5", reqs[0].Name)
 	assert.Empty(t, reqs[0].Namespace, "node is cluster-scoped")
+}
+
+func TestIsSlicedCapacityKey(t *testing.T) {
+	cases := []struct {
+		name string
+		in   core.ResourceName
+		want bool
+	}{
+		{"owned mig profile", "nvidia.com/gpu.sliced.mig-1g.10gb", true},
+		{"owned units", "nvidia.com/gpu.sliced.units", true},
+		{"owned cores-percentage", "nvidia.com/gpu.sliced.cores-percentage", true},
+		{"owned memory-mib", "nvidia.com/gpu.sliced.memory-mib", true},
+		// A foreign extended resource that merely contains the ".sliced.mig-" infix is NOT owned,
+		// so it is never nulled out when absent from desired (the reason to use SlicedMigProfileOf
+		// instead of a raw strings.Contains).
+		{"foreign mig-infix key not owned", "example.com/foo.sliced.mig-1g.10gb", false},
+		{"empty-profile mig key not owned", "nvidia.com/gpu.sliced.mig-", false},
+		{"bare sliced pool not owned", "nvidia.com/gpu.sliced", false},
+		{"bare shared pool not owned", "nvidia.com/gpu.shared", false},
+		{"unrelated resource", "cpu", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, isSlicedCapacityKey(c.in))
+		})
+	}
 }
 
 func TestBuildSlicedCapacityPatch(t *testing.T) {
@@ -515,6 +612,14 @@ func TestBuildSlicedCapacityPatch(t *testing.T) {
 			desired: nil,
 			current: mkCap(map[string]string{units: "6400000", mib: "98304", "cpu": "8"}),
 			want:    map[string]any{units: nil, mib: nil},
+		},
+		{
+			// A per-profile ".sliced.mig-<profile>" key is owned too, so it is reverse-patched to
+			// null once the last card offering that profile leaves (MIG disabled).
+			name:    "remove stale mig key when the last mig card leaves",
+			desired: nil,
+			current: mkCap(map[string]string{"nvidia.com/gpu.sliced.mig-1g.10gb": "7", "cpu": "8"}),
+			want:    map[string]any{"nvidia.com/gpu.sliced.mig-1g.10gb": nil},
 		},
 		{
 			name:    "bare .sliced and .shared device-plugin keys are left untouched",

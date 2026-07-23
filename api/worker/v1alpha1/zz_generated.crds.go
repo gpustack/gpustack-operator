@@ -124,6 +124,11 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
+																						"memoryMib": {
+																							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-card Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
+																							Type:        "integer",
+																							Format:      "int64",
+																						},
 																						"name": {
 																							Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
 																							Type:        "string",
@@ -132,6 +137,10 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																				},
 																			},
 																			Nullable: true,
+																			XListMapKeys: []string{
+																				"name",
+																			},
+																			XListType: ptr.To[string]("map"),
 																		},
 																	},
 																},
@@ -187,7 +196,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																							Type:        "boolean",
 																						},
 																						"count": {
-																							Description: "Count is the maximum number of soft slices this card can host. A MIG-enabled (or\npending-enable) card is always 0, which excludes it from the logical capacity keys.",
+																							Description: "Count is the maximum number of soft slices this card can host. A card whose MIG mode\nis currently enabled is always 0, which excludes it from the logical capacity keys; a\npending-enable card is not partitioned yet and still reports its soft-slice count.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
@@ -240,10 +249,41 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																											Description: "Name is the profile identifier, e.g. \"1g.5gb\". It is the display name and the\nfuture resource-key suffix for a physical-slice request.",
 																											Type:        "string",
 																										},
+																										"placements": {
+																											Description: "Placements is the profile's full empty-card legal placement set (start:size in\nmemory-slice units), enumerated once at detect time. The reconciler subtracts the\noccupied intervals it reconstructs from Pod annotations from this cached set to\nderive the card's RemainingProfiles, so no device query runs per reconcile. Caching the\nfull empty-card set makes the subtraction correct regardless of whether the vendor's\npossible-placements query is itself occupancy-aware. Empty for a card with no\nphysical-slice profiles.",
+																											Type:        "array",
+																											Items: &v1.JSONSchemaPropsOrArray{
+																												Schema: &v1.JSONSchemaProps{
+																													Type: "object",
+																													Required: []string{
+																														"start",
+																														"length",
+																													},
+																													Properties: map[string]v1.JSONSchemaProps{
+																														"length": {
+																															Description: "Length is the number of memory slices the interval spans; the interval is\n[Start, Start+Length). Named Length, not Size, to avoid colliding with the\nprotobuf-generated Size() method on this message.",
+																															Type:        "integer",
+																															Format:      "int32",
+																														},
+																														"start": {
+																															Description: "Start is the first memory slice the interval covers (0-based).",
+																															Type:        "integer",
+																															Format:      "int32",
+																														},
+																													},
+																												},
+																											},
+																											Nullable:  true,
+																											XListType: ptr.To[string]("atomic"),
+																										},
 																									},
 																								},
 																							},
 																							Nullable: true,
+																							XListMapKeys: []string{
+																								"name",
+																							},
+																							XListType: ptr.To[string]("map"),
 																						},
 																					},
 																				},
@@ -399,6 +439,65 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
+																		"allocatedPhysicalPlacements": {
+																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition\noccupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the\nnode's Pods into each card's occupied set to derive RemainingProfiles.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"start",
+																						"length",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"length": {
+																							Description: "Length is the number of memory slices the interval spans; the interval is\n[Start, Start+Length). Named Length, not Size, to avoid colliding with the\nprotobuf-generated Size() method on this message.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"start": {
+																							Description: "Start is the first memory slice the interval covers (0-based).",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																					},
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"allocatedPhysicalProfile": {
+																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its\nprofile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in\nthe aggregated Devices.Status. A Pod holds one instance of one profile per card.",
+																			Type:        "string",
+																		},
+																		"allocatedProfiles": {
+																			Description: "AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the\nAdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod\nAllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning\nevery Pod's occupied slots on this card). Both are empty (omitted) for a card with no\nphysical-slice profiles, so it serializes byte-identically to before they existed.\nAllocatedProfiles lists, by profile name, how many instances are currently created\nand bound on this card (the count of the Pods' recorded placements).",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																			XListMapKeys: []string{
+																				"name",
+																			},
+																			XListType: ptr.To[string]("map"),
+																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",
 																			Type:        "string",
@@ -417,6 +516,34 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Description: "Remaining is the remaining allocatable units of the device.",
 																			Type:        "integer",
 																			Format:      "int32",
+																		},
+																		"remainingProfiles": {
+																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the card's occupied placement slots — the placement-aware\nremaining capacity (the per-profile analog of the scalar Remaining) the\nAdmissionCheck gates on.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																			XListMapKeys: []string{
+																				"name",
+																			},
+																			XListType: ptr.To[string]("map"),
 																		},
 																	},
 																},
@@ -837,6 +964,65 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Type:        "integer",
 																			Format:      "int32",
 																		},
+																		"allocatedPhysicalPlacements": {
+																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition\noccupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the\nnode's Pods into each card's occupied set to derive RemainingProfiles.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"start",
+																						"length",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"length": {
+																							Description: "Length is the number of memory slices the interval spans; the interval is\n[Start, Start+Length). Named Length, not Size, to avoid colliding with the\nprotobuf-generated Size() method on this message.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"start": {
+																							Description: "Start is the first memory slice the interval covers (0-based).",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																					},
+																				},
+																			},
+																			Nullable:  true,
+																			XListType: ptr.To[string]("atomic"),
+																		},
+																		"allocatedPhysicalProfile": {
+																			Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation\nTRANSPORT the reconciler consumes to build the ledger above — not status output. The\ndevice-plugin Allocate records, in the Pod's own allocation annotation, the single\nphysical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its\nprofile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in\nthe aggregated Devices.Status. A Pod holds one instance of one profile per card.",
+																			Type:        "string",
+																		},
+																		"allocatedProfiles": {
+																			Description: "AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the\nAdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod\nAllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning\nevery Pod's occupied slots on this card). Both are empty (omitted) for a card with no\nphysical-slice profiles, so it serializes byte-identically to before they existed.\nAllocatedProfiles lists, by profile name, how many instances are currently created\nand bound on this card (the count of the Pods' recorded placements).",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																			XListMapKeys: []string{
+																				"name",
+																			},
+																			XListType: ptr.To[string]("map"),
+																		},
 																		"id": {
 																			Description: "ID is the universally unique identifier for this device.",
 																			Type:        "string",
@@ -855,6 +1041,34 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Description: "Remaining is the remaining allocatable units of the device.",
 																			Type:        "integer",
 																			Format:      "int32",
+																		},
+																		"remainingProfiles": {
+																			Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can\nstill be created given the card's occupied placement slots — the placement-aware\nremaining capacity (the per-profile analog of the scalar Remaining) the\nAdmissionCheck gates on.",
+																			Type:        "array",
+																			Items: &v1.JSONSchemaPropsOrArray{
+																				Schema: &v1.JSONSchemaProps{
+																					Type: "object",
+																					Required: []string{
+																						"name",
+																					},
+																					Properties: map[string]v1.JSONSchemaProps{
+																						"count": {
+																							Description: "Count is the number of instances of this profile.",
+																							Type:        "integer",
+																							Format:      "int32",
+																						},
+																						"name": {
+																							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																							Type:        "string",
+																						},
+																					},
+																				},
+																			},
+																			Nullable: true,
+																			XListMapKeys: []string{
+																				"name",
+																			},
+																			XListType: ptr.To[string]("map"),
 																		},
 																	},
 																},
@@ -1465,6 +1679,11 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 																					Type:        "integer",
 																					Format:      "int32",
 																				},
+																				"memoryMib": {
+																					Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform\nper profile name within a group, so it is carried through (not summed). It is the\nVRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits)\nfor a MIG request, which is why the aggregate — reachable from the InstanceType\nDetail, unlike per-card Devices — must carry it. Optional in the schema (a real\nprofile always carries a non-zero value); the Pod webhook treats a not-yet-populated\ndetail as a retryable not-ready state rather than relying on schema-required presence.",
+																					Type:        "integer",
+																					Format:      "int64",
+																				},
 																				"name": {
 																					Description: "Name is the profile identifier, e.g. \"1g.5gb\".",
 																					Type:        "string",
@@ -1473,6 +1692,10 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 																		},
 																	},
 																	Nullable: true,
+																	XListMapKeys: []string{
+																		"name",
+																	},
+																	XListType: ptr.To[string]("map"),
 																},
 															},
 														},

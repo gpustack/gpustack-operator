@@ -21,6 +21,31 @@ type AcceleratorAllocationApplyConfiguration struct {
 	Allocated *int32 `json:"allocated,omitempty"`
 	// Remaining is the remaining allocatable units of the device.
 	Remaining *int32 `json:"remaining,omitempty"`
+	// AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the
+	// AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod
+	// AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning
+	// every Pod's occupied slots on this card). Both are empty (omitted) for a card with no
+	// physical-slice profiles, so it serializes byte-identically to before they existed.
+	//
+	// AllocatedProfiles lists, by profile name, how many instances are currently created
+	// and bound on this card (the count of the Pods' recorded placements).
+	AllocatedProfiles []AcceleratorProfileCountApplyConfiguration `json:"allocatedProfiles,omitempty"`
+	// RemainingProfiles lists, by profile name, how many more instances of each profile can
+	// still be created given the card's occupied placement slots — the placement-aware
+	// remaining capacity (the per-profile analog of the scalar Remaining) the
+	// AdmissionCheck gates on.
+	RemainingProfiles []AcceleratorProfileCountApplyConfiguration `json:"remainingProfiles,omitempty"`
+	// AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation
+	// TRANSPORT the reconciler consumes to build the ledger above — not status output. The
+	// device-plugin Allocate records, in the Pod's own allocation annotation, the single
+	// physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its
+	// profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in
+	// the aggregated Devices.Status. A Pod holds one instance of one profile per card.
+	AllocatedPhysicalProfile *string `json:"allocatedPhysicalProfile,omitempty"`
+	// AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition
+	// occupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the
+	// node's Pods into each card's occupied set to derive RemainingProfiles.
+	AllocatedPhysicalPlacements []AcceleratorPhysicalPlacementApplyConfiguration `json:"allocatedPhysicalPlacements,omitempty"`
 }
 
 // AcceleratorAllocationApplyConfiguration constructs a declarative configuration of the AcceleratorAllocation type for use with
@@ -66,5 +91,52 @@ func (b *AcceleratorAllocationApplyConfiguration) WithAllocated(value int32) *Ac
 // If called multiple times, the Remaining field is set to the value of the last call.
 func (b *AcceleratorAllocationApplyConfiguration) WithRemaining(value int32) *AcceleratorAllocationApplyConfiguration {
 	b.Remaining = &value
+	return b
+}
+
+// WithAllocatedProfiles adds the given value to the AllocatedProfiles field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AllocatedProfiles field.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedProfiles(values ...*AcceleratorProfileCountApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAllocatedProfiles")
+		}
+		b.AllocatedProfiles = append(b.AllocatedProfiles, *values[i])
+	}
+	return b
+}
+
+// WithRemainingProfiles adds the given value to the RemainingProfiles field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the RemainingProfiles field.
+func (b *AcceleratorAllocationApplyConfiguration) WithRemainingProfiles(values ...*AcceleratorProfileCountApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithRemainingProfiles")
+		}
+		b.RemainingProfiles = append(b.RemainingProfiles, *values[i])
+	}
+	return b
+}
+
+// WithAllocatedPhysicalProfile sets the AllocatedPhysicalProfile field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AllocatedPhysicalProfile field is set to the value of the last call.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalProfile(value string) *AcceleratorAllocationApplyConfiguration {
+	b.AllocatedPhysicalProfile = &value
+	return b
+}
+
+// WithAllocatedPhysicalPlacements adds the given value to the AllocatedPhysicalPlacements field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AllocatedPhysicalPlacements field.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalPlacements(values ...*AcceleratorPhysicalPlacementApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAllocatedPhysicalPlacements")
+		}
+		b.AllocatedPhysicalPlacements = append(b.AllocatedPhysicalPlacements, *values[i])
+	}
 	return b
 }

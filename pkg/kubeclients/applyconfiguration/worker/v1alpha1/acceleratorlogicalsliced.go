@@ -10,8 +10,9 @@ type AcceleratorLogicalSlicedApplyConfiguration struct {
 	// CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
 	// device compute (time-sharing / weighted sharing); false means compute is partitioned.
 	CoresPercentageOvercommit *bool `json:"coresPercentageOvercommit,omitempty"`
-	// Count is the maximum number of soft slices this card can host. A MIG-enabled (or
-	// pending-enable) card is always 0, which excludes it from the logical capacity keys.
+	// Count is the maximum number of soft slices this card can host. A card whose MIG mode
+	// is currently enabled is always 0, which excludes it from the logical capacity keys; a
+	// pending-enable card is not partitioned yet and still reports its soft-slice count.
 	Count *int32 `json:"count,omitempty"`
 }
 

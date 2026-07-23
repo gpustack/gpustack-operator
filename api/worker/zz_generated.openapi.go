@@ -53,8 +53,10 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.Accelerator{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
 		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
 		v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref),
+		v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalPlacement(ref),
 		v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref),
 		v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref),
+		v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorProfileCount(ref),
 		v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref),
 		v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref),
 		v1alpha1.AcceleratorSlicedPhysicalDetail{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref),
@@ -1906,10 +1908,82 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							Format:      "int32",
 						},
 					},
+					"allocatedProfiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning every Pod's occupied slots on this card). Both are empty (omitted) for a card with no physical-slice profiles, so it serializes byte-identically to before they existed.\n\nAllocatedProfiles lists, by profile name, how many instances are currently created and bound on this card (the count of the Pods' recorded placements).",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"remainingProfiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can still be created given the card's occupied placement slots — the placement-aware remaining capacity (the per-profile analog of the scalar Remaining) the AdmissionCheck gates on.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"allocatedPhysicalProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation TRANSPORT the reconciler consumes to build the ledger above — not status output. The device-plugin Allocate records, in the Pod's own allocation annotation, the single physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in the aggregated Devices.Status. A Pod holds one instance of one profile per card.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"allocatedPhysicalPlacements": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the node's Pods into each card's occupied set to derive RemainingProfiles.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"id", "index", "mode"},
 			},
 		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName(), v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()},
 	}
 }
 
@@ -1929,12 +2003,42 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref common.Ref
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the maximum number of soft slices this card can host. A MIG-enabled (or pending-enable) card is always 0, which excludes it from the logical capacity keys.",
+							Description: "Count is the maximum number of soft slices this card can host. A card whose MIG mode is currently enabled is always 0, which excludes it from the logical capacity keys; a pending-enable card is not partitioned yet and still reports its soft-slice count.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
 				},
+			},
+		},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalPlacement(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorPhysicalPlacement is one memory-slice interval [Start, Start+Size) a hardware GPU partition (e.g. an NVIDIA MIG GPU instance) occupies on a card, in memory-slice units. It is the placement geometry both the capability's empty-card legal-slot cache and the annotation-transported occupied slot are expressed in.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"start": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Start is the first memory slice the interval covers (0-based).",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"length": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Length is the number of memory slices the interval spans; the interval is [Start, Start+Length). Named Length, not Size, to avoid colliding with the protobuf-generated Size() method on this message.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"start", "length"},
 			},
 		},
 	}
@@ -1948,6 +2052,14 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref common.Re
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"profiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "Profiles is empty when the card does not support, or has not enabled, hard slicing.",
 							Type:        []string{"array"},
@@ -2023,8 +2135,58 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref co
 							Format:      "int32",
 						},
 					},
+					"placements": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Placements is the profile's full empty-card legal placement set (start:size in memory-slice units), enumerated once at detect time. The reconciler subtracts the occupied intervals it reconstructs from Pod annotations from this cached set to derive the card's RemainingProfiles, so no device query runs per reconcile. Caching the full empty-card set makes the subtraction correct regardless of whether the vendor's possible-placements query is itself occupancy-aware. Empty for a card with no physical-slice profiles.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"name", "memoryMib", "computeSlices", "memorySlices", "count"},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorProfileCount(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorProfileCount pairs a physical-slice profile name with a count of instances — allocated (bound) or remaining (still buildable) per the field carrying it. It is a status-only type (never a map key), so the profile ledger and the capability inventory (AcceleratorSlicedPhysicalDetailProfile) stay independently evolvable.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"name": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"count": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Count is the number of instances of this profile.",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"name"},
 			},
 		},
 	}
@@ -2094,6 +2256,14 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref com
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"profiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
 						SchemaProps: spec.SchemaProps{
 							Description: "Profiles is the group's physical profiles, summed by name.",
 							Type:        []string{"array"},
@@ -2142,6 +2312,13 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(
 							Description: "Count is the sum of per-card Count for this profile name across the group.",
 							Type:        []string{"integer"},
 							Format:      "int32",
+						},
+					},
+					"memoryMib": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform per profile name within a group, so it is carried through (not summed). It is the VRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits) for a MIG request, which is why the aggregate — reachable from the InstanceType Detail, unlike per-card Devices — must carry it. Optional in the schema (a real profile always carries a non-zero value); the Pod webhook treats a not-yet-populated detail as a retryable not-ready state rather than relying on schema-required presence.",
+							Type:        []string{"integer"},
+							Format:      "int64",
 						},
 					},
 				},
