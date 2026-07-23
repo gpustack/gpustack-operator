@@ -85,6 +85,10 @@ func (in aggregated) Stop() {
 
 type server struct {
 	deviceplugin.ResourceServer
+
+	// mig is the NVML MIG actuator seam the sliced responder drives for a
+	// ".sliced.mig-<profile>" request; nil for non-sliced modes.
+	mig migDriver
 }
 
 func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) deviceplugin.Server {
@@ -97,6 +101,9 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
+	}
+	if mode == workercore.DeviceAllocationModeSliced {
+		s.mig = newMigDriver()
 	}
 	s.Responder = s
 

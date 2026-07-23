@@ -940,6 +940,170 @@ func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
 	assert.Equal(t, "dev-0", got.Groups[0].Accelerators[0].ID)
 }
 
+// physicalActuatorResponder is a stubResponder that also implements PhysicalSlicedActuator,
+// returning a canned partition allocation, so the server's physical-slice branch (detect →
+// actuate → fold placement → patch → return the actuator response) is tested without NVML.
+type physicalActuatorResponder struct {
+	stubResponder
+	placements map[Resource][]workercore.AcceleratorPhysicalPlacement
+	rolledBack *bool
+	actErr     error
+}
+
+func (r physicalActuatorResponder) ActuatePhysicalSliced(
+	_ context.Context, _ *core.Pod, _ *core.Container, _ *workercore.Devices,
+	_ map[Resource]int32, profile string,
+) (*PhysicalSlicedAllocation, error) {
+	if r.actErr != nil {
+		return nil, r.actErr
+	}
+	return &PhysicalSlicedAllocation{
+		Profile:    profile,
+		Placements: r.placements,
+		Response:   &ContainerAllocateResponse{Envs: map[string]string{"NVIDIA_VISIBLE_DEVICES": "MIG-actuated"}},
+		Rollback:   func() { *r.rolledBack = true },
+	}, nil
+}
+
+// physicalSlicedPod builds a sliced Pod whose container also carries a ".sliced.mig-<profile>"
+// request, so the server routes it through the physical-slice actuator.
+func physicalSlicedPod(nodeName, profile string) (*core.Pod, core.ResourceName) {
+	slicedRes := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+	migRes := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, profile)
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-mig"},
+		Spec: core.PodSpec{
+			NodeName: nodeName,
+			Containers: []core.Container{{
+				Name: "main",
+				Resources: core.ResourceRequirements{
+					Limits: core.ResourceList{
+						slicedRes: resource.MustParse("1"),
+						migRes:    resource.MustParse("1"),
+					},
+				},
+			}},
+		},
+	}, slicedRes
+}
+
+// TestResourceServer_Allocate_PhysicalSliced verifies the MIG branch: the actuator's chosen
+// placement is folded into the allocation annotation (the ledger's occupied source) and its
+// response — the MIG UUID env, no soft-slice artifacts — is returned in place of the soft
+// responder's.
+func TestResourceServer_Allocate_PhysicalSliced(t *testing.T) {
+	const nodeName = "node-mig"
+	const profile = "1g.10gb"
+
+	devs := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{{ID: "dev-0", Index: 0}},
+			}},
+		},
+	}
+	pod, _ := physicalSlicedPod(nodeName, profile)
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, pod).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+		Reconciler:     rec,
+		Responder: physicalActuatorResponder{
+			placements: map[Resource][]workercore.AcceleratorPhysicalPlacement{
+				{Group: "grp-0", Device: "dev-0"}: {{Start: 0, Length: 2}},
+			},
+		},
+	}
+
+	resp, err := s.Allocate(context.Background(), &AllocateRequest{
+		ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+	})
+	require.NoError(t, err)
+	require.Len(t, resp.ContainerResponses, 1)
+	assert.Equal(t, "MIG-actuated", resp.ContainerResponses[0].Envs["NVIDIA_VISIBLE_DEVICES"])
+	assert.NotContains(t, resp.ContainerResponses[0].Envs, "CUDA_DEVICE_MEMORY_SHARED_CACHE")
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+	allocated, err := extractAllocatedStatusFromPod(got)
+	require.NoError(t, err)
+	require.Len(t, allocated.Groups, 1)
+	require.Len(t, allocated.Groups[0].Accelerators, 1)
+	acc := allocated.Groups[0].Accelerators[0]
+	assert.Equal(t, workercore.DeviceAllocationModeSliced, acc.Mode)
+	assert.Equal(t, profile, acc.AllocatedPhysicalProfile)
+	require.Len(t, acc.AllocatedPhysicalPlacements, 1)
+	assert.Equal(t, int32(0), acc.AllocatedPhysicalPlacements[0].Start)
+	assert.Equal(t, int32(2), acc.AllocatedPhysicalPlacements[0].Length)
+}
+
+// TestResourceServer_Allocate_PhysicalSliced_RollbackOnPatchFailure verifies a failed
+// annotation patch tears down the materialized partition and releases the reservation, so no
+// half-owned instance or stranded card persists.
+func TestResourceServer_Allocate_PhysicalSliced_RollbackOnPatchFailure(t *testing.T) {
+	const nodeName = "node-mig-rb"
+	const profile = "1g.10gb"
+
+	devs := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{{ID: "dev-0", Index: 0}},
+			}},
+		},
+	}
+	pod, _ := physicalSlicedPod(nodeName, profile)
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, pod).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Patch: func(_ context.Context, _ ctrlcli.WithWatch, _ ctrlcli.Object, _ ctrlcli.Patch, _ ...ctrlcli.PatchOption) error {
+				return errors.New("simulated annotation patch failure")
+			},
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	rolledBack := false
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+		Reconciler:     rec,
+		Responder: physicalActuatorResponder{
+			placements: map[Resource][]workercore.AcceleratorPhysicalPlacement{
+				{Group: "grp-0", Device: "dev-0"}: {{Start: 0, Length: 2}},
+			},
+			rolledBack: &rolledBack,
+		},
+	}
+
+	_, err := s.Allocate(context.Background(), &AllocateRequest{
+		ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+	})
+	require.Error(t, err)
+	assert.True(t, rolledBack, "a failed patch must roll back the materialized partition")
+	_, reserved := rec.reservedDevices("pod-mig")
+	assert.False(t, reserved, "a failed patch must release the reservation")
+}
+
 // recordingResponder captures the allocated set the visibility Allocate hands the Responder.
 type recordingResponder struct {
 	gotAllocated map[Resource]int32

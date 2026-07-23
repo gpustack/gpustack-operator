@@ -855,15 +855,17 @@ make lint
 ```
 binding/nvml/library_device.go            # F1: Destroy / PossiblePlacements / GetGpuInstances /
                                           #     GetComputeInstanceProfileInfo / GetComputeInstances / MIG UUID
-binding/nvml/mig_placement.go             # F1: NVML-native geometry — profile-id maps (+ T7 slot-pick overlap)
+binding/nvml/mig_placement.go             # F1: NVML-native geometry — profile-id maps (MigProfileIDsForComputeSlices)
 pkg/device/physical_placement.go               # F1/F3: pure free-count geometry (ComputeRemainingProfiles) on operator types
 api/worker/v1alpha1/devices.go            # F2: AcceleratorProfileCount + ledger fields; AcceleratorPhysicalPlacement;
                                           #     capability Placements; annotation AllocatedPhysicalPlacements
 pkg/device/types.go                       # F2: aliases for the new status/placement types
 pkg/devicemanager/detector/nvidia/...     # F3: detect-time enumerate + cache Placements into Devices.Spec
 pkg/deviceplugin/controller.go            # F3: reconciler annotation-merge → Allocated/Remaining (no NVML)
-pkg/deviceplugin/server.go                # F4: mig branch in Allocate; reclaim; MIG UUID injection; annotation write
-pkg/devicemanager/allocator/nvidia/...    # F4: incremental GI/CI create/destroy actuator (_linux/_other seam)
+pkg/deviceplugin/server.go                # F4: physical-slice branch in Allocate (actuate → fold placement → patch)
+pkg/deviceplugin/types.go                 # F4: PhysicalSlicedActuator seam interface + PhysicalSlicedAllocation
+pkg/devicemanager/allocator/nvidia/mig.go # F4: marker + slot-pick + reuse-vs-create core + actuator (seam-testable)
+pkg/devicemanager/allocator/nvidia/mig_driver_{linux,other}.go  # F4: NVML GI/CI create/destroy seam
 pkg/worker/webhooks/worker/pod.go         # F5: mig-<profile> validation + units folding; initContainers
                                           #     (Instance webhook untouched — the Instance model can't carry MIG)
 pkg/worker/controllers/worker/node_devices_admission.go  # F6: profile dimension + mig feasibility branch
@@ -1009,15 +1011,22 @@ there too (Open Question 1).
 
 **Phase D — Actuation (the hot path)**
 
-[ ] **T7: F4 — device-plugin `Allocate` MIG branch (create/reuse under per-card lock + ownership marker).**
-    - Per-card lock guarding create/marker-write; reuse-or-`CreateGpuInstanceWithPlacement`+`CreateComputeInstance`
-      (T1 slot-pick now from `binding/nvml`, T2 wrappers); atomic on-disk marker
-      `podUID→{card,giId,ciId,migUUID,profile,start:size}` written in-section; **record the chosen
-      `{profile, start:size}` into the Pod's allocation annotation (`AllocatedPhysicalPlacements`) — the occupied
-      source T4's reconciler reads to derive `Remaining`**; NVIDIA Responder MIG branch injects only
-      `NVIDIA_VISIBLE_DEVICES=<MIG UUID>` (no libvgpu/CUDA_DEVICE_*); CI-fail → destroy GI; roll back on
-      marker/annotation-patch failure. The NVML create/destroy lives behind a `_linux.go`/`_other.go` seam (the
-      pure slot-pick + marker + annotation-encode logic is platform-independent + seam-testable).
+[x] **T7: F4 — device-plugin `Allocate` MIG branch (create/reuse under per-card lock + ownership marker).**
+    - The device-plugin `server.go` Allocate detects a physical-slice request generically
+      (`nodefeature.SlicedMigProfileOf` over the container's `.sliced.mig-<profile>` key) and, before the
+      annotation patch, invokes the responder's optional `PhysicalSlicedActuator` seam (new in
+      `pkg/deviceplugin/types.go`); the returned per-card placements are folded into `allocatedStatus` so the same
+      `patchAllocatingPod` writes `AllocatedPhysicalProfile`/`AllocatedPhysicalPlacements` — **the occupied source
+      T4's reconciler reads to derive `Remaining`** — and the actuator's response (only
+      `NVIDIA_VISIBLE_DEVICES=<MIG UUID>`, no libvgpu/CUDA_DEVICE_*) is returned in place of the soft responder's.
+    - The NVIDIA actuator (`allocator/nvidia/mig.go`) holds a per-card lock guarding create/marker-write; it reuses
+      an unbound instance of the profile else picks the lowest free placement (pure slot-pick in the core,
+      seam-testable) and creates via `CreateGpuInstanceWithPlacement`+`CreateComputeInstance` (T2 wrappers,
+      `MigProfileIDsForComputeSlices` for the CI id); it writes the atomic on-disk marker
+      `{podUID,container,card,giId,ciId,migUUID,profile,start:length}` in-section, rolling back a just-created
+      instance on marker failure; CI-fail → destroy GI; the server rolls back the partition on annotation-patch
+      failure. The NVML create/destroy lives behind a `mig_driver_{linux,other}.go` seam; the slot-pick + marker +
+      annotation-encode logic is platform-independent + seam-testable (fake driver + temp marker dir).
     - Acceptance: seam tests for slot-pick, reuse-vs-create, marker + annotation round-trip; concurrent same-card
       Allocate → no double-create/collision, sibling not blocked; crash-then-retry rebinds. Verify:
       `go test ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/nvidia/...`.
