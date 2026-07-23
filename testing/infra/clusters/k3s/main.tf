@@ -388,3 +388,39 @@ resource "null_resource" "kubeconfig" {
     EOT
   }
 }
+
+# Records the last SUCCESSFUL apply's inputs; Terraform auto-loads *.auto.tfvars.json on every
+# command (incl. destroy), and command-line -var still overrides it on apply. A managed
+# hashicorp/local local_file is not used here: it is deleted during destroy, which would strand
+# a failed/interrupted destroy retry with no values for server (a required variable).
+resource "null_resource" "last_apply" {
+  depends_on = [
+    null_resource.server_init,
+    null_resource.server_join,
+    null_resource.agent,
+    null_resource.containerd_config,
+    null_resource.kubeconfig,
+  ]
+
+  triggers = {
+    snapshot = jsonencode({
+      server                   = var.server
+      agent                    = var.agent
+      server_ssh_port          = var.server_ssh_port
+      agent_ssh_port           = var.agent_ssh_port
+      ssh_user                 = var.ssh_user
+      ssh_private_key          = var.ssh_private_key
+      release                  = var.release
+      flannel_backend          = var.flannel_backend
+      cluster_cidr             = var.cluster_cidr
+      service_cidr             = var.service_cidr
+      server_https_listen_port = var.server_https_listen_port
+      service_node_port_range  = var.service_node_port_range
+    })
+  }
+
+  provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-c"]
+    command     = "cat > '${path.module}/.last-apply.auto.tfvars.json' <<'EOF'\n${self.triggers.snapshot}\nEOF"
+  }
+}

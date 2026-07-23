@@ -72,13 +72,10 @@ kubectl config use-context "$(terraform output -raw context_name)"
 kubectl get nodes
 ```
 
-Tear down (pass the same host variables):
+Tear down (no `-var` needed -- reuses the last apply's variables):
 
 ```bash
-terraform destroy \
-  -var='server=["192.168.1.10"]' \
-  -var='agent=["192.168.1.11"]' \
-  -var='ssh_user=ubuntu'
+terraform destroy
 ```
 
 ## Variables
