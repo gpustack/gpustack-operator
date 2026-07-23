@@ -1045,7 +1045,7 @@ there too (Open Question 1).
 
 **Phase E — Capacity key, docs, real-card**
 
-[ ] **T9: F7 — advertise `.sliced.mig-<profile>` node capacity keys + verify Kueue coverage.**
+[x] **T9: F7 — advertise `.sliced.mig-<profile>` node capacity keys + verify Kueue coverage.**
     - `node_capacity.go`: emit `<base>.sliced.mig-<profile>` = `Detail.Physical.Profiles[name].Count`; add the
       suffix to `slicedCapacitySuffixes`; extend `slicedSignature` so a capability change re-enqueues; watch
       stays capability-only. Verify (build-time) that `.sliced.mig-*` gets the soft keys' credits-based Kueue

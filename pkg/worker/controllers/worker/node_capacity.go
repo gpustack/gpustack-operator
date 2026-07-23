@@ -3,6 +3,8 @@ package worker
 import (
 	"context"
 	"maps"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,6 +126,7 @@ func (r *NodeCapacityReconciler) Reconcile(ctx context.Context, req ctrl.Request
 //   - ".sliced.cores-percentage"  = Σ Detail.Logical.Count × 100 (overcommit) else Σ softCards × 100
 //   - ".sliced.memory-percentage" = Σ softCards × 100
 //   - ".sliced.memory-mib"        = Σ softCards × per-card VRAM MiB
+//   - ".sliced.mig-<profile>"     = Σ Detail.Physical.Profiles[name].Count (one key per MIG profile)
 //
 // All card counts come from the Devices ledger's per-card data as the single source of
 // truth — never mixed with the Node ".count" label — resolved to each model by the full
@@ -142,11 +145,12 @@ func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.Resourc
 	}
 	groupsByKey := devicesGroupsByAcceleratableKey(devs)
 	type tally struct {
-		units      int64
-		cores      int64
-		memoryPct  int64
-		memoryMib  int64
-		hasLogical bool // any soft-sliceable contribution → emit the three logical keys
+		units            int64
+		cores            int64
+		memoryPct        int64
+		memoryMib        int64
+		hasLogical       bool             // any soft-sliceable contribution → emit the three logical keys
+		physicalProfiles map[string]int64 // physical-slice (MIG) profile name → Σ Detail.Physical.Profiles[name].Count
 	}
 	byManufacturer := make(map[string]*tally)
 	for _, aKey := range nodefeature.ExtractAcceleratableNodeKeys(nd) {
@@ -189,6 +193,15 @@ func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.Resourc
 		t.memoryPct += memoryPct
 		t.memoryMib += memoryMib
 		t.hasLogical = t.hasLogical || logical
+		// Sum each MIG profile's static instance ceiling across this manufacturer's groups; a
+		// non-MIG group has no Physical.Profiles and contributes nothing.
+		for k := range grp.AcceleratorSlicedDetail.Physical.Profiles {
+			p := &grp.AcceleratorSlicedDetail.Physical.Profiles[k]
+			if t.physicalProfiles == nil {
+				t.physicalProfiles = make(map[string]int64)
+			}
+			t.physicalProfiles[p.Name] += int64(p.Count)
+		}
 	}
 	if len(byManufacturer) == 0 {
 		return nil
@@ -203,6 +216,12 @@ func desiredSlicedCapacity(nd *core.Node, devs *workercore.Devices) core.Resourc
 			continue
 		}
 		out[nodefeature.GetAcceleratableSlicedUnitsResourceName(manufacturer)] = *resource.NewQuantity(t.units, resource.DecimalSI)
+		// One ".sliced.mig-<profile>" key per MIG profile (independent of the soft budget, so
+		// emitted for an all-MIG model too); buildSlicedCapacityPatch reverse-patches any stale
+		// one once the last card offering that profile leaves.
+		for name, count := range t.physicalProfiles {
+			out[nodefeature.GetAcceleratableSlicedMigResourceName(manufacturer, name)] = *resource.NewQuantity(count, resource.DecimalSI)
+		}
 		if !t.hasLogical {
 			// Every card is hard-partitioned (MIG): the logical keys carry no soft budget,
 			// so omit them while ".sliced.units" still counts the MIG cards.
@@ -264,10 +283,11 @@ func acceleratableCardMemoryMib(nd *core.Node, nodeKey string) int64 {
 	return q.Value() / (1 << 20) // bytes → MiB
 }
 
-// slicedCapacitySuffixes are the ".sliced.*" extended-resource suffixes the
-// NodeCapacityReconciler owns via Patch Node. The bare ".sliced"/".shared" keys
-// advertised by the device-plugin are deliberately excluded so they are never
-// nulled out.
+// slicedCapacitySuffixes are the fixed ".sliced.*" extended-resource suffixes the
+// NodeCapacityReconciler owns via Patch Node. The per-profile ".sliced.mig-<profile>" keys
+// have a variable suffix (the profile name) and are matched by the ".sliced.mig-" infix
+// instead (see isSlicedCapacityKey). The bare ".sliced"/".shared" keys advertised by the
+// device-plugin are deliberately excluded so they are never nulled out.
 var slicedCapacitySuffixes = []string{
 	nodefeature.SlicedUnitsResourceNameSuffix,
 	nodefeature.SlicedCoresPercentageResourceNameSuffix,
@@ -276,8 +296,15 @@ var slicedCapacitySuffixes = []string{
 }
 
 // isSlicedCapacityKey reports whether name is one of the NodeCapacityReconciler-owned
-// ".sliced.*" keys (and not a bare ".sliced"/".shared" device-plugin key).
+// ".sliced.*" keys — the four fixed keys or a per-profile ".sliced.mig-<profile>" key — and
+// not a bare ".sliced"/".shared" device-plugin key.
 func isSlicedCapacityKey(name core.ResourceName) bool {
+	// Positively identify a per-profile MIG key (known accelerator base + non-empty profile)
+	// rather than a raw infix match, so a foreign extended resource that merely contains
+	// ".sliced.mig-" is never claimed as owned and nulled out when absent from desired.
+	if _, ok := nodefeature.SlicedMigProfileOf(name); ok {
+		return true
+	}
 	for _, suffix := range slicedCapacitySuffixes {
 		if stringx.HasSuffix(string(name), suffix) {
 			return true
@@ -436,13 +463,33 @@ func (r *NodeCapacityReconciler) enqueueNodeWhenDevicesChanged(
 }
 
 // slicedSignature captures exactly the Devices group fields desiredSlicedCapacity consumes:
-// the per-card sliceable/soft split and the logical detail (count + overcommit). Comparing
-// signatures lets the Devices watch fire only on a real slicing-detail change.
+// the per-card sliceable/soft split, the logical detail (count + overcommit), and the MIG
+// profile inventory (name→count) driving the ".sliced.mig-<profile>" keys. Comparing signatures
+// lets the Devices watch fire only on a real slicing-detail change, including a MIG re-slice that
+// changes the profile set without moving the sliceable card count. It must stay comparable (it is
+// a maps.Equal value), so the profiles are folded into a canonical string, not a map.
 type slicedSignature struct {
 	sliceable         int64
 	soft              int64
 	logicalCount      int32
 	logicalOvercommit bool
+	physicalProfiles  string
+}
+
+// physicalProfileSignature renders a group's aggregated MIG profile inventory as a canonical,
+// order-independent "name=count;..." string, so a change to the profile set or any profile's
+// count re-enqueues the node while identical inventories compare equal.
+func physicalProfileSignature(g *workercore.DevicesGroup) string {
+	profiles := g.AcceleratorSlicedDetail.Physical.Profiles
+	if len(profiles) == 0 {
+		return ""
+	}
+	parts := make([]string, len(profiles))
+	for i := range profiles {
+		parts[i] = profiles[i].Name + "=" + strconv.FormatInt(int64(profiles[i].Count), 10)
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, ";")
 }
 
 // slicedDetailChanged reports whether the slicing capability desiredSlicedCapacity consumes
@@ -465,6 +512,7 @@ func slicedSignatures(groups []workercore.DevicesGroup) map[string]slicedSignatu
 			soft:              soft,
 			logicalCount:      g.AcceleratorSlicedDetail.Logical.Count,
 			logicalOvercommit: g.AcceleratorSlicedDetail.Logical.CoresPercentageOvercommit,
+			physicalProfiles:  physicalProfileSignature(g),
 		}
 	}
 	return out
