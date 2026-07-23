@@ -1,4 +1,4 @@
-# region -> available platforms (region is fixed by parent_id's project, NOT a TF variable):
+# region -> available platforms (region is fixed by project_id's project, NOT a TF variable):
 #   eu-north1   : cpu-d3, cpu-e2, gpu-h100-sxm, gpu-h200-sxm, gpu-l40s-a, gpu-l40s-d
 #   eu-west1    : cpu-d3, gpu-h200-sxm
 #   me-west1    : cpu-d3, gpu-b200-sxm-a
@@ -12,31 +12,20 @@
 #   gpu-h200-sxm : 1gpu-16vcpu-200gb, 8gpu-128vcpu-1600gb
 #   gpu-l40s-a   : 1gpu-8vcpu-32gb, ... 1gpu-40vcpu-160gb
 #   gpu-l40s-d   : 1gpu-16vcpu-96gb, ... 4gpu-192vcpu-1152gb
-variable "parent_id" {
+variable "project_id" {
   description = "Nebius project ID; its region fixes VM placement and platform availability (see the region table above)."
   type        = string
 
   validation {
-    condition     = can(regex("^project-", var.parent_id))
-    error_message = "parent_id must be a Nebius project ID, e.g. 'project-...'."
+    condition     = can(regex("^project-", var.project_id))
+    error_message = "project_id must be a Nebius project ID, e.g. 'project-...'."
   }
 }
 
-variable "vm_name_prefix" {
+variable "name_prefix" {
   description = "Prefix for the VM and its network/subnet/security-group names (a random suffix is appended)."
   type        = string
   default     = "gpustack-nebius"
-}
-
-variable "ssh_source_cidrs" {
-  description = "CIDR blocks allowed to SSH (TCP/22) into the VM."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-
-  validation {
-    condition     = alltrue([for c in var.ssh_source_cidrs : can(cidrhost(c, 0))])
-    error_message = "ssh_source_cidrs must be valid CIDR blocks (e.g. '0.0.0.0/0')."
-  }
 }
 
 variable "ssh_public_key" {
@@ -51,21 +40,8 @@ variable "ssh_public_key" {
   }
 }
 
-variable "ssh_username" {
-  # Interpolated unquoted into the cloud-init YAML and the ssh_command output, so it's
-  # restricted to safe Linux username characters to avoid breaking either.
-  description = "Username created on the VM with the SSH public key as an authorized key."
-  type        = string
-  default     = "ubuntu"
-
-  validation {
-    condition     = can(regex("^[a-z_][a-z0-9_-]*$", var.ssh_username))
-    error_message = "ssh_username must be a valid Linux username (lowercase letters, digits, underscores, hyphens; starting with a letter or underscore)."
-  }
-}
-
 # platform / preset / image_family combos (pick one matching triple; an invalid combo fails at apply).
-# parent_id's region gates platform availability (see the region table above).
+# project_id's region gates platform availability (see the region table above).
 # Default: gpu-h100-sxm / 1gpu-16vcpu-200gb / ubuntu24.04-cuda13.0.
 #
 # | Platform         | Notes                    | Presets                                                | Image family          |
@@ -80,13 +56,10 @@ variable "ssh_username" {
 # | gpu-b200-sxm-a   | B200 NVLink              | 1gpu-20vcpu-224gb, 8gpu-160vcpu-1792gb                  | ubuntu24.04-cuda13.0  |
 # | gpu-b300-sxm     | B300 NVLink              | 1gpu-24vcpu-346gb, 8gpu-192vcpu-2768gb                  | ubuntu24.04-cuda13.0 (cuda12 families unsupported here, need nvidia_gpu_drivers 580.x) |
 # | gpu-rtx6000      | RTX PRO 6000             | 1gpu-24vcpu-218gb, 8gpu-192vcpu-1744gb                  | ubuntu24.04-cuda13.0 (cuda12 families unsupported here, need nvidia_gpu_drivers 580.x) |
-variable "platform_preset_image" {
-  description = "Nebius platform/preset/image_family triple (see the table above); pick a matching combo."
-  type = object({
-    platform     = string
-    preset       = string
-    image_family = string
-  })
+variable "instance_type" {
+  # The Nebius platform/preset/image_family combination that defines the instance shape.
+  description = "Nebius instance type: the platform/preset/image_family combination (see the table above); pick a matching combo."
+  type        = object({ platform = string, preset = string, image_family = string })
   default = {
     platform     = "gpu-h100-sxm"
     preset       = "1gpu-16vcpu-200gb"
@@ -105,13 +78,13 @@ variable "boot_disk_type" {
   }
 }
 
-variable "boot_disk_size_gibibytes" {
+variable "boot_disk_size_gb" {
   description = "Boot disk size, in GiB."
   type        = number
-  default     = 64
+  default     = 100
 
   validation {
-    condition     = var.boot_disk_size_gibibytes > 0 && var.boot_disk_size_gibibytes == floor(var.boot_disk_size_gibibytes)
-    error_message = "boot_disk_size_gibibytes must be a positive whole number."
+    condition     = var.boot_disk_size_gb > 0 && var.boot_disk_size_gb == floor(var.boot_disk_size_gb)
+    error_message = "boot_disk_size_gb must be a positive whole number."
   }
 }

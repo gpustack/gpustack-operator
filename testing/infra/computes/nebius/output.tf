@@ -15,5 +15,5 @@ output "private_ip" {
 
 output "ssh_command" {
   description = "Ready-to-run SSH command to reach the VM"
-  value       = "ssh -i ${trimsuffix(var.ssh_public_key, ".pub")} ${var.ssh_username}@${local.public_ip}"
+  value       = "ssh -i ${trimsuffix(var.ssh_public_key, ".pub")} ubuntu@${local.public_ip}"
 }

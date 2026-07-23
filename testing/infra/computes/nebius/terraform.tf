@@ -4,6 +4,10 @@ terraform {
       source  = "nebius/nebius"
       version = "0.6.30"
     }
+    null = {
+      source  = "hashicorp/null"
+      version = "3.3.0"
+    }
     random = {
       source  = "hashicorp/random"
       version = "3.9.0"
