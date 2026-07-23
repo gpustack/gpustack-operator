@@ -18,25 +18,25 @@ variable "vpc_cidr" {
   default     = "172.31.0.0/16"
 }
 
-variable "eks_name_prefix" {
+variable "name_prefix" {
   description = "Prefix for the EKS cluster name"
   type        = string
   default     = "gpustack-eks"
 }
 
-variable "eks_version" {
+variable "release" {
   description = "EKS version"
   type        = string
   default     = "1.34"
 }
 
-variable "eks_cpu_instance_types" {
+variable "cpu_instance_types" {
   description = "Instance types for EKS CPU node group list, check with https://aws.amazon.com/ec2/pricing/on-demand/"
   type        = list(string)
   default     = ["c6a.4xlarge", "c7a.4xlarge"]
 }
 
-variable "eks_gpu_instance_types" {
+variable "gpu_instance_types" {
   # Keyed by group name so each GPU node group has a stable key (gpu-<name>).
   # Adding a key is a +create only; editing a key's instance-type list replaces
   # just that group, never rotating the others.
@@ -46,4 +46,37 @@ variable "eks_gpu_instance_types" {
   # default     = { xlarge = ["g4dn.xlarge", "g5.xlarge"], xlarge-alt = ["g5.xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge"] }
   # default     = { small = ["g4dn.xlarge", "g4dn.12xlarge", "g6.xlarge"], large = ["g4dn.12xlarge", "g5.12xlarge", "g6.12xlarge"] }
   # default     = { g4dn = ["g4dn.xlarge", "g4dn.12xlarge"], g5 = ["g5.xlarge", "g5.12xlarge"], g6 = ["g6.xlarge", "g6.12xlarge"] }
+}
+
+variable "node_boot_disk_size_gb" {
+  description = "Node root (boot) volume size, in GiB. Under this module's custom launch template, block_device_mappings.xvda IS the boot disk (disk_size is ignored)."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.node_boot_disk_size_gb > 0 && var.node_boot_disk_size_gb == floor(var.node_boot_disk_size_gb)
+    error_message = "node_boot_disk_size_gb must be a positive whole number."
+  }
+}
+
+variable "node_boot_disk_type" {
+  # iops/throughput are optional so overriding volume_type to a non-gp3/io* type
+  # doesn't force incompatible values onto the block_device_mappings.xvda.ebs block.
+  description = "Node root (boot) volume EBS type/performance, driving block_device_mappings.xvda.ebs for both node groups."
+  type = object({
+    volume_type = string
+    iops        = optional(number)
+    throughput  = optional(number)
+  })
+  default = { volume_type = "gp3", iops = 3000, throughput = 125 }
+
+  validation {
+    condition     = var.node_boot_disk_type.iops == null || (var.node_boot_disk_type.iops == floor(var.node_boot_disk_type.iops) && var.node_boot_disk_type.iops > 0)
+    error_message = "node_boot_disk_type.iops, when set, must be a positive whole number."
+  }
+
+  validation {
+    condition     = var.node_boot_disk_type.throughput == null || (var.node_boot_disk_type.throughput == floor(var.node_boot_disk_type.throughput) && var.node_boot_disk_type.throughput > 0)
+    error_message = "node_boot_disk_type.throughput, when set, must be a positive whole number."
+  }
 }

@@ -9,7 +9,7 @@ local kubeconfig at it.
   (default version `1.34`).
 - Creates two kinds of managed node groups:
   - `cpu`: a CPU node group (`min = max = 1`).
-  - `gpu-<name>`: one GPU node group per key in `eks_gpu_instance_types`, using
+  - `gpu-<name>`: one GPU node group per key in `gpu_instance_types`, using
     the `AL2023_x86_64_NVIDIA` AMI and `min = 0` (scaled to zero by default,
     brought up on demand).
 - Installs common addons (`coredns`, `kube-proxy`, `vpc-cni`, `metrics-server`,
@@ -40,7 +40,7 @@ terraform apply
 # Or declare custom GPU node groups: each map key becomes a gpu-<key> group
 terraform apply \
   -var='region=us-east-1' \
-  -var='eks_gpu_instance_types={ g4dn = ["g4dn.xlarge","g4dn.12xlarge"], g5 = ["g5.xlarge"] }'
+  -var='gpu_instance_types={ g4dn = ["g4dn.xlarge","g4dn.12xlarge"], g5 = ["g5.xlarge"] }'
 ```
 
 GPU instance selection reference:
@@ -67,10 +67,12 @@ terraform destroy
 | `region` | AWS region | `us-east-1` |
 | `ssh_public_key` | Path to the SSH public key registered as the node EC2 key pair | `~/.ssh/id_ed25519.pub` |
 | `vpc_cidr` | VPC CIDR | `172.31.0.0/16` |
-| `eks_name_prefix` | Cluster name prefix (a random suffix is appended) | `gpustack-eks` |
-| `eks_version` | EKS version | `1.34` |
-| `eks_cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
-| `eks_gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
+| `name_prefix` | Cluster name prefix (a random suffix is appended) | `gpustack-eks` |
+| `release` | EKS version | `1.34` |
+| `cpu_instance_types` | Instance types for the CPU node group | `["c6a.4xlarge","c7a.4xlarge"]` |
+| `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
+| `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
+| `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 
 ## Outputs
 

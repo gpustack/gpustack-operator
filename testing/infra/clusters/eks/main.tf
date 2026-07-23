@@ -16,7 +16,7 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  eks_name = "${var.eks_name_prefix}-${random_string.suffix.result}"
+  eks_name = "${var.name_prefix}-${random_string.suffix.result}"
 
   azs = slice(data.aws_availability_zones.available.names, 0, 3)
   public_subnets = [
@@ -25,6 +25,17 @@ locals {
   private_subnets = [
     for i in range(3) : cidrsubnet(var.vpc_cidr, 8, i + length(local.azs))
   ]
+
+  # iops/throughput are optional on node_boot_disk_type, so only merge them in when set.
+  node_boot_disk_ebs = merge(
+    {
+      volume_size           = var.node_boot_disk_size_gb
+      volume_type           = var.node_boot_disk_type.volume_type
+      delete_on_termination = true
+    },
+    var.node_boot_disk_type.iops != null ? { iops = var.node_boot_disk_type.iops } : {},
+    var.node_boot_disk_type.throughput != null ? { throughput = var.node_boot_disk_type.throughput } : {},
+  )
 }
 
 module "vpc" {
@@ -74,8 +85,7 @@ locals {
         ami_type       = "AL2023_x86_64_STANDARD"
         max_size       = 1
         min_size       = 1
-        instance_types = var.eks_cpu_instance_types
-        disk_size      = 100
+        instance_types = var.cpu_instance_types
         key_name       = aws_key_pair.accessor.key_name
         network_interfaces = [
           {
@@ -85,25 +95,18 @@ locals {
         block_device_mappings = {
           xvda = {
             device_name = "/dev/xvda"
-            ebs = {
-              volume_size           = 100
-              volume_type           = "gp3"
-              iops                  = 3000
-              throughput            = 125
-              delete_on_termination = true
-            }
+            ebs         = local.node_boot_disk_ebs
           }
         }
       }
     },
     {
-      for name, types in var.eks_gpu_instance_types :
+      for name, types in var.gpu_instance_types :
       "gpu-${name}" => {
         ami_type       = "AL2023_x86_64_NVIDIA"
         max_size       = 1
         min_size       = 0
         instance_types = types
-        disk_size      = 100
         key_name       = aws_key_pair.accessor.key_name
         network_interfaces = [
           {
@@ -113,13 +116,7 @@ locals {
         block_device_mappings = {
           xvda = {
             device_name = "/dev/xvda"
-            ebs = {
-              volume_size           = 100
-              volume_type           = "gp3"
-              iops                  = 3000
-              throughput            = 125
-              delete_on_termination = true
-            }
+            ebs         = local.node_boot_disk_ebs
           }
         }
       }
@@ -172,7 +169,7 @@ module "eks" {
   version = "21.24.0"
 
   name               = local.eks_name
-  kubernetes_version = var.eks_version
+  kubernetes_version = var.release
 
   addons = {
     cert-manager              = {}
