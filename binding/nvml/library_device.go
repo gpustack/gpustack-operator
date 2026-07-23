@@ -231,6 +231,19 @@ func (l Device) GetNumGpuCores() (uint32, Return) {
 	return numCores, ret
 }
 
+// GetMemoryBusWidth retrieves the device's memory bus width in bits. It distinguishes HBM
+// (wide bus: data-center stacks are >=1024-bit) from GDDR (<=384-bit), which is what decides
+// whether enabling ECC costs user-visible memory.
+func (l Device) GetMemoryBusWidth() (uint32, Return) {
+	if l.so.Lookup("nvmlDeviceGetMemoryBusWidth") != nil {
+		return 0, ERROR_FUNCTION_NOT_FOUND
+	}
+
+	var busWidth uint32
+	ret := nvmlDeviceGetMemoryBusWidth(l.handle, &busWidth)
+	return busWidth, ret
+}
+
 // GetMemoryInfoV retrieves the memory information of the device, including total, used, and free memory,
 // returning a handler that can be used to access different versions of the memory information.
 func (l Device) GetMemoryInfoV() MemoryInfoHandler {
