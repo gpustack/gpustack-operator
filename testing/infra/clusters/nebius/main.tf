@@ -27,12 +27,40 @@ locals {
     {
       for name, cfg in var.gpu_instance_types :
       "gpu-${name}" => {
-        instance_type = cfg.instance_type
-        os            = cfg.os
-        gpu           = cfg.gpu
+        instance_type = { platform = cfg.platform, preset = cfg.preset }
+        os            = coalesce(cfg.os, data.external.gpu_compat[name].result.os)
+        gpu           = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
       }
     },
   )
+}
+
+# Resolve each GPU group's os + drivers_preset from Nebius' live compatibility matrix for
+# var.release, picking the newest available driver preset (per-group overrides in
+# var.gpu_instance_types take precedence via coalesce above). NOTE: as a data source this runs on
+# every plan, apply AND destroy, so the `nebius` CLI (authenticated) and `jq` must be available
+# whenever Terraform runs against this module — including `terraform destroy`.
+data "external" "gpu_compat" {
+  for_each = var.gpu_instance_types
+
+  program = ["bash", "-c", <<-EOT
+    set -euo pipefail
+    eval "$(jq -r '@sh "REL=\(.release) PLAT=\(.platform)"')"
+    nebius mk8s node-group get-compatibility-matrix \
+      --cluster-kubernetes-version "$REL" --platform "$PLAT" --format json \
+    | jq -e '
+        .versions[0].items
+        | map(select(.drivers_preset != null and .drivers_preset != ""))
+        | sort_by(.drivers_preset) | last
+        | {os: .os, drivers_preset: .drivers_preset}
+      '
+  EOT
+  ]
+
+  query = {
+    release  = var.release
+    platform = each.value.platform
+  }
 }
 
 resource "nebius_vpc_v1_network" "this" {
@@ -152,16 +180,23 @@ resource "null_resource" "kubeconfig" {
   triggers = {
     id      = nebius_mk8s_v1_cluster.this.id
     context = local.context_name
+    # get-credentials names the CONTEXT "<context>" but the cluster/user entries
+    # "nebius-mk8s-<context>-<clusterId>", where <clusterId> is the cluster id with its
+    # "mk8scluster-" resource-type prefix stripped. Precompute the full entry name here so
+    # the destroy provisioner (which may reference only self) deletes the real names.
+    kubeconfig_entry = "nebius-mk8s-${local.context_name}-${trimprefix(nebius_mk8s_v1_cluster.this.id, "mk8scluster-")}"
   }
 
   provisioner "local-exec" {
     command = "nebius mk8s cluster get-credentials --id ${self.triggers.id} --external --force --context-name ${self.triggers.context}"
   }
 
+  # Delete the context AND its cluster/user entries by their real names, so destroy leaves
+  # no orphaned cluster/user piling up in ~/.kube/config across runs.
   provisioner "local-exec" {
     when       = destroy
     on_failure = continue
-    command    = "kubectl config delete-context '${self.triggers.context}' || true; kubectl config delete-cluster '${self.triggers.context}' || true; kubectl config unset 'users.${self.triggers.context}' || true"
+    command    = "kubectl config delete-context '${self.triggers.context}' || true; kubectl config delete-cluster '${self.triggers.kubeconfig_entry}' || true; kubectl config unset 'users.${self.triggers.kubeconfig_entry}' || true"
   }
 }
 
