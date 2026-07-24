@@ -21,8 +21,11 @@
 #              - the drain deletes the pool's general ResourceFlavor;
 #              - the Instance flips to spec.stop=true (STOPPED, not recreated);
 #              - the worker log shows the stop-on-inactive/gone-type branch ran.
-# Cleanup:     Trap restores gpustack.ai/managed=true on all nodes, deletes the test Instance, and
-#              waits for the InstanceType to return to Active so a following case finds a healthy chain.
+# Cleanup:     Trap restores gpustack.ai/managed=true on all nodes, deletes the test Instance, clears
+#              the InstanceType's drain-latched Spec.Inactive (draining a pool that holds an admitted
+#              workload latches it Inactive BY DESIGN — managed=true alone will NOT reactivate it,
+#              unlike an idle-drained pool in case-3), and waits for the InstanceType to return to
+#              Active so a following case finds a healthy chain.
 set -uo pipefail
 
 NS="${1:?usage: case-2.sh <NS>}"
@@ -55,12 +58,21 @@ done
 
 restore() {
   echo
-  echo "[case-2] restoring gpustack.ai/managed=true on all nodes, deleting test Instance, waiting for rebuild"
+  echo "[case-2] restoring gpustack.ai/managed=true on all nodes, deleting test Instance, clearing drain-latched Inactive, waiting for rebuild"
   echo "$WORKER_NFS" | xargs -r -I{} kubectl -n "$NS" patch {} --type=merge \
     -p '{"spec":{"labels":{"gpustack.ai/managed":"true"}}}' 2>/dev/null || true
   kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found 2>/dev/null || true
+  # Draining a pool that still holds an admitted workload latches the InstanceType Inactive BY
+  # DESIGN: NodeQueueReconciler drives HoldAndDrain to evict the workload and syncInactive mirrors
+  # that into Spec.Inactive=true, sticky until an admin clears it — so managed=true alone does NOT
+  # reactivate this pool (an idle-drained pool would, per case-3). Clearing it races the drain:
+  # while the queue is still HoldAndDrain the mirror RE-LATCHES inactive=true, so a single clear
+  # sticks only once the drain has settled (StopPolicy leaves HoldAndDrain, flavors rebuilt).
+  # Re-patch inactive=false each iteration until the type reaches Active.
   for _ in $(seq 1 40); do
     [ "$(kubectl get instancetype "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Active" ] && break
+    kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
+      -p '{"spec":{"inactive":false}}' >/dev/null 2>&1 || true
     sleep 3
   done
 }
@@ -97,6 +109,19 @@ done
 stop0=$(kubectl -n default get instance gpustack-e2e-instance -o jsonpath='{.spec.stop}' 2>/dev/null)
 [ "$stop0" != "true" ] && record PASS "instance running pre-drain" "spec.stop=${stop0:-<unset>}" \
   || record FAIL "instance running pre-drain" "spec.stop already true before drain"
+
+# The drain only STOPS the Instance if the ClusterQueue still counts the reservation when the
+# NodeQueueReconciler reacts. A Workload reports Admitted=True a few seconds BEFORE the CQ's
+# reservingWorkloads counter reflects it; draining inside that lag makes NodeQueue observe an
+# unreserved queue and empty it via the idle path (StopPolicy stays None, no HoldAndDrain) — the
+# same path case-3 exercises — so the graceful drain-evict never runs and the Instance is not
+# stopped. Gate the drain on the counted reservation so it deterministically hits the reserved
+# state (HoldAndDrain), independent of that admission→accounting lag.
+for _ in $(seq 1 20); do
+  rw=$(kubectl get clusterqueue "$IT" -o jsonpath='{.status.reservingWorkloads}' 2>/dev/null)
+  [ "${rw:-0}" -ge 1 ] && break
+  sleep 2
+done
 
 # 3. Drain: exclude the node from management so the general flavor is deleted and the derived
 #    InstanceType (the Instance's type) tears down. Toggle via the NodeFeature (NFD reverts a
