@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -575,4 +576,81 @@ func TestInstanceReconciler_AcceleratedDetailNotReadyRequeues(t *testing.T) {
 	require.NoError(t, cli.Get(context.Background(),
 		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
 	assert.False(t, got.Spec.Stop, "a not-ready type does not stop the instance")
+}
+
+
+// TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild
+// loop: a backing Pod kubelet rejected with UnexpectedAdmissionError (the device-plugin's
+// Allocate failing, e.g. the cross-mode FailedPrecondition) is deleted and recreated while
+// the gap between the Instance's and the Pod's creation timestamps stays within the retry
+// window — the growing gap doubling as backoff and deadline, with no state persisted on the
+// Instance. A Pod failed for any other reason is left alone, and a gap past the window
+// leaves the failed Pod in place as the visible error.
+func TestInstanceReconciler_RebuildsAdmissionRejectedPod(t *testing.T) {
+	const (
+		ns       = "default"
+		name     = "inst"
+		typeName = "active-type"
+	)
+
+	now := time.Now()
+	newClient := func(instAge, podAge time.Duration, podPhase core.PodPhase, podReason string) ctrlcli.Client {
+		inst := newReadyInstance(ns, name, typeName)
+		inst.CreationTimestamp = meta.NewTime(now.Add(-instAge))
+		pod := &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace:         ns,
+				Name:              name,
+				CreationTimestamp: meta.NewTime(now.Add(-podAge)),
+			},
+			Status: core.PodStatus{Phase: podPhase, Reason: podReason},
+		}
+		it := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+		cq := &kueue.ClusterQueue{ObjectMeta: meta.ObjectMeta{Name: typeName}}
+		return buildInstanceClient(inst, pod, it, cq)
+	}
+
+	t.Run("rejected pod inside the window is deleted for a backed-off rebuild", func(t *testing.T) {
+		// Instance created 1m ago, this (rebuilt) Pod 30s ago: gap 30s is within 5m.
+		cli := newClient(time.Minute, 30*time.Second, core.PodFailed, _PodReasonUnexpectedAdmissionError)
+		res, err := reconcileInstance(t, cli, ns, name)
+		require.NoError(t, err)
+		assert.Equal(t, 30*time.Second, res.RequeueAfter, "the backoff is the instance-to-pod creation gap")
+
+		err = cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: ns, Name: name}, &core.Pod{})
+		assert.True(t, kerrors.IsNotFound(err), "the rejected pod is deleted so the reconcile recreates it")
+
+		got := &workercore.Instance{}
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: ns, Name: name}, got))
+		assert.Empty(t, got.Annotations, "the retry budget is stateless — nothing is written to the Instance")
+	})
+
+	t.Run("a fresh failure's backoff clamps to the floor", func(t *testing.T) {
+		// Gap ~0 (first Pod created right after the Instance): backoff floors at 2s.
+		cli := newClient(time.Second, 0, core.PodFailed, _PodReasonUnexpectedAdmissionError)
+		res, err := reconcileInstance(t, cli, ns, name)
+		require.NoError(t, err)
+		assert.Equal(t, 2*time.Second, res.RequeueAfter)
+	})
+
+	t.Run("rejected pod past the window is left in place", func(t *testing.T) {
+		// Instance created 10m ago, this Pod 1m ago: gap 9m exceeds the 5m window.
+		cli := newClient(10*time.Minute, time.Minute, core.PodFailed, _PodReasonUnexpectedAdmissionError)
+		_, err := reconcileInstance(t, cli, ns, name)
+		require.NoError(t, err)
+
+		pod := &core.Pod{}
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: ns, Name: name}, pod))
+		assert.Nil(t, pod.DeletionTimestamp, "past the window the failed pod stays as the visible error")
+	})
+
+	t.Run("pod failed for another reason is left alone", func(t *testing.T) {
+		cli := newClient(time.Minute, 30*time.Second, core.PodFailed, "Evicted")
+		_, err := reconcileInstance(t, cli, ns, name)
+		require.NoError(t, err)
+
+		pod := &core.Pod{}
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Namespace: ns, Name: name}, pod))
+		assert.Nil(t, pod.DeletionTimestamp, "a non-admission failure must not trigger a rebuild")
+	})
 }
