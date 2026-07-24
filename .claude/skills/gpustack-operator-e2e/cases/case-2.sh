@@ -110,6 +110,19 @@ stop0=$(kubectl -n default get instance gpustack-e2e-instance -o jsonpath='{.spe
 [ "$stop0" != "true" ] && record PASS "instance running pre-drain" "spec.stop=${stop0:-<unset>}" \
   || record FAIL "instance running pre-drain" "spec.stop already true before drain"
 
+# The drain only STOPS the Instance if the ClusterQueue still counts the reservation when the
+# NodeQueueReconciler reacts. A Workload reports Admitted=True a few seconds BEFORE the CQ's
+# reservingWorkloads counter reflects it; draining inside that lag makes NodeQueue observe an
+# unreserved queue and empty it via the idle path (StopPolicy stays None, no HoldAndDrain) — the
+# same path case-3 exercises — so the graceful drain-evict never runs and the Instance is not
+# stopped. Gate the drain on the counted reservation so it deterministically hits the reserved
+# state (HoldAndDrain), independent of that admission→accounting lag.
+for _ in $(seq 1 20); do
+  rw=$(kubectl get clusterqueue "$IT" -o jsonpath='{.status.reservingWorkloads}' 2>/dev/null)
+  [ "${rw:-0}" -ge 1 ] && break
+  sleep 2
+done
+
 # 3. Drain: exclude the node from management so the general flavor is deleted and the derived
 #    InstanceType (the Instance's type) tears down. Toggle via the NodeFeature (NFD reverts a
 #    direct node label).
