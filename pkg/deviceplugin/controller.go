@@ -178,21 +178,32 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	r.notifiersMutex.Lock()
 	r.lastLivePodUIDs = livePodUIDs
+	r.notifiersMutex.Unlock()
+	r.notifyListeners()
+
+	return ctrl.Result{}, nil
+}
+
+// notifyListeners broadcasts the last live-pod-UID sweep to every ListAndWatch subscriber,
+// triggering an immediate response rebuild. It fires on every Reconcile and synchronously from
+// reserveDevices/releaseReservation, so a card reserved (or freed) in-process is reported
+// Unhealthy (or Healthy again) to kubelet in the same instant instead of waiting for the next
+// annotation-driven reconcile — closing the window where kubelet could hand a just-held card to
+// an opposite-mode pod. Sends are non-blocking and skipped until the first sweep seeds the set,
+// so a pre-Reconcile reservation cannot flush a nil live set into the sliced working-dir GC.
+func (r *DevicesReconciler) notifyListeners() {
+	r.notifiersMutex.Lock()
+	defer r.notifiersMutex.Unlock()
+	if r.lastLivePodUIDs == nil {
+		return
+	}
 	for i := range r.notifiers {
 		notifier := &r.notifiers[i]
 		select {
-		case notifier.Channel <- livePodUIDs:
+		case notifier.Channel <- r.lastLivePodUIDs:
 		default:
-			logger.Error(nil,
-				"notifier channel is full, skipping notify",
-				"manufacturer", notifier.Manufacturer,
-				"mode", notifier.AllocationMode.String(),
-			)
 		}
 	}
-	r.notifiersMutex.Unlock()
-
-	return ctrl.Result{}, nil
 }
 
 const IndexingPodsByNodeName = "pods.nodeName"
@@ -333,11 +344,14 @@ func (r *DevicesReconciler) reserveDevices(podUID types.UID, allocated workercor
 		return
 	}
 	r.reservationsMutex.Lock()
-	defer r.reservationsMutex.Unlock()
 	if r.reservations == nil {
 		r.reservations = make(map[types.UID]workercore.DevicesStatus)
 	}
 	r.reservations[podUID] = allocated
+	r.reservationsMutex.Unlock()
+	// The reservation immediately withholds the card from the opposite mode in ListAndWatch;
+	// notify so kubelet sees the health flip now, not after the annotation-driven reconcile.
+	r.notifyListeners()
 }
 
 // reservedDevices returns the devices recorded for a pod by reserveDevices and whether a
@@ -355,8 +369,11 @@ func (r *DevicesReconciler) reservedDevices(podUID types.UID) (workercore.Device
 // the opposite mode until the next full resync. Undoing it here frees the card immediately.
 func (r *DevicesReconciler) releaseReservation(podUID types.UID) {
 	r.reservationsMutex.Lock()
-	defer r.reservationsMutex.Unlock()
 	delete(r.reservations, podUID)
+	r.reservationsMutex.Unlock()
+	// Mirror reserveDevices: a rolled-back reservation restores the card's health for the
+	// opposite mode in ListAndWatch, so notify immediately.
+	r.notifyListeners()
 }
 
 // reservedModeForResource reports the allocation mode a physical card (group:device) is
