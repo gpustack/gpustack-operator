@@ -80,6 +80,19 @@ const (
 	InstanceTypePhaseDraining = "Draining"
 )
 
+const (
+	// _PodReasonUnexpectedAdmissionError is the Pod status reason kubelet sets when it rejects
+	// a Pod at admission — for an accelerator Pod, the device-plugin's Allocate returning an
+	// error (e.g. FailedPrecondition on a cross-mode card conflict).
+	_PodReasonUnexpectedAdmissionError = "UnexpectedAdmissionError"
+	// _InstanceAdmissionFailureRetryWindow bounds how long after Instance creation a backing
+	// Pod rejected at admission is still rebuilt. The gap between the Instance's and the
+	// backing Pod's creation timestamps starts near zero and grows monotonically with every
+	// rebuild, so it doubles as a stateless backoff and a hard retry deadline — no rebuild
+	// bookkeeping has to be persisted on the Instance.
+	_InstanceAdmissionFailureRetryWindow = 5 * time.Minute
+)
+
 func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := ctrllog.FromContext(ctx)
 
@@ -275,6 +288,34 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		logger.Info("stop instance as its instance type is gone, deleting, or draining", "type", inst.Spec.Type)
 		return ctrl.Result{}, nil
+	}
+
+	// Rebuild a Pod kubelet rejected at admission — reason UnexpectedAdmissionError, which for
+	// an accelerator Pod is the device-plugin's Allocate failing (e.g. the cross-mode
+	// FailedPrecondition when kubelet's ListAndWatch snapshot raced a fresh reservation).
+	// Admission rejection happens before any container starts and leaves no allocation
+	// behind, so deleting and recreating the Pod is safe. The retry budget is stateless: the
+	// gap between the Instance's and the Pod's creation timestamps starts near zero and
+	// grows with every rebuild, so it doubles as the backoff (each attempt waits roughly the
+	// running gap) and the deadline — a gap beyond the window means the rejection is
+	// persistent, and the failed Pod stays as the visible error instead of hot-looping.
+	if pod != nil && pod.DeletionTimestamp == nil &&
+		pod.Status.Phase == core.PodFailed && pod.Status.Reason == _PodReasonUnexpectedAdmissionError {
+		gap := max(pod.CreationTimestamp.Sub(inst.CreationTimestamp.Time), 0)
+		if gap < _InstanceAdmissionFailureRetryWindow {
+			err = r.Client.Delete(ctx, pod,
+				ctrlclix.Terminated)
+			if err != nil && !kerrors.IsNotFound(err) {
+				logger.Error(err, "delete admission-rejected pod")
+				return ctrl.Result{}, err
+			}
+			backoff := max(gap, 2*time.Second)
+			logger.Info("rebuild admission-rejected pod",
+				"gap", gap, "backoff", backoff, "message", pod.Status.Message)
+			return ctrl.Result{RequeueAfter: backoff}, nil
+		}
+		logger.Info("admission-rejected pod past the retry window; leaving it as the visible error",
+			"gap", gap, "message", pod.Status.Message)
 	}
 
 	// Create the Pod if not exists.

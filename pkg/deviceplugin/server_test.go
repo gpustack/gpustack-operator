@@ -389,18 +389,19 @@ func twoCardDevices(nodeName string, dev0Status workercore.DeviceAllocationMode)
 	return d
 }
 
-// TestResourceServer_GetListAndWatch_AdvertisesByHealth verifies ListAndWatch reflects hardware
-// health only, never allocation state: a card held in a conflicting mode — via the ledger Status OR
-// an in-process reservation — is still advertised for this mode. Withholding its tokens would make
-// the advertised allocatable count track allocation and desync kubelet's device accounting; the
-// cross-mode invariant is enforced at Allocate, not here.
-func TestResourceServer_GetListAndWatch_AdvertisesByHealth(t *testing.T) {
+// TestResourceServer_GetListAndWatch_CrossModeWithhold verifies ListAndWatch keeps advertising a
+// card held in a conflicting mode — via the ledger Status OR an in-process reservation — but
+// reports its tokens Unhealthy, so kubelet can never assign one to an opposite-mode pod
+// (removing the tokens would strand kubelet's checkpointed allocations on re-registration).
+// A same-mode hold and the Visibility server keep the tokens Healthy: the former still accepts
+// same-mode co-tenants, the latter must co-allocate the held card for the SSH sidecar.
+func TestResourceServer_GetListAndWatch_CrossModeWithhold(t *testing.T) {
 	const nodeName = "node-wh"
 	dev0 := Resource{Group: "grp-0", Device: "dev-0"}
 	dev1 := Resource{Group: "grp-0", Device: "dev-1"}
 
-	// dev-0 held Exclusive in the ledger Status; dev-1 held Exclusive only via a reservation (ledger
-	// lagging). A shared server must still advertise both.
+	// dev-0 held Exclusive in the ledger Status; dev-1 held Exclusive only via a reservation
+	// (ledger lagging).
 	devs := twoCardDevices(nodeName, workercore.DeviceAllocationModeExclusive)
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(devs).Build()
 
@@ -412,18 +413,34 @@ func TestResourceServer_GetListAndWatch_AdvertisesByHealth(t *testing.T) {
 			Accelerators: []workercore.AcceleratorAllocation{{ID: "dev-1", Mode: workercore.DeviceAllocationModeExclusive}},
 		}},
 	})
-	s := &ResourceServer{
-		Manufacturer:   nodefeature.ManufacturerNVIDIA,
-		AllocationMode: workercore.DeviceAllocationModeShared,
-		Reconciler:     rec,
+	server := func(mode workercore.DeviceAllocationMode) *ResourceServer {
+		return &ResourceServer{
+			Manufacturer:   nodefeature.ManufacturerNVIDIA,
+			AllocationMode: mode,
+			Reconciler:     rec,
+		}
 	}
 
-	resp, err := s.getListAndWatchResponse(context.Background())
+	// Shared server: both held cards stay advertised, but none of their tokens is healthy.
+	resp, err := server(workercore.DeviceAllocationModeShared).getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
-	assert.Greater(t, cardTokenCount(resp, dev0), 0,
-		"a card held in another mode via Status must still be advertised (health-only)")
-	assert.Greater(t, cardTokenCount(resp, dev1), 0,
-		"a card held in another mode via reservation must still be advertised (health-only)")
+	assert.Greater(t, cardTokenCount(resp, dev0), 0, "a card held in another mode via Status stays advertised")
+	assert.Greater(t, cardTokenCount(resp, dev1), 0, "a card held in another mode via reservation stays advertised")
+	assert.Zero(t, cardHealthyTokenCount(resp, dev0), "a card held in another mode via Status reports Unhealthy")
+	assert.Zero(t, cardHealthyTokenCount(resp, dev1), "a card held in another mode via reservation reports Unhealthy")
+
+	// Exclusive server: the hold is same-mode, so the tokens stay Healthy (kubelet's own
+	// accounting has already consumed the card's single exclusive token anyway).
+	resp, err = server(workercore.DeviceAllocationModeExclusive).getListAndWatchResponse(context.Background())
+	require.NoError(t, err)
+	assert.Greater(t, cardHealthyTokenCount(resp, dev0), 0, "a same-mode hold keeps tokens healthy")
+	assert.Greater(t, cardHealthyTokenCount(resp, dev1), 0, "a same-mode hold keeps tokens healthy")
+
+	// Visibility server: exempt — the SSH sidecar must co-allocate the held card.
+	resp, err = server(workercore.DeviceAllocationModeVisibility).getListAndWatchResponse(context.Background())
+	require.NoError(t, err)
+	assert.Greater(t, cardHealthyTokenCount(resp, dev0), 0, "visibility keeps a held card's tokens healthy")
+	assert.Greater(t, cardHealthyTokenCount(resp, dev1), 0, "visibility keeps a held card's tokens healthy")
 }
 
 // TestResourceServer_GetListAndWatch_PerCardSlicedTokens verifies the sliced token pool is
@@ -729,6 +746,21 @@ func cardTokenCount(resp *kubeletdeviceplugin.ListAndWatchResponse, res Resource
 	return n
 }
 
+// cardHealthyTokenCount counts the healthy device tokens a ListAndWatch response advertises for
+// one physical card.
+func cardHealthyTokenCount(resp *kubeletdeviceplugin.ListAndWatchResponse, res Resource) int {
+	n := 0
+	for i := range resp.Devices {
+		if resp.Devices[i].Health != kubeletdeviceplugin.Healthy {
+			continue
+		}
+		if ru, err := ConvertResourceUnitFromDeviceIds(resp.Devices[i].ID); err == nil && ru.Resource == res {
+			n++
+		}
+	}
+	return n
+}
+
 // TestDevicesReconciler_ReleaseOnPodTermination verifies the release counting once a Pod is done:
 // the in-process reservation gates cross-mode allocation for the holding Pod's whole lifetime, so
 // it must be pruned in the same live-pod-set sweep Reconcile uses — freeing the card for the
@@ -769,14 +801,15 @@ func TestDevicesReconciler_ReleaseOnPodTermination(t *testing.T) {
 	})
 
 	// While Pod A is still live (in the sweep's live-pod set), pruning keeps its reservation, so
-	// dev-0 stays held against a shared claim at the Allocate gate. ListAndWatch still advertises it
-	// (health-only): the cross-mode invariant lives in Allocate, not the advertisement.
+	// dev-0 stays held against a shared claim at the Allocate gate. ListAndWatch keeps advertising
+	// its tokens but reports them Unhealthy, so kubelet can never hand the held card to a shared pod.
 	rec.pruneReservations([]string{"uid-a", "uid-b"})
 	held, _ := sharedServer.cardHeldInOtherMode(mustGetDevices(t, rec), dev0)
 	assert.True(t, held, "dev-0 must stay held while its exclusive Pod is live")
 	lw, err := sharedServer.getListAndWatchResponse(ctx)
 	require.NoError(t, err)
-	assert.Greater(t, cardTokenCount(lw, dev0), 0, "a held card is still advertised (health-only)")
+	assert.Greater(t, cardTokenCount(lw, dev0), 0, "a held card stays advertised")
+	assert.Zero(t, cardHealthyTokenCount(lw, dev0), "a held card's tokens report Unhealthy")
 
 	// Pod A terminates: the same live-pod-set sweep that rebuilds the ledger Status prunes its
 	// reservation, so the card frees for the opposite mode exactly when its Pod disappears.

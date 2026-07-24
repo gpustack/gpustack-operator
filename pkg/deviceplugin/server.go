@@ -135,14 +135,25 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 				Group:  devGroup.ID,
 				Device: devAccelerator.ID,
 			}
-			// ListAndWatch reflects hardware health only, never allocation state: a card held in
-			// another mode stays advertised. Withholding its tokens here would make the advertised
-			// allocatable count fluctuate with allocation (the external Detector drives these
-			// updates), desynchronizing kubelet's device accounting. The cross-mode invariant is
-			// enforced at the authoritative Allocate gate instead.
+			// Hardware health alone does not protect a card held in another allocation mode:
+			// kubelet picks tokens freely (GetPreferredAllocation is advisory, and with the
+			// default TopologyManager policy "none" it never even runs), so a held card still
+			// advertised as Healthy WILL eventually be handed to an opposite-mode pod, whose
+			// Allocate then fails with a permanent UnexpectedAdmissionError. Keep the held
+			// card's tokens advertised (removing them would strand kubelet's checkpointed
+			// allocations on re-registration) but report them Unhealthy — kubelet never assigns
+			// Unhealthy devices to new pods, while the holding pod's existing allocation is
+			// unaffected. The hold is read from the ledger Status AND the in-process
+			// reservation, so a just-reserved card is withheld in the same ListAndWatch cycle.
+			// The Visibility server is exempt: the SSH sidecar must co-allocate the very card
+			// its workload holds, whatever mode that hold is.
 			health := deviceplugin.Healthy
 			if devAccelerator.Status.Unhealthy {
 				health = deviceplugin.Unhealthy
+			} else if s.AllocationMode != workercore.DeviceAllocationModeVisibility {
+				if held, _ := s.cardHeldInOtherMode(devs, res); held {
+					health = deviceplugin.Unhealthy
+				}
 			}
 			var topology *deviceplugin.TopologyInfo
 			if numa := binding.StrRangeToList(devAccelerator.Topology.NumaAffinity); len(numa) > 0 {
