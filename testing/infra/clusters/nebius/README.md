@@ -56,11 +56,12 @@ terraform destroy   # no -var needed -- reuses the last apply's variables
 ```
 
 The default `cpu_instance_types` (`cpu-e2`/`4vcpu-16gb`) and `gpu_instance_types`
-(a `h100` entry: `gpu-h100-sxm`/`1gpu-16vcpu-200gb`, CUDA 12.8) provision one
-`cpu` node and one `gpu-h100` node. Override `-var='cpu_instance_types={...}'`
-to reshape the CPU group, or `-var='gpu_instance_types={...}'` to change,
-add, or remove GPU groups; each `gpu_instance_types` map key becomes that
-group's `gpu-<key>` name.
+(a `h100` entry: `gpu-h100-sxm`/`1gpu-16vcpu-200gb`) provision one `cpu` node and
+one `gpu-h100` node. A GPU group needs only `platform` + `preset`; its `os` and
+`drivers_preset` are resolved automatically from the compatibility matrix for
+`release` (see below). Override `-var='cpu_instance_types={...}'` to reshape the
+CPU group, or `-var='gpu_instance_types={...}'` to change, add, or remove GPU
+groups; each `gpu_instance_types` map key becomes that group's `gpu-<key>` name.
 
 Node groups don't expose per-node IPs in Terraform state, so reach individual
 nodes via `kubectl ... get nodes -o wide` -> `ssh ubuntu@<ExternalIP>`; the SSH
@@ -78,7 +79,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os}` | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
-| `gpu_instance_types` | GPU node groups as a `map(object)` keyed by group name (each becomes `gpu-<name>`): `{instance_type {platform, preset}, os, gpu {drivers_preset}}` | `{ h100 = { instance_type = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }, os = "ubuntu24.04", gpu = { drivers_preset = "cuda12.8" } } }` |
+| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; set them to override. | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 
 ## Outputs
 
@@ -94,17 +95,57 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 
 `nebius_mk8s_v1_node_group` has no `image_family` field (unlike a standalone
 `computes/nebius` VM) -- the node image is picked from `os` and, for GPU
-platforms, `gpu.drivers_preset`, per this platform/Kubernetes-version matrix:
+platforms, `gpu.drivers_preset`. **The supported `drivers_preset` values are
+tied to the Kubernetes version, and older CUDA presets are dropped as new
+versions land**, so this module resolves both automatically instead of asking
+you to track a static table.
 
-| Platform(s) | `drivers_preset` | Kubernetes version | `os` |
+### Automatic resolution (`get-compatibility-matrix`)
+
+For each GPU group, a `data.external` runs
+
+```bash
+nebius mk8s node-group get-compatibility-matrix \
+  --cluster-kubernetes-version <release> --platform <platform>
+```
+
+and selects the entry with the **newest** `drivers_preset` (its `os` comes with
+it), so you set only `platform` + `preset` per group and `release` on the
+cluster. Each `items[]` entry lists an `os`, an optional `drivers_preset`, and
+the `compatible_platforms` it applies to. To pin a specific (e.g. older) preset,
+set `os` and/or `drivers_preset` on the group to override the auto-pick; run the
+command yourself to see the valid combinations.
+
+> **CLI dependency:** because this is a `data.external`, Terraform runs it on
+> every `plan`, `apply` **and `destroy`** — the `nebius` CLI (authenticated) and
+> `jq` must be on `PATH` whenever you run Terraform against this module, or the
+> run (including a teardown) fails.
+
+### Example combinations
+
+| Kubernetes version | `drivers_preset` | `os` | NVIDIA driver |
 |---|---|---|---|
-| `cpu-e1`, `cpu-e2`, `cpu-d3`, `gpu-l40s-a`, `gpu-l40s-d`, `gpu-h100-sxm`, `gpu-h200-sxm` | `""` | 1.30 | `ubuntu22.04` |
-| (same) | `""` | 1.31 | `ubuntu22.04` (default), `ubuntu24.04` |
-| `gpu-l40s-a`, `gpu-l40s-d`, `gpu-h100-sxm`, `gpu-h200-sxm` | `cuda12` (CUDA 12.4) | 1.30, 1.31 | `ubuntu22.04` |
-| (same) | `cuda12.4` | 1.31 | `ubuntu22.04` |
-| (same) | `cuda12.8` | 1.31 | `ubuntu24.04` |
-| `gpu-b200-sxm` | `""`, `cuda12` (CUDA 12.8), `cuda12.8` | 1.30/1.31 (see provider docs) | `ubuntu24.04` |
-| `gpu-b200-sxm-a` | `""`, `cuda12.8` | 1.31 | `ubuntu24.04` |
+| 1.30 | `cuda12` | `ubuntu22.04` | CUDA 12.4 |
+| 1.31 | `cuda12` / `cuda12.4` | `ubuntu22.04` | CUDA 12.4 |
+| 1.31 | `cuda12.8` | `ubuntu24.04` | 570.x |
+| 1.33, 1.34 | `cuda13.0` | `ubuntu24.04` | 580.x |
+
+Applies to `gpu-l40s-a`, `gpu-l40s-d`, `gpu-h100-sxm`, `gpu-h200-sxm`. Note the
+break at 1.33: the `cuda12*` presets are **not** implemented for 1.33+ -- only
+`cuda13.0` -- so `release = "1.34"` with `cuda12.8` is rejected. (`gpu-b200-sxm*`
+use `cuda12.8`/`cuda13.0` on `ubuntu24.04`; check the matrix.)
+
+### Empty preset / installing drivers manually
+
+Every matrix also exposes an entry with **no** `drivers_preset` (e.g.
+`ubuntu24.04` alone): the node boots without GPU drivers and you install the
+[NVIDIA GPU Operator](https://docs.nebius.com/kubernetes/gpu/set-up#gpu-drivers-and-other-components)
+yourself (this is the path Nebius recommends when you need to customize the
+device plug-in, e.g. to enable MIG). **This module does not support that path**:
+it always emits `gpu_settings = { drivers_preset = <value> }` for a GPU group,
+and the API rejects an empty string with `value is required`. To use the
+manual path, extend `main.tf` to omit `gpu_settings` and install the operator
+out-of-band; otherwise pass a real preset from the matrix above.
 
 See `variables.tf` for the platform -> region and platform -> preset catalogs
 (shared with `computes/nebius`).

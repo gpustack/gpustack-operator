@@ -76,38 +76,21 @@ variable "cpu_instance_types" {
 }
 
 # Keyed by group name so each GPU node group has a stable key (gpu-<name>), mirroring
-# clusters/eks's gpu_instance_types map(list(string)) convention. os + gpu.drivers_preset must
-# match a supported combination for the group's platform and var.release:
-#
-#   gpu-l40s-a, gpu-l40s-d, gpu-h100-sxm, gpu-h200-sxm:
-#     drivers_preset = ""         : 1.30 -> os "ubuntu22.04" | 1.31 -> "ubuntu22.04" (default), "ubuntu24.04"
-#     drivers_preset = "cuda12"   (CUDA 12.4) : 1.30, 1.31 -> os "ubuntu22.04"
-#     drivers_preset = "cuda12.4"             : 1.31       -> os "ubuntu22.04"
-#     drivers_preset = "cuda12.8"             : 1.31       -> os "ubuntu24.04"
-#   gpu-b200-sxm:
-#     drivers_preset = ""         : 1.30, 1.31 -> os "ubuntu24.04"
-#     drivers_preset = "cuda12"   (CUDA 12.8) : 1.30, 1.31 -> os "ubuntu24.04"
-#     drivers_preset = "cuda12.8"             : 1.31       -> os "ubuntu24.04"
-#   gpu-b200-sxm-a:
-#     drivers_preset = ""                     : 1.31 -> os "ubuntu24.04"
-#     drivers_preset = "cuda12.8"              : 1.31 -> os "ubuntu24.04"
+# clusters/eks's gpu_instance_types map(list(string)) convention. Only platform + preset are
+# required per group: os and drivers_preset are auto-resolved from Nebius' live compatibility
+# matrix (`nebius mk8s node-group get-compatibility-matrix`) for the group's platform and
+# var.release, picking the newest available driver preset. Set os/drivers_preset explicitly only
+# to override that choice (e.g. pin an older CUDA preset); run the matrix query yourself to see
+# the valid combinations (see README).
 variable "gpu_instance_types" {
-  description = "GPU node groups as a map(object) keyed by group name (each becomes gpu-<name>); os/gpu.drivers_preset per the platform/Kubernetes-version/os/driver matrix above."
+  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release and may be overridden per group."
   type = map(object({
-    instance_type = object({
-      platform = string
-      preset   = string
-    })
-    os = string
-    gpu = object({
-      drivers_preset = string
-    })
+    platform       = string
+    preset         = string
+    os             = optional(string)
+    drivers_preset = optional(string)
   }))
   default = {
-    h100 = {
-      instance_type = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
-      os            = "ubuntu24.04"
-      gpu           = { drivers_preset = "cuda12.8" }
-    }
+    h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
   }
 }
