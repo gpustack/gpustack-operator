@@ -578,7 +578,6 @@ func TestInstanceReconciler_AcceleratedDetailNotReadyRequeues(t *testing.T) {
 	assert.False(t, got.Spec.Stop, "a not-ready type does not stop the instance")
 }
 
-
 // TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild
 // loop: a backing Pod kubelet rejected with UnexpectedAdmissionError (the device-plugin's
 // Allocate failing, e.g. the cross-mode FailedPrecondition) is deleted and recreated while

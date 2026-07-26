@@ -936,7 +936,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       protobuf, CRD, deepcopy, openapi and applyconfiguration output is consistent; no field number moved.
       Verify: `make generate` from the main checkout, then `make lint` && `go test ./api/... ./pkg/...`
 
-- [ ] **T3 · Per-card population predicates** (F8, prefactor)
+- [x] **T3 · Per-card population predicates** (F8, prefactor)
       Blocked by: None
       Owns: `pkg/device/population.go`, `pkg/device/population_test.go`
       *Do:* add the per-card population predicates (`logically sliceable`, `partitioned`, whole-card
