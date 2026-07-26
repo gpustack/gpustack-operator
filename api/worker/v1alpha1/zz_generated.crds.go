@@ -90,7 +90,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																	Type:        "object",
 																	Properties: map[string]v1.JSONSchemaProps{
 																		"coresPercentageOvercommit": {
-																			Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken\nfrom any soft-sliceable card; false and meaningless when no card is soft-sliceable.",
+																			Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable card; false and meaningless when no card is logically sliceable.",
 																			Type:        "boolean",
 																		},
 																		"count": {
@@ -196,7 +196,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																							Type:        "boolean",
 																						},
 																						"count": {
-																							Description: "Count is the maximum number of soft slices this card can host. A card whose MIG mode\nis currently enabled is always 0, which excludes it from the logical capacity keys; a\npending-enable card is not partitioned yet and still reports its soft-slice count.",
+																							Description: "Count is the maximum number of logical slices this card can host. A card whose MIG\nmode is currently enabled is always 0, which excludes it from the logical capacity\nkeys; a pending-enable card is not partitioned yet and still reports its logical count.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
@@ -207,7 +207,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																					Type:        "object",
 																					Properties: map[string]v1.JSONSchemaProps{
 																						"count": {
-																							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7\non A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".sliced\" token pool for a\nMIG-enabled card, so a hard-partitioned card stays served rather than dropping out.\nZero when Profiles is empty.",
+																							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7\non A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".partitioned\" token pool\nfor a partitioned card, which is the family that serves it; a partitioned card offers\nno logical slicing and so leaves the \".sliced\" pool entirely. Zero when Profiles is\nempty.",
 																							Type:        "integer",
 																							Format:      "int32",
 																						},
@@ -795,6 +795,10 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 													Nullable:     true,
 													XIntOrString: true,
 												},
+												"acceleratorPartitionedProfile": {
+													Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a\nrequest for one hardware partition of that shape, which is mutually exclusive with\nthe two slice percentages above: hardware partitioning and software slicing cannot\nboth apply to one card. It is ignored by InstanceTypes offering no partition.",
+													Type:        "string",
+												},
 												"acceleratorSlicedCoresPercentage": {
 													Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
 													Type:        "integer",
@@ -1315,11 +1319,57 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 										"accelerator",
 										"acceleratorShared",
 										"acceleratorSliced",
+										"acceleratorPartitioned",
 										"cpu",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"accelerator": {
 											Description: "Accelerator is the allocatable-as-exclusive view: whole cards that are\nentirely free, e.g. \"1\", \"4\".",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"acceleratorPartitioned": {
+											Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances\nthe pool's partitioned cards can still host, summed over those cards. It is disjoint\nfrom the three views above — a card in a partitioning mode can serve no other kind of\nclaim — so a pool with no partitioned card reports zero here.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"capacity": {
@@ -1645,7 +1695,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 															Type:        "object",
 															Properties: map[string]v1.JSONSchemaProps{
 																"coresPercentageOvercommit": {
-																	Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken\nfrom any soft-sliceable card; false and meaningless when no card is soft-sliceable.",
+																	Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from\nany logically sliceable card; false and meaningless when no card is logically sliceable.",
 																	Type:        "boolean",
 																},
 																"count": {

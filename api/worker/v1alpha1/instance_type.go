@@ -195,10 +195,14 @@ type InstanceTypeAcceleratorDetail struct {
 	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
 }
 
-// IsSliceable reports whether the accelerator can be sliced: the pool's aggregated slicing detail
-// carries a logical soft-slice count or at least one physical (MIG) profile.
+// IsSliceable reports whether the accelerator can be sliced **logically** — the pool's aggregated
+// slicing detail carries a non-zero logical slice count. Physical partitioning is deliberately not
+// counted: a partitioned card serves no logical slice, so a pool of nothing but partitioned cards
+// must not read as sliceable. A partition request is expressed by
+// InstanceResources.AcceleratorPartitionedProfile and answered by the Physical profile inventory,
+// never by this predicate.
 func (in InstanceTypeAcceleratorDetail) IsSliceable() bool {
-	return in.SlicedDetail.Logical.Count > 0 || len(in.SlicedDetail.Physical.Profiles) > 0
+	return in.SlicedDetail.Logical.Count > 0
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.
@@ -219,6 +223,12 @@ type InstanceTypeStatus struct {
 	// PhaseMessage is the message of the phase.
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,4,opt,name=phaseMessage"`
 
+	// The resource views below are mirrored field by field — not embedded — by the worker gateway's
+	// AggregatedInstanceType in pkg/workergateway/service, and no generator maintains that mirror.
+	// A view added here still compiles while the gateway drops it from every fleet-wide aggregate,
+	// so the fleet reads as having no capacity on the new dimension. Wire it there in the same
+	// change; a reflection test in that package fails while the two are out of step.
+
 	// Accelerator is the allocatable-as-exclusive view: whole cards that are
 	// entirely free, e.g. "1", "4".
 	Accelerator InstanceTypeResource `json:"accelerator" protobuf:"bytes,5,name=accelerator"`
@@ -231,6 +241,12 @@ type InstanceTypeStatus struct {
 	// AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
 	// hundred per card) summed over free and already-sliced cards.
 	AcceleratorSliced InstanceTypeResource `json:"acceleratorSliced" protobuf:"bytes,7,name=acceleratorSliced"`
+
+	// AcceleratorPartitioned is the hardware-partitionable view: the partition instances
+	// the pool's partitioned cards can still host, summed over those cards. It is disjoint
+	// from the three views above — a card in a partitioning mode can serve no other kind of
+	// claim — so a pool with no partitioned card reports zero here.
+	AcceleratorPartitioned InstanceTypeResource `json:"acceleratorPartitioned" protobuf:"bytes,9,name=acceleratorPartitioned"`
 
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
 	CPU InstanceTypeResource `json:"cpu" protobuf:"bytes,8,name=cpu"`

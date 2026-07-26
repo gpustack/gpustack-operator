@@ -52,7 +52,7 @@ import (
 //     (create-only) after it syncs a pool's flavors. This reconciler manages only types that
 //     already exist, and never deletes one for lack of flavors — the NodeQueueReconciler
 //     drains/empties the backing queue instead.
-//   - It materializes the three-view (or CPU) status from the Devices ledger + the
+//   - It materializes the four-view (or CPU) status from the Devices ledger + the
 //     ClusterQueue; the hardware-descriptor spec is a one-time snapshot the defaulting webhook
 //     fills at admission, no longer refreshed here.
 //   - On delete a finalizer holds the InstanceType until it has deleted the backing CQ and the
@@ -340,7 +340,7 @@ func (r *InstanceTypeReconciler) teardownInstanceType(
 	return ctrl.Result{}, nil
 }
 
-// computeStatus builds the InstanceType status: the accelerated three-view is a
+// computeStatus builds the InstanceType status: the accelerated four-view is a
 // per-card bin-packing projection of the pool's Devices ledger, the CPU view comes
 // from the ClusterQueue; a draining queue reports zero (its status views stay at
 // their zero value). The observed hardware Detail is computed here — not via a separate
@@ -360,7 +360,7 @@ func (r *InstanceTypeReconciler) computeStatus(
 	}
 	if !draining {
 		if acceleratable {
-			st.Accelerator, st.AcceleratorShared, st.AcceleratorSliced = getAcceleratorResources(devices)
+			st.Accelerator, st.AcceleratorShared, st.AcceleratorSliced, st.AcceleratorPartitioned = getAcceleratorResources(devices)
 		} else {
 			st.CPU = getCPUResource(cq, withOvercommit)
 		}
@@ -534,19 +534,26 @@ func poolDevicesSelector(cqLabels map[string]string) map[string]string {
 }
 
 // getAcceleratorResources aggregates the per-card Devices ledger of one flavor pool
-// into the three InstanceType display views. Each Devices object is one node, and the
+// into the four InstanceType display views. Each Devices object is one node, and the
 // status ledger seeds every card at ResourceMaxUnits (D), subtracting each allocation;
-// a card's Mode marks how it is currently used. Per node:
-//   - exclusive: cards that are entirely free (Remaining >= D), one each;
-//   - shared:    over free and Shared cards, Remaining/(D/SharedResourceMaxSize) shares;
-//   - sliced:    over free and Sliced cards, Remaining/(D/100) VRAM-percent units.
+// a card's Mode marks how it is currently used.
 //
-// Capacity is the whole pool seen as that mode (cards, cards×10, cards×100), Remaining
-// sums each node's availability. OnceMaxRequest is the largest single allocation: the
-// largest single node's availability for exclusive/shared (one allocation can span a
-// node's cards), but the freest single card's percent for sliced (a slice targets one
-// card — VRAM is per-card — so a single sliced request is at most 100).
-func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, sliced workercore.InstanceTypeResource) {
+// A card in a hardware partitioning mode and an unpartitioned card serve disjoint claims —
+// a partitioned card can host no whole-card, shared or logical-slice claim, and an
+// unpartitioned card can host no hardware partition — so every card feeds exactly one of the
+// two groups, decided by the capability it reports (never by its scalar ledger, whose
+// Remaining still reads a whole card on an empty partitioned card). Per node:
+//   - exclusive:   over unpartitioned cards that are entirely free (Remaining >= D), one each;
+//   - shared:      over unpartitioned free and Shared cards, Remaining/(D/SharedResourceMaxSize) shares;
+//   - sliced:      over unpartitioned free and Sliced cards, Remaining/(D/100) VRAM-percent units;
+//   - partitioned: over partitioned cards, the instances each can still host.
+//
+// Capacity is each group's whole pool seen as that mode (cards, cards×10, cards×100, and the
+// partitioned cards' instance ceilings), Remaining sums each node's availability.
+// OnceMaxRequest is the largest single allocation: the largest single node's availability for
+// exclusive/shared (one allocation can span a node's cards), but the freest single card for
+// sliced and partitioned (both target one card — VRAM and the partition geometry are per-card).
+func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, sliced, partitioned workercore.InstanceTypeResource) {
 	const (
 		d         = int64(nodefeature.ResourceMaxUnits)
 		sharedMax = int64(nodefeature.SharedResourceMaxSize) // ownership shares per card
@@ -558,14 +565,28 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 		capExcl, remExcl, ormExcl       int64
 		capShared, remShared, ormShared int64
 		capSliced, remSliced, ormSliced int64
+		capPart, remPart, ormPart       int64
 	)
 	for i := range devices {
 		dev := &devices[i]
-		var nodeCards, nodeExcl, nodeShared, nodeSliced int64
+		caps := acceleratorCapabilities(dev)
+		var nodeCards, nodeLogicalCards, nodeExcl, nodeShared, nodeSliced int64
 		for j := range dev.Status.Groups {
 			g := &dev.Status.Groups[j]
 			for k := range g.Accelerators {
 				a := &g.Accelerators[k]
+				st := caps[acceleratorCapabilityKey(g.Manufacturer, g.ID, a.ID)]
+
+				if device.IsPartitioned(st) {
+					capPart += int64(st.PhysicalSliced.Count)
+					cardPart := remainingPartitionInstances(a)
+					remPart += cardPart
+					// A partition request creates one instance on one card, so the largest
+					// single request is the freest card's remaining instances, not a card-sum.
+					ormPart = max(ormPart, cardPart)
+					continue
+				}
+
 				nodeCards++
 				rem := int64(a.Remaining)
 				free := rem >= d
@@ -575,6 +596,15 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 				if free || a.Mode == workercore.DeviceAllocationModeShared {
 					nodeShared += rem / sharedUnit
 				}
+				// The logical-slice views count only the cards that actually admit a logical
+				// slice. Not being partitioned is not enough: a card reporting neither
+				// capability is a whole card and nothing else, and the device plugin, the node
+				// capacity and the AdmissionCheck all gate on the same predicate — counting it
+				// here would advertise a slice no layer below can ever place.
+				if !device.IsLogicallySliceable(st) {
+					continue
+				}
+				nodeLogicalCards++
 				if free || a.Mode == workercore.DeviceAllocationModeSliced {
 					cardSliced := rem / slicedUnit
 					nodeSliced += cardSliced
@@ -588,13 +618,14 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 		}
 		capExcl += nodeCards
 		capShared += nodeCards * sharedMax
-		capSliced += nodeCards * slicedMax
+		capSliced += nodeLogicalCards * slicedMax
 		remExcl += nodeExcl
 		remShared += nodeShared
 		remSliced += nodeSliced
 		ormExcl = max(ormExcl, nodeExcl)
 		ormShared = max(ormShared, nodeShared)
-		// ormSliced is tracked per-card in the loop above (a slice is single-card), not per-node.
+		// ormSliced and ormPart are tracked per-card in the loop above (both requests are
+		// single-card), not per-node.
 	}
 
 	mk := func(orm, rem, total int64) workercore.InstanceTypeResource {
@@ -606,7 +637,44 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 	}
 	return mk(ormExcl, remExcl, capExcl),
 		mk(ormShared, remShared, capShared),
-		mk(ormSliced, remSliced, capSliced)
+		mk(ormSliced, remSliced, capSliced),
+		mk(ormPart, remPart, capPart)
+}
+
+// acceleratorCapabilities indexes a node's per-card reported capability by group and card ID.
+// The capability lives on the spec side (spec.groups[].accelerators[].status) while the
+// allocation ledger lives on the status side, so a view that must know what a card can serve
+// has to join the two; reading the capability off status.groups yields nothing at all.
+func acceleratorCapabilities(dev *workercore.Devices) map[string]workercore.AcceleratorStatus {
+	caps := make(map[string]workercore.AcceleratorStatus)
+	for i := range dev.Spec.Groups {
+		g := &dev.Spec.Groups[i]
+		for j := range g.Accelerators {
+			a := &g.Accelerators[j]
+			caps[acceleratorCapabilityKey(g.Manufacturer, g.ID, a.ID)] = a.Status
+		}
+	}
+	return caps
+}
+
+// acceleratorCapabilityKey keys a card by its group identity plus its own ID: a group ID is
+// unique only within a manufacturer, and a card ID only within its group.
+func acceleratorCapabilityKey(manufacturer, groupID, cardID string) string {
+	return manufacturer + "/" + groupID + "/" + cardID
+}
+
+// remainingPartitionInstances reports how many more hardware partitions a card can still host,
+// taken as the maximum over its per-profile remaining counts. The profiles compete for the same
+// physical slices — creating an instance of one profile consumes placements of the others — so
+// summing them would multiply-count the same hardware; the maximum is the largest number of
+// further instances the card can actually host, and it is the quantity the card's capability
+// ceiling (its largest per-profile instance count) sizes the capacity from.
+func remainingPartitionInstances(a *workercore.AcceleratorAllocation) int64 {
+	var most int64
+	for i := range a.RemainingProfiles {
+		most = max(most, int64(a.RemainingProfiles[i].Count))
+	}
+	return most
 }
 
 // getCPUResource computes the CPU display resource of a non-accelerated InstanceType
@@ -706,7 +774,7 @@ func (r *InstanceTypeReconciler) SetupController(_ context.Context, opts control
 			),
 		).
 		Watches(
-			// A Devices ledger change moves the accelerated three-view; this is the
+			// A Devices ledger change moves the accelerated four-view; this is the
 			// watch a ClusterQueue projection could not serve.
 			&workercore.Devices{},
 			ctrlhandlerx.DedupEnqueueRequestsFromMapFuncWithWindow(
@@ -716,7 +784,7 @@ func (r *InstanceTypeReconciler) SetupController(_ context.Context, opts control
 			),
 			ctrlbuilder.WithPredicates(
 				// Trigger reconciliation when a managed node's Devices ledger is created, updated,
-				// or deleted (it drives the accelerated three-view status).
+				// or deleted (it drives the accelerated four-view status).
 				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
 					return obj.GetLabels()[systemname.ManagedLabelKey] == "true"
 				}),

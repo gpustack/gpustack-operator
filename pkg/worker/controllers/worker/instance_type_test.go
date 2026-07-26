@@ -68,7 +68,9 @@ func concatCards(groups ...[]workercore.AcceleratorAllocation) []workercore.Acce
 	return out
 }
 
-// nodeDevices builds a single-node Devices object whose status ledger holds cards.
+// nodeDevices builds a single-node Devices object whose status ledger holds cards. It carries no
+// capability side: a test that exercises the capability-gated views wants
+// nodeDevicesWithCapability instead.
 func nodeDevices(name string, labels map[string]string, cards ...workercore.AcceleratorAllocation) workercore.Devices {
 	return workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: name, Labels: labels},
@@ -82,6 +84,93 @@ func nodeDevices(name string, labels map[string]string, cards ...workercore.Acce
 	}
 }
 
+// profileCount is shorthand for one entry of a card's per-profile partition ledger.
+func profileCount(name string, count int32) workercore.AcceleratorProfileCount {
+	return workercore.AcceleratorProfileCount{Name: name, Count: count}
+}
+
+// cardPartitionedLedger is the ledger entry of a card in a hardware partitioning mode. Its
+// scalar Remaining stays a whole card — the scalar ledger does not model partitions, which is
+// exactly why an unscoped whole-card view would count it as free — and the per-profile
+// remaining counts carry the real availability.
+func cardPartitionedLedger(profiles ...workercore.AcceleratorProfileCount) workercore.AcceleratorAllocation {
+	return workercore.AcceleratorAllocation{
+		Mode:              workercore.DeviceAllocationModePartitioned,
+		Remaining:         ledgerD,
+		RemainingProfiles: profiles,
+	}
+}
+
+// nodeCard pairs one card's reported capability (Devices.spec side) with its ledger entry
+// (Devices.status side).
+type nodeCard struct {
+	capability workercore.AcceleratorStatus
+	alloc      workercore.AcceleratorAllocation
+}
+
+// unpartitionedCard is a card offering logical slicing only.
+func unpartitionedCard(alloc workercore.AcceleratorAllocation) nodeCard {
+	return nodeCard{
+		capability: workercore.AcceleratorStatus{
+			LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 10},
+		},
+		alloc: alloc,
+	}
+}
+
+// unpartitionedCards wraps a ledger-only card list as logically sliceable cards, for the view
+// tests: the logical-slice views are derived only for cards whose capability admits a slice, so
+// a ledger alone does not describe a sliceable pool.
+func unpartitionedCards(allocs ...workercore.AcceleratorAllocation) []nodeCard {
+	out := make([]nodeCard, len(allocs))
+	for i := range allocs {
+		out[i] = unpartitionedCard(allocs[i])
+	}
+	return out
+}
+
+// wholeCardOnlyCard is a card reporting NEITHER slicing capability — an AMD card, or an Ascend
+// outside the families that support software slicing. It serves whole-card claims and nothing
+// else.
+func wholeCardOnlyCard(alloc workercore.AcceleratorAllocation) nodeCard {
+	return nodeCard{capability: workercore.AcceleratorStatus{}, alloc: alloc}
+}
+
+// partitionedCard is a card in a hardware partitioning mode: ceiling is its physical-slice
+// ceiling (the largest instance count across its profiles), profiles its remaining ledger.
+func partitionedCard(ceiling int32, profiles ...workercore.AcceleratorProfileCount) nodeCard {
+	return nodeCard{
+		capability: workercore.AcceleratorStatus{
+			PhysicalSliced: workercore.AcceleratorPhysicalSliced{Count: ceiling},
+		},
+		alloc: cardPartitionedLedger(profiles...),
+	}
+}
+
+// nodeDevicesWithCapability builds a single-node Devices carrying both sides the views join:
+// the capability in spec.groups[].accelerators[].status and the ledger in
+// status.groups[].accelerators[], paired by card ID.
+func nodeDevicesWithCapability(name string, cards ...nodeCard) workercore.Devices {
+	specCards := make([]workercore.Accelerator, len(cards))
+	ledgerCards := make([]workercore.AcceleratorAllocation, len(cards))
+	for i, c := range cards {
+		id := fmt.Sprintf("card-%d", i)
+		specCards[i] = workercore.Accelerator{ID: id, Index: uint32(i), Status: c.capability}
+		ledgerCards[i] = c.alloc
+		ledgerCards[i].ID = id
+		ledgerCards[i].Index = uint32(i)
+	}
+	dev := nodeDevices(name, nil, ledgerCards...)
+	dev.Spec = workercore.DevicesSpec{
+		Groups: []workercore.DevicesGroup{{
+			ID:           "g0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: specCards,
+		}},
+	}
+	return dev
+}
+
 func wantView(t *testing.T, v workercore.InstanceTypeResource, orm, rem, capacity int64, label string) {
 	t.Helper()
 	assert.Equalf(t, orm, v.OnceMaxRequest.Value(), "%s OnceMaxRequest", label)
@@ -89,12 +178,14 @@ func wantView(t *testing.T, v workercore.InstanceTypeResource, orm, rem, capacit
 	assert.Equalf(t, capacity, v.Capacity.Value(), "%s Capacity", label)
 }
 
-// TestAcceleratorThreeViews is the end-to-end acceptance oracle: the five-step
-// pooling sequence on an 8× A10G node must reproduce the three-view progression
+// TestAcceleratorFourViews is the end-to-end acceptance oracle: the five-step
+// pooling sequence on an 8× A10G node must reproduce the four-view progression
 // exactly. On a single node OnceMaxRequest == Remaining for the exclusive and shared
 // views; the sliced OnceMaxRequest is per-card (the freest card's percent), so it stays
 // 100 while any card is free. Capacity stays the whole pool (8 / ×10 / ×100) throughout.
-func TestAcceleratorThreeViews(t *testing.T) {
+// No card here is in a partitioning mode, so the partitioned view stays zero at every
+// step — the two populations are disjoint, and this pool has nothing in the second one.
+func TestAcceleratorFourViews(t *testing.T) {
 	cases := []struct {
 		name                 string
 		cards                []workercore.AcceleratorAllocation
@@ -135,48 +226,150 @@ func TestAcceleratorThreeViews(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			devices := []workercore.Devices{nodeDevices("node-a", nil, c.cards...)}
-			excl, shared, sliced := getAcceleratorResources(devices)
+			devices := []workercore.Devices{nodeDevicesWithCapability("node-a", unpartitionedCards(c.cards...)...)}
+			excl, shared, sliced, partitioned := getAcceleratorResources(devices)
 			wantView(t, excl, c.excl, c.excl, 8, "exclusive")
 			wantView(t, shared, c.shared, c.shared, 80, "shared")
 			// Every step above leaves at least one free card, so the freest-card sliced OnceMaxRequest is 100.
 			wantView(t, sliced, 100, c.sliced, 800, "sliced")
+			wantView(t, partitioned, 0, 0, 0, "partitioned")
 		})
 	}
 }
 
-// TestAcceleratorThreeViews_MultiNode pins the per-node rollup: Remaining sums across nodes;
+// TestAcceleratorFourViews_MultiNode pins the per-node rollup: Remaining sums across nodes;
 // exclusive/shared OnceMaxRequest is the largest single node (one allocation can span a node's
 // cards), while sliced OnceMaxRequest is per-card (the freest card — 100 here, all free).
-func TestAcceleratorThreeViews_MultiNode(t *testing.T) {
+func TestAcceleratorFourViews_MultiNode(t *testing.T) {
 	devices := []workercore.Devices{
-		nodeDevices("a", nil, repeatCard(4, cardFree())...),
-		nodeDevices("b", nil, repeatCard(2, cardFree())...),
+		nodeDevicesWithCapability("a", unpartitionedCards(repeatCard(4, cardFree())...)...),
+		nodeDevicesWithCapability("b", unpartitionedCards(repeatCard(2, cardFree())...)...),
 	}
-	excl, shared, sliced := getAcceleratorResources(devices)
+	excl, shared, sliced, _ := getAcceleratorResources(devices)
 	wantView(t, excl, 4, 6, 6, "exclusive")
 	wantView(t, shared, 40, 60, 60, "shared")
 	wantView(t, sliced, 100, 600, 600, "sliced")
 }
 
-// TestAcceleratorThreeViews_SlicedOnceMaxIsPerCard pins that the sliced OnceMaxRequest is the
+// TestAcceleratorFourViews_SlicedOnceMaxIsPerCard pins that the sliced OnceMaxRequest is the
 // freest single card's percent — not a node's card-sum. With no free card it is the largest
 // per-card remainder (40 here, not 40+30+20), while Remaining still sums the whole pool.
-func TestAcceleratorThreeViews_SlicedOnceMaxIsPerCard(t *testing.T) {
+func TestAcceleratorFourViews_SlicedOnceMaxIsPerCard(t *testing.T) {
 	devices := []workercore.Devices{
-		nodeDevices("a", nil, cardSliced(40), cardSliced(30), cardSliced(20)),
+		nodeDevicesWithCapability("a", unpartitionedCards(cardSliced(40), cardSliced(30), cardSliced(20))...),
 	}
-	_, _, sliced := getAcceleratorResources(devices)
+	_, _, sliced, _ := getAcceleratorResources(devices)
 	wantView(t, sliced, 40, 90, 300, "sliced")
 }
 
-// TestAcceleratorThreeViews_Empty pins that a pool with no Devices yields zeroed views
+// TestAcceleratorFourViews_NeitherFamilyCard pins that a card reporting NEITHER slicing
+// capability contributes to the whole-card views only. Not being partitioned does not make a card
+// logically sliceable — an AMD card reports no slicing at all, and an Ascend reports it only for
+// the families that support it. The device plugin, the node capacity and the AdmissionCheck all
+// gate on the same predicate, so a logical-slice view derived from mere non-partitionedness would
+// advertise a slice no layer below can place.
+func TestAcceleratorFourViews_NeitherFamilyCard(t *testing.T) {
+	devices := []workercore.Devices{nodeDevicesWithCapability("a",
+		wholeCardOnlyCard(cardFree()),
+		wholeCardOnlyCard(cardFree()),
+		unpartitionedCard(cardFree()),
+	)}
+	excl, shared, sliced, partitioned := getAcceleratorResources(devices)
+	wantView(t, excl, 3, 3, 3, "exclusive")
+	wantView(t, shared, 30, 30, 30, "shared")
+	// Only the one logically sliceable card backs the sliced view — capacity included.
+	wantView(t, sliced, 100, 100, 100, "sliced")
+	wantView(t, partitioned, 0, 0, 0, "partitioned")
+}
+
+// TestAcceleratorFourViews_Empty pins that a pool with no Devices yields zeroed views
 // rather than panicking.
-func TestAcceleratorThreeViews_Empty(t *testing.T) {
-	excl, shared, sliced := getAcceleratorResources(nil)
+func TestAcceleratorFourViews_Empty(t *testing.T) {
+	excl, shared, sliced, partitioned := getAcceleratorResources(nil)
 	wantView(t, excl, 0, 0, 0, "exclusive")
 	wantView(t, shared, 0, 0, 0, "shared")
 	wantView(t, sliced, 0, 0, 0, "sliced")
+	wantView(t, partitioned, 0, 0, 0, "partitioned")
+}
+
+// TestAcceleratorViews_LogicalOnlyPool pins that a pool of unpartitioned cards keeps the
+// whole-card and logical-slice views it always reported, and reports no partition capacity.
+func TestAcceleratorViews_LogicalOnlyPool(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevicesWithCapability("a",
+			unpartitionedCard(cardFree()),
+			unpartitionedCard(cardSliced(80)),
+		),
+	}
+	excl, shared, sliced, partitioned := getAcceleratorResources(devices)
+	wantView(t, excl, 1, 1, 2, "exclusive")
+	wantView(t, shared, 10, 10, 20, "shared")
+	wantView(t, sliced, 100, 180, 200, "sliced")
+	wantView(t, partitioned, 0, 0, 0, "partitioned")
+}
+
+// TestAcceleratorViews_PartitionOnlyPool pins that a pool whose cards are all in a hardware
+// partitioning mode serves no whole-card or logical-slice claim — the scalar ledger of an empty
+// partitioned card still reads a whole card, so an unscoped view would advertise capacity that
+// cannot be admitted.
+func TestAcceleratorViews_PartitionOnlyPool(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevicesWithCapability("a",
+			partitionedCard(7, profileCount("1g.5gb", 7), profileCount("2g.10gb", 3), profileCount("3g.20gb", 2)),
+			partitionedCard(7, profileCount("1g.5gb", 7), profileCount("2g.10gb", 3), profileCount("3g.20gb", 2)),
+		),
+	}
+	excl, shared, sliced, partitioned := getAcceleratorResources(devices)
+	wantView(t, excl, 0, 0, 0, "exclusive")
+	wantView(t, shared, 0, 0, 0, "shared")
+	wantView(t, sliced, 0, 0, 0, "sliced")
+	wantView(t, partitioned, 7, 14, 14, "partitioned")
+}
+
+// TestAcceleratorViews_MixedPool pins that every card contributes to exactly one side: the
+// unpartitioned card alone backs the whole-card and logical-slice views, the partitioned card
+// alone backs the partition view.
+func TestAcceleratorViews_MixedPool(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevicesWithCapability("a",
+			unpartitionedCard(cardFree()),
+			partitionedCard(7, profileCount("1g.5gb", 7), profileCount("2g.10gb", 3)),
+		),
+	}
+	excl, shared, sliced, partitioned := getAcceleratorResources(devices)
+	wantView(t, excl, 1, 1, 1, "exclusive")
+	wantView(t, shared, 10, 10, 10, "shared")
+	wantView(t, sliced, 100, 100, 100, "sliced")
+	wantView(t, partitioned, 7, 7, 7, "partitioned")
+}
+
+// TestAcceleratorViews_PartitionSurvivesFirstAllocation pins that a card holding one small
+// partition still advertises the further instances it can host — the view must not collapse to
+// zero on the first allocation.
+func TestAcceleratorViews_PartitionSurvivesFirstAllocation(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevicesWithCapability("a",
+			partitionedCard(7, profileCount("1g.5gb", 6), profileCount("2g.10gb", 2), profileCount("3g.20gb", 1)),
+		),
+	}
+	_, _, _, partitioned := getAcceleratorResources(devices)
+	wantView(t, partitioned, 6, 6, 7, "partitioned")
+}
+
+// TestAcceleratorViews_PartitionOnceMaxIsPerCard pins that the partition OnceMaxRequest is the
+// freest single card — a partition request targets one card — not a node's card-sum.
+func TestAcceleratorViews_PartitionOnceMaxIsPerCard(t *testing.T) {
+	devices := []workercore.Devices{
+		nodeDevicesWithCapability("a",
+			partitionedCard(7, profileCount("1g.5gb", 4)),
+			partitionedCard(7, profileCount("1g.5gb", 2)),
+		),
+		nodeDevicesWithCapability("b",
+			partitionedCard(7, profileCount("1g.5gb", 5)),
+		),
+	}
+	_, _, _, partitioned := getAcceleratorResources(devices)
+	wantView(t, partitioned, 5, 11, 21, "partitioned")
 }
 
 // TestClusterQueueCPUResource pins the non-accelerated CPU view: capacity is the
@@ -451,7 +644,8 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 		core.LabelArchStable:       "amd64",
 		systemname.ManagedLabelKey: "true",
 	}
-	dev := nodeDevices("node-a", devLabels, repeatCard(8, cardFree())...)
+	dev := nodeDevicesWithCapability("node-a", unpartitionedCards(repeatCard(8, cardFree())...)...)
+	dev.Labels = devLabels
 
 	it := &workercore.InstanceType{
 		ObjectMeta: meta.ObjectMeta{
@@ -478,6 +672,9 @@ func TestInstanceTypeReconciler_MaterializesStatus(t *testing.T) {
 	assert.Equal(t, int64(8), got.Status.Accelerator.Remaining.Value(), "8 free cards exclusive")
 	assert.Equal(t, int64(8), got.Status.Accelerator.Capacity.Value())
 	assert.Equal(t, int64(80), got.Status.AcceleratorShared.Capacity.Value(), "×10 shared capacity")
+	// The whole-card views need only the ledger; the logical-slice view needs a card that
+	// reports the capability, and this fixture carries no Devices.Spec to report it in. See
+	// TestAcceleratorFourViews_NeitherFamilyCard for the capability-gated derivation itself.
 	assert.Equal(t, int64(800), got.Status.AcceleratorSliced.Capacity.Value(), "×100 sliced capacity")
 }
 
@@ -505,6 +702,10 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 		core.LabelArchStable:       "amd64",
 		systemname.ManagedLabelKey: "true",
 	}
+	// No capability side: this test REWRITES the ledger through cli.Update, and the fake
+	// client's field manager cannot traverse a Spec-bearing Devices (Accelerator.Memory is a
+	// uint64, which structured-merge-diff rejects). The whole-card views need only the ledger,
+	// which is all the freshness contract below follows.
 	dev := nodeDevices("node-a", devLabels, repeatCard(8, cardFree())...)
 
 	it := &workercore.InstanceType{
@@ -535,14 +736,15 @@ func TestInstanceTypeReconciler_StatusFreshOnLedgerChange(t *testing.T) {
 		"unchanged ledger writes no status (DeepEqual guard)")
 
 	// A pod alloc moves the ledger (2 exclusive, 2 shared with 9 shares free, 4 free =
-	// the step-2 oracle); the whole three-view moves within the reconcile.
+	// the step-2 oracle); the whole-card views move within the reconcile.
 	setNodeDevicesLedger(t, cli, "node-a",
 		concatCards(repeatCard(2, cardExclusive()), repeatCard(2, cardShared(9)), repeatCard(4, cardFree())))
 	reconcileInstanceTypeN(t, cli, name, 2)
 	moved := getInstanceType(t, cli, name)
 	assert.Equal(t, int64(4), moved.Status.Accelerator.Remaining.Value(), "alloc drops exclusive to 4")
 	assert.Equal(t, int64(58), moved.Status.AcceleratorShared.Remaining.Value(), "alloc moves shared to 58")
-	assert.Equal(t, int64(400), moved.Status.AcceleratorSliced.Remaining.Value(), "alloc moves sliced to 400")
+	assert.Equal(t, int64(0), moved.Status.AcceleratorSliced.Remaining.Value(),
+		"no card reports a logical-slicing capability here, so the sliced view stays zero")
 	assert.NotEqual(t, rv, moved.ResourceVersion, "status rewritten within the reconcile")
 
 	// A pod free returns the ledger to 8 free cards; the view recovers.
@@ -583,7 +785,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 		// aggregates into SlicedDetail, plus the pool labels listFlavorPoolDevices selects on. The
 		// group ID is the bare model ("a10g"); Manufacturer+"-"+ID reconstructs the accelerator key.
 		dev := devicesWithGroups("node-a", slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-			softCard("0", 128, true), softCard("1", 128, true)))
+			logicalCard("0", 128, true), logicalCard("1", 128, true)))
 		dev.Labels = map[string]string{
 			featureKey:                 "true",
 			core.LabelOSStable:         "linux",
@@ -612,7 +814,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 		assert.Equal(t, "24576Mi", d.Memory, "per-card VRAM from the flavor note")
 		assert.Equal(t, "9216", d.Cores, "cores from the flavor note")
 		assert.Equal(t, int32(256), d.SlicedDetail.Logical.Count,
-			"SlicedDetail sums the two soft cards' logical counts (2×128)")
+			"SlicedDetail sums the two logically sliceable cards' counts (2×128)")
 		assert.True(t, d.SlicedDetail.Logical.CoresPercentageOvercommit,
 			"SlicedDetail carries the overcommit flag")
 

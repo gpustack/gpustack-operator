@@ -155,7 +155,7 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// getSlicedContainerAllocateResponse renders the MThreads QoS soft-slicing injection for
+// getSlicedContainerAllocateResponse renders the MThreads QoS logical-slicing injection for
 // a sliced container: MTHREADS_QOS_MEMORY_LIMIT is a hard per-card VRAM cap (bytes)
 // derived from the container's ".sliced.memory-percentage"/".sliced.memory-mib", while
 // MTHREADS_QOS_COMPUTING_POWER_WEIGHT is a relative compute weight from

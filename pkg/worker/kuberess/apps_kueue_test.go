@@ -90,19 +90,21 @@ func renderKueueTransformations(t *testing.T, manufacturers []string) map[string
 	return byInput
 }
 
-// Test_kueueChartTransformations pins the three per-manufacturer credits rules on
-// the integer credit base B = D = 1600000: exclusive→B, shared→B/10, and the sliced
-// rule folds in the card count via multiplyBy: <.sliced> with factor B/D = 1, so
-// credits = B×C×U/partitions stays integer-valued and Kueue's ResourceValue int64
-// ceil never rounds a fractional credit up to 1.
+// Test_kueueChartTransformations pins the per-manufacturer credits rules on the
+// integer credit base B = D = 1600000: exclusive→B, shared→B/10, sliced.units and
+// partitioned.units→B/D = 1 (sliced folds in the card count via multiplyBy:
+// <.sliced>; partitioned counts one card per unit, so it carries no multiplyBy).
+// Every factor stays integer-valued, so Kueue's ResourceValue int64 ceil never
+// rounds a fractional credit up to 1.
 func Test_kueueChartTransformations(t *testing.T) {
 	const manu = nodefeature.ManufacturerNVIDIA
 	var (
-		exclusive  = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive))
-		shared     = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeShared))
-		sliced     = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced))
-		slicedUnit = string(nodefeature.GetAcceleratableSlicedUnitsResourceName(manu))
-		credits    = string(nodefeature.GetAcceleratableCreditsResourceName(manu))
+		exclusive     = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeExclusive))
+		shared        = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeShared))
+		sliced        = string(nodefeature.GetAcceleratableResourceName(manu, workercore.DeviceAllocationModeSliced))
+		slicedUnit    = string(nodefeature.GetAcceleratableSlicedUnitsResourceName(manu))
+		partitionUnit = string(nodefeature.GetAcceleratablePartitionedUnitsResourceName(manu))
+		credits       = string(nodefeature.GetAcceleratableCreditsResourceName(manu))
 	)
 
 	byInput := renderKueueTransformations(t, []string{manu})
@@ -134,6 +136,14 @@ func Test_kueueChartTransformations(t *testing.T) {
 			wantMultiplyBy: sliced,
 			wantCredits:    "1",
 		},
+		{
+			// A physical partition (MIG) unit already denotes a fraction of exactly
+			// one card, so credits = .partitioned.units × (B/D) directly, with no
+			// multiplyBy folding in a card count.
+			name:        "partitioned unit is always one card, no multiplyBy",
+			input:       partitionUnit,
+			wantCredits: "1",
+		},
 	}
 
 	for _, c := range cases {
@@ -153,7 +163,22 @@ func Test_kueueChartTransformations(t *testing.T) {
 	// IgnoreUndeclared ignores any resource the CQ does not cover, including this leak.
 	_, dropped := byInput[sliced]
 	assert.False(t, dropped, ".sliced must not carry a drop transformation (IgnoreUndeclared handles the leak)")
-	assert.Len(t, byInput, len(cases), "only the three credits rules remain")
+	assert.Len(t, byInput, len(cases), "only the four credits rules remain")
+}
+
+// Test_kueueChartTransformations_NoPartitionKind asserts that a manufacturer with
+// no hardware-partitioning kind (Ascend) gets no ".partitioned.units"
+// transformation at all, rather than one built from a blindly concatenated,
+// always-empty resource name.
+func Test_kueueChartTransformations_NoPartitionKind(t *testing.T) {
+	const manu = nodefeature.ManufacturerAscend
+	require.Empty(t, nodefeature.GetAcceleratablePartitionedUnitsResourceName(manu), "precondition: ascend has no partition kind")
+
+	byInput := renderKueueTransformations(t, []string{manu})
+
+	assert.Len(t, byInput, 3, "no partition kind means only the three logical/exclusive/shared rules")
+	_, ok := byInput[""]
+	assert.False(t, ok, "must not emit a transformation keyed by an empty input")
 }
 
 // Test_kueueChartQuotaCheckStrategy pins the admission escape hatch that keeps

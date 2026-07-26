@@ -205,11 +205,11 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		{
 			status.Unhealthy = memoryUnhealthy
 
-			// Logical (soft) and physical (MIG) slicing are mutually exclusive per card, keyed
+			// Logical (software) and physical (MIG) slicing are mutually exclusive per card, keyed
 			// on the current MIG mode: a card that is currently MIG-enabled is hard-partitioned
 			// and reports only its physical MIG profiles. Every other card — MIG off, MIG
 			// unsupported (GetMigMode returns not-supported on non-MIG cards), or the mode
-			// unreadable — reports the group's logical soft-slice capability. A pending-mode
+			// unreadable — reports the group's logical-slice capability. A pending-mode
 			// transition is not partitioned yet and is re-detected after the administrator's
 			// reset + DeviceManager restart. This runs per card, fixing the old placeholder's
 			// first-card-only-seed defect.
@@ -220,7 +220,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					Count:    maxProfileCount(profiles),
 				}
 			} else {
-				// Soft (logical) slicing via HAMi-core ld.preload; the per-card slice count is
+				// Logical (software) slicing via HAMi-core ld.preload; the per-card slice count is
 				// capped at the max CUDA user processes a GPU serves (128, Volta+).
 				status.LogicalSliced = device.AcceleratorLogicalSliced{
 					Count:                     128,

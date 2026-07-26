@@ -63,9 +63,9 @@ func instanceTypeWithEntrance(memory string) *workercore.InstanceType {
 	return it
 }
 
-// instanceTypeWithPhysicalProfiles builds the fronting InstanceType a MIG request reads: a computed
-// Detail (a non-empty Manufacturer marks it ready) carrying the per-card VRAM and the pool's
-// aggregated physical-slice profile inventory (name → per-instance MemoryMib + pool ceiling Count).
+// instanceTypeWithPhysicalProfiles builds the fronting InstanceType a partition request reads: a
+// computed Detail (a non-empty Manufacturer marks it ready) carrying the per-card VRAM and the
+// pool's aggregated partition profile inventory (name → per-instance MemoryMib + pool ceiling Count).
 func instanceTypeWithPhysicalProfiles(
 	memory string, profiles ...workercore.AcceleratorSlicedPhysicalDetailProfile,
 ) *workercore.InstanceType {
@@ -75,7 +75,7 @@ func instanceTypeWithPhysicalProfiles(
 	return it
 }
 
-// physicalProfiles is the canonical H100-80GB inventory the MIG tests fold against.
+// physicalProfiles is the canonical H100-80GB inventory the partition tests fold against.
 func physicalProfiles() []workercore.AcceleratorSlicedPhysicalDetailProfile {
 	return []workercore.AcceleratorSlicedPhysicalDetailProfile{
 		{Name: "1g.10gb", Count: 7, MemoryMib: 10240},
@@ -83,9 +83,15 @@ func physicalProfiles() []workercore.AcceleratorSlicedPhysicalDetailProfile {
 	}
 }
 
+// partitionKey returns the per-profile physical-partition key for NVIDIA
+// (e.g. "nvidia.com/gpu.partitioned.mig-1g.10gb").
+func partitionKey(profile string) core.ResourceName {
+	return nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, profile)
+}
+
 func TestPodWebhook_Default(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
+	names := logicalResourceNamesForBase(nvidiaBase)
 
 	cases := []struct {
 		name      string
@@ -188,7 +194,7 @@ func TestPodWebhook_Default(t *testing.T) {
 
 func TestPodWebhook_ValidateCreate(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
+	names := logicalResourceNamesForBase(nvidiaBase)
 	nvidiaShared := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeShared)
 
 	cases := []struct {
@@ -266,6 +272,19 @@ func TestPodWebhook_ValidateCreate(t *testing.T) {
 			requests: map[core.ResourceName]string{nvidiaBase: "1", nvidiaShared: "1"},
 			wantErr:  true,
 		},
+		{
+			// Rule 2: multi-card logical slicing is deferred, so the card key is capped at 1
+			// at admission rather than failing inside Allocate after scheduling.
+			name:     "two logically sliced cards rejected",
+			requests: map[core.ResourceName]string{names.card: "2", names.memPct: "20"},
+			wantErr:  true,
+		},
+		{
+			// A fractional quantity must not round up to a passing 1.
+			name:     "a fractional sliced card count rejected",
+			requests: map[core.ResourceName]string{names.card: "1m", names.memPct: "20"},
+			wantErr:  true,
+		},
 	}
 
 	for _, c := range cases {
@@ -284,11 +303,12 @@ func TestPodWebhook_ValidateCreate(t *testing.T) {
 	}
 }
 
-func TestPodWebhook_DefaultPhysicalSliced(t *testing.T) {
+func TestPodWebhook_DefaultPartitioned(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
-	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
-	unknownKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "9g.99gb")
+	names := logicalResourceNamesForBase(nvidiaBase)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
+	profileKey := partitionKey("1g.10gb")
+	unknownKey := partitionKey("9g.99gb")
 
 	cases := []struct {
 		name      string
@@ -298,28 +318,22 @@ func TestPodWebhook_DefaultPhysicalSliced(t *testing.T) {
 		wantErr   bool
 	}{
 		{
-			// 10Gi / 80Gi × D = D/8 = 200000, identical to a soft .sliced.memory-mib: 10Gi request.
+			// 10Gi / 80Gi x D = D/8 = 200000, identical to a logical .sliced.memory-mib: 10Gi request.
 			name:      "profile folds units from its VRAM",
-			requests:  map[core.ResourceName]string{names.card: "2", physicalKey: "1"},
+			requests:  map[core.ResourceName]string{pnames.card: "1", profileKey: "1"},
 			it:        instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...),
 			wantUnits: 200000,
 		},
 		{
 			name:     "unknown profile rejected",
-			requests: map[core.ResourceName]string{names.card: "1", unknownKey: "1"},
+			requests: map[core.ResourceName]string{pnames.card: "1", unknownKey: "1"},
 			it:       instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...),
 			wantErr:  true,
 		},
 		{
 			name:     "detail not ready rejected (retryable)",
-			requests: map[core.ResourceName]string{names.card: "1", physicalKey: "1"},
-			it:       instanceTypeWithEntrance("81920Mi"), // Manufacturer empty → not ready
-			wantErr:  true,
-		},
-		{
-			name:     "card count over the pool ceiling rejected",
-			requests: map[core.ResourceName]string{names.card: "8", physicalKey: "1"}, // ceiling 7
-			it:       instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...),
+			requests: map[core.ResourceName]string{pnames.card: "1", profileKey: "1"},
+			it:       instanceTypeWithEntrance("81920Mi"), // Manufacturer empty -> not ready
 			wantErr:  true,
 		},
 	}
@@ -338,39 +352,46 @@ func TestPodWebhook_DefaultPhysicalSliced(t *testing.T) {
 			assert.NoError(t, err)
 
 			ctr := &pod.Spec.Containers[0]
-			reqUnits := ctr.Resources.Requests[names.units]
-			assert.Equal(t, c.wantUnits, reqUnits.Value(), "units request")
-			// A MIG request takes none of the logical budget keys.
+			reqUnits := ctr.Resources.Requests[pnames.units]
+			limUnits := ctr.Resources.Limits[pnames.units]
+			assert.Equal(t, c.wantUnits, reqUnits.Value(), "partitioned units request")
+			assert.Equal(t, c.wantUnits, limUnits.Value(), "partitioned units limit")
+			// A partition request takes none of the logical budget keys.
 			_, hasCores := ctr.Resources.Requests[names.coresPct]
-			assert.False(t, hasCores, "mig request must not default cores-percentage")
+			assert.False(t, hasCores, "a partition request must not default cores-percentage")
+			_, hasLogicalUnits := ctr.Resources.Requests[names.units]
+			assert.False(t, hasLogicalUnits, "a partition request must not fold the logical units key")
 		})
 	}
 }
 
-// TestPodWebhook_PhysicalSlicedUnitsParity guards the non-conflict property: a mig-<profile> request and
-// a soft .sliced.memory-mib request of the profile's VRAM fold to the identical .sliced.units.
-func TestPodWebhook_PhysicalSlicedUnitsParity(t *testing.T) {
+// TestPodWebhook_PartitionedUnitsParity guards the non-conflict property: a partition profile
+// request and a logical .sliced.memory-mib request of the profile's VRAM fold to the identical
+// units value, so the two families charge the same credits for the same VRAM.
+func TestPodWebhook_PartitionedUnitsParity(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
-	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+	names := logicalResourceNamesForBase(nvidiaBase)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
 
-	physicalPod := slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1"})
-	softPod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "10240"}) // 10Gi
+	partitionPod := slicedPod(map[core.ResourceName]string{pnames.card: "1", partitionKey("1g.10gb"): "1"})
+	logicalPod := slicedPod(map[core.ResourceName]string{names.card: "1", names.memMib: "10240"}) // 10Gi
 	w := newPodWebhook(instanceTypeWithPhysicalProfiles("81920Mi", physicalProfiles()...))
 
-	assert.NoError(t, w.Default(context.Background(), physicalPod))
-	assert.NoError(t, w.Default(context.Background(), softPod))
+	assert.NoError(t, w.Default(context.Background(), partitionPod))
+	assert.NoError(t, w.Default(context.Background(), logicalPod))
 
-	physicalUnits := physicalPod.Spec.Containers[0].Resources.Requests[names.units]
-	softUnits := softPod.Spec.Containers[0].Resources.Requests[names.units]
-	assert.Equal(t, softUnits.Value(), physicalUnits.Value(), "mig and same-VRAM soft slice fold identically")
+	partitionUnits := partitionPod.Spec.Containers[0].Resources.Requests[pnames.units]
+	logicalUnits := logicalPod.Spec.Containers[0].Resources.Requests[names.units]
+	assert.Equal(t, logicalUnits.Value(), partitionUnits.Value(),
+		"a partition and a same-VRAM logical slice fold identically")
 }
 
-func TestPodWebhook_ValidateCreatePhysicalSliced(t *testing.T) {
+func TestPodWebhook_ValidateCreatePartitioned(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
-	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
-	physicalKey2 := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "2g.20gb")
+	names := logicalResourceNamesForBase(nvidiaBase)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
+	profileKey := partitionKey("1g.10gb")
+	profileKey2 := partitionKey("2g.20gb")
 
 	cases := []struct {
 		name    string
@@ -378,46 +399,65 @@ func TestPodWebhook_ValidateCreatePhysicalSliced(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "valid mig on 2 cards",
-			pod:  slicedPod(map[core.ResourceName]string{names.card: "2", physicalKey: "1"}),
+			name: "one card, one profile is valid",
+			pod:  slicedPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "1"}),
 		},
 		{
-			name:    "mig value 2 rejected",
-			pod:     slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "2"}),
+			// Rule 3.
+			name:    "two partitioned cards rejected",
+			pod:     slicedPod(map[core.ResourceName]string{pnames.card: "2", profileKey: "1"}),
 			wantErr: true,
 		},
 		{
-			name:    "mig without card rejected",
-			pod:     slicedPod(map[core.ResourceName]string{physicalKey: "1"}),
+			// Rule 5.
+			name:    "a per-profile value of 2 rejected",
+			pod:     slicedPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "2"}),
 			wantErr: true,
 		},
 		{
-			name:    "mig plus memory-mib rejected",
-			pod:     slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1", names.memMib: "4096"}),
+			name:    "a profile key without the card key rejected",
+			pod:     slicedPod(map[core.ResourceName]string{profileKey: "1"}),
 			wantErr: true,
 		},
 		{
-			name:    "mig plus memory-percentage rejected",
-			pod:     slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1", names.memPct: "20"}),
+			// Rule 4 at container scope: a card key with no profile has no hardware shape.
+			name:    "the card key alone rejected",
+			pod:     slicedPod(map[core.ResourceName]string{pnames.card: "1"}),
 			wantErr: true,
 		},
 		{
+			// Rule 4.
+			name:    "two profiles on one container rejected",
+			pod:     slicedPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "1", profileKey2: "1"}),
+			wantErr: true,
+		},
+		{
+			// Rule 1: the partition and logical families are mutually exclusive Pod-wide, which
+			// subsumes the per-container branch this replaces.
+			name:    "a partition plus a logical memory key rejected",
+			pod:     slicedPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "1", names.memMib: "4096"}),
+			wantErr: true,
+		},
+		{
+			// Rules 4 and 6.
 			name:    "two containers naming different profiles rejected",
-			pod:     physicalTwoProfilePod(names.card, physicalKey, physicalKey2),
+			pod:     twoProfilePod(pnames.card, profileKey, profileKey2),
 			wantErr: true,
 		},
 		{
-			name: "init container mig validated (value 1 passes)",
-			pod:  physicalInitPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1"}),
+			name: "a partition on an init container alone is valid",
+			pod:  initContainerPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "1"}),
 		},
 		{
-			name:    "init container mig validated (value 2 rejected, not skipped)",
-			pod:     physicalInitPod(map[core.ResourceName]string{names.card: "1", physicalKey: "2"}),
+			// Rule 5 on the init path too: init containers are validated, not skipped.
+			name:    "a per-profile value of 2 on an init container rejected",
+			pod:     initContainerPod(map[core.ResourceName]string{pnames.card: "1", profileKey: "2"}),
 			wantErr: true,
 		},
 		{
-			name:    "init-container mig plus app-container exclusive rejected (cross-mode)",
-			pod:     physicalInitMigPlusAppExclusivePod(names.card, physicalKey, nvidiaBase),
+			// Rules 1 (two families) and 1 again (two groups).
+			name:    "an init-container partition plus an app-container exclusive rejected",
+			pod:     initPartitionPlusAppExclusivePod(pnames.card, profileKey, nvidiaBase),
 			wantErr: true,
 		},
 	}
@@ -436,29 +476,177 @@ func TestPodWebhook_ValidateCreatePhysicalSliced(t *testing.T) {
 	}
 }
 
-// TestPodWebhook_MigProfileMissingMemoryIsRetryable pins that a MIG profile present in the fronting
-// InstanceType's inventory but with MemoryMib not yet populated (partial detail during detection /
-// rollout skew) yields a retryable not-ready error from Default, not a permanent zero-units rejection.
-func TestPodWebhook_MigProfileMissingMemoryIsRetryable(t *testing.T) {
+// TestPodWebhook_CardCountRejectionsAreDistinct pins that the three "exactly 1" rules read as
+// three different problems: a logical slice count names the deferral, a partition card count
+// names the one-Pod-per-instance shape, and a per-profile count names the instance. A shared
+// message would send an operator looking at the wrong key.
+func TestPodWebhook_CardCountRejectionsAreDistinct(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
-	physicalKey := nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb")
+	names := logicalResourceNamesForBase(nvidiaBase)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
+	profileKey := partitionKey("1g.10gb")
+	w := newPodWebhook()
+
+	messageFor := func(requests map[core.ResourceName]string) string {
+		_, err := w.ValidateCreate(context.Background(), slicedPod(requests))
+		if !assert.Error(t, err) {
+			return ""
+		}
+		return err.Error()
+	}
+
+	sliced := messageFor(map[core.ResourceName]string{names.card: "2", names.memPct: "20"})
+	partitioned := messageFor(map[core.ResourceName]string{pnames.card: "2", profileKey: "1"})
+	profile := messageFor(map[core.ResourceName]string{pnames.card: "1", profileKey: "2"})
+
+	assert.Contains(t, sliced, "multi-card logical slicing is not supported yet")
+	assert.Contains(t, partitioned, "one Pod per instance")
+	assert.Contains(t, profile, "exactly 1 instance")
+	assert.NotEqual(t, sliced, partitioned)
+	assert.NotEqual(t, partitioned, profile)
+}
+
+// TestPodWebhook_ClaimsConfinedToOneContainerGroup pins rule 1's group half. Two claims in
+// different lifetime groups coexist rather than succeed one another — the kubelet keeps a
+// finished init container's devices in its Pod record for the Pod's whole life — while the
+// scheduler charges the Pod only max(sum init, sum app) per key. The node would then
+// over-advertise by exactly one slot and the next tenant would fail terminally.
+func TestPodWebhook_ClaimsConfinedToOneContainerGroup(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+
+	claim := core.ResourceList{nvidiaBase: resource.MustParse("1")}
+	both := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{
+			Namespace: "default", Name: "p",
+			Labels: map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+		},
+		Spec: core.PodSpec{
+			InitContainers: []core.Container{
+				{Name: "init", Resources: core.ResourceRequirements{Requests: claim, Limits: claim.DeepCopy()}},
+			},
+			Containers: []core.Container{
+				{Name: "main", Resources: core.ResourceRequirements{Requests: claim.DeepCopy(), Limits: claim.DeepCopy()}},
+			},
+		},
+	}
+
+	w := newPodWebhook()
+	_, err := w.ValidateCreate(context.Background(), both)
+	assert.Error(t, err, "the same family claimed in both groups must be rejected")
+	assert.Contains(t, err.Error(), "spec.initContainers",
+		"the rejection must name the group that has to give up its request")
+
+	// The same claim in one group alone is fine.
+	initOnly := both.DeepCopy()
+	initOnly.Spec.Containers[0].Resources = core.ResourceRequirements{}
+	_, err = w.ValidateCreate(context.Background(), initOnly)
+	assert.NoError(t, err)
+}
+
+// TestPodWebhook_RestartableInitContainerMayNotClaim pins rule 7: a native sidecar starts during
+// the init phase and keeps running, so it overlaps every later init container as well as every
+// app container and can belong to neither group.
+func TestPodWebhook_RestartableInitContainerMayNotClaim(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	visibility := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
+	always := core.ContainerRestartPolicyAlways
+
+	newPod := func(rl core.ResourceList) *core.Pod {
+		return &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: "default", Name: "p",
+				Labels: map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+			},
+			Spec: core.PodSpec{
+				InitContainers: []core.Container{{
+					Name: "sidecar", RestartPolicy: &always,
+					Resources: core.ResourceRequirements{Requests: rl, Limits: rl.DeepCopy()},
+				}},
+				Containers: []core.Container{{Name: "main"}},
+			},
+		}
+	}
+
+	w := newPodWebhook()
+	_, err := w.ValidateCreate(context.Background(), newPod(core.ResourceList{nvidiaBase: resource.MustParse("1")}))
+	assert.Error(t, err, "a restartable init container may not request an accelerator")
+
+	// The visibility resource is deliberately outside the accelerator families, so the SSH
+	// sidecar shape stays admissible wherever it runs.
+	_, err = w.ValidateCreate(context.Background(), newPod(core.ResourceList{visibility: resource.MustParse("1")}))
+	assert.NoError(t, err, "the visibility resource is not an accelerator family")
+}
+
+// TestPodWebhook_AtMostOneSlicingContainer pins rule 6: two containers of the claiming group each
+// requesting a slicing family is rejected, while two exclusive containers stay allowed.
+func TestPodWebhook_AtMostOneSlicingContainer(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := logicalResourceNamesForBase(nvidiaBase)
+
+	twoContainers := func(a, b core.ResourceList) *core.Pod {
+		return &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Namespace: "default", Name: "p",
+				Labels: map[string]string{kueuectrlconst.QueueLabel: testLocalQueueName},
+			},
+			Spec: core.PodSpec{Containers: []core.Container{
+				{Name: "main", Resources: core.ResourceRequirements{Requests: a, Limits: a.DeepCopy()}},
+				{Name: "aux", Resources: core.ResourceRequirements{Requests: b, Limits: b.DeepCopy()}},
+			}},
+		}
+	}
+	slice := core.ResourceList{names.card: resource.MustParse("1"), names.memPct: resource.MustParse("20")}
+	exclusive := core.ResourceList{nvidiaBase: resource.MustParse("1")}
+
+	w := newPodWebhook()
+	_, err := w.ValidateCreate(context.Background(), twoContainers(slice, slice.DeepCopy()))
+	assert.Error(t, err, "two containers may not both request a slicing family")
+
+	_, err = w.ValidateCreate(context.Background(), twoContainers(exclusive, exclusive.DeepCopy()))
+	assert.NoError(t, err, "two whole-card containers stay allowed")
+}
+
+// TestPodWebhook_FoldsWhicheverGroupClaims pins that the units fold follows the claim rather than
+// the container field: a logical slice requested on an init container is folded, which the
+// app-container-only fold this replaces silently skipped.
+func TestPodWebhook_FoldsWhicheverGroupClaims(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	names := logicalResourceNamesForBase(nvidiaBase)
+
+	pod := initContainerPod(map[core.ResourceName]string{names.card: "1", names.memPct: "20"})
+	w := newPodWebhook()
+	assert.NoError(t, w.Default(context.Background(), pod))
+
+	init := &pod.Spec.InitContainers[0]
+	units := init.Resources.Requests[names.units]
+	cores := init.Resources.Requests[names.coresPct]
+	assert.Equal(t, int64(320000), units.Value(), "units folded on the claiming init container")
+	assert.Equal(t, int64(100), cores.Value(), "cores defaulted on the claiming init container")
+}
+
+// TestPodWebhook_PartitionProfileMissingMemoryIsRetryable pins that a partition profile present in
+// the fronting InstanceType's inventory but with MemoryMib not yet populated (partial detail during
+// detection / rollout skew) yields a retryable not-ready error from Default, not a permanent
+// zero-units rejection.
+func TestPodWebhook_PartitionProfileMissingMemoryIsRetryable(t *testing.T) {
+	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
+	pnames := partitionResourceNamesForBase(nvidiaBase)
 
 	// The profile is offered but its per-instance MemoryMib is still 0 (detail not fully computed).
 	it := instanceTypeWithPhysicalProfiles("81920Mi",
 		workercore.AcceleratorSlicedPhysicalDetailProfile{Name: "1g.10gb", Count: 7, MemoryMib: 0})
 	w := newPodWebhook(it)
 
-	pod := slicedPod(map[core.ResourceName]string{names.card: "1", physicalKey: "1"})
+	pod := slicedPod(map[core.ResourceName]string{pnames.card: "1", partitionKey("1g.10gb"): "1"})
 	err := w.Default(context.Background(), pod)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not ready",
-		"a MIG profile with MemoryMib==0 must be a retryable not-ready rejection, not a permanent zero-units error")
+		"a partition profile with MemoryMib==0 must be a retryable not-ready rejection, not a permanent zero-units error")
 }
 
-// physicalTwoProfilePod builds a Pod whose two app containers each name a distinct MIG profile — the
+// twoProfilePod builds a Pod whose two app containers each name a distinct partition profile — the
 // unattributable multi-profile shape ValidateCreate rejects.
-func physicalTwoProfilePod(card, profileA, profileB core.ResourceName) *core.Pod {
+func twoProfilePod(card, profileA, profileB core.ResourceName) *core.Pod {
 	rlA := core.ResourceList{card: resource.MustParse("1"), profileA: resource.MustParse("1")}
 	rlB := core.ResourceList{card: resource.MustParse("1"), profileB: resource.MustParse("1")}
 	return &core.Pod{
@@ -475,9 +663,9 @@ func physicalTwoProfilePod(card, profileA, profileB core.ResourceName) *core.Pod
 	}
 }
 
-// physicalInitPod builds a queue-routed Pod whose sliced request lives on an init container, so the
-// webhook must validate init containers (getAllocatingPod attributes across both).
-func physicalInitPod(requests map[core.ResourceName]string) *core.Pod {
+// initContainerPod builds a queue-routed Pod whose accelerator request lives on a plain (not
+// restartable) init container, so the webhook must validate and fold init containers too.
+func initContainerPod(requests map[core.ResourceName]string) *core.Pod {
 	rl := core.ResourceList{}
 	for n, v := range requests {
 		rl[n] = resource.MustParse(v)
@@ -496,12 +684,10 @@ func physicalInitPod(requests map[core.ResourceName]string) *core.Pod {
 	}
 }
 
-// physicalInitMigPlusAppExclusivePod builds a Pod with a MIG (sliced) request on an init container
-// and a whole-card exclusive request on an app container — two allocation modes across the Pod.
-// ValidateCreate must reject it, which requires the one-mode-per-Pod check to scan init containers
-// too (not only app containers).
-func physicalInitMigPlusAppExclusivePod(card, migKey, exclusiveKey core.ResourceName) *core.Pod {
-	initRL := core.ResourceList{card: resource.MustParse("1"), migKey: resource.MustParse("1")}
+// initPartitionPlusAppExclusivePod builds a Pod with a partition request on an init container and a
+// whole-card exclusive request on an app container — two families across two container groups.
+func initPartitionPlusAppExclusivePod(card, profileKey, exclusiveKey core.ResourceName) *core.Pod {
+	initRL := core.ResourceList{card: resource.MustParse("1"), profileKey: resource.MustParse("1")}
 	appRL := core.ResourceList{exclusiveKey: resource.MustParse("1")}
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
@@ -550,7 +736,7 @@ func slicedPodWithSidecar(requests map[core.ResourceName]string) *core.Pod {
 // mode, so podAcceleratorModes stays at one mode.
 func TestPodWebhook_SlicedRequestOnMainWithSidecar(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
+	names := logicalResourceNamesForBase(nvidiaBase)
 
 	pod := slicedPodWithSidecar(map[core.ResourceName]string{names.card: "1", names.memPct: "60"})
 	w := newPodWebhook()
@@ -574,7 +760,7 @@ func TestPodWebhook_SlicedRequestOnMainWithSidecar(t *testing.T) {
 // podAcceleratorModes see two modes and reject the Pod).
 func TestPodWebhook_VisibilityResourceIsNotAMode(t *testing.T) {
 	nvidiaBase := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
-	names := slicedResourceNamesForBase(nvidiaBase)
+	names := logicalResourceNamesForBase(nvidiaBase)
 	visibility := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	pod := slicedPodWithSidecar(map[core.ResourceName]string{names.card: "1", names.memPct: "60"})

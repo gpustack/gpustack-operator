@@ -21,7 +21,7 @@ const (
 // InstanceTypeHandler handles v1.InstanceType objects.
 //
 // InstanceTypeHandler proxies the v1.InstanceType to the v1alpha1.InstanceType CRD.
-// The backing ClusterQueue and the three-view status are reconciled by the
+// The backing ClusterQueue and the four-view status are reconciled by the
 // InstanceTypeReconciler; this handler only serves the CRD storage.
 type InstanceTypeHandler struct {
 	extensionapi.ObjectInfo
@@ -66,15 +66,16 @@ func (h *InstanceTypeHandler) SetupHandler(
 		},
 		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Accelerator(E/S/P)",
+				Name: "Accelerator(EX/SH/SL/PT)",
 				Type: "string",
 			},
-			// Fold the exclusive/shared/sliced three-view into one column: three
+			// Fold the exclusive/shared/sliced/partitioned four-view into one column: four
 			// space-separated onceMaxRequest/remaining groups, in the order named
 			// by the column header.
 			Template: "{.status.accelerator.onceMaxRequest}/{.status.accelerator.remaining} " +
 				"{.status.acceleratorShared.onceMaxRequest}/{.status.acceleratorShared.remaining} " +
-				"{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining}",
+				"{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining} " +
+				"{.status.acceleratorPartitioned.onceMaxRequest}/{.status.acceleratorPartitioned.remaining}",
 		},
 		extensionapi.JSONPathTemplateTableColumnDefinition{
 			TableColumnDefinition: meta.TableColumnDefinition{

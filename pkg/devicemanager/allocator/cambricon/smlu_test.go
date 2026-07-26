@@ -20,8 +20,8 @@ const (
 	testCard1 = "0000:5d:00.0"
 )
 
-// redirectSoftSliceDirs points the soft-slicing host paths at a temp dir for the test.
-func redirectSoftSliceDirs(t *testing.T) {
+// redirectLogicalSliceDirs points the logical-slicing host paths at a temp dir for the test.
+func redirectLogicalSliceDirs(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	origLib, origPods := deviceplugin.OperatorLibDir, deviceplugin.OperatorPodsDir
@@ -199,7 +199,7 @@ func Test_instanceNameEncodeDecode(t *testing.T) {
 }
 
 func Test_marker_roundtrip_and_failClosed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 
 	path := markerPath("uid-rt", "train")
 	want := smluMarker{PodUID: "uid-rt", Container: "train", Card: testCard0, Instance: "gpustack-x", ProfileID: 2, CoresPct: 25, MemMiB: 16384}
@@ -219,7 +219,7 @@ func Test_marker_roundtrip_and_failClosed(t *testing.T) {
 
 // A corrupt marker for one pod must not block reserving an instance for another pod.
 func Test_reserveInstance_corruptOtherMarkerDoesNotBlock(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
 	other := markerPath("uid-corrupt", "train")
@@ -233,7 +233,7 @@ func Test_reserveInstance_corruptOtherMarkerDoesNotBlock(t *testing.T) {
 }
 
 func Test_reserveInstance_idempotentReuseAndFailClosed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
 	r0, err := reserveInstance(d, "uid-a", "train", testCard0, 25, 16384)
@@ -255,7 +255,7 @@ func Test_reserveInstance_idempotentReuseAndFailClosed(t *testing.T) {
 // Two instances with an identical quota on one card share a single profile; a differing
 // quota cuts a new profile.
 func Test_reserveInstance_exactMatchProfileReuse(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
 	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
@@ -279,7 +279,7 @@ func Test_reserveInstance_exactMatchProfileReuse(t *testing.T) {
 // A marker that survives after its instance is gone (create crash / external teardown)
 // fails closed on re-Allocate rather than silently re-creating under the reused marker.
 func Test_reserveInstance_reuseMissingInstanceFailsClosed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 
 	inst, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
@@ -293,7 +293,7 @@ func Test_reserveInstance_reuseMissingInstanceFailsClosed(t *testing.T) {
 
 // A failed instance create rolls back the freshly created profile.
 func Test_reserveInstance_createFailureRollsBackProfile(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	d.failCard[testCard0] = true
 
@@ -304,7 +304,7 @@ func Test_reserveInstance_createFailureRollsBackProfile(t *testing.T) {
 }
 
 func Test_reclaim_deadPodDestroysAfterDebounce(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	inst, err := reserveInstance(d, "pod-dead", "train", testCard0, 25, 16384)
 	require.NoError(t, err)
@@ -324,7 +324,7 @@ func Test_reclaim_deadPodDestroysAfterDebounce(t *testing.T) {
 
 // A live pod's instance is never touched, and a live snapshot resets the miss streak.
 func Test_reclaim_livePodPreserved(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	inst, err := reserveInstance(d, "pod-live", "train", testCard0, 25, 16384)
 	require.NoError(t, err)
@@ -342,7 +342,7 @@ func Test_reclaim_livePodPreserved(t *testing.T) {
 // A marker whose instance is already gone (external teardown) is cleaned once its pod is
 // dead: DestroyInstance is a no-op, the marker file is removed.
 func Test_reclaim_instanceLessMarker(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	seedMarker(t, "pod-dead", "train", testCard0, encodeInstanceName("pod-dead", "train"), 0, 25, 16384)
 
@@ -355,7 +355,7 @@ func Test_reclaim_instanceLessMarker(t *testing.T) {
 
 func Test_reclaim_markerLessOrphan(t *testing.T) {
 	t.Run("dead UID destroyed", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		d := newFakeDriver()
 		name := encodeInstanceName("pod-dead", "train")
 		d.seedInstance(smluInstance{card: testCard0, name: name, profileID: 0, coresPct: 25, memMiB: 16384})
@@ -369,7 +369,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 	})
 
 	t.Run("live UID left intact", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		d := newFakeDriver()
 		name := encodeInstanceName("pod-live", "train")
 		d.seedInstance(smluInstance{card: testCard0, name: name, profileID: 0, coresPct: 25, memMiB: 16384})
@@ -382,7 +382,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 	})
 
 	t.Run("foreign name left alone", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		d := newFakeDriver()
 		d.seedInstance(smluInstance{card: testCard0, name: "someone-elses-instance", profileID: 0, coresPct: 25, memMiB: 16384})
 
@@ -398,7 +398,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 // is reclaimed by the once-per-pass profile sweep, even though no marker or instance ever
 // referenced it.
 func Test_reclaim_orphanProfileGCd(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	id, err := d.CreateProfile(testCard0, 25, 16384) // orphan: profile created, no instance
 	require.NoError(t, err)
@@ -412,7 +412,7 @@ func Test_reclaim_orphanProfileGCd(t *testing.T) {
 
 // A profile-list error skips the sweep rather than destroying a profile on a partial view.
 func Test_reclaim_profileListErrorSkipsSweep(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	id, err := d.CreateProfile(testCard0, 25, 16384)
 	require.NoError(t, err)
@@ -427,7 +427,7 @@ func Test_reclaim_profileListErrorSkipsSweep(t *testing.T) {
 
 // A driver list error skips the reconcile pass rather than reclaiming on partial data.
 func Test_reclaim_listErrorSkipsPass(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	name := encodeInstanceName("pod-dead", "train")
 	d.seedInstance(smluInstance{card: testCard0, name: name, profileID: 0, coresPct: 25, memMiB: 16384})
@@ -443,7 +443,7 @@ func Test_reclaim_listErrorSkipsPass(t *testing.T) {
 // A profile shared by a live instance is never destroyed; it is GC'd only once its last
 // instance is reclaimed.
 func Test_reclaim_neverDestroysSharedProfile(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	_, err := reserveInstance(d, "pod-a", "train", testCard0, 25, 16384)
 	require.NoError(t, err)
@@ -468,7 +468,7 @@ func Test_reclaim_neverDestroysSharedProfile(t *testing.T) {
 // Reclaiming one container of a dead multi-container pod must remove only the specific
 // marker files (never RemoveAll a dir), and clean the pod dir only when empty.
 func Test_reclaim_multiContainerPod(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	i1, err := reserveInstance(d, "pod-dead", "c1", testCard0, 25, 16384)
 	require.NoError(t, err)
@@ -498,7 +498,7 @@ func Test_removeIfEmpty_leavesNonEmptyDir(t *testing.T) {
 
 // Concurrent Allocate + reclaim must be race-free.
 func Test_reserveInstance_reclaim_race(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	r := newReclaimer(d, deviceplugin.OperatorPodsDir, logr.Discard())
 

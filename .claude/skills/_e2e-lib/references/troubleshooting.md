@@ -54,6 +54,29 @@ accelerator schedulable on this node" signal, with one caveat about timing:
   several accelerator pools, so pool names that differ from the first node you looked at are expected. A
   `creationTimestamp` right after your own `helm install` also rules out "prior run" residue.
 
+## Remote cluster / kubectl
+
+- **A case stalls with no output, then a later step fails for an unrelated reason** — on a remote
+  cluster (public API endpoint plus an exec-credential plugin) a jittering connection does not make
+  `kubectl` fail, it makes it **hang**: the credential plugin re-execs on token expiry and the call
+  never returns. A 3-second poll inside a case becomes a multi-minute stall, and the case that
+  eventually times out is rarely the one that was actually wrong. Locally this never happens, so no
+  case guards against it.
+
+  Put the shim first on `PATH` for the whole run — it bounds every ordinary call with
+  `--request-timeout` (so a stall becomes a fast error the case's own poll loop retries) and retries
+  a read-only verb on a transport failure:
+
+  ```bash
+  PATH="$(pwd)/.claude/skills/_e2e-lib/scripts/kubectl-shim:$PATH"
+  ```
+
+  It deliberately does **not** retry a mutation (a re-sent create/delete turns a blip into an
+  `AlreadyExists`), does not retry a `NotFound` (that is a real answer, and the poll loops asking for
+  one are the suite's hottest calls), and leaves streaming or waiting calls — `exec`, `logs -f`,
+  `wait`, `delete`, `port-forward` — completely untouched. Knobs: `E2E_KUBECTL_TIMEOUT` (30s),
+  `E2E_KUBECTL_RETRIES` (2), `E2E_KUBECTL_BACKOFF` (2).
+
 ## Extension APIs / startup order
 
 - **Extension APIService not `Available`** — the aggregated apiserver isn't ready; check the worker

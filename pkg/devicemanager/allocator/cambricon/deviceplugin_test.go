@@ -74,7 +74,7 @@ func allocateMLU0() map[deviceplugin.Resource]int32 {
 // A single-card slice creates one sMLU instance, records the correlation + profile marker,
 // and injects VIRTUAL_DEVICES naming the instance's device node.
 func TestSliced_PartialSlice(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	s := newSlicedServer(d)
 	devs := cambriconDevicesFixture()
@@ -97,7 +97,7 @@ func TestSliced_PartialSlice(t *testing.T) {
 
 // An absent cores-percentage defaults to 100 (a whole-card-exclusive sMLU instance).
 func TestSliced_DefaultCores(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	d := newFakeDriver()
 	s := newSlicedServer(d)
 	devs := cambriconDevicesFixture()
@@ -114,7 +114,7 @@ func TestSliced_DefaultCores(t *testing.T) {
 // A sliced container with no memory dimension is rejected rather than silently given the
 // whole card.
 func TestSliced_NoMemoryRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeDriver())
 	devs := cambriconDevicesFixture()
 
@@ -125,7 +125,7 @@ func TestSliced_NoMemoryRejected(t *testing.T) {
 
 // sMLU slicing is single-card: a multi-card sliced allocation is rejected loudly.
 func TestSliced_MultiCardRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeDriver())
 	devs := cambriconDevicesFixture()
 
@@ -142,7 +142,7 @@ func TestSliced_MultiCardRejected(t *testing.T) {
 // A sliced allocation with no matching accelerator is rejected rather than dereferencing
 // a nil group/accelerator.
 func TestSliced_NoAllocatedAcceleratorRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeDriver())
 	devs := cambriconDevicesFixture()
 
@@ -156,7 +156,7 @@ func TestSliced_NoAllocatedAcceleratorRejected(t *testing.T) {
 // A non-sliced (exclusive) responder never creates an instance or writes a marker: the
 // slicing artifacts are isolated to the sliced mode.
 func TestSliced_ExclusiveModeHasNoSlicingArtifacts(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := &server{
 		ResourceServer: deviceplugin.ResourceServer{
 			Manufacturer:   Manufacturer,

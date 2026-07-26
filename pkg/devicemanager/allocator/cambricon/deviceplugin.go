@@ -79,7 +79,8 @@ func (in aggregated) Start(ctx context.Context) error {
 		gp.Go(func(ctx context.Context) error {
 			reconciler := controllers.Get[*deviceplugin.DevicesReconciler]()
 			r := newReclaimer(newSMLUDriver(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"))
-			deviceplugin.RunSlicedReclaimLoop(ctx, reconciler, Manufacturer, r.reconcile)
+			deviceplugin.RunReclaimLoop(ctx, reconciler, Manufacturer,
+				workercore.DeviceAllocationModeSliced, r.reconcile)
 			return nil
 		})
 	}
@@ -128,7 +129,7 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Sliced containers get real sMLU soft-slicing isolation (a cnDev instance + its device
+	// Sliced containers get real sMLU logical-slicing isolation (a cnDev instance + its device
 	// nodes); exclusive/shared/visibility keep the plain device-visibility response below.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, devs, allocated)
@@ -160,7 +161,7 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// getSlicedContainerAllocateResponse renders the sMLU soft-slicing injection for a sliced
+// getSlicedContainerAllocateResponse renders the sMLU logical-slicing injection for a sliced
 // container: it reserves a cnDev sMLU instance (a profile with the compute quota + VRAM
 // cap, instantiated) via the driver seam, writing the correlation + profile marker under
 // the pod work dir, and injects the instance's device node plus the card's control nodes.

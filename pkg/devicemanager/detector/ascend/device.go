@@ -235,8 +235,8 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			var status device.AcceleratorStatus
 			{
 				status.Unhealthy = memoryUnhealthy
-				// 910B/910C/950 support logical (soft) slicing: temporal compute sharing plus
-				// soft VRAM partitioning via vCANN-RT ld.preload; the per-card slice count is
+				// 910B/910C/950 support logical (software) slicing: temporal compute sharing plus
+				// software VRAM partitioning via vCANN-RT ld.preload; the per-card slice count is
 				// capped at the max user processes a device serves (63).
 				switch grpList[grpIndex].Family {
 				case "910B", "910C", "950":

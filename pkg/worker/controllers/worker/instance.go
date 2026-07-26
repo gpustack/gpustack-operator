@@ -32,9 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
-	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -457,11 +455,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		// Update the Allocations in the Instance status if not exists.
 		if len(instStatus.Allocations) == 0 {
-			if v := pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey]; v != "" {
-				var ds workercore.DevicesStatus
-				json.ShouldUnmarshal(stringx.ToBytes(&v), &ds)
-				instStatus.Allocations = ds.Groups
-			}
+			instStatus.Allocations = deviceplugin.AllocatedAcceleratorGroupsOf(pod)
 		}
 	}
 
@@ -955,11 +949,14 @@ func getPortName(port workercore.InstancePort) string {
 // 100m base to keep CPU from gating placement.
 //
 // For the accelerator entry the resource name and value depend on the
-// allocation mode: a sliced request (a sliced type with a non-zero memory
-// percentage) emits the bare .sliced card count plus the per-card memory/compute
-// percentages, which the Pod webhook folds into .sliced.units; everything else
-// (a non-sliced type, or a 0% request) uses the raw quantity and the exclusive
-// resource name.
+// allocation mode: a partition request (a non-empty AcceleratorPartitionedProfile
+// on a manufacturer that has hardware partitioning) emits .partitioned and
+// .partitioned.<kind>-<profile>, both exactly 1, whose .partitioned.units the Pod
+// webhook folds from the profile's VRAM; a logical slice request (a logically
+// sliceable type with a non-zero memory percentage) emits the bare .sliced card
+// count plus the per-card memory/compute percentages, which the Pod webhook folds
+// into .sliced.units; everything else (a non-sliced type, or a 0% request) uses the
+// raw quantity and the exclusive resource name.
 func getResourceRequirements(
 	inst *workercore.Instance,
 	instType *worker.InstanceType,
@@ -992,16 +989,31 @@ func getResourceRequirements(
 		inst.Spec.Resources.Accelerator.Sign() > 0
 	if requestAccelerator {
 		cardQ := *inst.Spec.Resources.Accelerator
+		manufacturer := instType.Status.Detail.Manufacturer
+		partProfile := inst.Spec.Resources.AcceleratorPartitionedProfile
+		partCardResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModePartitioned)
+		partProfileResName := nodefeature.GetAcceleratablePartitionedProfileResourceName(manufacturer, partProfile)
 		switch {
 		case withAccelerator:
-			if instType.Status.Detail.IsSliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0 {
+			switch {
+			case partProfile != "" && partCardResName != "" && partProfileResName != "":
+				// A hardware partition request is always one card and one instance of one
+				// profile shape, so both keys are exactly 1 regardless of the requested card
+				// count (the webhook pins it to 1). The credit-counting .partitioned.units is
+				// folded by the Pod webhook from the profile's VRAM, so it is not written here.
+				one := *resource.NewQuantity(1, resource.DecimalSI)
+				rr.Limits[partCardResName] = one
+				rr.Requests[partCardResName] = one
+				rr.Limits[partProfileResName] = one
+				rr.Requests[partProfileResName] = one
+			case instType.Status.Detail.IsSliceable() && inst.Spec.Resources.AcceleratorSlicedMemoryPercentage > 0:
 				// A sliced request emits the bare card count C (.sliced, which Kueue
 				// folds into credits via multiplyBy) plus the per-card memory/compute
 				// percentages. The Pod webhook folds .sliced.memory-percentage into the
 				// credit-counting .sliced.units before the Pod is persisted.
-				slicedResName := nodefeature.GetAcceleratableResourceName(instType.Status.Detail.Manufacturer, workercore.DeviceAllocationModeSliced)
-				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(instType.Status.Detail.Manufacturer)
-				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(instType.Status.Detail.Manufacturer)
+				slicedResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
+				memResName := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(manufacturer)
+				coresResName := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(manufacturer)
 				memQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedMemoryPercentage), resource.DecimalSI)
 				coresQ := *resource.NewQuantity(int64(inst.Spec.Resources.AcceleratorSlicedCoresPercentage), resource.DecimalSI)
 				rr.Limits[slicedResName] = cardQ
@@ -1010,10 +1022,12 @@ func getResourceRequirements(
 				rr.Requests[memResName] = memQ
 				rr.Limits[coresResName] = coresQ
 				rr.Requests[coresResName] = coresQ
-			} else {
-				// A non-sliced type, or a 0% request on a sliced type, is an exclusive
-				// whole-card request.
-				resName := nodefeature.GetAcceleratableResourceName(instType.Status.Detail.Manufacturer, workercore.DeviceAllocationModeExclusive)
+			default:
+				// A non-sliced type, a 0% request on a sliced type, or a partition request a
+				// manufacturer without hardware partitioning cannot express (no key exists to
+				// emit, and the webhook rejects such a request) is an exclusive whole-card
+				// request.
+				resName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeExclusive)
 				rr.Limits[resName] = cardQ
 				rr.Requests[resName] = cardQ
 			}
@@ -1022,7 +1036,7 @@ func getResourceRequirements(
 			// card count (never the slice percentages — it grants device access, not a
 			// slice). The device-plugin resolves it to main's already-allocated
 			// device(s) on the node, giving the sidecar a narrow device-cgroup grant.
-			visResName := nodefeature.GetAcceleratableResourceName(instType.Status.Detail.Manufacturer, workercore.DeviceAllocationModeVisibility)
+			visResName := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeVisibility)
 			rr.Limits[visResName] = cardQ
 			rr.Requests[visResName] = cardQ
 		}

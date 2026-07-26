@@ -72,7 +72,7 @@ func allocateGPU0() map[deviceplugin.Resource]int32 {
 // A partial slice creates one sgpu subdevice and injects METAX_SGPUS with the hard
 // compute and VRAM quota, plus the correlation + slot marker.
 func TestSliced_PartialSlice(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	s := newSlicedServer(mgr)
 	devs := metaxDevicesFixture()
@@ -98,7 +98,7 @@ func TestSliced_PartialSlice(t *testing.T) {
 // A whole-card slice (100% compute AND full VRAM) takes the native path: no sgpu
 // subdevice, no METAX_SGPUS, but an occupancy marker so the scanner sees the card taken.
 func TestSliced_WholeCard(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	s := newSlicedServer(mgr)
 	devs := metaxDevicesFixture()
@@ -117,7 +117,7 @@ func TestSliced_WholeCard(t *testing.T) {
 // An absent cores-percentage defaults to 100; combined with a partial memory request
 // this stays a partial slice (compute 100, VRAM < card), never a whole card.
 func TestSliced_DefaultCores(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	s := newSlicedServer(mgr)
 	devs := metaxDevicesFixture()
@@ -135,7 +135,7 @@ func TestSliced_DefaultCores(t *testing.T) {
 // A sliced container with no memory dimension is rejected rather than silently given
 // the whole card.
 func TestSliced_NoMemoryRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeMgr())
 	devs := metaxDevicesFixture()
 
@@ -146,7 +146,7 @@ func TestSliced_NoMemoryRejected(t *testing.T) {
 
 // sgpu slicing is single-card: a multi-card sliced allocation is rejected loudly.
 func TestSliced_MultiCardRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer(newFakeMgr())
 	devs := metaxDevicesFixture()
 
@@ -163,7 +163,7 @@ func TestSliced_MultiCardRejected(t *testing.T) {
 // A non-sliced (exclusive) responder never emits METAX_SGPUS or writes a marker: the
 // slicing artifacts are isolated to the sliced mode.
 func TestSliced_ExclusiveModeHasNoSlicingArtifacts(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := &server{
 		ResourceServer: deviceplugin.ResourceServer{
 			Manufacturer:   Manufacturer,

@@ -353,7 +353,7 @@ func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
 //
 // OnceMaxRequest is the resource bundle of the tier whose primary dimension is the largest.
 // The primary dimension is Accelerator when Spec.Acceleratable is true, otherwise CPU.
-// The whole bundle (Accelerator/CPU/AcceleratorShared/AcceleratorSliced) is copied from the winning tier
+// The whole bundle is copied from the winning tier
 // so the result corresponds to a real, achievable single allocation rather than a
 // per-dimension maximum across tiers.
 //
@@ -396,6 +396,7 @@ func (in *AggregatedInstanceType) Recompute() {
 		newRemaining.CPU.Add(tier.Remaining.CPU)
 		newRemaining.AcceleratorShared.Add(tier.Remaining.AcceleratorShared)
 		newRemaining.AcceleratorSliced.Add(tier.Remaining.AcceleratorSliced)
+		newRemaining.AcceleratorPartitioned.Add(tier.Remaining.AcceleratorPartitioned)
 	}
 
 	in.Status.OnceMaxRequest = newOnceMaxRequest
@@ -416,7 +417,7 @@ func (in *AggregatedInstanceType) Recompute() {
 // bundle offers no single allocation on any dimension.
 func overviewResourceIsZero(r AggregatedInstanceTypeOverviewResource) bool {
 	return r.Accelerator.IsZero() && r.AcceleratorShared.IsZero() &&
-		r.AcceleratorSliced.IsZero() && r.CPU.IsZero()
+		r.AcceleratorSliced.IsZero() && r.AcceleratorPartitioned.IsZero() && r.CPU.IsZero()
 }
 
 // Recompute rebuilds the tier-level OnceMaxRequest and Remaining overviews from the candidates.
@@ -460,10 +461,11 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 		}
 		if wins {
 			newOnceMaxRequest = AggregatedInstanceTypeOverviewResource{
-				Accelerator:       candidate.Accelerator.OnceMaxRequest,
-				CPU:               candidate.CPU.OnceMaxRequest,
-				AcceleratorShared: candidate.AcceleratorShared.OnceMaxRequest,
-				AcceleratorSliced: candidate.AcceleratorSliced.OnceMaxRequest,
+				Accelerator:            candidate.Accelerator.OnceMaxRequest,
+				CPU:                    candidate.CPU.OnceMaxRequest,
+				AcceleratorShared:      candidate.AcceleratorShared.OnceMaxRequest,
+				AcceleratorSliced:      candidate.AcceleratorSliced.OnceMaxRequest,
+				AcceleratorPartitioned: candidate.AcceleratorPartitioned.OnceMaxRequest,
 			}
 		}
 		seeded = true
@@ -472,6 +474,7 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 		newRemaining.CPU.Add(candidate.CPU.Remaining)
 		newRemaining.AcceleratorShared.Add(candidate.AcceleratorShared.Remaining)
 		newRemaining.AcceleratorSliced.Add(candidate.AcceleratorSliced.Remaining)
+		newRemaining.AcceleratorPartitioned.Add(candidate.AcceleratorPartitioned.Remaining)
 	}
 
 	in.OnceMaxRequest = newOnceMaxRequest
@@ -495,16 +498,18 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 func newAggregatedTier(instType *worker.InstanceType) AggregatedInstanceTypeOnceMaxRequestTier {
 	return AggregatedInstanceTypeOnceMaxRequestTier{
 		OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-			Accelerator:       instType.Status.Accelerator.OnceMaxRequest,
-			CPU:               instType.Status.CPU.OnceMaxRequest,
-			AcceleratorShared: instType.Status.AcceleratorShared.OnceMaxRequest,
-			AcceleratorSliced: instType.Status.AcceleratorSliced.OnceMaxRequest,
+			Accelerator:            instType.Status.Accelerator.OnceMaxRequest,
+			CPU:                    instType.Status.CPU.OnceMaxRequest,
+			AcceleratorShared:      instType.Status.AcceleratorShared.OnceMaxRequest,
+			AcceleratorSliced:      instType.Status.AcceleratorSliced.OnceMaxRequest,
+			AcceleratorPartitioned: instType.Status.AcceleratorPartitioned.OnceMaxRequest,
 		},
 		Remaining: AggregatedInstanceTypeOverviewResource{
-			Accelerator:       instType.Status.Accelerator.Remaining,
-			CPU:               instType.Status.CPU.Remaining,
-			AcceleratorShared: instType.Status.AcceleratorShared.Remaining,
-			AcceleratorSliced: instType.Status.AcceleratorSliced.Remaining,
+			Accelerator:            instType.Status.Accelerator.Remaining,
+			CPU:                    instType.Status.CPU.Remaining,
+			AcceleratorShared:      instType.Status.AcceleratorShared.Remaining,
+			AcceleratorSliced:      instType.Status.AcceleratorSliced.Remaining,
+			AcceleratorPartitioned: instType.Status.AcceleratorPartitioned.Remaining,
 		},
 	}
 }
@@ -535,13 +540,14 @@ func newAggregatedCandidate(cluster, name string, instType *worker.InstanceType)
 		CPU:                     instType.Status.CPU,
 		AcceleratorShared:       instType.Status.AcceleratorShared,
 		AcceleratorSliced:       instType.Status.AcceleratorSliced,
+		AcceleratorPartitioned:  instType.Status.AcceleratorPartitioned,
 		AcceleratorSlicedDetail: instType.Status.Detail.SlicedDetail,
 	}
 }
 
 // addAcceleratorSlicedDetail folds src into dst by direct summation: logical/physical counts add,
 // physical profiles sum by name (profileIndex tracks each name's slot in dst.Physical.Profiles), and
-// the logical overcommit flag is OR-ed from any soft-sliceable contributor. It lifts the detector's
+// the logical overcommit flag is OR-ed from any logically sliceable contributor. It lifts the detector's
 // card→group aggregation (device.AggregateAcceleratorSlicedDetail) one level up, so a tier/item
 // slicing view is the plain sum of its members' capability, independent of candidate Phase.
 func addAcceleratorSlicedDetail(dst *workercore.AcceleratorSlicedDetail, src workercore.AcceleratorSlicedDetail, profileIndex map[string]int) {

@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+#
+# kubectl shim — bound every call, retry the read-only ones.
+#
+# On a remote cluster (public API endpoint, exec-credential plugin) a kubectl call does not fail
+# when the connection jitters — it HANGS. The credential plugin re-execs on token expiry, a
+# connection stalls, and a 3-second poll inside a case becomes a multi-minute stall that inflates
+# the whole run and can time a case out for a reason that has nothing to do with what it tests.
+# Locally this never happens, which is why no case guards against it.
+#
+# Enable it by putting this directory FIRST on PATH, before running any case:
+#
+#   PATH="$(pwd)/.claude/skills/_e2e-lib/scripts/kubectl-shim:$PATH"
+#
+# It is a no-op-shaped pass-through otherwise: every call still reaches the real kubectl with the
+# same arguments, stdin, stdout and exit code.
+#
+#   E2E_KUBECTL_TIMEOUT   --request-timeout to add when the caller passed none  (default 30s)
+#   E2E_KUBECTL_RETRIES   extra attempts for a read-only verb                   (default 2)
+#   E2E_KUBECTL_BACKOFF   seconds between attempts                              (default 2)
+#   E2E_KUBECTL_REAL      path to the real kubectl, instead of searching PATH
+#
+# Two deliberate restrictions:
+#   - Only READ-ONLY verbs are retried. Re-running a create/patch/delete that already reached the
+#     server would turn a network blip into an AlreadyExists or a conflict — a worse failure than
+#     the one being papered over.
+#   - Only a TRANSPORT failure is retried, matched on stderr. A NotFound is a real answer, and the
+#     poll loops that ask for one are the hottest calls in the suite; retrying those would add
+#     seconds to every iteration.
+# Verbs that stream or wait (exec, logs -f, port-forward, wait, delete, rollout, ...) are passed
+# through with no timeout at all: bounding a request that is meant to stay open breaks it.
+set -uo pipefail
+
+TIMEOUT="${E2E_KUBECTL_TIMEOUT:-30s}"
+RETRIES="${E2E_KUBECTL_RETRIES:-2}"
+BACKOFF="${E2E_KUBECTL_BACKOFF:-2}"
+
+# The first kubectl on PATH that is not this shim.
+resolve_real() {
+  if [ -n "${E2E_KUBECTL_REAL:-}" ]; then printf '%s' "$E2E_KUBECTL_REAL"; return; fi
+  local self d
+  self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  while IFS= read -r d; do
+    [ -n "$d" ] && [ -x "$d/kubectl" ] || continue
+    [ "$(cd "$d" 2>/dev/null && pwd)" = "$self" ] && continue
+    printf '%s' "$d/kubectl"
+    return
+  done < <(printf '%s' "$PATH" | tr ':' '\n')
+}
+REAL="$(resolve_real)"
+[ -n "$REAL" ] || { echo "kubectl-shim: no kubectl on PATH besides this shim" >&2; exit 127; }
+
+# The verb, found by name rather than by position: "-n <ns>" and "--context <ctx>" both put a
+# bare word before it, so "the first non-flag argument" would pick the namespace.
+READ_VERBS=" get describe logs version api-resources api-versions explain cluster-info "
+BOUND_VERBS="${READ_VERBS}create apply patch label annotate scale set replace cordon uncordon taint "
+VERB=""
+for arg in "$@"; do
+  case "$BOUND_VERBS" in *" $arg "*) VERB="$arg"; break ;; esac
+done
+
+# A followed log stream is neither bounded nor retried.
+if [ "$VERB" = logs ]; then
+  for arg in "$@"; do
+    case "$arg" in -f | --follow | --follow=true) VERB="" ;; esac
+  done
+fi
+
+# Nothing to do for an unrecognized, streaming or waiting call: hand it over untouched, so stdin,
+# stdout, stderr and the exit code are the real kubectl's.
+if [ -z "$VERB" ]; then
+  exec "$REAL" "$@"
+fi
+
+ARGS=("$@")
+case " $* " in
+  *" --request-timeout"*) : ;; # the caller chose its own bound
+  *) ARGS+=("--request-timeout=$TIMEOUT") ;;
+esac
+
+case "$READ_VERBS" in
+  *" $VERB "*) : ;;
+  *) exec "$REAL" "${ARGS[@]}" ;; # bounded, but a mutation is never re-sent
+esac
+
+# A read-only verb: retry only a transport failure.
+transient() {
+  grep -qiE 'Unable to connect to the server|connection refused|connection reset|no such host|i/o timeout|TLS handshake timeout|context deadline exceeded|Client\.Timeout|unexpected EOF|getting credentials|exec plugin|http2:|EOF$' "$1"
+}
+
+errf="$(mktemp)"
+trap 'rm -f "$errf"' EXIT
+attempt=0
+while :; do
+  "$REAL" "${ARGS[@]}" 2>"$errf"
+  rc=$?
+  [ "$rc" -eq 0 ] && break
+  [ "$attempt" -ge "$RETRIES" ] && break
+  transient "$errf" || break
+  attempt=$((attempt + 1))
+  echo "kubectl-shim: transport failure, retrying ${VERB} (${attempt}/${RETRIES})" >&2
+  sleep "$BACKOFF"
+done
+cat "$errf" >&2
+exit "$rc"

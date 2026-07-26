@@ -217,6 +217,33 @@ func instSpecTeslaT4() workercore.InstanceTypeSpec {
 	}
 }
 
+func instSpecA100() workercore.InstanceTypeSpec {
+	return workercore.InstanceTypeSpec{
+		GeneralGroup:     "generic",
+		AcceleratorGroup: "nvidia-a100-40g",
+		Acceleratable:    true,
+		OS:               "linux",
+		Arch:             "amd64",
+		UnitResources:    workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"},
+		LocalStorage:     "100Gi",
+	}
+}
+
+// a100PartitionedInst builds a candidate from a pool whose cards are partitionable: acc whole cards
+// are still free and partitioned partition instances can still be hosted on the cards already in a
+// partitioning mode. The two views are disjoint by construction — a partitioned card serves no
+// whole-card, shared or logically sliced claim — so the shared and sliced views stay zero.
+func a100PartitionedInst(name, acc, partitioned string) *worker.InstanceType {
+	return newInstType("gpustack-nvidia-a100-40g-", name, instSpecA100(), workercore.InstanceTypeStatus{
+		Phase:                  "Active",
+		Accelerator:            instTypeRes(acc, acc, acc),
+		CPU:                    instTypeRes("4", "4", "4"),
+		AcceleratorShared:      instTypeRes("0", "0", "0"),
+		AcceleratorSliced:      instTypeRes("0", "0", "0"),
+		AcceleratorPartitioned: instTypeRes(partitioned, partitioned, partitioned),
+	})
+}
+
 func instStatusCPU() workercore.InstanceTypeStatus {
 	return workercore.InstanceTypeStatus{
 		Phase:             "Active",
@@ -733,6 +760,30 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 			"AcceleratorSliced must survive even though the primary dimension is zero")
 	})
 
+	t.Run("acceleratable: fully-partitioned tier with only a partition bundle still yields it", func(t *testing.T) {
+		// Every card of the pool sits in a partitioning mode, so the whole-card, shared and
+		// logically sliced views are all zero and only AcceleratorPartitioned is left. The
+		// bundle must not read as empty, or the tier is skipped as a seed and the fleet reports
+		// no partition capacity at all.
+		item := AggregatedInstanceType{
+			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
+			Status: AggregatedInstanceTypeStatus{
+				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
+					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+						AcceleratorPartitioned: resource.MustParse("7"),
+					}},
+				},
+			},
+		}
+
+		item.Recompute()
+
+		o := item.Status.OnceMaxRequest
+		assert.True(t, o.Accelerator.IsZero())
+		assert.True(t, o.AcceleratorPartitioned.Equal(resource.MustParse("7")),
+			"AcceleratorPartitioned must survive as the only non-zero dimension")
+	})
+
 	t.Run("empty tiers leaves overview zeroed", func(t *testing.T) {
 		item := AggregatedInstanceType{
 			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
@@ -1128,6 +1179,31 @@ func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
 	})
 }
 
+// TestListAggregateInstanceTypes_PartitionedAggregation drives the full Next/Result path for the
+// hardware-partition view. It is disjoint from the other accelerator views, so nothing else in the
+// pipeline carries it: it must survive ingestion into the candidate, seed the tier bundle from the
+// winning candidate, and sum into both the tier and item Remaining like every other dimension.
+func TestListAggregateInstanceTypes_PartitionedAggregation(t *testing.T) {
+	op := OpListAggregateInstanceTypes()
+	require.NoError(t, op.Next("cluster-a", a100PartitionedInst("a100-a", "1", "7")))
+	require.NoError(t, op.Next("cluster-b", a100PartitionedInst("a100-b", "1", "14")))
+
+	result := op.Result(false)
+
+	require.Len(t, result.Items, 1)
+	item := result.Items[0]
+	require.Len(t, item.Status.Tiers, 1, "both candidates share Accelerator OnceMaxRequest=1")
+	tier := item.Status.Tiers[0]
+	require.Len(t, tier.Candidates, 2)
+
+	assert.True(t, tier.Candidates[0].AcceleratorPartitioned.Remaining.Equal(resource.MustParse("7")),
+		"the candidate must carry the partition view through ingestion")
+	assert.True(t, tier.Remaining.AcceleratorPartitioned.Equal(resource.MustParse("21")), "7+14")
+	assert.True(t, item.Status.Remaining.AcceleratorPartitioned.Equal(resource.MustParse("21")), "7+14")
+	assert.True(t, item.Status.OnceMaxRequest.AcceleratorPartitioned.Equal(resource.MustParse("7")),
+		"the bundle must come from the winning candidate, not the per-dimension max (14)")
+}
+
 // TestListAggregateInstanceTypes_PhaseFiltering covers the batch (Next/Result) path: only
 // Active candidates contribute to the tier/item OnceMaxRequest and Remaining totals, while
 // non-Active candidates stay listed with their recorded Phase.
@@ -1301,7 +1377,7 @@ func withDetail(it *worker.InstanceType, detail workercore.InstanceTypeDetail) *
 }
 
 // gpuDetail builds an accelerator Status.Detail: identity fields plus a slicing capability of the
-// given logical soft-slice count/overcommit and physical (MIG) profiles (Physical.Count is their sum).
+// given logical slice count/overcommit and physical (MIG) profiles (Physical.Count is their sum).
 func gpuDetail(product string, logical int32, overcommit bool, profiles ...workercore.AcceleratorSlicedPhysicalDetailProfile) workercore.InstanceTypeDetail {
 	var d workercore.InstanceTypeDetail
 	d.Manufacturer = "nvidia"
@@ -1473,18 +1549,19 @@ func TestListAggregateInstanceTypes_StatusJSONShape(t *testing.T) {
         "cache": {}, "cpu": {"cache": {}},
         "slicedDetail": {"logical": {"coresPercentageOvercommit": true, "count": 8}, "physical": {}}
       },
-      "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
-      "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+      "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
+      "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
       "tiers": [
         {
-          "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
-          "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+          "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
+          "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
           "candidates": [
             {
               "cluster": "cluster-a", "name": "inst-a", "phase": "Active",
               "accelerator": {"onceMaxRequest": "1", "remaining": "1", "capacity": "1"},
               "acceleratorShared": {"onceMaxRequest": "0", "remaining": "0", "capacity": "0"},
               "acceleratorSliced": {"onceMaxRequest": "8", "remaining": "8", "capacity": "8"},
+              "acceleratorPartitioned": {"onceMaxRequest": "0", "remaining": "0", "capacity": "0"},
               "cpu": {"onceMaxRequest": "4", "remaining": "4", "capacity": "4"},
               "acceleratorSlicedDetail": {"logical": {"coresPercentageOvercommit": true, "count": 8}, "physical": {}}
             }

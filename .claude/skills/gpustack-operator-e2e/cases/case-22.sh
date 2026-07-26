@@ -5,8 +5,12 @@
 #
 #   case-22.sh <NS>
 #
-# Goal:        Whole-card exclusive, shared, and sliced claims are mutually exclusive on the SAME physical
-#              card. The device plugin advertises each mode as an independent resource name backed by an
+# Goal:        Whole-card exclusive, shared, and LOGICAL-slice claims are mutually exclusive on the SAME
+#              physical card. These three families share one substrate — every UNPARTITIONED card can serve
+#              all three — which is why health, not advertisement scope, is the mechanism here. A card in a
+#              hardware partitioning mode advertises none of the three, so it never enters this case's card
+#              set and needs no cross-mode rule; that separation is asserted elsewhere.
+#              The device plugin advertises each mode as an independent resource name backed by an
 #              independent device-ID pool aliasing the same cards, and kubelet picks tokens freely
 #              (GetPreferredAllocation is advisory and never runs under the default TopologyManager policy
 #              "none"), so the invariant is enforced at two levels, both exercised here:
@@ -27,7 +31,8 @@
 #              Variants C/D run on the raw path: the card-pick mechanism they prove lives in kubelet + the
 #              device plugin and is identical with or without a queue label.
 # Environment: A node advertising a real accelerator with BOTH the exclusive whole-card resource (<base> > 0)
-#              AND the shared companion (<base>.shared > 0); variants C/D additionally need <base>.sliced > 0
+#              AND the shared companion (<base>.shared > 0) — i.e. at least one unpartitioned card;
+#              variants C/D additionally need <base>.sliced > 0
 #              (the sliced section AUTO-SKIPS independently without it). Whole-case AUTO-SKIPS (exit 0)
 #              without the exclusive+shared pair — the co-location can only be observed on hardware the
 #              device plugin allocates.
@@ -55,7 +60,7 @@ NS="${1:?usage: case-22.sh <NS>}"
 PODPFX=gpustack-e2e-exshare
 ANNO=device.gpustack.ai/accelerator.allocated
 IMAGE="${IMAGE:-ubuntu:24.04}"
-# Image for sliced Pods. A soft-slicing runtime whose preload needs vendor libraries inside the image
+# Image for sliced Pods. A logical-slicing runtime whose preload needs vendor libraries inside the image
 # (e.g. Ascend vcann-rt needs the CANN runtime — a bare distro exits 127 at container start, AFTER the
 # allocation succeeds) must override this with a vendor runtime image, e.g.
 # SLICED_IMAGE=quay.io/ascend/cann:9.0.1-910b-ubuntu22.04-py3.11-devel. Image-agnostic preloads
@@ -67,6 +72,10 @@ SLICED_IMAGE="${SLICED_IMAGE:-$IMAGE}"
 # name has no dots (ruling out the .sliced/.visibility families) and that has a .shared companion. ---
 read -r GPU_NODE EXCL SHARED N <<<"$(kubectl get nodes -o json 2>/dev/null | python3 -c "
 import json,sys,re
+# Pick the node with the MOST whole cards, not the first by name: the free-card steering the C/D
+# variants prove needs a card to steer AWAY from, so a one-card node degenerates them into
+# 'the only card' and covers nothing.
+best=None
 for n in json.load(sys.stdin).get('items',[]):
     a=n.get('status',{}).get('allocatable',{})
     for k,v in a.items():
@@ -77,8 +86,9 @@ for n in json.load(sys.stdin).get('items',[]):
         shared=k+'.shared'
         try: scnt=int(a.get(shared,'0'))
         except: scnt=0
-        if scnt>0:
-            print(n['metadata']['name'], k, shared, cnt); sys.exit(0)
+        if scnt>0 and (best is None or cnt>best[3]):
+            best=(n['metadata']['name'], k, shared, cnt)
+if best: print(*best)
 " 2>/dev/null)"
 if [ -z "${GPU_NODE:-}" ] || [ -z "${N:-}" ]; then
   echo "== CASE 22 — SKIPPED =="
@@ -111,7 +121,13 @@ fi
 
 # The sliced companion enables variants C/D (exclusive↔sliced); that section skips independently.
 SLICED="${EXCL}.sliced"
-NSLICED=$(kubectl get node "$GPU_NODE" -o jsonpath="{.status.allocatable.${SLICED//./\\.}}" 2>/dev/null)
+# Read the key by exact name rather than by dotted jsonpath: this key carries BOTH '/' and '.', and
+# the escaped dotted form returns empty on some clusters that DO advertise it — which silently skips
+# the very variants this case adds.
+NSLICED=$(kubectl get node "$GPU_NODE" -o json 2>/dev/null | python3 -c "
+import json,sys
+print(json.load(sys.stdin).get('status',{}).get('allocatable',{}).get(sys.argv[1],''))
+" "$SLICED" 2>/dev/null)
 if [ -n "${NSLICED:-}" ] && [ "${NSLICED}" != "0" ]; then
   echo "[case-22] sliced companion ${SLICED} advertised (${NSLICED} tokens) — variants C/D enabled"
 else
@@ -224,10 +240,12 @@ if not ann: sys.exit(0)
 try: st=json.loads(ann)
 except Exception: sys.exit(0)
 cards=set()
-for g in st.get('groups',[]):
-    gid=g.get('id','')
-    for a in g.get('accelerators',[]):
-        cards.add(('%s:%s' % (gid, a.get('id',''))).replace(' ','~'))
+# The annotation is keyed by container name; each entry carries that container's own allocation.
+for c in st.values():
+    for g in (c.get('devices') or {}).get('groups',[]):
+        gid=g.get('id','')
+        for a in g.get('accelerators',[]):
+            cards.add(('%s:%s' % (gid, a.get('id',''))).replace(' ','~'))
 print(' '.join(sorted(cards)))
 "
 }

@@ -112,10 +112,11 @@ type (
 type (
 	// AllocatorOptions represents the options for configuring the allocator.
 	AllocatorOptions struct {
-		Logger     klog.Logger
-		KubeSocket string
-		NoShared   bool
-		NoSliced   bool
+		Logger        klog.Logger
+		KubeSocket    string
+		NoShared      bool
+		NoSliced      bool
+		NoPartitioned bool
 	}
 
 	// Allocator is an interface for allocating devices to containers.

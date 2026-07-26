@@ -1,7 +1,7 @@
 # npu-smi visibility & AICore-quota analysis
 
 ## npu-smi shows the physical card, not the slice
-Soft-slicing is **process-level API interception** (libvruntime.so hooks ACL/runtime calls in
+Logical-slicing is **process-level API interception** (libvruntime.so hooks ACL/runtime calls in
 the workload process). `npu-smi info` queries the driver/dcmi directly and is **not** rewritten
 by vcann-rt, so inside an injected container it still reports the full physical card (e.g. HBM
 `58874 / 65536 MB`), not the `memory-quota`. The sliced view is only visible via `enpu-monitor`.

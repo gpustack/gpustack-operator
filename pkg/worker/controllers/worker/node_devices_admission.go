@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -24,6 +25,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/controller"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
@@ -42,88 +44,177 @@ const (
 	_NodeDevicesRetryAfterSeconds = int32(30)
 )
 
-// cardRequest is the accelerator demand a Workload places on its assigned pool:
-// the allocation mode, the total cards summed across its pods and containers, the
-// per-card sliced units (zero for exclusive/shared), and — for a physical-slice
-// (MIG) request — the profile name it anchors on (empty otherwise).
-type cardRequest struct {
-	mode        workercore.DeviceAllocationMode
-	count       int32
-	slicedUnits int32
-	profile     string
+// familyDemand is one correlated accelerator demand a Workload places on its assigned
+// pool: the family, the cards it needs, the units one card must still have free to host a
+// single one of them, and — for a partition request — the profile it anchors on (empty
+// otherwise). For the three card-bound families each card is a distinct physical card; for
+// the partition family a card is one instance, since a partition request is one card per
+// Pod, and several of them can share a card.
+//
+// The three quantities are read from the SAME podset. Pairing a per-card demand taken as a
+// maximum over every podset with a card count summed over every podset would gate a small
+// request on a large one's budget, which is exactly what the single per-Pod tuple this
+// replaces did — and its mode was overwritten by whichever key was scanned last.
+type familyDemand struct {
+	family       nodefeature.ResourceFamily
+	cards        int32
+	unitsPerCard int32
+	profile      string
 }
 
-// parseCardRequest reads the accelerator request off a Workload's pod templates.
-// Each podset contributes Count × (cards summed across its containers); the mode
-// and per-card sliced units come from the requested resource names — the card key
-// (<base> exclusive, <base>.shared, <base>.sliced) sets the mode and adds to the
-// count, while <base>.sliced.units carries the per-card units. A physical-slice
-// (MIG) key <base>.sliced.mig-<profile> sets the sliced mode and the profile the
-// request anchors on (its own value is per-card, so it does not add to the count;
-// the count comes from the sibling <base>.sliced key). Init containers are scanned
-// as well as app containers so an init-only MIG request is gated too. The percentage
-// and MiB sliced sub-keys are ignored: the Pod webhook already folded them into units.
-// A Workload requesting no known accelerator returns mode None.
-func parseCardRequest(wl *kueue.Workload) cardRequest {
-	var req cardRequest
+// parseFamilyDemands reads the accelerator demands off a Workload's pod templates, one
+// correlated tuple per (podset, family), merged across podsets only where the per-card
+// demand and the profile agree — so the common single-podset Workload yields exactly one
+// tuple per family. A Workload requesting no known accelerator yields none.
+func parseFamilyDemands(wl *kueue.Workload) []familyDemand {
+	var demands []familyDemand
 	for i := range wl.Spec.PodSets {
-		ps := &wl.Spec.PodSets[i]
-		var perPod int32
-		containers := make([]*core.Container, 0, len(ps.Template.Spec.InitContainers)+len(ps.Template.Spec.Containers))
-		for ci := range ps.Template.Spec.InitContainers {
-			containers = append(containers, &ps.Template.Spec.InitContainers[ci])
+		for _, d := range podSetFamilyDemands(&wl.Spec.PodSets[i]) {
+			demands = mergeDemand(demands, d)
 		}
-		for ci := range ps.Template.Spec.Containers {
-			containers = append(containers, &ps.Template.Spec.Containers[ci])
-		}
-		for _, ctr := range containers {
-			// Scan requests AND limits: extended resources (including MIG keys) are commonly set
-			// only under limits, so a requests-only scan would miss the request and wrongly mark
-			// feasibility Ready. Merge with requests taking precedence so each resource is counted once.
-			merged := ctr.Resources.Requests
-			if len(ctr.Resources.Limits) > 0 {
-				merged = make(core.ResourceList, len(ctr.Resources.Requests)+len(ctr.Resources.Limits))
-				for name, qty := range ctr.Resources.Limits {
-					merged[name] = qty
-				}
-				for name, qty := range ctr.Resources.Requests {
-					merged[name] = qty
-				}
-			}
-			for name, qty := range merged {
-				switch {
-				case strings.Contains(string(name), nodefeature.SlicedMigResourceNameInfix):
-					if profile, ok := nodefeature.SlicedMigProfileOf(name); ok {
-						req.mode = workercore.DeviceAllocationModeSliced
-						req.profile = profile
-					}
-				case strings.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix):
-					// Keep the strictest per-card demand across containers/podsets, so
-					// feasibility is never checked against an undersized slice.
-					if u := clampInt32(qty.Value()); u > req.slicedUnits {
-						req.slicedUnits = u
-					}
-				case strings.HasSuffix(string(name), nodefeature.SlicedResourceNameSuffix):
-					if nodefeature.IsKnownAcceleratableResourceName(name) {
-						req.mode = workercore.DeviceAllocationModeSliced
-						perPod += clampInt32(qty.Value())
-					}
-				case strings.HasSuffix(string(name), nodefeature.SharedResourceNameSuffix):
-					if nodefeature.IsKnownAcceleratableResourceName(name) {
-						req.mode = workercore.DeviceAllocationModeShared
-						perPod += clampInt32(qty.Value())
-					}
-				default:
-					if nodefeature.IsKnownAcceleratableResourceName(name) {
-						req.mode = workercore.DeviceAllocationModeExclusive
-						perPod += clampInt32(qty.Value())
-					}
-				}
-			}
-		}
-		req.count += ps.Count * perPod
 	}
-	return req
+	sortDemands(demands)
+	return demands
+}
+
+// podSetFamilyDemands reads one podset's per-family demand. Each family contributes
+// Count × (cards summed across the podset's containers); the card key (<base> exclusive,
+// <base>.shared, <base>.sliced, <base>.partitioned) adds to the count, the counting key
+// (<base>.sliced.units, <base>.partitioned.units) carries the per-card units, and the
+// per-profile partition key names the profile — its own value is per-card, so it does not
+// add to the count. Init containers are scanned as well as app containers, so an init-only
+// request is gated too. The percentage and MiB sub-keys are ignored: the Pod webhook
+// already folded them into the counting key.
+func podSetFamilyDemands(ps *kueue.PodSet) []familyDemand {
+	byFamily := make(map[nodefeature.ResourceFamily]*familyDemand)
+	containers := make([]*core.Container, 0, len(ps.Template.Spec.InitContainers)+len(ps.Template.Spec.Containers))
+	for ci := range ps.Template.Spec.InitContainers {
+		containers = append(containers, &ps.Template.Spec.InitContainers[ci])
+	}
+	for ci := range ps.Template.Spec.Containers {
+		containers = append(containers, &ps.Template.Spec.Containers[ci])
+	}
+
+	for _, ctr := range containers {
+		for name, qty := range mergedContainerResources(ctr) {
+			family := nodefeature.ResourceFamilyOf(name)
+			switch family {
+			case nodefeature.ResourceFamilyExclusive, nodefeature.ResourceFamilyShared,
+				nodefeature.ResourceFamilySliced, nodefeature.ResourceFamilyPartitioned:
+			default:
+				continue
+			}
+			d := byFamily[family]
+			if d == nil {
+				d = &familyDemand{family: family}
+				byFamily[family] = d
+			}
+			switch {
+			case strings.HasSuffix(string(name), nodefeature.SlicedUnitsResourceNameSuffix),
+				strings.HasSuffix(string(name), nodefeature.PartitionedUnitsResourceNameSuffix):
+				// Keep the strictest per-card demand across this podset's containers, so
+				// feasibility is never checked against an undersized slice.
+				if u := clampInt32(qty.Value()); u > d.unitsPerCard {
+					d.unitsPerCard = u
+				}
+			case isCardKey(name, family):
+				d.cards += clampInt32(qty.Value())
+			default:
+				// One profile per Pod is a request rule, but the Pod webhook enforces it on a
+				// Pod and Kueue builds this Workload from a pod TEMPLATE before any Pod exists —
+				// so a template naming two profiles reaches here. Resource maps iterate in random
+				// order, so take the smallest name rather than the last one seen: the shape is
+				// refused at Pod creation either way, and this keeps the verdict message stable
+				// across reconciles instead of flipping between the two.
+				if profile, ok := nodefeature.PartitionedProfileOf(name); ok {
+					if d.profile == "" || profile < d.profile {
+						d.profile = profile
+					}
+				}
+			}
+		}
+	}
+
+	out := make([]familyDemand, 0, len(byFamily))
+	for _, d := range byFamily {
+		// Scale to the podset's pod count in int64 and clamp, so a crafted per-container
+		// count times a large pod count cannot wrap to a small (or negative) demand. A
+		// sub-key with no card request behind it, and a podset of zero pods, both demand
+		// no card at all.
+		d.cards = clampInt32(int64(d.cards) * int64(ps.Count))
+		if d.cards <= 0 {
+			continue
+		}
+		out = append(out, *d)
+	}
+	sortDemands(out)
+	return out
+}
+
+// isCardKey reports whether name is the family's card key — the one whose value is the
+// card count. Every other key of a family is a per-card budget or a profile anchor.
+func isCardKey(name core.ResourceName, family nodefeature.ResourceFamily) bool {
+	switch family {
+	case nodefeature.ResourceFamilyExclusive:
+		return true
+	case nodefeature.ResourceFamilyShared:
+		return strings.HasSuffix(string(name), nodefeature.SharedResourceNameSuffix)
+	case nodefeature.ResourceFamilySliced:
+		return strings.HasSuffix(string(name), nodefeature.SlicedResourceNameSuffix)
+	case nodefeature.ResourceFamilyPartitioned:
+		return strings.HasSuffix(string(name), nodefeature.PartitionedResourceNameSuffix)
+	}
+	return false
+}
+
+// mergedContainerResources merges a container's Limits and Requests, requests taking
+// precedence, so each resource is read once. Extended resources (accelerator keys) are
+// commonly set only under limits, so a requests-only scan would miss the request and
+// wrongly mark feasibility Ready.
+func mergedContainerResources(ctr *core.Container) core.ResourceList {
+	if len(ctr.Resources.Limits) == 0 {
+		return ctr.Resources.Requests
+	}
+	merged := make(core.ResourceList, len(ctr.Resources.Requests)+len(ctr.Resources.Limits))
+	for name, qty := range ctr.Resources.Limits {
+		merged[name] = qty
+	}
+	for name, qty := range ctr.Resources.Requests {
+		merged[name] = qty
+	}
+	return merged
+}
+
+// mergeDemand folds a podset's demand into the accumulated list, summing the cards of an
+// existing entry that shares its shape and appending a new entry otherwise. Two podsets
+// demanding different per-card budgets stay separate, so neither is checked against the
+// other's.
+func mergeDemand(demands []familyDemand, d familyDemand) []familyDemand {
+	for i := range demands {
+		if demands[i].family == d.family &&
+			demands[i].unitsPerCard == d.unitsPerCard &&
+			demands[i].profile == d.profile {
+			demands[i].cards = clampInt32(int64(demands[i].cards) + int64(d.cards))
+			return demands
+		}
+	}
+	return append(demands, d)
+}
+
+// sortDemands orders demands most constrained first — a partition request before a scalar
+// one, then by descending per-card units — so the greedy fit in nodeDevicesFeasibility
+// never spends a card a tighter demand needed, and so the verdict is deterministic.
+func sortDemands(demands []familyDemand) {
+	sort.SliceStable(demands, func(i, j int) bool {
+		a, b := &demands[i], &demands[j]
+		if (a.family == nodefeature.ResourceFamilyPartitioned) != (b.family == nodefeature.ResourceFamilyPartitioned) {
+			return a.family == nodefeature.ResourceFamilyPartitioned
+		}
+		if a.unitsPerCard != b.unitsPerCard {
+			return a.unitsPerCard > b.unitsPerCard
+		}
+		return a.family < b.family
+	})
 }
 
 // clampInt32 narrows a resource quantity value to the int32 the ledger uses,
@@ -140,130 +231,188 @@ func clampInt32(v int64) int32 {
 	}
 }
 
-// unitsPerCardFor returns the allocatable units one card must still have free to
-// host a single card of the request: a whole card for exclusive, one owner's share
-// for shared, and the requested sliced units for sliced.
-func unitsPerCardFor(mode workercore.DeviceAllocationMode, slicedUnits int32) int32 {
-	switch mode {
-	case workercore.DeviceAllocationModeShared:
+// unitsPerCardFor returns the allocatable units one card must still have free to host a
+// single card of a scalar demand: a whole card for exclusive, one owner's share for shared,
+// and the requested per-card units for a logical slice. A logical slice the Pod webhook did
+// not shape carries no budget, so any card with room fits.
+func unitsPerCardFor(d familyDemand) int32 {
+	switch d.family {
+	case nodefeature.ResourceFamilyShared:
 		return nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize
-	case workercore.DeviceAllocationModeSliced:
-		return slicedUnits
+	case nodefeature.ResourceFamilySliced:
+		return d.unitsPerCard
 	default:
 		return nodefeature.ResourceMaxUnits
 	}
 }
 
-// cardLedger is a per-card view joining the Spec-side capability (the physical-slice
-// profiles + their cached placements) with the Status-side allocation (mode, scalar
-// remaining, and the per-profile remaining ledger), matched by accelerator ID. A
-// card with a non-empty physicalProfiles is MIG-enabled.
+// cardLedger is a per-card view joining the Spec-side capability (which families the card
+// can serve, and the physical partition profiles with their cached placements) with the
+// Status-side allocation (mode, scalar remaining, and the per-profile remaining ledger),
+// matched by accelerator ID.
 type cardLedger struct {
+	capability        workercore.AcceleratorStatus
 	mode              workercore.DeviceAllocationMode
 	remaining         int32
 	remainingProfiles []workercore.AcceleratorProfileCount
-	physicalProfiles  []workercore.AcceleratorPhysicalSlicedProfile
 }
 
-// eachCard invokes fn for every accelerator across the candidate devices, joining
-// each Status allocation with its Spec capability by accelerator ID.
-func eachCard(devices []workercore.Devices, fn func(cardLedger)) {
+// collectCards flattens every accelerator across the candidate devices into one list,
+// joining each Status allocation with its Spec capability by accelerator ID.
+func collectCards(devices []workercore.Devices) []cardLedger {
+	var cards []cardLedger
 	for i := range devices {
 		d := &devices[i]
-		capByID := make(map[string][]workercore.AcceleratorPhysicalSlicedProfile)
+		capByID := make(map[string]workercore.AcceleratorStatus)
 		for gi := range d.Spec.Groups {
 			accs := d.Spec.Groups[gi].Accelerators
 			for ai := range accs {
-				capByID[accs[ai].ID] = accs[ai].Status.PhysicalSliced.Profiles
+				capByID[accs[ai].ID] = accs[ai].Status
 			}
 		}
 		for gi := range d.Status.Groups {
 			accs := d.Status.Groups[gi].Accelerators
 			for ai := range accs {
-				fn(cardLedger{
+				cards = append(cards, cardLedger{
+					capability:        capByID[accs[ai].ID],
 					mode:              accs[ai].Mode,
 					remaining:         accs[ai].Remaining,
 					remainingProfiles: accs[ai].RemainingProfiles,
-					physicalProfiles:  capByID[accs[ai].ID],
 				})
 			}
 		}
 	}
+	return cards
 }
 
-// nodeDevicesFeasibility reports whether the request can currently be placed across
-// the candidate devices (already scoped to one flavor pool by label), returning the
-// check state and the message explaining it. A physical-slice (MIG) request is gated
-// on the per-card RemainingProfiles ledger; every other mode is gated on the scalar
-// remaining ledger. The shortage is always transient — Retry, never Reject.
-func nodeDevicesFeasibility(devices []workercore.Devices, req cardRequest) (kueue.CheckState, string) {
-	if req.profile != "" {
-		return physicalSlicedFeasibility(devices, req.profile, req.count)
+// servesFamily reports whether the card's reported capability can serve the family at all.
+// Logical slicing and hardware partitioning are exclusive card states, and a partitioned
+// card is no longer available as a whole card — so a card that cannot serve a family is
+// excluded from that family's population here exactly as it is from the device plugin's
+// token pool. Without it an exclusive tenant's Pod would be judged feasible against a
+// partitioned card, admitted, and left Pending forever.
+func (c cardLedger) servesFamily(family nodefeature.ResourceFamily) bool {
+	switch family {
+	case nodefeature.ResourceFamilyPartitioned:
+		return device.IsPartitioned(c.capability)
+	case nodefeature.ResourceFamilySliced:
+		return device.IsLogicallySliceable(c.capability)
+	default:
+		return device.IsWholeCardCapable(c.capability)
 	}
-	return scalarFeasibility(devices, req.mode, req.count, req.slicedUnits)
 }
 
-// scalarFeasibility gates an exclusive/shared/soft-sliced request on the scalar per-card
+// cardBudget records what a Workload's already-checked demands claimed from one card, so a
+// later demand cannot spend the same room twice. A scalar demand takes the whole card; a
+// partition demand takes one of the several placements a card may host. The two never
+// contend for the same card — the populations are disjoint by capability — so a single
+// budget per card is enough.
+type cardBudget struct {
+	whole      bool
+	placements int32
+}
+
+// nodeDevicesFeasibility reports whether every demand can currently be placed across the
+// candidate devices (already scoped to one flavor pool by label) at the same time,
+// returning the check state and the message explaining it. Room is consumed as it is
+// matched, so two demands of one Workload never both claim it. The reported message is the
+// deciding demand's: the first that does not fit, or — when everything fits — the last one
+// checked, which for the single-demand Workload is simply its own verdict. A shortage is
+// always transient — Retry, never Reject.
+func nodeDevicesFeasibility(devices []workercore.Devices, demands []familyDemand) (kueue.CheckState, string) {
+	message := verdictMessage(kueue.CheckStateReady)
+	if len(demands) == 0 {
+		return kueue.CheckStateReady, message
+	}
+
+	cards := collectCards(devices)
+	budgets := make([]cardBudget, len(cards))
+	for _, d := range demands {
+		var state kueue.CheckState
+		if d.family == nodefeature.ResourceFamilyPartitioned {
+			state, message = fitPartitionDemand(cards, budgets, d)
+		} else {
+			state, message = fitScalarDemand(cards, budgets, d)
+		}
+		if state != kueue.CheckStateReady {
+			return state, message
+		}
+	}
+	return kueue.CheckStateReady, message
+}
+
+// fitScalarDemand gates an exclusive/shared/logical-slice demand on the scalar per-card
 // remaining ledger, which seeds every card at ResourceMaxUnits and subtracts each pod's
 // allocation, so a card carrying any allocation has Remaining below a whole card and never
-// satisfies an exclusive request. A soft-slice request additionally excludes MIG-enabled cards
-// (a hard-partitioned card offers no soft budget). Ready once enough cards fit, otherwise Retry.
-func scalarFeasibility(devices []workercore.Devices, mode workercore.DeviceAllocationMode, count, slicedUnits int32) (kueue.CheckState, string) {
-	demand := unitsPerCardFor(mode, slicedUnits)
+// satisfies an exclusive demand. Its cards count is a card count: each of them needs its
+// own card. Ready once enough cards of the family's population fit, otherwise Retry.
+func fitScalarDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
+	units := unitsPerCardFor(d)
 	var fit int32
-	eachCard(devices, func(c cardLedger) {
-		if mode == workercore.DeviceAllocationModeSliced && len(c.physicalProfiles) > 0 {
-			return // a soft slice never lands on a MIG-enabled card
+	for i := range cards {
+		if budgets[i].whole || !cards[i].servesFamily(d.family) || cards[i].remaining < units {
+			continue
 		}
-		if c.remaining >= demand {
-			fit++
+		budgets[i].whole = true
+		if fit++; fit >= d.cards {
+			return kueue.CheckStateReady, verdictMessage(kueue.CheckStateReady)
 		}
-	})
-	if fit >= count {
-		return kueue.CheckStateReady, verdictMessage(kueue.CheckStateReady)
 	}
 	return kueue.CheckStateRetry, verdictMessage(kueue.CheckStateRetry)
 }
 
-// physicalSlicedFeasibility gates a MIG request on the per-card placement-aware ledger: a
-// candidate card is MIG-enabled (its capability lists physical-slice profiles), is not held
-// whole-card (Mode None or Sliced), and still has a free placement for the profile
-// (RemainingProfiles[profile] >= 1). A pool with no MIG-enabled card at all, and a pool whose MIG
-// cards have not yet published cached Placements (rollout skew), each get their own distinct Retry
-// message (separate from "the profile is momentarily full") so an operator can tell the three apart.
+// fitPartitionDemand gates a partition demand on the per-card placement-aware ledger: a
+// candidate card is physically partitioned, is not held whole-card (Mode None or
+// Partitioned), and still has free placements for the profile. Its cards count is an
+// INSTANCE count — a partition request is one card per Pod (rule 3), so a replicated
+// Workload asks for that many instances — and one card can host several of them, which is
+// exactly what RemainingProfiles reports and what the placement-authoritative Allocate will
+// do. Counting one instance per card would leave every replica after the first in Retry
+// forever on a node that has room for them all.
+//
+// A pool with no partitioned card at all, and a pool whose partitioned cards have not yet
+// published cached Placements (rollout skew), each get their own distinct Retry message
+// (separate from "the profile is momentarily full") so an operator can tell the three apart.
 // Never Reject.
-func physicalSlicedFeasibility(devices []workercore.Devices, profile string, count int32) (kueue.CheckState, string) {
-	var migCards, ledgerReady, fit int32
-	eachCard(devices, func(c cardLedger) {
-		if len(c.physicalProfiles) == 0 {
-			return // not MIG-enabled
+func fitPartitionDemand(cards []cardLedger, budgets []cardBudget, d familyDemand) (kueue.CheckState, string) {
+	var partitionCards, ledgerReady, fit int32
+	for i := range cards {
+		c := &cards[i]
+		if !c.servesFamily(nodefeature.ResourceFamilyPartitioned) {
+			continue
 		}
-		migCards++
-		if physicalProfilesHavePlacements(c.physicalProfiles) {
+		partitionCards++
+		if partitionProfilesHavePlacements(c.capability.PhysicalSliced.Profiles) {
 			ledgerReady++
 		}
-		if c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModeSliced {
-			return // held whole-card by an exclusive/shared allocation
+		if c.mode != workercore.DeviceAllocationModeNone && c.mode != workercore.DeviceAllocationModePartitioned {
+			continue // held whole-card by an exclusive/shared allocation
 		}
-		if remainingProfileCount(c.remainingProfiles, profile) >= 1 {
-			fit++
+		// Every profile is charged one placement, whatever its size: the ledger reports
+		// remaining per profile, and profiles of one card overlap physically, so a finer
+		// account would need the placement intervals the plugin resolves at Allocate time.
+		free := remainingProfileCount(c.remainingProfiles, d.profile) - budgets[i].placements
+		if free <= 0 {
+			continue
 		}
-	})
-	if migCards == 0 {
-		return kueue.CheckStateRetry, physicalNoMigCardsMessage(profile)
+		take := min(free, d.cards-fit)
+		budgets[i].placements += take
+		if fit += take; fit >= d.cards {
+			return kueue.CheckStateReady, partitionVerdictMessage(kueue.CheckStateReady, d.profile)
+		}
 	}
-	if ledgerReady == 0 {
-		return kueue.CheckStateRetry, physicalLedgerNotReadyMessage
+	switch {
+	case partitionCards == 0:
+		return kueue.CheckStateRetry, partitionNoCardsMessage(d.profile)
+	case ledgerReady == 0:
+		return kueue.CheckStateRetry, partitionLedgerNotReadyMessage
 	}
-	if fit >= count {
-		return kueue.CheckStateReady, physicalVerdictMessage(kueue.CheckStateReady, profile)
-	}
-	return kueue.CheckStateRetry, physicalVerdictMessage(kueue.CheckStateRetry, profile)
+	return kueue.CheckStateRetry, partitionVerdictMessage(kueue.CheckStateRetry, d.profile)
 }
 
-// physicalProfilesHavePlacements reports whether any capability profile carries a cached
-// placement set — the signal that the device manager has published a MIG placement ledger.
-func physicalProfilesHavePlacements(profiles []workercore.AcceleratorPhysicalSlicedProfile) bool {
+// partitionProfilesHavePlacements reports whether any capability profile carries a cached
+// placement set — the signal that the device manager has published a partition placement ledger.
+func partitionProfilesHavePlacements(profiles []workercore.AcceleratorPhysicalSlicedProfile) bool {
 	for i := range profiles {
 		if len(profiles[i].Placements) > 0 {
 			return true
@@ -335,21 +484,41 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		return ctrl.Result{}, nil
 	}
 
-	request := parseCardRequest(wl)
+	demands := parseFamilyDemands(wl)
 	devices, err := r.candidateDevices(ctx, wl)
 	if err != nil {
 		logger.Error(err, "list candidate devices")
 		return ctrl.Result{}, err
 	}
-	state, message := nodeDevicesFeasibility(devices, request)
+	state, message := nodeDevicesFeasibility(devices, demands)
 
 	if err := r.applyVerdict(ctx, wl, checks, state, message); err != nil {
 		logger.Error(err, "patch admission check state")
 		return ctrl.Result{}, err
 	}
-	logger.V(2).Info("evaluated node-devices admission",
-		"state", state, "mode", request.mode.String(), "cards", request.count, "profile", request.profile)
+	// demandsSummary formats eagerly, so gate it: this runs on every Workload reconcile.
+	if logger.V(2).Enabled() {
+		logger.V(2).Info("evaluated node-devices admission",
+			"state", state, "demands", demandsSummary(demands))
+	}
 	return ctrl.Result{}, nil
+}
+
+// demandsSummary renders the parsed demands for the controller log; the familyDemand
+// fields are unexported, so the default struct rendering would print nothing useful.
+func demandsSummary(demands []familyDemand) string {
+	parts := make([]string, 0, len(demands))
+	for _, d := range demands {
+		part := fmt.Sprintf("%s cards=%d", d.family, d.cards)
+		if d.profile != "" {
+			part += " profile=" + d.profile
+		}
+		if d.unitsPerCard > 0 {
+			part += fmt.Sprintf(" units=%d", d.unitsPerCard)
+		}
+		parts = append(parts, part)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // candidateDevices gathers the Devices ledgers of every node backing the flavors
@@ -447,25 +616,26 @@ func verdictMessage(state kueue.CheckState) string {
 	return "no node in the assigned flavor pool currently has enough free cards; will retry as capacity frees"
 }
 
-// physicalLedgerNotReadyMessage is the distinct Retry message for a MIG request whose pool
-// carries no cached placement ledger yet — the device manager has not published it (rollout
-// skew). It is separated from a genuine "profile full" so an operator can tell a transient
-// upgrade window from real contention.
-const physicalLedgerNotReadyMessage = "the MIG placement ledger is not ready on the assigned flavor pool (device manager rolling out); will retry"
+// partitionLedgerNotReadyMessage is the distinct Retry message for a partition request whose
+// pool carries no cached placement ledger yet — the device manager has not published it
+// (rollout skew). It is separated from a genuine "profile full" so an operator can tell a
+// transient upgrade window from real contention.
+const partitionLedgerNotReadyMessage = "the partition placement ledger is not ready on the assigned flavor pool " +
+	"(device manager rolling out); will retry"
 
-func physicalVerdictMessage(state kueue.CheckState, profile string) string {
+func partitionVerdictMessage(state kueue.CheckState, profile string) string {
 	if state == kueue.CheckStateReady {
-		return fmt.Sprintf("the assigned flavor pool has enough MIG cards with a free %q placement", profile)
+		return fmt.Sprintf("the assigned flavor pool has enough partitioned cards with a free %q placement", profile)
 	}
-	return fmt.Sprintf("no MIG card in the assigned flavor pool currently has a free %q placement; will retry as capacity frees", profile)
+	return fmt.Sprintf("no partitioned card in the assigned flavor pool currently has a free %q placement; will retry as capacity frees", profile)
 }
 
-// physicalNoMigCardsMessage is the Retry message when the assigned flavor pool has no MIG-enabled
-// card at all — distinct from physicalLedgerNotReadyMessage (a device-manager rollout window on a
-// pool that IS MIG-enabled), so an operator is not misled into waiting on a rollout that will never
-// make a non-MIG pool eligible; the fix is to enable MIG on a card in the pool.
-func physicalNoMigCardsMessage(profile string) string {
-	return fmt.Sprintf("the assigned flavor pool has no MIG-enabled card for profile %q; enable MIG on a card in this pool (will retry)", profile)
+// partitionNoCardsMessage is the Retry message when the assigned flavor pool has no partitioned
+// card at all — distinct from partitionLedgerNotReadyMessage (a device-manager rollout window on
+// a pool that IS partitioned), so an operator is not misled into waiting on a rollout that will
+// never make an unpartitioned pool eligible; the fix is to partition a card in the pool.
+func partitionNoCardsMessage(profile string) string {
+	return fmt.Sprintf("the assigned flavor pool has no partitioned card for profile %q; partition a card in this pool (will retry)", profile)
 }
 
 func (r *NodeDevicesAdmissionReconciler) SetupController(_ context.Context, opts controller.SetupOptions) error {

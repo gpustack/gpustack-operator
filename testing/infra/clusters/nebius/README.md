@@ -15,6 +15,15 @@ node groups, and point your local kubeconfig at it.
   plus one `gpu-<name>` group per `gpu_instance_types` key (each node gets a
   public IP and cloud-init injecting an SSH user + key, same idiom as
   `computes/nebius`).
+- On every **GPU** node, installs `gpustack-node-prep.service` — a boot-time
+  oneshot that moves the image's vendor device-plugin **static Pod** manifest
+  out of `/etc/kubernetes/manifests/` and disables the DCGM services. Both would
+  otherwise fight GPUStack: the static Pod advertises the same accelerator
+  resource the GPUStack device plugin does (and the kubelet owns it, so
+  `kubectl delete` cannot remove it), and DCGM holds driver handles that make a
+  MIG mode switch fail. It runs on **every** boot, not just the first, because
+  the provider reboots a node whose GPU health check fails — and putting a card
+  into MIG mode is by itself enough to fail that check.
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
   into `~/.kube/config` as a new context; on destroy it removes that
   context/cluster/user.

@@ -8,32 +8,39 @@
 # Goal:        On a MIG-capable NVIDIA card the operator observes MIG geometry and dynamically
 #              allocates the hardware GPU/compute instances that back scheduled workloads. This case
 #              proves, end to end on real hardware, that:
-#                - a card whose MIG mode is OFF serves logical (soft) slices — two Pods at 20% and 40%
+#                - a card whose MIG mode is OFF serves logical slices — two Pods at 20% and 40%
 #                  coexist and are runtime-capped (the vendor libvgpu path);
 #                - after the ADMIN enables MIG (nvidia-smi, over SSH) and the Device Manager re-detects,
-#                  the card carves into its canonical profile set (names/counts match the ledger), the
-#                  node advertises one nvidia.com/gpu.sliced.mig-<profile> key per profile, and the soft
-#                  logical keys drop to zero (a hard-partitioned card offers no soft slicing);
-#                - the InstanceType numeric three-view + the per-profile ledger reflect the geometry;
+#                  the card carves into its canonical profile set (names/counts match the ledger) and
+#                  MOVES FAMILY: the node advertises one nvidia.com/gpu.partitioned.<kind>-<profile> key
+#                  per profile plus nvidia.com/gpu.partitioned.units, while the whole logical family
+#                  (nvidia.com/gpu.sliced + its .units/.cores-percentage/.memory-percentage/.memory-mib
+#                  counting keys) DISAPPEARS — a partitioned card serves no logical slice, so it leaves
+#                  the logical population entirely rather than keeping a units key;
+#                - the InstanceType numeric four-view (EX/SH/SL/PT) + the per-profile ledger reflect the
+#                  geometry: PT carries the partition instances and SL collapses to zero once every card
+#                  of the pool is partitioned;
 #                - profiles are placement-mutually-exclusive (a size-4 3g instance blocks a size-8 7g
 #                  instance on the same card; two size-4 fill it, a third is held);
 #                - deleting a MIG Pod frees the instance so a fresh request of the same profile admits
 #                  again (reuse), and an idle card's instance is reclaimed within the debounce;
 #                - after small instances are freed a whole-card profile fits again;
-#                - disabling MIG and re-detecting returns the card to its soft-slice capability.
+#                - disabling MIG and re-detecting returns the card to its logical-slice capability, and
+#                  every .partitioned key disappears in the same move.
 # Environment: A reachable cluster whose active context is the GPU cluster, a node with a real NVIDIA
 #              card, AND SSH to that node (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>.
 #              This case is the ONE case that toggles node hardware state, so it needs the node address;
 #              it does NOT guess it. It EXITS 2 (input required) when MIG_NODE_SSH is unset — provide the
 #              address and re-run. It AUTO-SKIPS (exit 0) when the node's card is not MIG-capable, or the
-#              cluster advertises no nvidia sliced accelerator.
+#              cluster advertises no nvidia accelerator.
 #              Prerequisites the ADMIN owns (the case attempts the mode switch but cannot force them):
 #              the card must be idle, driver-handle daemons (DCGM/nvsm/exporters) stopped, nvidia_drm
 #              unloaded, CAP_SYS_ADMIN available. Targets Hopper+ (no GPU reset needed); on Ampere a
 #              mode switch that pends a reset is reported as a FAIL with guidance, not forced.
 # Inputs:      All real, nothing mocked — the MIG geometry, the libvgpu cap, and the GI/CI create/destroy
 #              are the verification. The case toggles the node's MIG mode over SSH and restarts the
-#              Device Manager to re-detect; test Pods go through the accelerated pool's entrance
+#              Device Manager to re-detect (a DaemonSet restart is sufficient — an existing group's
+#              capability is rewritten in place); test Pods go through the accelerated pool's entrance
 #              LocalQueue. Profiles (SMALL size-1, MID size-4 "3g", FULL size-8 "7g") are DISCOVERED from
 #              the card's own ledger, so the case runs on A100 (…5gb/…20gb/…40gb) and H100
 #              (…10gb/…40gb/…80gb) alike. Placement-exclusion + small-then-large sub-checks run only on a
@@ -76,10 +83,19 @@ GPU_INDEX="${MIG_GPU_INDEX:-0}"
 
 # node_ssh <cmd...> — run a command on the node (non-interactive, bounded). The caller passes a full
 # command line; sudo is the caller's responsibility (nvidia-smi mode switches need it).
+# One shared control connection for the whole case. wait_card_idle alone polls up to 40 times, and
+# every poll otherwise pays a full TCP + auth handshake to a remote node; multiplexing collapses them
+# onto a single handshake. ControlPersist outlives the `timeout` killing a slow client, so the master
+# survives an individual call being cut short. node_ssh_close tears it down from the trap.
+MIGSSH_CTL="${TMPDIR:-/tmp}/gpustack-e2e-mig-$$.sock"
 node_ssh() {
   # shellcheck disable=SC2086
   timeout "${MIGSSH_TIMEOUT}" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o BatchMode=yes \
+    -o ControlMaster=auto -o ControlPath="$MIGSSH_CTL" -o ControlPersist=300 \
     ${MIG_NODE_SSH_OPTS:-} "$MIG_NODE_SSH" "$@"
+}
+node_ssh_close() {
+  ssh -O exit -o ControlPath="$MIGSSH_CTL" "${MIG_NODE_SSH:-}" >/dev/null 2>&1 || true
 }
 
 # --- Confirm SSH reachability + sudo before mutating anything. ---
@@ -149,10 +165,14 @@ for it in items:
 ")"
 [ -n "${IT:-}" ] && [ -n "${LQ:-}" ] || { echo "[case-23] no accelerated InstanceType with an entrance LocalQueue — chain not materialized"; exit 1; }
 MANUF="${MANUF:-nvidia}"
+# The two disjoint accelerator families. LOGICAL slicing (software, the vendor preload library) is
+# served only by a card that is NOT in a hardware partitioning mode; PHYSICAL partitioning (the MIG
+# hardware) only by a card that is. Enabling MIG moves the card from the first family to the second.
 SLICED="${MANUF}.com/gpu.sliced"
-echo "[case-23] accelerated InstanceType ${IT} (entrance LocalQueue ${LQ}, group ${GROUPID:-?}, sliced base ${SLICED})"
+PARTITIONED="${MANUF}.com/gpu.partitioned"
+echo "[case-23] accelerated InstanceType ${IT} (entrance LocalQueue ${LQ}, group ${GROUPID:-?}, logical base ${SLICED}, partition base ${PARTITIONED})"
 
-# The vendor runtimeClass mounts the driver libs the workload needs (nvidia-smi -L, and — on the soft
+# The vendor runtimeClass mounts the driver libs the workload needs (nvidia-smi -L, and — on the logically sliced
 # path — the LD_PRELOAD'd libvgpu.so, which exits 127 without it). Derive it from the manufacturer.
 RUNTIMECLASS=""
 if kubectl get runtimeclass.node.k8s.io "$MANUF" >/dev/null 2>&1; then RUNTIMECLASS="$MANUF"; fi
@@ -170,26 +190,70 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 running()      { [ "$(kubectl -n default get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ]; }
 wait_running() { for _ in $(seq 1 40); do running "$1" && return 0; sleep 3; done; return 1; }
 
-# held_reason <pod> — a concrete signal the Pod was HELD (not merely slow): device-plugin admission
-# refusal, a Kueue scheduling gate, or an Unschedulable verdict. Empty when none is present.
+# workload_refusal <pod> — the Pod's own Kueue Workload verdict, when an AdmissionCheck has actually
+# rendered one: "admission-check(<name>/<state>)" for Retry or Rejected, empty otherwise. This is the
+# product saying "I refuse to admit this", so it is conclusive the moment it appears.
+workload_refusal() {
+  kubectl -n default get workloads.kueue.x-k8s.io -o json 2>/dev/null | python3 -c "
+import json,sys
+pod='$1'
+for wl in json.load(sys.stdin).get('items',[]):
+    if not any(o.get('name')==pod for o in wl.get('metadata',{}).get('ownerReferences',[])):
+        continue
+    st=wl.get('status',{})
+    if any(c.get('type')=='Admitted' and c.get('status')=='True' for c in st.get('conditions',[])):
+        break
+    for c in st.get('admissionChecks',[]):
+        if c.get('state') in ('Retry','Rejected'):
+            print('admission-check(%s/%s)' % (c.get('name',''), c.get('state')))
+            break
+    break
+" 2>/dev/null
+}
+
+# held_reason <pod> — a DECISIVE signal that the Pod was refused: a terminal failure, an Unschedulable
+# verdict, a device-plugin admission refusal, or an AdmissionCheck that declined it. Empty when none is
+# present. The bare Kueue scheduling gate is deliberately NOT among these — see assert_held.
 held_reason() {
-  local p="$1" phase gates cond ev
+  local p="$1" phase cond ev wl
   phase="$(kubectl -n default get pod "$p" -o jsonpath='{.status.phase}' 2>/dev/null)"
   [ "$phase" = Failed ] && { echo "Failed"; return; }
-  gates="$(kubectl -n default get pod "$p" -o jsonpath='{.spec.schedulingGates[*].name}' 2>/dev/null)"
-  [ -n "$gates" ] && { echo "scheduling-gated(${gates})"; return; }
   cond="$(kubectl -n default get pod "$p" -o jsonpath='{.status.conditions[?(@.type=="PodScheduled")].reason}' 2>/dev/null)"
   [ "$cond" = Unschedulable ] && { echo "Unschedulable"; return; }
   ev="$(kubectl -n default get events --field-selector involvedObject.name="$p" -o jsonpath='{range .items[*]}{.reason} {end}' 2>/dev/null | tr ' ' '\n' | grep -iE 'UnexpectedAdmissionError|FailedScheduling' | head -1)"
   [ -n "$ev" ] && { echo "$ev"; return; }
+  wl="$(workload_refusal "$p")"
+  [ -n "$wl" ] && { echo "$wl"; return; }
   echo ""
 }
 
-# assert_held <pod> — poll for a concrete held signal; PASS text on success, empty on "cannot confirm".
+# assert_held <pod> [polls] — confirm the Pod is HELD rather than merely slow; PASS text on success,
+# empty on "cannot confirm".
+#
+# Kueue's pod integration gates EVERY Pod born in this namespace, so the bare kueue.x-k8s.io/admission
+# scheduling gate proves nothing on its own: a Pod that is about to admit normally carries it too, for
+# the second or two before Kueue clears it. Evidence therefore comes in two grades:
+#
+#   DECISIVE  — a verdict has been rendered against the Pod (held_reason). Conclusive on sight.
+#   ENDURING  — nothing but the birth gate. It means "held" only once it OUTLASTS the window a healthy
+#               admission needs, so it must survive every poll of the window.
+#
+# The window is always polled to its end unless the Pod resolves, because the device-plugin's
+# UnexpectedAdmissionError backstop fires only AFTER Kueue clears the gate. Reaching Running at any
+# point returns empty: the Pod was never held.
 assert_held() {
-  local hr=""
-  for _ in $(seq 1 10); do hr="$(held_reason "$1")"; [ -n "$hr" ] && break; sleep 3; done
-  echo "$hr"
+  local p="$1" t="${2:-20}" hr gate last_gate="" gated_throughout=1
+  for _ in $(seq 1 "$t"); do
+    running "$p" && { echo ""; return; }
+    hr="$(held_reason "$p")"
+    [ -n "$hr" ] && { echo "$hr"; return; }
+    gate="$(kubectl -n default get pod "$p" -o jsonpath='{.spec.schedulingGates[*].name}' 2>/dev/null)"
+    if [ -n "$gate" ]; then last_gate="$gate"; else gated_throughout=0; fi
+    sleep 3
+  done
+  [ "$gated_throughout" = 1 ] && [ -n "$last_gate" ] &&
+    { echo "scheduling-gated(${last_gate}) sustained across ${t} polls"; return; }
+  echo ""
 }
 
 # node_gi_count — the number of live GPU instances the card actually holds (node ground truth).
@@ -222,12 +286,40 @@ pod_mig_devices() {
 # node_key <resource> — the node's allocatable quantity for an extended resource (empty if absent).
 node_key() { kubectl get node "$GPU_NODE" -o jsonpath="{.status.allocatable['${1//./\\.}']}" 2>/dev/null; }
 
-# refresh_dm — the Device Manager writes the capability only at startup and does NOT overwrite an
-# existing Devices object, so a capability change (MIG on/off) is picked up only by deleting the ledger
-# object then restarting the DaemonSet. Waits for the rollout and for the object to reappear.
+# node_key_gone <resource> — true when a key is absent OR reads 0. Reconciler-owned counting keys are
+# genuinely REMOVED when their family leaves the node, but a device-plugin pool key only zeroes out —
+# the kubelet keeps the entry until it restarts — so "gone" must accept both for the pool keys.
+node_key_gone() { local v; v="$(node_key "$1")"; [ -z "$v" ] || [ "$v" = 0 ]; }
+
+# partition_profile_keys — the per-profile partition keys the node currently advertises, i.e. every
+# "<base>.partitioned.<kind>-<profile>" (never ".partitioned.units", which is a counting key, not a
+# profile). The kind segment is the manufacturer's own name for hardware partitioning and is read off
+# the node rather than assumed, so the case does not hardcode a vendor's spelling of it.
+partition_profile_keys() {
+  kubectl get node "$GPU_NODE" -o json 2>/dev/null | PFX="${PARTITIONED}." python3 -c "
+import json,os,sys
+pfx=os.environ['PFX']
+a=json.load(sys.stdin).get('status',{}).get('allocatable',{})
+print(' '.join(k for k in a if k.startswith(pfx) and not k.endswith('.units')))
+" 2>/dev/null
+}
+
+# profile_key <profile> — the advertised per-profile key whose profile segment is <profile>, or empty.
+profile_key() {
+  local want="$1" k
+  for k in $(partition_profile_keys); do
+    case "$k" in *-"$want") echo "$k"; return;; esac
+  done
+  echo ""
+}
+
+# refresh_dm — the Device Manager writes the capability at startup, and its detect loop compares only
+# {manufacturer, id, unhealthy}, which a partitioning-mode toggle does not change — so a mode flip is
+# picked up by RESTARTING the DaemonSet. Deleting the Devices object is deliberately NOT done: an
+# existing group's capability is rewritten in place, and deleting it here would hide a regression of
+# that. Waits for the rollout and for the object to be present.
 refresh_dm() {
-  echo "[case-23]   refreshing Device Manager (delete Devices/${GPU_NODE} + rollout restart ${DM_DS})"
-  kubectl delete devices.worker.gpustack.ai "$GPU_NODE" --ignore-not-found >/dev/null 2>&1 || true
+  echo "[case-23]   refreshing Device Manager (rollout restart ${DM_DS}; the Devices object is kept)"
   kubectl -n "$NS" rollout restart "ds/${DM_DS}" >/dev/null 2>&1 || true
   kubectl -n "$NS" rollout status "ds/${DM_DS}" --timeout=180s >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do kubectl get devices.worker.gpustack.ai "$GPU_NODE" >/dev/null 2>&1 && break; sleep 3; done
@@ -248,17 +340,20 @@ set_mig_mode() {
 }
 
 # card_profiles — DISCOVER the SMALL(size-1)/MID(size-4,3g)/FULL(size-8,7g) profiles + per-card counts +
-# the MIG-card count N from the card's own capability. The physical-slice geometry is CAPABILITY, so it
-# lives in Devices.spec (the per-card runtime ledger is in .status). Emits: SMALL SMALL_CNT MID MID_CNT
-# FULL FULL_CNT N.
+# the partitioned-card count N and the group's TOTAL card count NTOT, from the cards' own capability.
+# The physical-slice geometry is CAPABILITY, so it lives in Devices.spec (the per-card runtime ledger is
+# in .status). NTOT is what tells the case whether the WHOLE pool moved family (N == NTOT) or only part
+# of it, which decides whether the logical keys may legitimately still be present. Emits:
+# SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT N NTOT.
 card_profiles() {
   kubectl get devices "$GPU_NODE" -o json 2>/dev/null | python3 -c "
 import json,sys
 d=json.load(sys.stdin)
-small=mid=full=None; n=0
+small=mid=full=None; n=0; ntot=0
 for g in d.get('spec',{}).get('groups',[]):
     if g.get('manufacturer')!='nvidia': continue
     for a in g.get('accelerators',[]):
+        ntot+=1
         profs=a.get('status',{}).get('physicalSliced',{}).get('profiles',[]) or []
         if profs: n+=1
         for p in profs:
@@ -268,7 +363,7 @@ for g in d.get('spec',{}).get('groups',[]):
             if ms==8: full=(p['name'],p.get('memoryMib',0),p.get('count',0))
 def f(x): return (x[0], x[2]) if x else ('', 0)
 sn,sc=f(small); mn,mc=f(mid); fn,fc=f(full)
-print(sn, sc, mn, mc, fn, fc, n)
+print(sn, sc, mn, mc, fn, fc, n, ntot)
 " 2>/dev/null
 }
 
@@ -283,6 +378,7 @@ restore() {
     [ "$INITIAL_MODE" = Enabled ] && set_mig_mode 1 || set_mig_mode 0
     refresh_dm
   fi
+  node_ssh_close
 }
 trap restore EXIT
 
@@ -312,12 +408,12 @@ EOF
 delpod() { kubectl -n default delete pod "$1" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true; }
 
 # ===================================================================================================
-# Phase L — Logical (soft) slicing, only when the card started with MIG OFF.
+# Phase L — Logical slicing, only when the card started with MIG OFF.
 # ===================================================================================================
 if [ "$INITIAL_MODE" = Disabled ]; then
   echo
-  echo "[case-23] === Phase L: logical soft slicing (MIG off) — 20% and 40% coexist ==="
-  P20="${PODPFX}-soft20"; P40="${PODPFX}-soft40"
+  echo "[case-23] === Phase L: logical slicing (MIG off) — 20% and 40% coexist ==="
+  P20="${PODPFX}-logical20"; P40="${PODPFX}-logical40"
   mkpod "$P20" "          ${SLICED}: \"1\"
           ${SLICED}.memory-percentage: \"20\"
           ${SLICED}.cores-percentage: \"20\""
@@ -329,13 +425,13 @@ if [ "$INITIAL_MODE" = Disabled ]; then
   if [ "$l20" = 1 ] && [ "$l40" = 1 ]; then
     sm20="$(kubectl -n default exec "$P20" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)"
     sm40="$(kubectl -n default exec "$P40" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)"
-    record PASS "soft 20% + 40% coexist and are capped" "${P20}(SM=${sm20:-?}) + ${P40}(SM=${sm40:-?}) both Running on the soft-sliced card"
+    record PASS "logical 20% + 40% coexist and are capped" "${P20}(SM=${sm20:-?}) + ${P40}(SM=${sm40:-?}) both Running on the logical-sliced card"
   else
-    record FAIL "soft 20% + 40% coexist and are capped" "20% running=${l20} 40% running=${l40} — soft slicing broken on the MIG-off card"
+    record FAIL "logical 20% + 40% coexist and are capped" "20% running=${l20} 40% running=${l40} — logical slicing broken on the MIG-off card"
   fi
   delpod "$P20"; delpod "$P40"
 else
-  record SKIP "soft-slice path (card started MIG-on)" "card ${GPU_INDEX} was already MIG-enabled; soft slicing is verified in reverse by Phase D (disable → soft returns)"
+  record SKIP "logical-slice path (card started MIG-on)" "card ${GPU_INDEX} was already MIG-enabled; logical slicing is verified in reverse by Phase D (disable → logical returns)"
 fi
 
 # ===================================================================================================
@@ -352,21 +448,18 @@ if [ "$CUR" != Enabled ]; then
 fi
 refresh_dm
 MIGKEY_FULL=""
-# Wait for the card to carve: the node advertises at least one nvidia.com/gpu.sliced.mig-<profile> key.
+# Wait for the card to move family: the node advertises at least one per-profile partition key.
 for _ in $(seq 1 30); do
-  keys="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null | python3 -c "
-import json,sys
-a=json.load(sys.stdin).get('status',{}).get('allocatable',{})
-print(' '.join(k for k in a if '.sliced.mig-' in k))
-" 2>/dev/null)"
+  keys="$(partition_profile_keys)"
   [ -n "$keys" ] && break
   sleep 4
 done
-read -r SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT NCARD <<<"$(card_profiles)"
-echo "[case-23] discovered profiles: SMALL=${SMALL}(${SMALL_CNT}/card) MID=${MID}(${MID_CNT}/card) FULL=${FULL}(${FULL_CNT}/card); MIG cards N=${NCARD:-0}"
+read -r SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT NCARD NTOT <<<"$(card_profiles)"
+echo "[case-23] discovered profiles: SMALL=${SMALL}(${SMALL_CNT}/card) MID=${MID}(${MID_CNT}/card) FULL=${FULL}(${FULL_CNT}/card); partitioned cards N=${NCARD:-0} of ${NTOT:-0}"
+echo "[case-23] advertised per-profile partition keys: ${keys:-<none>}"
 
 # ===================================================================================================
-# Phase P — Profiles carve correctly; node advertises per-profile keys; soft logical keys drop to 0.
+# Phase P — Profiles carve correctly; node advertises per-profile keys; logical keys drop to 0.
 # ===================================================================================================
 echo
 echo "[case-23] === Phase P: profile carve + capability keys ==="
@@ -375,43 +468,58 @@ if [ -n "$MID" ] && [ -n "$FULL" ] && [ "${MID_CNT:-0}" = 2 ] && [ "${FULL_CNT:-
 else
   record FAIL "canonical profiles carved (names/counts)" "MID=${MID}(${MID_CNT}) FULL=${FULL}(${FULL_CNT}) SMALL=${SMALL}(${SMALL_CNT}) — expected a size-4 (2/card) and a size-8 (1/card) profile"
 fi
-MIGKEY_MID="${SLICED}.mig-${MID}"
-MIGKEY_FULL="${SLICED}.mig-${FULL}"
+MIGKEY_MID="$(profile_key "$MID")"
+MIGKEY_FULL="$(profile_key "$FULL")"
 mid_key_cap="$(node_key "$MIGKEY_MID")"
 full_key_cap="$(node_key "$MIGKEY_FULL")"
-if [ -n "$mid_key_cap" ] && [ -n "$full_key_cap" ]; then
-  record PASS "node advertises per-profile MIG keys" "${MIGKEY_MID}=${mid_key_cap}, ${MIGKEY_FULL}=${full_key_cap}"
+if [ -n "$MIGKEY_MID" ] && [ -n "$MIGKEY_FULL" ] && [ -n "$mid_key_cap" ] && [ -n "$full_key_cap" ]; then
+  record PASS "node advertises per-profile partition keys" "${MIGKEY_MID}=${mid_key_cap}, ${MIGKEY_FULL}=${full_key_cap}"
 else
-  record FAIL "node advertises per-profile MIG keys" "${MIGKEY_MID}='${mid_key_cap:-<absent>}', ${MIGKEY_FULL}='${full_key_cap:-<absent>}'"
+  record FAIL "node advertises per-profile partition keys" "MID key='${MIGKEY_MID:-<absent>}'=${mid_key_cap:-<absent>}, FULL key='${MIGKEY_FULL:-<absent>}'=${full_key_cap:-<absent>} — a partitioned card must advertise one key per profile it can host"
 fi
-# A hard-partitioned card offers no soft slicing → the logical keys must be gone (only .sliced.units + .sliced.mig-* remain).
-softpct="$(node_key "${SLICED}.memory-percentage")"
+# The partition family's counting key comes with them: a partitioned card is worth a whole card's units.
+punits="$(node_key "${PARTITIONED}.units")"
+[ -n "$punits" ] \
+  && record PASS "node advertises the partition units key" "${PARTITIONED}.units=${punits}" \
+  || record FAIL "node advertises the partition units key" "${PARTITIONED}.units absent — the partition family's credit input is missing"
+# THE FAMILY SWAP. A partitioned card serves no logical slice, so it leaves the logical population
+# entirely: the reconciler-owned logical counting keys are REMOVED (not retained, not zeroed) and the
+# device-plugin's logical token pool drains to nothing. This can only be asserted when EVERY card of
+# the group is partitioned — one unpartitioned sibling legitimately keeps the logical family alive.
+logicalpct="$(node_key "${SLICED}.memory-percentage")"
 units="$(node_key "${SLICED}.units")"
-if [ -z "$softpct" ] && [ -n "$units" ]; then
-  record PASS "soft logical keys drop on MIG card" "${SLICED}.memory-percentage absent, ${SLICED}.units=${units} retained (MIG folds into credits)"
+if [ "${NCARD:-0}" != "${NTOT:-0}" ] || [ "${NTOT:-0}" = 0 ]; then
+  record SKIP "logical family leaves the MIG card" "only ${NCARD:-0} of ${NTOT:-0} card(s) partitioned — the unpartitioned sibling(s) keep the logical keys alive, so their absence is not assertable here"
+elif [ -z "$logicalpct" ] && [ -z "$units" ] && node_key_gone "${SLICED}"; then
+  record PASS "logical family leaves the MIG card" "${SLICED}.memory-percentage and ${SLICED}.units removed, ${SLICED} pool drained — the card now serves only ${PARTITIONED}"
 else
-  record FAIL "soft logical keys drop on MIG card" "${SLICED}.memory-percentage='${softpct:-<absent>}' (want absent), ${SLICED}.units='${units:-<absent>}' (want present)"
+  record FAIL "logical family leaves the MIG card" "${SLICED}.memory-percentage='${logicalpct:-<absent>}', ${SLICED}.units='${units:-<absent>}' (both want absent), ${SLICED}='$(node_key "${SLICED}")' (want absent or 0)"
 fi
 
 # ===================================================================================================
-# Phase I — InstanceType numeric values reflect the MIG geometry (aggregate profiles + sliced view).
+# Phase I — InstanceType numeric values reflect the MIG geometry (aggregate profiles + PT/SL views).
 # ===================================================================================================
 echo
 echo "[case-23] === Phase I: InstanceType numeric values ==="
-it_ok="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null | MID="$MID" FULL="$FULL" NCARD="${NCARD:-1}" python3 -c "
+# PT (acceleratorPartitioned) is the partitioned cards' view and must be non-zero. SL
+# (acceleratorSliced) is the unpartitioned cards' view, and must collapse to zero — but only when every
+# card of the pool is partitioned; with an unpartitioned sibling the SL check is not applicable.
+it_ok="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null | MID="$MID" FULL="$FULL" NCARD="${NCARD:-1}" ALLMIG="$([ "${NCARD:-0}" = "${NTOT:-0}" ] && [ "${NTOT:-0}" != 0 ] && echo 1 || echo 0)" python3 -c "
 import json,sys,os
 it=json.load(sys.stdin); st=it.get('status',{})
 det=st.get('detail',{}).get('slicedDetail',{}).get('physical',{})
 profs={p['name']:p.get('count',0) for p in det.get('profiles',[]) or []}
 mid=os.environ['MID']; full=os.environ['FULL']; n=int(os.environ['NCARD'] or 1)
-sliced=st.get('acceleratorSliced',{})
-ok = profs.get(mid)==2*n and profs.get(full)==1*n and int(sliced.get('capacity',0) or 0)>0
-print('OK' if ok else 'BAD', 'mid=%s full=%s slicedCap=%s' % (profs.get(mid), profs.get(full), sliced.get('capacity')))
+allmig=os.environ['ALLMIG']=='1'
+sliced=st.get('acceleratorSliced',{}); part=st.get('acceleratorPartitioned',{})
+scap=int(sliced.get('capacity',0) or 0); pcap=int(part.get('capacity',0) or 0)
+ok = profs.get(mid)==2*n and profs.get(full)==1*n and pcap>0 and (scap==0 or not allmig)
+print('OK' if ok else 'BAD', 'mid=%s full=%s ptCap=%s slCap=%s allPartitioned=%s' % (profs.get(mid), profs.get(full), pcap, scap, allmig))
 " 2>/dev/null)"
 if [[ "$it_ok" == OK* ]]; then
-  record PASS "InstanceType status reflects MIG geometry" "aggregate profiles ${MID}=$((2*${NCARD:-1})), ${FULL}=$((1*${NCARD:-1})), sliced capacity > 0 [${it_ok#OK }]"
+  record PASS "InstanceType four-view reflects MIG geometry" "aggregate profiles ${MID}=$((2*${NCARD:-1})), ${FULL}=$((1*${NCARD:-1})), PT capacity > 0 [${it_ok#OK }]"
 else
-  record FAIL "InstanceType status reflects MIG geometry" "status detail mismatch [${it_ok:-<empty>}]"
+  record FAIL "InstanceType four-view reflects MIG geometry" "status detail mismatch [${it_ok:-<empty>}] — PT must carry the partition instances and SL must read 0 on an all-partitioned pool"
 fi
 
 # ===================================================================================================
@@ -419,10 +527,10 @@ fi
 # ===================================================================================================
 echo
 echo "[case-23] === Phase X: profile mutual exclusion ==="
-if [ "${NCARD:-0}" = 1 ] && [ -n "$MID" ] && [ -n "$FULL" ]; then
+if [ "${NCARD:-0}" = 1 ] && [ -n "$MIGKEY_MID" ] && [ -n "$MIGKEY_FULL" ]; then
   A="${PODPFX}-mid-a"; B="${PODPFX}-mid-b"; C="${PODPFX}-mid-c"; FU="${PODPFX}-full"
   # A size-4 MID admits and gets exactly one MIG device.
-  mkpod "$A" "          ${SLICED}: \"1\"
+  mkpod "$A" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   if wait_running "$A"; then
     nd="$(pod_mig_devices "$A")"; gic="$(node_gi_count)"
@@ -432,28 +540,28 @@ if [ "${NCARD:-0}" = 1 ] && [ -n "$MID" ] && [ -n "$FULL" ]; then
     record FAIL "MID ${MID} admits with one MIG device" "${A} not Running — MIG allocate failed (see device-manager logs)"
   fi
   # With a size-4 placed, a size-8 FULL cannot fit the same (only) card → held.
-  mkpod "$FU" "          ${SLICED}: \"1\"
+  mkpod "$FU" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_FULL}: \"1\""
   hr="$(assert_held "$FU")"
   [ -n "$hr" ] && record PASS "FULL ${FULL} held while MID occupies the card" "${FU} held [${hr}] — a size-8 profile cannot co-exist with a size-4 (mutual exclusion)" \
     || record FAIL "FULL ${FULL} held while MID occupies the card" "${FU} not held with no concrete reason — placement exclusion may be violated"
   delpod "$FU"
   # A second MID fills the card (2 per card); a third is held.
-  mkpod "$B" "          ${SLICED}: \"1\"
+  mkpod "$B" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   if wait_running "$B"; then
     record PASS "two MID ${MID} fill one card" "${A} + ${B} both Running (2× size-4 = full card), node GI count=$(node_gi_count)"
   else
     record FAIL "two MID ${MID} fill one card" "${B} not Running — the card should host two size-4 instances"
   fi
-  mkpod "$C" "          ${SLICED}: \"1\"
+  mkpod "$C" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   hr="$(assert_held "$C")"
   [ -n "$hr" ] && record PASS "third MID ${MID} held (card full)" "${C} held [${hr}] — no third size-4 slot" \
     || record FAIL "third MID ${MID} held (card full)" "${C} not held — the card was over-partitioned"
   delpod "$C"; delpod "$B"; delpod "$A"
 else
-  record SKIP "profile mutual exclusion (needs a single MIG card)" "MIG cards N=${NCARD:-0}; per-card placement exclusion is asserted only on a one-card node"
+  record SKIP "profile mutual exclusion (needs a single partitioned card)" "partitioned cards N=${NCARD:-0}, MID key='${MIGKEY_MID:-<none>}', FULL key='${MIGKEY_FULL:-<none>}'; per-card placement exclusion is asserted only on a one-card node"
 fi
 
 # ===================================================================================================
@@ -461,14 +569,20 @@ fi
 # ===================================================================================================
 echo
 echo "[case-23] === Phase R: reuse a freed instance ==="
-if [ -n "$MID" ]; then
+if [ -n "$MIGKEY_MID" ]; then
   R1="${PODPFX}-reuse-1"; R2="${PODPFX}-reuse-2"
-  mkpod "$R1" "          ${SLICED}: \"1\"
+  # Phase X force-deleted its Pods but the instances behind them are destroyed on the reclaim
+  # debounce, not on Pod deletion. Requesting R1 before that lands asks for a slot on a card that is
+  # still full: the AdmissionCheck refuses it and the retry rides Kueue's backoff, which can outlast
+  # this phase's own wait. Wait for the card to go idle first — the same precondition Phases S and D
+  # already take.
+  wait_card_idle || echo "[case-23]   warning: card still reports live instances entering the reuse phase"
+  mkpod "$R1" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   if wait_running "$R1"; then
     uuid1="$(kubectl -n default exec "$R1" -- bash -c 'echo $NVIDIA_VISIBLE_DEVICES' 2>/dev/null)"
     delpod "$R1"
-    mkpod "$R2" "          ${SLICED}: \"1\"
+    mkpod "$R2" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
     if wait_running "$R2"; then
       uuid2="$(kubectl -n default exec "$R2" -- bash -c 'echo $NVIDIA_VISIBLE_DEVICES' 2>/dev/null)"
@@ -482,7 +596,7 @@ if [ -n "$MID" ]; then
     delpod "$R1"
   fi
 else
-  record SKIP "reuse a freed instance" "no size-4 MID profile discovered"
+  record SKIP "reuse a freed instance" "no size-4 MID profile key advertised"
 fi
 
 # ===================================================================================================
@@ -490,9 +604,9 @@ fi
 # ===================================================================================================
 echo
 echo "[case-23] === Phase G: reclaim an idle instance ==="
-if [ -n "$MID" ]; then
+if [ -n "$MIGKEY_MID" ]; then
   G1="${PODPFX}-reclaim"
-  mkpod "$G1" "          ${SLICED}: \"1\"
+  mkpod "$G1" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   if wait_running "$G1"; then
     before="$(node_gi_count)"
@@ -510,7 +624,7 @@ if [ -n "$MID" ]; then
     delpod "$G1"
   fi
 else
-  record SKIP "idle instance reclaimed after debounce" "no size-4 MID profile discovered"
+  record SKIP "idle instance reclaimed after debounce" "no size-4 MID profile key advertised"
 fi
 
 # ===================================================================================================
@@ -518,12 +632,12 @@ fi
 # ===================================================================================================
 echo
 echo "[case-23] === Phase S: small profiles then a whole-card profile ==="
-if [ "${NCARD:-0}" = 1 ] && [ -n "$SMALL" ] && [ -n "$FULL" ] && [ "${SMALL_CNT:-0}" -ge 1 ]; then
-  MIGKEY_SMALL="${SLICED}.mig-${SMALL}"
+MIGKEY_SMALL="$(profile_key "$SMALL")"
+if [ "${NCARD:-0}" = 1 ] && [ -n "$MIGKEY_SMALL" ] && [ -n "$MIGKEY_FULL" ] && [ "${SMALL_CNT:-0}" -ge 1 ]; then
   smalls=(); ok_small=1
   for i in $(seq 1 "$SMALL_CNT"); do
     s="${PODPFX}-small-${i}"; smalls+=("$s")
-    mkpod "$s" "          ${SLICED}: \"1\"
+    mkpod "$s" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_SMALL}: \"1\""
     wait_running "$s" || ok_small=0
   done
@@ -533,7 +647,7 @@ if [ "${NCARD:-0}" = 1 ] && [ -n "$SMALL" ] && [ -n "$FULL" ] && [ "${SMALL_CNT:
   # Wait for the small instances to reclaim so the whole card is free again.
   for _ in $(seq 1 40); do [ "$(node_gi_count)" = 0 ] && break; sleep 3; done
   BIG="${PODPFX}-big"
-  mkpod "$BIG" "          ${SLICED}: \"1\"
+  mkpod "$BIG" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_FULL}: \"1\""
   if wait_running "$BIG"; then
     nd="$(pod_mig_devices "$BIG")"
@@ -543,34 +657,31 @@ if [ "${NCARD:-0}" = 1 ] && [ -n "$SMALL" ] && [ -n "$FULL" ] && [ "${SMALL_CNT:
   fi
   delpod "$BIG"
 else
-  record SKIP "small-then-large recompose (needs a single MIG card)" "MIG cards N=${NCARD:-0} / profiles SMALL=${SMALL:-?} FULL=${FULL:-?}"
+  record SKIP "small-then-large recompose (needs a single partitioned card)" "partitioned cards N=${NCARD:-0} / profile keys SMALL='${MIGKEY_SMALL:-<none>}' FULL='${MIGKEY_FULL:-<none>}'"
 fi
 
 # ===================================================================================================
-# Phase D — Disable MIG and re-detect → the card returns to its soft-slice capability.
+# Phase D — Disable MIG and re-detect → the card returns to its logical-slice capability.
 # ===================================================================================================
 echo
-echo "[case-23] === Phase D: disable MIG → soft-slice capability returns ==="
+echo "[case-23] === Phase D: disable MIG → logical-slice capability returns ==="
 # A mode switch needs an idle card — wait for the whole-card FULL from Phase S (just deleted) to
 # reclaim before disabling, else nvidia-smi -mig 0 cannot converge (the disable prerequisite).
 wait_card_idle || echo "[case-23]   warning: card still reports live instances before disable"
 if set_mig_mode 0; then
   refresh_dm
-  softpct=""; migleft="x"
+  logicalpct=""; partleft="x"; punits_left="x"
   for _ in $(seq 1 30); do
-    softpct="$(node_key "${SLICED}.memory-percentage")"
-    migleft="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null | python3 -c "
-import json,sys
-a=json.load(sys.stdin).get('status',{}).get('allocatable',{})
-print(sum(1 for k in a if '.sliced.mig-' in k))
-" 2>/dev/null)"
-    [ -n "$softpct" ] && [ "${migleft:-1}" = 0 ] && break
+    logicalpct="$(node_key "${SLICED}.memory-percentage")"
+    partleft="$(partition_profile_keys | wc -w | tr -d '[:space:]')"
+    punits_left="$(node_key "${PARTITIONED}.units")"
+    [ -n "$logicalpct" ] && [ "${partleft:-1}" = 0 ] && [ -z "$punits_left" ] && break
     sleep 4
   done
-  if [ -n "$softpct" ] && [ "${migleft:-1}" = 0 ]; then
-    record PASS "soft-slice capability returns after disable" "${SLICED}.memory-percentage=${softpct} back, all .sliced.mig-* keys gone"
+  if [ -n "$logicalpct" ] && [ "${partleft:-1}" = 0 ] && [ -z "$punits_left" ]; then
+    record PASS "logical family returns after disable" "${SLICED}.memory-percentage=${logicalpct} back; every per-profile partition key and ${PARTITIONED}.units gone — the card moved back to the logical population"
   else
-    record FAIL "soft-slice capability returns after disable" "${SLICED}.memory-percentage='${softpct:-<absent>}', remaining mig keys=${migleft} — card did not return to soft slicing"
+    record FAIL "logical family returns after disable" "${SLICED}.memory-percentage='${logicalpct:-<absent>}', per-profile partition keys left=${partleft}, ${PARTITIONED}.units='${punits_left:-<absent>}' — the card did not return to logical slicing"
   fi
 else
   record FAIL "disable MIG mode" "nvidia-smi -mig 0 did not converge to Disabled"
@@ -591,7 +702,7 @@ if [ "$FAILS" -ne 0 ]; then
   echo "FAILED ${FAILS} check(s). The operator observes MIG geometry and dynamically creates/destroys the"
   echo "GPU/compute instances backing scheduled Pods. Diagnose:"
   echo "  kubectl get devices ${GPU_NODE} -o yaml   # per-card physicalSliced profiles + RemainingProfiles"
-  echo "  kubectl get node ${GPU_NODE} -o json | jq '.status.allocatable | with_entries(select(.key|test(\"sliced\")))'"
+  echo "  kubectl get node ${GPU_NODE} -o json | jq '.status.allocatable | with_entries(select(.key|test(\"sliced|partitioned\")))'"
   echo "  kubectl -n ${NS} logs ds/${DM_DS} --tail=200"
   echo "  ${MIG_NODE_SSH} sudo nvidia-smi mig -lgi   # the live GPU instances on the card"
   exit 1

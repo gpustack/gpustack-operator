@@ -44,7 +44,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// workload container was granted; for any non-sliced mode the responder emits only
 	// ASCEND_VISIBLE_DEVICES with the exact allocated index(es) — Ascend has no `all`
 	// wildcard — which is exactly what the sidecar needs (device-cgroup access, no
-	// vcann-rt soft-slicing artifacts).
+	// vcann-rt logical-slicing artifacts).
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility),
 	)
@@ -146,7 +146,7 @@ func (s *server) GetContainerAllocateResponse(
 		// TODO: mount HCCL topo file for 950.
 	}
 
-	// Sliced containers get real soft-slicing isolation (vcann-rt preload + quota);
+	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota);
 	// exclusive/shared keep the plain device-visibility response below.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, indexes, accelerators)
@@ -163,7 +163,7 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// In-container paths the vcann-rt soft-slicing runtime expects.
+// In-container paths the vcann-rt logical-slicing runtime expects.
 const (
 	ctrLdPreloadPath = "/etc/ld.so.preload"
 	ctrVruntimePath  = "/opt/enpu/vcann-rt/lib/libvruntime.so"
@@ -175,7 +175,7 @@ const (
 	vcannSchedulingPolicy = 2
 )
 
-// getSlicedContainerAllocateResponse renders the vcann-rt soft-slicing injection for
+// getSlicedContainerAllocateResponse renders the vcann-rt logical-slicing injection for
 // a sliced container: a per-container npu_info.config carrying the compute/memory
 // quota derived from the container's ".sliced.units" request, plus the mounts that
 // preload libvruntime.so and expose the config. The real driver libdcmi/HAL bind at
@@ -197,7 +197,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 	// container maps to exactly one card. Reject a multi-card allocation rather than
 	// silently quota-isolating only the first card while exposing the rest.
 	if len(accels) > 1 {
-		return nil, fmt.Errorf("sliced container %q allocated %d accelerators, but vcann-rt soft slicing is single-NPU", ctr.Name, len(accels))
+		return nil, fmt.Errorf("sliced container %q allocated %d accelerators, but vcann-rt logical slicing is single-NPU", ctr.Name, len(accels))
 	}
 
 	// vcann-rt is single-NPU; configure the first allocated card.

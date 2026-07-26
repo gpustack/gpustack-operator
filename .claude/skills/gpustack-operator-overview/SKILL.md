@@ -15,7 +15,7 @@ One `gpustack-operator` binary, three subcommands; the scheduling chain builds i
 
 1. **Bootstrap** — the `worker` installs NFD and per-manufacturer Device Manager DaemonSets.
 2. **Device discovery** — the Device Manager detects accelerators and writes `acceleratable.feature.gpustack.ai/*` labels.
-3. **Capacity profiling** — the worker's `NodeFeatureReconciler` stamps the `gpustack.ai/managed` marker and `NodeCapacityReconciler` derives `general.`/`acceleratable.` per-card capacity labels (CPU cores + the four `.sliced.*` accelerator capacities). The general(CPU) key defaults to `generic` and does not encode os/arch.
+3. **Capacity profiling** — the worker's `NodeFeatureReconciler` stamps the `gpustack.ai/managed` marker and `NodeCapacityReconciler` derives `general.`/`acceleratable.` per-card capacity labels (CPU cores plus the two accelerator families' capacities — `.sliced.*` for logically sliceable cards, `.partitioned.*` for cards in a hardware partitioning mode; a card serves exactly one family). The general(CPU) key defaults to `generic` and does not encode os/arch.
 4. **Queue construction & admission** — worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no Cohort) plus a materialized `InstanceType` CRD, fronted by a per-namespace `LocalQueue` and gated per-card by a `gpustack-node-devices` AdmissionCheck.
 
 `pkg/nodefeature` is the heart of the label algebra (construct/extract of node keys, flavors,
@@ -61,7 +61,7 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 
 - **Kueue object names**: `gpustack-${key}-${os}-${arch}-${count}{c|d}` for a `ResourceFlavor` (`c` = CPU cores, `d` = devices); `gpustack-${key}-${os}-${arch}` for the `ClusterQueue` / `InstanceType` — single dash, CPU and device pools split (not composite), os/arch in full.
 - **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue name goes in the `schedule.gpustack.ai/cluster-queue` annotation).
-- **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models + `.sliced.*` capacities), `general.feature.gpustack.ai/` (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/` + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and `gpustack.ai/controlled` mark node onboarding and queue teardown.
+- **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models + `.sliced.*` / `.partitioned.*` capacities), `general.feature.gpustack.ai/` (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/` + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and `gpustack.ai/controlled` mark node onboarding and queue teardown.
 - **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.
 - **Generated files**: anything matching `zz_generated.*`, `generated.pb.go`, `generated.proto` is generated — never hand-edit; edit the source types and run the `gpustack-operator-generate` skill.
@@ -70,4 +70,5 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 
 - Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
 - Scheduling chain, label tables, worked example → [architecture.md](../../../docs/architecture.md)
+- The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)

@@ -9,8 +9,8 @@
 GPUStack Operator is a Kubernetes operator that discovers accelerators on every node, profiles their
 capacity into normalized per-device units, and materializes them into a Kueue-based scheduling chain your
 workloads can queue against. It supports **9 accelerator vendors** across GPU / NPU / MLU / DCU / PPU, and
-adds **soft-slicing** so a single card can be safely shared by multiple workloads with independent compute
-and memory budgets.
+adds **logical slicing** so a single card can be safely shared by multiple workloads with independent
+compute and memory budgets — or **physical partitioning** (NVIDIA MIG) where the hardware does the isolating.
 
 Built on top of [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery)
 and [Kueue](https://github.com/kubernetes-sigs/kueue) — you install one chart, and the operator brings up
@@ -19,9 +19,10 @@ the rest.
 ## Features
 
 - **Multi-vendor discovery** — auto-detects accelerators from 9 vendors (see [Supported Accelerators](#supported-accelerators)) and profiles each node's CPU / RAM / storage and per-card capacity, with no per-node configuration; scheduling pools can optionally split by CPU manufacturer (`instance-type-aware-cpu-manufacturer`).
-- **Soft-slicing with decoupled compute + memory isolation** — share one physical card among workloads, capping compute (SM / aicore %) independently of VRAM. Runtime isolation is enforced by a vendor preload library (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`), not just by accounting.
+- **Logical slicing with decoupled compute + memory isolation** — share one physical card among workloads, capping compute (SM / aicore %) independently of VRAM. Runtime isolation is enforced by a vendor preload library (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`), not just by accounting.
+- **Physical partitioning, as its own resource family** — a card put into a hardware partitioning mode (NVIDIA MIG) serves `<base>.partitioned` / `<base>.partitioned.<kind>-<profile>` requests, and the operator materializes the instance on admission and reclaims it when the Pod exits. Partitioned and unpartitioned cards advertise disjoint key families, so a partition request can never land on a card that cannot host it — see [Accelerator Requests](./docs/accelerator-requests.md).
 - **Per-card over-admission protection** — a four-gate admission model (Kueue credits → scheduler/kubelet → per-card `AdmissionCheck` → the `Devices` ledger) catches the fragmentation cases a coarse quota total can't see, so a request never lands on a card that has no room.
-- **Live capacity, as a real resource** — each pool surfaces as a materialized `InstanceType` CRD whose `.status` carries a three-view (free whole cards / shareable slots / sliceable VRAM units). `kubectl get instancetype -w` shows capacity move as workloads allocate and free. Admins can also **declare** `InstanceType`s directly (required, immutable-sized inputs, descriptors enriched at admission), and the list-only `InstanceTypeFlavor` catalog surfaces every pool's hardware profile.
+- **Live capacity, as a real resource** — each pool surfaces as a materialized `InstanceType` CRD whose `.status` carries a four-view (free whole cards / shareable slots / logically sliceable VRAM units / hardware partition instances). `kubectl get instancetype -w` shows capacity move as workloads allocate and free. Admins can also **declare** `InstanceType`s directly (required, immutable-sized inputs, descriptors enriched at admission), and the list-only `InstanceTypeFlavor` catalog surfaces every pool's hardware profile.
 - **SSH-enabled Instances** — launch a workload with an SSH sidecar that shares the same sliced card through a capability-stripped shell, for interactive development on a slice.
 - **Multi-cluster aggregation** — the `worker-gateway` aggregates InstanceTypes and capacity across upstream clusters into a single view.
 
@@ -87,9 +88,10 @@ worked example cluster.
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
+- [Accelerator Requests](./docs/accelerator-requests.md) — the resource keys for every accelerator family, the normative request rules enforced at admission, and a worked example per family.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
 - [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
-- [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) — the administrator runbook for enabling/disabling NVIDIA MIG on a node, reboot recovery, and the no-automatic-descheduling policy.
+- [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) — the administrator runbook for enabling/disabling NVIDIA MIG on a node, reboot recovery, and the no-automatic-descheduling policy, plus a recorded walkthrough of the three configurations a node can be in: all-logical, all-physical, and **mixed** (some cards partitioned, the rest whole).
 - [Migrating from v0.5.x](./docs/migration/from-v0.5.md) — upgrading an existing install to a higher version across the scheduling-chain refactor.
 
 ## License

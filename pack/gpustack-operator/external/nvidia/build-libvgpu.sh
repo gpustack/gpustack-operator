@@ -2,7 +2,7 @@
 #
 # build-libvgpu.sh <src-dir> <out-dir>
 #
-# Build the HAMi-core soft-slicing library (libvgpu.so) inside an NVIDIA CUDA devel
+# Build the HAMi-core logical-slicing library (libvgpu.so) inside an NVIDIA CUDA devel
 # image. <src-dir> is the HAMi-core source tree (the Dockerfile stage clones it); the
 # product is installed at <out-dir>/libvgpu.so.
 #

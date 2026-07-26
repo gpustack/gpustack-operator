@@ -15,7 +15,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
-// Soft-slicing host paths. The device-manager init container stages the in-image
+// Logical-slicing host paths. The device-manager init container stages the in-image
 // /etc/gpustack/lib tree onto the host at OperatorLibDir; per-container working
 // directories live under OperatorPodsDir. They are package vars (not consts) so
 // tests can redirect them to a temporary directory.
@@ -41,14 +41,18 @@ func (in Resource) String() string {
 	return in.Group + ":" + in.Device
 }
 
-func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxSlices int32) []string {
+// GetDeviceIds returns the device IDs one card advertises for mode. poolSize is the card's
+// own token count for the pooled modes (Sliced, Partitioned) and is ignored by the others;
+// a non-positive poolSize advertises no tokens at all. A mode with no token shape of its own
+// advertises nothing.
+func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, poolSize int32) []string {
 	str := in.String() + ":"
 
-	if mode == workercore.DeviceAllocationModeExclusive {
+	switch mode {
+	case workercore.DeviceAllocationModeExclusive:
 		return []string{str + "0000"}
-	}
 
-	if mode == workercore.DeviceAllocationModeShared {
+	case workercore.DeviceAllocationModeShared:
 		// One device ID per shared owner; indices step by D/maxOwners units.
 		const step = uint64(nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize)
 		devIDs := make([]string, 0, nodefeature.SharedResourceMaxSize)
@@ -56,9 +60,8 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxSlices 
 			devIDs = append(devIDs, str+padIndex(i))
 		}
 		return devIDs
-	}
 
-	if mode == workercore.DeviceAllocationModeVisibility {
+	case workercore.DeviceAllocationModeVisibility:
 		// Visibility advertises, per card, a flat pool sized to SlicedResourceMaxSize — the
 		// most slices (hence sidecars) a card can host — so a sidecar can always co-allocate
 		// visibility to the card its workload was placed on. The tokens are interchangeable:
@@ -69,22 +72,24 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, maxSlices 
 			devIDs[i] = str + padIndex(uint64(i))
 		}
 		return devIDs
+
+	case workercore.DeviceAllocationModeSliced, workercore.DeviceAllocationModePartitioned:
+		// Both pooled modes advertise a flat pool of interchangeable per-card tokens, one per
+		// possible concurrent claim on the card, differing only in how the caller sizes it.
+		// Sliced is a coarse, loose injection-token pool that only needs to be >= the real max
+		// concurrency so it never gates scheduling — the binding constraint is the
+		// ".sliced.units" capacity the Pod webhook folds each slice's memory request into.
+		if poolSize <= 0 {
+			return nil
+		}
+		devIDs := make([]string, poolSize)
+		for i := int32(0); i < poolSize; i++ {
+			devIDs[i] = str + padIndex(uint64(i))
+		}
+		return devIDs
 	}
 
-	// Sliced advertises a coarse, loose injection-token pool sized by the device group's
-	// max slice count: one interchangeable token per possible concurrent slice on a card.
-	// It only needs to be >= the real max concurrency so it never gates scheduling — the
-	// binding constraint is the ".sliced.units" capacity the Pod webhook folds each slice's
-	// memory request into. A group with no slicing capability (maxSlices <= 0) advertises no
-	// tokens at all.
-	if maxSlices <= 0 {
-		return nil
-	}
-	devIDs := make([]string, maxSlices)
-	for i := int32(0); i < maxSlices; i++ {
-		devIDs[i] = str + padIndex(uint64(i))
-	}
-	return devIDs
+	return nil
 }
 
 func padIndex(idx uint64) string {

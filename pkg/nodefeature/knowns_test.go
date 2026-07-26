@@ -1,11 +1,13 @@
 package nodefeature
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 )
@@ -34,15 +36,118 @@ func TestAcceleratableResourceNames(t *testing.T) {
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.memory-mib"),
 		GetAcceleratableSlicedMemoryMibResourceName(ManufacturerNVIDIA))
 
-	// The physical-slice (MIG) request key layers the card's own profile name under
-	// ".sliced.mig-"; the profile name is variable (and may itself contain a dot).
-	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.mig-1g.10gb"),
-		GetAcceleratableSlicedMigResourceName(ManufacturerNVIDIA, "1g.10gb"))
-
 	// The SSH sidecar's device-only visibility resource lives under a distinct domain,
 	// outside the accelerator families, so admission does not read it as a mode.
 	assert.Equal(t, core.ResourceName("device.gpustack.ai/nvidia.visibility"),
 		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility))
+}
+
+func TestAcceleratablePartitionedResourceNames(t *testing.T) {
+	// The physical-partition family mirrors the logical one: a coarse device-plugin
+	// token key, a fine-grained node-capacity counting key, and a variable-tailed
+	// per-profile key whose segment prefix is the manufacturer's own partitioning name.
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.partitioned"),
+		GetAcceleratableResourceName(ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.partitioned.units"),
+		GetAcceleratablePartitionedUnitsResourceName(ManufacturerNVIDIA))
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.partitioned.mig-3g.40gb"),
+		GetAcceleratablePartitionedProfileResourceName(ManufacturerNVIDIA, "3g.40gb"))
+
+	// A manufacturer without hardware partitioning has no kind, so it advertises no
+	// key of this family at all.
+	assert.Empty(t, GetAcceleratableResourceName(ManufacturerAMD, workercore.DeviceAllocationModePartitioned))
+	assert.Empty(t, GetAcceleratablePartitionedUnitsResourceName(ManufacturerAMD))
+	assert.Empty(t, GetAcceleratablePartitionedProfileResourceName(ManufacturerAMD, "3g.40gb"))
+	assert.Empty(t, GetAcceleratablePartitionedProfileResourceName("example", "3g.40gb"))
+}
+
+func TestGetAcceleratablePartitionedProfileResourceName(t *testing.T) {
+	longProfile := strings.Repeat("a", 64)
+
+	cases := []struct {
+		name    string
+		profile string
+		want    core.ResourceName
+	}{
+		{"dotted profile", "3g.40gb", "nvidia.com/gpu.partitioned.mig-3g.40gb"},
+		{"whole card profile", "7g.80gb", "nvidia.com/gpu.partitioned.mig-7g.80gb"},
+		{"empty profile", "", ""},
+		// A "+" variant is not a valid resource-name character; the profile is
+		// excluded rather than rewritten to something key-safe.
+		{"plus variant", "1g.10gb+me", ""},
+		{"plus all variant", "1g.10gb+me.all", ""},
+		// The part after "/" is limited to 63 characters.
+		{"over the length limit", longProfile, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := GetAcceleratablePartitionedProfileResourceName(ManufacturerNVIDIA, c.profile)
+			assert.Equal(t, c.want, got)
+			if got != "" {
+				assert.Empty(t, validation.IsQualifiedName(string(got)),
+					"every generated key must pass resource-name validation")
+			}
+		})
+	}
+}
+
+func TestPartitionedProfileOf(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      core.ResourceName
+		profile string
+		ok      bool
+	}{
+		{"dotted profile", "nvidia.com/gpu.partitioned.mig-3g.40gb", "3g.40gb", true},
+		{"counting key is not a profile", "nvidia.com/gpu.partitioned.units", "", false},
+		{"coarse token key is not a profile", "nvidia.com/gpu.partitioned", "", false},
+		{"empty profile", "nvidia.com/gpu.partitioned.mig-", "", false},
+		{"unknown base", "example.com/foo.partitioned.mig-3g.40gb", "", false},
+		{"manufacturer without a kind", "amd.com/gpu.partitioned.mig-3g.40gb", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			profile, ok := PartitionedProfileOf(c.in)
+			assert.Equal(t, c.ok, ok)
+			assert.Equal(t, c.profile, profile)
+		})
+	}
+}
+
+func TestResourceFamilyOf(t *testing.T) {
+	cases := []struct {
+		name string
+		in   core.ResourceName
+		want ResourceFamily
+	}{
+		{"exclusive", "nvidia.com/gpu", ResourceFamilyExclusive},
+		{"exclusive ascend", "huawei.com/npu", ResourceFamilyExclusive},
+		{"shared", "nvidia.com/gpu.shared", ResourceFamilyShared},
+		{"sliced token", "nvidia.com/gpu.sliced", ResourceFamilySliced},
+		{"sliced units", "nvidia.com/gpu.sliced.units", ResourceFamilySliced},
+		{"sliced cores percentage", "nvidia.com/gpu.sliced.cores-percentage", ResourceFamilySliced},
+		{"sliced memory percentage", "nvidia.com/gpu.sliced.memory-percentage", ResourceFamilySliced},
+		{"sliced memory mib", "nvidia.com/gpu.sliced.memory-mib", ResourceFamilySliced},
+		{"partitioned token", "nvidia.com/gpu.partitioned", ResourceFamilyPartitioned},
+		{"partitioned units", "nvidia.com/gpu.partitioned.units", ResourceFamilyPartitioned},
+		{"partitioned profile", "nvidia.com/gpu.partitioned.mig-3g.40gb", ResourceFamilyPartitioned},
+		{"visibility", "device.gpustack.ai/nvidia.visibility", ResourceFamilyVisibility},
+		{"visibility of an unknown manufacturer", "device.gpustack.ai/example.visibility", ResourceFamilyNone},
+		{"credits", "credits.gpustack.ai/nvidia", ResourceFamilyNone},
+		{"unknown base", "example.com/foo", ResourceFamilyNone},
+		{"unknown base sliced", "example.com/foo.sliced", ResourceFamilyNone},
+		{"unknown base partitioned", "example.com/foo.partitioned", ResourceFamilyNone},
+		{"unrecognized sliced sub-key", "nvidia.com/gpu.sliced.bogus", ResourceFamilyNone},
+		{"unrecognized partitioned sub-key", "nvidia.com/gpu.partitioned.bogus", ResourceFamilyNone},
+		{"empty per-profile tail", "nvidia.com/gpu.partitioned.mig-", ResourceFamilyNone},
+		{"plain cpu", "cpu", ResourceFamilyNone},
+		{"empty", "", ResourceFamilyNone},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, ResourceFamilyOf(c.in))
+		})
+	}
 }
 
 func TestIsKnownAcceleratableResourceName(t *testing.T) {
@@ -55,10 +160,14 @@ func TestIsKnownAcceleratableResourceName(t *testing.T) {
 		{"shared", "nvidia.com/gpu.shared", true},
 		{"sliced units", "nvidia.com/gpu.sliced.units", true},
 		{"sliced card", "nvidia.com/gpu.sliced", true},
-		{"mig profile (dotted name)", "nvidia.com/gpu.sliced.mig-1g.10gb", true},
-		{"mig profile amd", "amd.com/gpu.sliced.mig-1g.10gb", true},
-		{"mig profile unknown base", "example.com/foo.sliced.mig-1g.10gb", false},
-		{"mig profile empty suffix", "nvidia.com/gpu.sliced.mig-", false},
+		// The predicate answers "is this one of ours" through the same classifier that answers
+		// "which one", so a family cannot be known to one caller and unknown to the other.
+		{"partitioned card", "nvidia.com/gpu.partitioned", true},
+		{"partitioned units", "nvidia.com/gpu.partitioned.units", true},
+		{"partitioned profile", "nvidia.com/gpu.partitioned.mig-3g.40gb", true},
+		{"partitioned profile unknown base", "example.com/foo.partitioned.mig-3g.40gb", false},
+		{"partitioned profile empty suffix", "nvidia.com/gpu.partitioned.mig-", false},
+		{"sliced cores-percentage", "nvidia.com/gpu.sliced.cores-percentage", true},
 		{"amd exclusive", "amd.com/gpu", true},
 		{"unknown", "example.com/foo", false},
 		{"credits is not a device resource", "credits.gpustack.ai/nvidia", false},

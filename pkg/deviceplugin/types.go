@@ -51,12 +51,13 @@ type (
 	}
 
 	// PhysicalSlicedActuator is an optional capability of a ContainerAllocateResponder that
-	// materializes a hardware GPU partition (e.g. an NVIDIA MIG instance) for a sliced
-	// container carrying a ".sliced.mig-<profile>" request. The server invokes it — under the
-	// vendor's own per-card lock — after reserving the cards and before patching the allocation
-	// annotation, so the chosen placement is recorded upward (AllocatedPhysicalProfile /
-	// AllocatedPhysicalPlacements) for the reconciler's placement-aware ledger. A responder that
-	// does not implement it cannot serve physical-slice requests.
+	// materializes a hardware GPU partition (e.g. an NVIDIA MIG instance) for a container
+	// carrying a "<base>.partitioned.<kind>-<profile>" request. The server invokes it — under
+	// the vendor's own per-card lock — on the card IT chose, after reserving that card and
+	// before patching the allocation annotation, so the placement actually taken is recorded
+	// upward (AllocatedPhysicalProfile / AllocatedPhysicalPlacements) for the reconciler's
+	// placement-aware ledger. A responder that does not implement it cannot serve partition
+	// requests.
 	PhysicalSlicedActuator interface {
 		ActuatePhysicalSliced(
 			context.Context,
@@ -79,7 +80,7 @@ type PhysicalSlicedAllocation struct {
 	// occupies. The server folds these into the allocation annotation as the reconciler
 	// ledger's occupied source.
 	Placements map[Resource][]workercore.AcceleratorPhysicalPlacement
-	// Response carries the vendor visible-devices env for the partitions (no soft-slice
+	// Response carries the vendor visible-devices env for the partitions (no logical-slice
 	// artifacts). The server returns it in place of GetContainerAllocateResponse.
 	Response *ContainerAllocateResponse
 	// Rollback tears down whatever this allocation created; a no-op for a fully reused

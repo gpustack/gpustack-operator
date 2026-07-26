@@ -328,45 +328,10 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		skip = true
 		// Update groups.
 		if !kubemeta.DeepEqual(aDevs.Spec.Groups, eDevs.Spec.Groups) {
-			// Index the existing groups by multi-keys: manufacturer and id.
-			aGroups := aDevs.Spec.Groups
-			devGrpIndex := make(map[_DeviceGroupKey]*_DeviceGroupValue)
-			for i := range aGroups {
-				k := _DeviceGroupKey{aGroups[i].Manufacturer, aGroups[i].ID}
-				v := &_DeviceGroupValue{
-					Group: aGroups[i],
-					// If the manufacturer is not in the allowed list, keep it.
-					Remove: d.manufacturers.Has(aGroups[i].Manufacturer),
-				}
-				devGrpIndex[k] = v
-			}
-			// Iterate the expected groups, if the group is in the index, update it, otherwise, add it.
-			groups := make([]device.DevicesGroup, 0, len(eGroups))
-			for i := range eGroups {
-				k := _DeviceGroupKey{eGroups[i].Manufacturer, eGroups[i].ID}
-				if v, ok := devGrpIndex[k]; ok {
-					// The group is in the index, keep it and update it if needed.
-					v.Remove = false
-					if !kubemeta.DeepEqual(v.Group, eGroups[i]) {
-						v.Group = eGroups[i]
-						skip = false
-					}
-					continue
-				}
-				// The group is not in the index, add it.
-				groups = append(groups, eGroups[i])
+			groups, groupsChanged := alignDeviceGroups(aDevs.Spec.Groups, eGroups, d.manufacturers)
+			if groupsChanged {
 				skip = false
 			}
-			// Iterate the index, if the group is marked to remove, remove it.
-			for i := range aGroups {
-				k := _DeviceGroupKey{aGroups[i].Manufacturer, aGroups[i].ID}
-				if devGrpIndex[k].Remove {
-					skip = false
-					continue
-				}
-				groups = append(groups, aGroups[i])
-			}
-			// Update groups.
 			aDevs.Spec.Groups = groups
 		}
 		// Update selector labels (they appear once NFD has applied the feature labels).
@@ -394,6 +359,60 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	}
 
 	return nil
+}
+
+// alignDeviceGroups reconciles the existing device groups (aGroups) against the freshly detected
+// ones (eGroups) for one manufacturer pass: a group present in both is kept but refreshed with the
+// newly detected content (its accelerators' slicing capability included), a group only in eGroups is
+// added, and a group only in aGroups is dropped unless its manufacturer is outside the allowed set
+// (in which case it is left untouched, since this pass has no fresh data for it). changed reports
+// whether the returned list differs from aGroups.
+//
+// Note: the caller's re-detect trigger only watches the {manufacturer, id, unhealthy} device-key set
+// (see Start), so toggling a card's partitioning mode without changing that set never fires a
+// re-detect; the stale capability then only clears on the next re-detect (e.g. a DaemonSet restart).
+func alignDeviceGroups(
+	aGroups, eGroups device.DevicesGroupList, allowedManufacturers sets.Set[string],
+) (groups device.DevicesGroupList, changed bool) {
+	// Index the existing groups by multi-keys: manufacturer and id.
+	devGrpIndex := make(map[_DeviceGroupKey]*_DeviceGroupValue)
+	for i := range aGroups {
+		k := _DeviceGroupKey{aGroups[i].Manufacturer, aGroups[i].ID}
+		v := &_DeviceGroupValue{
+			Group: aGroups[i],
+			// If the manufacturer is not in the allowed list, keep it.
+			Remove: allowedManufacturers.Has(aGroups[i].Manufacturer),
+		}
+		devGrpIndex[k] = v
+	}
+	// Iterate the expected groups, if the group is in the index, update it, otherwise, add it.
+	groups = make(device.DevicesGroupList, 0, len(eGroups))
+	for i := range eGroups {
+		k := _DeviceGroupKey{eGroups[i].Manufacturer, eGroups[i].ID}
+		if v, ok := devGrpIndex[k]; ok {
+			// The group is in the index, keep it and update it if needed.
+			v.Remove = false
+			if !kubemeta.DeepEqual(v.Group, eGroups[i]) {
+				v.Group = eGroups[i]
+				changed = true
+			}
+			continue
+		}
+		// The group is not in the index, add it.
+		groups = append(groups, eGroups[i])
+		changed = true
+	}
+	// Iterate the index, if the group is marked to remove, remove it.
+	for i := range aGroups {
+		k := _DeviceGroupKey{aGroups[i].Manufacturer, aGroups[i].ID}
+		v := devGrpIndex[k]
+		if v.Remove {
+			changed = true
+			continue
+		}
+		groups = append(groups, v.Group)
+	}
+	return groups, changed
 }
 
 // acceleratableDevicesSelectorLabels builds the selector labels stamped on a node's Devices object

@@ -36,19 +36,29 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModeSliced),
 		)
 	}
+	// The hardware-partitioning server serves "<base>.partitioned" — MIG, under NVIDIA's own
+	// name for it. A manufacturer with no partition kind has no such resource name at all, so
+	// it registers no server rather than one advertising an empty name.
+	partitioned := !opts.NoPartitioned &&
+		nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned) != ""
+	if partitioned {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModePartitioned),
+		)
+	}
 	// The visibility server co-allocates the SSH sidecar to the same physical GPU(s) its
 	// workload container was granted; for any non-sliced mode the responder emits only
 	// NVIDIA_VISIBLE_DEVICES, which is exactly what the sidecar needs (device-cgroup access,
-	// no HAMi soft-slicing artifacts).
+	// no HAMi logical-slicing artifacts).
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility),
 	)
 
 	return aggregated{
-		logger:     logger,
-		servers:    servers,
-		kubeSocket: opts.KubeSocket,
-		sliced:     !opts.NoSliced,
+		logger:      logger,
+		servers:     servers,
+		kubeSocket:  opts.KubeSocket,
+		partitioned: partitioned,
 	}
 }
 
@@ -56,8 +66,9 @@ type aggregated struct {
 	logger     klog.Logger
 	servers    []deviceplugin.Server
 	kubeSocket string
-	// sliced reports whether a Sliced server is registered, gating the per-vendor MIG reclaim loop.
-	sliced bool
+	// partitioned reports whether a Partitioned server is registered, gating the per-vendor
+	// MIG reclaim loop: the loop exists to free the instances that server creates.
+	partitioned bool
 }
 
 func (aggregated) Name() string {
@@ -74,14 +85,15 @@ func (in aggregated) Start(ctx context.Context) error {
 			return srv.Start(ctx, in.kubeSocket)
 		})
 	}
-	// A sliced pool has no Release callback, so MIG GPU/compute instances are reclaimed by a
-	// level-based loop fed the reconciler's broadcast live-pod set plus a resync ticker.
-	if in.sliced {
+	// A device-plugin pool has no Release callback, so MIG GPU/compute instances are reclaimed
+	// by a level-based loop fed the reconciler's broadcast live-pod set plus a resync ticker.
+	if in.partitioned {
 		gp.Go(func(ctx context.Context) error {
 			reconciler := controllers.Get[*deviceplugin.DevicesReconciler]()
 			r := newReclaimer(newMigDriver(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"),
 				liveClaimsFrom(ctx, reconciler))
-			deviceplugin.RunSlicedReclaimLoop(ctx, reconciler, Manufacturer, r.reconcile)
+			deviceplugin.RunReclaimLoop(ctx, reconciler, Manufacturer,
+				workercore.DeviceAllocationModePartitioned, r.reconcile)
 			return nil
 		})
 	}
@@ -121,8 +133,8 @@ func (in aggregated) Stop() {
 type server struct {
 	deviceplugin.ResourceServer
 
-	// mig is the NVML MIG actuator seam the sliced responder drives for a
-	// ".sliced.mig-<profile>" request; nil for non-sliced modes.
+	// mig is the NVML MIG actuator seam the partitioned responder drives for a
+	// "<base>.partitioned.mig-<profile>" request; nil for every other mode.
 	mig migDriver
 }
 
@@ -137,7 +149,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
 	}
-	if mode == workercore.DeviceAllocationModeSliced {
+	if mode == workercore.DeviceAllocationModePartitioned {
 		s.mig = newMigDriver()
 	}
 	s.Responder = s
@@ -188,7 +200,7 @@ func (s *server) GetContainerAllocateResponse(
 		}
 	}
 
-	// Sliced containers get real soft-slicing isolation (HAMi-core preload + quota);
+	// Sliced containers get real logical-slicing isolation (HAMi-core preload + quota);
 	// exclusive/shared keep the plain device-visibility response below.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, ids, accelerators)
@@ -204,7 +216,7 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// In-container paths the HAMi-core soft-slicing runtime expects.
+// In-container paths the HAMi-core logical-slicing runtime expects.
 const (
 	ctrLdPreloadPath   = "/etc/ld.so.preload"
 	ctrVgpuLibPath     = "/usr/local/vgpu/libvgpu.so"
@@ -219,7 +231,7 @@ const (
 // tests can redirect it off the real /tmp.
 var hostVgpuLockPath = "/tmp/vgpulock"
 
-// getSlicedContainerAllocateResponse renders the HAMi-core soft-slicing injection for
+// getSlicedContainerAllocateResponse renders the HAMi-core logical-slicing injection for
 // a sliced container: a compute (SM) limit from the container's ".sliced.cores-percentage"
 // and a per-card VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib"
 // (independent dimensions, no single ratio), plus the mounts that preload libvgpu.so

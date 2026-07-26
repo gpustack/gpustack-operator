@@ -20,9 +20,9 @@ import (
 
 const groupID = "z100"
 
-// redirectSoftSliceDirs points the per-container pods dir at a temp dir so the on-disk
+// redirectLogicalSliceDirs points the per-container pods dir at a temp dir so the on-disk
 // vdev.conf writes and scans hit a clean tree.
-func redirectSoftSliceDirs(t *testing.T) {
+func redirectLogicalSliceDirs(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	origLib, origPods := deviceplugin.OperatorLibDir, deviceplugin.OperatorPodsDir
@@ -94,7 +94,7 @@ func mountByContainerPath(resp *deviceplugin.ContainerAllocateResponse, ctrPath 
 // A partial Hygon slice writes a vdev.conf carrying its CU bitmask + VRAM cap and mounts
 // the per-pod vdev dir at /etc/vdev/docker/.
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := hygonDevicesFixture()
 
@@ -133,7 +133,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 // A whole-card slice (100% compute, full VRAM) still writes a full-mask / full-memory
 // vdev.conf occupancy marker, so the on-disk scanner never misses a taken card.
 func TestGetSlicedContainerAllocateResponse_WholeCardMarker(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := hygonDevicesFixture()
 
@@ -161,7 +161,7 @@ func TestGetSlicedContainerAllocateResponse_WholeCardMarker(t *testing.T) {
 // A multi-card allocation writes one vdev<i>.conf per card, each independently slotted:
 // the node-wide vdev_id climbs while the per-card pipe_id resets on the second card.
 func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := hygonDevicesFixture()
 
@@ -191,7 +191,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 // A sliced container with no memory dimension is rejected rather than silently given the
 // whole card's VRAM.
 func TestGetSlicedContainerAllocateResponse_NoMemory(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := hygonDevicesFixture()
 

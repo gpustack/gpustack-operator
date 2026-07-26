@@ -1275,6 +1275,11 @@ func (m *InstanceResources) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.AcceleratorPartitionedProfile)
+	copy(dAtA[i:], m.AcceleratorPartitionedProfile)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.AcceleratorPartitionedProfile)))
+	i--
+	dAtA[i] = 0x3a
 	i = encodeVarintGenerated(dAtA, i, uint64(m.AcceleratorSlicedCoresPercentage))
 	i--
 	dAtA[i] = 0x30
@@ -2183,6 +2188,16 @@ func (m *InstanceTypeStatus) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	var l int
 	_ = l
 	{
+		size, err := m.AcceleratorPartitioned.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x4a
+	{
 		size, err := m.CPU.MarshalToSizedBuffer(dAtA[:i])
 		if err != nil {
 			return 0, err
@@ -2775,6 +2790,8 @@ func (m *InstanceResources) Size() (n int) {
 	}
 	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedMemoryPercentage))
 	n += 1 + sovGenerated(uint64(m.AcceleratorSlicedCoresPercentage))
+	l = len(m.AcceleratorPartitionedProfile)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -3093,6 +3110,8 @@ func (m *InstanceTypeStatus) Size() (n int) {
 	l = m.AcceleratorSliced.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	l = m.CPU.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.AcceleratorPartitioned.Size()
 	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
@@ -3510,6 +3529,7 @@ func (this *InstanceResources) String() string {
 		`Accelerator:` + strings.Replace(fmt.Sprintf("%v", this.Accelerator), "Quantity", "resource.Quantity", 1) + `,`,
 		`AcceleratorSlicedMemoryPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedMemoryPercentage) + `,`,
 		`AcceleratorSlicedCoresPercentage:` + fmt.Sprintf("%v", this.AcceleratorSlicedCoresPercentage) + `,`,
+		`AcceleratorPartitionedProfile:` + fmt.Sprintf("%v", this.AcceleratorPartitionedProfile) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -3749,6 +3769,7 @@ func (this *InstanceTypeStatus) String() string {
 		`AcceleratorShared:` + strings.Replace(strings.Replace(this.AcceleratorShared.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`AcceleratorSliced:` + strings.Replace(strings.Replace(this.AcceleratorSliced.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
+		`AcceleratorPartitioned:` + strings.Replace(strings.Replace(this.AcceleratorPartitioned.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -7606,6 +7627,38 @@ func (m *InstanceResources) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
+		case 7:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorPartitionedProfile", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AcceleratorPartitionedProfile = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -10786,6 +10839,39 @@ func (m *InstanceTypeStatus) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			if err := m.CPU.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AcceleratorPartitioned", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.AcceleratorPartitioned.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

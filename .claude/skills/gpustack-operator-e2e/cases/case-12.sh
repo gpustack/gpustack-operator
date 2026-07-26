@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# CASE 12 — Sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1   (MUTATING, self-recovering; AUTO-SKIPS without a real sliceable accelerated pool)
+# CASE 12 — Logically sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1   (MUTATING, self-recovering; AUTO-SKIPS without a real logically sliceable accelerated pool)
 #
 #   case-12.sh <NS>
 #
@@ -10,8 +10,10 @@
 #              Q2: a lone memory percentage is mirrored to the compute percentage, so CPU is sized too;
 #              Q3: Validate rejects a sliceable request whose accelerator count is not 1 (the slice is
 #                  expressed through the percentages, not the card count).
-# Environment: Needs a REAL sliceable accelerated pool (an InstanceType whose observed Status.Detail is
-#              sliceable — a logical soft-slice count or a physical MIG profile). AUTO-SKIPS (exit 0)
+# Environment: Needs a REAL LOGICALLY sliceable accelerated pool (an InstanceType whose observed
+#              Status.Detail reports a logical-slice count). A partition-only pool does NOT qualify:
+#              a slice percentage against a pool that offers no logical slicing is now rejected at
+#              admission, where it used to be served silently as a whole card. AUTO-SKIPS (exit 0)
 #              when none is present. Only the admission result is asserted (probes are deleted at once).
 # Inputs:      - the real sliceable accelerated InstanceType, READ-ONLY (its immutable per-card unit spec
 #                drives the expected slice math — the unit is not pinned/mutated);
@@ -41,24 +43,25 @@ FAILS=0
 ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
-# 1. Find a real sliceable accelerated InstanceType (observed Status.Detail carries a logical
-#    soft-slice count or a physical MIG profile) and read its per-card unit spec. AUTO-SKIP when
-#    none is present.
+# 1. Find a real LOGICALLY sliceable accelerated InstanceType (observed Status.Detail carries a
+#    logical-slice count) and read its per-card unit spec. AUTO-SKIP when none is present.
 read -r IT UNIT_CPU UNIT_RAM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); d=it.get('status',{}).get('detail',{}); sd=d.get('slicedDetail',{}); u=s.get('unitResources',{})
-    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0 or len(sd.get('physical',{}).get('profiles',[]) or [])>0
+    # LOGICALLY sliceable only: a hardware-partitioned card serves no logical slice.
+    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0
     if s.get('acceleratable') and sliceable:
         print(it['metadata']['name'], u.get('cpu',''), u.get('ram','')); break
 ")"
 if [ -z "$IT" ]; then
   echo "== CASE 12 — SKIPPED =="
-  echo "No real sliceable accelerated InstanceType (observed Status.Detail sliceable) — this case needs"
-  echo "real accelerator hardware whose pool is soft-sliceable or MIG-capable. Run it on such a cluster."
+  echo "No real logically sliceable accelerated InstanceType (observed Status.Detail reports a logical-slice"
+  echo "count) — this case needs real accelerator hardware whose cards are logically sliceable, i.e. NOT in a"
+  echo "hardware partitioning mode. Run it on such a cluster."
   exit 0
 fi
-echo "[case-12] sliceable InstanceType: ${IT} (per-card unit cpu=${UNIT_CPU} ram=${UNIT_RAM})"
+echo "[case-12] logically sliceable InstanceType: ${IT} (per-card unit cpu=${UNIT_CPU} ram=${UNIT_RAM})"
 
 # 2. Derive the expected slice sizing from the pool's per-card unit spec (immutable — read, don't pin).
 #    CPU floors to an integer core, never below 1; RAM scales linearly. Requires an integer unit CPU
@@ -127,7 +130,7 @@ else
 fi
 
 echo
-echo "== CASE 12 — Sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1 =="
+echo "== CASE 12 — Logically sliceable Instance webhook: slice-% sizes CPU/RAM, accelerator pinned to 1 =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"

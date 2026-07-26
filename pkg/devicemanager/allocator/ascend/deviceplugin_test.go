@@ -23,8 +23,8 @@ const (
 	testAccelID1 = "E281A66C 140C979 2CFBED72 A4500485 104301E3"
 )
 
-// redirectSoftSliceDirs points the soft-slicing host paths at a temp dir for the test.
-func redirectSoftSliceDirs(t *testing.T) {
+// redirectLogicalSliceDirs points the logical-slicing host paths at a temp dir for the test.
+func redirectLogicalSliceDirs(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	origLib, origPods := deviceplugin.OperatorLibDir, deviceplugin.OperatorPodsDir
@@ -87,7 +87,7 @@ func newSlicedServer() *server {
 }
 
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
@@ -148,7 +148,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 // A sliced container that declares ENPU_LOG_LEVEL keeps its own value: the allocator
 // must not inject the quiet default over it (the debugging escape hatch).
 func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 	pod, ctr := slicedPod("uid-loglevel", "train", 10, 25)
@@ -165,7 +165,7 @@ func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing
 // Two concurrent slices on the same physical NPU must get distinct virtual-npu-ids;
 // a slice on a different physical NPU starts back at 0.
 func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
@@ -207,7 +207,7 @@ func TestSlicedVirtualNPUIDAssignment(t *testing.T) {
 // A sliced container with no memory dimension (neither .sliced.memory-percentage nor
 // .sliced.memory-mib) must be rejected rather than silently given the whole card.
 func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
@@ -223,7 +223,7 @@ func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 // vcann-rt is single-NPU: a multi-card sliced allocation must be rejected rather than
 // silently quota-isolating only the first card.
 func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := ascendDevicesFixture()
 
@@ -240,7 +240,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCardRejected(t *testing.T) {
 // TestGetContainerAllocateResponse_Visibility verifies the visibility-mode responder emits
 // only ASCEND_VISIBLE_DEVICES with the exact allocated index(es) — the same plain
 // device-visibility response as exclusive/shared, and never `all` (Ascend has no wildcard)
-// — with no vcann-rt soft-slicing env or mounts.
+// — with no vcann-rt logical-slicing env or mounts.
 func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 	s := &server{
 		ResourceServer: deviceplugin.ResourceServer{

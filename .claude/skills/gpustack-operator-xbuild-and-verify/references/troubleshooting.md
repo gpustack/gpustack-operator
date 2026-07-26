@@ -42,7 +42,7 @@ Concrete failure modes hit while building this skill, with fixes.
   lacks the securec library. Use a CANN-based workload image (the built `vcann-build:*` image is
   exactly CANN-base + artifacts and works as the test image).
 - **enpu-monitor prints nothing** — its quota table is written to **stderr**; capture `2>&1`.
-- **`npu-smi info` shows full card under injection** — expected; soft-slicing is invisible to
+- **`npu-smi info` shows full card under injection** — expected; logical-slicing is invisible to
   npu-smi. Use `enpu-monitor` for the slice view (see `ascend-npu-smi-and-aicore.md`).
 - **`acl.blas.hgemm` returns `100000` (INVALID_PARAM)** — pyACL low-level BLAS is param-strict and
   is a dead-end for generating AICore load; use a real model (torch_npu/vLLM) instead.

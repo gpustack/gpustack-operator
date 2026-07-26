@@ -42,15 +42,40 @@ if [ -z "$sliced_node" ]; then
 fi
 echo "[case-14] real sliced accelerator found on ${sliced_node}"
 
+# Select on the LOGICAL slice view in .status, not on a spec flag: the pool's sliceability is an
+# observed property of its cards, and a pool whose cards are all in a hardware partitioning mode
+# serves no logical slice however "acceleratable" it is.
 IT=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
-    s=it.get('spec',{})
-    if s.get('acceleratable') and s.get('sliceable'):
+    if not it.get('spec',{}).get('acceleratable'):
+        continue
+    sl=(it.get('status',{}).get('acceleratorSliced') or {})
+    if int(sl.get('capacity') or 0) > 0:
         print(it['metadata']['name']); break
 ")
-[ -n "$IT" ] || { echo "no sliceable accelerated InstanceType found"; exit 1; }
-echo "[case-14] sliceable InstanceType ${IT}"
+if [ -z "$IT" ]; then
+  echo "== CASE 14 — SKIPPED =="
+  echo "No accelerated InstanceType reports a logical slice capacity — every accelerated pool is either"
+  echo "non-sliceable or fully in a hardware partitioning mode. This case needs a logically sliceable pool."
+  exit 0
+fi
+
+# The over-budget assertion below reads "a third 40% slice cannot fit", which is only true when the
+# pool has exactly ONE logically sliceable card: the AdmissionCheck budget is per card, so on a
+# multi-card pool the third slice legitimately lands on a free sibling card and runs. Rather than
+# fill every other card to force the condition — which scales with the node and proves nothing extra —
+# the case declines to run, and per-card accounting stays covered by CASE 11.
+SL_CAP=$(kubectl get instancetype "$IT" -o jsonpath='{.status.acceleratorSliced.capacity}' 2>/dev/null)
+if [ "${SL_CAP:-0}" -gt 100 ]; then
+  echo "== CASE 14 — SKIPPED =="
+  echo "Pool ${IT} reports a logical slice capacity of ${SL_CAP}% — more than one logically sliceable card."
+  echo "This case's over-budget assertion needs a single-card pool (the budget is enforced per card, so a"
+  echo "third slice would simply land on a free sibling card here). CASE 11 covers per-card accounting on"
+  echo "multi-card hardware. Run this case on a single-accelerator node."
+  exit 0
+fi
+echo "[case-14] logically sliceable InstanceType ${IT} (single-card pool, capacity ${SL_CAP}%)"
 
 restore() {
   echo

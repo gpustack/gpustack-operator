@@ -32,8 +32,8 @@ func TestAggregateAcceleratorSlicedDetail(t *testing.T) {
 		want  AcceleratorSlicedDetail
 	}{
 		{
-			// Two soft-sliceable NVIDIA cards + one MIG card: units logic aside, the logical
-			// count sums the two soft cards only, and the physical detail comes from the MIG card.
+			// Two logically sliceable NVIDIA cards + one MIG card: units logic aside, the logical
+			// count sums the two logical cards only, and the physical detail comes from the MIG card.
 			name: "mixed logical + mig",
 			cards: []Accelerator{
 				card(128, true, 0),

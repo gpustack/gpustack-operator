@@ -74,6 +74,8 @@ func TestGetResourceRequirements(t *testing.T) {
 	slicedCardNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
 	slicedMemPctNVIDIA := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(nodefeature.ManufacturerNVIDIA)
 	slicedCoresPctNVIDIA := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(nodefeature.ManufacturerNVIDIA)
+	partCardNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned)
+	partProfileNVIDIA := nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, "3g.40gb")
 	visNVIDIA := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	cases := []struct {
@@ -83,6 +85,7 @@ func TestGetResourceRequirements(t *testing.T) {
 		cpu, ram, storage string
 		acc               *string // nil → pod did not request accelerator
 		memPct, coresPct  int32   // AcceleratorSliced{Memory,Cores}Percentage; 0 → unset
+		profile           string  // AcceleratorPartitionedProfile; "" → not a partition request
 
 		// InstanceType fixture.
 		acceleratable bool
@@ -192,6 +195,62 @@ func TestGetResourceRequirements(t *testing.T) {
 			withAccelerator: true,
 			wantLimits:      core.ResourceList{accNVIDIA: qty("2")},
 			wantRequests:    core.ResourceList{accNVIDIA: qty("2")},
+		},
+		{
+			// A partition request emits the two partition keys, both exactly 1. The
+			// .partitioned.units credit key is folded by the Pod webhook from the profile's
+			// VRAM, so the controller must not write it here.
+			name: "partitioned accelerator — the two partition keys, both 1",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), profile: "3g.40gb",
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
+			withAccelerator: true,
+			wantLimits: core.ResourceList{
+				partCardNVIDIA:    qty("1"),
+				partProfileNVIDIA: qty("1"),
+			},
+			wantRequests: core.ResourceList{
+				partCardNVIDIA:    qty("1"),
+				partProfileNVIDIA: qty("1"),
+			},
+		},
+		{
+			// A partition request wins over a logically sliceable pool's slice keys: the two
+			// requests are mutually exclusive, and the webhook rejects the combination.
+			name: "partitioned accelerator on a logically sliceable type — still partition keys",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), profile: "1g.10gb",
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA, sliceable: true,
+			withAccelerator: true,
+			wantLimits: core.ResourceList{
+				partCardNVIDIA: qty("1"),
+				nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb"): qty("1"),
+			},
+			wantRequests: core.ResourceList{
+				partCardNVIDIA: qty("1"),
+				nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, "1g.10gb"): qty("1"),
+			},
+		},
+		{
+			// A manufacturer with no partition kind yields no partition key at all, so the
+			// request falls back to the whole-card shape instead of emitting an empty key.
+			name: "partition profile on a manufacturer with no partition kind — whole card",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), profile: "3g.40gb",
+			acceleratable: true, manufacturer: nodefeature.ManufacturerAscend,
+			withAccelerator: true,
+			wantLimits: core.ResourceList{
+				nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerAscend, workercore.DeviceAllocationModeExclusive): qty("1"),
+			},
+			wantRequests: core.ResourceList{
+				nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerAscend, workercore.DeviceAllocationModeExclusive): qty("1"),
+			},
+		},
+		{
+			// The SSH sidecar of a partition request still asks only for visibility.
+			name: "visibility on a partition request — just the card count",
+			cpu:  "4", ram: "16Gi", storage: "32Gi", acc: ptr.To("1"), profile: "3g.40gb",
+			acceleratable: true, manufacturer: nodefeature.ManufacturerNVIDIA,
+			withVisibility: true,
+			wantLimits:     core.ResourceList{visNVIDIA: qty("1")},
+			wantRequests:   core.ResourceList{visNVIDIA: qty("1")},
 		},
 		{
 			name: "combined — general + accelerator",
@@ -309,6 +368,7 @@ func TestGetResourceRequirements(t *testing.T) {
 			}
 			inst.Spec.Resources.AcceleratorSlicedMemoryPercentage = c.memPct
 			inst.Spec.Resources.AcceleratorSlicedCoresPercentage = c.coresPct
+			inst.Spec.Resources.AcceleratorPartitionedProfile = c.profile
 
 			instType := &worker.InstanceType{
 				Spec: workercore.InstanceTypeSpec{
@@ -577,7 +637,6 @@ func TestInstanceReconciler_AcceleratedDetailNotReadyRequeues(t *testing.T) {
 		ctrlcli.ObjectKey{Namespace: "default", Name: "inst"}, got))
 	assert.False(t, got.Spec.Stop, "a not-ready type does not stop the instance")
 }
-
 
 // TestInstanceReconciler_RebuildsAdmissionRejectedPod covers the admission-rejection rebuild
 // loop: a backing Pod kubelet rejected with UnexpectedAdmissionError (the device-plugin's

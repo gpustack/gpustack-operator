@@ -27,6 +27,103 @@ func ComputeRemainingProfiles(
 	return remaining
 }
 
+// PartitionCandidate is one partitioned card a placement decision may choose: the legal
+// memory-slice intervals the requested profile can occupy on it, and the intervals already
+// taken. Cards are identified only by an opaque ID the selector echoes back, so the decision
+// stays pure interval arithmetic with no device access and no knowledge of the caller's
+// resource shape.
+type PartitionCandidate struct {
+	// ID identifies the card to the caller.
+	ID string
+	// Possible lists every legal placement of the requested profile on this card, in the
+	// card's own capability order.
+	Possible []AcceleratorPhysicalPlacement
+	// Occupied lists the intervals already taken on this card — both those a live
+	// allocation records and those an in-flight allocation has already claimed.
+	Occupied []AcceleratorPhysicalPlacement
+}
+
+// PartitionSelection is one placed instance: the card it lands on and the memory-slice
+// interval it will occupy there.
+type PartitionSelection struct {
+	ID        string
+	Placement AcceleratorPhysicalPlacement
+}
+
+// SelectPartitionPlacements chooses where to build count instances of one profile across the
+// candidate cards, or reports false when the node cannot host them all.
+//
+// One selection takes at most one instance per card. That is not a placement preference but
+// the record's shape: a Pod's allocation annotation carries one profile and one placement set
+// per card, so a second instance of the same request on the same card could not be counted.
+// Two different Pods still share a card freely — each carries its own record — which is what
+// the caller's Occupied sets already reflect.
+//
+// Cards are chosen most-occupied first among those that still fit: filling a card that is
+// already in use keeps its siblings whole, so a later large profile still has somewhere to go.
+// Spreading instead would put one small partition on every card and leave a node with plenty of
+// free memory unable to host a single whole-card profile. Hardware partitioning is what makes
+// this the right way round — a MIG instance's memory bandwidth is isolated by the hardware, so
+// sharing a card costs the tenant nothing that spreading would have bought it. Within a card
+// the lowest free interval wins, so the free room stays contiguous at the high end and the
+// decision is deterministic — two identical requests against identical state place identically.
+func SelectPartitionPlacements(candidates []PartitionCandidate, count int) ([]PartitionSelection, bool) {
+	if count <= 0 {
+		return nil, true
+	}
+
+	used := make([]bool, len(candidates))
+	selections := make([]PartitionSelection, 0, count)
+	for range count {
+		var (
+			best     = -1
+			bestSlot AcceleratorPhysicalPlacement
+			bestRoom int32
+		)
+		for i := range candidates {
+			if used[i] {
+				continue
+			}
+			slot, ok := lowestFreePlacement(candidates[i].Possible, candidates[i].Occupied)
+			if !ok {
+				continue
+			}
+			if room := occupiedLength(candidates[i].Occupied); best < 0 || room > bestRoom {
+				best, bestSlot, bestRoom = i, slot, room
+			}
+		}
+		if best < 0 {
+			return nil, false
+		}
+		used[best] = true
+		selections = append(selections, PartitionSelection{ID: candidates[best].ID, Placement: bestSlot})
+	}
+	return selections, true
+}
+
+// lowestFreePlacement returns the first legal placement that overlaps nothing occupied.
+// Possible is in the card's capability order, which the detector emits by ascending start.
+func lowestFreePlacement(
+	possible, occupied []AcceleratorPhysicalPlacement,
+) (AcceleratorPhysicalPlacement, bool) {
+	for i := range possible {
+		if !placementOverlapsAny(possible[i], occupied) {
+			return possible[i], true
+		}
+	}
+	return AcceleratorPhysicalPlacement{}, false
+}
+
+// occupiedLength sums the memory slices a card's occupied intervals cover, the measure of
+// how full it is.
+func occupiedLength(occupied []AcceleratorPhysicalPlacement) int32 {
+	var n int32
+	for i := range occupied {
+		n += occupied[i].Length
+	}
+	return n
+}
+
 // placementOverlapsAny reports whether slot's memory-slice interval [Start, Start+Length)
 // intersects any occupied interval. Two half-open intervals [a, a+m) and [b, b+n)
 // overlap iff a < b+n and b < a+m.

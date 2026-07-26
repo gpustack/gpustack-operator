@@ -2003,7 +2003,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref common.Ref
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the maximum number of soft slices this card can host. A card whose MIG mode is currently enabled is always 0, which excludes it from the logical capacity keys; a pending-enable card is not partitioned yet and still reports its soft-slice count.",
+							Description: "Count is the maximum number of logical slices this card can host. A card whose MIG mode is currently enabled is always 0, which excludes it from the logical capacity keys; a pending-enable card is not partitioned yet and still reports its logical count.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -2075,7 +2075,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref common.Re
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".sliced\" token pool for a MIG-enabled card, so a hard-partitioned card stays served rather than dropping out. Zero when Profiles is empty.",
+							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".partitioned\" token pool for a partitioned card, which is the family that serves it; a partitioned card offers no logical slicing and so leaves the \".sliced\" pool entirely. Zero when Profiles is empty.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -2225,12 +2225,12 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref comm
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The per-card LogicalSliced is what a card-level decision reads; this group view is what external queries read to learn whether the node accepts soft-slice requests at all (Count > 0) and whether it permits compute overcommit.",
+				Description: "AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The per-card LogicalSliced is what a card-level decision reads; this group view is what external queries read to learn whether the node accepts logical-slice requests at all (Count > 0) and whether it permits compute overcommit.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"coresPercentageOvercommit": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from any soft-sliceable card; false and meaningless when no card is soft-sliceable.",
+							Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from any logically sliceable card; false and meaningless when no card is logically sliceable.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
@@ -3036,6 +3036,13 @@ func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceC
 							Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on a sliced InstanceType, as a percentage in [0,100]. It is independent of AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook copies it to the other. It is ignored by non-sliced requests.",
 							Type:        []string{"integer"},
 							Format:      "int32",
+						},
+					},
+					"acceleratorPartitionedProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a request for one hardware partition of that shape, which is mutually exclusive with the two slice percentages above: hardware partitioning and software slicing cannot both apply to one card. It is ignored by InstanceTypes offering no partition.",
+							Type:        []string{"string"},
+							Format:      "",
 						},
 					},
 				},
@@ -4164,6 +4171,13 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
 						},
 					},
+					"acceleratorPartitioned": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the pool's partitioned cards can still host, summed over those cards. It is disjoint from the three views above — a card in a partitioning mode can serve no other kind of claim — so a pool with no partitioned card reports zero here.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
 					"cpu": {
 						SchemaProps: spec.SchemaProps{
 							Description: "CPU is the CPU resource of the InstanceType, e.g. \"4\", \"8\".",
@@ -4172,7 +4186,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 						},
 					},
 				},
-				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "cpu"},
+				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "acceleratorPartitioned", "cpu"},
 			},
 		},
 		Dependencies: []string{

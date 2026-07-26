@@ -177,7 +177,7 @@ const (
 	hostHyhalDir  = "/opt/hyhal"
 )
 
-// getSlicedContainerAllocateResponse renders the Hygon soft-slicing injection for a sliced
+// getSlicedContainerAllocateResponse renders the Hygon logical-slicing injection for a sliced
 // container: one vdev.conf per allocated card carrying a cores%-derived CU bitmask and a
 // per-card VRAM cap, published into the pod work dir and mounted at /etc/vdev/docker/, plus
 // the DTK/hyhal runtime dirs and per-card device nodes. The host DTK/hyhal user-space
