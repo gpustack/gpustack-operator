@@ -415,6 +415,15 @@ replaces the single `{mode, count, profile}` tuple per Pod, whose mode is overwr
 scanned last. The upstream effective-request helper is the cross-check for the scalar keys — not the source
 of the correlated tuple, because it aggregates each key independently — and the correlation must be kept per
 podset, never re-derived from a maximum of one key against a sum of another.
+
+The tuple's `cards` term means a different thing per family, and conflating the two is the one way this
+model can silently under-admit. For the three card-bound families a card is a distinct physical card. For
+the partition family it is an **instance**: rule 3 makes a partition request exactly one card per Pod, so a
+replicated Workload's `cards` is its replica count, and one card hosts as many of them as its
+`RemainingProfiles` reports. Counting one instance per card — which is what the pre-split MIG check did —
+leaves every replica after the first in Retry forever on a node with room for them all. The feasibility
+pass therefore consumes free *placements* on the partition side and whole *cards* on the scalar side; the
+two never contend, because F1 already makes the populations disjoint.
 *Accept:* the classifier is table-driven and unit-tested for every family including the
 `.partitioned.units` and `.partitioned.<kind>-<profile>` shapes; each rule has a webhook unit test in both
 directions on the raw-Pod path and, where applicable, the `Instance` path; a Pod claiming an accelerator
@@ -1060,7 +1069,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       a second reconcile with an unchanged ledger emits no patch.
       Verify: `go test ./pkg/worker/controllers/worker/...`
 
-- [ ] **T8 · The request rules and a per-family admission demand** (F6, F8)
+- [x] **T8 · The request rules and a per-family admission demand** (F6, F8)
       Blocked by: T3, T4
       Owns: `pkg/worker/webhooks/worker/pod.go`, `pod_test.go`,
       `pkg/worker/controllers/worker/node_devices_admission.go`, `node_devices_admission_test.go`
@@ -1074,12 +1083,16 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       as the scalar cross-check; never re-aggregate as max-units / sum-cards across podsets. Generalize the
       Sliced-only population filter to all four families. One loose end T4 deliberately left: decide
       whether `IsKnownAcceleratableResourceName` is retired in favour of the classifier or widened to the
-      new family — it does not recognize `.partitioned*` today. Write **no** guard for the legacy MIG key.
-      Acceptance: every rule has an accept and a reject test in both entry paths; a Pod claiming an
-      accelerator family in both container groups is rejected naming the group that must give it up; a
-      native-sidecar init container requesting any family is rejected; an exclusive request is not judged
-      feasible against a partitioned card; `.sliced: 2`, `.partitioned: 2` and a per-profile value of 2 are
-      each rejected with their own message.
+      new family — it does not recognize `.partitioned*` today. **Decided: widened, by reimplementing it on
+      top of `ResourceFamilyOf`** — the two answer "is this one of ours" and "which one of ours", so a single
+      definition is what stops a future family from being known to one caller and unknown to the other. Its
+      one remaining caller outside the classifier (the node-capacity suffix matcher) passes a bare base, so
+      the widening is behaviour-preserving there. Write **no** guard for the legacy MIG key.
+      Acceptance: every rule has an accept and a reject test on the raw-Pod path (the `Instance` path is
+      T12's, which is blocked on this task); a Pod claiming an accelerator family in both container groups
+      is rejected naming the group that must give it up; a native-sidecar init container requesting any
+      family is rejected; an exclusive request is not judged feasible against a partitioned card;
+      `.sliced: 2`, `.partitioned: 2` and a per-profile value of 2 are each rejected with their own message.
       Verify: `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`
 
 - [x] **T9 · Kueue credits for the partition family** (F3)

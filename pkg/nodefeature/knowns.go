@@ -14,7 +14,6 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/utils/strconvx"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
 const (
@@ -420,23 +419,19 @@ func PartitionedProfileOf(name core.ResourceName) (string, bool) {
 	return "", false
 }
 
-// IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
+// IsKnownAcceleratableResourceName reports whether the given resource name is a key of one
+// of the four accelerator families. It answers "is this one of ours"; ResourceFamilyOf, which
+// it defers to, answers "which one" — keeping a single definition means a newly added family
+// can never be known to one caller and unknown to the other.
+//
+// The visibility resource is deliberately excluded: it is outside the accelerator families,
+// so admission never reads it as an allocation mode.
 func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
-	switch {
-	case stringx.HasSuffix(name, SharedResourceNameSuffix):
-		name = name[:len(name)-len(SharedResourceNameSuffix)]
-	case stringx.HasSuffix(name, SlicedUnitsResourceNameSuffix):
-		name = name[:len(name)-len(SlicedUnitsResourceNameSuffix)]
-	case strings.Contains(string(name), SlicedMigResourceNameInfix):
-		// A MIG key is variable-tailed (<base>.sliced.mig-<profile>); it is known only when
-		// the base is a known accelerator AND the profile part is non-empty. SlicedMigProfileOf
-		// enforces both, so an empty "<base>.sliced.mig-" suffix is correctly not known.
-		_, ok := SlicedMigProfileOf(name)
-		return ok
-	case stringx.HasSuffix(name, SlicedResourceNameSuffix):
-		name = name[:len(name)-len(SlicedResourceNameSuffix)]
+	switch ResourceFamilyOf(name) {
+	case ResourceFamilyExclusive, ResourceFamilyShared, ResourceFamilySliced, ResourceFamilyPartitioned:
+		return true
 	}
-	return _AcceleratableResourceNameSet.Has(name)
+	return false
 }
 
 // SlicedMigProfileOf returns the physical-slice (MIG) profile name encoded in a legacy

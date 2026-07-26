@@ -171,6 +171,14 @@ func TestIsKnownAcceleratableResourceName(t *testing.T) {
 		{"mig profile amd", "amd.com/gpu.sliced.mig-1g.10gb", true},
 		{"mig profile unknown base", "example.com/foo.sliced.mig-1g.10gb", false},
 		{"mig profile empty suffix", "nvidia.com/gpu.sliced.mig-", false},
+		// The predicate answers "is this one of ours" through the same classifier that answers
+		// "which one", so a family cannot be known to one caller and unknown to the other.
+		{"partitioned card", "nvidia.com/gpu.partitioned", true},
+		{"partitioned units", "nvidia.com/gpu.partitioned.units", true},
+		{"partitioned profile", "nvidia.com/gpu.partitioned.mig-3g.40gb", true},
+		{"partitioned profile unknown base", "example.com/foo.partitioned.mig-3g.40gb", false},
+		{"partitioned profile empty suffix", "nvidia.com/gpu.partitioned.mig-", false},
+		{"sliced cores-percentage", "nvidia.com/gpu.sliced.cores-percentage", true},
 		{"amd exclusive", "amd.com/gpu", true},
 		{"unknown", "example.com/foo", false},
 		{"credits is not a device resource", "credits.gpustack.ai/nvidia", false},
