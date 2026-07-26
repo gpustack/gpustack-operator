@@ -40,6 +40,44 @@ var sliceableDetail = workercore.InstanceTypeDetail{
 	},
 }
 
+// partitionedDetail is the observed accelerator Detail of a pool whose cards are all in a
+// hardware partitioning mode: a manufacturer (so Status.Detail.AcceleratorReady is true), a
+// per-card VRAM the partition sizing anchors on, no logical slice count (so
+// Status.Detail.IsSliceable is false — a partitioned card serves no logical slice), and the
+// profile inventory a partition request is validated against.
+var partitionedDetail = workercore.InstanceTypeDetail{
+	Manufacturer: "nvidia",
+	InstanceTypeAcceleratorDetail: workercore.InstanceTypeAcceleratorDetail{
+		Memory: "81920Mi", // 80Gi per card
+		SlicedDetail: workercore.AcceleratorSlicedDetail{
+			Physical: workercore.AcceleratorSlicedPhysicalDetail{
+				Count: 2,
+				Profiles: []workercore.AcceleratorSlicedPhysicalDetailProfile{
+					{Name: "2g.20gb", Count: 4, MemoryMib: 20480},
+					{Name: "3g.40gb", Count: 2, MemoryMib: 40960},
+				},
+			},
+		},
+	},
+}
+
+// partitionedInstanceType builds an all-partitioned pool: every card is in a partitioning mode,
+// so the exclusive / shared / logical-slice views report a zero capacity (they are computed from
+// unpartitioned cards only) while the partition view reports the instances the pool can host.
+func partitionedInstanceType(name string) *worker.InstanceType {
+	return &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+		},
+		Status: workercore.InstanceTypeStatus{
+			Detail:                 partitionedDetail,
+			AcceleratorPartitioned: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("2"), Capacity: resource.MustParse("4")},
+		},
+	}
+}
+
 // webhookInstance builds a valid Instance (with a volume so non-type validation
 // passes) referencing the given InstanceType.
 func webhookInstance(name, instType string) *workercore.Instance {
@@ -808,4 +846,249 @@ func TestInstanceWebhook_SlicedRequestNotReadyRejected(t *testing.T) {
 	require.Error(t, nerr, "Default must reject a negative slice percentage while Detail is not ready")
 	assert.True(t, kerrors.IsInternalError(nerr),
 		"negative-percentage rejection is a transient (retryable) error, not a whole-card fallthrough")
+}
+
+// TestInstanceWebhook_ValidateCreate_PartitionedProfile pins the Instance-side hardware
+// partition request: the profile must be one the fronting pool offers, it is mutually exclusive
+// with the two logical slice percentages, and — like a logical slice — it is always exactly one
+// card. A manufacturer with no hardware partitioning offers no profile at all, so any profile
+// against it is rejected rather than shaped into an empty resource key.
+func TestInstanceWebhook_ValidateCreate_PartitionedProfile(t *testing.T) {
+	const typeName = "partitioned-h100"
+
+	cases := []struct {
+		name             string
+		manufacturer     string // "" → the fixture's own (nvidia)
+		profile          string
+		acc              string // "" → accelerator left unset
+		memPct, coresPct int32
+
+		wantErr     bool
+		wantMessage string // substring the rejection must carry
+	}{
+		{name: "offered profile accepted", profile: "3g.40gb", acc: "1"},
+		{name: "other offered profile accepted", profile: "2g.20gb", acc: "1"},
+		{
+			name: "unknown profile rejected with the offered set", profile: "7g.80gb", acc: "1",
+			wantErr: true, wantMessage: "2g.20gb 3g.40gb",
+		},
+		{
+			name: "profile with memory percentage rejected", profile: "3g.40gb", acc: "1", memPct: 50,
+			wantErr: true, wantMessage: "mutually exclusive",
+		},
+		{
+			name: "profile with cores percentage rejected", profile: "3g.40gb", acc: "1", coresPct: 50,
+			wantErr: true, wantMessage: "mutually exclusive",
+		},
+		{
+			name: "two cards rejected", profile: "3g.40gb", acc: "2",
+			wantErr: true, wantMessage: "exactly 1",
+		},
+		{
+			name: "fractional card rejected", profile: "3g.40gb", acc: "1m",
+			wantErr: true, wantMessage: "exactly 1",
+		},
+		{
+			name:         "manufacturer without hardware partitioning rejected",
+			manufacturer: "ascend", profile: "3g.40gb", acc: "1",
+			wantErr: true, wantMessage: "does not support hardware partitioning",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := partitionedInstanceType(typeName)
+			if c.manufacturer != "" {
+				instType.Status.Detail.Manufacturer = c.manufacturer
+			}
+			w := newInstanceWebhook(instType)
+
+			inst := webhookInstance("a", typeName)
+			res := &workercore.InstanceResources{
+				AcceleratorPartitionedProfile:     c.profile,
+				AcceleratorSlicedMemoryPercentage: c.memPct,
+				AcceleratorSlicedCoresPercentage:  c.coresPct,
+			}
+			if c.acc != "" {
+				q := resource.MustParse(c.acc)
+				res.Accelerator = &q
+			}
+			inst.Spec.Resources = res
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if !c.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantMessage)
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_PoolCannotServe pins that a request a pool structurally
+// cannot serve is rejected at admission rather than admitted into a permanent Pending. An
+// all-partitioned pool has no unpartitioned card, so it serves neither a whole-card (exclusive)
+// nor a logical-slice request; the same requests are accepted on a logically sliceable pool.
+func TestInstanceWebhook_ValidateCreate_PoolCannotServe(t *testing.T) {
+	const partType = "partitioned-h100"
+	const sliceType = "sliced-a10g"
+
+	sliceable := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: sliceType},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+		},
+		Status: workercore.InstanceTypeStatus{
+			Detail:            sliceableDetail,
+			Accelerator:       workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("4"), Capacity: resource.MustParse("4")},
+			AcceleratorSliced: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("100"), Capacity: resource.MustParse("400")},
+		},
+	}
+
+	cases := []struct {
+		name             string
+		instType         string
+		cards            string
+		memPct, coresPct int32
+
+		wantErr     bool
+		wantMessage string
+	}{
+		{name: "exclusive on a logically sliceable pool accepted", instType: sliceType},
+		{name: "logical slice on a logically sliceable pool accepted", instType: sliceType, memPct: 50, coresPct: 50},
+		{
+			name: "exclusive on an all-partitioned pool rejected", instType: partType,
+			wantErr: true, wantMessage: "hardware-partitioned",
+		},
+		{
+			name: "logical slice on an all-partitioned pool rejected", instType: partType, memPct: 50, coresPct: 50,
+			wantErr: true, wantMessage: "does not offer logical slicing",
+		},
+		{
+			// A zero-card request asks for no accelerator at all and the controller emits no
+			// extended resource for it, so every pool serves it — the structural rejection
+			// applies to a positive claim only.
+			name: "a zero-card request on an all-partitioned pool accepted", instType: partType, cards: "0",
+		},
+		{
+			// The pool check must not mask a malformed request: a negative claim reads as
+			// negative, whichever pool it lands on.
+			name: "a negative request on an all-partitioned pool reads as negative", instType: partType, cards: "-1",
+			wantErr: true, wantMessage: "cannot be negative",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook(sliceable, partitionedInstanceType(partType))
+
+			inst := webhookInstance("a", c.instType)
+			cards := c.cards
+			if cards == "" {
+				cards = "1"
+			}
+			acc := resource.MustParse(cards)
+			inst.Spec.Resources = &workercore.InstanceResources{
+				Accelerator:                       &acc,
+				AcceleratorSlicedMemoryPercentage: c.memPct,
+				AcceleratorSlicedCoresPercentage:  c.coresPct,
+			}
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if !c.wantErr {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantMessage)
+		})
+	}
+}
+
+// TestInstanceWebhook_Default_PartitionedProfile pins the mutating side of a partition request:
+// the card count is pinned to one (a partition is one instance on one card) and the host CPU/RAM
+// are sized by the profile's share of a card's VRAM — the same VRAM-anchored fraction the logical
+// slice path uses — instead of a whole card's unit resources.
+func TestInstanceWebhook_Default_PartitionedProfile(t *testing.T) {
+	// Default reads the overcommit setting through the loopback client; point it at an empty
+	// fake cluster so it falls back to its default.
+	system.LoopbackCtrlClient.Configure(ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+
+	const typeName = "partitioned-h100"
+
+	cases := []struct {
+		name      string
+		profile   string
+		acc       string // "" → accelerator left unset
+		wantCPU   int64  // cores, from unitCPU 16
+		wantRAMGi int64  // from unitRAM 40Gi
+	}{
+		{name: "half card profile", profile: "3g.40gb", acc: "1", wantCPU: 8, wantRAMGi: 20},
+		{name: "quarter card profile", profile: "2g.20gb", acc: "1", wantCPU: 4, wantRAMGi: 10},
+		{name: "absent card count defaults to one", profile: "3g.40gb", wantCPU: 8, wantRAMGi: 20},
+		{name: "explicit zero card count defaults to one", profile: "3g.40gb", acc: "0", wantCPU: 8, wantRAMGi: 20},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook(partitionedInstanceType(typeName))
+
+			inst := webhookInstance("a", typeName)
+			res := &workercore.InstanceResources{AcceleratorPartitionedProfile: c.profile}
+			if c.acc != "" {
+				q := resource.MustParse(c.acc)
+				res.Accelerator = &q
+			}
+			inst.Spec.Resources = res
+
+			err := w.Default(context.Background(), inst)
+			require.NoError(t, err)
+			assert.Equal(t, int64(1), inst.Spec.Resources.Accelerator.Value(), "a partition is one card")
+			assert.Equal(t, c.wantCPU, inst.Spec.Resources.CPU.Value(), "cpu cores")
+			assert.Equal(t, c.wantRAMGi<<30, inst.Spec.Resources.RAM.Value(), "ram bytes")
+		})
+	}
+}
+
+// TestInstanceWebhook_PartitionRequestNotReadyRejected pins that a partition request against an
+// InstanceType whose accelerator Detail is not computed yet is rejected as retryable — the profile
+// inventory it is validated against lives in that Detail, so an empty one must not read as "the
+// pool does not offer this profile", which would be a permanent rejection of a valid request.
+func TestInstanceWebhook_PartitionRequestNotReadyRejected(t *testing.T) {
+	system.LoopbackCtrlClient.Configure(ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+
+	const typeName = "partitioned-not-ready"
+	instType := &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: typeName},
+		Spec: workercore.InstanceTypeSpec{
+			Acceleratable: true,
+			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
+		},
+	}
+	w := newInstanceWebhook(instType)
+
+	newPartitionInstance := func() *workercore.Instance {
+		inst := webhookInstance("a", typeName)
+		acc := resource.MustParse("1")
+		inst.Spec.Resources = &workercore.InstanceResources{
+			Accelerator:                   &acc,
+			AcceleratorPartitionedProfile: "3g.40gb",
+		}
+		return inst
+	}
+
+	derr := w.Default(context.Background(), newPartitionInstance())
+	require.Error(t, derr, "Default must reject a partition request while Detail is not ready")
+	assert.True(t, kerrors.IsInternalError(derr),
+		"Default rejection is a transient (retryable) error, not a permanent Invalid")
+
+	_, cerr := w.ValidateCreate(context.Background(), newPartitionInstance())
+	require.Error(t, cerr, "ValidateCreate must reject a partition request while Detail is not ready")
+	assert.True(t, kerrors.IsInternalError(cerr),
+		"ValidateCreate rejection is a transient (retryable) error, not a permanent Invalid")
 }

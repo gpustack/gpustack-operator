@@ -195,10 +195,14 @@ type InstanceTypeAcceleratorDetail struct {
 	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
 }
 
-// IsSliceable reports whether the accelerator can be sliced: the pool's aggregated slicing detail
-// carries a logical soft-slice count or at least one physical (MIG) profile.
+// IsSliceable reports whether the accelerator can be sliced **logically** — the pool's aggregated
+// slicing detail carries a non-zero logical slice count. Physical partitioning is deliberately not
+// counted: a partitioned card serves no logical slice, so a pool of nothing but partitioned cards
+// must not read as sliceable. A partition request is expressed by
+// InstanceResources.AcceleratorPartitionedProfile and answered by the Physical profile inventory,
+// never by this predicate.
 func (in InstanceTypeAcceleratorDetail) IsSliceable() bool {
-	return in.SlicedDetail.Logical.Count > 0 || len(in.SlicedDetail.Physical.Profiles) > 0
+	return in.SlicedDetail.Logical.Count > 0
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.

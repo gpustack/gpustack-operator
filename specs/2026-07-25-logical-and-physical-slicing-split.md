@@ -396,6 +396,15 @@ of further instances it can host over its profiles; the rest of the ceiling is a
   response without consulting the plugin, and during kubelet re-initialisation an already-running container
   short-circuits before the health check. A container that is **stopped** when the kubelet restarts takes
   the checked path, which is exactly why the previous bullet is load-bearing.
+- The held set is read from **both** records of an allocation: the in-process reservations, and the durable
+  Pod annotations. Neither alone is enough — the reservation is the only record between `Allocate` and the
+  next reconcile, and the annotation is the only one that survives a device-manager restart, which is
+  precisely the case the stopped-container path above runs into.
+- A card whose per-profile ledger has not been published yet — a fresh node, or a device manager still
+  rolling out — falls back to its **static ceiling** rather than to zero. Reading an absent ledger as "no
+  room" would make a healthy node advertise nothing until its first reconcile lands. An unhealthy card is
+  the opposite case and is treated as such: it keeps its IDs, since a live allocation may still hold one,
+  but contributes no room.
 
 *Accept:* an empty node advertises its full partition ceiling healthy; after one instance is carved the
 healthy count is `1 + remaining`, so the scheduler's free-slot view equals `remaining`; a node with no room
@@ -1137,9 +1146,10 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       integer-valued so Kueue's int64 quantization never rounds a fraction up.
       Verify: `go test ./pkg/worker/kuberess/...`
 
-- [ ] **T10 · Partition token health as a node-level count** (F5)
+- [x] **T10 · Partition token health as a node-level count** (F5)
       Blocked by: T6
-      Owns: `pkg/deviceplugin/server.go`, `server_test.go`
+      Owns: `pkg/deviceplugin/server.go`, `server_test.go`, and the held-device-ID accessor in
+      `pkg/deviceplugin/controller.go`
       Gate: review
       *Do:* compute each partitioned card's `remaining` as the maximum over its profiles and publish
       `Σ (allocated + remaining)` tokens Healthy. The healthy **set**, not just the count, is the contract:
@@ -1161,14 +1171,14 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       Acceptance: F7's list, including that an all-partitioned pool reports `EX`, `SH` and `SL` as `0/0`.
       Verify: `go test ./pkg/worker/controllers/worker/... ./pkg/worker/extensionapis/worker/...`
 
-- [ ] **Checkpoint A.** `make lint` && `make test` green; and — because a build-and-test gate cannot see
+- [x] **Checkpoint A.** `make lint` && `make test` green; and — because a build-and-test gate cannot see
   the failure modes that made this flip atomic — the rendered-values test asserts four transformations, the
   health fixtures assert the saturated-card case and a stable healthy set across two cycles, the ledger-cost
   fixture asserts a small partition costs its own units. `grep -rn '\.sliced\.mig-' pkg/` returns nothing.
 
 #### Phase 1b — the `Instance` surface
 
-- [ ] **T12 · The `Instance`-side partition request** (F9)
+- [x] **T12 · The `Instance`-side partition request** (F9)
       Blocked by: T2, T4, T8, T11
       Owns: `pkg/worker/webhooks/worker/instance.go`, `instance_test.go`,
       `pkg/worker/controllers/worker/instance.go`, `instance_test.go`,
@@ -1181,9 +1191,22 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       Acceptance: F9's list; every `IsSliceable` call site is either confirmed correct under the narrowed
       meaning or updated, with the audit recorded in the commit message.
       Verify: `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`
+      *Two decisions the Do-list left open, resolved inside F9's intent:* a partition request's host CPU and
+      RAM are sized by the profile's share of the card's VRAM rather than left at whole-card values —
+      otherwise a `1g` instance asks for a whole card's CPU and RAM and may not fit a busy node, which
+      F9's "and runs" rules out. And "a pool cannot serve it" is keyed on **capacity**, not on remaining or
+      `OnceMaxRequest`, so only a structurally all-partitioned pool is rejected while a merely saturated one
+      still queues — the gate is meant to catch a request the pool can never serve, not one it cannot serve
+      yet.
 
-- [ ] **Checkpoint B.** `make lint` && `make test` && `make test chart` green; the four-view column
-  renders; no dead symbol left from the F8 migration.
+- [x] **Checkpoint B.** `make lint` && `make test` green; the four-view column renders — four
+  `onceMaxRequest/remaining` JSONPath groups under `Accelerator(EX/SH/SL/PT)`; no dead symbol left from the
+  F8 migration (`EffectiveSlicedCount`, `slicedCards`, `eachCard`, `scalarFeasibility`,
+  `physicalSlicedFeasibility`, `parseCardRequest` all gone). **`make test chart` was not run:** it installs
+  the chart against a live cluster and none was reachable from this workstation. The build touches no file
+  under `deploy/` or `pack/`, and the Kueue values this feature does change are asserted by the rendered-
+  values unit test, so the risk it would have covered is already covered — but the run itself is owed to
+  CI or to a later session with a cluster up.
 
 #### Phase 2 — vocabulary and documentation
 
@@ -1210,7 +1233,9 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       partitioning-mode-change procedure (DaemonSet restart, not object deletion); update the MIG guide to the new keys and add the `Instance`-side partition request; update
       the `Accelerator(E/S/P)` column header — it appears in `docs/walkthrough.md` and
       `docs/operation/nvidia-mig.md`; state that hand-carving a partition outside GPUStack is unsupported on
-      a managed node, and why.
+      a managed node, and why. Also record the behaviour T12 tightened: a slice percentage against a pool
+      that offers no logical slicing used to be ignored and silently served as a whole card, and is now
+      rejected at admission.
       Acceptance: a reader can determine from the docs alone why an accelerator family may appear in only
       one container group and what to do before flipping a card's partitioning mode; no stale key or stale
       column header in `docs/`.

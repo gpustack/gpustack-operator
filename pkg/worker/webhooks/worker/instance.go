@@ -16,6 +16,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/quantityx"
 	"gpustack.ai/gpustack/pkg/webhook"
@@ -91,7 +92,7 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		// A slice request whose accelerator Detail is not yet computed cannot be validated;
 		// reject it with a transient (retryable) error, never a permanent Invalid, so the same
 		// request succeeds once the reconciler populates Status.Detail.
-		if slicedRequestNotReady(instType, instRess) {
+		if slicingRequestNotReady(instType, instRess) {
 			return nil, kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
 		}
 		errs = append(errs, validateResourceRequests(instType, instRess)...)
@@ -231,7 +232,7 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		if inst.Spec.Resources != nil {
 			// As on create, a slice request whose accelerator Detail is not yet computed is
 			// rejected with a transient (retryable) error, not a permanent Invalid.
-			if slicedRequestNotReady(instType, inst.Spec.Resources) {
+			if slicingRequestNotReady(instType, inst.Spec.Resources) {
 				return nil, kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
 			}
 			errs = append(errs, validateResourceRequests(instType, inst.Spec.Resources)...)
@@ -309,7 +310,7 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	// its sliceability and per-card sizing come from Status.Detail. Reject with a transient
 	// (retryable) error rather than fall through to whole-card sizing (which would silently
 	// mis-size the Pod); the same request succeeds once Detail is populated.
-	if slicedRequestNotReady(instType, instRess) {
+	if slicingRequestNotReady(instType, instRess) {
 		return kerrors.NewInternalError(fmt.Errorf("instance type %s is not ready yet; retry", instType.Name))
 	}
 	if instType.Spec.Acceleratable {
@@ -320,7 +321,23 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 		memPct := instRess.AcceleratorSlicedMemoryPercentage
 		coresPct := instRess.AcceleratorSlicedCoresPercentage
-		if instType.Status.Detail.IsSliceable() && (memPct > 0 || coresPct > 0) {
+		partitionPct := partitionProfileMemoryPercent(instType, instRess.AcceleratorPartitionedProfile)
+		switch {
+		case partitionPct > 0:
+			// A hardware partition is one instance on ONE card, so default an absent or
+			// explicitly zero accelerator count to 1 (nil was already defaulted above);
+			// otherwise validation would reject it for not being exactly 1.
+			if instRess.Accelerator.Value() == 0 {
+				instRess.Accelerator = resource.NewQuantity(1, resource.DecimalSI)
+			}
+			// UnitResources sizes a whole card, so size the host CPU/RAM by the share of the
+			// card's VRAM the profile occupies — the same VRAM-anchored fraction the logical
+			// slice path uses, so a partition and a slice of equal size cost equal host
+			// resources.
+			if err = sizeAcceleratorUnitByPercent(instType, instRess, partitionPct, withGeneralOvercommit); err != nil {
+				return err
+			}
+		case instType.Status.Detail.IsSliceable() && (memPct > 0 || coresPct > 0):
 			// A slice is a fraction of ONE card, so default an absent or explicitly zero
 			// accelerator count to 1 (nil was already defaulted above); otherwise
 			// validation would reject it for not being exactly 1.
@@ -342,24 +359,11 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			// reserved. The compute percentage only throttles GPU cores, not host
 			// resources. The memory percentage is non-zero here (copy-filled above when
 			// only the compute percentage was set).
-			unitPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
-			if withGeneralOvercommit || instRess.CPU.IsZero() {
-				instRess.CPU, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.CPU, unitPct)
-				if err != nil {
-					return field.InternalError(
-						field.NewPath("spec.resources.cpu"),
-						fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
-				}
+			if err = sizeAcceleratorUnitByPercent(instType, instRess,
+				int64(instRess.AcceleratorSlicedMemoryPercentage), withGeneralOvercommit); err != nil {
+				return err
 			}
-			if withGeneralOvercommit || instRess.RAM.IsZero() {
-				instRess.RAM, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.RAM, unitPct)
-				if err != nil {
-					return field.InternalError(
-						field.NewPath("spec.resources.ram"),
-						fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
-				}
-			}
-		} else {
+		default:
 			// A whole-card request — a non-sliceable type, or a zero-percentage request on a
 			// sliceable type — scales the unit CPU/RAM by the accelerator count. Allow a
 			// zero/absent count, but treat it as 1 when calculating other resource requests.
@@ -417,12 +421,62 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 	return nil
 }
 
-// slicedRequestNotReady reports whether the request asks for a slice (a non-zero memory or compute
-// percentage) of an accelerated InstanceType whose observed accelerator Detail has not been
-// computed yet. Sliceability and per-card sizing are read from Status.Detail, so until it is ready
-// such a request can neither be sized nor validated and must be rejected as retryable — never
-// treated as a whole-card request, which would silently admit a mis-sized Pod.
-func slicedRequestNotReady(instType *worker.InstanceType, instRess *workercore.InstanceResources) bool {
+// sizeAcceleratorUnitByPercent sizes the host CPU/RAM of a request that holds a fraction of ONE
+// card — a logical slice or a hardware partition — as that percentage of the InstanceType's
+// whole-card unit resources. An explicit request is preserved unless overcommit is on, matching
+// the whole-card path.
+func sizeAcceleratorUnitByPercent(
+	instType *worker.InstanceType, instRess *workercore.InstanceResources,
+	unitPct int64, withGeneralOvercommit bool,
+) error {
+	var err error
+	if withGeneralOvercommit || instRess.CPU.IsZero() {
+		instRess.CPU, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.CPU, unitPct)
+		if err != nil {
+			return field.InternalError(
+				field.NewPath("spec.resources.cpu"),
+				fmt.Errorf("invalid CPU unit of instance type %s: %w", instType.Name, err))
+		}
+	}
+	if withGeneralOvercommit || instRess.RAM.IsZero() {
+		instRess.RAM, err = quantityx.StringPercentMultiply(instType.Spec.UnitResources.RAM, unitPct)
+		if err != nil {
+			return field.InternalError(
+				field.NewPath("spec.resources.ram"),
+				fmt.Errorf("invalid RAM unit of instance type %s: %w", instType.Name, err))
+		}
+	}
+	return nil
+}
+
+// partitionProfileMemoryPercent reports the share of one card's VRAM the requested hardware
+// partition profile occupies, as a percentage in [1,100]. It returns 0 when the request is not a
+// partition request, or when the pool's observed Detail cannot answer — an unknown profile, or a
+// missing/unparseable memory — in which case the caller falls back to whole-card sizing and
+// validation rejects the request on its own terms, with a message naming the offered profiles.
+func partitionProfileMemoryPercent(instType *worker.InstanceType, profile string) int64 {
+	if profile == "" {
+		return 0
+	}
+	prof, _, found := partitionProfile((*workercore.InstanceType)(instType), profile)
+	if !found || prof.MemoryMib <= 0 {
+		return 0
+	}
+	cardVRAMMib, err := instanceTypeCardVRAMMib((*workercore.InstanceType)(instType))
+	if err != nil || cardVRAMMib <= 0 {
+		return 0
+	}
+	return min(max(prof.MemoryMib*100/cardVRAMMib, 1), 100)
+}
+
+// slicingRequestNotReady reports whether the request asks for a share of a card — a logical slice
+// (a non-zero memory or compute percentage) or a hardware partition (a non-empty profile) — of an
+// accelerated InstanceType whose observed accelerator Detail has not been computed yet.
+// Sliceability, the partition profile inventory and the per-card sizing are all read from
+// Status.Detail, so until it is ready such a request can neither be sized nor validated and must be
+// rejected as retryable — never treated as a whole-card request, which would silently admit a
+// mis-sized Pod, and never as an unknown profile, which would permanently reject a valid request.
+func slicingRequestNotReady(instType *worker.InstanceType, instRess *workercore.InstanceResources) bool {
 	if instRess == nil || !instType.Spec.Acceleratable {
 		return false
 	}
@@ -430,11 +484,13 @@ func slicedRequestNotReady(instType *worker.InstanceType, instRess *workercore.I
 	// once Detail is ready) is a slice request: gate it as not-ready so an empty Detail can
 	// never fall through to whole-card sizing.
 	slice := instRess.AcceleratorSlicedMemoryPercentage != 0 || instRess.AcceleratorSlicedCoresPercentage != 0
-	return slice && !instType.Status.Detail.AcceleratorReady()
+	partition := instRess.AcceleratorPartitionedProfile != ""
+	return (slice || partition) && !instType.Status.Detail.AcceleratorReady()
 }
 
 // validateResourceRequests checks an Instance's resource requests against its InstanceType's
-// entitlements: sign, the accelerator/CPU caps, the sliced-percentage ranges, and (via
+// entitlements: sign, the accelerator/CPU caps, the partition profile inventory, the
+// sliced-percentage ranges, and (via
 // capResourcesToInstanceType) the per-unit RAM / local-storage limits. Shared by ValidateCreate and
 // the start (resume) path of ValidateUpdate, so a stopped Instance whose resources were edited
 // cannot be started with a request that create would have rejected — the start path previously
@@ -444,12 +500,23 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	var errs field.ErrorList
 	// Validate accelerator request first since it may determine the validation of other resource requests.
 	if instType.Spec.Acceleratable {
+		memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
+		coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
 		switch {
-		case instType.Status.Detail.IsSliceable():
-			// The slice is requested as memory/compute percentages in [0,100] (0 disables
-			// slicing); the two budgets are independent.
-			memPct := int64(instRess.AcceleratorSlicedMemoryPercentage)
-			coresPct := int64(instRess.AcceleratorSlicedCoresPercentage)
+		case instRess.AcceleratorPartitionedProfile != "":
+			errs = append(errs, validatePartitionedAcceleratorRequest(instType, instRess)...)
+		case memPct != 0 || coresPct != 0:
+			// A logical slice is requested as memory/compute percentages in [0,100]; the two
+			// budgets are independent. A pool with no logically sliceable card cannot serve
+			// the request at all — on an all-partitioned pool it would otherwise be admitted
+			// and then stay Pending forever — so it is rejected here rather than reshaped
+			// into a whole-card request.
+			if !instType.Status.Detail.IsSliceable() {
+				errs = append(errs, field.Forbidden(
+					field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage"),
+					unservedLogicalSliceMessage(instType)))
+				break
+			}
 			memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
 			coresPath := field.NewPath("spec.resources.acceleratorSlicedCoresPercentage")
 			if memPct < 0 || memPct > 100 {
@@ -460,28 +527,13 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 				errs = append(errs, field.Invalid(coresPath, instRess.AcceleratorSlicedCoresPercentage,
 					"must be between 0 and 100"))
 			}
-			if memPct > 0 || coresPct > 0 {
-				// A sliced request (a non-zero percentage) is a fraction of ONE card: the
-				// slice is expressed through the percentages, not the card count, so the
-				// accelerator count must be exactly 1. Compare with Cmp (not Value(), which
-				// rounds a fractional quantity like "1m" up to 1) so only a true 1 passes.
-				one := resource.NewQuantity(1, resource.DecimalSI)
-				if instRess.Accelerator == nil || instRess.Accelerator.Cmp(*one) != 0 {
-					got := "0"
-					if instRess.Accelerator != nil {
-						got = instRess.Accelerator.String()
-					}
-					errs = append(errs, field.Invalid(
-						field.NewPath("spec.resources.accelerator"), got,
-						"accelerator request must be exactly 1 for a sliced request"))
-				}
-			} else {
-				// A zero-percentage request on a sliceable type is a whole-card exclusive
-				// request, which may span multiple cards and is bounded like a non-sliceable
-				// type.
-				errs = append(errs, validateExclusiveAcceleratorRequest(instType, instRess)...)
-			}
+			// A sliced request (a non-zero percentage) is a fraction of ONE card: the
+			// slice is expressed through the percentages, not the card count, so the
+			// accelerator count must be exactly 1.
+			errs = append(errs, validateSingleCardRequest(instRess, "sliced")...)
 		default:
+			// A zero-percentage request — on a sliceable type or not — is a whole-card
+			// exclusive request, which may span multiple cards.
 			errs = append(errs, validateExclusiveAcceleratorRequest(instType, instRess)...)
 		}
 	} else if instRess.Accelerator != nil && !instRess.Accelerator.IsZero() {
@@ -518,10 +570,103 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	return errs
 }
 
+// validateSingleCardRequest checks that a request holding a fraction of ONE card — a logical
+// slice or a hardware partition — asks for exactly one card. Compare with Cmp (not Value(),
+// which rounds a fractional quantity like "1m" up to 1) so only a true 1 passes. The kind names
+// the request in the message.
+func validateSingleCardRequest(instRess *workercore.InstanceResources, kind string) field.ErrorList {
+	one := resource.NewQuantity(1, resource.DecimalSI)
+	if instRess.Accelerator != nil && instRess.Accelerator.Cmp(*one) == 0 {
+		return nil
+	}
+	got := "0"
+	if instRess.Accelerator != nil {
+		got = instRess.Accelerator.String()
+	}
+	return field.ErrorList{field.Invalid(
+		field.NewPath("spec.resources.accelerator"), got,
+		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind))}
+}
+
+// isAllPartitionedPool reports whether every card of the pool is in a hardware partitioning
+// mode: the partition view has a capacity while the whole-card view has none. Capacity — not
+// Remaining or OnceMaxRequest — is the structural question ("can this pool ever serve a whole
+// card?"); a pool that is merely saturated keeps its capacity and its request stays queued
+// instead of being rejected.
+func isAllPartitionedPool(instType *worker.InstanceType) bool {
+	return instType.Status.AcceleratorPartitioned.Capacity.Sign() > 0 &&
+		instType.Status.Accelerator.Capacity.Sign() == 0
+}
+
+// unservedLogicalSliceMessage explains why a pool cannot serve a logical slice request, pointing
+// an all-partitioned pool's user at the partition profile field instead.
+func unservedLogicalSliceMessage(instType *worker.InstanceType) string {
+	if isAllPartitionedPool(instType) {
+		return fmt.Sprintf("instance type %s does not offer logical slicing: its cards are all "+
+			"hardware-partitioned; request a partition with spec.resources.acceleratorPartitionedProfile",
+			instType.Name)
+	}
+	return fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)
+}
+
+// validatePartitionedAcceleratorRequest checks a hardware partition request: it is mutually
+// exclusive with the two logical slice percentages (hardware partitioning and software slicing
+// cannot both apply to one card), it names a profile the fronting pool actually offers — reported
+// with the offered set, since a profile the pool cannot build would otherwise sit Pending forever —
+// and it is exactly one card, one instance. A manufacturer with no hardware partitioning yields no
+// partition resource key at all, so its request is rejected here rather than shaped into an empty
+// key by the controller.
+func validatePartitionedAcceleratorRequest(
+	instType *worker.InstanceType, instRess *workercore.InstanceResources,
+) field.ErrorList {
+	var errs field.ErrorList
+	profile := instRess.AcceleratorPartitionedProfile
+	profilePath := field.NewPath("spec.resources.acceleratorPartitionedProfile")
+
+	if instRess.AcceleratorSlicedMemoryPercentage != 0 || instRess.AcceleratorSlicedCoresPercentage != 0 {
+		errs = append(errs, field.Forbidden(profilePath,
+			"a hardware partition and a logical slice percentage are mutually exclusive; "+
+				"clear acceleratorSlicedMemoryPercentage and acceleratorSlicedCoresPercentage"))
+	}
+
+	manufacturer := instType.Status.Detail.Manufacturer
+	if nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModePartitioned) == "" {
+		errs = append(errs, field.Invalid(profilePath, profile,
+			fmt.Sprintf("manufacturer %s does not support hardware partitioning", manufacturer)))
+		return errs
+	}
+
+	offered := make([]string, 0, len(instType.Status.Detail.SlicedDetail.Physical.Profiles))
+	var found bool
+	for _, p := range instType.Status.Detail.SlicedDetail.Physical.Profiles {
+		offered = append(offered, p.Name)
+		if p.Name == profile {
+			found = true
+		}
+	}
+	switch {
+	case !found:
+		errs = append(errs, field.Invalid(profilePath, profile,
+			fmt.Sprintf("instance type %s does not offer this partition profile; offered: %v",
+				instType.Name, offered)))
+	case nodefeature.GetAcceleratablePartitionedProfileResourceName(manufacturer, profile) == "":
+		// An offered profile whose name is not a valid resource-name segment cannot be
+		// requested: the key it would produce is not addressable.
+		errs = append(errs, field.Invalid(profilePath, profile,
+			"partition profile name does not yield a valid resource name"))
+	}
+
+	// A partition is one instance on one card (rule 3), like a logical slice.
+	errs = append(errs, validateSingleCardRequest(instRess, "partitioned")...)
+
+	return errs
+}
+
 // validateExclusiveAcceleratorRequest checks a whole-card (exclusive) accelerator request:
-// it may not be negative, must be a whole number of cards, and may not exceed the
-// InstanceType's whole-card OnceMaxRequest. A nil request is left to defaulting. It is shared
-// by a non-sliceable type and by a zero-percentage (whole-card) request on a sliceable type.
+// the pool must have an unpartitioned card to serve it at all, and the request may not be
+// negative, must be a whole number of cards, and may not exceed the InstanceType's whole-card
+// OnceMaxRequest. A nil request is left to defaulting. It is shared by a non-sliceable type and
+// by a zero-percentage (whole-card) request on a sliceable type.
 func validateExclusiveAcceleratorRequest(
 	instType *worker.InstanceType, instRess *workercore.InstanceResources,
 ) field.ErrorList {
@@ -540,6 +685,17 @@ func validateExclusiveAcceleratorRequest(
 		return field.ErrorList{field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
 			"accelerator request must be a whole number of cards")}
+	}
+	// An all-partitioned pool can serve no whole-card claim — a partitioned card hosts nothing
+	// but partitions — so reject the request at admission instead of admitting a Pod that would
+	// stay Pending forever. Only a POSITIVE claim: a zero request asks for no accelerator at all
+	// and the controller emits no extended resource for it, so every pool serves it.
+	if instRess.Accelerator.Sign() > 0 && isAllPartitionedPool(instType) {
+		return field.ErrorList{field.Forbidden(
+			field.NewPath("spec.resources.accelerator"),
+			fmt.Sprintf("instance type %s serves no whole-card request: its cards are all "+
+				"hardware-partitioned; request a partition with spec.resources.acceleratorPartitionedProfile",
+				instType.Name))}
 	}
 	if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
 		return field.ErrorList{field.Invalid(
