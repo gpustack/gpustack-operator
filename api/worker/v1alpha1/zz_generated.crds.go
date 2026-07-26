@@ -795,6 +795,10 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 													Nullable:     true,
 													XIntOrString: true,
 												},
+												"acceleratorPartitionedProfile": {
+													Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a\npartition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a\nrequest for one hardware partition of that shape, which is mutually exclusive with\nthe two slice percentages above: hardware partitioning and software slicing cannot\nboth apply to one card. It is ignored by InstanceTypes offering no partition.",
+													Type:        "string",
+												},
 												"acceleratorSlicedCoresPercentage": {
 													Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on\na sliced InstanceType, as a percentage in [0,100]. It is independent of\nAcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook\ncopies it to the other. It is ignored by non-sliced requests.",
 													Type:        "integer",
@@ -1315,11 +1319,57 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 										"accelerator",
 										"acceleratorShared",
 										"acceleratorSliced",
+										"acceleratorPartitioned",
 										"cpu",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
 										"accelerator": {
 											Description: "Accelerator is the allocatable-as-exclusive view: whole cards that are\nentirely free, e.g. \"1\", \"4\".",
+											Type:        "object",
+											Properties: map[string]v1.JSONSchemaProps{
+												"capacity": {
+													Description: "Capacity is the total value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"onceMaxRequest": {
+													Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+												"remaining": {
+													Description: "Remaining is the remaining requestable value of the resource.",
+													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
+													AnyOf: []v1.JSONSchemaProps{
+														{
+															Type: "integer",
+														},
+														{
+															Type: "string",
+														},
+													},
+													XIntOrString: true,
+												},
+											},
+										},
+										"acceleratorPartitioned": {
+											Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances\nthe pool's partitioned cards can still host, summed over those cards. It is disjoint\nfrom the three views above — a card in a partitioning mode can serve no other kind of\nclaim — so a pool with no partitioned card reports zero here.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"capacity": {

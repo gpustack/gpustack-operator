@@ -146,6 +146,11 @@ const (
 	// DeviceAllocationModeSliced indicates that the device is allocated to multiple consumers,
 	// and the resources are partitioned among them.
 	DeviceAllocationModeSliced
+	// DeviceAllocationModePartitioned indicates that the device is carved into hardware
+	// partitions (e.g. NVIDIA MIG GPU instances), each allocated to one consumer. Unlike
+	// Sliced, the isolation is enforced by the hardware, the card must be put into a
+	// partitioning mode first, and the card can then serve no other mode.
+	DeviceAllocationModePartitioned
 	// DeviceAllocationModeVisibility is an internal-only mode: it grants a container
 	// device-cgroup visibility to the physical device(s) another container in the same Pod
 	// was allocated (used by the SSH sidecar to reach main's accelerator), without a real
@@ -162,6 +167,8 @@ func (in DeviceAllocationMode) String() string {
 		return "Shared"
 	case DeviceAllocationModeSliced:
 		return "Sliced"
+	case DeviceAllocationModePartitioned:
+		return "Partitioned"
 	case DeviceAllocationModeVisibility:
 		return "Visibility"
 	default:

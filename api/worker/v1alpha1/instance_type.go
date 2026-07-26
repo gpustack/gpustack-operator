@@ -232,6 +232,12 @@ type InstanceTypeStatus struct {
 	// hundred per card) summed over free and already-sliced cards.
 	AcceleratorSliced InstanceTypeResource `json:"acceleratorSliced" protobuf:"bytes,7,name=acceleratorSliced"`
 
+	// AcceleratorPartitioned is the hardware-partitionable view: the partition instances
+	// the pool's partitioned cards can still host, summed over those cards. It is disjoint
+	// from the three views above — a card in a partitioning mode can serve no other kind of
+	// claim — so a pool with no partitioned card reports zero here.
+	AcceleratorPartitioned InstanceTypeResource `json:"acceleratorPartitioned" protobuf:"bytes,9,name=acceleratorPartitioned"`
+
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
 	CPU InstanceTypeResource `json:"cpu" protobuf:"bytes,8,name=cpu"`
 }

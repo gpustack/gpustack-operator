@@ -179,6 +179,15 @@ type InstanceResources struct {
 	//
 	// +optional
 	AcceleratorSlicedCoresPercentage int32 `json:"acceleratorSlicedCoresPercentage,omitempty" protobuf:"varint,6,opt,name=acceleratorSlicedCoresPercentage"` // nolint: lll
+
+	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
+	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value makes this a
+	// request for one hardware partition of that shape, which is mutually exclusive with
+	// the two slice percentages above: hardware partitioning and software slicing cannot
+	// both apply to one card. It is ignored by InstanceTypes offering no partition.
+	//
+	// +optional
+	AcceleratorPartitionedProfile string `json:"acceleratorPartitionedProfile,omitempty" protobuf:"bytes,7,opt,name=acceleratorPartitionedProfile"` // nolint: lll
 }
 
 // InstanceVolume defines the volume to mount in the Instance,

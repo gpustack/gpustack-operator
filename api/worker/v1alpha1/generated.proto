@@ -468,6 +468,15 @@ message InstanceResources {
   //
   // +optional
   optional int32 acceleratorSlicedCoresPercentage = 6;
+
+  // AcceleratorPartitionedProfile is the hardware partition profile requested on a
+  // partition-offering InstanceType, e.g. "3g.40gb". A non-empty value makes this a
+  // request for one hardware partition of that shape, which is mutually exclusive with
+  // the two slice percentages above: hardware partitioning and software slicing cannot
+  // both apply to one card. It is ignored by InstanceTypes offering no partition.
+  //
+  // +optional
+  optional string acceleratorPartitionedProfile = 7;
 }
 
 // InstanceServicePort defines the port to expose from the container and the port to expose on the node.
@@ -827,6 +836,12 @@ message InstanceTypeStatus {
   // AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
   // hundred per card) summed over free and already-sliced cards.
   optional InstanceTypeResource acceleratorSliced = 7;
+
+  // AcceleratorPartitioned is the hardware-partitionable view: the partition instances
+  // the pool's partitioned cards can still host, summed over those cards. It is disjoint
+  // from the three views above — a card in a partitioning mode can serve no other kind of
+  // claim — so a pool with no partitioned card reports zero here.
+  optional InstanceTypeResource acceleratorPartitioned = 9;
 
   // CPU is the CPU resource of the InstanceType, e.g. "4", "8".
   optional InstanceTypeResource cpu = 8;

@@ -29,6 +29,12 @@ type InstanceResourcesApplyConfiguration struct {
 	// AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
 	// copies it to the other. It is ignored by non-sliced requests.
 	AcceleratorSlicedCoresPercentage *int32 `json:"acceleratorSlicedCoresPercentage,omitempty"`
+	// AcceleratorPartitionedProfile is the hardware partition profile requested on a
+	// partition-offering InstanceType, e.g. "3g.40gb". A non-empty value makes this a
+	// request for one hardware partition of that shape, which is mutually exclusive with
+	// the two slice percentages above: hardware partitioning and software slicing cannot
+	// both apply to one card. It is ignored by InstanceTypes offering no partition.
+	AcceleratorPartitionedProfile *string `json:"acceleratorPartitionedProfile,omitempty"`
 }
 
 // InstanceResourcesApplyConfiguration constructs a declarative configuration of the InstanceResources type for use with
@@ -82,5 +88,13 @@ func (b *InstanceResourcesApplyConfiguration) WithAcceleratorSlicedMemoryPercent
 // If called multiple times, the AcceleratorSlicedCoresPercentage field is set to the value of the last call.
 func (b *InstanceResourcesApplyConfiguration) WithAcceleratorSlicedCoresPercentage(value int32) *InstanceResourcesApplyConfiguration {
 	b.AcceleratorSlicedCoresPercentage = &value
+	return b
+}
+
+// WithAcceleratorPartitionedProfile sets the AcceleratorPartitionedProfile field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the AcceleratorPartitionedProfile field is set to the value of the last call.
+func (b *InstanceResourcesApplyConfiguration) WithAcceleratorPartitionedProfile(value string) *InstanceResourcesApplyConfiguration {
+	b.AcceleratorPartitionedProfile = &value
 	return b
 }

@@ -3038,6 +3038,13 @@ func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceC
 							Format:      "int32",
 						},
 					},
+					"acceleratorPartitionedProfile": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a request for one hardware partition of that shape, which is mutually exclusive with the two slice percentages above: hardware partitioning and software slicing cannot both apply to one card. It is ignored by InstanceTypes offering no partition.",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"cpu", "ram", "localStorage"},
 			},
@@ -4164,6 +4171,13 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
 						},
 					},
+					"acceleratorPartitioned": {
+						SchemaProps: spec.SchemaProps{
+							Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the pool's partitioned cards can still host, summed over those cards. It is disjoint from the three views above — a card in a partitioning mode can serve no other kind of claim — so a pool with no partitioned card reports zero here.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+						},
+					},
 					"cpu": {
 						SchemaProps: spec.SchemaProps{
 							Description: "CPU is the CPU resource of the InstanceType, e.g. \"4\", \"8\".",
@@ -4172,7 +4186,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 						},
 					},
 				},
-				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "cpu"},
+				Required: []string{"phase", "accelerator", "acceleratorShared", "acceleratorSliced", "acceleratorPartitioned", "cpu"},
 			},
 		},
 		Dependencies: []string{

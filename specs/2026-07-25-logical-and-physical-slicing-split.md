@@ -956,7 +956,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       for a gone Pod.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T2 · `Partitioned` enum + the two additive API fields + regeneration** (F2, F7, F9)
+- [x] **T2 · `Partitioned` enum + the two additive API fields + regeneration** (F2, F7, F9)
       Blocked by: None
       Owns: `api/worker/**`, `pkg/kubeclients/**`, `deploy/gpustack-operator/chart/crds/**`
       Gate: review

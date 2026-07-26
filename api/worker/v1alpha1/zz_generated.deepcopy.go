@@ -889,6 +889,7 @@ func (in *InstanceTypeStatus) DeepCopyInto(out *InstanceTypeStatus) {
 	in.Accelerator.DeepCopyInto(&out.Accelerator)
 	in.AcceleratorShared.DeepCopyInto(&out.AcceleratorShared)
 	in.AcceleratorSliced.DeepCopyInto(&out.AcceleratorSliced)
+	in.AcceleratorPartitioned.DeepCopyInto(&out.AcceleratorPartitioned)
 	in.CPU.DeepCopyInto(&out.CPU)
 	return
 }

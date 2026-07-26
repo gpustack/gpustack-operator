@@ -520,6 +520,182 @@ func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 	})
 }
 
+// cardWithCapability builds one accelerator carrying only the slicing capability under test:
+// logicalCount > 0 is an unpartitioned card, physicalCount > 0 a card in a partitioning mode,
+// both zero a card that reports neither.
+func cardWithCapability(id string, index uint32, logicalCount, physicalCount int32) workercore.Accelerator {
+	return workercore.Accelerator{
+		ID:    id,
+		Index: index,
+		Status: workercore.AcceleratorStatus{
+			LogicalSliced:  workercore.AcceleratorLogicalSliced{Count: logicalCount},
+			PhysicalSliced: workercore.AcceleratorPhysicalSliced{Count: physicalCount},
+		},
+	}
+}
+
+// TestResourceServer_GetListAndWatch_TokenSetPerCardState pins the token pool every mode
+// advertises for every card state as it stands today, before the two slicing families are given
+// disjoint card populations. Only the sliced pool reads the card's capability at all: the
+// whole-card families advertise the same tokens on a card they cannot actually serve, and the
+// sliced pool is sized by whichever capability is non-zero, so one pool spans both populations.
+// Pinning it here is what makes the narrowing that follows read as a change of scope rather than
+// a redefinition.
+func TestResourceServer_GetListAndWatch_TokenSetPerCardState(t *testing.T) {
+	const nodeName = "node-pin"
+	card := Resource{Group: "grp-0", Device: "dev-0"}
+
+	cases := []struct {
+		name          string
+		logicalCount  int32
+		physicalCount int32
+		want          map[workercore.DeviceAllocationMode]int
+	}{
+		{
+			name:         "unpartitioned card",
+			logicalCount: 128,
+			want: map[workercore.DeviceAllocationMode]int{
+				workercore.DeviceAllocationModeExclusive:  1,
+				workercore.DeviceAllocationModeShared:     nodefeature.SharedResourceMaxSize,
+				workercore.DeviceAllocationModeSliced:     128,
+				workercore.DeviceAllocationModeVisibility: nodefeature.SlicedResourceMaxSize,
+			},
+		},
+		{
+			name:          "card in a partitioning mode",
+			physicalCount: 7,
+			want: map[workercore.DeviceAllocationMode]int{
+				// The whole-card families do not consult the capability, so they still
+				// advertise a card that cannot serve them.
+				workercore.DeviceAllocationModeExclusive: 1,
+				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
+				// The sliced pool falls back to the partition ceiling, which is how one
+				// family ends up spanning both card populations.
+				workercore.DeviceAllocationModeSliced:     7,
+				workercore.DeviceAllocationModeVisibility: nodefeature.SlicedResourceMaxSize,
+			},
+		},
+		{
+			name: "card reporting neither capability",
+			want: map[workercore.DeviceAllocationMode]int{
+				workercore.DeviceAllocationModeExclusive: 1,
+				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
+				// A zero-sized pool advertises no IDs at all.
+				workercore.DeviceAllocationModeSliced:     0,
+				workercore.DeviceAllocationModeVisibility: nodefeature.SlicedResourceMaxSize,
+			},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			devs := &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec: workercore.DevicesSpec{
+					Groups: []workercore.DevicesGroup{{
+						ID:           "grp-0",
+						Manufacturer: nodefeature.ManufacturerNVIDIA,
+						Accelerators: []workercore.Accelerator{
+							cardWithCapability("dev-0", 0, c.logicalCount, c.physicalCount),
+						},
+					}},
+				},
+			}
+			cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(devs).Build()
+
+			for mode, want := range c.want {
+				s := &ResourceServer{
+					Manufacturer:   nodefeature.ManufacturerNVIDIA,
+					AllocationMode: mode,
+					Reconciler:     &DevicesReconciler{NodeName: nodeName, Client: cli},
+				}
+				resp, err := s.getListAndWatchResponse(context.Background())
+				require.NoError(t, err)
+				assert.Equal(t, want, cardTokenCount(resp, card), "mode %s", mode)
+				assert.Equal(t, want, cardHealthyTokenCount(resp, card),
+					"an unheld card's tokens are all healthy, mode %s", mode)
+			}
+		})
+	}
+}
+
+// TestResourceServer_Allocate_LedgerCostPerMode pins what one token costs a card in the ledger,
+// per mode, as it stands today. A token-set assertion cannot see this: two modes can advertise
+// the same tokens and charge wildly different amounts for one. It matters most for what the
+// switch does with a mode it does not name — it charges a whole card — so any mode added later
+// silently consumes the card unless it is given a branch of its own.
+func TestResourceServer_Allocate_LedgerCostPerMode(t *testing.T) {
+	const nodeName = "node-cost"
+	slicedUnits := int64(nodefeature.ResourceMaxUnits / 4) // a quarter-card slice
+
+	cases := []struct {
+		name string
+		mode workercore.DeviceAllocationMode
+		want int32
+	}{
+		{
+			name: "exclusive costs the whole card",
+			mode: workercore.DeviceAllocationModeExclusive,
+			want: nodefeature.ResourceMaxUnits,
+		},
+		{
+			name: "shared costs one ownership share",
+			mode: workercore.DeviceAllocationModeShared,
+			want: nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize,
+		},
+		{
+			name: "sliced costs the container's own per-card units",
+			mode: workercore.DeviceAllocationModeSliced,
+			want: int32(slicedUnits),
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, c.mode)
+			limits := core.ResourceList{resName: resource.MustParse("1")}
+			if c.mode == workercore.DeviceAllocationModeSliced {
+				limits[nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)] =
+					*resource.NewQuantity(slicedUnits, resource.DecimalSI)
+			}
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "uid-cost"},
+				Spec: core.PodSpec{
+					NodeName:   nodeName,
+					Containers: []core.Container{{Name: workloadContainer, Resources: core.ResourceRequirements{Limits: limits}}},
+				},
+			}
+			cli := ctrlfake.NewClientBuilder().
+				WithScheme(scheme.Scheme).
+				WithObjects(crossModeDevices(nodeName, workercore.DeviceAllocationModeNone), pod).
+				WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+					return []string{obj.(*core.Pod).Spec.NodeName}
+				}).
+				Build()
+
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: c.mode,
+				Reconciler:     rec,
+				Responder:      stubResponder{},
+			}
+			_, err := s.Allocate(context.Background(), &AllocateRequest{
+				ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+			})
+			require.NoError(t, err)
+
+			reserved, ok := reservedWorkload(rec, "uid-cost")
+			require.True(t, ok)
+			require.Len(t, reserved.Groups, 1)
+			require.Len(t, reserved.Groups[0].Accelerators, 1)
+			assert.Equal(t, c.want, reserved.Groups[0].Accelerators[0].Allocated)
+		})
+	}
+}
+
 // concurrentAllocatePod builds a pending pod requesting count units of mode's resource on node.
 func concurrentAllocatePod(nodeName, name, uid string, mode workercore.DeviceAllocationMode, count int) *core.Pod {
 	resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, mode)
