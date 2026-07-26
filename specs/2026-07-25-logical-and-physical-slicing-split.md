@@ -80,11 +80,9 @@ through the `Instance` API.
   admission check nor by the `EX`/`SH` views — so it is rejected or left queued instead of being admitted
   into a permanent `Pending`.
 - A restartable init container requesting any accelerator family is rejected.
-- A legacy `.sliced.mig-<profile>` request is rejected at admission with the replacement key named, rather
-  than failing later with a message about a missing memory budget.
 - `grep -riE 'soft[ _-]?slic' pkg/ api/ docs/ deploy/ pack/ testing/ README.md .claude/skills/` returns
-  nothing, and `grep -rn '\.sliced\.mig-' pkg/ api/ docs/ .claude/skills/` returns only the
-  removal-only recognition site and the legacy guard.
+  nothing, and `grep -rn '\.sliced\.mig-' pkg/ api/ docs/ .claude/skills/` returns nothing at all — the
+  old MIG key leaves no recognition path behind, not even a rejection.
 - `kubectl get instancetypes` prints an `Accelerator(EX/SH/SL/PT)` column with four groups.
 - Every request rule is rejected-when-violated by a webhook unit test in both directions, and all are
   stated in the docs with an accepted and a rejected example.
@@ -466,12 +464,20 @@ not offer is rejected with the offered set in the message; setting both a profil
 rejected; a logical-slice or exclusive Instance against an all-partitioned pool is rejected at admission
 rather than left Pending; every `IsSliceable` call site is confirmed correct under the narrowed meaning.
 
-**F10 — keys we stop owning are removed, not stranded.**
-The node-capacity reconciler keeps recognizing `<base>.sliced.mig-<profile>` as an owned key for **removal
-only**, so a node that an earlier build wrote them onto is cleaned up instead of carrying a phantom resource
-forever; it never writes one.
-*Accept:* a node carrying `.sliced.mig-*` capacity has those keys nulled within one reconcile; the e2e
-teardown reverse-patch covers both families.
+**F10 — the old MIG key is deleted outright, with no recognition left behind.**
+`<base>.sliced.mig-<profile>` is removed from the codebase entirely: no builder, no parser, no classifier
+branch, no removal-only recognition in the node-capacity reconciler, no webhook guard. Nothing in this
+project has to know the key ever existed, which is what makes the vocabulary sweep's grep an absolute
+check rather than one with two standing exemptions. The alternative — keeping a recognition path so the
+reconciler strips the key off a node an earlier build wrote it onto — was considered and dropped: it
+spreads legacy handling across four packages to serve an upgrade path no released version needs.
+
+The one consequence is stated rather than solved: a development node that already carries
+`.sliced.mig-*` capacity keeps it, because nothing owns the key any more. It is one `kubectl patch` to
+remove, and the e2e teardown's reverse-patch keeps covering the shape so a cluster the suite ran on is
+left clean.
+*Accept:* `grep -rn '\.sliced\.mig-' pkg/ api/ docs/ .claude/skills/` returns nothing; the e2e teardown
+reverse-patch covers the legacy shape as well as both current families.
 
 **F11 — observe what the SSH sidecar actually gets for a partition, then decide.**
 The visibility allocate reuses main's reserved *card* and asks the responder for that card's
@@ -503,27 +509,26 @@ and what to do before flipping a card's partitioning mode.
 **F13 — e2e coverage.**
 Existing cases move to the new keys; new coverage proves what only real hardware shows: mixed-node
 placement, concurrent distinct profiles, saturated-node health, exclusive/shared allocatable-zero on a
-partitioned card, the legacy-key rejection, the F11 observation, and one case per demonstrable residual —
+partitioned card, the F11 observation, and one case per demonstrable residual —
 the reclaim window, an out-of-band instance, a terminated init container whose instance is still live, and
 a kubelet restart with the container stopped.
 *Accept:* the MIG lifecycle case passes against the new keys; the new mixed case passes on real hardware
 and self-skips without it; request-rule rejections live in the webhook unit tests with one end-to-end
-rejection to prove the webhook is wired; the teardown script cleans both families.
+rejection to prove the webhook is wired; the teardown script cleans both families and the legacy shape.
 
-**F14 — the old MIG key is a hard break with a legible rejection.**
+**F14 — no compatibility surface for the old MIG key, not even a rejection.**
 No released version is marked stable, so the key change needs no migration, no rollout order and no
-version-skew handling: `<base>.sliced.mig-<profile>` is simply gone as a request key. What it does need is a
-failure an operator can read. Left alone, such a request now falls into the logical-slice path and complains
-about a missing memory budget, which explains nothing — so the Pod webhook rejects a container carrying the
-key outright, naming the replacement. Nothing on the node side re-checks it: the on-node identity heuristic
-cannot reliably tell which container it is looking at, and with no compatibility guarantee to defend there is
-no threat model that would justify a best-effort second guess. An in-place upgrade of a development cluster
-is handled operationally — drain, upgrade, let the new keys converge — not by compatibility code.
-The rejection reaches only Kueue-labelled Pods, like every other rule: a hand-written Pod carrying the old
-key pends forever against a resource no node advertises (residual 7).
-*Accept:* a legacy-key request is rejected at the webhook naming
-`<base>.partitioned.<kind>-<profile>`; no code path maps a legacy MIG key onto the logical responder; one
-end-to-end assertion proves the webhook is wired.
+version-skew handling. An earlier revision of this spec bought legibility with a webhook guard that
+rejected the old key by name; that guard is dropped too. Its only beneficiary is someone hand-writing a
+key that no documentation, no InstanceType and no example produces, and paying for it means every task
+that touches a key path carries a legacy branch.
+
+What such a Pod meets instead: `<base>.sliced.mig-<profile>` is an extended resource no node advertises,
+so it never schedules, and the `<base>.sliced: 1` beside it is a slice request with no memory budget,
+which the existing rules already reject. Neither failure names the replacement key. That is the accepted
+cost, and it is bounded by the fact that nothing in the project can generate such a Pod.
+*Accept:* no symbol, branch or fixture anywhere refers to the legacy key; a request carrying it fails —
+by the ordinary missing-budget rule or by never scheduling — with no special-cased path.
 
 **F15 — unambiguous per-container allocation identity (prerequisite, repairs pre-existing breaks).**
 The device-plugin API omits the Pod identity, so `Allocate` matches (resource name, quantity) against the
@@ -643,8 +648,7 @@ Each is accepted with its containment; none is a regression of this work.
    reservation or rolling the partition back. Out of scope.
 7. **The rules bind only the Kueue-labelled path.** Both Pod webhooks select on the queue-name label, so a
    hand-written Pod without it bypasses every rule and fold while still being able to request the
-   device-plugin resources. F14's legible legacy-key rejection is bypassed with them: such a Pod pends
-   forever against a key no node advertises. The contract is complete for managed workloads, advisory
+   device-plugin resources. The contract is complete for managed workloads, advisory
    otherwise.
 8. **The device plugin never re-registers after a kubelet socket deletion (pre-existing).** Affects every
    family equally; worth an e2e observation rather than a fix here.
@@ -691,8 +695,9 @@ Each is accepted with its containment; none is a regression of this work.
   double subtraction.
 - **The ClusterQueue still covers only the credits resource.** Both `.units` keys are node-capacity plus
   admission-check inputs feeding credits through the transformation; neither becomes a quota dimension.
-- **Clean break on keys.** The old `.sliced.mig-<profile>` request key is not accepted, aliased or
-  translated; only the node-capacity *removal* path keeps recognizing it.
+- **Clean break on keys.** The old `.sliced.mig-<profile>` key is not accepted, aliased, translated or
+  recognized anywhere — including by the node-capacity reconciler, which therefore leaves it on a
+  development node that already carries it (one `kubectl patch` to clear; the e2e teardown does it).
 - **Clean break on the allocation annotation too, so drain before upgrading the device manager.**
   Its value becomes a per-container map (F15) and the old flat shape is not read. A Pod carrying the
   old shape on a node whose device manager has restarted drops out of the ledger and its cards read
@@ -788,8 +793,8 @@ api/worker/v1alpha1/
 
 pkg/nodefeature/
   knowns.go                     # .partitioned family; per-manufacturer partition kind (env-overridable);
-                                # key-name validity guard; family classifier; .sliced.mig- kept for
-                                # removal only
+                                # key-name validity guard; family classifier; the .sliced.mig- helpers
+                                # deleted once the plugin reads the new per-profile key
 
 pkg/device/
   population.go                 # NEW — the per-card population predicates all four consumers share
@@ -822,7 +827,7 @@ pkg/devicemanager/allocator/{ascend,cambricon,hygon,metax,mthreads,amd,iluvatar,
 pkg/worker/controllers/worker/
   node_capacity.go              # own .partitioned.units + per-profile keys valued Σ(allocated+remaining);
                                 # watch the ledger Status side; presence gate stays on capacity;
-                                # .sliced.* logical-only; legacy .sliced.mig- removal-only
+                                # .sliced.* logical-only; no legacy .sliced.mig- recognition
   node_devices_admission.go     # one correlated (cards, per-card demand, profile) tuple per family;
                                 # upstream effective-request helper as the scalar cross-check; the shared
                                 # population predicates for all four families
@@ -831,8 +836,7 @@ pkg/worker/controllers/worker/
 
 pkg/worker/webhooks/worker/
   pod.go                        # family classifier; the seven rules, claims confined to one container
-                                # group; .units fold follows the claiming group; reject a legacy
-                                # .sliced.mig-* request
+                                # group; .units fold follows the claiming group
   instance.go                   # validate AcceleratorPartitionedProfile; reject a request a pool cannot serve
 
 pkg/worker/extensionapis/worker/instance_type.go   # Accelerator(E/S/P) → Accelerator(EX/SH/SL/PT) column
@@ -982,12 +986,13 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
 
 #### Phase 1 — the family split (T5–T11 are one atomic flip)
 
-- [ ] **T4 · The `.partitioned` key family and one classifier** (F4, F6)
+- [x] **T4 · The `.partitioned` key family and one classifier** (F4, F6)
       Blocked by: T2
       Owns: `pkg/nodefeature/**`
       *Do:* add the two suffixes, the per-manufacturer partition-kind map (env-overridable), the
       per-profile key builder and parser, a resource-name validity guard, and the family classifier. Keep
-      the `.sliced.mig-` helpers annotated as removal-only. The edge on T2 is real:
+      the `.sliced.mig-` helpers for now — they are the *live* path the device plugin still reads a MIG
+      profile through, and T6 deletes them once it repoints that read. The edge on T2 is real:
       `pkg/nodefeature/knowns.go` already switches on `DeviceAllocationMode`, so the classifier needs the
       new enum value.
       Acceptance: nothing consumes the new family yet; the parser never reads `.partitioned.units` as a
@@ -1025,7 +1030,10 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       mode an explicit per-token ledger-cost branch instead of the `switch`'s whole-card `default`; move the
       MIG driver and the reclaim-loop gate from Sliced to Partitioned; read the requested profile from the
       per-profile key; add `--no-partitioned` beside `--no-shared` / `--no-sliced` in
-      `pkg/devicemanager/allocator/option.go`.
+      `pkg/devicemanager/allocator/option.go`. Repointing the profile read is what frees the legacy
+      `.sliced.mig-` helpers — today's *live* path, not a compatibility path — so **delete them here**
+      (constant, builder, parser and the classifier's branch, in `pkg/nodefeature`), leaving no
+      recognition of the old key anywhere.
       Acceptance: F2's list, including a request whose offered tokens all name a card that cannot host the
       profile; two concurrent requests for mutually exclusive profiles land on different cards when the node
       has two, with the second observing the first's published selection; a manufacturer without a partition
@@ -1033,7 +1041,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       ledger-cost fixture distinct from the token-set fixture.
       Verify: `go test ./pkg/deviceplugin/... ./pkg/device/... ./pkg/devicemanager/...`
 
-- [ ] **T7 · Node capacity: partition keys, ledger-derived per-profile value, legacy removal** (F3, F10)
+- [ ] **T7 · Node capacity: the partition keys and their ledger-derived per-profile value** (F3, F10)
       Blocked by: T3, T4
       Owns: `pkg/worker/controllers/worker/node_capacity.go`, `node_capacity_test.go`
       Gate: review
@@ -1043,15 +1051,16 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       this reconciler reads only the **Spec** side today, so it must join the Spec capability with the
       Status per-card ledger — copy the access pattern from `node_devices_admission.go:180` — and its
       Devices watch predicate, which today deliberately ignores Status churn, must fire on it inside the
-      existing 3 s dedup window. Keep the presence gate on **capacity**; keep recognizing `.sliced.mig-` for
-      removal only.
+      existing 3 s dedup window. Keep the presence gate on **capacity**. Drop the `.sliced.mig-` keys from
+      the owned set entirely rather than keeping them for removal: nothing recognizes the old key any more,
+      so a node that already carries it keeps it until someone patches it off.
       Acceptance: F3's three-row table reproduces on a one-card fixture holding one mid-size partition; a
       terminating Pod's instance still counts; no card contributes to both `.units` keys; a partition-only
-      model emits no logical keys and vice versa; legacy per-profile keys are nulled within one reconcile;
+      model emits no logical keys and vice versa; no legacy per-profile key is written or recognized;
       a second reconcile with an unchanged ledger emits no patch.
       Verify: `go test ./pkg/worker/controllers/worker/...`
 
-- [ ] **T8 · The request rules and a per-family admission demand** (F6, F8, F14)
+- [ ] **T8 · The request rules and a per-family admission demand** (F6, F8)
       Blocked by: T3, T4
       Owns: `pkg/worker/webhooks/worker/pod.go`, `pod_test.go`,
       `pkg/worker/controllers/worker/node_devices_admission.go`, `node_devices_admission_test.go`
@@ -1059,17 +1068,18 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       *Do:* implement the seven rules through T4's classifier, with the container groups defined by
       lifetime and accelerator claims confined to one group; delete the per-container
       physical/logical mutual-exclusion branch and extend the `.units` fold to whichever group holds the
-      claims; reject a legacy `<base>.sliced.mig-<profile>` key outright, naming the replacement. Replace
+      claims. Replace
       the admission check's single `{mode, count, profile}` tuple with one correlated
       `(cards, per-card demand, profile)` tuple **per family**, using the upstream effective-request helper
       as the scalar cross-check; never re-aggregate as max-units / sum-cards across podsets. Generalize the
-      Sliced-only population filter to all four families.
+      Sliced-only population filter to all four families. One loose end T4 deliberately left: decide
+      whether `IsKnownAcceleratableResourceName` is retired in favour of the classifier or widened to the
+      new family — it does not recognize `.partitioned*` today. Write **no** guard for the legacy MIG key.
       Acceptance: every rule has an accept and a reject test in both entry paths; a Pod claiming an
       accelerator family in both container groups is rejected naming the group that must give it up; a
       native-sidecar init container requesting any family is rejected; an exclusive request is not judged
       feasible against a partitioned card; `.sliced: 2`, `.partitioned: 2` and a per-profile value of 2 are
-      each rejected with their own message; a legacy-key request is rejected naming
-      `<base>.partitioned.<kind>-<profile>`.
+      each rejected with their own message.
       Verify: `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`
 
 - [ ] **T9 · Kueue credits for the partition family** (F3)
@@ -1110,8 +1120,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
 - [ ] **Checkpoint A.** `make lint` && `make test` green; and — because a build-and-test gate cannot see
   the failure modes that made this flip atomic — the rendered-values test asserts four transformations, the
   health fixtures assert the saturated-card case and a stable healthy set across two cycles, the ledger-cost
-  fixture asserts a small partition costs its own units, and the legacy-key rejection passes.
-  `grep -rn '\.sliced\.mig-' pkg/` shows only the removal-only site and the webhook rejection.
+  fixture asserts a small partition costs its own units. `grep -rn '\.sliced\.mig-' pkg/` returns nothing.
 
 #### Phase 1b — the `Instance` surface
 
@@ -1148,7 +1157,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       silently.
       Verify: `make test`, then the greps
 
-- [ ] **T14 · Documentation** (F12, F14)
+- [ ] **T14 · Documentation** (F10, F12, F14)
       Blocked by: T13
       Owns: `docs/**`, `README.md`
       *Do:* add the normative request-rules section; state that the old MIG key is a pre-release break with
@@ -1173,14 +1182,15 @@ cluster with a MIG-capable node.
       Owns: `.claude/skills/gpustack-operator-e2e/**`, `.claude/skills/_e2e-lib/scripts/teardown.sh`
       *Do:* update the accelerator-view, sliced and cross-mode cases, the teardown reverse-patch, and the
       case table in the suite's skill document. The MIG lifecycle case moves to the new keys.
-      Acceptance: each ported case passes unchanged in intent; teardown removes both key families.
+      Acceptance: each ported case passes unchanged in intent; teardown removes both key families and the
+      legacy `.sliced.mig-*` shape.
       Verify: run the ported cases; teardown leaves no `.sliced.*` or `.partitioned.*` key behind
 
-- [ ] **T16 · New cases for what only hardware shows** (F5, F11, F13, F14)
+- [ ] **T16 · New cases for what only hardware shows** (F5, F11, F13)
       Blocked by: T15
       Owns: `.claude/skills/gpustack-operator-e2e/**`
       *Do:* add cases for mixed-node placement, ledger-derived per-profile capacity, saturated-card health,
-      exclusive/shared allocatable-zero on a partitioned card, the legacy-key rejection, and the F11
+      exclusive/shared allocatable-zero on a partitioned card, and the F11
       observation — plus the five the cross-check surfaced: a terminated init container whose MIG instance
       is still live, a same-profile replacement scheduled inside the reclaim debounce window, an
       administrator-created out-of-band instance, a kubelet restart with the partition's container stopped
@@ -1210,8 +1220,8 @@ change what they assert. Before the behavior changes, make them state today's be
 - `pkg/deviceplugin/controller_test.go` — T1's two red tests land here first and fail, proving the
   Pod-wide reserved-skip and the single-slot annotation breaks before they are fixed.
 - `pkg/devicemanager/detector/detector_test.go` — T0's red fixture for a changed existing group.
-- `pkg/worker/controllers/worker/node_capacity_test.go` — the `.sliced.mig-` fixtures become the legacy
-  removal fixtures; add a mixed logical/partitioned group fixture first.
+- `pkg/worker/controllers/worker/node_capacity_test.go` — the `.sliced.mig-` fixtures are deleted with the
+  key; add a mixed logical/partitioned group fixture first.
 - `pkg/worker/controllers/worker/node_devices_admission_test.go` — pin the current summed demand and the
   current exclusive-vs-partitioned-card verdict before they change.
 - `pkg/worker/webhooks/worker/pod_test.go` — the MIG-key fixtures state which container group they
@@ -1278,8 +1288,6 @@ New (T16), each self-skipping without the hardware it needs:
 - **Exclusive/shared allocatable-zero** — a partitioned card reports its whole-card and shared tokens
   Unhealthy (capacity intact, allocatable zero); an exclusive Pod on an all-partitioned pool is rejected
   at admission rather than admitted and left Pending.
-- **Legacy-key rejection** — a Pod carrying `<base>.sliced.mig-<profile>` is rejected with the new key
-  named, proving the webhook is wired.
 - **SSH sidecar observation (F11)** — record the sidecar's visible-devices env, `nvidia-smi -L` inside the
   sidecar, and whether a trivial CUDA init succeeds.
 - **Terminated init container, live instance** — a Pod whose init container took a partition and has

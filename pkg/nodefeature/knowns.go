@@ -8,6 +8,8 @@ import (
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apimachinery/pkg/util/validation"
+	klog "k8s.io/klog/v2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/osx"
@@ -65,12 +67,27 @@ const (
 	// into .sliced.units via floor(mib/cardVRAM*M)); never folded into Kueue credits.
 	SlicedMemoryMibResourceNameSuffix = ".sliced.memory-mib"
 	// SlicedMigResourceNameInfix precedes the profile name in a physical-slice (MIG)
-	// request key, e.g. "nvidia.com/gpu.sliced.mig-1g.10gb". The profile name is the
-	// card's own hardware-reported name, so the key is variable-tailed (unlike the fixed
-	// soft-slice sub-keys above) and never encodes a hardcoded profile table. A MIG
-	// request names its profile explicitly and is mutually exclusive with the logical
-	// sub-keys on one container.
+	// request key, e.g. "nvidia.com/gpu.sliced.mig-1g.10gb".
+	//
+	// Superseded by the ".partitioned" family, which expresses hardware partitioning
+	// under the manufacturer's own name for it. This key is still the one the device
+	// plugin reads a requested profile from, so it survives only until that read moves
+	// to the per-profile partition key; it then goes away entirely, leaving no
+	// recognition of the old shape anywhere.
 	SlicedMigResourceNameInfix = ".sliced.mig-"
+
+	// PartitionedResourceNameSuffix is the coarse physical-partition token key,
+	// advertised by the device-plugin for the cards put into a hardware partitioning
+	// mode. It only triggers the allocator's Allocate() hook, which places the
+	// instance itself; the counting lives on ".partitioned.units" and on the
+	// per-profile keys. It is advertised only by a manufacturer that has a partition
+	// kind.
+	PartitionedResourceNameSuffix = ".partitioned"
+	// PartitionedUnitsResourceNameSuffix is the fine-grained physical-partition counting
+	// key, reported per node via Patch Node and used for Kueue credits accounting. It
+	// values a partitioned card at whole-card units, mirroring ".sliced.units" for a
+	// logically sliceable card.
+	PartitionedUnitsResourceNameSuffix = ".partitioned.units"
 
 	// VisibilityResourceNamePrefix and VisibilityResourceNameSuffix compose the device-only
 	// "visibility" resource the SSH sidecar requests to co-allocate the same physical
@@ -107,7 +124,9 @@ var (
 	_ManufacturerPciVendorIDMap               map[string]string
 	_ManufacturerAcceleratableResourceNameMap map[string]core.ResourceName
 	_ManufacturerAcceleratableRuntimeNameMap  map[string]string
+	_ManufacturerPartitionKindMap             map[string]string
 	_AcceleratableResourceNameSet             sets.Set[core.ResourceName]
+	_PartitionedProfileResourceNamePrefixMap  map[string]string
 	_SlicedResourceSizes                      []int64
 	_SlicedResourceOperatedSizesSet           sets.Set[string]
 	_SlicedResourceUnitsPerSlice              map[int64]int64
@@ -183,8 +202,36 @@ func init() {
 		}
 	}
 
+	// _ManufacturerPartitionKindMap maps a manufacturer to its own name for hardware
+	// partitioning, which becomes the per-profile key's segment prefix — "mig" is NVIDIA's
+	// name, not the concept's. A manufacturer absent from the map has no hardware
+	// partitioning, so it advertises no ".partitioned" family at all. Each entry is
+	// overridable by GPUSTACK_<MANUFACTURER>_PARTITION_KIND.
+	_ManufacturerPartitionKindMap = map[string]string{
+		ManufacturerNVIDIA: "mig",
+	}
+	for _, manufacturer := range maps.Keys(_ManufacturerPartitionKindMap) {
+		// Extract the hardware partitioning name from environment variable if exists,
+		// and override the default value in the map.
+		//
+		// E.g. for NVIDIA, the environment variable is "GPUSTACK_NVIDIA_PARTITION_KIND".
+		if v := osx.Getenv("GPUSTACK_" + strings.ToUpper(manufacturer) + "_PARTITION_KIND"); v != "" {
+			_ManufacturerPartitionKindMap[manufacturer] = v
+		}
+	}
+
 	// Make a set of all known resource names for quick lookup.
 	_AcceleratableResourceNameSet = sets.New[core.ResourceName](maps.Values(_ManufacturerAcceleratableResourceNameMap)...)
+
+	// Resolve the hardware partitioning names, which build on the resource names above.
+	_PartitionedProfileResourceNamePrefixMap = make(map[string]string, len(_ManufacturerPartitionKindMap))
+	for manufacturer, kind := range _ManufacturerPartitionKindMap {
+		resName := _ManufacturerAcceleratableResourceNameMap[manufacturer]
+		if resName == "" || kind == "" {
+			continue
+		}
+		_PartitionedProfileResourceNamePrefixMap[manufacturer] = string(resName) + PartitionedResourceNameSuffix + "." + kind + "-"
+	}
 
 	// Define the available sizes for sliced resources.
 	for val := int64(1); val <= SlicedResourceMaxSize; val <<= 1 {
@@ -207,6 +254,17 @@ func init() {
 	for _, size := range _SlicedResourceSizes {
 		_SlicedResourceUnitsPerSlice[size] = ResourceMaxUnits / size
 	}
+}
+
+// GetPartitionKind returns the manufacturer's own name for hardware partitioning
+// ("mig" for NVIDIA), which the per-profile key's segment prefix is built from. It
+// returns "" when the manufacturer has no hardware partitioning, in which case the
+// manufacturer advertises no key of the ".partitioned" family.
+func GetPartitionKind(manufacturer string) string {
+	if _PartitionedProfileResourceNamePrefixMap[manufacturer] == "" {
+		return ""
+	}
+	return _ManufacturerPartitionKindMap[manufacturer]
 }
 
 // GetPciVendorID returns the PCI vendor ID for the given manufacturer.
@@ -240,6 +298,9 @@ func GetAcceleratablePciVendorIDs() []string {
 // to the kubelet for the given manufacturer and allocation mode:
 //   - Exclusive → "nvidia.com/gpu", Shared → "nvidia.com/gpu.shared",
 //     Sliced → "nvidia.com/gpu.sliced" (the accelerator families).
+//   - Partitioned → "nvidia.com/gpu.partitioned", the hardware-partitioning family. It is
+//     empty for a manufacturer with no partition kind, which advertises no key of that
+//     family at all.
 //   - Visibility → "device.gpustack.ai/nvidia.visibility": the device-only resource the SSH
 //     sidecar requests (with the SAME quantity its workload container asks of the real
 //     accelerator) to co-allocate visibility to the same physical device(s). It is
@@ -254,6 +315,11 @@ func GetAcceleratableResourceName(manufacturer string, mode workercore.DeviceAll
 		return resName + SharedResourceNameSuffix
 	case workercore.DeviceAllocationModeSliced:
 		return resName + SlicedResourceNameSuffix
+	case workercore.DeviceAllocationModePartitioned:
+		if GetPartitionKind(manufacturer) == "" {
+			return ""
+		}
+		return resName + PartitionedResourceNameSuffix
 	case workercore.DeviceAllocationModeVisibility:
 		return core.ResourceName(VisibilityResourceNamePrefix + manufacturer + VisibilityResourceNameSuffix)
 	}
@@ -290,12 +356,68 @@ func GetAcceleratableSlicedMemoryMibResourceName(manufacturer string) core.Resou
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMemoryMibResourceNameSuffix
 }
 
-// GetAcceleratableSlicedMigResourceName returns the physical-slice (MIG) request key
-// for the given manufacturer and profile name — e.g. profile "1g.10gb" for nvidia
-// yields "nvidia.com/gpu.sliced.mig-1g.10gb". The profile name is the card's own
-// hardware-reported name, so the key carries no hardcoded profile table.
+// GetAcceleratableSlicedMigResourceName returns the legacy physical-slice (MIG) request
+// key for the given manufacturer and profile name — e.g. profile "1g.10gb" for nvidia
+// yields "nvidia.com/gpu.sliced.mig-1g.10gb".
+//
+// Superseded by GetAcceleratablePartitionedProfileResourceName, and deleted once the
+// device plugin reads a requested profile from that key instead of this one. The old
+// key is a clean break: nothing will translate, alias or strip it afterwards.
 func GetAcceleratableSlicedMigResourceName(manufacturer, profile string) core.ResourceName {
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMigResourceNameInfix + core.ResourceName(profile)
+}
+
+// GetAcceleratablePartitionedUnitsResourceName returns the fine-grained
+// physical-partition counting key for the given manufacturer (e.g.
+// "nvidia.com/gpu.partitioned.units"), reported per node via Patch Node and used as a
+// Kueue credits transformation input. It returns "" when the manufacturer has no
+// partition kind.
+func GetAcceleratablePartitionedUnitsResourceName(manufacturer string) core.ResourceName {
+	if GetPartitionKind(manufacturer) == "" {
+		return ""
+	}
+	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + PartitionedUnitsResourceNameSuffix
+}
+
+// GetAcceleratablePartitionedProfileResourceName returns the per-profile physical-partition
+// key for a manufacturer and profile — profile "3g.40gb" for nvidia yields
+// "nvidia.com/gpu.partitioned.mig-3g.40gb". The profile name is used verbatim: a name that
+// is not a valid resource-name segment is excluded upstream when the card's inventory is
+// built, so the key always maps back to its profile by plain prefix strip. It returns ""
+// when the manufacturer has no partition kind, or when the name would not yield a valid
+// resource name.
+func GetAcceleratablePartitionedProfileResourceName(manufacturer, profile string) core.ResourceName {
+	prefix := _PartitionedProfileResourceNamePrefixMap[manufacturer]
+	if prefix == "" || profile == "" {
+		return ""
+	}
+	name := prefix + profile
+	if errs := validation.IsQualifiedName(name); len(errs) != 0 {
+		// The profile name is never rewritten to make it key-safe: a rewritten key
+		// could not be mapped back to the hardware profile it names.
+		klog.Warningf("excluding %s partition profile %q: it does not yield a valid resource name: %s",
+			manufacturer, profile, strings.Join(errs, "; "))
+		return ""
+	}
+	return core.ResourceName(name)
+}
+
+// PartitionedProfileOf returns the physical-partition profile name encoded in a
+// "<base>.partitioned.<kind>-<profile>" resource key of a known accelerator base whose
+// manufacturer declares that kind, and whether name is such a key. It is the reverse of
+// GetAcceleratablePartitionedProfileResourceName.
+//
+// The counting key "<base>.partitioned.units" shares the ".partitioned." prefix but is
+// not a per-profile key, so it is never read as a profile.
+func PartitionedProfileOf(name core.ResourceName) (string, bool) {
+	s := string(name)
+	for _, prefix := range _PartitionedProfileResourceNamePrefixMap {
+		profile, ok := strings.CutPrefix(s, prefix)
+		if ok && profile != "" {
+			return profile, true
+		}
+	}
+	return "", false
 }
 
 // IsKnownAcceleratableResourceName reports whether the given resource name is a well-known accelerator resource name.
@@ -317,9 +439,13 @@ func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	return _AcceleratableResourceNameSet.Has(name)
 }
 
-// SlicedMigProfileOf returns the physical-slice (MIG) profile name encoded in a
+// SlicedMigProfileOf returns the physical-slice (MIG) profile name encoded in a legacy
 // "<base>.sliced.mig-<profile>" resource key of a known accelerator base, and whether name is
 // such a key. It is the reverse of GetAcceleratableSlicedMigResourceName.
+//
+// Superseded by PartitionedProfileOf, and deleted once the device plugin reads a requested
+// profile from the per-profile partition key instead of this one. The old key is a clean
+// break: nothing will translate, alias or strip it afterwards.
 func SlicedMigProfileOf(name core.ResourceName) (string, bool) {
 	s := string(name)
 	i := strings.Index(s, SlicedMigResourceNameInfix)
@@ -334,6 +460,90 @@ func SlicedMigProfileOf(name core.ResourceName) (string, bool) {
 		return "", false
 	}
 	return profile, true
+}
+
+// ResourceFamily names the accelerator resource family a resource name belongs to.
+// Every key of a family — the coarse device-plugin token key, the fine-grained counting
+// keys, and any variable-tailed per-profile key — classifies as its family, since the
+// question the admission rules ask of a key is "which family does it belong to".
+type ResourceFamily string
+
+const (
+	// ResourceFamilyNone is the classification of a resource name outside every
+	// accelerator family, e.g. "cpu" or a credits resource.
+	ResourceFamilyNone ResourceFamily = "none"
+	// ResourceFamilyExclusive is the whole-card family, "<base>".
+	ResourceFamilyExclusive ResourceFamily = "exclusive"
+	// ResourceFamilyShared is the card-sharing family, "<base>.shared".
+	ResourceFamilyShared ResourceFamily = "shared"
+	// ResourceFamilySliced is the logical (software injection) slicing family,
+	// "<base>.sliced" and its sub-keys, including the superseded
+	// "<base>.sliced.mig-<profile>" shape for as long as it exists.
+	ResourceFamilySliced ResourceFamily = "sliced"
+	// ResourceFamilyPartitioned is the physical (hardware partitioning) family,
+	// "<base>.partitioned" and its sub-keys.
+	ResourceFamilyPartitioned ResourceFamily = "partitioned"
+	// ResourceFamilyVisibility is the device-only co-allocation family the SSH sidecar
+	// requests, "device.gpustack.ai/<manufacturer>.visibility". It is deliberately
+	// outside the accelerator families, so the one-family rules ignore it.
+	ResourceFamilyVisibility ResourceFamily = "visibility"
+)
+
+// _ResourceFamilyFixedSuffixes maps each fixed key suffix to its family. The suffixes are
+// listed longest first for readability; the classification is order-independent, because a
+// key matches at most one suffix with a known accelerator base in front of it.
+var _ResourceFamilyFixedSuffixes = []struct {
+	suffix string
+	family ResourceFamily
+}{
+	{SlicedMemoryPercentageResourceNameSuffix, ResourceFamilySliced},
+	{SlicedCoresPercentageResourceNameSuffix, ResourceFamilySliced},
+	{SlicedMemoryMibResourceNameSuffix, ResourceFamilySliced},
+	{PartitionedUnitsResourceNameSuffix, ResourceFamilyPartitioned},
+	{SlicedUnitsResourceNameSuffix, ResourceFamilySliced},
+	{PartitionedResourceNameSuffix, ResourceFamilyPartitioned},
+	{SlicedResourceNameSuffix, ResourceFamilySliced},
+	{SharedResourceNameSuffix, ResourceFamilyShared},
+}
+
+// ResourceFamilyOf classifies a resource name into the accelerator family it belongs to,
+// the single decision the Pod webhooks and the node-devices admission check drive their
+// one-family rules through.
+//
+// A name is classified only when it is well-formed: its base must be a known accelerator
+// resource name (or, for visibility, a known manufacturer) and any variable tail must be
+// non-empty. Anything else — an unrecognized sub-key, an unknown base, a non-accelerator
+// resource — is ResourceFamilyNone.
+func ResourceFamilyOf(name core.ResourceName) ResourceFamily {
+	s := string(name)
+
+	if manufacturer, ok := strings.CutPrefix(s, VisibilityResourceNamePrefix); ok {
+		manufacturer, ok = strings.CutSuffix(manufacturer, VisibilityResourceNameSuffix)
+		if ok && IsKnownAcceleratableManufacturer(manufacturer) {
+			return ResourceFamilyVisibility
+		}
+		return ResourceFamilyNone
+	}
+
+	// The variable-tailed per-profile keys carry their own base and tail checks.
+	if _, ok := PartitionedProfileOf(name); ok {
+		return ResourceFamilyPartitioned
+	}
+	if _, ok := SlicedMigProfileOf(name); ok {
+		return ResourceFamilySliced
+	}
+
+	for _, e := range _ResourceFamilyFixedSuffixes {
+		if base, ok := strings.CutSuffix(s, e.suffix); ok &&
+			_AcceleratableResourceNameSet.Has(core.ResourceName(base)) {
+			return e.family
+		}
+	}
+
+	if _AcceleratableResourceNameSet.Has(name) {
+		return ResourceFamilyExclusive
+	}
+	return ResourceFamilyNone
 }
 
 // GetAcceleratableRuntimeName returns the accelerator runtime name for the given manufacturer,

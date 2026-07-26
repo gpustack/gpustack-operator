@@ -99,6 +99,12 @@ Defaults:
 
 > T-Head has no default runtime name, but `GPUSTACK_THEAD_ACCELERATABLE_RUNTIME_NAME` is still honored and can supply one.
 
+A fourth override is **not** expanded for every manufacturer — only for one that has hardware partitioning at all:
+
+- `GPUSTACK_${MANUFACTURER}_PARTITION_KIND` — overrides the manufacturer's own name for hardware partitioning, which becomes the segment prefix of its per-profile resource key.
+
+`nvidia` is the only manufacturer with a default: `mig`, giving `nvidia.com/gpu.partitioned.mig-${profile}`. Setting the variable for any other manufacturer has no effect — one without hardware partitioning advertises no `.partitioned` family, so there is no key segment to rename.
+
 ### Vendor Toolkit Paths
 
 The DM device bindings locate vendor libraries through conventional toolkit-home variables. Each falls back to the listed default directory when unset.
