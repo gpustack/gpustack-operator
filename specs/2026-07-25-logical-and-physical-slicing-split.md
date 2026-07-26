@@ -1235,7 +1235,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       they belong to a later task's `Owns:` — `docs/**` to T14, and the e2e cases plus
       `_e2e-lib/scripts/teardown.sh` to T15 — so the criteria close at T15, not here.
 
-- [ ] **T14 · Documentation** (F10, F12, F14)
+- [x] **T14 · Documentation** (F10, F12, F14)
       Blocked by: T13
       Owns: `docs/**`, `README.md`
       *Do:* add the normative request-rules section; state that the old MIG key is a pre-release break with
@@ -1254,6 +1254,19 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       column header in `docs/`; the two success-criteria greps return nothing under `docs/` or
       `README.md`.
       Verify: read-through against the F6 table
+      *Landed:* the rules needed their own page — `docs/accelerator-requests.md`, linked from the README
+      index, `architecture.md`, `walkthrough.md` and the MIG guide. Its rule numbering follows the webhook's
+      own, and each rule quotes the message verbatim. Two judgment calls worth recording. The old MIG key is
+      described compositionally — "a `mig-<profile>` segment on `<base>.sliced`" — because naming it
+      literally would re-populate the very grep F14 uses to prove no recognition path survives; the reader
+      still learns exactly which key is gone. And `architecture.md` carried three statements this build
+      falsified but T14 never named: the pre-T1 "at most one workload allocation per Pod" limit, the
+      second-container skip, and `.sliced > 1` recorded as an unenforced follow-up. They were rewritten
+      rather than left contradicting the acceptance criterion.
+      *Owed to hardware:* both walkthroughs present themselves as recorded runs. The accelerator-column and
+      MIG-guide values were re-derived from the code under the four-view formula, not re-captured, so
+      `nvidia-mig.md` steps 5 and 6 now read `0/0 0/0 0/0 7/7` and `0/0 0/0 0/0 3/3` where step 5 used to
+      claim the pool row was unchanged. T15 confirms these against the live run.
 
 #### Phase 3 — e2e
 
