@@ -224,10 +224,12 @@ if not ann: sys.exit(0)
 try: st=json.loads(ann)
 except Exception: sys.exit(0)
 cards=set()
-for g in st.get('groups',[]):
-    gid=g.get('id','')
-    for a in g.get('accelerators',[]):
-        cards.add(('%s:%s' % (gid, a.get('id',''))).replace(' ','~'))
+# The annotation is keyed by container name; each entry carries that container's own allocation.
+for c in st.values():
+    for g in (c.get('devices') or {}).get('groups',[]):
+        gid=g.get('id','')
+        for a in g.get('accelerators',[]):
+            cards.add(('%s:%s' % (gid, a.get('id',''))).replace(' ','~'))
 print(' '.join(sorted(cards)))
 "
 }

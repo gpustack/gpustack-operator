@@ -541,7 +541,15 @@ sidecar that belongs to neither group.
 
 *The durable annotation is a single slot.* A second live claim **erases** the first from the ledger the
 reconciler rebuilds, so the cross-mode gate fails open for a card that is still running a container after a
-device-manager restart. Fixed by accumulating **per container**, and by keeping a **terminating** Pod's
+device-manager restart. Fixed by re-shaping the annotation's value into a map **keyed by container name**,
+each entry carrying that container's allocation and the device IDs the kubelet offered it. The container
+key is what makes the record accumulate across containers *and* stay idempotent within one — a repeated
+`Allocate` overwrites its own entry rather than charging its card twice — and it is the only place the
+offered IDs can live, since neither `AcceleratorAllocation` may grow fields (Non-Goals) nor can the IDs be
+re-derived once `Allocate` picks its own card. It is a value-format change on a device-plugin-owned
+annotation, not an API change: the two readers outside the plugin (the `Instance` controller's status
+mirror and the cross-mode e2e case) move to an exported aggregation helper. Also fixed by keeping a
+**terminating** Pod's
 allocation merged until the object is gone, matching the live set the reclaim loop already uses. The
 accumulation is **not** filtered by container liveness: the NVIDIA reclaimer destroys an instance on Pod
 deletion, not container termination, and the kubelet likewise keeps a regular init container's devices in
@@ -550,15 +558,26 @@ an instance still physically occupies it — advertising room that placement the
 charges its card until its Pod is gone, which is what the hardware does.
 
 *The match is too coarse to tell two requests apart.* Two Pods requesting different profiles both carry
-`<base>.partitioned: 1`, because the profile lives on a key that never participates in matching, so one Pod
-can absorb the other's `Allocate` and have the **wrong profile** actuated. With placement authority the
-symptom changes from a terminal failure that gets noticed into a silently wrong instance, so it is fixed
-rather than recorded: every **response-affecting** request dimension joins the match — the per-profile key
-for a partition, and for a logical slice the per-card units *and* the injection-budget keys, because the
-vendor responder reads the core and memory percentages independently of the units. Candidates that are equal
-on every one of those dimensions are genuinely interchangeable — whichever one is chosen receives exactly
-what it asked for — so the existing oldest-pending tie-break is kept rather than replaced by a fail-closed
+`<base>.partitioned: 1`, so one Pod can absorb the other's `Allocate` and have the **wrong profile**
+actuated. With placement authority the symptom changes from a terminal failure that gets noticed into a
+silently wrong instance, so it is narrowed rather than merely recorded.
+
+It cannot be closed by matching harder. `ContainerAllocateRequest` carries a resource name and a list of
+device IDs and nothing else — no profile, no percentage, no Pod identity — so no predicate over the
+request can name the container the call is for; adding the response-affecting keys to the *match* would
+only shrink the candidate set without saying which candidate is right. What the plugin can check is the
+converse: **which candidates this call could actually serve**. A candidate whose demand does not fit the
+cards the kubelet offered — a slice whose per-card units exceed their remaining, later a partition whose
+profile no card on the node can host — is not the one being served, and dropping it is a real narrowing in
+exactly the mixed case the defect describes. Candidates that survive the test are genuinely
+interchangeable, so the existing oldest-pending tie-break is kept rather than replaced by a fail-closed
 error, which would reject the concurrent-identical-Pods case this heuristic was last repaired to support.
+
+The test **disambiguates; it does not gate**. It reads a ledger that lags reality, so when it rejects
+every candidate the search falls back to the unfiltered oldest rather than failing a resolvable request —
+admission belongs to the Pod webhook and the node-devices admission check, upstream. What remains when
+several feasible candidates differ is the same guess as today, now confined to the cases the node can
+actually serve either way.
 
 *The one hole that stays open.* If the kubelet dies after receiving an `AllocateResponse` but before writing
 its checkpoint, the Pod is re-admitted with no record while the plugin still holds its reservation; the
@@ -569,10 +588,11 @@ allocation instead of erroring. The mixed case — one reserved and one unreserv
 *Accept:* the concurrent-identical-Pods behavior the Pod-wide skip existed for is unchanged; a Pod with two
 live claims has both durably recorded, so the rebuilt ledger holds both cards; a container that has
 terminated still charges its card until its Pod is gone; a terminating Pod still charges its card until the
-object disappears; two pending Pods differing only in profile each resolve to their own container; two
-candidates differing only in a percentage the responder reads are told apart; the device IDs the kubelet
-offered are recorded with the allocation so F5 can keep them Healthy; no reservation or annotation entry
-survives a prune sweep for a gone Pod.
+object disappears; two pending Pods differing only in per-card demand resolve to the one the offered card
+can still hold, rather than to the older one it cannot; equally feasible candidates still fall back to
+oldest-pending, and an all-infeasible candidate set still resolves rather than erroring; the device IDs the
+kubelet offered are recorded with the allocation so F5 can keep them Healthy; no reservation or annotation
+entry survives a prune sweep for a gone Pod.
 
 **F16 — a re-detected capability actually lands in the `Devices` object (prerequisite).**
 The detector's alignment path indexes the existing groups, writes an updated group into the index value,
@@ -673,6 +693,12 @@ Each is accepted with its containment; none is a regression of this work.
   admission-check inputs feeding credits through the transformation; neither becomes a quota dimension.
 - **Clean break on keys.** The old `.sliced.mig-<profile>` request key is not accepted, aliased or
   translated; only the node-capacity *removal* path keeps recognizing it.
+- **Clean break on the allocation annotation too, so drain before upgrading the device manager.**
+  Its value becomes a per-container map (F15) and the old flat shape is not read. A Pod carrying the
+  old shape on a node whose device manager has restarted drops out of the ledger and its cards read
+  *free* while it still holds them — a fail-open the rebuild cannot recover, since the occupancy is
+  exactly what became unreadable. No translation is written (Non-Goals); instead the reconciler logs
+  what is at stake, naming the Pod, and the docs state the drain requirement.
 - **`make generate` runs from the main checkout** — the protobuf generator requires a working-directory
   path ending in the module name, so it fails inside a worktree.
 - **Verification reach.** The whole module, including the vendor CGO detectors, builds and unit-tests on
@@ -777,10 +803,11 @@ pkg/deviceplugin/
                                 # released, no NUMA topology reported); node-level partition health over a
                                 # stable healthy set, never ID removal; profile read from
                                 # .partitioned.<kind>-<profile>
-  controller.go                 # reservations keyed per (Pod, container); match on every response-
-                                # affecting request dimension, oldest-pending among equals; annotation
-                                # accumulates per container for the Pod's life; terminating Pods stay
-                                # merged; offered device IDs recorded with the allocation
+  controller.go                 # reservations keyed per (Pod, container); candidate resolution
+                                # narrowed by feasibility, oldest-pending among the survivors; the
+                                # allocation annotation's value becomes a per-container map carrying
+                                # each container's allocation and the device IDs kubelet offered it;
+                                # terminating Pods stay merged
   types.go                      # Partitioned mode plumbing
 
 pkg/devicemanager/detector/
@@ -904,21 +931,26 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       code comment.
       Verify: `go test ./pkg/devicemanager/detector/...`
 
-- [ ] **T1 · Unambiguous per-container allocation identity** (F15)
+- [x] **T1 · Unambiguous per-container allocation identity** (F15)
       Blocked by: None
       Owns: `pkg/deviceplugin/controller.go`, `controller_test.go`, `pkg/deviceplugin/gc.go`, `gc_test.go`,
-      `pkg/deviceplugin/reclaim.go`, `reclaim_test.go`
+      `pkg/deviceplugin/reclaim.go`, `reclaim_test.go`, `pkg/deviceplugin/server.go` (the reservation,
+      identity and patch call sites only), `server_test.go`,
+      `pkg/worker/controllers/worker/instance.go` (the annotation read),
+      `.claude/skills/gpustack-operator-e2e/cases/case-22.sh` (the annotation parse)
       Gate: review
       *Do:* two failing tests first — two containers of one group each holding a live claim, where the
       second `Allocate` is refused by the Pod-wide skip, and where the second's annotation erases the
       first. Then key reservations by (Pod UID, container), change the skip predicate accordingly, have the
-      visibility lookup select the Pod's non-self accelerator reservation, make the annotation accumulate
-      per container, keep a terminating Pod's allocation merged until the object is gone, record the device
-      IDs the kubelet offered alongside the allocation (T10 pins them Healthy), and widen the match to every
-      **response-affecting** request dimension — the per-profile key, the per-card units, and the injection
-      budget keys the vendor responder reads. Candidates equal on all of them are interchangeable, so the
-      existing oldest-pending tie-break stays; do **not** add a fail-closed tie-break, and do **not** filter
-      an entry by container liveness — both are corrected upstream in F15.
+      visibility lookup select the Pod's non-self accelerator reservation, re-shape the annotation's value
+      into a per-container map (carrying each container's allocation and the device IDs kubelet offered it,
+      which T10 pins Healthy), keep a terminating Pod's allocation merged until the object is gone, and
+      narrow the candidate resolution by **feasibility** — drop a candidate whose per-card demand the
+      offered cards cannot hold. Keep the oldest-pending tie-break among the survivors; the feasibility
+      test must fall back rather than gate. Do **not** add a fail-closed tie-break, and do **not** filter an
+      entry by container liveness — both are corrected upstream in F15. The two annotation readers outside
+      the plugin move to an exported aggregation helper; the three extra `Owns:` entries are all downstream
+      of this task's siblings, so nothing in wave 1 contends for them.
       Acceptance: F15's list; the concurrent-identical-Pods behaviour is unchanged; a terminated container's
       card stays charged until its Pod is gone; no reservation or annotation entry survives a prune sweep
       for a gone Pod.
@@ -1120,8 +1152,9 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       Blocked by: T13
       Owns: `docs/**`, `README.md`
       *Do:* add the normative request-rules section; state that the old MIG key is a pre-release break with
-      no translation; correct the partitioning-mode-change procedure (DaemonSet restart, not object
-      deletion); update the MIG guide to the new keys and add the `Instance`-side partition request; update
+      no translation, and that the allocation annotation's value is one too — so a node must be drained
+      before its device manager is upgraded, or its running Pods' cards read free; correct the
+      partitioning-mode-change procedure (DaemonSet restart, not object deletion); update the MIG guide to the new keys and add the `Instance`-side partition request; update
       the `Accelerator(E/S/P)` column header — it appears in `docs/walkthrough.md` and
       `docs/operation/nvidia-mig.md`; state that hand-carving a partition outside GPUStack is unsupported on
       a managed node, and why.
@@ -1335,10 +1368,14 @@ actually receives for a partition — with both outcomes and the escalation boun
   mutex. This removes the card dimension of residual 3 and reduces partition health to a node-level count.
   The other three families stay card-bound.
 - *Allocation identity* — fixed here rather than deferred, because placement authority turns a misresolved
-  container from a failure that gets noticed into a silently wrong instance. The match widens to every
-  response-affecting dimension, but the oldest-pending tie-break **stays**: candidates equal on all of them
-  are interchangeable, and a fail-closed tie-break would reject the concurrent-identical-Pods case the
+  container from a failure that gets noticed into a silently wrong instance. The Allocate RPC carries no
+  dimension that could name the right container, so the resolution is narrowed by feasibility — drop the
+  candidates this call could not serve on the cards offered — rather than by a richer match. The
+  oldest-pending tie-break **stays** among the survivors, and the test never gates: an all-infeasible set
+  falls back to it, because a fail-closed outcome would reject the concurrent-identical-Pods case the
   heuristic was last repaired to support.
+- *The allocation annotation's value* — re-shaped into a per-container map carrying each container's
+  allocation and the device IDs kubelet offered it. A device-plugin-owned value format, not an API change.
 - *Container-liveness filtering* — rejected. The reclaimer and the kubelet both scope a device to the Pod's
   life, so a liveness filter would report a card free while its instance still occupies slices.
 - *Per-profile key shape* — `<base>.partitioned.<kind>-<profile>` with a per-manufacturer, overridable

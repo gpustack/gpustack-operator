@@ -202,9 +202,12 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(ctrReq.GetAllocationSize()), resource.DecimalSI)
-	// Advisory path: do not skip reserved pods (kubelet may ignore this hint, and the authoritative
-	// pod identification with skip-reserved happens in Allocate).
-	pod, ctr, err := s.Reconciler.getAllocatingPodWithRetry(ctx, resName, resQuantity, false)
+	// Advisory path: do not skip reserved containers (kubelet may ignore this hint, and the
+	// authoritative identification with skip-reserved happens in Allocate).
+	pod, ctr, err := s.Reconciler.getAllocatingPodWithRetry(ctx, _AllocationMatch{
+		ResourceName: resName,
+		Quantity:     resQuantity,
+	})
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for preferred allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for preferred allocation: %v", err)
@@ -384,6 +387,57 @@ func statusModeOf(devs *workercore.Devices, res Resource) workercore.DeviceAlloc
 	return workercore.DeviceAllocationModeNone
 }
 
+// statusRemainingOf returns the units the Devices ledger still reports free on a physical card.
+// A card absent from the Status is treated as untouched, i.e. a whole card free.
+func statusRemainingOf(devs *workercore.Devices, res Resource) int32 {
+	for i := range devs.Status.Groups {
+		grp := &devs.Status.Groups[i]
+		if grp.ID != res.Group {
+			continue
+		}
+		for j := range grp.Accelerators {
+			if grp.Accelerators[j].ID == res.Device {
+				return grp.Accelerators[j].Remaining
+			}
+		}
+	}
+	return nodefeature.ResourceMaxUnits
+}
+
+// candidateFeasible returns the test that tells two otherwise identical Allocate candidates
+// apart. The RPC carries only a resource name and a device-ID count, so two pending containers
+// asking for the same family are indistinguishable to it even when they demand very different
+// things — and picking the wrong one actuates the wrong request. This narrows the choice using
+// the one thing the plugin can check: whether the candidate's demand still fits the cards
+// kubelet offered, per the ledger.
+//
+// A logical slice's demand is its per-card ".sliced.units", the normalized budget the Pod
+// webhook folded its memory request into. The exclusive and shared families carry no such
+// dimension — every candidate for them really is interchangeable — so they get no test.
+func (s *ResourceServer) candidateFeasible(
+	devs *workercore.Devices, cards map[Resource][]ResourceUnit,
+) func(*core.Pod, *core.Container) bool {
+	if s.AllocationMode != workercore.DeviceAllocationModeSliced {
+		return nil
+	}
+	unitsResName := nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)
+	return func(_ *core.Pod, ctr *core.Container) bool {
+		q, ok := ctr.Resources.Limits[unitsResName]
+		if !ok || q.Value() <= 0 {
+			// A slice the Pod webhook did not shape carries no per-card budget, so there is
+			// nothing to test it against.
+			return true
+		}
+		units := int32(min(q.Value(), int64(nodefeature.ResourceMaxUnits)))
+		for res := range cards {
+			if statusRemainingOf(devs, res) < units {
+				return false
+			}
+		}
+		return true
+	}
+}
+
 // cardHeldInOtherMode reports whether the physical card is currently held in a mode different
 // from this server's, per the ledger Status OR the in-process reservations (the reservation is
 // race-safe: written synchronously by every workload Allocate). Free (None) or same-mode is not
@@ -448,16 +502,23 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		defer s.Reconciler.allocateMutex.Unlock()
 
 		var err error
-		pod, ctr, err = s.Reconciler.getAllocatingPod(ctx, resName, resQuantity, true)
-		if err != nil {
-			s.Logger.Error(err, "get allocating pod for allocation")
-			return grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
-		}
-
+		// The ledger is read first: it is what tells two otherwise identical candidates apart
+		// in the feasibility test below.
 		devs, err = s.Reconciler.getDevices(ctx)
 		if err != nil {
 			s.Logger.Error(err, "get devices for allocation")
 			return grpcstatus.Errorf(grpccodes.Internal, "get devices for allocation: %v", err)
+		}
+
+		pod, ctr, err = s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
+			ResourceName: resName,
+			Quantity:     resQuantity,
+			SkipReserved: true,
+			Feasible:     s.candidateFeasible(devs, allocatedResUnitsMap),
+		})
+		if err != nil {
+			s.Logger.Error(err, "get allocating pod for allocation")
+			return grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
 		}
 
 		// For a sliced allocation each token placed on a card commits the container's per-card
@@ -540,7 +601,9 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		// the check passes, so the next serialized Allocate observes it (cross-mode check and
 		// getAllocatingPod's skip-reserved), and the SSH sidecar's visibility Allocate can
 		// co-allocate the same physical device without racing the annotation's cache propagation.
-		s.Reconciler.reserveDevices(pod.UID, allocatedStatus)
+		// The offered device IDs ride along so ListAndWatch can keep advertising exactly them
+		// Healthy for as long as this allocation lives.
+		s.Reconciler.reserveDevices(pod.UID, ctr.Name, allocatedStatus, allocatedDeviceIDs)
 		return nil
 	}(); err != nil {
 		return nil, err
@@ -557,14 +620,14 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	if profile, ok := physicalSlicedProfileOf(ctr); ok {
 		actuator, canActuate := s.Responder.(PhysicalSlicedActuator)
 		if !canActuate {
-			s.Reconciler.releaseReservation(pod.UID)
+			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
 			return nil, grpcstatus.Errorf(grpccodes.Internal,
 				"responder cannot actuate physical-slice profile %q", profile)
 		}
 		var actErr error
 		physical, actErr = actuator.ActuatePhysicalSliced(ctx, pod, ctr, devs, allocatedAllocation, profile)
 		if actErr != nil {
-			s.Reconciler.releaseReservation(pod.UID)
+			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
 			s.Logger.Error(actErr, "actuate physical-slice for allocation", "pod", kubemeta.GetNamespacedNameKey(pod))
 			return nil, grpcstatus.Errorf(grpccodes.Internal, "actuate physical-slice: %v", actErr)
 		}
@@ -577,11 +640,11 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	// does not start the container on this error, so freeing the reservation now is safe and keeps
 	// the release counting honest. A physical partition materialized above is also torn down, so
 	// no half-owned instance persists past a failed patch.
-	if err := s.Reconciler.patchAllocatingPod(ctx, pod, allocatedStatus); err != nil {
+	if err := s.Reconciler.patchAllocatingPod(ctx, pod, ctr.Name, allocatedStatus, allocatedDeviceIDs); err != nil {
 		if physical != nil && physical.Rollback != nil {
 			physical.Rollback()
 		}
-		s.Reconciler.releaseReservation(pod.UID)
+		s.Reconciler.releaseReservation(pod.UID, ctr.Name)
 		s.Logger.Error(err, "patch allocating pod for allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 	}
@@ -653,15 +716,21 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	// Do not skip reserved pods: visibility re-finds its own pod (whose workload Allocate already
-	// recorded the reservation) to co-allocate the same physical device to the sidecar.
-	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, resName, resQuantity, false)
+	// Do not skip reserved containers: visibility re-finds its own pod (whose workload container
+	// already recorded a reservation) to co-allocate the same physical device to the sidecar.
+	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
+		ResourceName: resName,
+		Quantity:     resQuantity,
+	})
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for visibility allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
 	}
 
-	reserved, ok := s.Reconciler.reservedDevices(pod.UID)
+	// Take the pod's accelerator reservation held by a container other than this sidecar: the
+	// sidecar co-allocates what the workload holds, and its own visibility request reserves
+	// nothing. Accelerator claims live in exactly one container group, so there is only one.
+	reserved, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, ctr.Name)
 	if !ok || len(reserved.Groups) == 0 {
 		// Fail closed: the workload container's allocation has not been recorded yet (or was
 		// pruned). Returning an error rejects this admission rather than emitting an empty

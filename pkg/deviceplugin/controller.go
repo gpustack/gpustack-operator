@@ -42,6 +42,23 @@ type (
 		Channel        chan []string
 	}
 
+	// _ReservationKey identifies one container's in-process allocation claim. A pod can hold
+	// several at once — the device-plugin API serves one container per Allocate call — so the
+	// container name is part of the identity, not a detail of the payload.
+	_ReservationKey struct {
+		PodUID    types.UID
+		Container string
+	}
+
+	// _Reservation is the in-process mirror of one container's durable allocation record.
+	// DeviceIDs are the device IDs kubelet offered for that container's Allocate; a family
+	// whose Allocate picks the card itself hands back devices those IDs do not name, so the
+	// IDs cannot be re-derived from the allocation and are kept alongside it.
+	_Reservation struct {
+		Allocated workercore.DevicesStatus
+		DeviceIDs []string
+	}
+
 	// DevicesReconciler reconciles v1alpha1.Devices objects on a Kubernetes Node
 	// and watches the events of Pods scheduled to the Node, to manage the status of Devices.
 	DevicesReconciler struct {
@@ -57,13 +74,15 @@ type (
 		// could stay unseeded until the next reconcile and never reclaim on its resync tick.
 		lastLivePodUIDs []string
 
-		// reservations records, keyed by pod UID, the accelerator devices a pod's
-		// workload container was allocated, so the SSH sidecar's visibility Allocate
+		// reservations records, keyed by pod UID AND container name, the accelerator
+		// devices a container was allocated, so the SSH sidecar's visibility Allocate
 		// (same pod, same node, later in the same admission window) can co-allocate the
 		// same physical devices without re-selecting them or racing the annotation's
-		// cache propagation.
+		// cache propagation. Keying by pod alone would let the first served container of a
+		// pod mask every later one: the already-reserved skip would refuse to resolve them,
+		// so two containers each holding a live claim could never both be served.
 		reservationsMutex sync.RWMutex
-		reservations      map[types.UID]workercore.DevicesStatus
+		reservations      map[_ReservationKey]_Reservation
 
 		// allocateMutex serializes the whole workload Allocate identify→cross-mode-check→reserve
 		// section for the node. All per-mode ResourceServers share this one reconciler, so a single
@@ -134,18 +153,25 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	livePodUIDs := make([]string, 0, len(podList.Items))
 	for i := range podList.Items {
 		pod := &podList.Items[i]
-		// Keep terminating pods (DeletionTimestamp != nil) in the live set: during
-		// the grace period their containers can still be running with the working
-		// dir mounted, so the per-pod GC must not reclaim it until the pod object is
-		// actually gone. They are still skipped for the allocation-status merge.
+		// Keep terminating pods (DeletionTimestamp != nil) in the live set AND in the
+		// allocation merge: during the grace period their containers can still be running
+		// with the working dir mounted and their hardware still carved, and the reclaimer
+		// destroys an instance on pod deletion rather than on container exit. Dropping them
+		// here would report a card free while it is still physically occupied.
 		livePodUIDs = append(livePodUIDs, string(pod.UID))
-		if pod.DeletionTimestamp != nil {
-			continue
-		}
 
 		podDevsStatus, err := extractAllocatedStatusFromPod(pod)
 		if err != nil {
-			logger.Error(err, "extract allocated accelerators from pod", "pod", ctrlcli.ObjectKeyFromObject(pod))
+			// An unreadable record is the one failure this rebuild cannot absorb: the pod's
+			// cards drop out of the ledger and read FREE while its containers still hold them,
+			// which is how an opposite-mode pod lands on an occupied card. Nothing here can
+			// recover the occupancy, so say loudly what is at stake. The reachable cause is an
+			// annotation an older device-manager wrote in a shape this one no longer reads —
+			// pre-release formats are a clean break, so drain a node before upgrading it.
+			logger.Error(err, "cannot read the allocation this pod holds; its cards will be "+
+				"reported free while it still occupies them — drain the node before upgrading "+
+				"the device manager",
+				"pod", ctrlcli.ObjectKeyFromObject(pod))
 			continue
 		}
 
@@ -334,42 +360,90 @@ func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices
 	return devs, err
 }
 
-// reserveDevices records the accelerator devices a pod's workload container was
-// allocated, keyed by pod UID. It mirrors the AllocatedAcceleratorAnnoKey annotation the
-// workload Allocate persists (which stays the durable read fallback), giving the sidecar's
-// visibility Allocate a race-free in-process source for the same-pod, same-window
-// co-allocation. A no-op for an empty UID or an empty allocation.
-func (r *DevicesReconciler) reserveDevices(podUID types.UID, allocated workercore.DevicesStatus) {
-	if podUID == "" || len(allocated.Groups) == 0 {
+// reserveDevices records the accelerator devices a container was allocated, keyed by pod UID
+// and container name, together with the device IDs kubelet offered for it. It mirrors the
+// AllocatedAcceleratorAnnoKey annotation the workload Allocate persists (which stays the
+// durable read fallback), giving the sidecar's visibility Allocate a race-free in-process
+// source for the same-pod, same-window co-allocation. A no-op for an empty UID, an empty
+// container name or an empty allocation.
+func (r *DevicesReconciler) reserveDevices(
+	podUID types.UID, container string, allocated workercore.DevicesStatus, deviceIDs []string,
+) {
+	if podUID == "" || container == "" || len(allocated.Groups) == 0 {
 		return
 	}
 	r.reservationsMutex.Lock()
 	if r.reservations == nil {
-		r.reservations = make(map[types.UID]workercore.DevicesStatus)
+		r.reservations = make(map[_ReservationKey]_Reservation)
 	}
-	r.reservations[podUID] = allocated
+	r.reservations[_ReservationKey{PodUID: podUID, Container: container}] = _Reservation{
+		Allocated: allocated,
+		DeviceIDs: deviceIDs,
+	}
 	r.reservationsMutex.Unlock()
 	// The reservation immediately withholds the card from the opposite mode in ListAndWatch;
 	// notify so kubelet sees the health flip now, not after the annotation-driven reconcile.
 	r.notifyListeners()
 }
 
-// reservedDevices returns the devices recorded for a pod by reserveDevices and whether a
-// reservation exists.
-func (r *DevicesReconciler) reservedDevices(podUID types.UID) (workercore.DevicesStatus, bool) {
+// reservedDevices returns the devices recorded for one container by reserveDevices and whether
+// a reservation exists.
+func (r *DevicesReconciler) reservedDevices(podUID types.UID, container string) (workercore.DevicesStatus, bool) {
 	r.reservationsMutex.RLock()
 	defer r.reservationsMutex.RUnlock()
-	got, ok := r.reservations[podUID]
-	return got, ok
+	got, ok := r.reservations[_ReservationKey{PodUID: podUID, Container: container}]
+	return got.Allocated, ok
 }
 
-// releaseReservation drops the reservation recorded for a pod. It rolls back a reservation
-// written before a durable-annotation patch that then failed: without the annotation the
-// Pod-delete watch (gated on it) would never enqueue a prune, so the card would stay held for
-// the opposite mode until the next full resync. Undoing it here frees the card immediately.
-func (r *DevicesReconciler) releaseReservation(podUID types.UID) {
+// reservedAcceleratorDevices returns the accelerator devices reserved for a pod by a container
+// other than self — what the SSH sidecar must co-allocate. Accelerator claims are confined to a
+// single container group, so a pod holds at most one such reservation and the answer is
+// unambiguous; the container names are still scanned in order so a pod that somehow holds
+// several resolves deterministically.
+func (r *DevicesReconciler) reservedAcceleratorDevices(podUID types.UID, self string) (workercore.DevicesStatus, bool) {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	var (
+		found     workercore.DevicesStatus
+		foundName string
+	)
+	for k, v := range r.reservations {
+		if k.PodUID != podUID || k.Container == self {
+			continue
+		}
+		if foundName == "" || k.Container < foundName {
+			found, foundName = v.Allocated, k.Container
+		}
+	}
+	return found, foundName != ""
+}
+
+// reservationsFor returns every container reservation currently held for a pod, keyed by
+// container name.
+func (r *DevicesReconciler) reservationsFor(podUID types.UID) map[string]_Reservation {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	var held map[string]_Reservation
+	for k, v := range r.reservations {
+		if k.PodUID != podUID {
+			continue
+		}
+		if held == nil {
+			held = make(map[string]_Reservation, 1)
+		}
+		held[k.Container] = v
+	}
+	return held
+}
+
+// releaseReservation drops the reservation recorded for one container. It rolls back a
+// reservation written before a durable-annotation patch that then failed: without the
+// annotation the Pod-delete watch (gated on it) would never enqueue a prune, so the card would
+// stay held for the opposite mode until the next full resync. Undoing it here frees the card
+// immediately.
+func (r *DevicesReconciler) releaseReservation(podUID types.UID, container string) {
 	r.reservationsMutex.Lock()
-	delete(r.reservations, podUID)
+	delete(r.reservations, _ReservationKey{PodUID: podUID, Container: container})
 	r.reservationsMutex.Unlock()
 	// Mirror reserveDevices: a rolled-back reservation restores the card's health for the
 	// opposite mode in ListAndWatch, so notify immediately.
@@ -384,7 +458,8 @@ func (r *DevicesReconciler) releaseReservation(podUID types.UID) {
 func (r *DevicesReconciler) reservedModeForResource(group, device string) (workercore.DeviceAllocationMode, types.UID) {
 	r.reservationsMutex.RLock()
 	defer r.reservationsMutex.RUnlock()
-	for uid, status := range r.reservations {
+	for key, reservation := range r.reservations {
+		status := reservation.Allocated
 		for i := range status.Groups {
 			grp := &status.Groups[i]
 			if grp.ID != group {
@@ -393,7 +468,7 @@ func (r *DevicesReconciler) reservedModeForResource(group, device string) (worke
 			for j := range grp.Accelerators {
 				acc := &grp.Accelerators[j]
 				if acc.ID == device && acc.Mode != workercore.DeviceAllocationModeNone {
-					return acc.Mode, uid
+					return acc.Mode, key.PodUID
 				}
 			}
 		}
@@ -413,9 +488,9 @@ func (r *DevicesReconciler) pruneReservations(livePodUIDs []string) {
 	for i := range livePodUIDs {
 		live.Insert(types.UID(livePodUIDs[i]))
 	}
-	for uid := range r.reservations {
-		if !live.Has(uid) {
-			delete(r.reservations, uid)
+	for key := range r.reservations {
+		if !live.Has(key.PodUID) {
+			delete(r.reservations, key)
 		}
 	}
 }
@@ -426,11 +501,36 @@ const (
 	_PreferredAcceleratorIndexAnnoKey = "device.gpustack.ai/accelerator.preferred-index"
 )
 
+// _AllocationMatch describes which pending container an Allocate (or the advisory
+// GetPreferredAllocation) call can be serving. The device-plugin API omits the pod identity, so
+// the resolution is a search over the node's pending containers rather than a lookup.
+type _AllocationMatch struct {
+	// ResourceName and Quantity are the only two dimensions the RPC itself carries: the
+	// resource being served, and how many device IDs kubelet offered for it.
+	ResourceName core.ResourceName
+	Quantity     resource.Quantity
+	// SkipReserved drops a (pod, container) that a previous Allocate already reserved, so
+	// concurrent calls serialized by allocateMutex resolve to distinct containers instead of
+	// all matching the same oldest one. The visibility path leaves it false: it must re-find
+	// the pod whose workload container already holds a reservation.
+	SkipReserved bool
+	// Feasible, when set, drops a candidate this call cannot actually serve. It is the only
+	// disambiguator available for the request dimensions the RPC does not carry — a
+	// partition's profile, a slice's per-card units — which is how two pods differing only in
+	// one of them can otherwise absorb each other's call.
+	//
+	// It is deliberately NOT an admission gate: when it rejects every candidate the search
+	// falls back to the unfiltered set, because the ledger it reads lags reality and must
+	// never turn a resolvable Allocate into a hard failure. Admission is enforced upstream by
+	// the Pod webhook and the node-devices admission check.
+	Feasible func(pod *core.Pod, ctr *core.Container) bool
+}
+
 func (r *DevicesReconciler) getAllocatingPodWithRetry(
-	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity, skipReserved bool,
+	ctx context.Context, match _AllocationMatch,
 ) (pod *core.Pod, ctr *core.Container, err error) {
 	for i := 0; i < 5; i++ {
-		pod, ctr, err = r.getAllocatingPod(ctx, resName, resQuantity, skipReserved)
+		pod, ctr, err = r.getAllocatingPod(ctx, match)
 		if err == nil {
 			return pod, ctr, nil
 		}
@@ -439,14 +539,14 @@ func (r *DevicesReconciler) getAllocatingPodWithRetry(
 	return nil, nil, fmt.Errorf("get allocating pod with retry: %w", err)
 }
 
-// getAllocatingPod maps a kubelet Allocate/GetPreferredAllocation call to the pod being admitted.
-// The device-plugin API omits the pod identity, so it picks the oldest Pending pod on the node whose
-// container requests the matching resource+quantity. When skipReserved is set it also skips pods that
-// already hold an in-process reservation, so concurrent workload Allocates serialized by allocateMutex
-// each resolve to a distinct pod instead of all matching the same oldest one; the visibility path
-// passes false, since it must re-find its own reserved pod.
+// getAllocatingPod maps a kubelet Allocate/GetPreferredAllocation call to the container being
+// admitted, preferring the oldest Pending pod. Candidates are ranked rather than filtered: an
+// unreserved feasible container wins; failing that an unreserved but infeasible one (the
+// feasibility test disambiguates, it does not gate); failing that an already-reserved one, whose
+// allocation is then replayed instead of erroring — the containment for a kubelet that received
+// an AllocateResponse but died before checkpointing it.
 func (r *DevicesReconciler) getAllocatingPod(
-	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity, skipReserved bool,
+	ctx context.Context, match _AllocationMatch,
 ) (*core.Pod, *core.Container, error) {
 	podList := new(core.PodList)
 	err := r.Client.List(ctx, podList,
@@ -463,50 +563,195 @@ func (r *DevicesReconciler) getAllocatingPod(
 		return podList.Items[i].CreationTimestamp.Before(&podList.Items[j].CreationTimestamp)
 	})
 
+	type candidate struct {
+		pod *core.Pod
+		ctr *core.Container
+	}
+	var feasible, infeasible, reserved []candidate
+
+	classify := func(pod *core.Pod, ctr *core.Container) {
+		if !containerRequests(ctr, match.ResourceName, match.Quantity) {
+			return
+		}
+		// A container whose own Allocate already reserved its cards is claimed: the
+		// reservation is the synchronous, cache-lag-free marker, so under allocateMutex the
+		// next call in a concurrent batch does not re-pick what the previous one just took.
+		if match.SkipReserved {
+			if _, ok := r.reservedDevices(pod.UID, ctr.Name); ok {
+				reserved = append(reserved, candidate{pod, ctr})
+				return
+			}
+		}
+		if match.Feasible != nil && !match.Feasible(pod, ctr) {
+			infeasible = append(infeasible, candidate{pod, ctr})
+			return
+		}
+		feasible = append(feasible, candidate{pod, ctr})
+	}
+
 	for i := range podList.Items {
 		pod := &podList.Items[i]
 		if p := pod.Status.Phase; p != "" && p != core.PodPending {
 			continue
 		}
-		// Skip a pod whose workload Allocate already reserved its cards: the reservation is the
-		// synchronous, cache-lag-free claim marker, so under allocateMutex the next Allocate in a
-		// concurrent batch does not re-pick the pod the previous one just claimed.
-		if skipReserved {
-			if _, ok := r.reservedDevices(pod.UID); ok {
-				continue
-			}
-		}
 		for j := range pod.Spec.InitContainers {
-			ctr := &pod.Spec.InitContainers[j]
-			for actualResName, actualResQuantity := range ctr.Resources.Limits {
-				if actualResName == resName && actualResQuantity.Equal(resQuantity) {
-					return pod, ctr, nil
-				}
-			}
+			classify(pod, &pod.Spec.InitContainers[j])
 		}
 		for j := range pod.Spec.Containers {
-			ctr := &pod.Spec.Containers[j]
-			for actualResName, actualResQuantity := range ctr.Resources.Limits {
-				if actualResName == resName && actualResQuantity.Equal(resQuantity) {
-					return pod, ctr, nil
-				}
-			}
+			classify(pod, &pod.Spec.Containers[j])
 		}
 	}
 
-	return nil, nil, fmt.Errorf("cannot find pending pod with resource request %s=%s", resName, resQuantity.String())
+	logger := ctrllog.FromContext(ctx)
+	switch {
+	case len(feasible) > 0:
+		return feasible[0].pod, feasible[0].ctr, nil
+	case len(infeasible) > 0:
+		logger.Info("no candidate container can be served by this allocation; "+
+			"resolving to the oldest one anyway rather than failing a resolvable request",
+			"resource", match.ResourceName, "candidates", len(infeasible),
+			"pod", ctrlcli.ObjectKeyFromObject(infeasible[0].pod), "container", infeasible[0].ctr.Name)
+		return infeasible[0].pod, infeasible[0].ctr, nil
+	case len(reserved) > 0:
+		logger.Info("every candidate container is already reserved; replaying the oldest one's "+
+			"allocation, which a kubelet that lost its checkpoint is asking for again",
+			"resource", match.ResourceName, "candidates", len(reserved),
+			"pod", ctrlcli.ObjectKeyFromObject(reserved[0].pod), "container", reserved[0].ctr.Name)
+		return reserved[0].pod, reserved[0].ctr, nil
+	}
+
+	return nil, nil, fmt.Errorf("cannot find pending pod with resource request %s=%s",
+		match.ResourceName, match.Quantity.String())
 }
 
-func (r *DevicesReconciler) patchAllocatingPod(ctx context.Context, pod *core.Pod, allocatedStatus workercore.DevicesStatus) error {
-	allocatedStatusBytes, err := json.Marshal(allocatedStatus)
+// containerRequests reports whether the container asks for exactly resQuantity of resName.
+func containerRequests(ctr *core.Container, resName core.ResourceName, resQuantity resource.Quantity) bool {
+	q, ok := ctr.Resources.Limits[resName]
+	return ok && q.Equal(resQuantity)
+}
+
+type (
+	// ContainerAllocation is what the device plugin allocated for one container of a pod.
+	//
+	// DeviceIDs are the device IDs kubelet offered for that container's Allocate. They are
+	// recorded rather than re-derived because a family whose Allocate picks the card itself
+	// hands back devices those IDs do not name, and because the IDs must keep being
+	// advertised Healthy for as long as the allocation lives: kubelet refuses to re-admit a
+	// container whose checkpointed IDs have left the healthy set.
+	ContainerAllocation struct {
+		Devices   workercore.DevicesStatus `json:"devices"`
+		DeviceIDs []string                 `json:"deviceIDs,omitempty"`
+	}
+
+	// PodAllocations is the value of the AllocatedAcceleratorAnnoKey annotation, keyed by
+	// container name. The container dimension is what stops a second Allocate from erasing
+	// the first container's claim, and what makes a repeated Allocate for one container
+	// overwrite its own entry instead of double-counting the card.
+	PodAllocations map[string]ContainerAllocation
+)
+
+// Aggregate folds every container's record into the pod-wide allocation the ledger consumes.
+// Two containers holding the same card keep separate entries, so the card is charged for both.
+// Containers are visited in name order, so the result does not depend on map iteration.
+func (in PodAllocations) Aggregate() workercore.DevicesStatus {
+	names := make([]string, 0, len(in))
+	for name := range in {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var (
+		aggregated workercore.DevicesStatus
+		groupIndex = make(map[string]int)
+	)
+	for _, name := range names {
+		groups := in[name].Devices.Groups
+		for i := range groups {
+			src := &groups[i]
+			idx, ok := groupIndex[src.ID]
+			if !ok {
+				idx = len(aggregated.Groups)
+				groupIndex[src.ID] = idx
+				aggregated.Groups = append(aggregated.Groups, workercore.DevicesAllocationGroup{
+					ID:           src.ID,
+					Manufacturer: src.Manufacturer,
+				})
+			}
+			dst := &aggregated.Groups[idx]
+			dst.Accelerators = append(dst.Accelerators, src.Accelerators...)
+		}
+	}
+	return aggregated
+}
+
+// AllocatedAcceleratorsOf reads a pod's per-container allocation records. An unannotated pod
+// yields an empty map and no error.
+func AllocatedAcceleratorsOf(pod *core.Pod) (PodAllocations, error) {
+	str := pod.Annotations[AllocatedAcceleratorAnnoKey]
+	if str == "" {
+		return nil, nil
+	}
+	var allocations PodAllocations
+	if err := json.Unmarshal(stringx.ToBytes(&str), &allocations); err != nil {
+		return nil, err
+	}
+	return allocations, nil
+}
+
+// AllocatedAcceleratorGroupsOf returns the pod-wide accelerator allocation recorded on a pod,
+// for a caller that only reports it (the Instance status) and has no use for the per-container
+// breakdown. An unannotated or malformed annotation yields nil.
+func AllocatedAcceleratorGroupsOf(pod *core.Pod) []workercore.DevicesAllocationGroup {
+	allocations, err := AllocatedAcceleratorsOf(pod)
 	if err != nil {
-		return fmt.Errorf("marshal allocated groups: %w", err)
+		return nil
+	}
+	return allocations.Aggregate().Groups
+}
+
+// patchAllocatingPod records one container's allocation on its pod, merging it into whatever the
+// pod's other containers already hold. Re-recording the same container overwrites its own entry,
+// so a repeated Allocate is idempotent rather than additive.
+//
+// The merge starts from the pod as the informer has it, then overlays this process's own
+// reservations for the pod's other containers. That overlay is not redundant: a strategic-merge
+// patch replaces the annotation's whole value, and the informer copy can predate a sibling
+// container's patch, so writing only what the cached copy carried would silently erase the
+// sibling's claim from the ledger.
+func (r *DevicesReconciler) patchAllocatingPod(
+	ctx context.Context, pod *core.Pod, container string,
+	allocatedStatus workercore.DevicesStatus, deviceIDs []string,
+) error {
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return fmt.Errorf("read allocated accelerators: %w", err)
+	}
+	if allocations == nil {
+		allocations = make(PodAllocations, 1)
+	}
+	for name, reserved := range r.reservationsFor(pod.UID) {
+		if name == container {
+			continue
+		}
+		allocations[name] = ContainerAllocation{
+			Devices:   reserved.Allocated,
+			DeviceIDs: reserved.DeviceIDs,
+		}
+	}
+	allocations[container] = ContainerAllocation{
+		Devices:   allocatedStatus,
+		DeviceIDs: deviceIDs,
+	}
+
+	allocationsBytes, err := json.Marshal(allocations)
+	if err != nil {
+		return fmt.Errorf("marshal allocated accelerators: %w", err)
 	}
 
 	obj := map[string]any{
 		"metadata": map[string]any{
 			"annotations": map[string]any{
-				AllocatedAcceleratorAnnoKey: string(allocatedStatusBytes),
+				AllocatedAcceleratorAnnoKey: string(allocationsBytes),
 			},
 		},
 	}
@@ -520,11 +765,11 @@ func (r *DevicesReconciler) patchAllocatingPod(ctx context.Context, pod *core.Po
 }
 
 func extractAllocatedStatusFromPod(pod *core.Pod) (allocatedStatus workercore.DevicesStatus, err error) {
-	if pod.Annotations != nil && pod.Annotations[AllocatedAcceleratorAnnoKey] != "" {
-		str := pod.Annotations[AllocatedAcceleratorAnnoKey]
-		err = json.Unmarshal(stringx.ToBytes(&str), &allocatedStatus)
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return workercore.DevicesStatus{}, err
 	}
-	return allocatedStatus, err
+	return allocations.Aggregate(), nil
 }
 
 func applyAllocatedStatus(allocatedStatus, remainingStatus workercore.DevicesStatus) (workercore.DevicesStatus, error) {
@@ -638,11 +883,13 @@ func foldPhysicalLedger(
 	}
 }
 
-// LivePhysicalOccupied lists, per accelerator resource, the physical-slice placements that live
-// (non-terminating) Pods on this node currently claim by annotation — the same annotation-derived
-// occupied set the ledger fold uses. A per-vendor reclaim loop consults it as an attribution
-// self-check, so a mis-attributed ownership marker never destroys an instance a running Pod still
-// holds. It reads the informer cache (no device I/O).
+// LivePhysicalOccupied lists, per accelerator resource, the physical-slice placements that Pods
+// on this node currently claim by annotation — the same annotation-derived occupied set the
+// ledger fold uses. A per-vendor reclaim loop consults it as an attribution self-check, so a
+// mis-attributed ownership marker never destroys an instance a running Pod still holds. A
+// terminating Pod still counts, matching the live set the reclaim loop drives from: its
+// instance is destroyed when the Pod object is gone, not when its containers exit. It reads the
+// informer cache (no device I/O).
 func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resource][]workercore.AcceleratorPhysicalPlacement, error) {
 	podList := new(core.PodList)
 	if err := r.Client.List(ctx, podList,
@@ -653,11 +900,7 @@ func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resou
 	occupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
 	allocated := make(map[Resource]map[string]int32)
 	for i := range podList.Items {
-		pod := &podList.Items[i]
-		if pod.DeletionTimestamp != nil {
-			continue
-		}
-		podDevsStatus, err := extractAllocatedStatusFromPod(pod)
+		podDevsStatus, err := extractAllocatedStatusFromPod(&podList.Items[i])
 		if err != nil {
 			continue
 		}

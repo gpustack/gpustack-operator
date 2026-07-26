@@ -66,6 +66,31 @@ func TestResourceServer_GetResourceName(t *testing.T) {
 	}
 }
 
+// workloadContainer is the container name every fixture here gives the workload container that
+// claims accelerators. Reservations are keyed by (pod, container), so a test that seeds one
+// directly has to name a container the same way a real Allocate would.
+const workloadContainer = "main"
+
+// reserveWorkload seeds the reservation a workload container's Allocate would have written.
+func reserveWorkload(r *DevicesReconciler, podUID types.UID, status workercore.DevicesStatus) {
+	r.reserveDevices(podUID, workloadContainer, status, nil)
+}
+
+// reservedWorkload reads back the workload container's reservation.
+func reservedWorkload(r *DevicesReconciler, podUID types.UID) (workercore.DevicesStatus, bool) {
+	return r.reservedDevices(podUID, workloadContainer)
+}
+
+// exclusiveMatch is the (resource, quantity) pair an exclusive Allocate for one card carries.
+func exclusiveMatch(skipReserved bool) _AllocationMatch {
+	return _AllocationMatch{
+		ResourceName: nodefeature.GetAcceleratableResourceName(
+			nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive),
+		Quantity:     resource.MustParse("1"),
+		SkipReserved: skipReserved,
+	}
+}
+
 type stubResponder struct{}
 
 func (stubResponder) GetContainerAllocateResponse(
@@ -320,7 +345,7 @@ func TestResourceServer_Allocate_CrossMode(t *testing.T) {
 
 			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
 			if c.reserveMode != workercore.DeviceAllocationModeNone {
-				rec.reserveDevices("sibling", workercore.DevicesStatus{
+				reserveWorkload(rec, "sibling", workercore.DevicesStatus{
 					Groups: []workercore.DevicesAllocationGroup{{
 						ID:           "grp-0",
 						Manufacturer: nodefeature.ManufacturerNVIDIA,
@@ -406,7 +431,7 @@ func TestResourceServer_GetListAndWatch_CrossModeWithhold(t *testing.T) {
 	cli := ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(devs).Build()
 
 	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
-	rec.reserveDevices("sibling", workercore.DevicesStatus{
+	reserveWorkload(rec, "sibling", workercore.DevicesStatus{
 		Groups: []workercore.DevicesAllocationGroup{{
 			ID:           "grp-0",
 			Manufacturer: nodefeature.ManufacturerNVIDIA,
@@ -618,13 +643,14 @@ func TestResourceServer_Allocate_Concurrent(t *testing.T) {
 	}
 }
 
-// TestDevicesReconciler_GetAllocatingPod_SkipReserved verifies the pod-identification skip that
-// underlies distinct-pod attribution: with two identical pending pods, skipReserved=false returns
-// the oldest (the legacy guess), while skipReserved=true skips a pod already holding a reservation
-// and returns the next one.
+// TestDevicesReconciler_GetAllocatingPod_SkipReserved verifies the container-identification skip
+// that underlies distinct-pod attribution: with two identical pending pods, skipReserved=false
+// returns the oldest (the legacy guess), while skipReserved=true skips a container already holding
+// a reservation and returns the next one. Once every candidate is reserved the search replays the
+// oldest instead of erroring, so a kubelet that lost its checkpoint and is asking again gets an
+// answer rather than a permanently failed admission.
 func TestDevicesReconciler_GetAllocatingPod_SkipReserved(t *testing.T) {
 	const nodeName = "node-skip"
-	resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeExclusive)
 	podX := concurrentAllocatePod(nodeName, "x", "uid-x", workercore.DeviceAllocationModeExclusive, 1)
 	podY := concurrentAllocatePod(nodeName, "y", "uid-y", workercore.DeviceAllocationModeExclusive, 1)
 	// podY is created after podX, so the "oldest pending" guess prefers podX.
@@ -638,28 +664,115 @@ func TestDevicesReconciler_GetAllocatingPod_SkipReserved(t *testing.T) {
 		}).
 		Build()
 	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
-	q := resource.MustParse("1")
+	exclusiveOn := func(dev string) workercore.DevicesStatus {
+		return workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.AcceleratorAllocation{{ID: dev, Mode: workercore.DeviceAllocationModeExclusive}},
+			}},
+		}
+	}
 
 	// No reservation yet: the oldest pending pod is returned.
-	got, _, err := rec.getAllocatingPod(context.Background(), resName, q, true)
+	got, _, err := rec.getAllocatingPod(context.Background(), exclusiveMatch(true))
 	require.NoError(t, err)
 	assert.Equal(t, types.UID("uid-x"), got.UID, "oldest pending pod when none is reserved")
 
 	// Reserve podX: skipReserved=true now skips it and returns podY; skipReserved=false still returns podX.
-	rec.reserveDevices("uid-x", workercore.DevicesStatus{
-		Groups: []workercore.DevicesAllocationGroup{{
-			ID:           "grp-0",
-			Manufacturer: nodefeature.ManufacturerNVIDIA,
-			Accelerators: []workercore.AcceleratorAllocation{{ID: "dev-0", Mode: workercore.DeviceAllocationModeExclusive}},
-		}},
-	})
-	got, _, err = rec.getAllocatingPod(context.Background(), resName, q, true)
+	reserveWorkload(rec, "uid-x", exclusiveOn("dev-0"))
+	got, _, err = rec.getAllocatingPod(context.Background(), exclusiveMatch(true))
 	require.NoError(t, err)
-	assert.Equal(t, types.UID("uid-y"), got.UID, "skipReserved must skip the already-reserved pod")
+	assert.Equal(t, types.UID("uid-y"), got.UID, "skipReserved must skip the already-reserved container")
 
-	got, _, err = rec.getAllocatingPod(context.Background(), resName, q, false)
+	got, _, err = rec.getAllocatingPod(context.Background(), exclusiveMatch(false))
 	require.NoError(t, err)
 	assert.Equal(t, types.UID("uid-x"), got.UID, "without skipReserved the oldest pod is still returned")
+
+	// Every candidate reserved: replay the oldest rather than fail the call.
+	reserveWorkload(rec, "uid-y", exclusiveOn("dev-1"))
+	got, _, err = rec.getAllocatingPod(context.Background(), exclusiveMatch(true))
+	require.NoError(t, err, "an all-reserved candidate set must not error")
+	assert.Equal(t, types.UID("uid-x"), got.UID, "the oldest reserved candidate is replayed")
+}
+
+// TestDevicesReconciler_GetAllocatingPod_Feasibility verifies the only disambiguator available for
+// the request dimensions the Allocate RPC does not carry: two pods asking for the same coarse
+// resource but very different per-card budgets are told apart by which of them the offered card
+// can still hold. When no candidate fits, the search still answers — the test disambiguates, it
+// does not gate admission.
+func TestDevicesReconciler_GetAllocatingPod_Feasibility(t *testing.T) {
+	const nodeName = "node-feas"
+	slicedRes := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+	unitsRes := nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)
+
+	slicePod := func(name, uid string, units int64, createdAfter time.Duration) *core.Pod {
+		return &core.Pod{
+			ObjectMeta: meta.ObjectMeta{
+				Name: name, Namespace: "default", UID: types.UID(uid),
+				CreationTimestamp: meta.NewTime(time.Now().Add(createdAfter)),
+			},
+			Spec: core.PodSpec{
+				NodeName: nodeName,
+				Containers: []core.Container{{
+					Name: workloadContainer,
+					Resources: core.ResourceRequirements{
+						Limits: core.ResourceList{
+							slicedRes: resource.MustParse("1"),
+							unitsRes:  *resource.NewQuantity(units, resource.DecimalSI),
+						},
+					},
+				}},
+			},
+		}
+	}
+	// The big slice is the older pod, so the plain oldest-pending guess would always pick it.
+	big := slicePod("big", "uid-big", int64(nodefeature.ResourceMaxUnits*3/4), 0)
+	small := slicePod("small", "uid-small", int64(nodefeature.ResourceMaxUnits/8), time.Second)
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(big, small).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+		Reconciler:     rec,
+		Responder:      stubResponder{},
+	}
+	offered := map[Resource][]ResourceUnit{{Group: "grp-0", Device: "dev-0"}: {{Index: 0}}}
+	matchWithRemaining := func(remaining int32) _AllocationMatch {
+		devs := crossModeDevices(nodeName, workercore.DeviceAllocationModeSliced)
+		devs.Status.Groups[0].Accelerators[0].Remaining = remaining
+		return _AllocationMatch{
+			ResourceName: slicedRes,
+			Quantity:     resource.MustParse("1"),
+			SkipReserved: true,
+			Feasible:     s.candidateFeasible(devs, offered),
+		}
+	}
+
+	// A quarter of the card's units are left: only the small slice still fits.
+	got, _, err := rec.getAllocatingPod(context.Background(), matchWithRemaining(nodefeature.ResourceMaxUnits/4))
+	require.NoError(t, err)
+	assert.Equal(t, types.UID("uid-small"), got.UID,
+		"the candidate the offered card can still hold wins over the older one it cannot")
+
+	// With the card empty both fit again, so the oldest-pending tie-break decides.
+	got, _, err = rec.getAllocatingPod(context.Background(), matchWithRemaining(nodefeature.ResourceMaxUnits))
+	require.NoError(t, err)
+	assert.Equal(t, types.UID("uid-big"), got.UID, "interchangeable candidates fall back to oldest-pending")
+
+	// With no room for either, the search still resolves: feasibility disambiguates, it does not
+	// reject — admission is the webhook's and the admission check's job.
+	got, _, err = rec.getAllocatingPod(context.Background(), matchWithRemaining(0))
+	require.NoError(t, err, "an all-infeasible candidate set must not turn into a hard failure")
+	assert.Equal(t, types.UID("uid-big"), got.UID)
 }
 
 // TestResourceServer_Allocate_ConcurrentDistinctPods verifies the node allocate mutex + skip-reserved
@@ -711,8 +824,8 @@ func TestResourceServer_Allocate_ConcurrentDistinctPods(t *testing.T) {
 
 	// Both distinct pods are reserved, and the two reserved cards are exactly {dev-0, dev-1}: no card
 	// was double-attributed to one pod nor lost (the pod↔card pairing may vary with the mutex order).
-	resX, okX := rec.reservedDevices("uid-x")
-	resY, okY := rec.reservedDevices("uid-y")
+	resX, okX := reservedWorkload(rec, "uid-x")
+	resY, okY := reservedWorkload(rec, "uid-y")
 	require.True(t, okX, "podX must hold a reservation")
 	require.True(t, okY, "podY must hold a reservation")
 
@@ -792,7 +905,7 @@ func TestDevicesReconciler_ReleaseOnPodTermination(t *testing.T) {
 
 	// Pod A (uid-a) holds dev-0 exclusively via the reservation the workload Allocate records; the
 	// ledger Status stays free here, isolating the reservation as the authoritative release signal.
-	rec.reserveDevices("uid-a", workercore.DevicesStatus{
+	reserveWorkload(rec, "uid-a", workercore.DevicesStatus{
 		Groups: []workercore.DevicesAllocationGroup{{
 			ID:           "grp-0",
 			Manufacturer: nodefeature.ManufacturerNVIDIA,
@@ -814,7 +927,7 @@ func TestDevicesReconciler_ReleaseOnPodTermination(t *testing.T) {
 	// Pod A terminates: the same live-pod-set sweep that rebuilds the ledger Status prunes its
 	// reservation, so the card frees for the opposite mode exactly when its Pod disappears.
 	rec.pruneReservations([]string{"uid-b"})
-	_, stillReserved := rec.reservedDevices("uid-a")
+	_, stillReserved := reservedWorkload(rec, "uid-a")
 	assert.False(t, stillReserved, "the reservation must be pruned once Pod A is gone")
 	held, _ = sharedServer.cardHeldInOtherMode(mustGetDevices(t, rec), dev0)
 	assert.False(t, held, "dev-0 must be free for the opposite mode once its Pod is gone")
@@ -864,50 +977,92 @@ func TestResourceServer_Allocate_RollsBackReservationOnPatchFailure(t *testing.T
 	})
 	require.Error(t, err, "Allocate must fail when the annotation patch fails")
 
-	_, reserved := rec.reservedDevices("uid-a")
+	_, reserved := reservedWorkload(rec, "uid-a")
 	assert.False(t, reserved, "a failed patch must roll back the reservation so the card is not stranded")
 }
 
-// TestDevicesReconciler_Reservation verifies the in-process, pod-keyed reservation the
-// workload Allocate records for the sidecar's visibility Allocate to reuse: reserve→read,
-// empty inputs are no-ops, and pruning drops reservations whose pod is no longer live.
-func TestDevicesReconciler_Reservation(t *testing.T) {
-	statusFor := func(dev string) workercore.DevicesStatus {
-		return workercore.DevicesStatus{
-			Groups: []workercore.DevicesAllocationGroup{{
-				ID:           "grp-0",
-				Manufacturer: nodefeature.ManufacturerNVIDIA,
-				Accelerators: []workercore.AcceleratorAllocation{
-					{ID: dev, Mode: workercore.DeviceAllocationModeSliced},
-				},
-			}},
-		}
+// reservationStatusFor builds a one-card sliced allocation for a reservation fixture.
+func reservationStatusFor(dev string) workercore.DevicesStatus {
+	return workercore.DevicesStatus{
+		Groups: []workercore.DevicesAllocationGroup{{
+			ID:           "grp-0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: []workercore.AcceleratorAllocation{
+				{ID: dev, Mode: workercore.DeviceAllocationModeSliced},
+			},
+		}},
 	}
+}
 
+// TestDevicesReconciler_Reservation verifies the in-process reservation the workload Allocate
+// records for the sidecar's visibility Allocate to reuse: reserve→read, empty inputs are no-ops,
+// and pruning drops reservations whose pod is no longer live.
+func TestDevicesReconciler_Reservation(t *testing.T) {
 	r := &DevicesReconciler{}
 
-	// An empty UID or an empty allocation is a no-op.
-	r.reserveDevices("", statusFor("dev-0"))
-	r.reserveDevices("p1", workercore.DevicesStatus{})
-	_, ok := r.reservedDevices("p1")
+	// An empty UID, an empty container name or an empty allocation is a no-op.
+	reserveWorkload(r, "", reservationStatusFor("dev-0"))
+	r.reserveDevices("p1", "", reservationStatusFor("dev-0"), nil)
+	reserveWorkload(r, "p1", workercore.DevicesStatus{})
+	_, ok := reservedWorkload(r, "p1")
 	assert.False(t, ok, "empty allocation must not be reserved")
 
 	// Reserve then read.
-	r.reserveDevices("p1", statusFor("dev-0"))
-	got, ok := r.reservedDevices("p1")
+	reserveWorkload(r, "p1", reservationStatusFor("dev-0"))
+	got, ok := reservedWorkload(r, "p1")
 	require.True(t, ok)
 	require.Len(t, got.Groups, 1)
 	require.Len(t, got.Groups[0].Accelerators, 1)
 	assert.Equal(t, "dev-0", got.Groups[0].Accelerators[0].ID)
 
 	// A second pod coexists; pruning to a live set keeps it and drops the gone pod.
-	r.reserveDevices("p2", statusFor("dev-1"))
+	reserveWorkload(r, "p2", reservationStatusFor("dev-1"))
 	r.pruneReservations([]string{"p2"})
-	_, ok = r.reservedDevices("p1")
+	_, ok = reservedWorkload(r, "p1")
 	assert.False(t, ok, "p1 must be pruned when no longer live")
-	got2, ok := r.reservedDevices("p2")
+	got2, ok := reservedWorkload(r, "p2")
 	require.True(t, ok, "p2 must survive the prune")
 	assert.Equal(t, "dev-1", got2.Groups[0].Accelerators[0].ID)
+}
+
+// TestDevicesReconciler_Reservation_PerContainer verifies that a pod's containers hold separate
+// reservations. Keyed by pod alone, the first container served would mask every later one — the
+// already-reserved skip would refuse to resolve them — so two containers each taking a card could
+// never both be served, and the sidecar's lookup could pick up its own claim instead of the
+// workload's.
+func TestDevicesReconciler_Reservation_PerContainer(t *testing.T) {
+	r := &DevicesReconciler{}
+
+	r.reserveDevices("p1", "init", reservationStatusFor("dev-0"), []string{"grp-0:dev-0:0000"})
+	r.reserveDevices("p1", "main", reservationStatusFor("dev-1"), []string{"grp-0:dev-1:0000"})
+
+	initReserved, ok := r.reservedDevices("p1", "init")
+	require.True(t, ok, "the first container's reservation must survive the second")
+	assert.Equal(t, "dev-0", initReserved.Groups[0].Accelerators[0].ID)
+	mainReserved, ok := r.reservedDevices("p1", "main")
+	require.True(t, ok)
+	assert.Equal(t, "dev-1", mainReserved.Groups[0].Accelerators[0].ID)
+
+	// A container with no reservation of its own is unclaimed, so its Allocate still resolves.
+	_, ok = r.reservedDevices("p1", "sshd")
+	assert.False(t, ok, "an unserved container must not inherit a sibling's reservation")
+
+	// The sidecar co-allocates a sibling's accelerator claim, never its own.
+	sidecarView, ok := r.reservedAcceleratorDevices("p1", "sshd")
+	require.True(t, ok, "the sidecar must see the pod's accelerator reservation")
+	assert.Equal(t, "dev-0", sidecarView.Groups[0].Accelerators[0].ID)
+	_, ok = r.reservedAcceleratorDevices("p2", "sshd")
+	assert.False(t, ok, "another pod's reservation must not leak")
+
+	// Releasing one container leaves the other alone; pruning the pod drops both.
+	r.releaseReservation("p1", "init")
+	_, ok = r.reservedDevices("p1", "init")
+	assert.False(t, ok)
+	_, ok = r.reservedDevices("p1", "main")
+	assert.True(t, ok, "releasing one container must not release its siblings")
+	r.pruneReservations(nil)
+	_, ok = r.reservedDevices("p1", "main")
+	assert.False(t, ok, "no reservation may outlive its pod")
 }
 
 // TestResourceServer_Allocate_RecordsReservation verifies the workload Allocate records an
@@ -966,7 +1121,7 @@ func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	got, ok := rec.reservedDevices("pod-uid-7")
+	got, ok := reservedWorkload(rec, "pod-uid-7")
 	require.True(t, ok, "workload Allocate must record an in-process reservation")
 	require.Len(t, got.Groups, 1)
 	require.Len(t, got.Groups[0].Accelerators, 1)
@@ -1133,7 +1288,7 @@ func TestResourceServer_Allocate_PhysicalSliced_RollbackOnPatchFailure(t *testin
 	})
 	require.Error(t, err)
 	assert.True(t, rolledBack, "a failed patch must roll back the materialized partition")
-	_, reserved := rec.reservedDevices("pod-mig")
+	_, reserved := reservedWorkload(rec, "pod-mig")
 	assert.False(t, reserved, "a failed patch must release the reservation")
 }
 
@@ -1281,7 +1436,7 @@ func TestResourceServer_Allocate_Visibility(t *testing.T) {
 
 	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
 	// Simulate the workload container's earlier Allocate having recorded its device.
-	rec.reserveDevices("pod-uid-v", visibilityReservation("dev-0"))
+	reserveWorkload(rec, "pod-uid-v", visibilityReservation("dev-0"))
 
 	responder := &recordingResponder{}
 	s := &ResourceServer{
@@ -1402,7 +1557,7 @@ func TestResourceServer_Allocate_Visibility_StaleReservation(t *testing.T) {
 
 	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
 	// The reservation points at a device that is no longer present in devs (only dev-0 is).
-	rec.reserveDevices("pod-uid-v3", visibilityReservation("dev-9"))
+	reserveWorkload(rec, "pod-uid-v3", visibilityReservation("dev-9"))
 
 	responder := &recordingResponder{}
 	s := &ResourceServer{
@@ -1461,7 +1616,7 @@ func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 		Build()
 
 	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
-	rec.reserveDevices("pod-uid-v4", visibilityReservation("dev-0")) // only 1 device reserved
+	reserveWorkload(rec, "pod-uid-v4", visibilityReservation("dev-0")) // only 1 device reserved
 
 	responder := &recordingResponder{}
 	s := &ResourceServer{

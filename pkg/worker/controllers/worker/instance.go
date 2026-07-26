@@ -32,9 +32,7 @@ import (
 	"gpustack.ai/gpustack/pkg/systemmeta"
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
-	"gpustack.ai/gpustack/pkg/utils/json"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
-	"gpustack.ai/gpustack/pkg/utils/stringx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -457,11 +455,7 @@ func (r *InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 		// Update the Allocations in the Instance status if not exists.
 		if len(instStatus.Allocations) == 0 {
-			if v := pod.Annotations[deviceplugin.AllocatedAcceleratorAnnoKey]; v != "" {
-				var ds workercore.DevicesStatus
-				json.ShouldUnmarshal(stringx.ToBytes(&v), &ds)
-				instStatus.Allocations = ds.Groups
-			}
+			instStatus.Allocations = deviceplugin.AllocatedAcceleratorGroupsOf(pod)
 		}
 	}
 
