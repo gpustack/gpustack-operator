@@ -1000,7 +1000,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       keys stay within the 63-character limit after `/`.
       Verify: `go test ./pkg/nodefeature/...` && `make test`
 
-- [ ] **T5 · Per-family pool sizing, `EffectiveSlicedCount` removed** (F1, F8)
+- [x] **T5 · Per-family pool sizing, `EffectiveSlicedCount` removed** (F1, F8)
       Blocked by: T3, T4
       Owns: `pkg/deviceplugin/helper.go`, `helper_test.go`, `pkg/deviceplugin/server.go` (pool sizing only),
       `server_test.go`, `api/worker/v1alpha1/devices.go` (the method deletion)
@@ -1082,7 +1082,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       each rejected with their own message.
       Verify: `go test ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`
 
-- [ ] **T9 · Kueue credits for the partition family** (F3)
+- [x] **T9 · Kueue credits for the partition family** (F3)
       Blocked by: T4
       Owns: `pkg/worker/kuberess/apps_kueue.go`, `apps_kueue_test.go`
       *Do:* add the `.partitioned.units` transformation and its template helper, and rename the per-unit
@@ -1106,7 +1106,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       a saturated node's running partitions are unaffected.
       Verify: `go test ./pkg/deviceplugin/...`
 
-- [ ] **T11 · Four InstanceType views and the table column** (F7, F8)
+- [x] **T11 · Four InstanceType views and the table column** (F7, F8)
       Blocked by: T2, T3
       Owns: `pkg/worker/controllers/worker/instance_type.go`, `instance_type_test.go`,
       `pkg/worker/extensionapis/worker/instance_type.go`

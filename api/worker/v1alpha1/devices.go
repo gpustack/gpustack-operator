@@ -404,18 +404,6 @@ type (
 	}
 )
 
-// EffectiveSlicedCount returns a card's effective sliced-token count: its logical (soft)
-// slice count when the card is logically sliceable, otherwise its physical-slice ceiling (a
-// MIG-enabled card). The two are mutually exclusive by construction — a card is either
-// soft-sliced or hard-partitioned — so this returns whichever is non-zero, and 0 when the
-// card offers no slicing.
-func (in AcceleratorStatus) EffectiveSlicedCount() int32 {
-	if in.LogicalSliced.Count > 0 {
-		return in.LogicalSliced.Count
-	}
-	return in.PhysicalSliced.Count
-}
-
 // DevicesList holds the list of Devices.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

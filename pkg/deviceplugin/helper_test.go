@@ -18,7 +18,7 @@ func TestResource_GetDeviceIds(t *testing.T) {
 	cases := []struct {
 		name      string
 		mode      workercore.DeviceAllocationMode
-		maxSlices int32
+		poolSize  int32
 		wantLen   int
 		wantFirst string
 		wantLast  string
@@ -37,20 +37,29 @@ func TestResource_GetDeviceIds(t *testing.T) {
 			wantFirst: "grp-0:dev-0:0000",
 		},
 		{
-			// Sliced advertises a loose token pool sized by the group's max slice count,
+			// Sliced advertises a loose token pool sized by the card's logical slice count,
 			// not the old per-card MaxUnits (12800) fake-device pool.
-			name:      "sliced advertises maxSlices tokens per card",
+			name:      "sliced advertises poolSize tokens per card",
 			mode:      workercore.DeviceAllocationModeSliced,
-			maxSlices: 8,
+			poolSize:  8,
 			wantLen:   8,
 			wantFirst: "grp-0:dev-0:0000",
 			wantLast:  "grp-0:dev-0:0007",
 		},
 		{
-			name:      "sliced advertises no token when maxSlices is non-positive",
-			mode:      workercore.DeviceAllocationModeSliced,
-			maxSlices: 0,
-			wantLen:   0,
+			name:     "sliced advertises no token when poolSize is non-positive",
+			mode:     workercore.DeviceAllocationModeSliced,
+			poolSize: 0,
+			wantLen:  0,
+		},
+		{
+			// Partitioned has a token shape of its own, sized by the card's partition ceiling.
+			name:      "partitioned advertises poolSize tokens per card",
+			mode:      workercore.DeviceAllocationModePartitioned,
+			poolSize:  7,
+			wantLen:   7,
+			wantFirst: "grp-0:dev-0:0000",
+			wantLast:  "grp-0:dev-0:0006",
 		},
 		{
 			// Visibility advertises a fixed per-card pool sized to SlicedResourceMaxSize,
@@ -66,7 +75,7 @@ func TestResource_GetDeviceIds(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			ids := res.GetDeviceIds(c.mode, c.maxSlices)
+			ids := res.GetDeviceIds(c.mode, c.poolSize)
 			assert.Len(t, ids, c.wantLen)
 			if c.wantLen > 0 {
 				assert.Equal(t, c.wantFirst, ids[0], "first id")

@@ -22,6 +22,7 @@ import (
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/binding"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
@@ -135,6 +136,31 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 				Group:  devGroup.ID,
 				Device: devAccelerator.ID,
 			}
+			// This server's family draws tokens only from the card population that can
+			// physically serve it, and sizes its pool from that card's own capability:
+			// logical slicing and hardware partitioning are exclusive card states, and a
+			// partitioned card is no longer available as a whole card. Scope, not health, is
+			// the mechanism here — the populations are physically exclusive, so a card
+			// skipped this way could never become servable while it stays in that state.
+			// Visibility is exempt and advertised everywhere: the SSH sidecar must
+			// co-allocate the very card its workload holds, whatever state that card is in.
+			var poolSize int32
+			switch s.AllocationMode {
+			case workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared:
+				if !device.IsWholeCardCapable(devAccelerator.Status) {
+					continue
+				}
+			case workercore.DeviceAllocationModeSliced:
+				if !device.IsLogicallySliceable(devAccelerator.Status) {
+					continue
+				}
+				poolSize = devAccelerator.Status.LogicalSliced.Count
+			case workercore.DeviceAllocationModePartitioned:
+				if !device.IsPartitioned(devAccelerator.Status) {
+					continue
+				}
+				poolSize = devAccelerator.Status.PhysicalSliced.Count
+			}
 			// Hardware health alone does not protect a card held in another allocation mode:
 			// kubelet picks tokens freely (GetPreferredAllocation is advisory, and with the
 			// default TopologyManager policy "none" it never even runs), so a held card still
@@ -165,11 +191,7 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 					}),
 				}
 			}
-			// Size the sliced token pool from the card's own per-card slicing capability
-			// (its logical soft count, or the MIG physical ceiling). The count is ignored
-			// for non-sliced modes.
-			slicedCount := devAccelerator.Status.EffectiveSlicedCount()
-			ids := res.GetDeviceIds(s.AllocationMode, slicedCount)
+			ids := res.GetDeviceIds(s.AllocationMode, poolSize)
 			for k := range ids {
 				resp.Devices = append(resp.Devices,
 					&deviceplugin.Device{

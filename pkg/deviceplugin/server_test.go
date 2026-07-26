@@ -468,10 +468,11 @@ func TestResourceServer_GetListAndWatch_CrossModeWithhold(t *testing.T) {
 	assert.Greater(t, cardHealthyTokenCount(resp, dev1), 0, "visibility keeps a held card's tokens healthy")
 }
 
-// TestResourceServer_GetListAndWatch_PerCardSlicedTokens verifies the sliced token pool is
-// sized per card from its own slicing capability: a soft card advertises LogicalSliced.Count
-// tokens and a MIG card advertises its PhysicalSliced.Count (non-zero, so it stays served
-// rather than dropping out). Non-sliced modes ignore the count.
+// TestResourceServer_GetListAndWatch_PerCardSlicedTokens verifies each family's token pool is
+// sized per card from that card's own capability, on a node mixing both card populations: the
+// logical pool covers the soft cards only, sized by each one's LogicalSliced.Count, and the
+// partition pool covers the MIG card only, sized by its PhysicalSliced.Count. The whole-card
+// families cover the soft cards and skip the MIG card.
 func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 	const nodeName = "node-pc"
 	soft0 := Resource{Group: "grp-0", Device: "soft-0"}
@@ -504,19 +505,27 @@ func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 		}
 	}
 
-	t.Run("soft cards get logical count, mig card gets physical ceiling", func(t *testing.T) {
+	t.Run("logical pool covers the soft cards only", func(t *testing.T) {
 		resp, err := server(newFmt, workercore.DeviceAllocationModeSliced).getListAndWatchResponse(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, 128, cardTokenCount(resp, soft0), "soft card advertises LogicalSliced.Count tokens")
 		assert.Equal(t, 128, cardTokenCount(resp, soft1), "soft card advertises LogicalSliced.Count tokens")
-		assert.Equal(t, 7, cardTokenCount(resp, mig), "MIG card advertises PhysicalSliced.Count tokens (stays served)")
+		assert.Zero(t, cardTokenCount(resp, mig), "a MIG card serves no logical slice")
 	})
 
-	t.Run("exclusive mode ignores the sliced count", func(t *testing.T) {
+	t.Run("partition pool covers the mig card only", func(t *testing.T) {
+		resp, err := server(newFmt, workercore.DeviceAllocationModePartitioned).getListAndWatchResponse(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, 7, cardTokenCount(resp, mig), "MIG card advertises PhysicalSliced.Count tokens")
+		assert.Zero(t, cardTokenCount(resp, soft0), "an unpartitioned card serves no partition")
+		assert.Zero(t, cardTokenCount(resp, soft1), "an unpartitioned card serves no partition")
+	})
+
+	t.Run("exclusive mode ignores the sliced count and skips the mig card", func(t *testing.T) {
 		resp, err := server(newFmt, workercore.DeviceAllocationModeExclusive).getListAndWatchResponse(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, 1, cardTokenCount(resp, soft0), "exclusive advertises one token per card")
-		assert.Equal(t, 1, cardTokenCount(resp, mig), "exclusive advertises one token per card regardless of MIG")
+		assert.Zero(t, cardTokenCount(resp, mig), "a MIG card serves no whole-card claim")
 	})
 }
 
@@ -535,12 +544,11 @@ func cardWithCapability(id string, index uint32, logicalCount, physicalCount int
 }
 
 // TestResourceServer_GetListAndWatch_TokenSetPerCardState pins the token pool every mode
-// advertises for every card state as it stands today, before the two slicing families are given
-// disjoint card populations. Only the sliced pool reads the card's capability at all: the
-// whole-card families advertise the same tokens on a card they cannot actually serve, and the
-// sliced pool is sized by whichever capability is non-zero, so one pool spans both populations.
-// Pinning it here is what makes the narrowing that follows read as a change of scope rather than
-// a redefinition.
+// advertises for every card state. Each family draws only from the card population that can
+// physically serve it: an unpartitioned card advertises the whole-card families and a logical
+// slice pool sized by its own soft slice count, while a card in a partitioning mode advertises
+// nothing but its partition pool. Visibility is advertised on every card whatever its state, so
+// a sidecar can always co-allocate the card its workload holds.
 func TestResourceServer_GetListAndWatch_TokenSetPerCardState(t *testing.T) {
 	const nodeName = "node-pin"
 	card := Resource{Group: "grp-0", Device: "dev-0"}
@@ -555,24 +563,27 @@ func TestResourceServer_GetListAndWatch_TokenSetPerCardState(t *testing.T) {
 			name:         "unpartitioned card",
 			logicalCount: 128,
 			want: map[workercore.DeviceAllocationMode]int{
-				workercore.DeviceAllocationModeExclusive:  1,
-				workercore.DeviceAllocationModeShared:     nodefeature.SharedResourceMaxSize,
-				workercore.DeviceAllocationModeSliced:     128,
-				workercore.DeviceAllocationModeVisibility: nodefeature.SlicedResourceMaxSize,
+				workercore.DeviceAllocationModeExclusive: 1,
+				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
+				// The logical pool is sized by the card's own soft slice count.
+				workercore.DeviceAllocationModeSliced: 128,
+				// A card that is not partitioned serves no partition claim.
+				workercore.DeviceAllocationModePartitioned: 0,
+				workercore.DeviceAllocationModeVisibility:  nodefeature.SlicedResourceMaxSize,
 			},
 		},
 		{
 			name:          "card in a partitioning mode",
 			physicalCount: 7,
 			want: map[workercore.DeviceAllocationMode]int{
-				// The whole-card families do not consult the capability, so they still
-				// advertise a card that cannot serve them.
-				workercore.DeviceAllocationModeExclusive: 1,
-				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
-				// The sliced pool falls back to the partition ceiling, which is how one
-				// family ends up spanning both card populations.
-				workercore.DeviceAllocationModeSliced:     7,
-				workercore.DeviceAllocationModeVisibility: nodefeature.SlicedResourceMaxSize,
+				// A partitioned card cannot serve a whole-card claim, nor a logical slice:
+				// none of the three advertise it at all.
+				workercore.DeviceAllocationModeExclusive: 0,
+				workercore.DeviceAllocationModeShared:    0,
+				workercore.DeviceAllocationModeSliced:    0,
+				// The partition pool is sized by the card's partition ceiling.
+				workercore.DeviceAllocationModePartitioned: 7,
+				workercore.DeviceAllocationModeVisibility:  nodefeature.SlicedResourceMaxSize,
 			},
 		},
 		{
@@ -581,8 +592,9 @@ func TestResourceServer_GetListAndWatch_TokenSetPerCardState(t *testing.T) {
 				workercore.DeviceAllocationModeExclusive: 1,
 				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
 				// A zero-sized pool advertises no IDs at all.
-				workercore.DeviceAllocationModeSliced:     0,
-				workercore.DeviceAllocationModeVisibility: nodefeature.SlicedResourceMaxSize,
+				workercore.DeviceAllocationModeSliced:      0,
+				workercore.DeviceAllocationModePartitioned: 0,
+				workercore.DeviceAllocationModeVisibility:  nodefeature.SlicedResourceMaxSize,
 			},
 		},
 	}
@@ -657,8 +669,7 @@ func TestResourceServer_Allocate_LedgerCostPerMode(t *testing.T) {
 			resName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, c.mode)
 			limits := core.ResourceList{resName: resource.MustParse("1")}
 			if c.mode == workercore.DeviceAllocationModeSliced {
-				limits[nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)] =
-					*resource.NewQuantity(slicedUnits, resource.DecimalSI)
+				limits[nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA)] = *resource.NewQuantity(slicedUnits, resource.DecimalSI)
 			}
 			pod := &core.Pod{
 				ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "uid-cost"},
