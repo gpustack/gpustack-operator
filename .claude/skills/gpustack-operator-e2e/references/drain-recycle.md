@@ -6,13 +6,13 @@ before running or debugging those cases.
 Post-refactor shape the cases assume: unit specs are **Queue/InstanceType-managed** (not on the
 node); all three modes fold into **one isolated ClusterQueue per pool** (**Cohort removed** — there
 is no borrow topology and **no `schedule.gpustack.ai/drain` tombstone** anymore); `InstanceType` is a
-**real CRD** whose `.status` three-view is materialized by `InstanceTypeReconciler`; teardown flows
+**real CRD** whose `.status` four-view is materialized by `InstanceTypeReconciler`; teardown flows
 through the InstanceType **finalizer** (`HoldAndDrain` the backing CQ, then delete it).
 
 ## Shared accelerated mock recipe (CASE 4 and CASE 6)
 
 A GPU-less node produces no accelerator labels and no `Devices` ledger, so two inputs are mocked; the
-derivation and the three-view / AdmissionCheck math are **not** mocked.
+derivation and the four-view / AdmissionCheck math are **not** mocked.
 
 1. **A fake accelerator NodeFeature** — NFD merges its labels onto `Node.Labels`, and the Worker
    derives the accelerated `ResourceFlavor` → `InstanceType` → `ClusterQueue`. Minimal set (validated
@@ -40,8 +40,10 @@ derivation and the three-view / AdmissionCheck math are **not** mocked.
    > tracked bug; the DeviceManager writes the ledger via the typed v1alpha1 client, so production is
    > unaffected.)
 
-Card tokens the ledgers use: `mode` `0`=free, `1`=exclusive, `2`=shared, `3`=sliced; `remaining` in
-credit units out of `D = 1,600,000` per whole card (`50%` sliced ⇒ `remaining = 50 × D/100`).
+Card tokens the ledgers use: `mode` `0`=free, `1`=exclusive, `2`=shared, `3`=logically sliced,
+`4`=physically partitioned; `remaining` in credit units out of `D = 1,600,000` per whole card
+(`50%` logically sliced ⇒ `remaining = 50 × D/100`). A mocked card carries no `physicalSliced`
+capability, so it never enters the partition population and the mocked pools' `PT` view stays `0`.
 
 ## CASE 2 — Instance admits on its queue, then drain stops it (not recreate)
 
@@ -91,7 +93,7 @@ verify against a **continuously running** operator.
 
 ## CASE 4 — AdmissionCheck holds exclusive over-admit (Story 4)
 
-Uses the shared accelerated mock (count=8) plus a ledger where **all 8 cards are 50%-sliced — no clean
+Uses the shared accelerated mock (count=8) plus a ledger where **all 8 cards are 50% logically sliced — no clean
 whole card**. A request for 5 exclusive cards passes coarse `credits` (gate 1: `5×M ≤ 8×M`) but the
 node-devices **AdmissionCheck** (gate 3) must hold it (`Retry`, not `Rejected` — transient) because no
 card can host a whole exclusive card.
@@ -118,20 +120,22 @@ Ordering invariant (pinned by a comment in `webhooks/setup.go`): our mutating co
 `gpustack-worker-mutation` must sort before `kueue-mutating-webhook-configuration` (`g` < `k`) so our
 fold runs before Kueue hashes the container resources.
 
-## CASE 6 — Pooled three-view + watch freshness (Story 2/6)
+## CASE 6 — Pooled four-view + watch freshness (Story 2/6)
 
 Uses the shared accelerated mock. Walks the five-step pooling sequence and asserts the InstanceType
-three-view (`.status.accelerator/.acceleratorShared/.acceleratorSliced`) matches the oracle exactly:
-`8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256`. Also asserts **watch freshness** (a
+four-view (`.status.accelerator/.acceleratorShared/.acceleratorSliced/.acceleratorPartitioned`)
+matches the oracle exactly:
+`8/80/800/0 → 6/60/600/0 → 4/58/400/0 → 2/38/360/0 → 2/38/356/0 → 1/28/256/0` — `PT` stays `0`
+throughout because no mocked card reports a hardware partitioning capability. Also asserts **watch freshness** (a
 native `kubectl get instancetype -w` observes the `.status` move as the ledger allocs/frees — the whole
 point of promoting InstanceType to a real CRD; the old aggregated projection could not emit
 `Devices`-driven changes), **unit-spec edit** through the InstanceType API persisting on the
 InstanceType spec (`spec.unitResources.cpu`) — never a CQ note or a `Node`/NodeFeature — and **zero
 Cohort** objects.
 
-The three-view is a per-card bin-packing projection the reconciler computes over the mocked ledger;
+The four-view is a per-card bin-packing projection the reconciler computes over the mocked ledger;
 because it reads `Devices.status`, the mock must be written to the **v1alpha1** `/status` subresource
-(see the shared recipe warning). A three-view stuck at `0/0/0` almost always means the status patch
+(see the shared recipe warning). A four-view stuck at `0/0/0/0` almost always means the status patch
 did not land (wrong API version) or the ledger's reverse-lookup labels do not match the pool's.
 
 ## Skill-specific troubleshooting
@@ -150,7 +154,7 @@ did not land (wrong API version) or the ledger's reverse-lookup labels do not ma
 - **CASE 4 workload never gets a check state** — confirm the AC is `Active` and the accelerated CQ
   references it (`kubectl get cq <name> -o jsonpath='{.spec.admissionChecksStrategy}'`); confirm the
   phantom Devices carries the pool's feature-key + `kubernetes.io/os|arch` + `gpustack.ai/managed=true`.
-- **CASE 6 three-view stuck at 0/0/0** — the ledger status patch did not land: target
+- **CASE 6 four-view stuck at 0/0/0/0** — the ledger status patch did not land: target
   `devices.v1alpha1.worker.gpustack.ai --subresource=status` (the `v1` proxy returns
   `ServiceUnavailable`), and verify the phantom Devices' reverse-lookup labels match the InstanceType's.
 - **Accelerated InstanceType never materializes** — `instance-type-derived-from-node` must be on

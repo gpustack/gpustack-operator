@@ -177,13 +177,16 @@ same card are unaffected.
   a mode change — the administrator owns the *mode* lifecycle. (The operator does create and destroy the
   *instances* that back scheduled workloads; see [Requesting a MIG instance](#requesting-a-mig-instance).) A
   capability change reaches the cluster only through Device Manager restart or re-detection.
-- **Carving an instance out of band is unsupported on a managed node.** Every node-level number — the
-  per-profile capacity key, the partition token health and the AdmissionCheck — is derived from the allocation
-  annotations the device plugin writes, and an instance created by hand with `nvidia-smi mig -cgi` produces
-  none. The node keeps advertising room it does not have, and unlike a transient over-advertisement this
-  **never converges** until the instance is removed. Placement reads live NVML and so will not double-book such
-  an instance, but the accounting above it stays wrong. Let GPUStack materialize the instances; it reuses any
-  that already exist on a card it manages.
+- **Carving an instance out of band is unsupported on a managed node** — the accounting will not see it, and
+  GPUStack will eventually delete it. Every node-level number — the per-profile capacity key, the partition
+  token health and the AdmissionCheck — is derived from the allocation annotations the device plugin writes,
+  and an instance created by hand with `nvidia-smi mig -cgi` produces none. So while any GPUStack workload
+  holds the card, the node keeps advertising room it does not have and, unlike a transient
+  over-advertisement, that **never converges**. Placement reads live NVML and so will not double-book such an
+  instance, but the accounting above it stays wrong. Then, once the card is fully drained of GPUStack
+  workloads, the opposite happens: an instance no allocation accounts for is an orphan, and the reclaimer
+  **destroys it** after its debounce — including one it never created, and including one your own process is
+  still using. Let GPUStack materialize the instances; it reuses any that already exist on a card it manages.
 - **A same-profile replacement submitted the instant its predecessor is deleted can fail to start.** Node
   accounting is rebuilt from Pod annotations, so a deleted Pod's slot reappears in the per-profile key and
   in the healthy token count **immediately**, while the reclaimer destroys the hardware instance on its
@@ -668,6 +671,7 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
 - It does not trigger on nodeconfig or labels, does not flip MIG mode automatically, and does not rewrite
   the mode geometry.
 - It does not deschedule or evict Pods when MIG *mode* changes.
-- It does not account for an instance you carved by hand — see [Limitations](#limitations).
+- It does not account for an instance you carved by hand. (It *does* delete it: an instance no allocation
+  accounts for is reclaimed as an orphan once its card is idle — see [Limitations](#limitations).)
 
 A capability change reaches the cluster **only** through Device Manager restart or re-detection.

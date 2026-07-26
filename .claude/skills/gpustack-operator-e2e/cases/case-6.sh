@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# CASE 6 — Pooled three-view + watch freshness   (MUTATING, self-recovering)
+# CASE 6 — Pooled four-view + watch freshness   (MUTATING, self-recovering)
 #
 #   case-6.sh <NS>
 #
-# Goal:        The materialized InstanceType's three-view (.status.accelerator / acceleratorShared /
-#              acceleratorSliced) tracks a per-card Devices ledger through a five-step pooling
-#              sequence and moves live over a native watch; the unit spec is immutable after create,
+# Goal:        The materialized InstanceType's four-view (.status.accelerator / acceleratorShared /
+#              acceleratorSliced / acceleratorPartitioned) tracks a per-card Devices ledger through a
+#              five-step pooling sequence and moves live over a native watch; the mocked cards report no
+#              hardware partitioning capability, so the partition view stays 0 throughout — the ledger
+#              never leaks a card into a family it cannot serve; the unit spec is immutable after create,
 #              lives only on the InstanceType (never a ClusterQueue note or a Node), and its write
 #              touches no Node/NodeFeature; zero Cohort objects exist.
 # Environment: Any cluster BY APPROXIMATION (same recipe as CASE 4) — the non-colliding nvidia-e2emock
@@ -17,11 +19,11 @@
 #                DeviceManager never runs on, so the mocked status.groups is stable and never fought);
 #              - real probe: a patch editing the InstanceType's unit spec (expects rejection);
 #              - NOT mocked (the verification): the flavor/CQ/InstanceType derivation and the
-#                three-view bin-packing math the reconciler runs over the ledger.
+#                four-view bin-packing math the reconciler runs over the ledger.
 # Expected:    - the derived accelerated InstanceType materializes; its spec.os/spec.arch equal its
 #                ClusterQueue's kubernetes.io/os|arch schedule labels;
-#              - the three-view matches the oracle at each step of
-#                8/80/800 → 6/60/600 → 4/58/400 → 2/38/360 → 2/38/356 → 1/28/256;
+#              - the four-view matches the oracle at each step of
+#                8/80/800/0 → 6/60/600/0 → 4/58/400/0 → 2/38/360/0 → 2/38/356/0 → 1/28/256/0;
 #              - a native watch observes the exclusive count move 8 → 4 → 8;
 #              - the unit-spec edit is REJECTED (immutable) and the stored value is unchanged;
 #              - no unit-spec note lands on the ClusterQueue; the worker NodeFeature labels are unchanged;
@@ -59,7 +61,9 @@ ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 # set_ledger "<8 space-separated card tokens>" patches the mocked Devices ledger.
-# Tokens: f=free, e=exclusive, s9=shared(9 shares free), l80/l78=sliced(80/78% free).
+# Tokens: f=free, e=exclusive, s9=shared(9 shares free), l80/l78=logically sliced(80/78% free).
+# No token carries a hardware partitioning capability, so every mocked card is unpartitioned and the
+# partition view (PT) stays 0 at every step.
 set_ledger() {
   local tokens="$1"
   local groups
@@ -70,8 +74,8 @@ tok = {
     "f":  (0, D),                 # free whole card
     "e":  (1, 0),                 # exclusive: nothing left
     "s9": (2, 9 * (D // 10)),     # shared: 9 of 10 ownership shares free
-    "l80": (3, 80 * (D // 100)),  # sliced: 80% VRAM free
-    "l78": (3, 78 * (D // 100)),  # sliced: 78% VRAM free
+    "l80": (3, 80 * (D // 100)),  # logically sliced: 80% VRAM free
+    "l78": (3, 78 * (D // 100)),  # logically sliced: 78% VRAM free
 }
 accs = []
 for i, t in enumerate(os.environ["TOKENS"].split()):
@@ -88,21 +92,26 @@ PY
   kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge -p "$groups" >/dev/null
 }
 
-# assert_view <label> <excl> <shared> <sliced> polls the InstanceType three-view until it
-# matches the oracle (Remaining == OnceMaxRequest on a single node), then records PASS/FAIL.
+# assert_view <label> <excl> <shared> <sliced> <partitioned> polls the InstanceType four-view
+# (EX/SH/SL/PT) until it matches the oracle (Remaining == OnceMaxRequest on a single node), then
+# records PASS/FAIL. PT is always 0 here: the mocked cards carry no hardware partitioning capability,
+# so none of them belongs to the partition population.
 assert_view() {
-  local label="$1" wE="$2" wS="$3" wL="$4" e s l
+  local label="$1" wE="$2" wS="$3" wL="$4" wP="$5" e s l p
   for _ in $(seq 1 40); do
     e=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null)
     s=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.acceleratorShared.remaining}' 2>/dev/null)
     l=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.acceleratorSliced.remaining}' 2>/dev/null)
-    [ "$e" = "$wE" ] && [ "$s" = "$wS" ] && [ "$l" = "$wL" ] && break
+    p=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.acceleratorPartitioned.remaining}' 2>/dev/null)
+    p="${p:-0}"
+    [ "$e" = "$wE" ] && [ "$s" = "$wS" ] && [ "$l" = "$wL" ] && [ "$p" = "$wP" ] && break
     sleep 3
   done
-  if [ "$e" = "$wE" ] && [ "$s" = "$wS" ] && [ "$l" = "$wL" ]; then
-    record PASS "$label" "three-view ${e}/${s}/${l}"
+  p="${p:-0}"
+  if [ "$e" = "$wE" ] && [ "$s" = "$wS" ] && [ "$l" = "$wL" ] && [ "$p" = "$wP" ]; then
+    record PASS "$label" "four-view ${e}/${s}/${l}/${p} (EX/SH/SL/PT)"
   else
-    record FAIL "$label" "got ${e:-?}/${s:-?}/${l:-?}, want ${wE}/${wS}/${wL} — three-view math or ledger reverse-lookup"
+    record FAIL "$label" "got ${e:-?}/${s:-?}/${l:-?}/${p:-?}, want ${wE}/${wS}/${wL}/${wP} — four-view math or ledger reverse-lookup"
   fi
 }
 
@@ -185,18 +194,18 @@ spec:
       memory: ${MEM_MIB}
 EOF
 
-# 4. Walk the five-step pooling sequence; the three-view must match the oracle at each step.
-set_ledger "f f f f f f f f";       assert_view "init: 8 free"                         8 80 800
-set_ledger "e e f f f f f f";       assert_view "step 1: +2 exclusive"                 6 60 600
-set_ledger "e e s9 s9 f f f f";     assert_view "step 2: +2 shared (9 free)"           4 58 400
-set_ledger "e e s9 s9 l80 l80 f f"; assert_view "step 3: +2 sliced (80% free)"         2 38 360
-set_ledger "e e s9 s9 l78 l78 f f"; assert_view "step 4: sliced cards drop to 78%"     2 38 356
-set_ledger "e e e s9 s9 l78 l78 f"; assert_view "step 5: +1 exclusive"                 1 28 256
+# 4. Walk the five-step pooling sequence; the four-view must match the oracle at each step.
+set_ledger "f f f f f f f f";       assert_view "init: 8 free"                         8 80 800 0
+set_ledger "e e f f f f f f";       assert_view "step 1: +2 exclusive"                 6 60 600 0
+set_ledger "e e s9 s9 f f f f";     assert_view "step 2: +2 shared (9 free)"           4 58 400 0
+set_ledger "e e s9 s9 l80 l80 f f"; assert_view "step 3: +2 logical slices (80% free)" 2 38 360 0
+set_ledger "e e s9 s9 l78 l78 f f"; assert_view "step 4: sliced cards drop to 78%"     2 38 356 0
+set_ledger "e e e s9 s9 l78 l78 f"; assert_view "step 5: +1 exclusive"                 1 28 256 0
 
-# 5. Watch freshness: a native watch on the InstanceType observes the .status three-view move
+# 5. Watch freshness: a native watch on the InstanceType observes the .status four-view move
 #    as the ledger allocs/frees (exclusive 8 → 4 → 8).
 echo "[case-6] asserting watch freshness over kubectl get -w"
-set_ledger "f f f f f f f f"; assert_view "watch precondition: back to 8 free" 8 80 800 >/dev/null
+set_ledger "f f f f f f f f"; assert_view "watch precondition: back to 8 free" 8 80 800 0 >/dev/null
 watchlog=$(mktemp)
 # Watch the NATIVE v1alpha1 CRD, not the unversioned name — the latter resolves to the aggregated
 # worker.gpustack.ai/v1 apiservice (a proxy), whose watch re-projects/coalesces and drops intermediate
@@ -256,7 +265,7 @@ cohorts=$(kubectl get cohorts.kueue.x-k8s.io -A --no-headers 2>/dev/null | grep 
   || record FAIL "zero Cohort objects" "${cohorts} Cohort(s) present — CohortReconciler should be gone"
 
 echo
-echo "== CASE 6 — Pooled three-view + watch freshness =="
+echo "== CASE 6 — Pooled four-view + watch freshness =="
 {
   echo "STATUS|CHECK|OBJECT"
   printf '%s\n' "${ROWS[@]}"
@@ -264,7 +273,7 @@ echo "== CASE 6 — Pooled three-view + watch freshness =="
 
 if [ "$FAILS" -ne 0 ]; then
   echo
-  echo "FAILED ${FAILS} check(s). The three-view must track the ledger, a native watch must surface"
+  echo "FAILED ${FAILS} check(s). The four-view must track the ledger, a native watch must surface"
   echo "its transitions, the unit spec must be immutable + off the ClusterQueue/NodeFeature, and no"
   echo "Cohort may exist. Diagnose: kubectl -n ${NS} logs deploy/gpustack-operator-worker --tail=200"
   exit 1

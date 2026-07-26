@@ -6,19 +6,21 @@
 #
 # Goal:        Several InstanceTypes that declare the SAME os / arch / acceleratorGroup / acceleratable
 #              share ONE ResourceFlavor + Devices pool, so a Devices-ledger change must re-enqueue EVERY
-#              one of them and leave their three-view status identical — the InstanceTypeReconciler's
+#              one of them and leave their four-view status identical — the InstanceTypeReconciler's
 #              enqueueInstanceTypeWhenDevicesChanged lists all types carrying the pool's feature key, not
 #              just the one whose name matches. Deploying a sliced workload moves the ledger and is the
 #              trigger.
-# Environment: Needs a REAL sliceable accelerator pool (a Devices ledger a slice actually moves; the same
-#              path CASE 8 uses). AUTO-SKIPS (exit 0, prints why) on a GPU-less / non-sliceable cluster.
+# Environment: Needs a REAL LOGICALLY sliceable accelerator pool (a Devices ledger a logical slice
+#              actually moves; the same path CASE 8 uses). A partition-only pool does NOT qualify — it
+#              serves no logical slice, and such a request is now rejected at admission. AUTO-SKIPS
+#              (exit 0, prints why) on a GPU-less / non-logically-sliceable cluster.
 # Inputs:      All real, nothing mocked —
 #              - two throwaway admin InstanceTypes e2e-case20-a / e2e-case20-b declaring the derived
 #                accelerated pool's acceleratorGroup/os/arch (+ a unit spec);
 #              - one Pod e2e-case20-load requesting a 50% slice on the pool's entrance LocalQueue.
-# Expected:    - all siblings (the derived one + a + b) report the SAME three-view status before the load;
+# Expected:    - all siblings (the derived one + a + b) report the SAME four-view status before the load;
 #              - the sliced Pod admits + runs (a slice is taken from the pool);
-#              - after the load every sibling's three-view is still identical AND has moved from the
+#              - after the load every sibling's four-view is still identical AND has moved from the
 #                pre-load value — proof the ledger change re-enqueued them all.
 # Cleanup:     Trap deletes the load Pod and both throwaway types (+ their ClusterQueues), then waits for
 #              the derived type's status to return to its pre-load value.
@@ -29,26 +31,29 @@ A=e2e-case20-a
 B=e2e-case20-b
 POD=gpustack-e2e-case20-load
 
-# sig <instancetype> — the pool's three-view remaining signature (exclusive|shared|sliced), or empty.
+# sig <instancetype> — the pool's four-view remaining signature (EX|SH|SL|PT), or empty.
 sig() {
-  kubectl get instancetype "$1" -o jsonpath='{.status.accelerator.remaining}|{.status.acceleratorShared.remaining}|{.status.acceleratorSliced.remaining}' 2>/dev/null
+  kubectl get instancetype "$1" -o jsonpath='{.status.accelerator.remaining}|{.status.acceleratorShared.remaining}|{.status.acceleratorSliced.remaining}|{.status.acceleratorPartitioned.remaining}' 2>/dev/null
 }
 
-# --- Skip gate: a real SLICEABLE accelerated pool (derived InstanceType, sliced capacity > 0). ---
+# --- Skip gate: a real LOGICALLY sliceable accelerated pool (derived InstanceType, sliced capacity > 0).
+#     A hardware-partitioning capability is deliberately NOT accepted: the load below is a logical slice,
+#     which a partitioned card cannot serve. ---
 read -r DERIVED AKEY OS ARCH LQ MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); st=it.get('status',{}); n=it['metadata']['name']; d=st.get('detail',{}); sd=d.get('slicedDetail',{})
     sliced=st.get('acceleratorSliced',{}).get('capacity','0')
-    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0 or len(sd.get('physical',{}).get('profiles',[]) or [])>0
+    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0
     if n.startswith('e2e-case20'): continue  # skip this case's own throwaways (e.g. a prior aborted run)
     if s.get('acceleratable') and s.get('acceleratorGroup') and sliceable and sliced not in ('','0') and st.get('entrance'):
         print(n, s['acceleratorGroup'], s.get('os',''), s.get('arch',''), st['entrance'], d.get('manufacturer','')); break
 ")"
 if [ -z "${DERIVED:-}" ] || [ -z "${LQ:-}" ]; then
   echo "== CASE 20 — SKIPPED =="
-  echo "No real sliceable accelerated pool (an acceleratable+sliceable InstanceType with a non-zero sliced"
-  echo "capacity and an entrance LocalQueue) — this case needs real accelerator hardware. Run it on a GPU cluster."
+  echo "No real logically sliceable accelerated pool (an acceleratable InstanceType with a non-zero logical"
+  echo "slice count, a non-zero sliced capacity and an entrance LocalQueue) — this case needs real accelerator"
+  echo "hardware whose cards are NOT in a hardware partitioning mode. Run it on such a GPU cluster."
   exit 0
 fi
 # The sliced resource + its memory/cores percentage keys, read off a pool node's allocatable (the
@@ -92,8 +97,8 @@ ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 BASE=$(sig "$DERIVED")
-[ -n "$BASE" ] && [ "$BASE" != "||" ] || { echo "[case-20] derived pool has no three-view status yet"; exit 1; }
-echo "[case-20] baseline three-view (exclusive|shared|sliced) on ${DERIVED} = ${BASE}"
+[ -n "$BASE" ] && [ "$BASE" != "|||" ] || { echo "[case-20] derived pool has no four-view status yet"; exit 1; }
+echo "[case-20] baseline four-view (EX|SH|SL|PT) on ${DERIVED} = ${BASE}"
 
 # 1. Declare two sibling admin InstanceTypes on the SAME pool identity.
 for t in "$A" "$B"; do
@@ -120,11 +125,11 @@ for _ in $(seq 1 40); do
   sleep 3
 done
 [ -n "$ok" ] \
-  && record PASS "siblings share the pool status before load" "all three = ${sd} (exclusive|shared|sliced)" \
+  && record PASS "siblings share the pool status before load" "all three = ${sd} (EX|SH|SL|PT)" \
   || record FAIL "siblings share the pool status before load" "derived=${sd:-?} a=${sa:-?} b=${sb:-?} — sibling types on one pool must show the same status"
 
-# 2. Deploy a 50% sliced workload on the pool's entrance LocalQueue — this moves the Devices ledger.
-echo "[case-20] deploying 50% sliced Pod ${POD} on ${LQ}"
+# 2. Deploy a 50% logical-slice workload on the pool's entrance LocalQueue — this moves the Devices ledger.
+echo "[case-20] deploying 50% logical-slice Pod ${POD} on ${LQ}"
 cat <<EOF | kubectl apply -f - >/dev/null 2>&1
 apiVersion: v1
 kind: Pod
@@ -147,8 +152,8 @@ for _ in $(seq 1 50); do
   sleep 3
 done
 [ -n "$running" ] \
-  && record PASS "sliced workload admits + runs" "${POD} Running (a slice is taken from the pool)" \
-  || record FAIL "sliced workload admits + runs" "${POD} not Running — Kueue admission / node-devices AdmissionCheck / scheduling failed"
+  && record PASS "logical-slice workload admits + runs" "${POD} Running (a slice is taken from the pool)" \
+  || record FAIL "logical-slice workload admits + runs" "${POD} not Running — Kueue admission / node-devices AdmissionCheck / scheduling failed"
 
 # 3. The ledger change must re-enqueue EVERY sibling: all stay identical AND move from the baseline.
 moved=""
@@ -172,7 +177,7 @@ if [ "$FAILS" -ne 0 ]; then
   echo
   echo "FAILED ${FAILS} check(s). Types sharing os/arch/acceleratorGroup/acceleratable share one pool;"
   echo "enqueueInstanceTypeWhenDevicesChanged must enqueue ALL of them on a Devices change so their"
-  echo "three-view status stays identical. See pkg/worker/controllers/worker/instance_type.go."
+  echo "four-view status stays identical. See pkg/worker/controllers/worker/instance_type.go."
   exit 1
 fi
 echo "CASE 20 PASS"

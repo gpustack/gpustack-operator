@@ -25,7 +25,8 @@
 #              the InstanceType's drain-latched Spec.Inactive (draining a pool that holds an admitted
 #              workload latches it Inactive BY DESIGN — managed=true alone will NOT reactivate it,
 #              unlike an idle-drained pool in case-3), and waits for the InstanceType to return to
-#              Active so a following case finds a healthy chain.
+#              Active WITH a non-zero CPU capacity so a following case finds a healthy chain rather
+#              than a pool whose flavor is still being rebuilt.
 set -uo pipefail
 
 NS="${1:?usage: case-2.sh <NS>}"
@@ -69,12 +70,20 @@ restore() {
   # while the queue is still HoldAndDrain the mirror RE-LATCHES inactive=true, so a single clear
   # sticks only once the drain has settled (StopPolicy leaves HoldAndDrain, flavors rebuilt).
   # Re-patch inactive=false each iteration until the type reaches Active.
+  #
+  # Active alone is too weak a readiness signal: the pool reports Active as soon as its
+  # ClusterQueue is admitting again, while its ResourceFlavor is still being rebuilt and its
+  # CPU capacity is still zero. A case starting against that pool sees a healthy phase and no
+  # room, and fails for a reason that has nothing to do with what it tests. Wait for both.
   for _ in $(seq 1 40); do
-    [ "$(kubectl get instancetype "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Active" ] && break
+    phase=$(kubectl get instancetype "$IT" -o jsonpath='{.status.phase}' 2>/dev/null)
+    cpucap=$(kubectl get instancetype "$IT" -o jsonpath='{.status.cpu.capacity}' 2>/dev/null)
+    [ "$phase" = "Active" ] && [ -n "$cpucap" ] && [ "$cpucap" != "0" ] && break
     kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
       -p '{"spec":{"inactive":false}}' >/dev/null 2>&1 || true
     sleep 3
   done
+  echo "[case-2] ${IT}: phase=${phase:-<none>} cpu.capacity=${cpucap:-<none>}"
 }
 trap restore EXIT
 

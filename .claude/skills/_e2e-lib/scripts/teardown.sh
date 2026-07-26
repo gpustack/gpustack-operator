@@ -105,21 +105,38 @@ done
 
 # 7. E2E-ONLY (NOT part of the cleanup.sh mirror): reverse-patch the Node extended resources GPUStack
 #    advertised, so the NEXT case sees a pristine node. Node extended resources do not self-remove when
-#    their advertiser is gone: the NodeCapacityReconciler's "<vendor>.com/gpu.sliced.*" keys clear on the
-#    reconciler's own convergence at shutdown, but the device-plugin keys ("<vendor>.com/gpu.shared",
-#    "<vendor>.com/gpu.sliced", "device.gpustack.ai/<vendor>.visibility") only zero out and linger on the
-#    Node object until a kubelet restart. Sweep the GPUStack-OWNED keys from status.capacity+allocatable on
-#    every node: device.gpustack.ai/*, any "/gpu.sliced" key (the sliced pool + the per-profile
-#    ".sliced.mig-<profile>" + ".sliced.units"/percentage/mib), and "*/gpu.shared". The bare whole-card
-#    "<vendor>.com/gpu" is deliberately LEFT ALONE — it is name-identical to a real vendor device-plugin's
-#    resource, so removing it generically is unsafe; it zeroes out on the GPUStack plugin's exit. Requires
-#    python3 (already a hard dependency of the case scripts) and a kubectl new enough for --subresource.
+#    their advertiser is gone, and the two families clear differently — the removal below is genuinely
+#    needed for one and only cosmetic for the other:
+#      - reconciler-owned counting keys ("<vendor>.com/gpu.sliced.units|.cores-percentage|
+#        .memory-percentage|.memory-mib", "<vendor>.com/gpu.partitioned.units",
+#        "<vendor>.com/gpu.partitioned.<kind>-<profile>") are written by the NodeCapacityReconciler.
+#        Nothing removes them once the worker is uninstalled, so this JSON patch is the ONLY thing that
+#        clears them;
+#      - device-plugin-owned pool keys ("<vendor>.com/gpu.shared", "<vendor>.com/gpu.sliced",
+#        "<vendor>.com/gpu.partitioned", "device.gpustack.ai/<vendor>.visibility") only ZERO OUT when the
+#        plugin exits. The patch removes the entry, but the kubelet re-adds a zero-valued one on its next
+#        status sync — full removal needs a kubelet restart, which this script deliberately does not do.
+#    So the sweep leaves the node clean for the next case, NOT provably key-free.
+#    Sweep the GPUStack-OWNED keys from status.capacity+allocatable on every node: device.gpustack.ai/*,
+#    any "/gpu.sliced" key, any "/gpu.partitioned" key, and "*/gpu.shared". The "/gpu.sliced" prefix match
+#    also catches the pre-split per-profile MIG shape — a "mig-<profile>" segment appended to the
+#    LOGICAL family's key, which the split replaced and which no component owns any more, so a
+#    development node an earlier build wrote it onto keeps it otherwise. The bare
+#    whole-card "<vendor>.com/gpu" is deliberately LEFT ALONE — it is name-identical to a real vendor
+#    device-plugin's resource, so removing it generically is unsafe; it zeroes out on the GPUStack
+#    plugin's exit. Requires python3 (already a hard dependency of the case scripts) and a kubectl new
+#    enough for --subresource.
 for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
   patch=$(kubectl get node "$node" -o json 2>/dev/null | python3 -c '
 import json, sys
 o = json.load(sys.stdin); ops = []
 esc = lambda k: k.replace("~", "~0").replace("/", "~1")
-owned = lambda k: k.startswith("device.gpustack.ai/") or "/gpu.sliced" in k or k.endswith("/gpu.shared")
+owned = lambda k: (
+    k.startswith("device.gpustack.ai/")
+    or "/gpu.sliced" in k
+    or "/gpu.partitioned" in k
+    or k.endswith("/gpu.shared")
+)
 for sect in ("capacity", "allocatable"):
     for k in o.get("status", {}).get(sect, {}):
         if owned(k):

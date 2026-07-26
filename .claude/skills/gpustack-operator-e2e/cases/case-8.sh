@@ -47,16 +47,17 @@ if [ -z "$sliced_node" ]; then
 fi
 echo "[case-8] real sliced accelerator found on ${sliced_node}"
 
-# A sliceable accelerated InstanceType, its entrance LocalQueue, and its per-card memory.
+# A LOGICALLY sliceable accelerated InstanceType, its entrance LocalQueue, and its per-card memory.
 read -r IT LQ CARDMEM MANUF <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     s=it.get('spec',{}); st=it.get('status',{}); d=st.get('detail',{}); sd=d.get('slicedDetail',{})
-    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0 or len(sd.get('physical',{}).get('profiles',[]) or [])>0
+    # LOGICALLY sliceable only: a hardware-partitioned card serves no logical slice.
+    sliceable=(sd.get('logical',{}).get('count',0) or 0)>0
     if s.get('acceleratable') and sliceable:
         print(it['metadata']['name'], st.get('entrance',''), d.get('memory',''), d.get('manufacturer','')); break
 ")"
-[ -n "$IT" ] && [ -n "$LQ" ] || { echo "no sliceable accelerated InstanceType with an entrance LocalQueue found"; exit 1; }
+[ -n "$IT" ] && [ -n "$LQ" ] || { echo "no logically sliceable accelerated InstanceType with an entrance LocalQueue found"; exit 1; }
 # Physical card memory in MiB (from the InstanceType card memory, e.g. "24Gi") for the below-physical
 # assertion; 0 if it cannot be parsed.
 PHYS_MIB=$(python3 -c "

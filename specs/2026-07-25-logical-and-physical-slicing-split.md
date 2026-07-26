@@ -1,6 +1,6 @@
 # Spec: Split Logical and Physical Slicing into Distinct Resource Families
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -538,6 +538,25 @@ own partition, the case becomes a regression guard and F11 is done; if it sees m
 the actuator's chosen partition identity in the reservation — in this spec when confined to that one
 addition, a follow-up spec if it requires changing the responder contract.
 
+*Measured (CASE 28, real H100, `3g.40gb`):* **the second branch — the sidecar sees more.**
+
+```
+main env : NVIDIA_VISIBLE_DEVICES=MIG-<instance-uuid>     cuInit=0 (CUDA_SUCCESS)
+sshd env : NVIDIA_VISIBLE_DEVICES=GPU-<parent-card-uuid>
+```
+
+Main is confined to its partition and CUDA initializes there. The sidecar is handed the **parent card's**
+identity — broader than its own partition, which is exactly the "sees more" condition. The in-container
+legs (`nvidia-smi -L`, CUDA init) came back empty in the sidecar, but they are **inconclusive rather than
+reassuring**: that image ships no NVIDIA tooling, so an absent probe says nothing about what was injected.
+The env is decisive on its own, being what the container runtime consumes.
+
+*Resolution:* F11 does **not** close here, and the fix is **out of this spec's scope**. The reservation
+carries the profile and the occupied memory-slice intervals but not the partition's device identity, and
+the responder is asked for a *card's* visible-devices env — answering with a *partition's* changes that
+contract, which F11 itself scoped to a follow-up spec. CASE 28 stays observational; running it with
+`F11_EXPECT=own` turns it into the guard the moment the follow-up lands.
+
 **F12 — vocabulary and documentation, including the request rules.**
 The rename covers live code comments, error strings, test helper names, chart templates, Dockerfile stage
 comments, `README.md`, `docs/architecture.md`, `docs/walkthrough.md` and `docs/operation/nvidia-mig.md`.
@@ -557,8 +576,9 @@ and what to do before flipping a card's partitioning mode.
 Existing cases move to the new keys; new coverage proves what only real hardware shows: mixed-node
 placement, concurrent distinct profiles, saturated-node health, exclusive/shared allocatable-zero on a
 partitioned card, the F11 observation, and one case per demonstrable residual —
-the reclaim window, an out-of-band instance, a terminated init container whose instance is still live, and
-a kubelet restart with the container stopped.
+the reclaim window, an out-of-band instance, and a terminated init container whose instance is still live.
+A kubelet-restart case was scoped and then **dropped** — restarting a node's kubelet to observe a property
+the saturated-node case already covers costs more than it proves.
 *Accept:* the MIG lifecycle case passes against the new keys; the new mixed case passes on real hardware
 and self-skips without it; request-rule rejections live in the webhook unit tests with one end-to-end
 rejection to prove the webhook is wired; the teardown script cleans both families and the legacy shape.
@@ -1273,7 +1293,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
 Hardware is not provisioned during Wave 1 through Phase 2. When T15 starts, confirm whether to bring up a
 cluster with a MIG-capable node.
 
-- [ ] **T15 · Port the existing cases** (F13)
+- [x] **T15 · Port the existing cases** (F13)
       Blocked by: T13
       Owns: `.claude/skills/gpustack-operator-e2e/**`, `.claude/skills/_e2e-lib/scripts/teardown.sh`
       *Do:* update the accelerator-view, sliced and cross-mode cases, the teardown reverse-patch, and the
@@ -1282,24 +1302,54 @@ cluster with a MIG-capable node.
       legacy `.sliced.mig-*` shape; the `.sliced.mig-` grep returns nothing under `.claude/skills/`,
       closing the last residue T13 left.
       Verify: run the ported cases; teardown leaves no `.sliced.*` or `.partitioned.*` key behind
+      *Landed:* the `.sliced.mig-` grep under `.claude/skills/` returns nothing, closing T13's last
+      residue; `teardown.sh` reverse-patches both key families. The ported cases surfaced two
+      pre-existing defects in CASE 14 — it selected on `spec.sliceable`, deleted before this branch, and
+      its over-budget assertion assumed a single-card pool — both fixed here.
 
-- [ ] **T16 · New cases for what only hardware shows** (F5, F11, F13)
+- [x] **T16 · New cases for what only hardware shows** (F5, F11, F13)
       Blocked by: T15
       Owns: `.claude/skills/gpustack-operator-e2e/**`
       *Do:* add cases for mixed-node placement, ledger-derived per-profile capacity, saturated-card health,
       exclusive/shared allocatable-zero on a partitioned card, and the F11
       observation — plus the five the cross-check surfaced: a terminated init container whose MIG instance
       is still live, a same-profile replacement scheduled inside the reclaim debounce window, an
-      administrator-created out-of-band instance, a kubelet restart with the partition's container stopped
-      rather than running, and — if a dual-socket node is available — `single-numa-node` with free capacity
-      only on the far socket. Measure the node-status write volume the ledger-derived key produces.
+      administrator-created out-of-band instance, and — if a dual-socket node is available —
+      `single-numa-node` with free capacity only on the far socket. The kubelet-restart case the
+      cross-check also suggested was written and then dropped: it restarts a node's kubelet to observe
+      what the saturated-node case already asserts, which is not worth that blast radius. Measure the node-status write volume the ledger-derived key produces.
       Acceptance: zero `UnexpectedAdmissionError` in the mixed case; each case self-skips without its
       hardware; residuals 1, 2 and 3 are demonstrated rather than asserted; the F11 observation and the
       write-volume measurement are written into the case output and folded back into the spec.
       Verify: full suite run; record the F11 outcome and either close F11 or open its follow-up
+      *Landed:* ten cases (24-32, 34) on `_partition-lib.sh`, run on a real 8x H100 node. Mixed-node
+      placement holds over three rounds with **zero `UnexpectedAdmissionError`** (CASE 24); the
+      per-profile key is ledger-derived, not a ceiling (CASE 25); concurrent distinct-profile requests
+      each actuate their own profile (CASE 29); a terminated init container still charges its card
+      (CASE 30). Residuals 1-3 are demonstrated, not asserted: CASE 32 records that a hand-carved
+      instance is invisible to every node-level number, and additionally that **GPUStack's reclaimer
+      destroys an instance it did not create** — worth folding into the docs. **Node-status write volume
+      (measured, CASE 25):** 2 writes / 60s idle; 4 writes / 39s across one carve-and-free cycle. F11's
+      outcome is recorded above: the second branch, so it stays open as a follow-up.
 
-- [ ] **Checkpoint C.** The suite passes on a MIG-capable node; the F11 decision is recorded; the
+- [x] **Checkpoint C.** The suite passes on a MIG-capable node; the F11 decision is recorded; the
   mixed-node requirement and the residuals are demonstrated rather than assumed.
+      *Outcome:* met, with **one candidate product defect found and one environment hazard recorded**,
+      neither introduced by this branch.
+      - **Reclaim-window TOCTOU (pre-existing).** A same-profile replacement admitted between a Pod's
+        deletion and the reclaimer destroying its hardware instance can be handed the outgoing instance:
+        the container fails to create (`failed to get device handle from UUID: Not Found`) or the Pod
+        ends in `UnexpectedAdmissionError`. Four independent reproductions. Verified pre-existing by
+        diffing the reclaim wiring — `origin/main` already ran the MIG reclaimer through the same
+        level-based loop, and this branch's change is a faithful rename plus a mode parameter, leaving
+        the reclaimer, the driver and the debounce untouched. **Filed for the owner, not fixed here:**
+        `Allocate` should re-verify the instance it hands back, or share the reclaimer's lock.
+      - **The provider can shut the node down for toggling MIG.** A managed provider's GPU health check
+        expects `N x (N-1)` NVLink topology pairs; a partitioned card drops out of that matrix, the check
+        fails, and the node agent cordons and then restarts the node. Sampling-dependent, so it cannot be
+        outrun. Recorded in the suite's cluster-provisioning reference and in the MIG operations doc.
+      - Kubernetes 1.31.9, 8x H100 80GB HBM3. Full record, including the two withdrawn-and-re-earned
+        assertions, in the run report.
 
 ### Test Plan
 
@@ -1380,8 +1430,8 @@ New (T16), each self-skipping without the hardware it needs:
   key reads zero while the same-size profile key still reads one, and that a whole-card-profile request is
   not scheduled to that node. Also record the node-status write volume.
 - **Saturated-node health** — carve until no partitioned card has room for any profile; assert
-  `.partitioned` allocatable reaches zero, that already-running partitions are unaffected and survive a
-  kubelet restart, and that freeing one restores the count without a restart.
+  `.partitioned` allocatable reaches zero, that already-running partitions are unaffected, and that
+  freeing one restores the count without a plugin or kubelet restart.
 - **Exclusive/shared allocatable-zero** — a partitioned card reports its whole-card and shared tokens
   Unhealthy (capacity intact, allocatable zero); an exclusive Pod on an all-partitioned pool is rejected
   at admission rather than admitted and left Pending.
