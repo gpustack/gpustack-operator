@@ -120,8 +120,16 @@ func podSetFamilyDemands(ps *kueue.PodSet) []familyDemand {
 			case isCardKey(name, family):
 				d.cards += clampInt32(qty.Value())
 			default:
+				// One profile per Pod is a request rule, but the Pod webhook enforces it on a
+				// Pod and Kueue builds this Workload from a pod TEMPLATE before any Pod exists —
+				// so a template naming two profiles reaches here. Resource maps iterate in random
+				// order, so take the smallest name rather than the last one seen: the shape is
+				// refused at Pod creation either way, and this keeps the verdict message stable
+				// across reconciles instead of flipping between the two.
 				if profile, ok := nodefeature.PartitionedProfileOf(name); ok {
-					d.profile = profile
+					if d.profile == "" || profile < d.profile {
+						d.profile = profile
+					}
 				}
 			}
 		}
@@ -488,8 +496,11 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 		logger.Error(err, "patch admission check state")
 		return ctrl.Result{}, err
 	}
-	logger.V(2).Info("evaluated node-devices admission",
-		"state", state, "demands", demandsSummary(demands))
+	// demandsSummary formats eagerly, so gate it: this runs on every Workload reconcile.
+	if logger.V(2).Enabled() {
+		logger.V(2).Info("evaluated node-devices admission",
+			"state", state, "demands", demandsSummary(demands))
+	}
 	return ctrl.Result{}, nil
 }
 

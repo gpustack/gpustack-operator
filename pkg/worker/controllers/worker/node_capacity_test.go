@@ -384,10 +384,9 @@ func TestDesiredAcceleratorCapacityIgnoresPartitions(t *testing.T) {
 	}
 }
 
-// TestDesiredAcceleratorCapacityNewFormat covers the new per-card sourcing: the every-card-vs-
-// logical-only split (units count every sliceable card, the three logical keys only the logically
-// sliceable ones), all-MIG
-// (logical keys omitted), the lossy VRAM label, and the Devices-wins-over-label cardinality.
+// TestDesiredAcceleratorCapacityNewFormat covers the per-card sourcing: every logical-slicing key
+// — the units credit included — counts only the logically sliceable cards, so an all-partitioned
+// pool emits none of them; plus the lossy VRAM label and the Devices-wins-over-label cardinality.
 func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 	const node = "node-5"
 	unitsFor := func(cards int64) int64 { return cards * nodefeature.ResourceMaxUnits }

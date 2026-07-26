@@ -570,7 +570,7 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 	for i := range devices {
 		dev := &devices[i]
 		caps := acceleratorCapabilities(dev)
-		var nodeCards, nodeExcl, nodeShared, nodeSliced int64
+		var nodeCards, nodeLogicalCards, nodeExcl, nodeShared, nodeSliced int64
 		for j := range dev.Status.Groups {
 			g := &dev.Status.Groups[j]
 			for k := range g.Accelerators {
@@ -596,6 +596,15 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 				if free || a.Mode == workercore.DeviceAllocationModeShared {
 					nodeShared += rem / sharedUnit
 				}
+				// The logical-slice views count only the cards that actually admit a logical
+				// slice. Not being partitioned is not enough: a card reporting neither
+				// capability is a whole card and nothing else, and the device plugin, the node
+				// capacity and the AdmissionCheck all gate on the same predicate — counting it
+				// here would advertise a slice no layer below can ever place.
+				if !device.IsLogicallySliceable(st) {
+					continue
+				}
+				nodeLogicalCards++
 				if free || a.Mode == workercore.DeviceAllocationModeSliced {
 					cardSliced := rem / slicedUnit
 					nodeSliced += cardSliced
@@ -609,7 +618,7 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 		}
 		capExcl += nodeCards
 		capShared += nodeCards * sharedMax
-		capSliced += nodeCards * slicedMax
+		capSliced += nodeLogicalCards * slicedMax
 		remExcl += nodeExcl
 		remShared += nodeShared
 		remSliced += nodeSliced
