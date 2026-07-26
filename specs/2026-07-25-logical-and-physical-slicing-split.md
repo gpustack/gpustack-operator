@@ -1,6 +1,6 @@
 # Spec: Split Logical and Physical Slicing into Distinct Resource Families
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -892,7 +892,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
 
 #### Wave 1 — repairs and additive groundwork (no hardware, fully parallel)
 
-- [ ] **T0 · The detector's alignment path writes an updated group back** (F16)
+- [x] **T0 · The detector's alignment path writes an updated group back** (F16)
       Blocked by: None
       Owns: `pkg/devicemanager/detector/detector.go`, `pkg/devicemanager/detector/detector_test.go`
       *Do:* add a failing fixture where an existing group's slicing capability changes and is not
