@@ -26,6 +26,8 @@ var (
 	nvidiaSlicedCores  = nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(nodefeature.ManufacturerNVIDIA)
 	nvidiaSlicedMemPct = nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(nodefeature.ManufacturerNVIDIA)
 	nvidiaSlicedMemMib = nodefeature.GetAcceleratableSlicedMemoryMibResourceName(nodefeature.ManufacturerNVIDIA)
+
+	nvidiaPartitionedUnits = nodefeature.GetAcceleratablePartitionedUnitsResourceName(nodefeature.ManufacturerNVIDIA)
 )
 
 // Per-card VRAM of the test models, in MiB (the ".memory" feature label is a
@@ -91,13 +93,22 @@ func mergeWant(maps ...map[string]int64) map[string]int64 {
 }
 
 // withSlicedPool advertises the device-plugin's bare "<mfr>.sliced" token pool on the
-// node — the presence gate desiredSlicedCapacity reads before emitting ".sliced.*".
+// node — the presence gate desiredAcceleratorCapacity reads before emitting ".sliced.*".
 func withSlicedPool(nd *core.Node, manufacturer string, tokens int64) *core.Node {
+	return withPool(nd, manufacturer, workercore.DeviceAllocationModeSliced, tokens)
+}
+
+// withPartitionedPool advertises the bare "<mfr>.partitioned" token pool — the presence gate for
+// the hardware-partition counting keys.
+func withPartitionedPool(nd *core.Node, manufacturer string, tokens int64) *core.Node {
+	return withPool(nd, manufacturer, workercore.DeviceAllocationModePartitioned, tokens)
+}
+
+func withPool(nd *core.Node, manufacturer string, mode workercore.DeviceAllocationMode, tokens int64) *core.Node {
 	if nd.Status.Capacity == nil {
 		nd.Status.Capacity = core.ResourceList{}
 	}
-	name := nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModeSliced)
-	nd.Status.Capacity[name] = *resource.NewQuantity(tokens, resource.DecimalSI)
+	nd.Status.Capacity[nodefeature.GetAcceleratableResourceName(manufacturer, mode)] = *resource.NewQuantity(tokens, resource.DecimalSI)
 	return nd
 }
 
@@ -115,7 +126,7 @@ type vendorSlicing struct {
 }
 
 // devicesWithSlicing builds a same-named Devices CR whose groups carry per-card soft-slice
-// status, resolved by "${manufacturer}-${group ID}" so desiredSlicedCapacity maps each node
+// status, resolved by "${manufacturer}-${group ID}" so desiredAcceleratorCapacity maps each node
 // model to its own group. Each vendor contributes v.cards soft cards, matching the count its
 // model's ".count" label advertises on the node.
 func devicesWithSlicing(name string, vendors ...vendorSlicing) *workercore.Devices {
@@ -175,9 +186,9 @@ func migCardWithProfiles(id string, profiles map[string]int32) workercore.Accele
 	}
 }
 
-// nvidiaMig is the NVIDIA ".sliced.mig-<profile>" capacity key name for a profile.
-func nvidiaMig(profile string) string {
-	return string(nodefeature.GetAcceleratableSlicedMigResourceName(nodefeature.ManufacturerNVIDIA, profile))
+// nvidiaPartitioned is the NVIDIA per-profile hardware-partition capacity key for a profile.
+func nvidiaPartitioned(profile string) string {
+	return string(nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, profile))
 }
 
 // slicedGroup builds a new-format Devices group from its per-card statuses, deriving the
@@ -191,6 +202,25 @@ func slicedGroup(mfr, id string, cards ...workercore.Accelerator) workercore.Dev
 	}
 }
 
+// withPartitionLedger attaches the runtime allocation ledger for one card: the partition
+// instances it currently holds and the ones it can still host. The capability lives on the
+// Devices spec and the occupancy on its status, so the per-profile capacity key is a join of the
+// two — a fixture that sets only the spec exercises the no-ledger fallback instead.
+func withPartitionLedger(
+	devs *workercore.Devices, groupID, cardID string, allocated, remaining map[string]int32,
+) *workercore.Devices {
+	devs.Status.Groups = append(devs.Status.Groups, workercore.DevicesAllocationGroup{
+		ID:           groupID,
+		Manufacturer: nodefeature.ManufacturerNVIDIA,
+		Accelerators: []workercore.AcceleratorAllocation{{
+			ID:                cardID,
+			AllocatedProfiles: device.ProfileCountSlice(allocated),
+			RemainingProfiles: device.ProfileCountSlice(remaining),
+		}},
+	})
+	return devs
+}
+
 // devicesWithGroups builds a same-named Devices CR from prebuilt new-format groups.
 func devicesWithGroups(name string, groups ...workercore.DevicesGroup) *workercore.Devices {
 	return &workercore.Devices{
@@ -199,12 +229,12 @@ func devicesWithGroups(name string, groups ...workercore.DevicesGroup) *workerco
 	}
 }
 
-// TestDesiredSlicedCapacity covers per-card sliced capacity across the aggregation and presence
+// TestDesiredAcceleratorCapacity covers per-card sliced capacity across the aggregation and presence
 // gates: cross-model and cross-manufacturer summation, per-model memory-mib weighting, the managed
 // / sliced-pool / reported-capability gates, colliding group IDs staying isolated, and a
-// non-sliceable model contributing nothing. TestDesiredSlicedCapacityNewFormat covers the
+// non-sliceable model contributing nothing. TestDesiredAcceleratorCapacityNewFormat covers the
 // mixed-logical/MIG, all-MIG, and lossy-VRAM edge cases.
-func TestDesiredSlicedCapacity(t *testing.T) {
+func TestDesiredAcceleratorCapacity(t *testing.T) {
 	cases := []struct {
 		name string
 		node *core.Node
@@ -324,7 +354,7 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			got := desiredSlicedCapacity(c.node, c.devs)
+			got := desiredAcceleratorCapacity(c.node, c.devs)
 			assert.Len(t, got, len(c.want))
 			for name, val := range c.want {
 				q, ok := got[core.ResourceName(name)]
@@ -335,16 +365,16 @@ func TestDesiredSlicedCapacity(t *testing.T) {
 	}
 }
 
-// TestDesiredSlicedCapacityIgnoresPartitions pins that the legacy ".sliced.partitions"
+// TestDesiredAcceleratorCapacityIgnoresPartitions pins that the legacy ".sliced.partitions"
 // label no longer affects capacity (slicing capability is sourced from Devices).
-func TestDesiredSlicedCapacityIgnoresPartitions(t *testing.T) {
+func TestDesiredAcceleratorCapacityIgnoresPartitions(t *testing.T) {
 	nd := withSlicedPool(acceleratableNode("node-5", "nvidia-a10g", "4", "24Gi", true),
 		nodefeature.ManufacturerNVIDIA, 4*128)
 	// An invalid partitions value would have suppressed capacity before; now ignored.
 	nd.Labels[nodefeature.AcceleratableFeatureLabelPrefix+"nvidia-a10g.sliced.partitions"] = "3"
 	devs := devicesWithSlicing("node-5", vendorSlicing{nodefeature.ManufacturerNVIDIA, "a10g", 4, 128, true})
 
-	got := desiredSlicedCapacity(nd, devs)
+	got := desiredAcceleratorCapacity(nd, devs)
 	want := slicedWant(nodefeature.ManufacturerNVIDIA, 4, 4*a10gMib, 128, true)
 	assert.Len(t, got, len(want))
 	for name, val := range want {
@@ -354,10 +384,10 @@ func TestDesiredSlicedCapacityIgnoresPartitions(t *testing.T) {
 	}
 }
 
-// TestDesiredSlicedCapacityNewFormat covers the new per-card sourcing: the sliceable-vs-soft
+// TestDesiredAcceleratorCapacityNewFormat covers the new per-card sourcing: the sliceable-vs-soft
 // split (units count every sliceable card, the three logical keys only soft cards), all-MIG
 // (logical keys omitted), the lossy VRAM label, and the Devices-wins-over-label cardinality.
-func TestDesiredSlicedCapacityNewFormat(t *testing.T) {
+func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 	const node = "node-5"
 	unitsFor := func(cards int64) int64 { return cards * nodefeature.ResourceMaxUnits }
 
@@ -379,62 +409,96 @@ func TestDesiredSlicedCapacityNewFormat(t *testing.T) {
 			want: slicedWant(nodefeature.ManufacturerNVIDIA, 8, 8*a10gMib, 128, true),
 		},
 		{
-			// Mixed group: 2 soft + 1 MIG card. ".sliced.units" counts all 3; the three logical
-			// keys count only the 2 soft cards (cores = Detail.Logical.Count × 100).
-			name: "mixed logical + mig: units all cards, logical keys soft only",
-			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
-				nodefeature.ManufacturerNVIDIA, 3*128),
+			// Mixed group: 2 logically sliceable + 1 partitioned card. Every key counts only its
+			// own population, so no card is charged to both families.
+			name: "mixed logical + partitioned: each family counts only its own cards",
+			node: withPartitionedPool(withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
+				nodefeature.ManufacturerNVIDIA, 2*128), nodefeature.ManufacturerNVIDIA, 7),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
 				softCard("0", 128, true), softCard("1", 128, true), migCard("2", 7))),
 			want: map[string]int64{
-				string(nvidiaSlicedUnits):  unitsFor(3),
-				string(nvidiaSlicedCores):  2 * 128 * 100,
-				string(nvidiaSlicedMemPct): 2 * 100,
-				string(nvidiaSlicedMemMib): 2 * a10gMib,
+				string(nvidiaSlicedUnits):      unitsFor(2),
+				string(nvidiaSlicedCores):      2 * 128 * 100,
+				string(nvidiaSlicedMemPct):     2 * 100,
+				string(nvidiaSlicedMemMib):     2 * a10gMib,
+				string(nvidiaPartitionedUnits): unitsFor(1),
 			},
 		},
 		{
-			// All-MIG group: ".sliced.units" counts the MIG cards; the three logical keys are
-			// omitted entirely (no soft budget) so a stale one is reverse-patched.
-			name: "all-mig: units only, logical keys omitted",
-			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "2", "24Gi", true),
+			// A partitioned card advertises nothing while the plugin serves no partition pool
+			// here, exactly as a logically sliceable card advertises nothing without ".sliced".
+			name: "partition keys are gated on the partition pool",
+			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "1", "24Gi", true),
+				nodefeature.ManufacturerNVIDIA, 128),
+			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
+				migCard("0", 7))),
+			want: nil,
+		},
+		{
+			// All-partitioned group: only the partition units key; every logical key is omitted
+			// entirely, so a stale one is reverse-patched.
+			name: "all-partitioned: partition units only, logical keys omitted",
+			node: withPartitionedPool(acceleratableNode(node, "nvidia-a10g", "2", "24Gi", true),
 				nodefeature.ManufacturerNVIDIA, 2*7),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
 				migCard("0", 7), migCard("1", 7))),
-			want: map[string]int64{string(nvidiaSlicedUnits): unitsFor(2)},
+			want: map[string]int64{string(nvidiaPartitionedUnits): unitsFor(2)},
 		},
 		{
-			// All-MIG group with profiles: units counts the MIG cards, and one
-			// ".sliced.mig-<profile>" key per profile equals Detail.Physical.Profiles[name].Count
-			// (summed across cards); the three logical keys stay omitted (no soft budget).
-			name: "all-mig advertises per-profile keys equal to the aggregate counts",
-			node: withSlicedPool(acceleratableNode(node, "nvidia-a100", "2", "40Gi", true),
+			// With no ledger reported yet, each per-profile key degrades to the card's static
+			// capability ceiling summed across the cards — an empty node's honest answer.
+			name: "no ledger yet: per-profile keys degrade to the static ceiling",
+			node: withPartitionedPool(acceleratableNode(node, "nvidia-a100", "2", "40Gi", true),
 				nodefeature.ManufacturerNVIDIA, 2*7),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a100",
 				migCardWithProfiles("0", map[string]int32{"1g.5gb": 7, "2g.10gb": 3, "3g.20gb": 2}),
 				migCardWithProfiles("1", map[string]int32{"1g.5gb": 7, "2g.10gb": 3, "3g.20gb": 2}))),
 			want: map[string]int64{
-				string(nvidiaSlicedUnits): unitsFor(2),
-				nvidiaMig("1g.5gb"):       14,
-				nvidiaMig("2g.10gb"):      6,
-				nvidiaMig("3g.20gb"):      4,
+				string(nvidiaPartitionedUnits): unitsFor(2),
+				nvidiaPartitioned("1g.5gb"):    14,
+				nvidiaPartitioned("2g.10gb"):   6,
+				nvidiaPartitioned("3g.20gb"):   4,
 			},
 		},
 		{
-			// Mixed soft + MIG in one group: ".sliced.units" counts all 3 cards, the three logical
-			// keys count the 2 soft cards, and the MIG card contributes its per-profile key.
-			name: "mixed soft + mig advertises both the logical keys and the mig key",
-			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
-				nodefeature.ManufacturerNVIDIA, 3*128),
+			// The ledger-derived value on a card holding one mid-size partition. Each key is
+			// allocated + remaining, so the scheduler — which subtracts the requests of the Pods
+			// already on the node — arrives at the free count rather than subtracting each live
+			// instance twice. A profile the geometry can no longer fit reads zero even though its
+			// static ceiling is one.
+			name: "ledger-derived per-profile value on a partly carved card",
+			node: withPartitionedPool(acceleratableNode(node, "nvidia-a100", "1", "80Gi", true),
+				nodefeature.ManufacturerNVIDIA, 7),
+			devs: withPartitionLedger(
+				devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a100",
+					migCardWithProfiles("0", map[string]int32{"1g.10gb": 7, "3g.40gb": 2, "7g.80gb": 1}))),
+				"a100", "0",
+				map[string]int32{"3g.40gb": 1},
+				map[string]int32{"1g.10gb": 4, "3g.40gb": 1},
+			),
+			want: map[string]int64{
+				string(nvidiaPartitionedUnits): unitsFor(1),
+				nvidiaPartitioned("1g.10gb"):   4, // 0 allocated + 4 that still fit
+				nvidiaPartitioned("3g.40gb"):   2, // 1 allocated + 1 that still fits
+				nvidiaPartitioned("7g.80gb"):   0, // the whole-card profile no longer fits
+			},
+		},
+		{
+			// Mixed in one group: the logical keys count the 2 unpartitioned cards and the
+			// partition keys the 1 partitioned card, each family's units disjoint from the other.
+			name: "mixed populations advertise both families, no card counted twice",
+			node: withPartitionedPool(withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
+				nodefeature.ManufacturerNVIDIA, 2*128), nodefeature.ManufacturerNVIDIA, 7),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
 				softCard("0", 128, true), softCard("1", 128, true),
 				migCardWithProfiles("2", map[string]int32{"1g.10gb": 7}))),
 			want: map[string]int64{
-				string(nvidiaSlicedUnits):  unitsFor(3),
-				string(nvidiaSlicedCores):  2 * 128 * 100,
-				string(nvidiaSlicedMemPct): 2 * 100,
-				string(nvidiaSlicedMemMib): 2 * a10gMib,
-				nvidiaMig("1g.10gb"):       7,
+				string(nvidiaSlicedUnits):      unitsFor(2),
+				string(nvidiaSlicedCores):      2 * 128 * 100,
+				string(nvidiaSlicedMemPct):     2 * 100,
+				string(nvidiaSlicedMemMib):     2 * a10gMib,
+				string(nvidiaPartitionedUnits): unitsFor(1),
+				nvidiaPartitioned("1g.10gb"):   7,
 			},
 		},
 		{
@@ -480,7 +544,7 @@ func TestDesiredSlicedCapacityNewFormat(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			got := desiredSlicedCapacity(c.node, c.devs)
+			got := desiredAcceleratorCapacity(c.node, c.devs)
 			assert.Len(t, got, len(c.want))
 			for name, val := range c.want {
 				q, ok := got[core.ResourceName(name)]
@@ -491,45 +555,90 @@ func TestDesiredSlicedCapacityNewFormat(t *testing.T) {
 	}
 }
 
-// TestSlicedDetailChanged pins the Devices-watch predicate: it fires on a real slicing-detail
-// change (the sliceable/soft split or the logical count) and stays quiet on non-slicing spec
-// churn such as a health flip (allocation churn lives in Status, not Spec).
-func TestSlicedDetailChanged(t *testing.T) {
-	base := []workercore.DevicesGroup{
+// TestPartitionLedgerIsManufacturerQualified pins that the runtime ledger is looked up by
+// manufacturer AND group ID. ConstructGroupID strips the vendor prefix, so two manufacturers can
+// carry the same bare group ID on one node; keyed by ID alone one vendor's ledger would be read
+// for the other's cards, and its live allocations would vanish from the advertised capacity.
+func TestPartitionLedgerIsManufacturerQualified(t *testing.T) {
+	profiles := map[string]int32{"1g.10gb": 7, "3g.40gb": 2}
+	nvidiaGroup := slicedGroup(nodefeature.ManufacturerNVIDIA, "x", migCardWithProfiles("0", profiles))
+	mthreadsGroup := slicedGroup(nodefeature.ManufacturerMThreads, "x", migCardWithProfiles("0", profiles))
+
+	devs := devicesWithGroups("node-collide", nvidiaGroup, mthreadsGroup)
+	// Only the MThreads card is carved; the NVIDIA card sharing its bare group ID is untouched.
+	devs.Status.Groups = append(devs.Status.Groups, workercore.DevicesAllocationGroup{
+		ID: "x", Manufacturer: nodefeature.ManufacturerMThreads,
+		Accelerators: []workercore.AcceleratorAllocation{{
+			ID:                "0",
+			AllocatedProfiles: device.ProfileCountSlice(map[string]int32{"3g.40gb": 1}),
+			RemainingProfiles: device.ProfileCountSlice(map[string]int32{"1g.10gb": 4, "3g.40gb": 1}),
+		}},
+	})
+
+	ledger := devicesLedgerByGroup(devs)
+	nvidia := partitionInstancesByProfile(&nvidiaGroup, ledger[nodefeature.ManufacturerNVIDIA+"-x"])
+	mthreads := partitionInstancesByProfile(&mthreadsGroup, ledger[nodefeature.ManufacturerMThreads+"-x"])
+
+	assert.Equal(t, map[string]int64{"1g.10gb": 7, "3g.40gb": 2}, nvidia,
+		"the untouched vendor keeps its full ceiling")
+	assert.Equal(t, map[string]int64{"1g.10gb": 4, "3g.40gb": 2}, mthreads,
+		"the carved vendor reports what its own ledger says")
+}
+
+// TestAcceleratorDetailChanged pins the Devices-watch predicate: it fires on anything the
+// desired capacity is computed from — the per-card population split, the logical count, the
+// profile inventory, and now the runtime ledger the per-profile key is derived from — and stays
+// quiet on churn that cannot move a capacity value, such as a health flip.
+func TestAcceleratorDetailChanged(t *testing.T) {
+	const node = "node-w"
+	base := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)))
+	assert.False(t, acceleratorDetailChanged(base, base), "identical devices do not fire")
+
+	health := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)))
+	health.Spec.Groups[0].Accelerators[0].Status.Unhealthy = true
+	assert.False(t, acceleratorDetailChanged(base, health), "a health flip cannot move a capacity value")
+
+	toMig := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), migCard("1", 7)))
+	assert.True(t, acceleratorDetailChanged(base, toMig), "a card moving between populations fires")
+
+	fewer := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 64, true), softCard("1", 64, true)))
+	assert.True(t, acceleratorDetailChanged(base, fewer), "a logical-count change fires")
+
+	added := devicesWithGroups(node,
 		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)),
-	}
-	assert.False(t, slicedDetailChanged(base, base), "identical groups do not fire")
-
-	health := []workercore.DevicesGroup{
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)),
-	}
-	health[0].Accelerators[0].Status.Unhealthy = true
-	assert.False(t, slicedDetailChanged(base, health), "a health flip is not a slicing change")
-
-	toMig := []workercore.DevicesGroup{
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), migCard("1", 7)),
-	}
-	assert.True(t, slicedDetailChanged(base, toMig), "a soft→mig split fires")
-
-	fewer := []workercore.DevicesGroup{
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 64, true), softCard("1", 64, true)),
-	}
-	assert.True(t, slicedDetailChanged(base, fewer), "a logical-count change fires")
-
-	added := append(append([]workercore.DevicesGroup{}, base...),
 		slicedGroup(nodefeature.ManufacturerMThreads, "s4000", softCard("0", 16, false)))
-	assert.True(t, slicedDetailChanged(base, added), "a new group fires")
+	assert.True(t, acceleratorDetailChanged(base, added), "a new group fires")
 
-	// A MIG re-slice keeps the sliceable card count (1) but changes the profile inventory, which
-	// the sliceable/soft split alone would miss — the profile signature must fire it.
-	reslice := []workercore.DevicesGroup{
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", map[string]int32{"1g.10gb": 7})),
-	}
-	resliced := []workercore.DevicesGroup{
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", map[string]int32{"2g.20gb": 3})),
-	}
-	assert.False(t, slicedDetailChanged(reslice, reslice), "identical mig profiles do not fire")
-	assert.True(t, slicedDetailChanged(reslice, resliced), "a mig re-slice (profile set change) fires")
+	// A re-partition keeps the card count but changes the profile inventory, which the population
+	// split alone would miss.
+	reslice := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", map[string]int32{"1g.10gb": 7})))
+	resliced := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", map[string]int32{"2g.20gb": 3})))
+	assert.False(t, acceleratorDetailChanged(reslice, reslice), "identical profiles do not fire")
+	assert.True(t, acceleratorDetailChanged(reslice, resliced), "a re-partition fires")
+
+	// The ledger side matters now: carving a partition moves the per-profile key with the spec
+	// untouched, so the watch must fire on it. This is the churn the predicate used to ignore
+	// outright, and ignoring it would leave the node advertising room it no longer has.
+	//
+	// It has to be a card offering more than one profile shape. On a single-profile card
+	// allocated + remaining is invariant under carving — that is exactly why the key sums both
+	// terms — so only a profile whose room another profile's instance consumed actually moves.
+	multi := map[string]int32{"1g.10gb": 7, "3g.40gb": 2, "7g.80gb": 1}
+	empty := devicesWithGroups(node,
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", multi)))
+	carved := withPartitionLedger(
+		devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a100", migCardWithProfiles("0", multi))),
+		"a100", "0",
+		map[string]int32{"3g.40gb": 1},
+		map[string]int32{"1g.10gb": 4, "3g.40gb": 1})
+	assert.True(t, acceleratorDetailChanged(empty, carved), "an allocation that shrinks another profile fires")
+	assert.False(t, acceleratorDetailChanged(carved, carved), "an unchanged ledger does not fire")
 }
 
 // TestEnqueueNodeWhenDevicesChanged pins that a Devices ledger enqueues its name-identical Node.
@@ -542,33 +651,41 @@ func TestEnqueueNodeWhenDevicesChanged(t *testing.T) {
 	assert.Empty(t, reqs[0].Namespace, "node is cluster-scoped")
 }
 
-func TestIsSlicedCapacityKey(t *testing.T) {
+func TestIsOwnedCapacityKey(t *testing.T) {
 	cases := []struct {
 		name string
 		in   core.ResourceName
 		want bool
 	}{
-		{"owned mig profile", "nvidia.com/gpu.sliced.mig-1g.10gb", true},
 		{"owned units", "nvidia.com/gpu.sliced.units", true},
 		{"owned cores-percentage", "nvidia.com/gpu.sliced.cores-percentage", true},
 		{"owned memory-mib", "nvidia.com/gpu.sliced.memory-mib", true},
-		// A foreign extended resource that merely contains the ".sliced.mig-" infix is NOT owned,
-		// so it is never nulled out when absent from desired (the reason to use SlicedMigProfileOf
-		// instead of a raw strings.Contains).
-		{"foreign mig-infix key not owned", "example.com/foo.sliced.mig-1g.10gb", false},
-		{"empty-profile mig key not owned", "nvidia.com/gpu.sliced.mig-", false},
+		{"owned partitioned units", "nvidia.com/gpu.partitioned.units", true},
+		{"owned partition profile", "nvidia.com/gpu.partitioned.mig-1g.10gb", true},
+		// A foreign extended resource that merely looks like a per-profile key is NOT owned, so
+		// it is never nulled out when absent from desired — the reason to parse the key rather
+		// than match a raw infix.
+		{"foreign profile-shaped key not owned", "example.com/foo.partitioned.mig-1g.10gb", false},
+		{"empty-profile key not owned", "nvidia.com/gpu.partitioned.mig-", false},
+		// A fixed suffix is only ours behind a known accelerator base; another plugin's
+		// same-shaped resource must never be claimed and then nulled out.
+		{"foreign partitioned units not owned", "example.com/foo.partitioned.units", false},
+		{"foreign sliced units not owned", "example.com/foo.sliced.units", false},
 		{"bare sliced pool not owned", "nvidia.com/gpu.sliced", false},
+		{"bare partitioned pool not owned", "nvidia.com/gpu.partitioned", false},
 		{"bare shared pool not owned", "nvidia.com/gpu.shared", false},
+		// The superseded MIG key is owned by nobody: nothing writes it and nothing strips it.
+		{"superseded mig key not owned", "nvidia.com/gpu.sliced.mig-1g.10gb", false},
 		{"unrelated resource", "cpu", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.Equal(t, c.want, isSlicedCapacityKey(c.in))
+			assert.Equal(t, c.want, isOwnedCapacityKey(c.in))
 		})
 	}
 }
 
-func TestBuildSlicedCapacityPatch(t *testing.T) {
+func TestBuildAcceleratorCapacityPatch(t *testing.T) {
 	const (
 		units = "nvidia.com/gpu.sliced.units"
 		mib   = "nvidia.com/gpu.sliced.memory-mib"
@@ -616,10 +733,18 @@ func TestBuildSlicedCapacityPatch(t *testing.T) {
 		{
 			// A per-profile ".sliced.mig-<profile>" key is owned too, so it is reverse-patched to
 			// null once the last card offering that profile leaves (MIG disabled).
-			name:    "remove stale mig key when the last mig card leaves",
+			name:    "remove a stale per-profile key when the last card offering it leaves",
+			desired: nil,
+			current: mkCap(map[string]string{"nvidia.com/gpu.partitioned.mig-1g.10gb": "7", "cpu": "8"}),
+			want:    map[string]any{"nvidia.com/gpu.partitioned.mig-1g.10gb": nil},
+		},
+		{
+			// Nothing owns the superseded key any more, so it is left exactly where it is on a
+			// node an earlier build wrote it onto.
+			name:    "a superseded mig key is left alone, not reverse-patched",
 			desired: nil,
 			current: mkCap(map[string]string{"nvidia.com/gpu.sliced.mig-1g.10gb": "7", "cpu": "8"}),
-			want:    map[string]any{"nvidia.com/gpu.sliced.mig-1g.10gb": nil},
+			want:    nil,
 		},
 		{
 			name:    "bare .sliced and .shared device-plugin keys are left untouched",
@@ -632,7 +757,7 @@ func TestBuildSlicedCapacityPatch(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			got := buildSlicedCapacityPatch(c.desired, c.current)
+			got := buildAcceleratorCapacityPatch(c.desired, c.current)
 			if c.want == nil {
 				assert.Nil(t, got)
 				return
@@ -642,7 +767,7 @@ func TestBuildSlicedCapacityPatch(t *testing.T) {
 	}
 }
 
-func TestSlicedFamilyCapacityChanged(t *testing.T) {
+func TestAcceleratorFamilyCapacityChanged(t *testing.T) {
 	nvidiaSliced := nodefeature.GetAcceleratableResourceName(
 		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
 	mk := func(entries map[core.ResourceName]string) core.ResourceList {
@@ -659,16 +784,16 @@ func TestSlicedFamilyCapacityChanged(t *testing.T) {
 	poolLess := mk(map[core.ResourceName]string{nvidiaSliced: "512"})
 
 	// Owned ".sliced.*" keys.
-	assert.False(t, slicedFamilyCapacityChanged(units, units), "owned key unchanged")
-	assert.True(t, slicedFamilyCapacityChanged(units, unitsLess), "owned key value changed")
-	assert.True(t, slicedFamilyCapacityChanged(units, none), "owned key removed")
-	assert.True(t, slicedFamilyCapacityChanged(none, units), "owned key added")
+	assert.False(t, acceleratorFamilyCapacityChanged(units, units), "owned key unchanged")
+	assert.True(t, acceleratorFamilyCapacityChanged(units, unitsLess), "owned key value changed")
+	assert.True(t, acceleratorFamilyCapacityChanged(units, none), "owned key removed")
+	assert.True(t, acceleratorFamilyCapacityChanged(none, units), "owned key added")
 	// Bare device-plugin ".sliced" token pool (the presence gate).
-	assert.True(t, slicedFamilyCapacityChanged(none, pool), "bare .sliced pool added")
-	assert.True(t, slicedFamilyCapacityChanged(pool, none), "bare .sliced pool removed")
-	assert.True(t, slicedFamilyCapacityChanged(pool, poolLess), "bare .sliced pool value changed")
+	assert.True(t, acceleratorFamilyCapacityChanged(none, pool), "bare .sliced pool added")
+	assert.True(t, acceleratorFamilyCapacityChanged(pool, none), "bare .sliced pool removed")
+	assert.True(t, acceleratorFamilyCapacityChanged(pool, poolLess), "bare .sliced pool value changed")
 	// Only CPU changes are ignored.
-	assert.False(t, slicedFamilyCapacityChanged(none, none), "only cpu, no change")
+	assert.False(t, acceleratorFamilyCapacityChanged(none, none), "only cpu, no change")
 }
 
 // TestNodeCapacityReconciler_Reconcile verifies the end-to-end node status patch:
@@ -729,21 +854,28 @@ func TestNodeCapacityReconciler_Reconcile(t *testing.T) {
 		assert.Equal(t, wantUnits, val(get(cli).Status.Capacity, nvidiaSlicedUnits), "still present after no-op reconcile")
 	})
 
-	t.Run("mixed logical+mig group converges units for all cards, logical keys for soft only", func(t *testing.T) {
-		// End-to-end via new-format Devices (the Devices-watch data source): 2 soft + 1 MIG
-		// card. ".sliced.units" counts all 3; the three logical keys count only the 2 soft.
-		nd := withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
-			nodefeature.ManufacturerNVIDIA, 3*128)
+	t.Run("mixed group converges each family onto its own cards", func(t *testing.T) {
+		// End-to-end via the Devices watch's data source: 2 unpartitioned + 1 partitioned card.
+		// Each family's units count only its own population, so the two never sum to more than
+		// the node's cards.
+		nd := withPartitionedPool(withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
+			nodefeature.ManufacturerNVIDIA, 2*128), nodefeature.ManufacturerNVIDIA, 7)
 		devs := devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
 			softCard("0", 128, true), softCard("1", 128, true), migCard("2", 7)))
 		cli := build(nd, devs)
 
 		require.NoError(t, reconcile(cli))
 		capn := get(cli).Status.Capacity
-		assert.Equal(t, int64(3)*nodefeature.ResourceMaxUnits, val(capn, nvidiaSlicedUnits), "units count all sliceable cards")
-		assert.Equal(t, int64(2)*128*100, val(capn, nvidiaSlicedCores), "cores from the 2 soft cards")
-		assert.Equal(t, int64(2)*100, val(capn, nvidiaSlicedMemPct), "memory-percentage from soft cards")
-		assert.Equal(t, int64(2)*a10gMib, val(capn, nvidiaSlicedMemMib), "memory-mib from soft cards")
+		assert.Equal(t, int64(2)*nodefeature.ResourceMaxUnits, val(capn, nvidiaSlicedUnits), "sliced units count the unpartitioned cards")
+		assert.Equal(t, int64(1)*nodefeature.ResourceMaxUnits, val(capn, nvidiaPartitionedUnits), "partition units count the partitioned card")
+		assert.Equal(t, int64(2)*128*100, val(capn, nvidiaSlicedCores), "cores from the 2 unpartitioned cards")
+		assert.Equal(t, int64(2)*100, val(capn, nvidiaSlicedMemPct), "memory-percentage from the unpartitioned cards")
+		assert.Equal(t, int64(2)*a10gMib, val(capn, nvidiaSlicedMemMib), "memory-mib from the unpartitioned cards")
+
+		// A second pass with an unchanged ledger emits no patch at all.
+		before := get(cli).ResourceVersion
+		require.NoError(t, reconcile(cli))
+		assert.Equal(t, before, get(cli).ResourceVersion, "an unchanged ledger must not re-patch the node")
 	})
 
 	t.Run("removing the sliced token pool reverse-patches all four keys", func(t *testing.T) {

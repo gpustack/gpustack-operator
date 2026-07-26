@@ -1041,7 +1041,7 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       ledger-cost fixture distinct from the token-set fixture.
       Verify: `go test ./pkg/deviceplugin/... ./pkg/device/... ./pkg/devicemanager/...`
 
-- [ ] **T7 · Node capacity: the partition keys and their ledger-derived per-profile value** (F3, F10)
+- [x] **T7 · Node capacity: the partition keys and their ledger-derived per-profile value** (F3, F10)
       Blocked by: T3, T4
       Owns: `pkg/worker/controllers/worker/node_capacity.go`, `node_capacity_test.go`
       Gate: review
