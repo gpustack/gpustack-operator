@@ -300,6 +300,70 @@ func TestInstanceWebhook_ValidateCreate_AcceleratedCPU(t *testing.T) {
 	}
 }
 
+// TestInstanceWebhook_ValidateCreate_CPURejectionMessage pins what a rejected CPU request tells the
+// administrator. A zero maximum is not a small limit: a drained pool keeps its ClusterQueue
+// admitting, so it reports a healthy phase with a capacity of zero, and "exceeds the maximum" then
+// describes a limit that was never the problem. Each state names itself instead.
+func TestInstanceWebhook_ValidateCreate_CPURejectionMessage(t *testing.T) {
+	const typeName = "gpustack-generic-linux-amd64"
+
+	cases := []struct {
+		name     string
+		capacity string // Status.CPU.Capacity
+		onceMax  string // Status.CPU.OnceMaxRequest
+		cpu      string // the Instance's CPU request
+		wantMsg  string // "" means the request must be accepted
+	}{
+		{
+			name: "drained pool names the absent capacity", capacity: "0", onceMax: "0", cpu: "1",
+			wantMsg: "has no CPU capacity: no managed node currently backs it",
+		},
+		{
+			name: "saturated pool names the exhausted capacity", capacity: "48", onceMax: "0", cpu: "1",
+			wantMsg: "has no CPU available: its capacity 48 is fully requested",
+		},
+		{
+			name: "over the maximum carries the maximum", capacity: "48", onceMax: "16", cpu: "32",
+			wantMsg: "exceeds the maximum CPU request 16 of instance type " + typeName,
+		},
+		{
+			name: "within the maximum accepted", capacity: "48", onceMax: "16", cpu: "16",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := &worker.InstanceType{
+				ObjectMeta: meta.ObjectMeta{Name: typeName},
+				Spec: workercore.InstanceTypeSpec{
+					UnitResources: workercore.InstanceTypeUnitResources{CPU: "1", RAM: "2Gi"},
+					LocalStorage:  "64Gi",
+				},
+				Status: workercore.InstanceTypeStatus{
+					CPU: workercore.InstanceTypeResource{
+						Capacity:       resource.MustParse(c.capacity),
+						OnceMaxRequest: resource.MustParse(c.onceMax),
+					},
+				},
+			}
+			inst := webhookInstance("a", typeName)
+			inst.Spec.Resources = &workercore.InstanceResources{
+				CPU:          resource.MustParse(c.cpu),
+				RAM:          resource.MustParse("2Gi"),
+				LocalStorage: resource.MustParse("10Gi"),
+			}
+
+			_, err := newInstanceWebhook(instType).ValidateCreate(context.Background(), inst)
+			if c.wantMsg == "" {
+				assert.NoError(t, err)
+				return
+			}
+			assert.ErrorContains(t, err, c.wantMsg)
+		})
+	}
+}
+
 func TestInstanceWebhook_ValidateUpdate(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1091,4 +1155,98 @@ func TestInstanceWebhook_PartitionRequestNotReadyRejected(t *testing.T) {
 	require.Error(t, cerr, "ValidateCreate must reject a partition request while Detail is not ready")
 	assert.True(t, kerrors.IsInternalError(cerr),
 		"ValidateCreate rejection is a transient (retryable) error, not a permanent Invalid")
+}
+
+// TestInstanceWebhook_Default_PartitionProfileNotSizeable pins the gap between "the Detail is not
+// computed" and "the Detail is computed but cannot size THIS profile". A profile can appear in the
+// inventory before its per-instance memory is populated (partial detail during detection, or a
+// device-manager rollout skew) — the Pod webhook already treats that as retryable. Default must do
+// the same rather than fall back to whole-card sizing: the resources it writes stick, because
+// Default does not run again once they are set, so the Instance would be permanently sized for a
+// whole card while its Pod is rejected forever.
+//
+// The last case is the guard on the other side: a profile the pool genuinely does not offer stays a
+// PERMANENT rejection from validation, and must not be turned into a retry loop.
+func TestInstanceWebhook_Default_PartitionProfileNotSizeable(t *testing.T) {
+	system.LoopbackCtrlClient.Configure(ctrlfake.NewClientBuilder().WithScheme(scheme.Scheme).Build())
+
+	const typeName = "partitioned-partial-detail"
+
+	cases := []struct {
+		name string
+		// mutate makes the pool's observed Detail partial in one specific way.
+		mutate  func(*worker.InstanceType)
+		profile string
+
+		wantDefaultRetryable bool // Default rejects as transient
+		wantCreateInvalid    bool // Default passes, ValidateCreate rejects as permanent
+	}{
+		{
+			name:    "offered profile with no memory detail is retryable",
+			profile: "3g.40gb",
+			mutate: func(it *worker.InstanceType) {
+				profs := it.Status.Detail.SlicedDetail.Physical.Profiles
+				for i := range profs {
+					if profs[i].Name == "3g.40gb" {
+						profs[i].MemoryMib = 0
+					}
+				}
+			},
+			wantDefaultRetryable: true,
+		},
+		{
+			name:    "offered profile with no per-card VRAM is retryable",
+			profile: "3g.40gb",
+			mutate: func(it *worker.InstanceType) {
+				it.Status.Detail.Memory = ""
+			},
+			wantDefaultRetryable: true,
+		},
+		{
+			name:              "unoffered profile stays a permanent rejection",
+			profile:           "9g.90gb",
+			mutate:            func(*worker.InstanceType) {},
+			wantCreateInvalid: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			instType := partitionedInstanceType(typeName)
+			c.mutate(instType)
+			w := newInstanceWebhook(instType)
+
+			newInst := func() *workercore.Instance {
+				inst := webhookInstance("a", typeName)
+				acc := resource.MustParse("1")
+				inst.Spec.Resources = &workercore.InstanceResources{
+					Accelerator:                   &acc,
+					AcceleratorPartitionedProfile: c.profile,
+				}
+				return inst
+			}
+
+			inst := newInst()
+			derr := w.Default(context.Background(), inst)
+			if c.wantDefaultRetryable {
+				require.Error(t, derr, "Default must reject a profile it cannot size")
+				assert.True(t, kerrors.IsInternalError(derr),
+					"the rejection is transient (retryable), not a permanent Invalid")
+				assert.True(t, inst.Spec.Resources.CPU.IsZero(),
+					"no whole-card sizing may be written when the profile cannot be sized")
+				assert.True(t, inst.Spec.Resources.RAM.IsZero(),
+					"no whole-card sizing may be written when the profile cannot be sized")
+				return
+			}
+
+			require.NoError(t, derr, "Default must not turn a permanent condition into a retry")
+			_, cerr := w.ValidateCreate(context.Background(), newInst())
+			if c.wantCreateInvalid {
+				require.Error(t, cerr, "an unoffered profile must be rejected")
+				assert.False(t, kerrors.IsInternalError(cerr),
+					"an unoffered profile is a permanent rejection naming the offered set")
+			}
+		})
+	}
 }

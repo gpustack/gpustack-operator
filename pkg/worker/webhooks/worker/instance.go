@@ -321,7 +321,16 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 		}
 		memPct := instRess.AcceleratorSlicedMemoryPercentage
 		coresPct := instRess.AcceleratorSlicedCoresPercentage
-		partitionPct := partitionProfileMemoryPercent(instType, instRess.AcceleratorPartitionedProfile)
+		partitionPct, sizeable := partitionProfileMemoryPercent(instType, instRess.AcceleratorPartitionedProfile)
+		if !sizeable {
+			// The pool offers the profile but cannot size it yet. Reject as retryable, the same
+			// way slicingRequestNotReady does for an uncomputed Detail — whole-card sizing here
+			// would stick, because Default does not run again once the resources are set.
+			return kerrors.NewInternalError(fmt.Errorf(
+				"instance type %s is not ready yet (partition profile %q cannot be sized from the "+
+					"observed accelerator detail); retry",
+				instType.Name, instRess.AcceleratorPartitionedProfile))
+		}
 		switch {
 		case partitionPct > 0:
 			// A hardware partition is one instance on ONE card, so default an absent or
@@ -450,23 +459,34 @@ func sizeAcceleratorUnitByPercent(
 }
 
 // partitionProfileMemoryPercent reports the share of one card's VRAM the requested hardware
-// partition profile occupies, as a percentage in [1,100]. It returns 0 when the request is not a
-// partition request, or when the pool's observed Detail cannot answer — an unknown profile, or a
-// missing/unparseable memory — in which case the caller falls back to whole-card sizing and
-// validation rejects the request on its own terms, with a message naming the offered profiles.
-func partitionProfileMemoryPercent(instType *worker.InstanceType, profile string) int64 {
+// partition profile occupies, as a percentage in [1,100].
+//
+// It reports sizeable=false when the pool offers the profile but its observed Detail cannot size
+// it yet — the profile's per-instance memory has not been populated, or the per-card VRAM has not
+// — which is a transient state during detection or a device-manager rollout skew. The caller must
+// reject such a request as retryable, exactly as the Pod webhook does for the same state: falling
+// back to whole-card sizing would persist an Instance sized for a whole card, and Default does not
+// run again to correct it.
+//
+// It reports (0, true) when the request is not a partition request at all, or when the named
+// profile is not offered. That second case is permanent, not transient, and validation rejects it
+// on its own terms with a message naming the offered profiles.
+func partitionProfileMemoryPercent(instType *worker.InstanceType, profile string) (pct int64, sizeable bool) {
 	if profile == "" {
-		return 0
+		return 0, true
 	}
 	prof, _, found := partitionProfile((*workercore.InstanceType)(instType), profile)
-	if !found || prof.MemoryMib <= 0 {
-		return 0
+	if !found {
+		return 0, true
+	}
+	if prof.MemoryMib <= 0 {
+		return 0, false
 	}
 	cardVRAMMib, err := instanceTypeCardVRAMMib((*workercore.InstanceType)(instType))
 	if err != nil || cardVRAMMib <= 0 {
-		return 0
+		return 0, false
 	}
-	return min(max(prof.MemoryMib*100/cardVRAMMib, 1), 100)
+	return min(max(prof.MemoryMib*100/cardVRAMMib, 1), 100), true
 }
 
 // slicingRequestNotReady reports whether the request asks for a share of a card — a logical slice
@@ -551,7 +571,7 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 		// Status.CPU is zero (its CPU derives from unitCPU × count, bounded elsewhere).
 		errs = append(errs, field.Invalid(
 			field.NewPath("spec.resources.cpu"), instRess.CPU.String(),
-			fmt.Sprintf("exceeds the maximum CPU request of instance type %s", instType.Name)))
+			cpuRequestRejection(instType)))
 	}
 	// A negative RAM or local-storage request is rejected outright; a positive one
 	// must stay within the InstanceType's per-unit RAM entitlement and its local
@@ -568,6 +588,28 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 	}
 	errs = append(errs, capResourcesToInstanceType(instType, instRess)...)
 	return errs
+}
+
+// cpuRequestRejection explains why a CPU request does not fit a non-accelerated InstanceType. A
+// zero maximum does not mean "the limit is small", and the two ways to reach it read very
+// differently to an administrator: a pool whose nodes are all drained or unmanaged keeps its
+// ClusterQueue admitting — so it reports phase Active with a capacity of zero — and a bare
+// "exceeds the maximum" then sends the reader looking for a limit that was never the problem.
+// Name the actual state instead, and carry the maximum in the ordinary case as the RAM and local
+// storage messages already do.
+func cpuRequestRejection(instType *worker.InstanceType) string {
+	cpu := instType.Status.CPU
+	switch {
+	case cpu.Capacity.IsZero():
+		return fmt.Sprintf("instance type %s has no CPU capacity: no managed node currently backs it",
+			instType.Name)
+	case cpu.OnceMaxRequest.IsZero():
+		return fmt.Sprintf("instance type %s has no CPU available: its capacity %s is fully requested",
+			instType.Name, cpu.Capacity.String())
+	default:
+		return fmt.Sprintf("exceeds the maximum CPU request %s of instance type %s",
+			cpu.OnceMaxRequest.String(), instType.Name)
+	}
 }
 
 // validateSingleCardRequest checks that a request holding a fraction of ONE card — a logical

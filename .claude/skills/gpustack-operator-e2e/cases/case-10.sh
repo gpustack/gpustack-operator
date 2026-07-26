@@ -17,8 +17,8 @@
 #              patched over-cap while stopped, then started.
 # Expected:    - create rejects an over-cap CPU request;
 #              - resources are mutable while stopped (the over-cap edit sticks);
-#              - starting the over-cap Instance is REJECTED with the same "exceeds the maximum CPU"
-#                error as create;
+#              - starting the over-cap Instance is REJECTED on the same spec.resources.cpu field as
+#                create;
 #              - a valid in-cap resize (cpu=1) still starts (the guard does not over-reject).
 # Cleanup:     Trap deletes the test Instance.
 set -uo pipefail
@@ -111,7 +111,10 @@ got=$(kubectl -n default get instance "$INST" -o jsonpath='{.spec.resources.cpu}
 # 3. THE assertion: starting the instance re-validates and rejects the over-cap request.
 err=$(kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"stop":false}}' 2>&1 >/dev/null)
 rc=$?
-if [ "$rc" -ne 0 ] && echo "$err" | grep -qiE 'exceeds the maximum CPU'; then
+# Match the rejected FIELD, not one wording of it: the CPU rejection names the pool's actual state
+# (over the maximum / no capacity / fully requested), so pinning one phrase would fail on a pool that
+# is degraded rather than merely full — which is not what this case is asserting.
+if [ "$rc" -ne 0 ] && echo "$err" | grep -qiE 'spec\.resources\.cpu|maximum CPU'; then
   record PASS "start re-validates resized resources" "start rejected cpu=${OVER} (same as create)"
 else
   # Leave it stopped again for a clean teardown if it slipped through.
