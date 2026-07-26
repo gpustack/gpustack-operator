@@ -413,13 +413,15 @@ managerConfig:
 {{- if $.Manufacturers }}
       # Credits are scored on the integer base B = D = 1600000 (one whole card = B
       # credits): exclusive→B, shared→B/10, sliced.units→B/D=1 (× multiplyBy
-      # .sliced). Every per-mode value stays an integer, so Kueue's ResourceValue
-      # int64 quantization (q.Value(), which ceils non-CPU resources) never rounds
-      # a fractional credit up to 1.
+      # .sliced), partitioned.units→B/D=1 (no multiplyBy: a partition request is
+      # confined to one card, so its units already carry the whole charge). Every
+      # per-mode value stays an integer, so Kueue's ResourceValue int64 quantization
+      # (q.Value(), which ceils non-CPU resources) never rounds a fractional credit
+      # up to 1.
       transformations:
 {{- $exclusiveCreditsFactor := getExclusiveCreditsFactor }}
 {{- $sharedCreditsFactor := getSharedCreditsFactor }}
-{{- $slicedCreditsFactor := getSlicedCreditsFactor }}
+{{- $unitsCreditsFactor := getUnitsCreditsFactor }}
 {{- range $.Manufacturers }}
 {{- $manu := . }}
 {{- $manuCreditsResName := getCreditsResourceName $manu }}
@@ -427,6 +429,7 @@ managerConfig:
 {{- $manuSharedResName := getSharedResourceName $manu }}
 {{- $manuSlicedResName := getSlicedResourceName $manu }}
 {{- $manuSlicedUnitsResName := getSlicedUnitsResourceName $manu }}
+{{- $manuPartitionedUnitsResName := getPartitionedUnitsResourceName $manu }}
       # Multiply each manufacturer resource into a single credits resource, so that
       # the queue can be configured with a single credit budget. The multiplyBy
       # factor is the number of credits per unit of the input resource, so that
@@ -445,7 +448,16 @@ managerConfig:
         strategy: Replace
         multiplyBy: {{ $manuSlicedResName }}
         outputs:
-          {{ $manuCreditsResName }}: "{{ $slicedCreditsFactor }}"
+          {{ $manuCreditsResName }}: "{{ $unitsCreditsFactor }}"
+{{- if $manuPartitionedUnitsResName }}
+      # Physical partitions (MIG) count disjoint cards from the logical/sliced
+      # family, so this key is not multiplied by any counting resource: each unit
+      # already denotes a fraction of exactly one card.
+      - input: {{ $manuPartitionedUnitsResName }}
+        strategy: Replace
+        outputs:
+          {{ $manuCreditsResName }}: "{{ $unitsCreditsFactor }}"
+{{- end }}
 {{- end }}
 {{- end }}
     #objectRetentionPolicies:
@@ -494,6 +506,13 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 			}
 			return string(nodefeature.GetAcceleratableSlicedUnitsResourceName(s))
 		},
+		"getPartitionedUnitsResourceName": func(v any) string {
+			s, ok := v.(string)
+			if !ok {
+				panic(fmt.Sprintf("manufacturer should be string, but got %T", v))
+			}
+			return string(nodefeature.GetAcceleratablePartitionedUnitsResourceName(s))
+		},
 		"getCreditsResourceName": func(v any) string {
 			s, ok := v.(string)
 			if !ok {
@@ -508,7 +527,10 @@ func extendKueueChartValuesTemplateFuncMap() template.FuncMap {
 		"getSharedCreditsFactor": func() string {
 			return strconv.Itoa(nodefeature.CreditsPerCard / nodefeature.SharedResourceMaxSize)
 		},
-		"getSlicedCreditsFactor": func() string {
+		// getUnitsCreditsFactor is shared by both fine-grained counting keys
+		// (.sliced.units and .partitioned.units): each unit is B/D credits before
+		// any family-specific multiplyBy is applied.
+		"getUnitsCreditsFactor": func() string {
 			return strconv.Itoa(nodefeature.CreditsPerCard / nodefeature.ResourceMaxUnits)
 		},
 		// hasAPIResource is a placeholder function for Kueue chart values template.
