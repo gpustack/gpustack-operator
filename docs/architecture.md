@@ -22,6 +22,21 @@ webhook configs → settings → NFD/Kueue/DM/CSI apps) then `Start`. In `Start`
 manager is deliberately started **only after** the extension API services report ready, so
 controllers can index extension-API resources. Preserve this ordering when adding startup steps.
 
+### The worker gateway mirrors the cluster API, it does not embed it
+
+`pkg/workergateway/service` folds the `InstanceType`s of many clusters into one fleet-wide
+`AggregatedInstanceType`: candidates (one per cluster) group into tiers by accelerator
+`OnceMaxRequest`, and each level carries an overview bundle — a single achievable allocation copied
+from the winning member — plus a `Remaining` that is the per-dimension sum.
+
+Those overview types **re-declare** the cluster `InstanceTypeStatus`'s resource views field by field
+rather than embedding them, and no generator maintains them. A view added to the CRD therefore still
+compiles while the gateway never ingests, sums or serves it, and the fleet reads as having no
+capacity on that dimension. Adding one means touching `types.go` plus every aggregation site in
+`helper.go` (`newAggregatedTier`, `newAggregatedCandidate`, both `Recompute` methods,
+`overviewResourceIsZero`). `TestAggregatedInstanceTypeMirrorsEveryStatusView` fails while the field
+sets differ, but it cannot see a missed aggregation site — walk them.
+
 ### Per-manufacturer device support
 
 Detection (`pkg/devicemanager/detector/<mfr>`) and allocation (`pkg/devicemanager/allocator/<mfr>`)

@@ -61,7 +61,7 @@ type (
 		//
 		// It is the resource bundle of the tier that wins on the primary dimension:
 		// Accelerator when Spec.Acceleratable is true, otherwise CPU.
-		// All four fields (Accelerator/AcceleratorShared/AcceleratorSliced/CPU) are taken from the same winning tier,
+		// Every dimension is taken from the same winning tier,
 		// so the overview always represents a bundle achievable by some real candidate,
 		// not a per-dimension maximum across tiers.
 		OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
@@ -85,7 +85,8 @@ type (
 	}
 
 	// AggregatedInstanceTypeOverviewResource represents the overview resource of an AggregatedInstanceType,
-	// including allocatable-as-exclusive, shareable, sliceable accelerator resources and CPU resources.
+	// including allocatable-as-exclusive, shareable, sliceable and hardware-partitionable accelerator
+	// resources, and CPU resources.
 	AggregatedInstanceTypeOverviewResource struct {
 		// Accelerator is the allocatable-as-exclusive accelerator resource of the AggregatedInstanceType, e.g. "1", "4".
 		Accelerator resource.Quantity `json:"accelerator"`
@@ -96,6 +97,14 @@ type (
 		// AcceleratorSliced is the sliceable accelerator resource of the AggregatedInstanceType, e.g. "100", "400".
 		AcceleratorSliced resource.Quantity `json:"acceleratorSliced"`
 
+		// AcceleratorPartitioned is the hardware-partitionable accelerator resource of the
+		// AggregatedInstanceType — the partition instances its partitioned cards can still host, e.g. "7", "14".
+		//
+		// It is disjoint from the three dimensions above: a card in a partitioning mode serves no other
+		// kind of claim, so a fleet with no partitioned card reports zero here while a fully partitioned
+		// one reports zero on the others.
+		AcceleratorPartitioned resource.Quantity `json:"acceleratorPartitioned"`
+
 		// CPU is the CPU remaining resource of the AggregatedInstanceType, e.g. "4", "8".
 		CPU resource.Quantity `json:"cpu"`
 	}
@@ -105,7 +114,7 @@ type (
 		// OnceMaxRequest is the resource bundle of the candidate that wins on the primary dimension within this tier.
 		//
 		// The primary dimension is Accelerator when the owning AggregatedInstanceType is acceleratable, otherwise CPU.
-		// All four fields are taken from the same winning candidate so the bundle is achievable, not synthesized
+		// Every dimension is taken from the same winning candidate so the bundle is achievable, not synthesized
 		// from per-dimension maxes across candidates.
 		OnceMaxRequest AggregatedInstanceTypeOverviewResource `json:"onceMaxRequest"`
 
@@ -119,7 +128,7 @@ type (
 		// Candidates is the list of candidates of the tier.
 		//
 		// All candidates in the same tier share the same accelerator OnceMaxRequest,
-		// but may differ on AcceleratorShared/AcceleratorSliced/CPU.
+		// but may differ on every other dimension.
 		Candidates []AggregatedInstanceTypeOnceMaxRequestCandidate `json:"candidates"`
 
 		// AcceleratorSlicedDetail is the direct Σ of the candidates' slicing capability (identical to
@@ -149,6 +158,9 @@ type (
 
 		// AcceleratorSliced is the sliceable accelerator resource of the candidate, e.g. "100", "400".
 		AcceleratorSliced AggregatedInstanceTypeResource `json:"acceleratorSliced"`
+
+		// AcceleratorPartitioned is the hardware-partitionable accelerator resource of the candidate, e.g. "7", "14".
+		AcceleratorPartitioned AggregatedInstanceTypeResource `json:"acceleratorPartitioned"`
 
 		// CPU is the CPU once max request resource of the candidate, e.g. "4", "8".
 		CPU AggregatedInstanceTypeResource `json:"cpu"`

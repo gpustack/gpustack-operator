@@ -223,6 +223,12 @@ type InstanceTypeStatus struct {
 	// PhaseMessage is the message of the phase.
 	PhaseMessage string `json:"phaseMessage,omitempty" protobuf:"bytes,4,opt,name=phaseMessage"`
 
+	// The resource views below are mirrored field by field — not embedded — by the worker gateway's
+	// AggregatedInstanceType in pkg/workergateway/service, and no generator maintains that mirror.
+	// A view added here still compiles while the gateway drops it from every fleet-wide aggregate,
+	// so the fleet reads as having no capacity on the new dimension. Wire it there in the same
+	// change; a reflection test in that package fails while the two are out of step.
+
 	// Accelerator is the allocatable-as-exclusive view: whole cards that are
 	// entirely free, e.g. "1", "4".
 	Accelerator InstanceTypeResource `json:"accelerator" protobuf:"bytes,5,name=accelerator"`

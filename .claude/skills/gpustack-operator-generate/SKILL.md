@@ -55,5 +55,23 @@ the source types above and regenerate.
 3. If generation fails, the error usually points at a malformed type marker or a missing
    `+kubebuilder`/`+k8s` comment in the edited source — fix the source `*.go` and rerun.
 
+## Hand-written mirrors the generator does NOT update
+
+Some packages re-declare an API type's fields instead of embedding it. The generator does not touch
+them, and a newly added field is not a compile error there — it is simply never carried, so the
+feature silently does nothing in that layer. After adding a field, check each mirror below and wire
+it in the same change:
+
+| Mirror | Mirrors | Wire up |
+| --- | --- | --- |
+| `pkg/workergateway/service` — `AggregatedInstanceTypeOverviewResource`, `AggregatedInstanceTypeOnceMaxRequestCandidate` | `InstanceTypeStatus`'s resource views (`Accelerator*`, `CPU`) | the field on both types, plus `newAggregatedTier`, `newAggregatedCandidate`, both `Recompute` methods and `overviewResourceIsZero` in `helper.go` |
+
+`TestAggregatedInstanceTypeMirrorsEveryStatusView` (in `pkg/workergateway/service`) fails while that
+mirror is out of step, so `make test` catches the omission — but only the missing *field*, not a
+missed aggregation site. Walk the "Wire up" column too.
+
+Found another mirror of this shape? Add a row — the table is the reminder, and it is only as good as
+its coverage.
+
 See [development.md](../../../docs/development.md) for the full code-generation pipeline and the
 API group/version/kind table.
