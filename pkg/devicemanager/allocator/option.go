@@ -15,8 +15,9 @@ type Options struct {
 	KubeSocket string
 
 	// Control.
-	NoShared bool
-	NoSliced bool
+	NoShared      bool
+	NoSliced      bool
+	NoPartitioned bool
 }
 
 func NewOptions() *Options {
@@ -25,8 +26,9 @@ func NewOptions() *Options {
 		KubeSocket: deviceplugin.KubeletSocket,
 
 		// Control.
-		NoShared: false,
-		NoSliced: false,
+		NoShared:      false,
+		NoSliced:      false,
+		NoPartitioned: false,
 	}
 }
 
@@ -40,6 +42,8 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"whether to disable creating shared devices.")
 	fs.BoolVar(&o.NoSliced, "no-sliced", o.NoSliced,
 		"whether to disable creating sliced devices.")
+	fs.BoolVar(&o.NoPartitioned, "no-partitioned", o.NoPartitioned,
+		"whether to disable creating hardware-partitioned devices.")
 }
 
 func (o *Options) Validate(_ context.Context) error {
@@ -56,8 +60,9 @@ func (o *Options) Validate(_ context.Context) error {
 
 func (o *Options) Complete(_ context.Context) (*Config, error) {
 	return &Config{
-		KubeSocket: o.KubeSocket,
-		NoShared:   o.NoShared,
-		NoSliced:   o.NoSliced,
+		KubeSocket:    o.KubeSocket,
+		NoShared:      o.NoShared,
+		NoSliced:      o.NoSliced,
+		NoPartitioned: o.NoPartitioned,
 	}, nil
 }

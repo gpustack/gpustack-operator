@@ -36,11 +36,6 @@ func TestAcceleratableResourceNames(t *testing.T) {
 	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.memory-mib"),
 		GetAcceleratableSlicedMemoryMibResourceName(ManufacturerNVIDIA))
 
-	// The physical-slice (MIG) request key layers the card's own profile name under
-	// ".sliced.mig-"; the profile name is variable (and may itself contain a dot).
-	assert.Equal(t, core.ResourceName("nvidia.com/gpu.sliced.mig-1g.10gb"),
-		GetAcceleratableSlicedMigResourceName(ManufacturerNVIDIA, "1g.10gb"))
-
 	// The SSH sidecar's device-only visibility resource lives under a distinct domain,
 	// outside the accelerator families, so admission does not read it as a mode.
 	assert.Equal(t, core.ResourceName("device.gpustack.ai/nvidia.visibility"),
@@ -109,7 +104,6 @@ func TestPartitionedProfileOf(t *testing.T) {
 		{"empty profile", "nvidia.com/gpu.partitioned.mig-", "", false},
 		{"unknown base", "example.com/foo.partitioned.mig-3g.40gb", "", false},
 		{"manufacturer without a kind", "amd.com/gpu.partitioned.mig-3g.40gb", "", false},
-		{"legacy sliced mig key", "nvidia.com/gpu.sliced.mig-1g.10gb", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -134,7 +128,6 @@ func TestResourceFamilyOf(t *testing.T) {
 		{"sliced cores percentage", "nvidia.com/gpu.sliced.cores-percentage", ResourceFamilySliced},
 		{"sliced memory percentage", "nvidia.com/gpu.sliced.memory-percentage", ResourceFamilySliced},
 		{"sliced memory mib", "nvidia.com/gpu.sliced.memory-mib", ResourceFamilySliced},
-		{"legacy sliced mig profile", "nvidia.com/gpu.sliced.mig-1g.10gb", ResourceFamilySliced},
 		{"partitioned token", "nvidia.com/gpu.partitioned", ResourceFamilyPartitioned},
 		{"partitioned units", "nvidia.com/gpu.partitioned.units", ResourceFamilyPartitioned},
 		{"partitioned profile", "nvidia.com/gpu.partitioned.mig-3g.40gb", ResourceFamilyPartitioned},
@@ -167,10 +160,6 @@ func TestIsKnownAcceleratableResourceName(t *testing.T) {
 		{"shared", "nvidia.com/gpu.shared", true},
 		{"sliced units", "nvidia.com/gpu.sliced.units", true},
 		{"sliced card", "nvidia.com/gpu.sliced", true},
-		{"mig profile (dotted name)", "nvidia.com/gpu.sliced.mig-1g.10gb", true},
-		{"mig profile amd", "amd.com/gpu.sliced.mig-1g.10gb", true},
-		{"mig profile unknown base", "example.com/foo.sliced.mig-1g.10gb", false},
-		{"mig profile empty suffix", "nvidia.com/gpu.sliced.mig-", false},
 		// The predicate answers "is this one of ours" through the same classifier that answers
 		// "which one", so a family cannot be known to one caller and unknown to the other.
 		{"partitioned card", "nvidia.com/gpu.partitioned", true},

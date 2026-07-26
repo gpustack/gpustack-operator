@@ -79,7 +79,8 @@ func (in aggregated) Start(ctx context.Context) error {
 		gp.Go(func(ctx context.Context) error {
 			reconciler := controllers.Get[*deviceplugin.DevicesReconciler]()
 			r := newReclaimer(newSMLUDriver(), deviceplugin.OperatorPodsDir, in.logger.WithName("reclaim"))
-			deviceplugin.RunSlicedReclaimLoop(ctx, reconciler, Manufacturer, r.reconcile)
+			deviceplugin.RunReclaimLoop(ctx, reconciler, Manufacturer,
+				workercore.DeviceAllocationModeSliced, r.reconcile)
 			return nil
 		})
 	}

@@ -165,10 +165,10 @@ func migCard(id string, physicalCount int32) workercore.Accelerator {
 	}
 }
 
-// migCardWithProfiles builds one MIG-enabled accelerator carrying per-card physical profiles
+// migCardWithProfiles builds one partitioned accelerator carrying per-card physical profiles
 // (name→count), so the group aggregate produces Detail.Physical.Profiles that NodeCapacity
-// advertises as ".sliced.mig-<profile>" keys. PhysicalSliced.Count is the largest profile count
-// (the pool ceiling), keeping the card sliceable.
+// advertises as ".partitioned.<kind>-<profile>" keys. PhysicalSliced.Count is the largest
+// profile count (the pool ceiling), keeping the card partitioned.
 func migCardWithProfiles(id string, profiles map[string]int32) workercore.Accelerator {
 	ps := make([]workercore.AcceleratorPhysicalSlicedProfile, 0, len(profiles))
 	var ceiling int32
@@ -674,8 +674,6 @@ func TestIsOwnedCapacityKey(t *testing.T) {
 		{"bare sliced pool not owned", "nvidia.com/gpu.sliced", false},
 		{"bare partitioned pool not owned", "nvidia.com/gpu.partitioned", false},
 		{"bare shared pool not owned", "nvidia.com/gpu.shared", false},
-		// The superseded MIG key is owned by nobody: nothing writes it and nothing strips it.
-		{"superseded mig key not owned", "nvidia.com/gpu.sliced.mig-1g.10gb", false},
 		{"unrelated resource", "cpu", false},
 	}
 	for _, c := range cases {
@@ -731,20 +729,12 @@ func TestBuildAcceleratorCapacityPatch(t *testing.T) {
 			want:    map[string]any{units: nil, mib: nil},
 		},
 		{
-			// A per-profile ".sliced.mig-<profile>" key is owned too, so it is reverse-patched to
-			// null once the last card offering that profile leaves (MIG disabled).
+			// A per-profile ".partitioned.<kind>-<profile>" key is owned too, so it is
+			// reverse-patched to null once the last card offering that profile leaves.
 			name:    "remove a stale per-profile key when the last card offering it leaves",
 			desired: nil,
 			current: mkCap(map[string]string{"nvidia.com/gpu.partitioned.mig-1g.10gb": "7", "cpu": "8"}),
 			want:    map[string]any{"nvidia.com/gpu.partitioned.mig-1g.10gb": nil},
-		},
-		{
-			// Nothing owns the superseded key any more, so it is left exactly where it is on a
-			// node an earlier build wrote it onto.
-			name:    "a superseded mig key is left alone, not reverse-patched",
-			desired: nil,
-			current: mkCap(map[string]string{"nvidia.com/gpu.sliced.mig-1g.10gb": "7", "cpu": "8"}),
-			want:    nil,
 		},
 		{
 			name:    "bare .sliced and .shared device-plugin keys are left untouched",

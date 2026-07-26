@@ -262,6 +262,33 @@ reservation — card, profile and the memory-slice intervals it intends to occup
 released**, so the next caller selects against post-decision state rather than against a card that merely
 has not been carved yet.
 
+Placement authority carries two obligations the card-bound families get for free, because they simply
+follow the tokens kubelet checkpointed.
+
+- **A retried `Allocate` must land back on the card it already used.** The kubelet re-runs `Allocate` for a
+  container whose checkpoint it lost — a restart while the container was stopped, the same path F5's
+  healthy-set rule is written for — and by then that container's own placement is part of the node's
+  occupancy. Deciding afresh would read it as somebody else's: a whole-card profile would report the node
+  exhausted, and a node with a free sibling would place on *that* card, bypassing the vendor's
+  per-(pod, container, card) reuse marker and carving a second instance. So the decision reads the
+  container's existing allocation first — the in-process reservation, then the durable annotation, which is
+  the only record that survives a device-manager restart — and reuses it.
+- **One selection takes at most one instance per card.** That is the record's shape rather than a placement
+  preference: a Pod's annotation carries one profile and one placement set per card, so a second instance
+  of the same request on the same card could not be counted. Rule 3 already makes every partition request
+  a single card, so the constraint costs nothing and closes the hole. Two different Pods still share a card
+  freely — each carries its own record.
+
+**Cards are packed, not spread: the most-occupied card that still fits wins.** Filling a card already in
+use keeps its siblings whole, so a later large profile still has somewhere to go; spreading would put one
+small partition on every card and leave a node with plenty of free memory unable to host a single
+whole-card profile. Hardware partitioning is what makes this the right way round — a partition's memory
+bandwidth is isolated by the hardware, so sharing a card costs the tenant nothing that spreading would
+have bought it. Story 3's "spreads partitions across cards instead of piling them onto one" is satisfied by
+the *health* half of that story, which packing does not weaken: a card whose geometry is consumed stops
+attracting new partition Pods immediately. Within a card the lowest free interval wins, so the free room
+stays contiguous at the high end and two identical requests against identical state place identically.
+
 The mode also gets an **explicit branch in the per-token ledger cost** charging the partition's own folded
 units — never the whole-card amount the `switch`'s `default` branch applies to any newly added mode.
 *Accept:* `<base>.partitioned` allocatable equals Σ partition ceilings over the partitioned cards; a node
@@ -269,9 +296,11 @@ with no partitioned card reads zero; the mode string round-trips as `Partitioned
 tokens all name a card that cannot host the requested profile still runs, on a card that can; two
 concurrent requests for mutually exclusive profiles land on different cards when the node has two;
 `Allocate` rejects only when no card on the node can host the profile, and says so; the annotation records
-the card actually used, not the one the kubelet offered; a single small partition consumes only its own
-units in the per-card ledger — asserted by a ledger-cost fixture distinct from the token-set fixture,
-because a token-set test cannot observe it.
+the card actually used, not the one the kubelet offered; a retried `Allocate` reuses the card it already
+used rather than reporting the node exhausted or carving a second instance, from the reservation and from
+the annotation alone; successive small partitions fill one card and leave a sibling whole for a later
+whole-card profile; a single small partition consumes only its own units in the per-card ledger — asserted
+by a ledger-cost fixture distinct from the token-set fixture, because a token-set test cannot observe it.
 
 **F3 — accounting moves off the logical keys: a geometry-aware per-profile key and its own credits input.**
 
@@ -1023,12 +1052,14 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       nothing; no symbol returns "logical count or else physical count".
       Verify: `go test ./pkg/deviceplugin/... ./api/...`
 
-- [ ] **T6 · The Partitioned server, placement authority, and the new mode's ledger cost** (F2)
+- [x] **T6 · The Partitioned server, placement authority, and the new mode's ledger cost** (F2)
       Blocked by: T1, T4, T5
-      Owns: `pkg/deviceplugin/server.go`, `server_test.go`, `pkg/deviceplugin/types.go`,
-      `pkg/deviceplugin/controller.go` (the ledger-cost branch), `pkg/device/physical_placement.go`,
-      `physical_placement_test.go`, `pkg/devicemanager/allocator/nvidia/**`,
-      `pkg/devicemanager/allocator/{allocator.go,config.go,option.go}`
+      Owns: `pkg/deviceplugin/{server.go,server_test.go,types.go,controller.go,reclaim.go}`,
+      `pkg/device/{physical_placement.go,physical_placement_test.go,types.go}`,
+      `pkg/devicemanager/allocator/nvidia/**`,
+      `pkg/devicemanager/allocator/{allocator.go,config.go,option.go}`, and the `.sliced.mig-` deletion in
+      `pkg/nodefeature`. The reclaim loop is shared with MetaX and Cambricon, so parameterizing it by
+      allocation mode also touches their one call site each.
       Gate: review
       *Do:* add the Partitioned `ResourceServer` and register it for NVIDIA; make its `Allocate`
       **placement-authoritative** — treat the offered device IDs as a quantity, choose the card in a pure

@@ -450,6 +450,24 @@ func (r *DevicesReconciler) releaseReservation(podUID types.UID, container strin
 	r.notifyListeners()
 }
 
+// reservedPhysicalOccupied lists, per accelerator resource, the physical placements the
+// in-process reservations currently claim. A placement-authoritative Allocate publishes its
+// choice here before releasing the node allocate mutex, so the next serialized caller decides
+// against a card that is already spoken for rather than one that merely has not been carved
+// yet. It is the synchronous counterpart to LivePhysicalOccupied, whose annotation source
+// lags by a cache round-trip; the two are unioned at the decision, and an interval recorded
+// in both is harmless because overlap, not multiplicity, is what a placement decision reads.
+func (r *DevicesReconciler) reservedPhysicalOccupied() map[Resource][]workercore.AcceleratorPhysicalPlacement {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	occupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
+	allocated := make(map[Resource]map[string]int32)
+	for _, v := range r.reservations {
+		accumulatePhysicalOccupied(v.Allocated, occupied, allocated)
+	}
+	return occupied
+}
+
 // reservedModeForResource reports the allocation mode a physical card (group:device) is
 // currently held in by any pod's reservation, and the owning pod UID. The reservation map is
 // written synchronously by every workload Allocate, so it is the race-safe cross-pod source of
@@ -907,6 +925,46 @@ func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resou
 		accumulatePhysicalOccupied(podDevsStatus, occupied, allocated)
 	}
 	return occupied, nil
+}
+
+// liveDeviceIDs returns every device ID a live allocation on this node holds: the IDs the
+// in-process reservations carry, plus the IDs the durable Pod annotations carry — the only
+// record that survives a device-manager restart. A terminating Pod still counts, matching
+// LivePhysicalOccupied: its allocation is released when the Pod object is gone, not when its
+// containers exit.
+//
+// The kubelet checkpoints the exact IDs it offered a container and refuses any later
+// allocation for it unless every one of them is still advertised healthy, so this set is what
+// a family whose health is a node-level count must keep Healthy. It reads the informer cache
+// (no device I/O). An unreadable annotation is logged and skipped: its IDs then risk being
+// reported Unhealthy, which the operator has to know about.
+func (r *DevicesReconciler) liveDeviceIDs(ctx context.Context) (sets.Set[string], error) {
+	podList := new(core.PodList)
+	if err := r.Client.List(ctx, podList,
+		ctrlcli.MatchingFields{IndexingPodsByNodeName: r.NodeName},
+		ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	held := sets.New[string]()
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		allocations, err := AllocatedAcceleratorsOf(pod)
+		if err != nil {
+			ctrllog.FromContext(ctx).Error(err, "read the allocation annotation of a pod; "+
+				"its device IDs may be reported unhealthy and strand the kubelet's checkpoint",
+				"pod", kubemeta.GetNamespacedNameKey(pod))
+			continue
+		}
+		for _, allocation := range allocations {
+			held.Insert(allocation.DeviceIDs...)
+		}
+	}
+	r.reservationsMutex.RLock()
+	for _, reservation := range r.reservations {
+		held.Insert(reservation.DeviceIDs...)
+	}
+	r.reservationsMutex.RUnlock()
+	return held, nil
 }
 
 func extractPreferredAcceleratorIDsFromPod(pod *core.Pod, devices *workercore.Devices) sets.Set[string] {

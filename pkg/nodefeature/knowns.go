@@ -65,16 +65,6 @@ const (
 	// node-level only (drives CUDA_DEVICE_MEMORY_LIMIT_IN_BYTES; the webhook folds it
 	// into .sliced.units via floor(mib/cardVRAM*M)); never folded into Kueue credits.
 	SlicedMemoryMibResourceNameSuffix = ".sliced.memory-mib"
-	// SlicedMigResourceNameInfix precedes the profile name in a physical-slice (MIG)
-	// request key, e.g. "nvidia.com/gpu.sliced.mig-1g.10gb".
-	//
-	// Superseded by the ".partitioned" family, which expresses hardware partitioning
-	// under the manufacturer's own name for it. This key is still the one the device
-	// plugin reads a requested profile from, so it survives only until that read moves
-	// to the per-profile partition key; it then goes away entirely, leaving no
-	// recognition of the old shape anywhere.
-	SlicedMigResourceNameInfix = ".sliced.mig-"
-
 	// PartitionedResourceNameSuffix is the coarse physical-partition token key,
 	// advertised by the device-plugin for the cards put into a hardware partitioning
 	// mode. It only triggers the allocator's Allocate() hook, which places the
@@ -355,17 +345,6 @@ func GetAcceleratableSlicedMemoryMibResourceName(manufacturer string) core.Resou
 	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMemoryMibResourceNameSuffix
 }
 
-// GetAcceleratableSlicedMigResourceName returns the legacy physical-slice (MIG) request
-// key for the given manufacturer and profile name — e.g. profile "1g.10gb" for nvidia
-// yields "nvidia.com/gpu.sliced.mig-1g.10gb".
-//
-// Superseded by GetAcceleratablePartitionedProfileResourceName, and deleted once the
-// device plugin reads a requested profile from that key instead of this one. The old
-// key is a clean break: nothing will translate, alias or strip it afterwards.
-func GetAcceleratableSlicedMigResourceName(manufacturer, profile string) core.ResourceName {
-	return _ManufacturerAcceleratableResourceNameMap[manufacturer] + SlicedMigResourceNameInfix + core.ResourceName(profile)
-}
-
 // GetAcceleratablePartitionedUnitsResourceName returns the fine-grained
 // physical-partition counting key for the given manufacturer (e.g.
 // "nvidia.com/gpu.partitioned.units"), reported per node via Patch Node and used as a
@@ -434,29 +413,6 @@ func IsKnownAcceleratableResourceName(name core.ResourceName) bool {
 	return false
 }
 
-// SlicedMigProfileOf returns the physical-slice (MIG) profile name encoded in a legacy
-// "<base>.sliced.mig-<profile>" resource key of a known accelerator base, and whether name is
-// such a key. It is the reverse of GetAcceleratableSlicedMigResourceName.
-//
-// Superseded by PartitionedProfileOf, and deleted once the device plugin reads a requested
-// profile from the per-profile partition key instead of this one. The old key is a clean
-// break: nothing will translate, alias or strip it afterwards.
-func SlicedMigProfileOf(name core.ResourceName) (string, bool) {
-	s := string(name)
-	i := strings.Index(s, SlicedMigResourceNameInfix)
-	if i < 0 {
-		return "", false
-	}
-	if !_AcceleratableResourceNameSet.Has(core.ResourceName(s[:i])) {
-		return "", false
-	}
-	profile := s[i+len(SlicedMigResourceNameInfix):]
-	if profile == "" {
-		return "", false
-	}
-	return profile, true
-}
-
 // ResourceFamily names the accelerator resource family a resource name belongs to.
 // Every key of a family — the coarse device-plugin token key, the fine-grained counting
 // keys, and any variable-tailed per-profile key — classifies as its family, since the
@@ -472,8 +428,7 @@ const (
 	// ResourceFamilyShared is the card-sharing family, "<base>.shared".
 	ResourceFamilyShared ResourceFamily = "shared"
 	// ResourceFamilySliced is the logical (software injection) slicing family,
-	// "<base>.sliced" and its sub-keys, including the superseded
-	// "<base>.sliced.mig-<profile>" shape for as long as it exists.
+	// "<base>.sliced" and its sub-keys.
 	ResourceFamilySliced ResourceFamily = "sliced"
 	// ResourceFamilyPartitioned is the physical (hardware partitioning) family,
 	// "<base>.partitioned" and its sub-keys.
@@ -520,12 +475,9 @@ func ResourceFamilyOf(name core.ResourceName) ResourceFamily {
 		return ResourceFamilyNone
 	}
 
-	// The variable-tailed per-profile keys carry their own base and tail checks.
+	// The variable-tailed per-profile key carries its own base and tail checks.
 	if _, ok := PartitionedProfileOf(name); ok {
 		return ResourceFamilyPartitioned
-	}
-	if _, ok := SlicedMigProfileOf(name); ok {
-		return ResourceFamilySliced
 	}
 
 	for _, e := range _ResourceFamilyFixedSuffixes {

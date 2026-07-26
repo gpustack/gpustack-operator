@@ -10,6 +10,7 @@ type Config struct {
 	KubeSocket              string
 	NoShared                bool
 	NoSliced                bool
+	NoPartitioned           bool
 	DetectedManufacturersCh <-chan sets.Set[string]
 }
 

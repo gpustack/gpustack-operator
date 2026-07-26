@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
@@ -90,6 +91,88 @@ func newSlicedServer() *server {
 			AllocationMode: workercore.DeviceAllocationModeSliced,
 		},
 	}
+}
+
+// TestNew_ServerSet pins which families NVIDIA registers a device-plugin server for, and that
+// each control flag removes exactly its own. The hardware-partitioning server is additionally
+// gated on the manufacturer having a partition kind: without one its resource name is empty, and
+// registering a server that advertises an empty name to kubelet is worse than registering none.
+func TestNew_ServerSet(t *testing.T) {
+	modesOf := func(a device.Allocator) []workercore.DeviceAllocationMode {
+		agg, ok := a.(aggregated)
+		require.True(t, ok)
+		modes := make([]workercore.DeviceAllocationMode, 0, len(agg.servers))
+		for i := range agg.servers {
+			srv, ok := agg.servers[i].(*server)
+			require.True(t, ok)
+			modes = append(modes, srv.AllocationMode)
+		}
+		return modes
+	}
+
+	cases := []struct {
+		name string
+		opts device.AllocatorOptions
+		want []workercore.DeviceAllocationMode
+	}{
+		{
+			name: "every family by default",
+			want: []workercore.DeviceAllocationMode{
+				workercore.DeviceAllocationModeExclusive,
+				workercore.DeviceAllocationModeShared,
+				workercore.DeviceAllocationModeSliced,
+				workercore.DeviceAllocationModePartitioned,
+				workercore.DeviceAllocationModeVisibility,
+			},
+		},
+		{
+			name: "--no-partitioned drops only the partition server",
+			opts: device.AllocatorOptions{NoPartitioned: true},
+			want: []workercore.DeviceAllocationMode{
+				workercore.DeviceAllocationModeExclusive,
+				workercore.DeviceAllocationModeShared,
+				workercore.DeviceAllocationModeSliced,
+				workercore.DeviceAllocationModeVisibility,
+			},
+		},
+		{
+			name: "--no-sliced drops only the logical slicing server",
+			opts: device.AllocatorOptions{NoSliced: true},
+			want: []workercore.DeviceAllocationMode{
+				workercore.DeviceAllocationModeExclusive,
+				workercore.DeviceAllocationModeShared,
+				workercore.DeviceAllocationModePartitioned,
+				workercore.DeviceAllocationModeVisibility,
+			},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, modesOf(New(c.opts)))
+		})
+	}
+
+	// The gate the partition server is registered behind, stated at its source: a manufacturer
+	// with no partition kind has no ".partitioned" resource name at all.
+	assert.NotEmpty(t, nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned),
+		"nvidia declares a partition kind, so it serves the family")
+	assert.Empty(t, nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerMThreads, workercore.DeviceAllocationModePartitioned),
+		"a manufacturer with no partition kind yields no resource name, so it registers no server")
+}
+
+// TestNew_ReclaimLoopFollowsThePartitionServer pins that the MIG reclaim loop is gated on the
+// server that creates the instances it frees. Gating it on the logical slicing server would run
+// it with no partitions to reclaim, and stop it while partitions were still live.
+func TestNew_ReclaimLoopFollowsThePartitionServer(t *testing.T) {
+	withPartitions, ok := New(device.AllocatorOptions{NoSliced: true}).(aggregated)
+	require.True(t, ok)
+	assert.True(t, withPartitions.partitioned, "the reclaim loop runs while the partition server does")
+
+	withoutPartitions, ok := New(device.AllocatorOptions{NoPartitioned: true}).(aggregated)
+	require.True(t, ok)
+	assert.False(t, withoutPartitions.partitioned, "no partition server, nothing to reclaim")
 }
 
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {

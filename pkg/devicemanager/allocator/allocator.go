@@ -16,6 +16,7 @@ type Allocator struct {
 	kubeSocket              string
 	noShared                bool
 	noSliced                bool
+	noPartitioned           bool
 	detectedManufacturersCh <-chan sets.Set[string]
 }
 
@@ -24,6 +25,7 @@ func New(c *Config) (*Allocator, error) {
 		kubeSocket:              c.KubeSocket,
 		noShared:                c.NoShared,
 		noSliced:                c.NoSliced,
+		noPartitioned:           c.NoPartitioned,
 		detectedManufacturersCh: c.DetectedManufacturersCh,
 	}, nil
 }
@@ -41,10 +43,11 @@ func (a *Allocator) Start(ctx context.Context) error {
 	defer sCancel()
 
 	createOpts := device.AllocatorOptions{
-		Logger:     logger.V(3),
-		KubeSocket: a.kubeSocket,
-		NoShared:   a.noShared,
-		NoSliced:   a.noSliced,
+		Logger:        logger.V(3),
+		KubeSocket:    a.kubeSocket,
+		NoShared:      a.noShared,
+		NoSliced:      a.noSliced,
+		NoPartitioned: a.noPartitioned,
 	}
 
 	for {
