@@ -9,8 +9,8 @@
 GPUStack Operator is a Kubernetes operator that discovers accelerators on every node, profiles their
 capacity into normalized per-device units, and materializes them into a Kueue-based scheduling chain your
 workloads can queue against. It supports **9 accelerator vendors** across GPU / NPU / MLU / DCU / PPU, and
-adds **soft-slicing** so a single card can be safely shared by multiple workloads with independent compute
-and memory budgets.
+adds **logical slicing** so a single card can be safely shared by multiple workloads with independent
+compute and memory budgets.
 
 Built on top of [Node Feature Discovery (NFD)](https://github.com/kubernetes-sigs/node-feature-discovery)
 and [Kueue](https://github.com/kubernetes-sigs/kueue) — you install one chart, and the operator brings up
@@ -19,7 +19,7 @@ the rest.
 ## Features
 
 - **Multi-vendor discovery** — auto-detects accelerators from 9 vendors (see [Supported Accelerators](#supported-accelerators)) and profiles each node's CPU / RAM / storage and per-card capacity, with no per-node configuration; scheduling pools can optionally split by CPU manufacturer (`instance-type-aware-cpu-manufacturer`).
-- **Soft-slicing with decoupled compute + memory isolation** — share one physical card among workloads, capping compute (SM / aicore %) independently of VRAM. Runtime isolation is enforced by a vendor preload library (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`), not just by accounting.
+- **Logical slicing with decoupled compute + memory isolation** — share one physical card among workloads, capping compute (SM / aicore %) independently of VRAM. Runtime isolation is enforced by a vendor preload library (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`), not just by accounting.
 - **Per-card over-admission protection** — a four-gate admission model (Kueue credits → scheduler/kubelet → per-card `AdmissionCheck` → the `Devices` ledger) catches the fragmentation cases a coarse quota total can't see, so a request never lands on a card that has no room.
 - **Live capacity, as a real resource** — each pool surfaces as a materialized `InstanceType` CRD whose `.status` carries a three-view (free whole cards / shareable slots / sliceable VRAM units). `kubectl get instancetype -w` shows capacity move as workloads allocate and free. Admins can also **declare** `InstanceType`s directly (required, immutable-sized inputs, descriptors enriched at admission), and the list-only `InstanceTypeFlavor` catalog surfaces every pool's hardware profile.
 - **SSH-enabled Instances** — launch a workload with an SSH sidecar that shares the same sliced card through a capability-stripped shell, for interactive development on a slice.

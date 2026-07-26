@@ -7,11 +7,11 @@ package v1alpha1
 //
 // AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
 // per-card LogicalSliced is what a card-level decision reads; this group view is what
-// external queries read to learn whether the node accepts soft-slice requests at all
+// external queries read to learn whether the node accepts logical-slice requests at all
 // (Count > 0) and whether it permits compute overcommit.
 type AcceleratorSlicedLogicalDetailApplyConfiguration struct {
-	// CoresPercentageOvercommit is a per-model property (uniform within a group), taken
-	// from any soft-sliceable card; false and meaningless when no card is soft-sliceable.
+	// CoresPercentageOvercommit is a per-model property (uniform within a group), taken from
+	// any logically sliceable card; false and meaningless when no card is logically sliceable.
 	CoresPercentageOvercommit *bool `json:"coresPercentageOvercommit,omitempty"`
 	// Count is the sum of per-card LogicalSliced.Count across the group.
 	Count *int32 `json:"count,omitempty"`

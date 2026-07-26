@@ -8,19 +8,19 @@
 # Goal:        On a MIG-capable NVIDIA card the operator observes MIG geometry and dynamically
 #              allocates the hardware GPU/compute instances that back scheduled workloads. This case
 #              proves, end to end on real hardware, that:
-#                - a card whose MIG mode is OFF serves logical (soft) slices — two Pods at 20% and 40%
+#                - a card whose MIG mode is OFF serves logical slices — two Pods at 20% and 40%
 #                  coexist and are runtime-capped (the vendor libvgpu path);
 #                - after the ADMIN enables MIG (nvidia-smi, over SSH) and the Device Manager re-detects,
 #                  the card carves into its canonical profile set (names/counts match the ledger), the
-#                  node advertises one nvidia.com/gpu.sliced.mig-<profile> key per profile, and the soft
-#                  logical keys drop to zero (a hard-partitioned card offers no soft slicing);
+#                  node advertises one nvidia.com/gpu.sliced.mig-<profile> key per profile, and the
+#                  logical keys drop to zero (a hard-partitioned card offers no logical slicing);
 #                - the InstanceType numeric three-view + the per-profile ledger reflect the geometry;
 #                - profiles are placement-mutually-exclusive (a size-4 3g instance blocks a size-8 7g
 #                  instance on the same card; two size-4 fill it, a third is held);
 #                - deleting a MIG Pod frees the instance so a fresh request of the same profile admits
 #                  again (reuse), and an idle card's instance is reclaimed within the debounce;
 #                - after small instances are freed a whole-card profile fits again;
-#                - disabling MIG and re-detecting returns the card to its soft-slice capability.
+#                - disabling MIG and re-detecting returns the card to its logical-slice capability.
 # Environment: A reachable cluster whose active context is the GPU cluster, a node with a real NVIDIA
 #              card, AND SSH to that node (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>.
 #              This case is the ONE case that toggles node hardware state, so it needs the node address;
@@ -152,7 +152,7 @@ MANUF="${MANUF:-nvidia}"
 SLICED="${MANUF}.com/gpu.sliced"
 echo "[case-23] accelerated InstanceType ${IT} (entrance LocalQueue ${LQ}, group ${GROUPID:-?}, sliced base ${SLICED})"
 
-# The vendor runtimeClass mounts the driver libs the workload needs (nvidia-smi -L, and — on the soft
+# The vendor runtimeClass mounts the driver libs the workload needs (nvidia-smi -L, and — on the logically sliced
 # path — the LD_PRELOAD'd libvgpu.so, which exits 127 without it). Derive it from the manufacturer.
 RUNTIMECLASS=""
 if kubectl get runtimeclass.node.k8s.io "$MANUF" >/dev/null 2>&1; then RUNTIMECLASS="$MANUF"; fi
@@ -312,12 +312,12 @@ EOF
 delpod() { kubectl -n default delete pod "$1" --ignore-not-found --force --grace-period=0 >/dev/null 2>&1 || true; }
 
 # ===================================================================================================
-# Phase L — Logical (soft) slicing, only when the card started with MIG OFF.
+# Phase L — Logical slicing, only when the card started with MIG OFF.
 # ===================================================================================================
 if [ "$INITIAL_MODE" = Disabled ]; then
   echo
-  echo "[case-23] === Phase L: logical soft slicing (MIG off) — 20% and 40% coexist ==="
-  P20="${PODPFX}-soft20"; P40="${PODPFX}-soft40"
+  echo "[case-23] === Phase L: logical slicing (MIG off) — 20% and 40% coexist ==="
+  P20="${PODPFX}-logical20"; P40="${PODPFX}-logical40"
   mkpod "$P20" "          ${SLICED}: \"1\"
           ${SLICED}.memory-percentage: \"20\"
           ${SLICED}.cores-percentage: \"20\""
@@ -329,13 +329,13 @@ if [ "$INITIAL_MODE" = Disabled ]; then
   if [ "$l20" = 1 ] && [ "$l40" = 1 ]; then
     sm20="$(kubectl -n default exec "$P20" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)"
     sm40="$(kubectl -n default exec "$P40" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)"
-    record PASS "soft 20% + 40% coexist and are capped" "${P20}(SM=${sm20:-?}) + ${P40}(SM=${sm40:-?}) both Running on the soft-sliced card"
+    record PASS "logical 20% + 40% coexist and are capped" "${P20}(SM=${sm20:-?}) + ${P40}(SM=${sm40:-?}) both Running on the logical-sliced card"
   else
-    record FAIL "soft 20% + 40% coexist and are capped" "20% running=${l20} 40% running=${l40} — soft slicing broken on the MIG-off card"
+    record FAIL "logical 20% + 40% coexist and are capped" "20% running=${l20} 40% running=${l40} — logical slicing broken on the MIG-off card"
   fi
   delpod "$P20"; delpod "$P40"
 else
-  record SKIP "soft-slice path (card started MIG-on)" "card ${GPU_INDEX} was already MIG-enabled; soft slicing is verified in reverse by Phase D (disable → soft returns)"
+  record SKIP "logical-slice path (card started MIG-on)" "card ${GPU_INDEX} was already MIG-enabled; logical slicing is verified in reverse by Phase D (disable → logical returns)"
 fi
 
 # ===================================================================================================
@@ -366,7 +366,7 @@ read -r SMALL SMALL_CNT MID MID_CNT FULL FULL_CNT NCARD <<<"$(card_profiles)"
 echo "[case-23] discovered profiles: SMALL=${SMALL}(${SMALL_CNT}/card) MID=${MID}(${MID_CNT}/card) FULL=${FULL}(${FULL_CNT}/card); MIG cards N=${NCARD:-0}"
 
 # ===================================================================================================
-# Phase P — Profiles carve correctly; node advertises per-profile keys; soft logical keys drop to 0.
+# Phase P — Profiles carve correctly; node advertises per-profile keys; logical keys drop to 0.
 # ===================================================================================================
 echo
 echo "[case-23] === Phase P: profile carve + capability keys ==="
@@ -384,13 +384,13 @@ if [ -n "$mid_key_cap" ] && [ -n "$full_key_cap" ]; then
 else
   record FAIL "node advertises per-profile MIG keys" "${MIGKEY_MID}='${mid_key_cap:-<absent>}', ${MIGKEY_FULL}='${full_key_cap:-<absent>}'"
 fi
-# A hard-partitioned card offers no soft slicing → the logical keys must be gone (only .sliced.units + .sliced.mig-* remain).
-softpct="$(node_key "${SLICED}.memory-percentage")"
+# A hard-partitioned card offers no logical slicing → the logical keys must be gone (only .sliced.units + .sliced.mig-* remain).
+logicalpct="$(node_key "${SLICED}.memory-percentage")"
 units="$(node_key "${SLICED}.units")"
-if [ -z "$softpct" ] && [ -n "$units" ]; then
-  record PASS "soft logical keys drop on MIG card" "${SLICED}.memory-percentage absent, ${SLICED}.units=${units} retained (MIG folds into credits)"
+if [ -z "$logicalpct" ] && [ -n "$units" ]; then
+  record PASS "logical keys drop on MIG card" "${SLICED}.memory-percentage absent, ${SLICED}.units=${units} retained (MIG folds into credits)"
 else
-  record FAIL "soft logical keys drop on MIG card" "${SLICED}.memory-percentage='${softpct:-<absent>}' (want absent), ${SLICED}.units='${units:-<absent>}' (want present)"
+  record FAIL "logical keys drop on MIG card" "${SLICED}.memory-percentage='${logicalpct:-<absent>}' (want absent), ${SLICED}.units='${units:-<absent>}' (want present)"
 fi
 
 # ===================================================================================================
@@ -547,30 +547,30 @@ else
 fi
 
 # ===================================================================================================
-# Phase D — Disable MIG and re-detect → the card returns to its soft-slice capability.
+# Phase D — Disable MIG and re-detect → the card returns to its logical-slice capability.
 # ===================================================================================================
 echo
-echo "[case-23] === Phase D: disable MIG → soft-slice capability returns ==="
+echo "[case-23] === Phase D: disable MIG → logical-slice capability returns ==="
 # A mode switch needs an idle card — wait for the whole-card FULL from Phase S (just deleted) to
 # reclaim before disabling, else nvidia-smi -mig 0 cannot converge (the disable prerequisite).
 wait_card_idle || echo "[case-23]   warning: card still reports live instances before disable"
 if set_mig_mode 0; then
   refresh_dm
-  softpct=""; migleft="x"
+  logicalpct=""; migleft="x"
   for _ in $(seq 1 30); do
-    softpct="$(node_key "${SLICED}.memory-percentage")"
+    logicalpct="$(node_key "${SLICED}.memory-percentage")"
     migleft="$(kubectl get node "$GPU_NODE" -o json 2>/dev/null | python3 -c "
 import json,sys
 a=json.load(sys.stdin).get('status',{}).get('allocatable',{})
 print(sum(1 for k in a if '.sliced.mig-' in k))
 " 2>/dev/null)"
-    [ -n "$softpct" ] && [ "${migleft:-1}" = 0 ] && break
+    [ -n "$logicalpct" ] && [ "${migleft:-1}" = 0 ] && break
     sleep 4
   done
-  if [ -n "$softpct" ] && [ "${migleft:-1}" = 0 ]; then
-    record PASS "soft-slice capability returns after disable" "${SLICED}.memory-percentage=${softpct} back, all .sliced.mig-* keys gone"
+  if [ -n "$logicalpct" ] && [ "${migleft:-1}" = 0 ]; then
+    record PASS "logical-slice capability returns after disable" "${SLICED}.memory-percentage=${logicalpct} back, all .sliced.mig-* keys gone"
   else
-    record FAIL "soft-slice capability returns after disable" "${SLICED}.memory-percentage='${softpct:-<absent>}', remaining mig keys=${migleft} — card did not return to soft slicing"
+    record FAIL "logical-slice capability returns after disable" "${SLICED}.memory-percentage='${logicalpct:-<absent>}', remaining mig keys=${migleft} — card did not return to logical slicing"
   fi
 else
   record FAIL "disable MIG mode" "nvidia-smi -mig 0 did not converge to Disabled"

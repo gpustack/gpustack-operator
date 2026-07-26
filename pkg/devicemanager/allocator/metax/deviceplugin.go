@@ -128,7 +128,7 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Sliced containers get real sgpu soft-slicing isolation (a subdevice + METAX_SGPUS);
+	// Sliced containers get real sgpu logical-slicing isolation (a subdevice + METAX_SGPUS);
 	// exclusive/shared/visibility keep the plain device-visibility response below.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, devs, allocated)
@@ -176,7 +176,7 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// getSlicedContainerAllocateResponse renders the sgpu soft-slicing injection for a
+// getSlicedContainerAllocateResponse renders the sgpu logical-slicing injection for a
 // sliced container: it reserves a per-card sgpu subdevice (fixed-share compute quota +
 // VRAM cap) via the sysfs seam, writing the correlation + slot marker under the pod
 // work dir, and returns METAX_SGPUS plus the control (/dev/mxcd) and per-card render

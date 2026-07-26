@@ -1,7 +1,7 @@
 # ld.so.preload + the libdcmi requirement
 
 ## How the injection activates
-Soft-slicing activates by mounting an `ld.so.preload` file to the container's
+Logical-slicing activates by mounting an `ld.so.preload` file to the container's
 `/etc/ld.so.preload` (never the host `/etc` — that would preload on the host and hit host
 workloads). Every dynamically-linked process in the container then loads the listed libraries.
 

@@ -50,10 +50,10 @@ func a100Placements() []workercore.AcceleratorPhysicalSlicedProfile {
 	}
 }
 
-// physicalAndSoftDevices returns a node's Devices with one MIG-enabled card (mig-0, a non-empty
-// PhysicalSliced.Profiles carrying cached Placements) and one soft-slice card (soft-0), so
-// a reconcile exercises the ledger fold on the MIG card and its absence on the soft card.
-func physicalAndSoftDevices(nodeName string) *workercore.Devices {
+// physicalAndLogicalDevices returns a node's Devices with one MIG-enabled card (mig-0, a non-empty
+// PhysicalSliced.Profiles carrying cached Placements) and one logical-slice card (logical-0), so
+// a reconcile exercises the ledger fold on the MIG card and its absence on the logical card.
+func physicalAndLogicalDevices(nodeName string) *workercore.Devices {
 	return &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
 		Spec: workercore.DevicesSpec{
@@ -70,7 +70,7 @@ func physicalAndSoftDevices(nodeName string) *workercore.Devices {
 						}},
 					},
 					{
-						ID:     "soft-0",
+						ID:     "logical-0",
 						Index:  1,
 						Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}},
 					},
@@ -197,7 +197,7 @@ func TestDevicesReconciler_TerminatingPodStillCharges(t *testing.T) {
 	deleting := meta.NewTime(pod.CreationTimestamp.Add(time.Second))
 	pod.DeletionTimestamp = &deleting
 	pod.Finalizers = []string{"gpustack.ai/test-hold"} // the fake client rejects a deleted object without one
-	rec := newReconciler(t, nodeName, capture, physicalAndSoftDevices(nodeName), pod)
+	rec := newReconciler(t, nodeName, capture, physicalAndLogicalDevices(nodeName), pod)
 
 	reconcileNode(t, rec, nodeName)
 
@@ -232,7 +232,7 @@ func TestDevicesReconciler_TerminatedContainerStillCharges(t *testing.T) {
 			}},
 		},
 	}
-	rec := newReconciler(t, nodeName, capture, physicalAndSoftDevices(nodeName), pod)
+	rec := newReconciler(t, nodeName, capture, physicalAndLogicalDevices(nodeName), pod)
 
 	reconcileNode(t, rec, nodeName)
 
@@ -302,16 +302,16 @@ func reconcileNode(t *testing.T, rec *DevicesReconciler, nodeName string) {
 
 // TestDevicesReconciler_PhysicalLedgerFold verifies the placement-aware MIG ledger is derived
 // by pure annotation-merge (no NVML): an empty MIG card reports its full free ceilings and
-// a soft card none; annotated placements fold to the worked-example Allocated/Free; two
+// a logical card none; annotated placements fold to the worked-example Allocated/Free; two
 // same-profile Pods at different slots reconstruct the real occupied set; the ledger is
 // recomputed (not stomped) on a second reconcile; and missing occupancy only overstates
 // Free, never understates it.
 func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 	const nodeName = "node-mig"
 
-	t.Run("empty MIG card reports full free, soft card empty", func(t *testing.T) {
+	t.Run("empty MIG card reports full free, logical card empty", func(t *testing.T) {
 		capture := &statusCapture{}
-		rec := newReconciler(t, nodeName, capture, physicalAndSoftDevices(nodeName))
+		rec := newReconciler(t, nodeName, capture, physicalAndLogicalDevices(nodeName))
 
 		reconcileNode(t, rec, nodeName)
 
@@ -324,15 +324,15 @@ func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 			{Name: "3g.20gb", Count: 2},
 		}, mig.RemainingProfiles, "empty MIG card reports full per-profile ceilings")
 
-		soft := acceleratorByID(t, capture.last, "soft-0")
-		assert.Nil(t, soft.AllocatedProfiles, "soft card carries no allocated ledger")
-		assert.Nil(t, soft.RemainingProfiles, "soft card carries no free ledger")
+		logical := acceleratorByID(t, capture.last, "logical-0")
+		assert.Nil(t, logical.AllocatedProfiles, "logical card carries no allocated ledger")
+		assert.Nil(t, logical.RemainingProfiles, "logical card carries no free ledger")
 	})
 
 	t.Run("one 3g.20gb@slot0 folds to the worked-example ledger", func(t *testing.T) {
 		capture := &statusCapture{}
 		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
-		rec := newReconciler(t, nodeName, capture, physicalAndSoftDevices(nodeName), pod)
+		rec := newReconciler(t, nodeName, capture, physicalAndLogicalDevices(nodeName), pod)
 
 		reconcileNode(t, rec, nodeName)
 
@@ -350,7 +350,7 @@ func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 		capture := &statusCapture{}
 		p1 := physicalSlicePod(t, "p1", "grp-0", "mig-0", "1g.10gb", nodeName, pl(0, 2))
 		p2 := physicalSlicePod(t, "p2", "grp-0", "mig-0", "1g.10gb", nodeName, pl(2, 2))
-		rec := newReconciler(t, nodeName, capture, physicalAndSoftDevices(nodeName), p1, p2)
+		rec := newReconciler(t, nodeName, capture, physicalAndLogicalDevices(nodeName), p1, p2)
 
 		reconcileNode(t, rec, nodeName)
 
@@ -368,7 +368,7 @@ func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 	t.Run("ledger recomputed (not stomped) on a second reconcile", func(t *testing.T) {
 		capture := &statusCapture{}
 		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
-		rec := newReconciler(t, nodeName, capture, physicalAndSoftDevices(nodeName), pod)
+		rec := newReconciler(t, nodeName, capture, physicalAndLogicalDevices(nodeName), pod)
 
 		reconcileNode(t, rec, nodeName)
 		reconcileNode(t, rec, nodeName)
@@ -385,11 +385,11 @@ func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 		// overstate. Free for the placements the reconciler does see is never inflated.
 		recorded := &statusCapture{}
 		pod := physicalSlicePod(t, "p-3g", "grp-0", "mig-0", "3g.20gb", nodeName, pl(0, 4))
-		reconcileNode(t, newReconciler(t, nodeName, recorded, physicalAndSoftDevices(nodeName), pod), nodeName)
+		reconcileNode(t, newReconciler(t, nodeName, recorded, physicalAndLogicalDevices(nodeName), pod), nodeName)
 		recordedFree := remainingByProfile(t, recorded.last, "mig-0", "3g.20gb")
 
 		missing := &statusCapture{}
-		reconcileNode(t, newReconciler(t, nodeName, missing, physicalAndSoftDevices(nodeName)), nodeName)
+		reconcileNode(t, newReconciler(t, nodeName, missing, physicalAndLogicalDevices(nodeName)), nodeName)
 		missingFree := remainingByProfile(t, missing.last, "mig-0", "3g.20gb")
 
 		assert.GreaterOrEqual(t, missingFree, recordedFree, "missing occupancy only inflates free")

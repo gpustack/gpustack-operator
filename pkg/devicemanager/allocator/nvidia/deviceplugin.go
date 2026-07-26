@@ -49,7 +49,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// The visibility server co-allocates the SSH sidecar to the same physical GPU(s) its
 	// workload container was granted; for any non-sliced mode the responder emits only
 	// NVIDIA_VISIBLE_DEVICES, which is exactly what the sidecar needs (device-cgroup access,
-	// no HAMi soft-slicing artifacts).
+	// no HAMi logical-slicing artifacts).
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility),
 	)
@@ -200,7 +200,7 @@ func (s *server) GetContainerAllocateResponse(
 		}
 	}
 
-	// Sliced containers get real soft-slicing isolation (HAMi-core preload + quota);
+	// Sliced containers get real logical-slicing isolation (HAMi-core preload + quota);
 	// exclusive/shared keep the plain device-visibility response below.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, ids, accelerators)
@@ -216,7 +216,7 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// In-container paths the HAMi-core soft-slicing runtime expects.
+// In-container paths the HAMi-core logical-slicing runtime expects.
 const (
 	ctrLdPreloadPath   = "/etc/ld.so.preload"
 	ctrVgpuLibPath     = "/usr/local/vgpu/libvgpu.so"
@@ -231,7 +231,7 @@ const (
 // tests can redirect it off the real /tmp.
 var hostVgpuLockPath = "/tmp/vgpulock"
 
-// getSlicedContainerAllocateResponse renders the HAMi-core soft-slicing injection for
+// getSlicedContainerAllocateResponse renders the HAMi-core logical-slicing injection for
 // a sliced container: a compute (SM) limit from the container's ".sliced.cores-percentage"
 // and a per-card VRAM limit from its ".sliced.memory-percentage"/".sliced.memory-mib"
 // (independent dimensions, no single ratio), plus the mounts that preload libvgpu.so

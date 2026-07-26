@@ -15,7 +15,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
-// Soft-slicing host paths. The device-manager init container stages the in-image
+// Logical-slicing host paths. The device-manager init container stages the in-image
 // /etc/gpustack/lib tree onto the host at OperatorLibDir; per-container working
 // directories live under OperatorPodsDir. They are package vars (not consts) so
 // tests can redirect them to a temporary directory.

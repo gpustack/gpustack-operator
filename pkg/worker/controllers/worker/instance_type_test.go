@@ -733,7 +733,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 		// aggregates into SlicedDetail, plus the pool labels listFlavorPoolDevices selects on. The
 		// group ID is the bare model ("a10g"); Manufacturer+"-"+ID reconstructs the accelerator key.
 		dev := devicesWithGroups("node-a", slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-			softCard("0", 128, true), softCard("1", 128, true)))
+			logicalCard("0", 128, true), logicalCard("1", 128, true)))
 		dev.Labels = map[string]string{
 			featureKey:                 "true",
 			core.LabelOSStable:         "linux",
@@ -762,7 +762,7 @@ func TestInstanceTypeReconciler_ComputesDetail(t *testing.T) {
 		assert.Equal(t, "24576Mi", d.Memory, "per-card VRAM from the flavor note")
 		assert.Equal(t, "9216", d.Cores, "cores from the flavor note")
 		assert.Equal(t, int32(256), d.SlicedDetail.Logical.Count,
-			"SlicedDetail sums the two soft cards' logical counts (2×128)")
+			"SlicedDetail sums the two logically sliceable cards' counts (2×128)")
 		assert.True(t, d.SlicedDetail.Logical.CoresPercentageOvercommit,
 			"SlicedDetail carries the overcommit flag")
 

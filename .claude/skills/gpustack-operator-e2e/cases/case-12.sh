@@ -11,7 +11,7 @@
 #              Q3: Validate rejects a sliceable request whose accelerator count is not 1 (the slice is
 #                  expressed through the percentages, not the card count).
 # Environment: Needs a REAL sliceable accelerated pool (an InstanceType whose observed Status.Detail is
-#              sliceable — a logical soft-slice count or a physical MIG profile). AUTO-SKIPS (exit 0)
+#              sliceable — a logical-slice count or a physical MIG profile). AUTO-SKIPS (exit 0)
 #              when none is present. Only the admission result is asserted (probes are deleted at once).
 # Inputs:      - the real sliceable accelerated InstanceType, READ-ONLY (its immutable per-card unit spec
 #                drives the expected slice math — the unit is not pinned/mutated);
@@ -42,7 +42,7 @@ ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 
 # 1. Find a real sliceable accelerated InstanceType (observed Status.Detail carries a logical
-#    soft-slice count or a physical MIG profile) and read its per-card unit spec. AUTO-SKIP when
+#    logical-slice count or a physical MIG profile) and read its per-card unit spec. AUTO-SKIP when
 #    none is present.
 read -r IT UNIT_CPU UNIT_RAM <<<"$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 -c "
 import json,sys
@@ -55,7 +55,7 @@ for it in json.load(sys.stdin).get('items',[]):
 if [ -z "$IT" ]; then
   echo "== CASE 12 — SKIPPED =="
   echo "No real sliceable accelerated InstanceType (observed Status.Detail sliceable) — this case needs"
-  echo "real accelerator hardware whose pool is soft-sliceable or MIG-capable. Run it on such a cluster."
+  echo "real accelerator hardware whose pool is logically sliceable or MIG-capable. Run it on such a cluster."
   exit 0
 fi
 echo "[case-12] sliceable InstanceType: ${IT} (per-card unit cpu=${UNIT_CPU} ram=${UNIT_RAM})"

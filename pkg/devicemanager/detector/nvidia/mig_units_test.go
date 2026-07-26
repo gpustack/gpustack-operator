@@ -10,8 +10,8 @@ func TestMigProfileUnitsFold(t *testing.T) {
 	const d = nodefeature.ResourceMaxUnits
 
 	// A MIG instance folds into .sliced.units via the same VRAM-anchored
-	// MemoryMibToUnits the soft .sliced.memory-mib path uses, so a MIG profile and a
-	// soft slice of the same VRAM charge identical credits. These pin the H100-80GB
+	// MemoryMibToUnits the logical .sliced.memory-mib path uses, so a MIG profile and a
+	// logical slice of the same VRAM charge identical credits. These pin the H100-80GB
 	// worked-example fold values (10GiB->D/8, 20GiB->D/4, 40GiB->D/2, 80GiB->D).
 	const h100VRAM = int64(81920)
 	testCases := []struct {

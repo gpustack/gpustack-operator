@@ -1,4 +1,4 @@
-# HAMi-core (`libvgpu.so`) — the NVIDIA soft-slicing runtime
+# HAMi-core (`libvgpu.so`) — the NVIDIA logical-slicing runtime
 
 The NVIDIA counterpart to Ascend's vcann-rt. Built by the `xbuild-nvidia-cuda-<major>` Dockerfile stage
 (product `/out/libvgpu.so`); enforces per-container VRAM + compute (SM) limits by hijacking the CUDA

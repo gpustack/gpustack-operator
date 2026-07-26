@@ -24,9 +24,9 @@ const (
 	testGPUUUID1 = "GPU-bbbb1111-1111-1111-1111-111111111111"
 )
 
-// redirectSoftSliceDirs points the soft-slicing host paths (incl. the vgpulock dir)
+// redirectLogicalSliceDirs points the logical-slicing host paths (incl. the vgpulock dir)
 // at a temp dir for the test.
-func redirectSoftSliceDirs(t *testing.T) string {
+func redirectLogicalSliceDirs(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	origLib, origPods, origLock := deviceplugin.OperatorLibDir, deviceplugin.OperatorPodsDir, hostVgpuLockPath
@@ -176,7 +176,7 @@ func TestNew_ReclaimLoopFollowsThePartitionServer(t *testing.T) {
 }
 
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	// A10G-like: 24576 MiB. cores=10% SM, memory=25% VRAM (independent dimensions).
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
@@ -231,7 +231,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 // A sliced container that declares LIBCUDA_LOG_LEVEL keeps its own value: the allocator
 // must not inject the quiet default over it (the debugging escape hatch).
 func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
 	pod, ctr := slicedPod("pod-uid-loglevel", "train", 10, 25)
@@ -247,7 +247,7 @@ func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing
 
 // One CUDA_DEVICE_MEMORY_LIMIT_<i> per allocated card (.sliced card count).
 func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0, testGPUUUID1)
 	pod, ctr := slicedPod("pod-uid-2", "train", 50, 25) // SM 50%, VRAM 25%
@@ -268,7 +268,7 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 
 // The libvgpu.so mount tracks the card's CUDA runtime major (default cuda-12).
 func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 
 	cases := []struct{ runtimeVersion, wantDir string }{
@@ -297,7 +297,7 @@ func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 // A sliced container with no memory dimension (neither .sliced.memory-percentage nor
 // .sliced.memory-mib) must be rejected rather than silently given the whole card.
 func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0)
 	pod := &core.Pod{
@@ -312,7 +312,7 @@ func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 // A single libvgpu is mounted, so a sliced allocation spanning GPUs with different
 // CUDA majors must be rejected rather than mounting an incompatible library.
 func TestGetSlicedContainerAllocateResponse_MixedCUDAMajorRejected(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
 	// Two groups: cuda-12 (a10g) and cuda-13 (l4).
 	devs := &workercore.Devices{
@@ -341,7 +341,7 @@ func Test_nvidiaCUDADir(t *testing.T) {
 
 // TestGetContainerAllocateResponse_Visibility verifies the visibility-mode responder emits
 // only NVIDIA_VISIBLE_DEVICES for the allocated device(s) — the same plain device-visibility
-// response as exclusive/shared — with no HAMi soft-slicing env or mounts.
+// response as exclusive/shared — with no HAMi logical-slicing env or mounts.
 func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 	s := &server{
 		ResourceServer: deviceplugin.ResourceServer{

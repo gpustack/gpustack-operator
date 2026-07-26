@@ -11,7 +11,7 @@ func TestPopulationPredicates(t *testing.T) {
 		wantWholeCard      bool
 	}{
 		{
-			// A not-partitioned card that reports a soft-slice count is logically
+			// A not-partitioned card that reports a logical-slice count is logically
 			// sliceable and, since it has no hardware partitions, still whole-card
 			// capable.
 			name:               "logically sliceable, not partitioned",

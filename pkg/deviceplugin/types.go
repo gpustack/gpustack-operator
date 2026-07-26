@@ -80,7 +80,7 @@ type PhysicalSlicedAllocation struct {
 	// occupies. The server folds these into the allocation annotation as the reconciler
 	// ledger's occupied source.
 	Placements map[Resource][]workercore.AcceleratorPhysicalPlacement
-	// Response carries the vendor visible-devices env for the partitions (no soft-slice
+	// Response carries the vendor visible-devices env for the partitions (no logical-slice
 	// artifacts). The server returns it in place of GetContainerAllocateResponse.
 	Response *ContainerAllocateResponse
 	// Rollback tears down whatever this allocation created; a no-op for a fully reused

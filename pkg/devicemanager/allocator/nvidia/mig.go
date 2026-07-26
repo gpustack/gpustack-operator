@@ -432,7 +432,7 @@ func profileGeometry(devs *workercore.Devices, cardUUID, profile string) (comput
 // ActuatePhysicalSliced materializes one MIG partition of profile per allocated card,
 // serialized per card by the card lock, records each chosen placement upward for the ledger
 // reconciler, and returns the container response injecting only NVIDIA_VISIBLE_DEVICES set to
-// the partitions' MIG UUIDs (no libvgpu/CUDA_DEVICE_* soft-slice artifacts). On any card's
+// the partitions' MIG UUIDs (no libvgpu/CUDA_DEVICE_* logical-slice artifacts). On any card's
 // failure it rolls back exactly what this call did — per the per-card outcome — so no half-owned
 // Pod persists and no partition a prior allocation owns is touched.
 func (s *server) ActuatePhysicalSliced(

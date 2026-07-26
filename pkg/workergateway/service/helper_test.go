@@ -1301,7 +1301,7 @@ func withDetail(it *worker.InstanceType, detail workercore.InstanceTypeDetail) *
 }
 
 // gpuDetail builds an accelerator Status.Detail: identity fields plus a slicing capability of the
-// given logical soft-slice count/overcommit and physical (MIG) profiles (Physical.Count is their sum).
+// given logical slice count/overcommit and physical (MIG) profiles (Physical.Count is their sum).
 func gpuDetail(product string, logical int32, overcommit bool, profiles ...workercore.AcceleratorSlicedPhysicalDetailProfile) workercore.InstanceTypeDetail {
 	var d workercore.InstanceTypeDetail
 	d.Manufacturer = "nvidia"

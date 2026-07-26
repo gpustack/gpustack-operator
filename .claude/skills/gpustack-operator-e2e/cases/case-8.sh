@@ -66,7 +66,7 @@ print(int(m.group(1)) * (1024 if m.group(2) == 'G' else 1) if m else 0)
 " 2>/dev/null)
 echo "[case-8] sliceable InstanceType ${IT} (card memory ${CARDMEM} = ${PHYS_MIB}MiB) via LocalQueue ${LQ}"
 
-# The soft-slicing runtime (HAMi libvgpu.so, LD_PRELOAD-injected at Allocate) needs the vendor
+# The logical-slicing runtime (HAMi libvgpu.so, LD_PRELOAD-injected at Allocate) needs the vendor
 # runtimeClass to mount the driver libs it depends on — a bare image without it exits 127. The
 # operator's Instance controller injects this automatically; a raw Pod must set it too. Derive it
 # from the pool manufacturer (identity map: nvidia->nvidia, mthreads->mthreads).

@@ -541,7 +541,7 @@ func newAggregatedCandidate(cluster, name string, instType *worker.InstanceType)
 
 // addAcceleratorSlicedDetail folds src into dst by direct summation: logical/physical counts add,
 // physical profiles sum by name (profileIndex tracks each name's slot in dst.Physical.Profiles), and
-// the logical overcommit flag is OR-ed from any soft-sliceable contributor. It lifts the detector's
+// the logical overcommit flag is OR-ed from any logically sliceable contributor. It lifts the detector's
 // card→group aggregation (device.AggregateAcceleratorSlicedDetail) one level up, so a tier/item
 // slicing view is the plain sum of its members' capability, independent of candidate Phase.
 func addAcceleratorSlicedDetail(dst *workercore.AcceleratorSlicedDetail, src workercore.AcceleratorSlicedDetail, profileIndex map[string]int) {

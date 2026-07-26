@@ -1210,19 +1210,30 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
 
 #### Phase 2 — vocabulary and documentation
 
-- [ ] **T13 · The soft → logical vocabulary sweep** (F12)
+- [x] **T13 · The soft → logical vocabulary sweep** (F12)
       Blocked by: T12
-      Owns: `pkg/**`, `deploy/gpustack-operator/chart/templates/**`, `pack/gpustack-operator/**`,
-      `README.md`, `.claude/skills/gpustack-operator-e2e/**`
+      Owns: `pkg/**`, `api/**`, `deploy/gpustack-operator/chart/templates/**`,
+      `pack/gpustack-operator/**`, `README.md`, `.claude/skills/gpustack-operator-e2e/**`,
+      `.claude/skills/gpustack-operator-xbuild-and-verify/**`
       Gate: review
       *Do:* rename package by package — comments, error strings, test helper identifiers, including
       identifiers carrying "Soft" without "SoftSlic" — running that package's tests after each. Correct the
       two comments this work proved wrong while passing through them: `server.go`'s claim that
       `GetPreferredAllocation` "never even runs" under policy `none` (it does run; it is merely advisory),
       and any comment describing `.sliced` as covering MIG. Archived specs and past reports are untouched.
-      Acceptance: the success-criteria greps return nothing outside them; no assertion string drifts
-      silently.
+      Acceptance: the success-criteria greps return nothing under this task's own paths; no assertion
+      string drifts silently.
       Verify: `make test`, then the greps
+      *Landed:* `api/**` joined `Owns:` because the vocabulary lives in the `Devices` field doc
+      comments, whose text is copied verbatim into `generated.proto`, the openapi definitions, the
+      embedded CRDs and the apply configurations — so clearing the grep there is one source edit plus
+      `make generate`, not a generated-file edit. `gpustack-operator-xbuild-and-verify/**` joined it for
+      the same reason the chart and Dockerfile are in scope: the builder stages it drives are named after
+      the vocabulary. The comment describing `.sliced` as covering MIG turned out to be
+      `AcceleratorPhysicalSliced.Count`'s, which still claimed to size the bare `.sliced` pool for a
+      MIG-enabled card; it sizes `.partitioned` since T6. Two greps residues are left standing because
+      they belong to a later task's `Owns:` — `docs/**` to T14, and the e2e cases plus
+      `_e2e-lib/scripts/teardown.sh` to T15 — so the criteria close at T15, not here.
 
 - [ ] **T14 · Documentation** (F10, F12, F14)
       Blocked by: T13
@@ -1235,10 +1246,13 @@ in the InstanceType view). T3 adds the shared predicates; T5, T7, T8 and T11 eac
       `docs/operation/nvidia-mig.md`; state that hand-carving a partition outside GPUStack is unsupported on
       a managed node, and why. Also record the behaviour T12 tightened: a slice percentage against a pool
       that offers no logical slicing used to be ignored and silently served as a whole card, and is now
-      rejected at admission.
+      rejected at admission. Two stale statements T13 left standing because they are documentation rather
+      than vocabulary: `README.md` still calls the `InstanceType` status a "three-view", and `docs/` still
+      carries the soft-slicing vocabulary the sweep cleared everywhere else.
       Acceptance: a reader can determine from the docs alone why an accelerator family may appear in only
       one container group and what to do before flipping a card's partitioning mode; no stale key or stale
-      column header in `docs/`.
+      column header in `docs/`; the two success-criteria greps return nothing under `docs/` or
+      `README.md`.
       Verify: read-through against the F6 table
 
 #### Phase 3 — e2e
@@ -1252,7 +1266,8 @@ cluster with a MIG-capable node.
       *Do:* update the accelerator-view, sliced and cross-mode cases, the teardown reverse-patch, and the
       case table in the suite's skill document. The MIG lifecycle case moves to the new keys.
       Acceptance: each ported case passes unchanged in intent; teardown removes both key families and the
-      legacy `.sliced.mig-*` shape.
+      legacy `.sliced.mig-*` shape; the `.sliced.mig-` grep returns nothing under `.claude/skills/`,
+      closing the last residue T13 left.
       Verify: run the ported cases; teardown leaves no `.sliced.*` or `.partitioned.*` key behind
 
 - [ ] **T16 · New cases for what only hardware shows** (F5, F11, F13)

@@ -114,7 +114,7 @@ func withPool(nd *core.Node, manufacturer string, mode workercore.DeviceAllocati
 
 // vendorSlicing is one device group's per-card logical-slicing capability for a Devices
 // fixture: the group ID (which must equal the model part of the node's aKey,
-// "${manufacturer}-${id}"), the manufacturer, the number of soft cards, and each card's
+// "${manufacturer}-${id}"), the manufacturer, the number of logical cards, and each card's
 // per-card slice count / overcommit. A maxSlices of 0 models a non-sliceable group (cards
 // carrying no slice budget).
 type vendorSlicing struct {
@@ -125,24 +125,24 @@ type vendorSlicing struct {
 	overcommit   bool
 }
 
-// devicesWithSlicing builds a same-named Devices CR whose groups carry per-card soft-slice
+// devicesWithSlicing builds a same-named Devices CR whose groups carry per-card logical-slice
 // status, resolved by "${manufacturer}-${group ID}" so desiredAcceleratorCapacity maps each node
-// model to its own group. Each vendor contributes v.cards soft cards, matching the count its
+// model to its own group. Each vendor contributes v.cards logical cards, matching the count its
 // model's ".count" label advertises on the node.
 func devicesWithSlicing(name string, vendors ...vendorSlicing) *workercore.Devices {
 	d := &workercore.Devices{ObjectMeta: meta.ObjectMeta{Name: name}}
 	for _, v := range vendors {
 		cards := make([]workercore.Accelerator, 0, v.cards)
 		for i := int32(0); i < v.cards; i++ {
-			cards = append(cards, softCard(strconv.Itoa(int(i)), v.maxSlices, v.overcommit))
+			cards = append(cards, logicalCard(strconv.Itoa(int(i)), v.maxSlices, v.overcommit))
 		}
 		d.Spec.Groups = append(d.Spec.Groups, slicedGroup(v.manufacturer, v.id, cards...))
 	}
 	return d
 }
 
-// softCard builds one logically-sliceable (soft) accelerator carrying per-card sliced status.
-func softCard(id string, logicalCount int32, overcommit bool) workercore.Accelerator {
+// logicalCard builds one logically sliceable accelerator carrying per-card sliced status.
+func logicalCard(id string, logicalCount int32, overcommit bool) workercore.Accelerator {
 	return workercore.Accelerator{
 		ID: id,
 		Status: workercore.AcceleratorStatus{
@@ -155,7 +155,7 @@ func softCard(id string, logicalCount int32, overcommit bool) workercore.Acceler
 }
 
 // migCard builds one MIG-enabled (physically-sliceable) accelerator with the given physical
-// ceiling — no logical (soft) budget.
+// ceiling — no logical budget.
 func migCard(id string, physicalCount int32) workercore.Accelerator {
 	return workercore.Accelerator{
 		ID: id,
@@ -384,8 +384,9 @@ func TestDesiredAcceleratorCapacityIgnoresPartitions(t *testing.T) {
 	}
 }
 
-// TestDesiredAcceleratorCapacityNewFormat covers the new per-card sourcing: the sliceable-vs-soft
-// split (units count every sliceable card, the three logical keys only soft cards), all-MIG
+// TestDesiredAcceleratorCapacityNewFormat covers the new per-card sourcing: the every-card-vs-
+// logical-only split (units count every sliceable card, the three logical keys only the logically
+// sliceable ones), all-MIG
 // (logical keys omitted), the lossy VRAM label, and the Devices-wins-over-label cardinality.
 func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 	const node = "node-5"
@@ -398,14 +399,14 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 		want map[string]int64
 	}{
 		{
-			// Non-MIG identity: 8 soft cards each with LogicalSliced.Count = group maxSlices
+			// Non-MIG identity: 8 logical cards each with LogicalSliced.Count = group maxSlices
 			// (128) reproduce today's numbers exactly on the new per-card path.
-			name: "non-mig soft cards match today's numbers",
+			name: "non-mig logical cards match today's numbers",
 			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "8", "24Gi", true),
 				nodefeature.ManufacturerNVIDIA, 8*128),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-				softCard("0", 128, true), softCard("1", 128, true), softCard("2", 128, true), softCard("3", 128, true),
-				softCard("4", 128, true), softCard("5", 128, true), softCard("6", 128, true), softCard("7", 128, true))),
+				logicalCard("0", 128, true), logicalCard("1", 128, true), logicalCard("2", 128, true), logicalCard("3", 128, true),
+				logicalCard("4", 128, true), logicalCard("5", 128, true), logicalCard("6", 128, true), logicalCard("7", 128, true))),
 			want: slicedWant(nodefeature.ManufacturerNVIDIA, 8, 8*a10gMib, 128, true),
 		},
 		{
@@ -415,7 +416,7 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 			node: withPartitionedPool(withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
 				nodefeature.ManufacturerNVIDIA, 2*128), nodefeature.ManufacturerNVIDIA, 7),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-				softCard("0", 128, true), softCard("1", 128, true), migCard("2", 7))),
+				logicalCard("0", 128, true), logicalCard("1", 128, true), migCard("2", 7))),
 			want: map[string]int64{
 				string(nvidiaSlicedUnits):      unitsFor(2),
 				string(nvidiaSlicedCores):      2 * 128 * 100,
@@ -490,7 +491,7 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 			node: withPartitionedPool(withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
 				nodefeature.ManufacturerNVIDIA, 2*128), nodefeature.ManufacturerNVIDIA, 7),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-				softCard("0", 128, true), softCard("1", 128, true),
+				logicalCard("0", 128, true), logicalCard("1", 128, true),
 				migCardWithProfiles("2", map[string]int32{"1g.10gb": 7}))),
 			want: map[string]int64{
 				string(nvidiaSlicedUnits):      unitsFor(2),
@@ -502,12 +503,12 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 			},
 		},
 		{
-			// Non-overcommit (partition) model: cores = softCards × 100, not Detail.Logical.Count.
-			name: "non-overcommit soft cards cap cores at softCards × 100",
+			// Non-overcommit (partition) model: cores = logicalCards × 100, not Detail.Logical.Count.
+			name: "non-overcommit logical cards cap cores at logicalCards × 100",
 			node: withSlicedPool(acceleratableNode(node, "mthreads-s4000", "4", "48Gi", true),
 				nodefeature.ManufacturerMThreads, 4*16),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerMThreads, "s4000",
-				softCard("0", 16, false), softCard("1", 16, false), softCard("2", 16, false), softCard("3", 16, false))),
+				logicalCard("0", 16, false), logicalCard("1", 16, false), logicalCard("2", 16, false), logicalCard("3", 16, false))),
 			want: slicedWant(nodefeature.ManufacturerMThreads, 4, 4*mthreadsMib, 16, false),
 		},
 		{
@@ -518,7 +519,7 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "1", "42Gi", true),
 				nodefeature.ManufacturerNVIDIA, 128),
 			devs: func() *workercore.Devices {
-				g := slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true))
+				g := slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true))
 				g.Memory = 43238 // decoy: exact MiB the reconciler must NOT read
 				return devicesWithGroups(node, g)
 			}(),
@@ -531,12 +532,12 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 		},
 		{
 			// Node-vs-Devices skew: the ".count" label claims 8, but the Devices ledger holds 4
-			// soft cards. The ledger wins for cardinality (the label only finds the group).
+			// logical cards. The ledger wins for cardinality (the label only finds the group).
 			name: "devices ledger wins cardinality over the .count label",
 			node: withSlicedPool(acceleratableNode(node, "nvidia-a10g", "8", "24Gi", true),
 				nodefeature.ManufacturerNVIDIA, 8*128),
 			devs: devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-				softCard("0", 128, true), softCard("1", 128, true), softCard("2", 128, true), softCard("3", 128, true))),
+				logicalCard("0", 128, true), logicalCard("1", 128, true), logicalCard("2", 128, true), logicalCard("3", 128, true))),
 			want: slicedWant(nodefeature.ManufacturerNVIDIA, 4, 4*a10gMib, 128, true),
 		},
 	}
@@ -592,25 +593,25 @@ func TestPartitionLedgerIsManufacturerQualified(t *testing.T) {
 func TestAcceleratorDetailChanged(t *testing.T) {
 	const node = "node-w"
 	base := devicesWithGroups(node,
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)))
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), logicalCard("1", 128, true)))
 	assert.False(t, acceleratorDetailChanged(base, base), "identical devices do not fire")
 
 	health := devicesWithGroups(node,
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)))
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), logicalCard("1", 128, true)))
 	health.Spec.Groups[0].Accelerators[0].Status.Unhealthy = true
 	assert.False(t, acceleratorDetailChanged(base, health), "a health flip cannot move a capacity value")
 
 	toMig := devicesWithGroups(node,
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), migCard("1", 7)))
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), migCard("1", 7)))
 	assert.True(t, acceleratorDetailChanged(base, toMig), "a card moving between populations fires")
 
 	fewer := devicesWithGroups(node,
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 64, true), softCard("1", 64, true)))
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 64, true), logicalCard("1", 64, true)))
 	assert.True(t, acceleratorDetailChanged(base, fewer), "a logical-count change fires")
 
 	added := devicesWithGroups(node,
-		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", softCard("0", 128, true), softCard("1", 128, true)),
-		slicedGroup(nodefeature.ManufacturerMThreads, "s4000", softCard("0", 16, false)))
+		slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g", logicalCard("0", 128, true), logicalCard("1", 128, true)),
+		slicedGroup(nodefeature.ManufacturerMThreads, "s4000", logicalCard("0", 16, false)))
 	assert.True(t, acceleratorDetailChanged(base, added), "a new group fires")
 
 	// A re-partition keeps the card count but changes the profile inventory, which the population
@@ -851,7 +852,7 @@ func TestNodeCapacityReconciler_Reconcile(t *testing.T) {
 		nd := withPartitionedPool(withSlicedPool(acceleratableNode(node, "nvidia-a10g", "3", "24Gi", true),
 			nodefeature.ManufacturerNVIDIA, 2*128), nodefeature.ManufacturerNVIDIA, 7)
 		devs := devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerNVIDIA, "a10g",
-			softCard("0", 128, true), softCard("1", 128, true), migCard("2", 7)))
+			logicalCard("0", 128, true), logicalCard("1", 128, true), migCard("2", 7)))
 		cli := build(nd, devs)
 
 		require.NoError(t, reconcile(cli))

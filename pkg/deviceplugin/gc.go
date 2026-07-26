@@ -11,7 +11,7 @@ import (
 // absent from the live set before its working directory is reclaimed.
 const podDirGCMaxMisses = 3
 
-// podDirGC reclaims per-pod soft-slicing working directories under a base dir once
+// podDirGC reclaims per-pod logical-slicing working directories under a base dir once
 // their pod is gone. It is level-based: each reconcile re-scans the directory and
 // compares it against the live pod-UUID set, so it self-heals across restarts. A
 // directory is removed only after its UUID has been absent from the live set for

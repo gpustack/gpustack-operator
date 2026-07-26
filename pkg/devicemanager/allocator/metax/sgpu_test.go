@@ -19,8 +19,8 @@ const (
 	testBDF1 = "0000:3e:00.0"
 )
 
-// redirectSoftSliceDirs points the soft-slicing host paths at a temp dir for the test.
-func redirectSoftSliceDirs(t *testing.T) {
+// redirectLogicalSliceDirs points the logical-slicing host paths at a temp dir for the test.
+func redirectLogicalSliceDirs(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	origLib, origPods := deviceplugin.OperatorLibDir, deviceplugin.OperatorPodsDir
@@ -144,7 +144,7 @@ func Test_aliasEncodeDecode(t *testing.T) {
 }
 
 func Test_marker_roundtrip_and_failClosed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 
 	// Round-trip: write then parse returns the same record.
 	path := markerPath("uid-rt", "train")
@@ -168,7 +168,7 @@ func Test_marker_roundtrip_and_failClosed(t *testing.T) {
 // A corrupt marker for one pod must not block deriving a slot for another pod (the
 // fail-closed scope is the owning pod's own marker, backstopped by the registry).
 func Test_reserveSlice_corruptOtherMarkerDoesNotBlock(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 
 	// A corrupt marker belonging to some other pod.
@@ -186,7 +186,7 @@ func osMkdirAllFor(file string) error {
 }
 
 func Test_reserveSlice_indexDerivation(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 
 	// First slice on card 0 -> index 0.
@@ -210,7 +210,7 @@ func Test_reserveSlice_indexDerivation(t *testing.T) {
 // A driver subdevice with no marker (a crash orphan) still occupies its index, so the
 // next allocation must skip it (registry UNION markers, never markers alone).
 func Test_reserveSlice_registryOrphanOccupiesIndex(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	mgr.seed(testBDF0, 0, "") // orphan at index 0, no marker
 
@@ -221,7 +221,7 @@ func Test_reserveSlice_registryOrphanOccupiesIndex(t *testing.T) {
 }
 
 func Test_reserveSlice_idempotentReuseAndFailClosed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 
 	r0, err := reserveSlice(mgr, "uid-a", "train", testBDF0, 60, 2048, false)
@@ -248,7 +248,7 @@ func Test_reserveSlice_idempotentReuseAndFailClosed(t *testing.T) {
 }
 
 func Test_reserveSlice_wholeCard(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 
 	res, err := reserveSlice(mgr, "uid-whole", "train", testBDF0, 100, 65536, true)
@@ -274,7 +274,7 @@ func Test_reserveSlice_wholeCard(t *testing.T) {
 }
 
 func Test_reserveSlice_poolExhausted(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	for i := 0; i < maxSGPUPerCard; i++ {
 		mgr.seed(testBDF0, i, "")
@@ -285,7 +285,7 @@ func Test_reserveSlice_poolExhausted(t *testing.T) {
 }
 
 func Test_reclaim_deadPodDestroysAfterDebounce(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	_, err := reserveSlice(mgr, "pod-dead", "train", testBDF0, 60, 1024, false)
 	require.NoError(t, err)
@@ -306,7 +306,7 @@ func Test_reclaim_deadPodDestroysAfterDebounce(t *testing.T) {
 
 // A live pod's slice is never touched, and a live snapshot resets the miss streak.
 func Test_reclaim_livePodPreserved(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	_, err := reserveSlice(mgr, "pod-live", "train", testBDF0, 60, 1024, false)
 	require.NoError(t, err)
@@ -326,7 +326,7 @@ func Test_reclaim_livePodPreserved(t *testing.T) {
 // A marker whose subdevice is already gone (external teardown) is cleaned once its
 // pod is dead: Remove is a no-op, the marker file is removed.
 func Test_reclaim_subdeviceLessMarker(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	seedMarker(t, "pod-dead", "train", testBDF0, 0, 60, 1024) // marker only, no subdevice
 
@@ -339,7 +339,7 @@ func Test_reclaim_subdeviceLessMarker(t *testing.T) {
 
 func Test_reclaim_markerLessOrphan(t *testing.T) {
 	t.Run("dead UID destroyed", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		mgr := newFakeMgr()
 		mgr.seed(testBDF0, 5, encodeAlias("pod-dead")) // orphan, no marker
 
@@ -352,7 +352,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 	})
 
 	t.Run("live UID left intact", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		mgr := newFakeMgr()
 		mgr.seed(testBDF0, 5, encodeAlias("pod-live")) // create-before-marker crash on a reserved pod
 
@@ -364,7 +364,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 	})
 
 	t.Run("undecodable alias on a drained card reclaimed", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		mgr := newFakeMgr()
 		mgr.seed(testBDF0, 5, "")            // driver did not expose the operator's alias
 		mgr.seed(testBDF1, 2, "foreign-tag") // undecodable owner
@@ -379,7 +379,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 	})
 
 	t.Run("undecodable alias on a card with a live pod left intact", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		mgr := newFakeMgr()
 		// A live pod holds a slice on the card, plus an unidentifiable subdevice (could be
 		// that pod's own create-before-marker crash orphan) — never destroy it.
@@ -398,7 +398,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 // Reclaiming one container of a dead multi-container pod must remove only the specific
 // marker files (never RemoveAll a dir), and clean the pod dir only when empty.
 func Test_reclaim_multiContainerPod(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	_, err := reserveSlice(mgr, "pod-dead", "c1", testBDF0, 60, 1024, false)
 	require.NoError(t, err)
@@ -467,7 +467,7 @@ func Test_sysfsSGPUManager(t *testing.T) {
 
 // Concurrent Allocate + reclaim must be race-free and never double-book an index.
 func Test_reserveSlice_reclaim_race(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 	r := newReclaimer(mgr, deviceplugin.OperatorPodsDir, logr.Discard())
 

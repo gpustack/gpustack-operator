@@ -55,7 +55,7 @@ NS="${1:?usage: case-22.sh <NS>}"
 PODPFX=gpustack-e2e-exshare
 ANNO=device.gpustack.ai/accelerator.allocated
 IMAGE="${IMAGE:-ubuntu:24.04}"
-# Image for sliced Pods. A soft-slicing runtime whose preload needs vendor libraries inside the image
+# Image for sliced Pods. A logical-slicing runtime whose preload needs vendor libraries inside the image
 # (e.g. Ascend vcann-rt needs the CANN runtime — a bare distro exits 127 at container start, AFTER the
 # allocation succeeds) must override this with a vendor runtime image, e.g.
 # SLICED_IMAGE=quay.io/ascend/cann:9.0.1-910b-ubuntu22.04-py3.11-devel. Image-agnostic preloads

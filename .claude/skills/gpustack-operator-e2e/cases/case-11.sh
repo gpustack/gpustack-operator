@@ -72,7 +72,7 @@ print(int(m.group(1))*(1024 if m.group(2)=='G' else 1) if m else 0)
 " 2>/dev/null)
 echo "[case-11] sliceable InstanceType ${IT} (card ${CARDMEM}=${PHYS_MIB}MiB) via LocalQueue ${LQ}"
 
-# The soft-slicing runtime (HAMi libvgpu.so, LD_PRELOAD-injected at Allocate) needs the vendor
+# The logical-slicing runtime (HAMi libvgpu.so, LD_PRELOAD-injected at Allocate) needs the vendor
 # runtimeClass to mount its driver-lib dependencies — a bare image without it exits 127. Derive it
 # from the pool manufacturer (identity map: nvidia->nvidia, mthreads->mthreads); guard on existence.
 RUNTIMECLASS=""

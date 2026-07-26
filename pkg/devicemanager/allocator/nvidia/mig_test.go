@@ -172,7 +172,7 @@ func TestReserveMigInstance(t *testing.T) {
 	const profile = "1g.10gb"
 
 	t.Run("creates at the lowest free placement", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		drv.possible[testGPUUUID0] = evenSlots()
 
@@ -192,7 +192,7 @@ func TestReserveMigInstance(t *testing.T) {
 	})
 
 	t.Run("second card of a new pod picks the next free slot", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		drv.possible[testGPUUUID0] = evenSlots()
 		// A prior pod already holds slot 0 (its marker owns GI 100).
@@ -210,7 +210,7 @@ func TestReserveMigInstance(t *testing.T) {
 	})
 
 	t.Run("binds a reusable unbound instance instead of creating", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		drv.possible[testGPUUUID0] = evenSlots()
 		// An unbound instance (no marker references it) of the requested geometry.
@@ -226,7 +226,7 @@ func TestReserveMigInstance(t *testing.T) {
 	})
 
 	t.Run("full card fails without creating", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		drv.possible[testGPUUUID0] = evenSlots()
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 1, ComputeSlices: 7, Placement: migPlacement{0, 8}, UUID: "MIG-whole"})
@@ -239,7 +239,7 @@ func TestReserveMigInstance(t *testing.T) {
 	})
 
 	t.Run("rebinds its own live instance on a retry", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		drv.possible[testGPUUUID0] = evenSlots()
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 5, CiID: 5, ComputeSlices: 1, Placement: migPlacement{0, 2}, UUID: "MIG-self"})
@@ -257,7 +257,7 @@ func TestReserveMigInstance(t *testing.T) {
 	})
 
 	t.Run("fails closed when its gpu-instance id was reused by another partition", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		drv.possible[testGPUUUID0] = evenSlots()
 		// The live GI 5 is now a different partition (different MIG UUID) than the marker recorded.
@@ -281,7 +281,7 @@ func TestReserveMigInstance(t *testing.T) {
 // NVIDIA_VISIBLE_DEVICES.
 func TestReserveMigInstance_SkipsEmptyUUIDInstance(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	// A geometry-matching but CI-less orphan on slot 0 (no UUID); no marker owns it.
@@ -299,7 +299,7 @@ func TestReserveMigInstance_SkipsEmptyUUIDInstance(t *testing.T) {
 
 func TestReserveMigInstance_IdempotentRetry(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 
@@ -319,7 +319,7 @@ func TestReserveMigInstance_IdempotentRetry(t *testing.T) {
 
 func TestReserveMigInstance_SelfMarkerStale(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	// A marker whose GPU instance is gone from the live set (out-of-band destroy): fail closed
@@ -336,7 +336,7 @@ func TestReserveMigInstance_SelfMarkerStale(t *testing.T) {
 }
 
 func TestReserveMigInstance_ProfileMismatch(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	require.NoError(t, writeMarker(markerPath("pod-a", "c", testGPUUUID0), migMarker{
@@ -355,7 +355,7 @@ func TestReserveMigInstance_ProfileMismatch(t *testing.T) {
 // create, while a sibling card proceeds in parallel.
 func TestReserveMigInstance_ConcurrentSameCard(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	drv.possible[testGPUUUID1] = evenSlots()
@@ -439,7 +439,7 @@ func migDevices(profile string, computeSlices, memorySlices int32, uuids ...stri
 
 func TestActuatePhysicalSliced(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	drv.possible[testGPUUUID1] = evenSlots()
@@ -469,7 +469,7 @@ func TestActuatePhysicalSliced(t *testing.T) {
 		assert.Equal(t, int32(2), out.Placements[res][0].Length)
 	}
 
-	// The response injects only the MIG UUIDs (no libvgpu / CUDA_DEVICE_* soft-slice env).
+	// The response injects only the MIG UUIDs (no libvgpu / CUDA_DEVICE_* logical-slice env).
 	require.NotNil(t, out.Response)
 	vis := out.Response.Envs["NVIDIA_VISIBLE_DEVICES"]
 	assert.Contains(t, vis, "MIG-"+testGPUUUID0)
@@ -485,7 +485,7 @@ func TestActuatePhysicalSliced(t *testing.T) {
 
 func TestActuatePhysicalSliced_RollbackDestroysCreated(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	s := &server{mig: drv}
@@ -510,7 +510,7 @@ func TestActuatePhysicalSliced_RollbackDestroysCreated(t *testing.T) {
 // unbound pool) and never destroys hardware this call did not create.
 func TestActuatePhysicalSliced_RollbackReusedNotDestroyed(t *testing.T) {
 	const profile = "1g.10gb"
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	// A reusable unbound instance (has a UUID, no marker owns it).
@@ -533,7 +533,7 @@ func TestActuatePhysicalSliced_RollbackReusedNotDestroyed(t *testing.T) {
 }
 
 func TestActuatePhysicalSliced_UnknownProfileFails(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.possible[testGPUUUID0] = evenSlots()
 	s := &server{mig: drv}

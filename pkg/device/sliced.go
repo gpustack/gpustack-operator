@@ -2,7 +2,7 @@ package device
 
 // AggregateAcceleratorSlicedDetail derives a group's slicing detail from its cards' per-card
 // statuses: the logical count is summed across cards and the overcommit flag taken from any
-// soft-sliceable card (uniform per model, meaningless when none is); the physical profiles are
+// logically sliceable card (uniform per model, meaningless when none is); the physical profiles are
 // summed by name and the physical ceiling summed across cards.
 func AggregateAcceleratorSlicedDetail(accelerators []Accelerator) AcceleratorSlicedDetail {
 	var detail AcceleratorSlicedDetail

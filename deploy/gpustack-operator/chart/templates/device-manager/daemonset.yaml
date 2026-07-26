@@ -51,7 +51,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       initContainers:
-        # Stage the soft-slicing library tree (preload libs + ld.so.preload) baked
+        # Stage the logical-slicing library tree (preload libs + ld.so.preload) baked
         # into the image at /etc/gpustack/lib onto the host, idempotently (checksum
         # guarded), so the allocator can mount it into sliced workload containers.
         - name: stage-libs

@@ -4,7 +4,7 @@
 #
 #   ascend-case-3.sh [TARGET]
 #
-# Proves the soft-slice is REAL, not cosmetic: a process that allocates NPU HBM in
+# Proves the logical-slice is REAL, not cosmetic: a process that allocates NPU HBM in
 # a loop is capped at the configured memory-quota when libvruntime.so is preloaded,
 # but not when it is absent.
 #   - baseline (no injection): allocates well past the quota (until physical free)

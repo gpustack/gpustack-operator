@@ -11,7 +11,7 @@ ARG GPUSTACK_CHARTS_DIR="${GPUSTACK_CONF_DIR}/charts"
 ARG GPUSTACK_LIB_DIR="${GPUSTACK_CONF_DIR}/lib"
 ARG UBUNTU_IMAGE="ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b"
 
-# Soft-slicing preload-library sources, cloned inline per build stage at a pinned
+# Logical-slicing preload-library sources, cloned inline per build stage at a pinned
 # commit (no git submodule). Bump the commit to update; the ARG busts the build cache.
 ARG LIB_UBS_VIRT_ENPU_COMMIT="4d7e4b10ebc2416d761de7d9c1ab0282ae35dae9"
 ARG LIB_HAMI_CORE_COMMIT="0831874bce5af56cefca7093dfb2f9f95d1970aa"
@@ -185,7 +185,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
 EOF
 
 # =============================================================================
-# Stages: xbuild-ascend-cann-* (Ascend soft-slicing)
+# Stages: xbuild-ascend-cann-* (Ascend logical-slicing)
 # Build the vcann-rt runtime (libvruntime.so + enpu-monitor) once per CANN/family
 # target against the matching quay.io/ascend/cann base image. Each stage installs
 # its products under /out/{lib,tools}; the final image copies them into
@@ -253,7 +253,7 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.s
 EOF
 
 # =============================================================================
-# Stages: xbuild-nvidia-cuda-* (NVIDIA soft-slicing)
+# Stages: xbuild-nvidia-cuda-* (NVIDIA logical-slicing)
 # Build the HAMi-core preload library (libvgpu.so) once per CUDA major against the
 # matching nvidia/cuda devel image. Each stage installs its product at /out; the
 # final image copies it into ${GPUSTACK_LIB_DIR}/nvidia/cuda-<major>. HAMi-core only
@@ -344,7 +344,7 @@ RUN <<EOF
         && rm -rf /var/lib/apt/lists/*
 EOF
 
-## Copy the Ascend soft-slicing runtime (vcann-rt) per CANN/family target.
+## Copy the Ascend logical-slicing runtime (vcann-rt) per CANN/family target.
 ## buildkit builds each xbuild-ascend-cann-* stage for the final image's target arch
 ## (the CANN base images are multi-arch), so these are arch-correct.
 
@@ -356,7 +356,7 @@ COPY --from=xbuild-ascend-cann-9-910b /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-910
 COPY --from=xbuild-ascend-cann-9-910c /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-910c
 COPY --from=xbuild-ascend-cann-9-950  /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-950
 
-## Copy the NVIDIA soft-slicing runtime (HAMi-core) per CUDA major.
+## Copy the NVIDIA logical-slicing runtime (HAMi-core) per CUDA major.
 COPY --from=xbuild-nvidia-cuda-12 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-12
 COPY --from=xbuild-nvidia-cuda-13 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-13
 
@@ -454,7 +454,7 @@ EOT
     # Install the host-staging helper used by the device-manager init container.
     install -m 0755 /rootfs/usr/bin/copy-dir.sh /usr/bin/copy-dir.sh
 
-    # Install the soft-slicing ld.so.preload files (point at the in-container library
+    # Install the logical-slicing ld.so.preload files (point at the in-container library
     # mounts); staged onto the host alongside the per-target preload libs.
     install -D -m 0644 /rootfs/etc/gpustack/lib/ascend/ld.so.preload \
         "${GPUSTACK_LIB_DIR}"/ascend/ld.so.preload

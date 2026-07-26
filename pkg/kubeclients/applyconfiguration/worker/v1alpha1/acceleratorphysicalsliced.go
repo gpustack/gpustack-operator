@@ -10,9 +10,10 @@ type AcceleratorPhysicalSlicedApplyConfiguration struct {
 	// Profiles is empty when the card does not support, or has not enabled, hard slicing.
 	Profiles []AcceleratorPhysicalSlicedProfileApplyConfiguration `json:"profiles,omitempty"`
 	// Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
-	// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".sliced" token pool for a
-	// MIG-enabled card, so a hard-partitioned card stays served rather than dropping out.
-	// Zero when Profiles is empty.
+	// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned" token pool
+	// for a partitioned card, which is the family that serves it; a partitioned card offers
+	// no logical slicing and so leaves the ".sliced" pool entirely. Zero when Profiles is
+	// empty.
 	Count *int32 `json:"count,omitempty"`
 }
 

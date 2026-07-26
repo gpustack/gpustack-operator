@@ -4,7 +4,7 @@
 #
 #   ascend-case-2.sh [TARGET]
 #
-# Reproduces the GPUStack soft-slicing injection by hand and confirms vcann-rt
+# Reproduces the GPUStack logical-slicing injection by hand and confirms vcann-rt
 # initializes and reports the configured quota inside a container:
 #   1. read the card VDie-ID (npu-smi info -t board) -> shm-id (spaces -> '-')
 #   2. render npu_info.config (0644) — the same 6 fields the Ascend allocator emits

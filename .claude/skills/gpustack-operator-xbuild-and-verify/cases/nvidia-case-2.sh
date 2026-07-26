@@ -4,7 +4,7 @@
 #
 #   nvidia-case-2.sh [TARGET]
 #
-# Reproduces the GPUStack NVIDIA soft-slicing injection by hand on one card and
+# Reproduces the GPUStack NVIDIA logical-slicing injection by hand on one card and
 # confirms HAMi-core caps both VRAM and compute:
 #   1. write ld.so.preload (single line: /usr/local/vgpu/libvgpu.so)
 #   2. docker run (nvidia runtime, NVIDIA_VISIBLE_DEVICES=GPU) with

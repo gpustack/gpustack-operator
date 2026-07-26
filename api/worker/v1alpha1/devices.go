@@ -249,9 +249,9 @@ type (
 		// device compute (time-sharing / weighted sharing); false means compute is partitioned.
 		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,1,opt,name=coresPercentageOvercommit"` // nolint: lll
 
-		// Count is the maximum number of soft slices this card can host. A card whose MIG mode
-		// is currently enabled is always 0, which excludes it from the logical capacity keys; a
-		// pending-enable card is not partitioned yet and still reports its soft-slice count.
+		// Count is the maximum number of logical slices this card can host. A card whose MIG
+		// mode is currently enabled is always 0, which excludes it from the logical capacity
+		// keys; a pending-enable card is not partitioned yet and still reports its logical count.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
@@ -264,9 +264,10 @@ type (
 		Profiles []AcceleratorPhysicalSlicedProfile `json:"profiles,omitempty" yaml:"profiles,omitempty" protobuf:"bytes,1,rep,name=profiles"` // nolint: lll
 
 		// Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
-		// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".sliced" token pool for a
-		// MIG-enabled card, so a hard-partitioned card stays served rather than dropping out.
-		// Zero when Profiles is empty.
+		// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned" token pool
+		// for a partitioned card, which is the family that serves it; a partitioned card offers
+		// no logical slicing and so leaves the ".sliced" pool entirely. Zero when Profiles is
+		// empty.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
@@ -284,11 +285,11 @@ type (
 
 	// AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
 	// per-card LogicalSliced is what a card-level decision reads; this group view is what
-	// external queries read to learn whether the node accepts soft-slice requests at all
+	// external queries read to learn whether the node accepts logical-slice requests at all
 	// (Count > 0) and whether it permits compute overcommit.
 	AcceleratorSlicedLogicalDetail struct {
-		// CoresPercentageOvercommit is a per-model property (uniform within a group), taken
-		// from any soft-sliceable card; false and meaningless when no card is soft-sliceable.
+		// CoresPercentageOvercommit is a per-model property (uniform within a group), taken from
+		// any logically sliceable card; false and meaningless when no card is logically sliceable.
 		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,1,opt,name=coresPercentageOvercommit"` // nolint: lll
 
 		// Count is the sum of per-card LogicalSliced.Count across the group.

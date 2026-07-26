@@ -162,8 +162,8 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 				poolSize = devAccelerator.Status.LogicalSliced.Count
 			}
 			// Hardware health alone does not protect a card held in another allocation mode:
-			// kubelet picks tokens freely (GetPreferredAllocation is advisory, and with the
-			// default TopologyManager policy "none" it never even runs), so a held card still
+			// kubelet picks tokens freely (GetPreferredAllocation does run, but its answer is
+			// only a hint kubelet is free to ignore), so a held card still
 			// advertised as Healthy WILL eventually be handed to an opposite-mode pod, whose
 			// Allocate then fails with a permanent UnexpectedAdmissionError. Keep the held
 			// card's tokens advertised (removing them would strand kubelet's checkpointed
@@ -946,7 +946,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	}
 
 	// A physical-slice allocation injects only the partition's visible-devices env the actuator
-	// already assembled (no soft-slice artifacts), so it bypasses the soft-slice responder.
+	// already assembled (no logical-slice artifacts), so it bypasses the logical-slice responder.
 	var ctrResp *ContainerAllocateResponse
 	if physical != nil {
 		ctrResp = physical.Response

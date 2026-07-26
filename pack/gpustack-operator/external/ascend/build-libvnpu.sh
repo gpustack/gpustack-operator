@@ -2,7 +2,7 @@
 #
 # build-libvnpu.sh <src-dir> <out-dir>
 #
-# Build the vcann-rt soft-slicing runtime (libvruntime.so + enpu-monitor) inside a
+# Build the vcann-rt logical-slicing runtime (libvruntime.so + enpu-monitor) inside a
 # CANN base image. <src-dir> is the vcann-rt source tree (the Dockerfile stage clones
 # ubs-virt and passes its ubs-virt-enpu/vcann-rt subdir); the build products are
 # installed under:

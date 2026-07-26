@@ -65,7 +65,7 @@ for n in json.load(sys.stdin).get('items',[]):
 [ -n "${SLICED:-}" ] || { echo "[case-20] no *.sliced resource advertised on a node carrying ${AKEY}"; exit 1; }
 echo "[case-20] pool: derived=${DERIVED} acceleratorGroup=${AKEY} os/arch=${OS}/${ARCH} entrance=${LQ} sliced=${SLICED}"
 
-# The sliced load Pod runs the HAMi soft-slicing runtime (libvgpu.so via LD_PRELOAD) — without the
+# The sliced load Pod runs the HAMi logical-slicing runtime (libvgpu.so via LD_PRELOAD) — without the
 # vendor runtimeClass mounting its driver-lib dependencies a bare image exits 127 and never runs.
 # Derive it from the pool manufacturer (identity map: nvidia->nvidia, mthreads->mthreads).
 RUNTIMECLASS=""

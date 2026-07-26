@@ -2,7 +2,7 @@ package device
 
 // IsLogicallySliceable reports whether the card's reported capability admits logical
 // (software) slicing — it is not in a physical partitioning mode and offers at least one
-// soft slice. A card reporting neither capability returns false.
+// logical slice. A card reporting neither capability returns false.
 //
 // Detectors report the two capabilities exclusively per card, so the partition test never
 // changes today's answer. It is here so this predicate enforces the contract it states

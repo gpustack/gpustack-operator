@@ -28,7 +28,7 @@ func seedMarkedInstance(t *testing.T, drv *fakeMigDriver, podUID, card string, g
 }
 
 func TestReclaim_DestroysDeadPodAfterDebounce(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
 	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
@@ -50,7 +50,7 @@ func TestReclaim_DestroysDeadPodAfterDebounce(t *testing.T) {
 }
 
 func TestReclaim_KeepsLivePod(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	seedMarkedInstance(t, drv, "pod-live", testGPUUUID0, 1)
 	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
@@ -67,7 +67,7 @@ func TestReclaim_KeepsLivePod(t *testing.T) {
 // the instance, keeps retrying every pass (the debounce is not cleared), surfaces the
 // operator-visible condition exactly once at the bound, and finally reclaims once the process exits.
 func TestReclaim_InUseBoundedRetryAndCondition(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.inUseGiIDs = map[uint32]bool{1: true}
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
@@ -100,7 +100,7 @@ func TestReclaim_InUseBoundedRetryAndCondition(t *testing.T) {
 // marker whose placement a running Pod still claims (the oldest-Pending getAllocatingPod
 // heuristic mis-bound the marker) never destroys the running Pod's instance.
 func TestReclaim_MisAttributedMarkerNotDestroyed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
 	claims := func() (map[string][]migPlacement, error) {
@@ -119,7 +119,7 @@ func TestReclaim_MisAttributedMarkerNotDestroyed(t *testing.T) {
 // TestReclaim_FailClosedOnClaimsError asserts a liveClaims read error skips the whole pass — the
 // self-check cannot run, so no destroy is risked.
 func TestReclaim_FailClosedOnClaimsError(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
 	claims := func() (map[string][]migPlacement, error) {
@@ -136,7 +136,7 @@ func TestReclaim_FailClosedOnClaimsError(t *testing.T) {
 // TestReclaim_FailClosedOnListError asserts a ListInstances error skips the whole pass — without
 // the live-state view the marker identity check cannot run, so no destroy is risked.
 func TestReclaim_FailClosedOnListError(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.listErr = assert.AnError
 	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
@@ -153,7 +153,7 @@ func TestReclaim_FailClosedOnListError(t *testing.T) {
 // the placement-based attribution check does not catch — is dropped without destroying the live
 // instance, because the marker's recorded MIG-device UUID no longer matches the live one.
 func TestReclaim_StaleMarkerGiIdReuseNotDestroyed(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	// GI 1 is now a live pod's instance at slot 4 (UUID MIG-new), recorded by its own marker.
 	drv.seedLive(testGPUUUID0, migInstance{GiID: 1, CiID: 1, ComputeSlices: 1, Placement: migPlacement{4, 2}, UUID: "MIG-new"})
@@ -185,7 +185,7 @@ func TestReclaim_StaleMarkerGiIdReuseNotDestroyed(t *testing.T) {
 // not GC'd while the card still carries any marker (here a dead-but-in-use pod whose marker cannot
 // be removed), because such a card is not fully drained.
 func TestReclaim_OrphanKeptWhileCardHasMarker(t *testing.T) {
-	redirectSoftSliceDirs(t)
+	redirectLogicalSliceDirs(t)
 	drv := newFakeMigDriver()
 	drv.inUseGiIDs = map[uint32]bool{1: true} // the marked pod's GI 1 is wedged in-use
 	seedMarkedInstance(t, drv, "pod-stuck", testGPUUUID0, 1)
@@ -203,7 +203,7 @@ func TestReclaim_OrphanKeptWhileCardHasMarker(t *testing.T) {
 // Pod is on its card and reclaimed only once the card fully drains past the debounce.
 func TestReclaim_OrphanGCOnlyOnDrainedCard(t *testing.T) {
 	t.Run("kept while a live pod is on the card", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		seedMarkedInstance(t, drv, "pod-live", testGPUUUID0, 1)
 		// A marker-less orphan (a crash between GI-create and marker-write) shares the card.
@@ -217,7 +217,7 @@ func TestReclaim_OrphanGCOnlyOnDrainedCard(t *testing.T) {
 	})
 
 	t.Run("gc'd after the card drains and the debounce", func(t *testing.T) {
-		redirectSoftSliceDirs(t)
+		redirectLogicalSliceDirs(t)
 		drv := newFakeMigDriver()
 		// A single marker-less orphan on an otherwise-empty card.
 		drv.seedLive(testGPUUUID0, migInstance{GiID: 2, CiID: 2, ComputeSlices: 1, Placement: migPlacement{2, 2}, UUID: "MIG-orphan"})

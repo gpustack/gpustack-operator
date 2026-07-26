@@ -472,16 +472,16 @@ func TestResourceServer_GetListAndWatch_CrossModeWithhold(t *testing.T) {
 
 // TestResourceServer_GetListAndWatch_PerCardSlicedTokens verifies each family's token pool is
 // sized per card from that card's own capability, on a node mixing both card populations: the
-// logical pool covers the soft cards only, sized by each one's LogicalSliced.Count, and the
+// logical pool covers the logically sliceable cards only, sized by each one's LogicalSliced.Count, and the
 // partition pool covers the MIG card only, sized by its PhysicalSliced.Count. The whole-card
-// families cover the soft cards and skip the MIG card.
+// families cover the logical cards and skip the MIG card.
 func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 	const nodeName = "node-pc"
-	soft0 := Resource{Group: "grp-0", Device: "soft-0"}
-	soft1 := Resource{Group: "grp-0", Device: "soft-1"}
+	logical0 := Resource{Group: "grp-0", Device: "logical-0"}
+	logical1 := Resource{Group: "grp-0", Device: "logical-1"}
 	mig := Resource{Group: "grp-0", Device: "mig-0"}
 
-	// Two soft cards (128 slices each) + one MIG card (7 physical instances): each card's own
+	// Two logical cards (128 slices each) + one MIG card (7 physical instances): each card's own
 	// per-card capability sizes its token pool independently.
 	newFmt := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
@@ -490,8 +490,8 @@ func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 				ID:           "grp-0",
 				Manufacturer: nodefeature.ManufacturerNVIDIA,
 				Accelerators: []workercore.Accelerator{
-					{ID: "soft-0", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
-					{ID: "soft-1", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
+					{ID: "logical-0", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
+					{ID: "logical-1", Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: 128}}},
 					{ID: "mig-0", Status: workercore.AcceleratorStatus{PhysicalSliced: workercore.AcceleratorPhysicalSliced{Count: 7}}},
 				},
 			}},
@@ -507,11 +507,11 @@ func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 		}
 	}
 
-	t.Run("logical pool covers the soft cards only", func(t *testing.T) {
+	t.Run("logical pool covers the logically sliceable cards only", func(t *testing.T) {
 		resp, err := server(newFmt, workercore.DeviceAllocationModeSliced).getListAndWatchResponse(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, 128, cardTokenCount(resp, soft0), "soft card advertises LogicalSliced.Count tokens")
-		assert.Equal(t, 128, cardTokenCount(resp, soft1), "soft card advertises LogicalSliced.Count tokens")
+		assert.Equal(t, 128, cardTokenCount(resp, logical0), "logical card advertises LogicalSliced.Count tokens")
+		assert.Equal(t, 128, cardTokenCount(resp, logical1), "logical card advertises LogicalSliced.Count tokens")
 		assert.Zero(t, cardTokenCount(resp, mig), "a MIG card serves no logical slice")
 	})
 
@@ -519,14 +519,14 @@ func TestResourceServer_GetListAndWatch_PerCardSlicedTokens(t *testing.T) {
 		resp, err := server(newFmt, workercore.DeviceAllocationModePartitioned).getListAndWatchResponse(context.Background())
 		require.NoError(t, err)
 		assert.Equal(t, 7, cardTokenCount(resp, mig), "MIG card advertises PhysicalSliced.Count tokens")
-		assert.Zero(t, cardTokenCount(resp, soft0), "an unpartitioned card serves no partition")
-		assert.Zero(t, cardTokenCount(resp, soft1), "an unpartitioned card serves no partition")
+		assert.Zero(t, cardTokenCount(resp, logical0), "an unpartitioned card serves no partition")
+		assert.Zero(t, cardTokenCount(resp, logical1), "an unpartitioned card serves no partition")
 	})
 
 	t.Run("exclusive mode ignores the sliced count and skips the mig card", func(t *testing.T) {
 		resp, err := server(newFmt, workercore.DeviceAllocationModeExclusive).getListAndWatchResponse(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, 1, cardTokenCount(resp, soft0), "exclusive advertises one token per card")
+		assert.Equal(t, 1, cardTokenCount(resp, logical0), "exclusive advertises one token per card")
 		assert.Zero(t, cardTokenCount(resp, mig), "a MIG card serves no whole-card claim")
 	})
 }
@@ -548,7 +548,7 @@ func cardWithCapability(id string, index uint32, logicalCount, physicalCount int
 // TestResourceServer_GetListAndWatch_TokenSetPerCardState pins the token pool every mode
 // advertises for every card state. Each family draws only from the card population that can
 // physically serve it: an unpartitioned card advertises the whole-card families and a logical
-// slice pool sized by its own soft slice count, while a card in a partitioning mode advertises
+// slice pool sized by its own logical slice count, while a card in a partitioning mode advertises
 // nothing but its partition pool. Visibility is advertised on every card whatever its state, so
 // a sidecar can always co-allocate the card its workload holds.
 func TestResourceServer_GetListAndWatch_TokenSetPerCardState(t *testing.T) {
@@ -567,7 +567,7 @@ func TestResourceServer_GetListAndWatch_TokenSetPerCardState(t *testing.T) {
 			want: map[workercore.DeviceAllocationMode]int{
 				workercore.DeviceAllocationModeExclusive: 1,
 				workercore.DeviceAllocationModeShared:    nodefeature.SharedResourceMaxSize,
-				// The logical pool is sized by the card's own soft slice count.
+				// The logical pool is sized by the card's own logical slice count.
 				workercore.DeviceAllocationModeSliced: 128,
 				// A card that is not partitioned serves no partition claim.
 				workercore.DeviceAllocationModePartitioned: 0,
@@ -1525,7 +1525,7 @@ func nodeFixture(objs ...ctrlcli.Object) ctrlcli.WithWatch {
 // TestResourceServer_Allocate_Partitioned verifies the partition branch end to end: the plugin
 // chooses the card, the actuator's placement is folded into the allocation annotation (the
 // ledger's occupied source), and the actuator's response — the partition UUID env, no
-// soft-slice artifacts — is returned in place of the soft responder's.
+// logical-slice artifacts — is returned in place of the logical-slice responder's.
 func TestResourceServer_Allocate_Partitioned(t *testing.T) {
 	const nodeName = "node-partition"
 	const profile = "1g.10gb"
@@ -2103,7 +2103,7 @@ func TestResourceServer_GetListAndWatch_Sliced(t *testing.T) {
 		wantLen      int
 	}{
 		{
-			name:         "nvidia soft cards advertise cards x logical count",
+			name:         "nvidia logical cards advertise cards x logical count",
 			logicalCount: 128,
 			wantLen:      2 * 128,
 		},
