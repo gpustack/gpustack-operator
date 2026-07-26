@@ -59,10 +59,21 @@ Instances also occupy **hardcoded placement slots**. Because A100 and H100 share
 layout, the legal `start:size` positions (in memory-slice units) are identical across the two — only the GB
 per slice differs. A combination is legal only when the occupied slot intervals do not overlap:
 
-- size 1 (`1g.5gb` / `1g.10gb`) — any start 0–6
-- size 2 (`1g.10gb` / `2g.10gb` on A100; `1g.20gb` / `2g.20gb` on H100) — starts 0/2/4/6
-- size 4 (`3g.20gb` / `4g.20gb` on A100; `3g.40gb` / `4g.40gb` on H100) — starts 0 or 4
+- size 1 (`1g.5gb` on A100; `1g.10gb` on H100) — any start 0–6
+- size 2, the `1g` profiles (`1g.10gb` on A100; `1g.20gb` on H100) — starts 0/2/4/6
+- size 2, the `2g` profiles (`2g.10gb` on A100; `2g.20gb` on H100) — starts 0/2/4
+- size 4, the `3g` profiles (`3g.20gb` on A100; `3g.40gb` on H100) — starts 0 or 4
+- size 4, the `4g` profiles (`4g.20gb` on A100; `4g.40gb` on H100) — start 0 only
 - size 8 (`7g.40gb` / `7g.80gb`) — start 0
+
+**A profile's slot count is its "max instances/card" from the tables above** — read that column as the
+length of its placement list, which is what makes the two consistent.
+
+**Two profiles covering the same memory slices do not always get the same placement freedom.** A `4g`
+covers four slices exactly as a `3g` does, yet is offered only the one slot; a `2g` covers two exactly
+as the same-size `1g` does, yet is offered three slots to its four. The practical consequence is that a
+live instance can remove slots from profiles other than its own: a `3g` at slots 0–3 takes the card's
+only `4g` slot with it, while still leaving room for a second `3g` at 4–7.
 
 The per-card `Devices` ledger reports each MIG card's profile inventory as static per-profile *counts* (the
 maximum instances of each profile the card could host) and, per profile, a **placement-aware `Remaining`**
@@ -479,7 +490,7 @@ $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(se
   "nvidia.com/gpu.partitioned.mig-1g.20gb": "30",
   "nvidia.com/gpu.partitioned.mig-2g.20gb": "22",
   "nvidia.com/gpu.partitioned.mig-3g.40gb": "16",
-  "nvidia.com/gpu.partitioned.mig-4g.40gb": "8",
+  "nvidia.com/gpu.partitioned.mig-4g.40gb": "7",
   "nvidia.com/gpu.partitioned.mig-7g.80gb": "7",
   "nvidia.com/gpu.partitioned.units": "12800k"
 }
@@ -495,12 +506,13 @@ node, so publishing bare *remaining* would subtract each live instance twice:
 | `1g.20gb` | `7 × 4 = 28` | slots `{4,2}`, `{6,2}` → 2 | **30** |
 | `2g.20gb` | `7 × 3 = 21` | slot `{4,2}` → 1 | **22** |
 | `3g.40gb` | `7 × 2 = 14` | 1 allocated + 1 remaining | **16** |
+| `4g.40gb` | `7 × 1 = 7` | its one slot is taken → 0 | **7** |
 | `7g.80gb` | `7 × 1 = 7` | needs all 8 slices → 0 | **7** |
 
 Read the `3g.40gb` row as `allocated (1) + remaining (1)`: the scheduler subtracts `mig-demo`'s own
-request of 1 and correctly sees **one** more fitting on that card. The `7g.80gb` row lost exactly the
-carved card. `mig-4g.40gb` still reads 8 because a `4g.40gb` and the live `3g.40gb` both occupy slots
-0–3 — the key counts allocated + remaining, and the carved card contributes its 1 as *allocated*.
+request of 1 and correctly sees **one** more fitting on that card. `7g.80gb` and `4g.40gb` each lost
+exactly the carved card, while `3g.40gb` lost nothing at all — [2.5](#25-where-those-numbers-come-from)
+walks why, one profile at a time.
 
 Deleting the Pod releases the credits immediately; the operator then destroys the compute instance and
 the GPU instance, and the profile keys restore within one reclaim cycle.
@@ -508,6 +520,64 @@ the GPU instance, and the profile keys restore within one reclaim cycle.
 > **Do not re-request the freed slot instantly.** The accounting frees on Pod deletion while the
 > hardware is destroyed on the reclaimer's debounce, so a same-profile replacement submitted in that gap
 > can be handed an instance that is about to disappear — see [Limitations](#limitations).
+
+#### 2.5 Where those numbers come from
+
+Four kinds of number on this page count that one carved card, and they do not agree — deliberately.
+Walking the arithmetic once makes the rest of the page read cleanly.
+
+**Per card it is interval overlap, nothing more.** A profile may only start at one of its hardcoded
+slots, and the slot count *is* its per-card maximum ([Supported profiles](#supported-profiles)). An
+instance still fits when its slot's interval overlaps nothing already taken — no device access and no
+driver call, just intervals:
+
+```text
+the carved card's 8 memory slices
+
+  [0][1][2][3]  taken by the live 3g.40gb          [4][5][6][7]  free
+```
+
+Every profile is then re-counted against that one occupied interval:
+
+| Profile | Slot size | Legal starts | Blocked by the live `3g.40gb` | Still free | Adds to *that profile's* key |
+|---|---|---|---|---|---|
+| `1g.10gb` | 1 | 0 1 2 3 4 5 6 | 0, 1, 2, 3 | 4, 5, 6 | 3 |
+| `1g.20gb` | 2 | 0 2 4 6 | 0, 2 | 4, 6 | 2 |
+| `2g.20gb` | 2 | 0 2 4 | 0, 2 | 4 | 1 |
+| `3g.40gb` | 4 | 0 4 | — (start 0 *is* the live one) | 4 | 1 allocated + 1 free |
+| `4g.40gb` | 4 | 0 | 0 | — | 0 |
+| `7g.80gb` | 8 | 0 | 0 | — | 0 |
+
+Two rows are worth reading twice. `2g.20gb` has three slots, not four, so it loses its last one to a
+`3g` that a `1g.20gb` survives. And `4g.40gb` contributes **0 allocated**, not 1: the ledger keys an
+allocation by the profile actually built, which is `3g.40gb`.
+
+**The four numbers, and what each one sums.** Take the whole node — seven untouched cards plus the
+carved one:
+
+| Number | Value here | Sums, over the node's partitioned cards | Why that shape |
+|---|---|---|---|
+| `…partitioned.mig-<profile>` | the table above | that profile's `allocated + remaining` | the scheduler subtracts the node's existing requests, so the key must include them |
+| `nvidia.com/gpu.partitioned` | `53` | `allocated +` the card's **largest** per-profile free count | one pool key for the family, same scheduler-fit reason |
+| `InstanceType` `PT` remaining | `52` | that largest free count alone, **no allocated term** | a user-facing "how many more can I start" |
+| `InstanceType` `PT` onceMaxRequest | `7` | **max** over cards, not a sum | one request builds one instance on one card, so the freest card bounds it |
+
+`53` and `52` differ by exactly the one live instance — the pool key carries it, the user-facing view
+does not. And `7` is not `52` because no single request could ever consume the node's whole remainder.
+
+**A card's contribution is a maximum, never a sum.** To those last three numbers the carved card
+contributes `3` — not `3 + 2 + 1 + 1 = 7`. Its profiles compete for the same physical slices, so
+creating an instance of one consumes placements of the others, and adding them would count the same
+hardware several times over. The largest per-profile free count is the honest answer to "how many more
+instances can this card host": three `1g.10gb`, or fewer larger ones instead — never both.
+
+**The capability snapshot does not move at all.** `status.detail.slicedDetail` on the `InstanceType`
+still reports `physical.count: 56` and `4g.40gb: 8` after the carve, unchanged from
+[step 2.2](#22-the-whole-node-changes-families). It is derived only from the `Devices` **spec** — the
+detector's record of what these cards could host when empty — and never reads the runtime ledger. Every
+number in the table above is instead a join of that spec capability with the `Devices` **status**
+ledger. Use `slicedDetail` to answer "what is this pool made of", and the node keys or the `PT` view to
+answer "what is still free". Reading the capability as a remainder is the easiest mistake to make here.
 
 ### 3. Mixed — part logical, part physical
 

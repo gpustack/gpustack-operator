@@ -1,6 +1,6 @@
 # Spec: Split Logical and Physical Slicing into Distinct Resource Families
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -477,10 +477,18 @@ containers only — covers whichever group holds the claims.
 from partitioned cards only, while `EX`, `SH` and `SL` are computed from unpartitioned cards only. `PT`'s
 `OnceMaxRequest` is a per-card maximum like `SL`'s, since a partition request is single-card. The table
 column becomes `Accelerator(EX/SH/SL/PT)` with four `onceMaxRequest/remaining` groups.
+
+The view has one consumer beyond the CRD: the worker gateway's fleet aggregate **hand-mirrors**
+`InstanceTypeStatus`'s resource views field by field instead of embedding them, and no generator maintains
+that mirror. An additive view is therefore not a compile error there — it is simply never ingested, summed
+or served, and a partitioned pool reads fleet-wide as having no requestable accelerator at all. The fourth
+view has to be carried through the mirror in the same change, and the mirror needs a guard so the next one
+cannot be forgotten.
 *Accept:* on a logical-only pool `PT` reads `0/0` and `SL` is unchanged from today; on a partition-only
 pool `SL`, `EX` and `SH` read `0/0` and `PT` reflects the partition instances; on a mixed pool each card
 contributes to exactly one of the two; the partition view does not collapse to zero after the first small
-allocation; `kubectl get instancetypes` prints the four-group column.
+allocation; `kubectl get instancetypes` prints the four-group column; the fleet aggregate carries `PT`
+through every level it carries the other three, and a test fails if the two field sets ever diverge.
 
 **F8 — the conflation's special cases become population predicates, not deletions.**
 One set of per-card population predicates is added first, and the four places that each answer "which cards
@@ -909,10 +917,17 @@ pkg/worker/webhooks/worker/
 pkg/worker/extensionapis/worker/instance_type.go   # Accelerator(E/S/P) → Accelerator(EX/SH/SL/PT) column
 pkg/worker/kuberess/apps_kueue.go                  # fourth transformation; key helpers
 
+pkg/workergateway/service/
+  types.go, helper.go           # the fleet aggregate hand-mirrors InstanceTypeStatus's resource views, so
+                                # the fourth view is carried and summed here too, and the mirror gains a
+                                # field-set guard (F7)
+
 deploy/gpustack-operator/chart/templates/device-manager/daemonset.yaml   # comment wording
 pack/gpustack-operator/{Dockerfile,external/*/build-*.sh}               # comment wording
-docs/{architecture.md,walkthrough.md,operation/nvidia-mig.md}, README.md # keys + vocabulary
+docs/{architecture.md,walkthrough.md,operation/nvidia-mig.md}, README.md # keys + vocabulary; architecture
+                                # also gains the gateway mirror and its aggregation sites
 .claude/skills/gpustack-operator-e2e/cases/*.sh, .claude/skills/_e2e-lib/scripts/teardown.sh
+.claude/skills/gpustack-operator-generate/SKILL.md   # the hand-written mirrors the generator does not update
 ```
 
 ### Code Style
