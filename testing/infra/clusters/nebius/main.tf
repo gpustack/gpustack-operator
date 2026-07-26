@@ -16,6 +16,52 @@ locals {
   cluster_name = "${var.name_prefix}-${random_string.suffix.result}"
   context_name = local.cluster_name
 
+  # Node preparation for a GPU node group. The managed GPU image ships two things GPUStack must not
+  # compete with: a vendor device plugin as a STATIC Pod (it advertises the same accelerator resource
+  # the GPUStack device plugin does, and cannot be removed with `kubectl delete` because the kubelet
+  # owns it), and a DCGM telemetry service holding driver handles that make a MIG mode switch fail.
+  #
+  # This runs as a boot-time unit rather than a one-shot cloud-init command, for two reasons: the
+  # static manifest is written by the node bootstrap, which has not necessarily finished when
+  # cloud-init runs; and the provider reboots a node whose GPU health check fails — which putting a
+  # card into MIG mode is enough to cause — so anything merely stopped would come back.
+  gpu_node_prep = <<-EOT
+    write_files:
+      - path: /usr/local/sbin/gpustack-node-prep.sh
+        permissions: "0755"
+        content: |
+          #!/usr/bin/env bash
+          # Idempotent, and re-applied on every boot.
+          set -u
+          disabled=/etc/kubernetes/manifests.disabled
+          mkdir -p "$disabled"
+          shopt -s nullglob
+          # Wait out the node bootstrap: the manifests directory may not be populated yet.
+          for _ in $(seq 1 60); do
+            found=(/etc/kubernetes/manifests/*device-plugin*.yaml /etc/kubernetes/manifests/*device_plugin*.yaml)
+            if [ $${#found[@]} -gt 0 ]; then
+              mv -f "$${found[@]}" "$disabled"/
+              break
+            fi
+            sleep 10
+          done
+          systemctl disable --now nvidia-dcgm nvidia-dcgm-exporter 2>/dev/null || true
+      - path: /etc/systemd/system/gpustack-node-prep.service
+        content: |
+          [Unit]
+          Description=Disable the vendor device plugin and DCGM so GPUStack owns the accelerators
+          After=network-online.target
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/usr/local/sbin/gpustack-node-prep.sh
+          [Install]
+          WantedBy=multi-user.target
+    runcmd:
+      - [ systemctl, daemon-reload ]
+      - [ systemctl, enable, --now, gpustack-node-prep.service ]
+  EOT
+
   node_groups = merge(
     {
       cpu = {
@@ -156,15 +202,19 @@ resource "nebius_mk8s_v1_node_group" "this" {
       security_groups   = [{ id = nebius_vpc_v1_security_group.this.id }]
     }]
 
-    cloud_init_user_data = <<-EOT
-      #cloud-config
-      users:
-        - name: ubuntu
-          sudo: ALL=(ALL) NOPASSWD:ALL
-          shell: /bin/bash
-          ssh_authorized_keys:
-            - "${trimspace(file(pathexpand(var.ssh_public_key)))}"
-    EOT
+    cloud_init_user_data = join("\n", compact([
+      <<-EOT
+        #cloud-config
+        users:
+          - name: ubuntu
+            sudo: ALL=(ALL) NOPASSWD:ALL
+            shell: /bin/bash
+            ssh_authorized_keys:
+              - "${trimspace(file(pathexpand(var.ssh_public_key)))}"
+      EOT
+      ,
+      each.value.gpu != null ? local.gpu_node_prep : "",
+    ]))
 
     gpu_settings = each.value.gpu != null ? {
       drivers_preset = each.value.gpu.drivers_preset

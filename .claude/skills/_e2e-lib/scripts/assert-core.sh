@@ -25,14 +25,21 @@ else
   record FAIL "worker rollout" "$WORKER not Available within 300s"
 fi
 
-# 2. The RUNNING binary is built from HEAD (not a stale cached image). The image
-#    label can claim HEAD while the embedded binary is an older cached build.
+# 2. The RUNNING binary is built from HEAD (not a stale cached image). This asks
+#    the binary itself rather than comparing image references, which is what makes
+#    it survive a same-tag rebuild: the kubelet matches a cached ":dev" by name,
+#    not by digest, so the reference can be right while the bits are old.
 want=$(git rev-parse HEAD)
 got=$(kubectl -n "$NS" exec "$WORKER" -- gpustack-operator --version 2>/dev/null | grep -oiE '[0-9a-f]{40}')
 if [ -n "$got" ] && [ "$want" = "$got" ]; then
   record PASS "binary revision == HEAD" "$got"
 else
-  record FAIL "binary revision == HEAD" "running [${got:-none}] != HEAD [$want] — STALE IMAGE, rebuild+redeploy with a fresh TAG"
+  # Name the image the kubelet actually resolved. Without the digest a stale-image
+  # failure cannot be told apart from "the right tag, served from cache".
+  ref=$(kubectl -n "$NS" get pod "$WORKER" -o jsonpath='{.status.containerStatuses[0].image}' 2>/dev/null)
+  iid=$(kubectl -n "$NS" get pod "$WORKER" -o jsonpath='{.status.containerStatuses[0].imageID}' 2>/dev/null)
+  record FAIL "binary revision == HEAD" \
+    "running [${got:-none}] != HEAD [$want] — STALE IMAGE. Running ${ref:-<unknown>} (imageID ${iid:-<unknown>}); rebuild and redeploy with a fresh TAG, or pin the digest if the tag was reused"
 fi
 
 # 3. Aggregated extension APIs registered and Available. Poll — the aggregated
