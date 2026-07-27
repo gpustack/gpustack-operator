@@ -1315,11 +1315,14 @@ func TestDevicesReconciler_Reservation_PerContainer(t *testing.T) {
 	_, ok = r.reservedDevices("p1", "sshd")
 	assert.False(t, ok, "an unserved container must not inherit a sibling's reservation")
 
-	// The sidecar co-allocates a sibling's accelerator claim, never its own.
-	sidecarView, ok := r.reservedAcceleratorDevices("p1", "sshd")
+	// The sidecar co-allocates a sibling's accelerator claim, never its own, and the owner name
+	// reported alongside it is the very container those devices were read from — a caller that
+	// looks up a per-container record by owner must not read it against another one's cards.
+	sidecarView, owner, ok := r.reservedAcceleratorDevices("p1", "sshd")
 	require.True(t, ok, "the sidecar must see the pod's accelerator reservation")
+	assert.Equal(t, "init", owner, "the owner must be the container the devices were read from")
 	assert.Equal(t, "dev-0", sidecarView.Groups[0].Accelerators[0].ID)
-	_, ok = r.reservedAcceleratorDevices("p2", "sshd")
+	_, _, ok = r.reservedAcceleratorDevices("p2", "sshd")
 	assert.False(t, ok, "another pod's reservation must not leak")
 
 	// Releasing one container leaves the other alone; pruning the pod drops both.
@@ -1396,7 +1399,7 @@ func TestResourceServer_Allocate_RecordsReservation(t *testing.T) {
 	assert.Equal(t, "dev-0", got.Groups[0].Accelerators[0].ID)
 }
 
-// physicalActuatorResponder is a stubResponder that also implements PhysicalSlicedActuator,
+// physicalActuatorResponder is a stubResponder that also implements PhysicalSlicedResponder,
 // returning a canned partition allocation, so the server's physical-slice branch (detect →
 // actuate → fold placement → patch → return the actuator response) is tested without NVML.
 type physicalActuatorResponder struct {
@@ -2378,4 +2381,9 @@ func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 	})
 	require.Error(t, err, "visibility Allocate must fail closed when the request count exceeds the reserved device count")
 	assert.Nil(t, responder.gotAllocated, "the Responder must not be invoked on a count mismatch")
+	// The rejection reaches the user as a container-creation failure, so it must be diagnosable
+	// on its own: which pod, which container holds the accelerator, and which cards it holds.
+	assert.Contains(t, err.Error(), "default/p")
+	assert.Contains(t, err.Error(), workloadContainer)
+	assert.Contains(t, err.Error(), "grp-0:dev-0")
 }

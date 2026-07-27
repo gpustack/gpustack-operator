@@ -395,27 +395,45 @@ func (r *DevicesReconciler) reservedDevices(podUID types.UID, container string) 
 	return got.Allocated, ok
 }
 
-// reservedAcceleratorDevices returns the accelerator devices reserved for a pod by a container
-// other than self — what the SSH sidecar must co-allocate. Accelerator claims are confined to a
-// single container group, so a pod holds at most one such reservation and the answer is
-// unambiguous; the container names are still scanned in order so a pod that somehow holds
-// several resolves deterministically.
-func (r *DevicesReconciler) reservedAcceleratorDevices(podUID types.UID, self string) (workercore.DevicesStatus, bool) {
-	r.reservationsMutex.RLock()
-	defer r.reservationsMutex.RUnlock()
-	var (
-		found     workercore.DevicesStatus
-		foundName string
-	)
-	for k, v := range r.reservations {
-		if k.PodUID != podUID || k.Container == self {
+// pickAcceleratorOwner returns the container holding a pod's accelerator claim among candidates,
+// excluding self: the lexicographically smallest remaining name. Accelerator claims are confined
+// to a single container group, so a pod holds at most one such record and the answer is
+// unambiguous; the names are still compared so a pod that somehow holds several resolves to the
+// same container on every call, and every record source agrees on which one it is.
+func pickAcceleratorOwner(candidates []string, self string) (string, bool) {
+	var owner string
+	for _, name := range candidates {
+		if name == self {
 			continue
 		}
-		if foundName == "" || k.Container < foundName {
-			found, foundName = v.Allocated, k.Container
+		if owner == "" || name < owner {
+			owner = name
 		}
 	}
-	return found, foundName != ""
+	return owner, owner != ""
+}
+
+// reservedAcceleratorDevices returns the accelerator devices reserved for a pod by a container
+// other than self — what a visibility request co-allocates — along with the name of the container
+// they were read from, so a caller that must also resolve a per-container record keyed by owner
+// uses the same pick that produced the devices.
+func (r *DevicesReconciler) reservedAcceleratorDevices(
+	podUID types.UID, self string,
+) (workercore.DevicesStatus, string, bool) {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	var candidates []string
+	for k := range r.reservations {
+		if k.PodUID != podUID {
+			continue
+		}
+		candidates = append(candidates, k.Container)
+	}
+	owner, ok := pickAcceleratorOwner(candidates, self)
+	if !ok {
+		return workercore.DevicesStatus{}, "", false
+	}
+	return r.reservations[_ReservationKey{PodUID: podUID, Container: owner}].Allocated, owner, true
 }
 
 // reservationsFor returns every container reservation currently held for a pod, keyed by

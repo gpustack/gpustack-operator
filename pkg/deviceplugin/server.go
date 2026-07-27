@@ -913,7 +913,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	// no partition.
 	var physical *PhysicalSlicedAllocation
 	if profile != "" {
-		actuator, canActuate := s.Responder.(PhysicalSlicedActuator)
+		actuator, canActuate := s.Responder.(PhysicalSlicedResponder)
 		if !canActuate {
 			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
 			return nil, grpcstatus.Errorf(grpccodes.Internal,
@@ -1105,14 +1105,16 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	// Take the pod's accelerator reservation held by a container other than this sidecar: the
 	// sidecar co-allocates what the workload holds, and its own visibility request reserves
 	// nothing. Accelerator claims live in exactly one container group, so there is only one.
-	reserved, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, ctr.Name)
+	reserved, owner, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, ctr.Name)
 	if !ok || len(reserved.Groups) == 0 {
 		// Fail closed: the workload container's allocation has not been recorded yet (or was
 		// pruned). Returning an error rejects this admission rather than emitting an empty
 		// visible-devices env a runtime could read as "all devices". Because main is always
 		// allocated before sshd in the same pod, this path should not occur in practice; if it
 		// ever does, recovery is the controller recreating the Pod.
-		err = fmt.Errorf("no reserved devices for pod %s; refusing to grant visibility", kubemeta.GetNamespacedNameKey(pod))
+		err = fmt.Errorf("no accelerator devices reserved for pod %s by a container other than %q "+
+			"(owner=%q); refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), ctr.Name, owner)
 		s.Logger.Error(err, "visibility allocation without reservation")
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}
@@ -1139,12 +1141,14 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	// is not the sliced mode. No patchAllocatingPod/reserveDevices: visibility consumes no
 	// ledger units and holds no reservation of its own.
 	reservedCount := 0
+	var reservedCards []string
 	allocated := make(map[Resource]int32)
 	for i := range reserved.Groups {
 		grp := &reserved.Groups[i]
 		for j := range grp.Accelerators {
 			reservedCount++
 			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
+			reservedCards = append(reservedCards, res.String())
 			if _, ok := present[res]; !ok {
 				continue
 			}
@@ -1158,9 +1162,9 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	// degraded (or empty) visible-devices env a runtime could misread.
 	requestCount := len(ctrReq.GetDevicesIds())
 	if len(allocated) != reservedCount || reservedCount != requestCount {
-		err = fmt.Errorf("visibility reservation for pod %s does not match the request "+
-			"(reserved=%d, present=%d, requested=%d); refusing to grant visibility",
-			kubemeta.GetNamespacedNameKey(pod), reservedCount, len(allocated), requestCount)
+		err = fmt.Errorf("visibility reservation for pod %s held by container %q does not match the "+
+			"request (cards=%v, reserved=%d, present=%d, requested=%d); refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), owner, reservedCards, reservedCount, len(allocated), requestCount)
 		s.Logger.Error(err, "visibility allocation with mismatched or stale reservation")
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}

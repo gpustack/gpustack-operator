@@ -50,15 +50,15 @@ type (
 		) (*ContainerAllocateResponse, error)
 	}
 
-	// PhysicalSlicedActuator is an optional capability of a ContainerAllocateResponder that
-	// materializes a hardware GPU partition (e.g. an NVIDIA MIG instance) for a container
-	// carrying a "<base>.partitioned.<kind>-<profile>" request. The server invokes it — under
-	// the vendor's own per-card lock — on the card IT chose, after reserving that card and
-	// before patching the allocation annotation, so the placement actually taken is recorded
+	// PhysicalSlicedResponder is an optional capability of a ContainerAllocateResponder that
+	// owns a hardware GPU partition (e.g. an NVIDIA MIG instance): materializing it for a
+	// container carrying a "<base>.partitioned.<kind>-<profile>" request. The server invokes it
+	// — under the vendor's own per-card lock — on the card IT chose, after reserving that card
+	// and before patching the allocation annotation, so the placement actually taken is recorded
 	// upward (AllocatedPhysicalProfile / AllocatedPhysicalPlacements) for the reconciler's
 	// placement-aware ledger. A responder that does not implement it cannot serve partition
 	// requests.
-	PhysicalSlicedActuator interface {
+	PhysicalSlicedResponder interface {
 		ActuatePhysicalSliced(
 			context.Context,
 			*core.Pod,
