@@ -102,7 +102,8 @@ release note says so plainly.
 ### Goals
 
 - The SSH sidecar of a partition-backed Instance receives the identity of **its workload's partition**, not
-  the parent card, and nothing broader.
+  the parent card, not another tenant's partition, and nothing broader — including when several
+  same-shaped Instances are admitted to the node together.
 - The vendor responder can be asked, for a container that already holds a partition on a card, what that
   container's visible-devices response is — a contract that is explicit rather than inferred from a card map,
   and shaped so a vendor that injects **device nodes** instead of a `*_VISIBLE_DEVICES` env can answer it.
@@ -117,7 +118,8 @@ release note says so plainly.
 
 - Changing what the **workload** container receives; it is already correct.
 - Changing the visibility resource, its token pool, or the fact that visibility consumes no ledger units and
-  holds no reservation of its own.
+  holds no reservation of its own. T8 records that a visibility `Allocate` was answered for a container, but
+  that record names no device and costs no unit — it is an identification marker, not a reservation.
 - Giving the sidecar a *different* partition from its workload, or more than one.
 - Vendors with no hardware partitioning. Their visibility path is unchanged.
 - The confined-shell and SSH-server behavior of the sidecar itself.
@@ -282,9 +284,9 @@ that no longer exists.
   It does make an unresolvable identity a user-visible admission failure, so the error message must name the
   pod, the card and the owning container, and transient causes must be genuinely transient (kubelet retries
   container creation with backoff).
-- **A wrong-pod grant** is pre-existing and this spec does not close it, but the reason first recorded here —
-  that `getAllocatingPod`'s matching gates it — is **wrong for the visibility path**, and saying so mattered
-  enough that the correction is kept rather than quietly replaced. Nothing gates it. The workload path is
+- **A wrong-pod grant** is pre-existing, and the reason first recorded here — that `getAllocatingPod`'s
+  matching gates it — is **wrong for the visibility path**; saying so mattered enough that the correction is
+  kept rather than quietly replaced. Nothing gated it. **Closed by T8.** The workload path is
   protected by `SkipReserved`: a container whose own `Allocate` already reserved its cards is set aside, so
   the next call in a concurrent batch cannot re-pick it. Visibility deliberately opts out of that — it must
   re-find its own pod — **and reserves nothing of its own**, so no marker distinguishes a visibility container
@@ -299,11 +301,16 @@ that no longer exists.
   partition when both Instances landed on the same card; after it, the sidecar is granted precisely another
   tenant's partition and cannot see its own. Narrower, but no longer accidentally right.
 
-  Closing it needs a served-`(podUID, container)` set kept **separate** from `reservations` — reusing
-  `reserveDevices` would feed a visibility container into `reservedModeForResource`,
-  `reservedPhysicalOccupied` and `liveDeviceIDs`, corrupting the very per-card accounting those exist for —
-  so that visibility can take the `SkipReserved` semantics too, with the existing `reserved` bucket serving
-  replays exactly as it does for the workload path. Out of scope here; tracked as its own defect.
+  It is in scope after all — Goal 1 says the sidecar receives *its workload's* partition, and being handed
+  another workload's violates that same invariant on the concurrency axis. T8 closes it with a
+  granted-`(podUID, container)` set kept **separate** from `reservations`: reusing `reserveDevices` would
+  feed a visibility container into `reservedModeForResource`, `reservedPhysicalOccupied` and `liveDeviceIDs`,
+  corrupting the very per-card accounting those exist for.
+- **A device-manager restart between two pods' sidecar Allocates loses the grants**, so both retries can
+  resolve to the oldest pending pod again → the same exposure the reservation map already has, and narrower:
+  kubelet does not re-`Allocate` a container whose checkpoint it still holds, so only admissions in flight at
+  the instant of the restart are affected. Not closed; a durable record would have to be invented for a
+  container that, by design, owns nothing to record.
 
 ## Design Details
 
@@ -569,6 +576,49 @@ GetPhysicalSlicedVisibilityResponse(
       The only workload-path change this branch makes is the `allocatedCards` extraction and the responder
       type's rename, and the five partition cases that carve instances all passed, which exercises both.
 
+- [x] **T8 · Two sidecars admitted together get their own partitions**
+      Blocked by: T4, T7
+      Owns: `pkg/deviceplugin/controller.go`, `pkg/deviceplugin/server.go`, `pkg/deviceplugin/server_test.go`
+      Gate: review
+      Added after the end-of-build review, which found the wrong-pod grant this spec had recorded as
+      out of scope. It is not: T4 sharpened the failure from "another card, which happened to include my
+      partition" into "precisely another tenant's partition, and never my own", and Goal 1 covers it.
+      A `visibilityGrants` set on the reconciler, keyed by `(podUID, container)` exactly as `reservations`
+      is, records that a visibility `Allocate` was answered for a container. It stays **separate** from
+      `reservations` — an entry there would count in the per-card mode, occupancy and device-ID accounting
+      every reader of that map performs, for a container that holds no card. `_AllocationMatch` gains
+      `SkipGranted`, the visibility counterpart of `SkipReserved`, and `getAllocatingPod`'s
+      already-reserved bucket widens into an already-*claimed* one that both flags feed, so the
+      lost-checkpoint replay works identically for either. `allocateVisibility` takes the node allocate
+      mutex across identify→grant, the same section the workload `Allocate` runs under, and rolls the grant
+      back on every path that then rejects the admission, so kubelet's retry of that container resolves
+      back to it. The grant is pruned from the `Reconcile` live-pod sweep beside the reservations.
+      Acceptance: two same-shaped pending Pods, each with its workload container reserved on a card of its
+      own, resolve their sidecars to their own cards rather than both to the oldest Pod's; an all-granted
+      candidate set still replays the oldest instead of erroring; a rejected visibility Allocate leaves no
+      grant; grants are per container, revocable one at a time, and never outlive their pod.
+      Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/deviceplugin/...` then `make lint`
+
+      The two-Pod case was written against the pre-fix code first and reproduced the defect exactly — the
+      second sidecar was granted `dev-0`, the *first* Pod's card. `make test` 0 failures, `make lint` 0
+      issues.
+
+      Verified live as well, on a Kubernetes cluster with a MIG-capable NVIDIA node, against an image built
+      from this branch and deployed pinned by digest. Two SSH Instances of the same profile were applied in
+      one `kubectl apply` so their Pods were admitted together, and both landed on the **same physical
+      card** — the condition the defect needs:
+
+      ```
+      both 2/2 Running   a -> h100-80gb-hbm3:GPU-fcb261a8-4542-a28b-0731-f56cb6825a9c
+                         b -> h100-80gb-hbm3:GPU-fcb261a8-4542-a28b-0731-f56cb6825a9c
+      instance a         main=MIG-cc2a2490-ac6c-5243-b426-472c9c7600c4  sshd=MIG-cc2a2490-ac6c-5243-b426-472c9c7600c4
+      instance b         main=MIG-e3917d3c-4b35-551e-bdee-10ceb2e971f3  sshd=MIG-e3917d3c-4b35-551e-bdee-10ceb2e971f3
+      ```
+
+      Two distinct partitions on one card, each sidecar naming its own and carrying no `GPU-` card identity:
+      8 of 8 checks PASS. `case-28`, the single-Instance guard, was re-run afterwards and still PASSes, so
+      the grant and the mutex this task adds to that same path cost it nothing.
+
 ### Test Plan
 [ ] I/we understand the owners of the involved components may require updates to existing tests to make this
 code solid enough prior to committing the changes necessary to implement this enhancement.
@@ -587,7 +637,7 @@ code solid enough prior to committing the changes necessary to implement this en
   cases extend; `mig_test.go` already builds markers under a temp `OperatorPodsDir` against `fakeMigDriver`.
 
 #### Unit tests
-- `pkg/deviceplugin`: `2026-07-26` - `62.6%`
+- `pkg/deviceplugin`: `2026-07-27` - `65.2%`
 - `pkg/devicemanager/allocator/nvidia`: `2026-07-26` - `80.0%`
 - `pkg/worker/webhooks/worker`: `2026-07-27` - `78.9%` (T2 only)
 - `pkg/worker/controllers/worker`: `2026-07-27` - `63.3%` (T2 only)
@@ -621,6 +671,16 @@ T2 adds two more, on the pool-level predicates:
     message naming the missing capability, while one against a partitioned pool that does not offer the
     requested profile still gets the offered-set message (pins the guard to capability, not membership).
 
+T8 adds three, on the identification of the visibility container itself:
+
+13. Two same-shaped pending Pods, each with its workload container reserved on a card of its own → the two
+    sidecars' `Allocate` calls are served their **own** Pod's card, not both the oldest Pod's. Written
+    against the pre-fix code first, where it failed exactly as the defect describes.
+14. Both sidecars already granted → the search still answers, replaying the oldest (a kubelet that lost its
+    checkpoint must not face a permanently failed admission).
+15. A rejected visibility `Allocate` leaves no grant behind; grants are per container, revocable one at a
+    time, and pruned with their pod.
+
 #### Integration tests
 None. The repository has no tier between unit tests and e2e: the device-plugin gRPC surface is exercised by
 the unit tests against a fake client and fake responders, and by the e2e cases against a real kubelet.
@@ -633,6 +693,13 @@ the unit tests against a fake client and fake responders, and by the e2e cases a
   exclusion, placement arithmetic and reclaim.
 - Not covered by e2e, deliberately: the restart-between-Allocates path (T3), which needs a device-manager
   restart inside a sub-second admission window and is pinned by unit test 5 instead.
+- Not covered by a **committed** case, and still a gap: T8's two-sidecars-at-once scenario. No case admits
+  two same-shaped SSH Instances together, and `case-28` (one Instance) passes with or without the fix, so it
+  cannot stand in. T8 was verified live by a scratch script built on `_partition-lib.sh` — two concurrent
+  partition-backed SSH Instances on one node, asserting each sidecar's visible-devices env names its own
+  workload's `MIG-<uuid>` and that the two workloads hold distinct partitions. Promoting that script to a
+  case belongs with the partition family (the shape `case-29` already builds for two differing profiles,
+  run with identical ones).
 
 ## Alternatives
 

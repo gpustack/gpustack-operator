@@ -1338,6 +1338,40 @@ func TestDevicesReconciler_Reservation_PerContainer(t *testing.T) {
 	assert.False(t, ok, "no reservation may outlive its pod")
 }
 
+// TestDevicesReconciler_VisibilityGrant verifies the record that tells two pods' visibility
+// containers apart, which a reservation cannot: such a container takes no cards, so it never
+// records one. Grant→read, empty inputs are no-ops, a revoke frees one container without touching
+// its siblings, and pruning drops the grants of pods that are no longer live.
+func TestDevicesReconciler_VisibilityGrant(t *testing.T) {
+	r := &DevicesReconciler{}
+
+	// An empty UID or an empty container name is a no-op.
+	r.grantVisibility("", "sshd")
+	r.grantVisibility("p1", "")
+	assert.False(t, r.visibilityGranted("", "sshd"))
+	assert.False(t, r.visibilityGranted("p1", ""))
+
+	// Grant then read. The grant claims one container of one pod, nothing else.
+	r.grantVisibility("p1", "sshd")
+	assert.True(t, r.visibilityGranted("p1", "sshd"))
+	assert.False(t, r.visibilityGranted("p1", workloadContainer), "a grant must not claim a sibling container")
+	assert.False(t, r.visibilityGranted("p2", "sshd"), "a grant must not claim another pod")
+
+	// A revoked grant frees the container for the kubelet's retry of that same container.
+	r.grantVisibility("p2", "sshd")
+	r.revokeVisibility("p1", "sshd")
+	assert.False(t, r.visibilityGranted("p1", "sshd"))
+	assert.True(t, r.visibilityGranted("p2", "sshd"), "revoking one container must not free the others")
+
+	// A third pod coexists; pruning to a live set keeps it and drops the gone pod.
+	r.grantVisibility("p3", "sshd")
+	r.pruneVisibilityGrants([]string{"p3"})
+	assert.False(t, r.visibilityGranted("p2", "sshd"), "p2 must be pruned when no longer live")
+	assert.True(t, r.visibilityGranted("p3", "sshd"), "p3 must survive the prune")
+	r.pruneVisibilityGrants(nil)
+	assert.False(t, r.visibilityGranted("p3", "sshd"), "no grant may outlive its pod")
+}
+
 // TestResourceServer_Allocate_RecordsReservation verifies the workload Allocate records an
 // in-process reservation keyed by the pod UID, carrying the allocated device (ID + Index),
 // so the sidecar's visibility Allocate can co-allocate the same physical device.
@@ -2266,10 +2300,11 @@ func TestResourceServer_Allocate_Visibility_FailsClosed(t *testing.T) {
 		}).
 		Build()
 
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli} // no reservation
 	s := &ResourceServer{
 		Manufacturer:   nodefeature.ManufacturerNVIDIA,
 		AllocationMode: workercore.DeviceAllocationModeVisibility,
-		Reconciler:     &DevicesReconciler{NodeName: nodeName, Client: cli}, // no reservation
+		Reconciler:     rec,
 		Responder:      &recordingResponder{},
 	}
 
@@ -2279,6 +2314,10 @@ func TestResourceServer_Allocate_Visibility_FailsClosed(t *testing.T) {
 		}},
 	})
 	require.Error(t, err, "visibility Allocate must fail closed without a reservation")
+	// The grant taken to claim the container is rolled back, so the kubelet's retry of this very
+	// container resolves back to it instead of to another pod's sidecar.
+	assert.False(t, rec.visibilityGranted("pod-uid-v2", "sshd"),
+		"a rejected visibility Allocate must leave no grant behind")
 }
 
 // TestResourceServer_Allocate_Visibility_StaleReservation verifies the visibility Allocate
@@ -2378,6 +2417,73 @@ func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "default/p")
 	assert.Contains(t, err.Error(), workloadContainer)
 	assert.Contains(t, err.Error(), "grp-0:dev-0")
+}
+
+// TestResourceServer_Allocate_VisibilityDistinctPods verifies the grant that tells two pods'
+// sidecars apart. The Allocate RPC carries no pod identity, and a visibility container takes no
+// cards and so records no reservation, so a batch of same-shaped Pods — what Kueue admits together
+// — offers the search several indistinguishable candidates. Without a per-container claim every
+// one of their Allocates resolves to the oldest pending Pod, and the later sidecars are handed the
+// first Pod's card: with a partition-backed owner, another tenant's partition rather than their own.
+func TestResourceServer_Allocate_VisibilityDistinctPods(t *testing.T) {
+	const nodeName = "node-v7"
+
+	devs := &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{{ID: "dev-0", Index: 0}, {ID: "dev-1", Index: 1}},
+			}},
+		},
+	}
+	podA := sshVisibilityPod(nodeName, "pod-uid-a", slicedOwnerLimits, 1)
+	podA.Name = "a"
+	podB := sshVisibilityPod(nodeName, "pod-uid-b", slicedOwnerLimits, 1)
+	podB.Name = "b"
+	// podB is created after podA, so the "oldest pending" guess prefers podA for both sidecars.
+	podB.CreationTimestamp = meta.NewTime(podA.CreationTimestamp.Add(time.Second))
+
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(devs, podA, podB).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		Build()
+
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	// Each pod's workload Allocate has already landed, on a card of its own.
+	reserveWorkload(rec, "pod-uid-a", visibilityReservation("dev-0"))
+	reserveWorkload(rec, "pod-uid-b", visibilityReservation("dev-1"))
+
+	// allocate runs one sidecar's visibility Allocate and reports the card it was granted.
+	allocate := func() string {
+		t.Helper()
+		responder := &recordingResponder{}
+		s := &ResourceServer{
+			Manufacturer:   nodefeature.ManufacturerNVIDIA,
+			AllocationMode: workercore.DeviceAllocationModeVisibility,
+			Reconciler:     rec,
+			Responder:      responder,
+		}
+		_, err := s.Allocate(context.Background(), &AllocateRequest{
+			ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"visibility:0000"}}},
+		})
+		require.NoError(t, err)
+		require.Len(t, responder.gotAllocated, 1)
+		for res := range responder.gotAllocated {
+			return res.Device
+		}
+		return ""
+	}
+
+	assert.Equal(t, "dev-0", allocate(), "the first sidecar takes the oldest pod's card")
+	assert.Equal(t, "dev-1", allocate(), "the second sidecar must take its own pod's card, not the first pod's")
+	// Both are granted now: a kubelet that lost its checkpoint and asks again is still answered —
+	// replaying the oldest — rather than left with a permanently failed admission.
+	assert.Equal(t, "dev-0", allocate(), "an all-granted candidate set replays the oldest")
 }
 
 // slicedOwnerLimits is a workload container's logical-slice request — an owner that is NOT

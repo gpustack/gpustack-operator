@@ -84,14 +84,30 @@ type (
 		reservationsMutex sync.RWMutex
 		reservations      map[_ReservationKey]_Reservation
 
+		// visibilityGrants records which containers a visibility Allocate has already been
+		// answered for, keyed by pod UID AND container name. It is what tells two pods' visibility
+		// containers apart: such a container consumes no ledger units and therefore writes no
+		// reservation, so without this record nothing marks it as served and a batch of identical
+		// Pods would resolve every one of their visibility Allocates to the oldest pending pod —
+		// handing the second pod's container the first pod's devices, and with them the first
+		// pod's partition.
+		//
+		// It is deliberately NOT folded into reservations: a visibility container holds no card,
+		// and an entry there would count in the per-card mode, occupancy and device-ID accounting
+		// every reader of that map performs.
+		visibilityGrantsMutex sync.RWMutex
+		visibilityGrants      sets.Set[_ReservationKey]
+
 		// allocateMutex serializes the whole workload Allocate identify→cross-mode-check→reserve
-		// section for the node. All per-mode ResourceServers share this one reconciler, so a single
-		// node-wide mutex makes concurrent Allocates (e.g. a Kueue-admitted batch of identical Pods)
-		// run that section one at a time: the reservation each writes is visible before the next
-		// identifies its pod, so getAllocatingPod (skipping already-reserved pods) maps each Allocate
-		// to a distinct pod instead of all resolving to the oldest pending one, and no opposite-mode
-		// Allocate for the same card can interleave between the cross-mode check and the reservation
-		// write (TOCTOU). It is never held across the annotation patch (I/O).
+		// section for the node, and the visibility Allocate's identify→grant section. All per-mode
+		// ResourceServers share this one reconciler, so a single node-wide mutex makes concurrent
+		// Allocates (e.g. a Kueue-admitted batch of identical Pods) run that section one at a time:
+		// the claim each writes — a reservation, or a visibility grant — is visible before the next
+		// identifies its pod, so getAllocatingPod (skipping already-claimed containers) maps each
+		// Allocate to a distinct pod instead of all resolving to the oldest pending one, and no
+		// opposite-mode Allocate for the same card can interleave between the cross-mode check and
+		// the reservation write (TOCTOU). It is never held across the annotation patch (I/O), nor
+		// across the vendor calls that actuate or name a partition.
 		allocateMutex sync.Mutex
 	}
 )
@@ -199,8 +215,9 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// Drop reservations whose pod is gone (same live set the sliced working-dir GC uses).
+	// Drop the in-process claims whose pod is gone (same live set the sliced working-dir GC uses).
 	r.pruneReservations(livePodUIDs)
+	r.pruneVisibilityGrants(livePodUIDs)
 
 	r.notifiersMutex.Lock()
 	r.lastLivePodUIDs = livePodUIDs
@@ -395,6 +412,40 @@ func (r *DevicesReconciler) reservedDevices(podUID types.UID, container string) 
 	return got.Allocated, ok
 }
 
+// grantVisibility records that a visibility Allocate has been answered for one container, so the
+// next call in the same admission window resolves to a different one. Unlike reserveDevices it
+// stores no devices and notifies no listener: a visibility grant is a device-cgroup grant over the
+// cards its owner already holds, and takes nothing of its own. A no-op for an empty UID or an
+// empty container name.
+func (r *DevicesReconciler) grantVisibility(podUID types.UID, container string) {
+	if podUID == "" || container == "" {
+		return
+	}
+	r.visibilityGrantsMutex.Lock()
+	if r.visibilityGrants == nil {
+		r.visibilityGrants = sets.New[_ReservationKey]()
+	}
+	r.visibilityGrants.Insert(_ReservationKey{PodUID: podUID, Container: container})
+	r.visibilityGrantsMutex.Unlock()
+}
+
+// revokeVisibility drops the grant recorded for one container. It rolls back a grant taken before
+// a response that then could not be assembled: kubelet retries the same container, and a grant
+// left behind would make that retry resolve to another pod's visibility container instead.
+func (r *DevicesReconciler) revokeVisibility(podUID types.UID, container string) {
+	r.visibilityGrantsMutex.Lock()
+	r.visibilityGrants.Delete(_ReservationKey{PodUID: podUID, Container: container})
+	r.visibilityGrantsMutex.Unlock()
+}
+
+// visibilityGranted reports whether a visibility Allocate has already been answered for one
+// container.
+func (r *DevicesReconciler) visibilityGranted(podUID types.UID, container string) bool {
+	r.visibilityGrantsMutex.RLock()
+	defer r.visibilityGrantsMutex.RUnlock()
+	return r.visibilityGrants.Has(_ReservationKey{PodUID: podUID, Container: container})
+}
+
 // pickAcceleratorOwner returns the container holding a pod's accelerator claim among candidates,
 // excluding self: the lexicographically smallest remaining name. Accelerator claims are confined
 // to a single container group, so a pod holds at most one such record and the answer is
@@ -520,15 +571,37 @@ func (r *DevicesReconciler) pruneReservations(livePodUIDs []string) {
 	if len(r.reservations) == 0 {
 		return
 	}
-	live := sets.New[types.UID]()
-	for i := range livePodUIDs {
-		live.Insert(types.UID(livePodUIDs[i]))
-	}
+	live := livePodUIDSet(livePodUIDs)
 	for key := range r.reservations {
 		if !live.Has(key.PodUID) {
 			delete(r.reservations, key)
 		}
 	}
+}
+
+// pruneVisibilityGrants drops visibility grants for pods no longer in the live set, mirroring
+// pruneReservations: a grant cannot outlive its pod.
+func (r *DevicesReconciler) pruneVisibilityGrants(livePodUIDs []string) {
+	r.visibilityGrantsMutex.Lock()
+	defer r.visibilityGrantsMutex.Unlock()
+	if r.visibilityGrants.Len() == 0 {
+		return
+	}
+	live := livePodUIDSet(livePodUIDs)
+	for key := range r.visibilityGrants {
+		if !live.Has(key.PodUID) {
+			r.visibilityGrants.Delete(key)
+		}
+	}
+}
+
+// livePodUIDSet indexes a live pod-UID sweep for membership tests.
+func livePodUIDSet(livePodUIDs []string) sets.Set[types.UID] {
+	live := sets.New[types.UID]()
+	for i := range livePodUIDs {
+		live.Insert(types.UID(livePodUIDs[i]))
+	}
+	return live
 }
 
 const (
@@ -550,6 +623,11 @@ type _AllocationMatch struct {
 	// all matching the same oldest one. The visibility path leaves it false: it must re-find
 	// the pod whose workload container already holds a reservation.
 	SkipReserved bool
+	// SkipGranted is the visibility counterpart of SkipReserved: it drops a (pod, container)
+	// whose visibility Allocate was already answered. A visibility container takes no cards and
+	// so records no reservation, which leaves SkipReserved nothing to skip on — without this the
+	// visibility Allocates of a batch of identical Pods would all resolve to the oldest one.
+	SkipGranted bool
 	// Feasible, when set, drops a candidate this call cannot actually serve. It is the only
 	// disambiguator available for the request dimensions the RPC does not carry — a
 	// partition's profile, a slice's per-card units — which is how two pods differing only in
@@ -577,10 +655,11 @@ func (r *DevicesReconciler) getAllocatingPodWithRetry(
 
 // getAllocatingPod maps a kubelet Allocate/GetPreferredAllocation call to the container being
 // admitted, preferring the oldest Pending pod. Candidates are ranked rather than filtered: an
-// unreserved feasible container wins; failing that an unreserved but infeasible one (the
-// feasibility test disambiguates, it does not gate); failing that an already-reserved one, whose
-// allocation is then replayed instead of erroring — the containment for a kubelet that received
-// an AllocateResponse but died before checkpointing it.
+// unclaimed feasible container wins; failing that an unclaimed but infeasible one (the
+// feasibility test disambiguates, it does not gate); failing that an already-claimed one — one
+// holding a reservation, or one whose visibility grant was already issued — whose allocation is
+// then replayed instead of erroring, the containment for a kubelet that received an
+// AllocateResponse but died before checkpointing it.
 func (r *DevicesReconciler) getAllocatingPod(
 	ctx context.Context, match _AllocationMatch,
 ) (*core.Pod, *core.Container, error) {
@@ -603,20 +682,25 @@ func (r *DevicesReconciler) getAllocatingPod(
 		pod *core.Pod
 		ctr *core.Container
 	}
-	var feasible, infeasible, reserved []candidate
+	var feasible, infeasible, claimed []candidate
 
 	classify := func(pod *core.Pod, ctr *core.Container) {
 		if !containerRequests(ctr, match.ResourceName, match.Quantity) {
 			return
 		}
-		// A container whose own Allocate already reserved its cards is claimed: the
-		// reservation is the synchronous, cache-lag-free marker, so under allocateMutex the
-		// next call in a concurrent batch does not re-pick what the previous one just took.
+		// A container a previous Allocate already answered is claimed: the record it left —
+		// the reservation of the cards it took, or the grant of the visibility it was given —
+		// is the synchronous, cache-lag-free marker, so under allocateMutex the next call in a
+		// concurrent batch does not re-pick what the previous one just took.
 		if match.SkipReserved {
 			if _, ok := r.reservedDevices(pod.UID, ctr.Name); ok {
-				reserved = append(reserved, candidate{pod, ctr})
+				claimed = append(claimed, candidate{pod, ctr})
 				return
 			}
+		}
+		if match.SkipGranted && r.visibilityGranted(pod.UID, ctr.Name) {
+			claimed = append(claimed, candidate{pod, ctr})
+			return
 		}
 		if match.Feasible != nil && !match.Feasible(pod, ctr) {
 			infeasible = append(infeasible, candidate{pod, ctr})
@@ -648,12 +732,12 @@ func (r *DevicesReconciler) getAllocatingPod(
 			"resource", match.ResourceName, "candidates", len(infeasible),
 			"pod", ctrlcli.ObjectKeyFromObject(infeasible[0].pod), "container", infeasible[0].ctr.Name)
 		return infeasible[0].pod, infeasible[0].ctr, nil
-	case len(reserved) > 0:
-		logger.Info("every candidate container is already reserved; replaying the oldest one's "+
+	case len(claimed) > 0:
+		logger.Info("every candidate container was already answered; replaying the oldest one's "+
 			"allocation, which a kubelet that lost its checkpoint is asking for again",
-			"resource", match.ResourceName, "candidates", len(reserved),
-			"pod", ctrlcli.ObjectKeyFromObject(reserved[0].pod), "container", reserved[0].ctr.Name)
-		return reserved[0].pod, reserved[0].ctr, nil
+			"resource", match.ResourceName, "candidates", len(claimed),
+			"pod", ctrlcli.ObjectKeyFromObject(claimed[0].pod), "container", claimed[0].ctr.Name)
+		return claimed[0].pod, claimed[0].ctr, nil
 	}
 
 	return nil, nil, fmt.Errorf("cannot find pending pod with resource request %s=%s",

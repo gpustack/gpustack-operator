@@ -1123,16 +1123,20 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	// Do not skip reserved containers: visibility re-finds its own pod (whose owner container
-	// already recorded a reservation) to co-allocate the same physical device.
-	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
-		ResourceName: resName,
-		Quantity:     resQuantity,
-	})
+	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for visibility allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
 	}
+	// Everything below can still reject this admission, and kubelet retries the same container.
+	// Keep the grant only if one is actually issued, so the retry resolves back to this container
+	// rather than to another pod's.
+	granted := false
+	defer func() {
+		if !granted {
+			s.Reconciler.revokeVisibility(pod.UID, ctr.Name)
+		}
+	}()
 
 	// Take the accelerator allocation the pod holds in a container other than this one: a
 	// visibility request co-allocates what its owner holds and reserves nothing of its own.
@@ -1218,10 +1222,39 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	resp := &AllocateResponse{
 		ContainerResponses: []*ContainerAllocateResponse{ctrResp},
 	}
+	granted = true
 	s.Logger.Info("visibility allocate response",
 		"pod", kubemeta.GetNamespacedNameKey(pod),
 		"response", resp)
 	return resp, nil
+}
+
+// claimVisibilityContainer identifies the container a visibility Allocate is serving and records
+// the grant, under the node allocate mutex so the record is written before the next call in a
+// concurrent batch reads it (see DevicesReconciler.allocateMutex).
+//
+// Reserved containers are deliberately NOT skipped: visibility re-finds its own pod, whose owner
+// container already recorded a reservation. Already-granted ones are, and that is the whole reason
+// the grant exists — a batch of identical Pods offers the search several indistinguishable
+// visibility containers, and without a per-container claim every one of them resolves to the
+// oldest pending pod, granting the later ones the first pod's cards and, when its owner is
+// partition-backed, the first pod's partition.
+func (s *ResourceServer) claimVisibilityContainer(
+	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
+) (*core.Pod, *core.Container, error) {
+	s.Reconciler.allocateMutex.Lock()
+	defer s.Reconciler.allocateMutex.Unlock()
+
+	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
+		ResourceName: resName,
+		Quantity:     resQuantity,
+		SkipGranted:  true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	s.Reconciler.grantVisibility(pod.UID, ctr.Name)
+	return pod, ctr, nil
 }
 
 // visibilityResponse renders the visibility container's response over the cards its owner holds.
