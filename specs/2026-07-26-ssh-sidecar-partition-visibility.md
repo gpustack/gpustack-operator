@@ -1,6 +1,6 @@
 # Spec: SSH Sidecar Partition Visibility — give the sidecar its workload's partition, not the parent card
 
-Status: Built
+Status: Shipped
 Type: Bug fix
 
 ## Summary
@@ -101,9 +101,13 @@ release note says so plainly.
 
 ### Goals
 
-- The SSH sidecar of a partition-backed Instance receives the identity of **its workload's partition**, not
-  the parent card, not another tenant's partition, and nothing broader — including when several
-  same-shaped Instances are admitted to the node together.
+- The SSH sidecar of a partition-backed Instance receives a **partition identity**, never the parent card and
+  never a grant broader than one partition; and when several same-shaped Instances are admitted to the node
+  together, a **distinct** partition per sidecar rather than all of them the oldest Pod's. Binding a sidecar to
+  *its own* workload's partition rests on the same oldest-pending heuristic the workload path uses
+  (`getAllocatingPod`), because the device-plugin `Allocate` RPC carries no Pod identity; under a concurrent,
+  out-of-creation-order arrival two sidecars can still be swapped onto each other's partition — a bound this
+  path shares with the workload path and does not widen (see Risks and Open Questions).
 - The vendor responder can be asked, for a container that already holds a partition on a card, what that
   container's visible-devices response is — a contract that is explicit rather than inferred from a card map,
   and shaped so a vendor that injects **device nodes** instead of a `*_VISIBLE_DEVICES` env can answer it.
@@ -302,10 +306,17 @@ that no longer exists.
   tenant's partition and cannot see its own. Narrower, but no longer accidentally right.
 
   It is in scope after all — Goal 1 says the sidecar receives *its workload's* partition, and being handed
-  another workload's violates that same invariant on the concurrency axis. T8 closes it with a
+  another workload's violates that same invariant on the concurrency axis. T8 **narrows** it with a
   granted-`(podUID, container)` set kept **separate** from `reservations`: reusing `reserveDevices` would
   feed a visibility container into `reservedModeForResource`, `reservedPhysicalOccupied` and `liveDeviceIDs`,
-  corrupting the very per-card accounting those exist for.
+  corrupting the very per-card accounting those exist for. What T8 buys is that the two sidecars resolve to
+  **distinct** Pods instead of both to the oldest — not that each provably resolves to **its own**: the
+  `Allocate` RPC still carries no Pod identity, so the RPC→Pod binding stays the oldest-pending heuristic, and
+  a concurrent arrival out of creation order can still swap the two sidecars onto each other's partition. That
+  residual is exactly the bound the workload path already carries through the same `getAllocatingPod`; T8 does
+  not widen it, and closing it for good would take a cross-path Pod-identity correlation (see Open Questions).
+  The live two-Instance verification below passed because kubelet's real `Allocate` ordering matched creation
+  order.
 - **A device-manager restart between two pods' sidecar Allocates loses the grants**, so both retries can
   resolve to the oldest pending pod again → the same exposure the reservation map already has, and narrower:
   kubelet does not re-`Allocate` a container whose checkpoint it still holds, so only admissions in flight at
@@ -735,6 +746,13 @@ the unit tests against a fake client and fake responders, and by the e2e cases a
 - Does any non-NVIDIA vendor in the tree plan hardware partitioning? T-Head and Hygon are the candidates, and
   both inject device nodes rather than a visible-devices env — the contract is shaped for that, but the
   signature should be reviewed against the first real implementation before it is fixed by a shipped one.
+- Should the RPC→Pod binding be made exact rather than heuristic? The sidecar (and the workload) resolve their
+  Pod through `getAllocatingPod`'s oldest-pending guess only because the device-plugin `Allocate` RPC carries
+  no Pod identity; a concurrent out-of-creation-order arrival can still swap two same-shaped sidecars onto each
+  other's partition (see Risks). The kubelet **PodResources** API *does* expose the container→device mapping
+  after the fact, so a reconciliation against it would close the swap residual for the sidecar and the workload
+  path at once. Out of scope here — it touches the whole allocate path and needs its own cluster verification —
+  but worth its own spec.
 - ~~Is Pod deletion the only path that prunes an in-process reservation?~~ Answered in T3: yes for the prune
   sweep, and the three rollback releases cannot leave a startable container behind. The fallback ships
   ungated (see Risks).
