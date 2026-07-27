@@ -38,7 +38,7 @@ terraform apply -var='project_id=project-...'
 terraform output -raw ssh_command
 # ssh -i <ssh_private_key> ubuntu@<public_ip>
 
-terraform destroy   # no -var needed -- reuses the last apply's variables
+terraform destroy   # no -var needed -- project_id is carried across from the last apply
 ```
 
 The SSH source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed; the

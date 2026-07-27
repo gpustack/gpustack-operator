@@ -23,10 +23,42 @@ node groups, and point your local kubeconfig at it.
   `kubectl delete` cannot remove it), and DCGM holds driver handles that make a
   MIG mode switch fail. It runs on **every** boot, not just the first, because
   the provider reboots a node whose GPU health check fails — and putting a card
-  into MIG mode is by itself enough to fail that check.
+  into MIG mode is by itself enough to fail that check. DCGM is **masked**, not
+  merely disabled: it was observed running again hours after a clean disable,
+  pulled back in by the vendor's own units.
+- Turns off auto-repair for the `NebiusGPUError` node condition on every **GPU**
+  node group. See [MIG readiness](#mig-readiness) — without this, a partitioning
+  test shuts down the node it runs on.
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
   into `~/.kube/config` as a new context; on destroy it removes that
   context/cluster/user.
+
+## MIG readiness
+
+Putting a card into a hardware partitioning mode is enough, on its own, to fail
+the provider's GPU health check: its NVLink topology probe cannot read a
+partitioned card. The failure raises the `NebiusGPUError` node condition, and
+the **default auto-repair rule for that condition cordons the node and then
+shuts it down** — so a MIG test destroys the node it is running on. The first
+symptom is rarely the GPU: unrelated Pods start failing to create, because the
+node hosting a webhook went away.
+
+Two things make a node MIG-ready, and both are in the Terraform:
+
+- `auto_repair.conditions` names `NebiusGPUError` with `disabled = true` on GPU
+  node groups. The condition is still reported and still visible in
+  `kubectl describe node`; it is simply no longer node-fatal. Every other
+  auto-repair rule keeps its default.
+- `gpustack-node-prep.service` masks `nvidia-dcgm` / `nvidia-dcgm-exporter`,
+  which otherwise hold driver handles that make `nvidia-smi -mig 1` fail.
+
+Neither is reversed automatically. If you want the platform's GPU auto-repair
+back on a cluster you are done partitioning, drop the `auto_repair` block and
+re-apply.
+
+`nvidia-fabricmanager` is deliberately left running — MIG does not require it to
+be stopped, and stopping it breaks NVLink for whole-card workloads on the same
+node.
 
 ## Prerequisites
 
@@ -61,8 +93,17 @@ kubectl --context "$(terraform output -raw context_name)" get nodes
 kubectl --context "$(terraform output -raw context_name)" get nodes -o wide
 # ssh ubuntu@<ExternalIP> for any node
 
-terraform destroy   # no -var needed -- reuses the last apply's variables
+terraform destroy   # no -var needed -- project_id is carried across from the last apply
 ```
+
+A successful apply writes `.last-apply.auto.tfvars.json` holding **only**
+`project_id`, the one variable with no default, so a destroy (including a retry
+after an interrupted one) does not need it on the command line. Terraform
+auto-loads any `*.auto.tfvars.json`, on `apply` as readily as on `destroy`, so
+nothing that has a default is recorded there: a variable in that file silently
+overrides its own default on every later command in this directory, with nothing
+on the command line to hint at it. If you ever add to that snapshot, expect a
+plain `terraform apply` to keep rebuilding whatever shape it captured.
 
 The default `cpu_instance_types` (`cpu-e2`/`4vcpu-16gb`) and `gpu_instance_types`
 (a `h100` entry: `gpu-h100-sxm`/`1gpu-16vcpu-200gb`) provision one `cpu` node and

@@ -114,21 +114,22 @@ resource "nebius_compute_v1_instance" "this" {
   EOT
 }
 
-# Records the last SUCCESSFUL apply's inputs; Terraform auto-loads *.auto.tfvars.json on every
-# command (incl. destroy), and command-line -var still overrides it on apply. A managed
-# hashicorp/local local_file is not used here: it is deleted during destroy, which would strand
-# a failed/interrupted destroy retry with no values for project_id (a required variable).
+# Carries project_id — the one variable with no default — across a failed or interrupted destroy
+# retry. Terraform auto-loads *.auto.tfvars.json on every command (incl. destroy), and
+# command-line -var still overrides it on apply. A managed hashicorp/local local_file is not used
+# here: it is deleted during destroy, which is exactly when the value is still needed. A
+# destroy-time provisioner on this resource has the same defect: last_apply depends on the
+# instances, so it is destroyed FIRST, and the file would be gone before they were.
+#
+# Snapshot NOTHING that has a default. Auto-loading is indiscriminate — it feeds `apply` just as
+# readily as `destroy` — so a variable recorded here silently overrides its own default on every
+# later apply in this directory, with nothing on the command line to hint at it.
 resource "null_resource" "last_apply" {
   depends_on = [nebius_compute_v1_instance.this]
 
   triggers = {
     snapshot = jsonencode({
-      project_id        = var.project_id
-      name_prefix       = var.name_prefix
-      ssh_public_key    = var.ssh_public_key
-      instance_type     = var.instance_type
-      boot_disk_type    = var.boot_disk_type
-      boot_disk_size_gb = var.boot_disk_size_gb
+      project_id = var.project_id
     })
   }
 
