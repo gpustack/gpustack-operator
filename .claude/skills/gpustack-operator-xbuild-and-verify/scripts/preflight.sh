@@ -46,24 +46,24 @@ else
   fails=$((fails+1))
 fi
 
-# --- hardware checks (WARN only; needed for ASCEND-CASE 2/3) ---
+# --- hardware checks (WARN only; needed for ASCEND-CASE 2/3/4) ---
 if command -v npu-smi >/dev/null 2>&1; then
   n="$(npu-smi info 2>/dev/null | grep -cE '910|310|Ascend' || true)"
   row PASS "npu-smi" "present (chips matched: ${n})"
 else
-  row WARN "npu-smi" "absent — ASCEND-CASE 2/3 (hardware) unavailable"
+  row WARN "npu-smi" "absent — ASCEND-CASE 2/3/4 (hardware) unavailable"
 fi
 
 if docker info 2>/dev/null | grep -qiE 'Runtimes:.*ascend|Default Runtime: ascend'; then
   row PASS "ascend-runtime" "$(docker info 2>/dev/null | grep -i 'Default Runtime' | tr -s ' ')"
 else
-  row WARN "ascend-runtime" "ascend docker runtime not detected — ASCEND-CASE 2/3 need it"
+  row WARN "ascend-runtime" "ascend docker runtime not detected — ASCEND-CASE 2/3/4 need it"
 fi
 
 if ls /dev/davinci0 >/dev/null 2>&1; then
   row PASS "davinci-devices" "$(ls /dev/davinci[0-9]* 2>/dev/null | tr '\n' ' ')"
 else
-  row WARN "davinci-devices" "/dev/davinci* absent — ASCEND-CASE 2/3 need a real NPU"
+  row WARN "davinci-devices" "/dev/davinci* absent — ASCEND-CASE 2/3/4 need a real NPU"
 fi
 
 # --- NVIDIA hardware checks (WARN only; needed for NVIDIA-CASE 2/3) ---

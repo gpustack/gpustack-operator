@@ -1,7 +1,7 @@
 ---
 name: gpustack-operator-xbuild-and-verify
-description: "Build and verify the GPUStack Operator's accelerator logical-slicing **builder stages** (`xbuild-ascend-cann-*` and `xbuild-nvidia-cuda-*` in `pack/gpustack-operator/Dockerfile`) end to end, either on the local docker host or on a remote accelerator host over ssh. Builds one stage via buildx `--target`, then runs numbered cases against the produced runtime. SCOPE — two backends: **Ascend (vcann-rt: `libvruntime.so` + `enpu-monitor`)** and **NVIDIA (HAMi-core: `libvgpu.so`)**. Ascend cases: (1) artifacts+linking [no NPU], (2) inject + `enpu-monitor`, (3) memory-quota enforcement. NVIDIA cases: (1) artifacts+linking [no GPU], (2) single-card inject + `nvidia-smi`/SM-limit, (3) multi-card per-device limits. The hardware cases need a real accelerator. Proactively offer this whenever a branch changes the Docker build flow — `pack/gpustack-operator/Dockerfile` or `pack/gpustack-operator/external/(ascend|nvidia)/**`. Examples: \"verify my Dockerfile build-stage change\", \"did the vcann-rt / HAMi-core build still link\", \"test the logical-slicing build on the 910B / 4090 host\", \"does enpu-monitor still work in a container\", \"does nvidia-smi show the sliced memory\", \"prove the memory slice is enforced on real hardware\"."
-allowed-tools: "Read, AskUserQuestion, Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/preflight.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/build.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-1.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-2.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-3.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/nvidia-case-1.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/nvidia-case-2.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/nvidia-case-3.sh*), Bash(grep*), Bash(git diff*), Bash(git rev-parse*), Bash(ssh*), Bash(docker buildx*), Bash(docker images*), Bash(docker info*), Bash(command -v*)"
+description: "Build and verify the GPUStack Operator's accelerator logical-slicing **builder stages** (`xbuild-ascend-cann-*` and `xbuild-nvidia-cuda-*` in `pack/gpustack-operator/Dockerfile`) end to end, either on the local docker host or on a remote accelerator host over ssh. Builds one stage via buildx `--target`, then runs numbered cases against the produced runtime. SCOPE — two backends: **Ascend (vcann-rt: `libvruntime.so` + `enpu-monitor`)** and **NVIDIA (HAMi-core: `libvgpu.so`)**. Ascend cases: (1) artifacts+linking [no NPU], (2) inject + `enpu-monitor`, (3) memory-quota enforcement, (4) `npu-smi` slice visibility. NVIDIA cases: (1) artifacts+linking [no GPU], (2) single-card inject + `nvidia-smi`/SM-limit, (3) multi-card per-device limits. The hardware cases need a real accelerator. Proactively offer this whenever a branch changes the Docker build flow — `pack/gpustack-operator/Dockerfile` or `pack/gpustack-operator/external/(ascend|nvidia)/**`. Examples: \"verify my Dockerfile build-stage change\", \"did the vcann-rt / HAMi-core build still link\", \"test the logical-slicing build on the 910B / 4090 host\", \"does enpu-monitor still work in a container\", \"does nvidia-smi show the sliced memory\", \"why doesn't npu-smi show the Ascend slice\", \"prove the memory slice is enforced on real hardware\"."
+allowed-tools: "Read, AskUserQuestion, Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/preflight.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/build.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-1.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-2.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-3.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/ascend-case-4.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/nvidia-case-1.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/nvidia-case-2.sh*), Bash(bash .claude/skills/gpustack-operator-xbuild-and-verify/cases/nvidia-case-3.sh*), Bash(grep*), Bash(git diff*), Bash(git rev-parse*), Bash(ssh*), Bash(docker buildx*), Bash(docker images*), Bash(docker info*), Bash(command -v*)"
 model: sonnet
 ---
 
@@ -35,7 +35,8 @@ The remote host is **never hardcoded** — always ask the user for it.
 - **Never push images** — builds use `buildx --load` into the local/remote docker store only.
 - **Confirm before any remote build or container run** (they consume the host's accelerator/driver). Preflight and the build-artifact case (ASCEND-CASE 1 / NVIDIA-CASE 1) are safe once the user names the target.
 - **Touch only what the skill creates** — the `vcann-build:*` / `vgpu-build:*` image, `${XB_STAGE}` artifacts, `${XB_STAGE}/test` config/preload, the remote build context. Never modify the user's other resources.
-- **Hardware cases require a real accelerator** (local or the ssh host): ASCEND-CASE 2/3 need an NPU; NVIDIA-CASE 2 needs a GPU, NVIDIA-CASE 3 needs **≥ 2** GPUs. The two CASE-1 builds need only docker+buildx.
+- **Hardware cases require a real accelerator** (local or the ssh host): ASCEND-CASE 2/3/4 need an NPU; NVIDIA-CASE 2 needs a GPU, NVIDIA-CASE 3 needs **≥ 2** GPUs. The two CASE-1 builds need only docker+buildx.
+- **Never write the *host's* `/etc/ld.so.preload`** — every preload the cases install is scoped to a container (ASCEND-CASE 4 builds and preloads a throwaway dsmi interposer; it is a probe, never product code).
 
 ## Flow
 
@@ -65,6 +66,7 @@ The remote host is **never hardcoded** — always ask the user for it.
    XB_MODE=… XB_HOST=… bash .../cases/ascend-case-1.sh xbuild-ascend-cann-8-910b
    XB_MODE=… XB_HOST=… XB_NPU=0 bash .../cases/ascend-case-2.sh xbuild-ascend-cann-8-910b
    XB_MODE=… XB_HOST=… XB_NPU=0 XB_MEM=1024 bash .../cases/ascend-case-3.sh xbuild-ascend-cann-8-910b
+   XB_MODE=… XB_HOST=… XB_NPU=0 XB_MEM=1024 bash .../cases/ascend-case-4.sh xbuild-ascend-cann-8-910b
    # NVIDIA
    XB_MODE=… XB_HOST=… bash .../cases/nvidia-case-1.sh xbuild-nvidia-cuda-13
    XB_MODE=… XB_HOST=… XB_GPU=0  XB_MEM=4096 XB_SM=50 bash .../cases/nvidia-case-2.sh xbuild-nvidia-cuda-13
@@ -76,9 +78,10 @@ The remote host is **never hardcoded** — always ask the user for it.
 ### Ascend (`xbuild-ascend-cann-*`)
 | Case | Title | Needs NPU | Asserts |
 |---|---|---|---|
-| 1 | Build artifacts + linking | no | `libvruntime.so` (0644) + `enpu-monitor` (0755) exist; ELF arch == build platform; build linked (the `--allow-shlib-undefined` path); both `NEEDED` `libc_sec.so`+`libascendcl.so`; notes the weak UND `dcmi_*` syms |
+| 1 | Build artifacts + linking | no | `libvruntime.so` (0644) + `enpu-monitor` (0755) exist; ELF arch == build platform; build linked (the `--allow-shlib-undefined` path); both `NEEDED` `libc_sec.so` and **not** `libascendcl.so` (upstream dropped it at ubs-virt `476bb968` for a runtime `dlopen` — asserted in the negative as a revert tripwire); `libvruntime.so` defines the rt-layer interposition surface (80 rt-prefixed FUNCs, incl. 15 lowercase-s `rts*`) and **no** `dcmi_*`/`dsmi_*`, i.e. dcmi client not interposer; both carry weak UND `dcmi_*` syms (why libdcmi must be preloaded) |
 | 2 | Inject + enpu-monitor | yes | VDie-ID→`shm-id`; render `npu_info.config`; preload (libdcmi×2 + libvruntime); container `enpu-monitor` loads all 6 fields, initializes, and prints `Aicore Limit Quota`/`Memory Limit quota` matching the config |
 | 3 | Memory-quota enforcement | yes | injected HBM alloc capped at `memory-quota` (the `Out of memory! … quota:<bytes>` log); baseline (no inject) exceeds it |
+| 4 | npu-smi slice visibility | yes | `npu-smi` links `libdrvdsmi_host.so` and **neither** `libruntime.so` nor `libdcmi.so`, and is not setuid; vcann-rt's slice is invisible in `npu-smi` while `enpu-monitor` reports the quota (and, as an INFO row, whether it reports any utilization); a throwaway **dsmi** interposer *does* halve `npu-smi`'s HBM (`rewritten`) — the layer is the point; `hami-vnpu-core`, if staged at `XB_HAMI`, has the same blind spot while its hooked `rtMemGetInfoEx` reports the quota and enforces it (rows WARN-skip when unstaged) |
 
 ### NVIDIA (`xbuild-nvidia-cuda-*`)
 | Case | Title | Needs GPU | Asserts |
@@ -90,7 +93,9 @@ The remote host is **never hardcoded** — always ask the user for it.
 ## Env knobs
 `XB_MODE`/`XB_HOST` (runner); `XB_PLATFORM` (default from target arch); `XB_IMAGE`/`XB_WORKLOAD_IMAGE`;
 `XB_STAGE` (Ascend `/opt/enpu/vcann-rt` | NVIDIA `/opt/vgpu`); `XB_REMOTE_CTX` (remote build-context dir).
-- Ascend: `XB_NPU`/`XB_CHIP` (card/chip, default 0); `XB_VNPU` (0); `XB_AICORE` (20); `XB_MEM` (1024 MB).
+- Ascend: `XB_NPU`/`XB_CHIP` (card/chip, default 0); `XB_VNPU` (0); `XB_AICORE` (20); `XB_MEM` (1024 MB);
+  `XB_HAMI` (case 4 only — where a `hami-vnpu-core` `libvnpu.so`/`libvnpu-needed.so` is staged for
+  the comparison rows, default `/opt/hami-vnpu-core`; absent ⇒ those rows WARN-skip).
 - NVIDIA: `XB_GPU` (single-card index, 0); `XB_GPUS` (multi-card csv, `0,1`); `XB_MEM` (MiB, 4096);
   `XB_SM` (compute %, 50 / 30).
 
@@ -98,8 +103,10 @@ The remote host is **never hardcoded** — always ask the user for it.
 - `references/ascend-npu-info-config.md` — Ascend: the 6 config fields, VDie-ID→shm-id, allocator mapping.
 - `references/ascend-ld-preload-and-libdcmi.md` — Ascend activation via `/etc/ld.so.preload`; **why libdcmi must
   be preloaded** (weak dcmi syms); the `libc_sec`/CANN-image requirement.
-- `references/ascend-npu-smi-and-aicore.md` — Ascend: `npu-smi` shows the physical card; AICore-quota mechanism,
-  the benign CANN-8.5.0 warnings, the unverified-throttle gap.
+- `references/ascend-npu-smi-and-aicore.md` — Ascend: `npu-smi` shows the physical card, and **why** — the
+  three layers (`rt*` / `dcmi` / `dsmi`), the measured `npu-smi` → `libdrvdsmi_host.so` call chain, that a
+  **dsmi** interposer *does* rewrite `npu-smi` (and what it still cannot fix), the two in-container card-numbering
+  schemes; AICore-quota mechanism, the benign CANN-8.5.0 warnings, the unverified-throttle gap.
 - `references/nvidia-hami-core-vgpu.md` — NVIDIA: what `libvgpu.so` is, the env+mount injection contract, the
   one-CUDA-major-per-container rule, HAMi-core knobs.
 - `references/nvidia-smi-and-sm-limit.md` — NVIDIA: memory limit is directly visible in `nvidia-smi` (NVML
