@@ -18,9 +18,12 @@
 #     resolves the rt entry table itself (src/tools/monitor.c::load_rt_for_monitor).
 #     Asserted in the negative so a silent revert upstream is caught.
 #   - libvruntime.so defines the rt interposition surface (80 global rt-prefixed FUNCs
-#     at 476bb968 = 65 rt[A-Z] + 15 lowercase-s rts* STARS/RTS entries) and NO
-#     dcmi_*/dsmi_* definitions — it hooks the CANN runtime layer only and is a
-#     *client* of dcmi. See references/ascend-npu-smi-and-aicore.md.
+#     at 476bb968 = 65 rt[A-Z] + 15 lowercase-s rts* STARS/RTS entries) and no dcmi_*
+#     definition — it hooks the CANN runtime layer only and is a *client* of dcmi
+#   - libvruntime.so defines exactly one dsmi getter, dsmi_get_hbm_info: upstream defines
+#     none, and our vendored patch (external/ascend/vcann-rt/) adds it for the npu-smi
+#     slice view. A patch that silently stopped applying fails here.
+#     See references/ascend-npu-smi-and-aicore.md.
 #   - both carry WEAK UND dcmi_* symbols: that is why libdcmi must be preloaded at
 #     runtime (with nothing preloaded, enpu-monitor SIGSEGVs — ASCEND-CASE 2/4)
 #
@@ -90,8 +93,17 @@ else
                    || { row FAIL "libvruntime.so rt hooks defined" 0; fails=$((fails+1)); }
   # A numeric Ndx means defined; UND would mean merely called. WEAK/IFUNC included so a
   # weak *definition* of dcmi_*/dsmi_* cannot slip past (upstream already emits weak dcmi UNDs).
-  d=$(echo "$syms" | grep -cE "(FUNC|IFUNC) +(GLOBAL|WEAK) +DEFAULT +[0-9]+ (dcmi|dsmi)" || true)
-  [ "${d}" -eq 0 ] && row PASS "libvruntime.so defines no dcmi/dsmi" "0 (dcmi client, not interposer)" || { row FAIL "libvruntime.so defines no dcmi/dsmi" "${d}"; fails=$((fails+1)); }
+  d=$(echo "$syms" | grep -cE "(FUNC|IFUNC) +(GLOBAL|WEAK) +DEFAULT +[0-9]+ dcmi" || true)
+  [ "${d}" -eq 0 ] && row PASS "libvruntime.so defines no dcmi" "0 (dcmi client, not interposer)" || { row FAIL "libvruntime.so defines no dcmi" "${d}"; fails=$((fails+1)); }
+  # The dsmi side is no longer empty: our vendored patch defines exactly one getter, the
+  # npu-smi slice view. This assertion is how a patch that stopped applying gets caught —
+  # the library would build and ship, just without the feature.
+  # sort -u, not sort: upstream links with -s so .symtab is gone and each symbol appears
+  # once, but a build that stopped stripping would list it twice and fail this row for
+  # the wrong reason. A second, *different* dsmi symbol still fails, which is the point.
+  ds=$(echo "$syms" | grep -E "(FUNC|IFUNC) +(GLOBAL|WEAK) +DEFAULT +[0-9]+ dsmi" | awk '{print $NF}' | sort -u | tr '\n' ' ')
+  [ "${ds}" = "dsmi_get_hbm_info " ] && row PASS "libvruntime.so defines the patched dsmi getter" "${ds}(external/ascend/vcann-rt patch applied)" \
+                                     || { row FAIL "libvruntime.so defines exactly dsmi_get_hbm_info" "got: ${ds:-<none>}"; fails=$((fails+1)); }
 fi
 for f in "$LV" "$EM"; do
   w=$(readelf -sW "$f" 2>/dev/null | grep -cE "WEAK +DEFAULT +UND +dcmi" || true)

@@ -4,8 +4,10 @@
 #
 # Build the vcann-rt logical-slicing runtime (libvruntime.so + enpu-monitor) inside a
 # CANN base image. <src-dir> is the vcann-rt source tree (the Dockerfile stage clones
-# ubs-virt and passes its ubs-virt-enpu/vcann-rt subdir); the build products are
-# installed under:
+# ubs-virt and passes its ubs-virt-enpu/vcann-rt subdir), and the stage must also
+# bind-mount external/ascend/vcann-rt at /vcann-rt-patches, whose *.patch files are
+# applied to a copy of that tree before the build; the build products are installed
+# under:
 #   <out-dir>/lib/libvruntime.so
 #   <out-dir>/tools/enpu-monitor
 #
@@ -25,6 +27,21 @@ rm -rf "${work}"
 mkdir -p "${work}"
 cp -r "${src}/." "${work}/"
 cd "${work}"
+
+# Apply GPUStack's vendored patches to the pinned upstream source. The build stage
+# bind-mounts them here; the work copy above carries no .git, so the tool is `patch`,
+# not `git apply`. A missing mount or a rejected hunk aborts the build on purpose:
+# silently building an unpatched libvruntime.so would drop the npu-smi slice view
+# without anything failing.
+patches_dir="/vcann-rt-patches"
+patches=("${patches_dir}"/*.patch)
+if [ ! -d "${patches_dir}" ] || [ ! -f "${patches[0]}" ]; then
+    echo "[ERROR] no vendored patches under ${patches_dir}: the build stage must bind-mount pack/gpustack-operator/external/ascend/vcann-rt there." >&2
+    exit 1
+fi
+for p in "${patches[@]}"; do
+    patch -p1 --batch --forward <"${p}"
+done
 
 # vcann-rt links -ldcmi, but dcmi belongs to the host Ascend driver (HDK), which is
 # absent from the CANN toolkit image and only injected into the workload at runtime.

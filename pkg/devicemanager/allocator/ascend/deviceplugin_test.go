@@ -101,6 +101,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	// Env: the visible device index.
 	assert.Equal(t, "0", resp.Envs["ASCEND_VISIBLE_DEVICES"])
 	assert.Equal(t, "1", resp.Envs["ENPU_LOG_LEVEL"]) // quiet vcann-rt by default
+	assert.Equal(t, "1", resp.Envs["ENPU_DSMI_HOOK"]) // slice visible in npu-smi by default
 
 	// npu_info.config: aicore 10% (.sliced.cores-percentage), memory floor(65536*25%)=16384MiB.
 	podWorkDir := deviceplugin.PodWorkDir("pod-uid-1", "train")
@@ -160,6 +161,45 @@ func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing
 
 	_, injected := resp.Envs["ENPU_LOG_LEVEL"]
 	assert.False(t, injected, "must not override a container-declared ENPU_LOG_LEVEL")
+}
+
+// ENPU_DSMI_HOOK turns the npu-smi slice view on. The allocator injects the enabled
+// default, but a container that declares the variable owns it — whatever the value,
+// since the library, not the allocator, decides what a value means.
+func TestGetSlicedContainerAllocateResponse_DsmiHookEnv(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string // "" == the container declares nothing
+		want     string // only meaningful when wantInjected
+		// Asserted separately from want: an absent key and an injected empty value both
+		// read as "" out of the map, and only one of them honors the contract.
+		wantInjected bool
+	}{
+		{name: "not declared", declared: "", wantInjected: true, want: "1"},
+		{name: "opted out", declared: "0", wantInjected: false},
+		{name: "opted in", declared: "1", wantInjected: false},
+		{name: "unparsable", declared: "yes-please", wantInjected: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			s := newSlicedServer()
+			pod, ctr := slicedPod("uid-dsmi-"+c.name, "train", 10, 25)
+			if c.declared != "" {
+				ctr.Env = []core.EnvVar{{Name: "ENPU_DSMI_HOOK", Value: c.declared}}
+			}
+
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, ascendDevicesFixture(),
+				map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+			require.NoError(t, err)
+
+			got, injected := resp.Envs["ENPU_DSMI_HOOK"]
+			require.Equal(t, c.wantInjected, injected, "allocator injected ENPU_DSMI_HOOK")
+			if c.wantInjected {
+				assert.Equal(t, c.want, got)
+			}
+		})
+	}
 }
 
 // Two concurrent slices on the same physical NPU must get distinct virtual-npu-ids;

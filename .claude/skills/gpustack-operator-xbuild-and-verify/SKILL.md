@@ -36,7 +36,7 @@ The remote host is **never hardcoded** — always ask the user for it.
 - **Confirm before any remote build or container run** (they consume the host's accelerator/driver). Preflight and the build-artifact case (ASCEND-CASE 1 / NVIDIA-CASE 1) are safe once the user names the target.
 - **Touch only what the skill creates** — the `vcann-build:*` / `vgpu-build:*` image, `${XB_STAGE}` artifacts, `${XB_STAGE}/test` config/preload, the remote build context. Never modify the user's other resources.
 - **Hardware cases require a real accelerator** (local or the ssh host): ASCEND-CASE 2/3/4 need an NPU; NVIDIA-CASE 2 needs a GPU, NVIDIA-CASE 3 needs **≥ 2** GPUs. The two CASE-1 builds need only docker+buildx.
-- **Never write the *host's* `/etc/ld.so.preload`** — every preload the cases install is scoped to a container (ASCEND-CASE 4 builds and preloads a throwaway dsmi interposer; it is a probe, never product code).
+- **Never write the *host's* `/etc/ld.so.preload`** — every preload the cases install is scoped to a container (ASCEND-CASE 4 builds and preloads a throwaway dsmi interposer as a mechanism control; that shim is a probe, never product code — the shipped dsmi hook is the vendored patch in `pack/gpustack-operator/external/ascend/vcann-rt/`).
 
 ## Flow
 
@@ -58,6 +58,7 @@ The remote host is **never hardcoded** — always ask the user for it.
    ```bash
    XB_MODE=… XB_HOST=… bash .claude/skills/gpustack-operator-xbuild-and-verify/scripts/build.sh xbuild-nvidia-cuda-13
    ```
+   For Ascend it also ships `external/ascend/vcann-rt/*.patch` into the build context, because every `xbuild-ascend-cann-*` stage bind-mounts that directory and `build-libvnpu.sh` applies it to the pinned upstream source — a build that cannot find it fails rather than shipping an unpatched library.
    Produces `XB_IMAGE` (Ascend `vcann-build:<suffix>` / NVIDIA `vgpu-build:<suffix>`) and stages the artifacts under `XB_STAGE` (Ascend `/opt/enpu/vcann-rt`, NVIDIA `/opt/vgpu`). The CANN/CUDA-based image doubles as the workload image for the hardware cases (`XB_WORKLOAD_IMAGE` defaults to it).
 
 5. **Run cases.** Pass the same target; read each PASS/FAIL table — don't re-derive from raw logs.
@@ -78,10 +79,10 @@ The remote host is **never hardcoded** — always ask the user for it.
 ### Ascend (`xbuild-ascend-cann-*`)
 | Case | Title | Needs NPU | Asserts |
 |---|---|---|---|
-| 1 | Build artifacts + linking | no | `libvruntime.so` (0644) + `enpu-monitor` (0755) exist; ELF arch == build platform; build linked (the `--allow-shlib-undefined` path); both `NEEDED` `libc_sec.so` and **not** `libascendcl.so` (upstream dropped it at ubs-virt `476bb968` for a runtime `dlopen` — asserted in the negative as a revert tripwire); `libvruntime.so` defines the rt-layer interposition surface (80 rt-prefixed FUNCs, incl. 15 lowercase-s `rts*`) and **no** `dcmi_*`/`dsmi_*`, i.e. dcmi client not interposer; both carry weak UND `dcmi_*` syms (why libdcmi must be preloaded) |
+| 1 | Build artifacts + linking | no | `libvruntime.so` (0644) + `enpu-monitor` (0755) exist; ELF arch == build platform; build linked (the `--allow-shlib-undefined` path); both `NEEDED` `libc_sec.so` and **not** `libascendcl.so` (upstream dropped it at ubs-virt `476bb968` for a runtime `dlopen` — asserted in the negative as a revert tripwire); `libvruntime.so` defines the rt-layer interposition surface (80 rt-prefixed FUNCs, incl. 15 lowercase-s `rts*`) and **no** `dcmi_*` definition, i.e. dcmi client not interposer; it defines **exactly one** `dsmi_*`, `dsmi_get_hbm_info` — the vendored `external/ascend/vcann-rt/` patch, so a patch that stopped applying fails here instead of shipping silently; both carry weak UND `dcmi_*` syms (why libdcmi must be preloaded) |
 | 2 | Inject + enpu-monitor | yes | VDie-ID→`shm-id`; render `npu_info.config`; preload (libdcmi×2 + libvruntime); container `enpu-monitor` loads all 6 fields, initializes, and prints `Aicore Limit Quota`/`Memory Limit quota` matching the config |
 | 3 | Memory-quota enforcement | yes | injected HBM alloc capped at `memory-quota` (the `Out of memory! … quota:<bytes>` log); baseline (no inject) exceeds it |
-| 4 | npu-smi slice visibility | yes | `npu-smi` links `libdrvdsmi_host.so` and **neither** `libruntime.so` nor `libdcmi.so`, and is not setuid; vcann-rt's slice is invisible in `npu-smi` while `enpu-monitor` reports the quota (and, as an INFO row, whether it reports any utilization); a throwaway **dsmi** interposer *does* halve `npu-smi`'s HBM (`rewritten`) — the layer is the point; `hami-vnpu-core`, if staged at `XB_HAMI`, has the same blind spot while its hooked `rtMemGetInfoEx` reports the quota and enforces it (rows WARN-skip when unstaged) |
+| 4 | npu-smi slice visibility | yes | `npu-smi` links `libdrvdsmi_host.so` and **neither** `libruntime.so` nor `libdcmi.so`, imports no `rt*` symbol, and is not setuid — so the rt-layer hooks cannot reach it; the shipped gate, both halves: `ENPU_DSMI_HOOK` unset ⇒ `npu-smi` shows the physical card, `=1` ⇒ it shows the quota, with `enpu-monitor` and the plain non-CANN binaries unaffected either way; a throwaway **dsmi** interposer halves `npu-smi`'s HBM as the mechanism control (`rewritten`); `hami-vnpu-core`, if staged at `XB_HAMI`, still has the blind spot while its hooked `rtMemGetInfoEx` reports the quota and enforces it (rows WARN-skip when unstaged) |
 
 ### NVIDIA (`xbuild-nvidia-cuda-*`)
 | Case | Title | Needs GPU | Asserts |
@@ -103,10 +104,11 @@ The remote host is **never hardcoded** — always ask the user for it.
 - `references/ascend-npu-info-config.md` — Ascend: the 6 config fields, VDie-ID→shm-id, allocator mapping.
 - `references/ascend-ld-preload-and-libdcmi.md` — Ascend activation via `/etc/ld.so.preload`; **why libdcmi must
   be preloaded** (weak dcmi syms); the `libc_sec`/CANN-image requirement.
-- `references/ascend-npu-smi-and-aicore.md` — Ascend: `npu-smi` shows the physical card, and **why** — the
-  three layers (`rt*` / `dcmi` / `dsmi`), the measured `npu-smi` → `libdrvdsmi_host.so` call chain, that a
-  **dsmi** interposer *does* rewrite `npu-smi` (and what it still cannot fix), the two in-container card-numbering
-  schemes; AICore-quota mechanism, the benign CANN-8.5.0 warnings, the unverified-throttle gap.
+- `references/ascend-npu-smi-and-aicore.md` — Ascend: why the `rt*` layer alone cannot show the slice in
+  `npu-smi` (the three layers `rt*` / `dcmi` / `dsmi`, and the measured `npu-smi` → `libdrvdsmi_host.so` call
+  chain), **the shipped `ENPU_DSMI_HOOK` fix** and which fields it deliberately leaves card-wide, the
+  in-container id-numbering table (the interfaces disagree); AICore-quota mechanism, the benign CANN-8.5.0
+  warnings, the unverified-throttle gap.
 - `references/nvidia-hami-core-vgpu.md` — NVIDIA: what `libvgpu.so` is, the env+mount injection contract, the
   one-CUDA-major-per-container rule, HAMi-core knobs.
 - `references/nvidia-smi-and-sm-limit.md` — NVIDIA: memory limit is directly visible in `nvidia-smi` (NVML

@@ -8,15 +8,19 @@
 #
 #   1. npu-smi is a DRIVER tool: it links libdrvdsmi_host.so + libascend_hal.so and
 #      neither libruntime.so nor libdcmi.so. vcann-rt (and hami-vnpu-core) interpose
-#      the CANN runtime layer (rt*), which npu-smi never enters — so the slice is
-#      invisible in npu-smi, and that is a LAYER mismatch, not an impossibility.
-#   2. Interposing the dsmi getter npu-smi actually imports DOES rewrite its output:
-#      the case builds a throwaway shim that halves dsmi_get_hbm_info and asserts
-#      npu-smi's HBM Capacity halves with it. This is the "it could be done, at a
-#      different layer" evidence — a probe, never product code.
-#   3. hami-vnpu-core (if staged at XB_HAMI) has the same blind spot: its hooked
-#      rtMemGetInfoEx reports the quota to the application while npu-smi keeps
-#      reporting the physical card. Rows WARN-skip when it is not staged.
+#      the CANN runtime layer (rt*), which npu-smi never enters — so the rt* hooks
+#      alone leave the slice invisible: a LAYER mismatch, not an impossibility.
+#   2. GPUStack closes it at the layer npu-smi does use. The vendored patch in
+#      external/ascend/vcann-rt/ defines dsmi_get_hbm_info inside libvruntime.so, which
+#      the sliced container already preloads, and ENPU_DSMI_HOOK gates it. The case
+#      asserts both halves of the pair — gate off => the physical card, gate on => the
+#      quota — plus that enpu-monitor and the plain non-CANN binaries survive it.
+#   3. The mechanism control: a throwaway shim that halves dsmi_get_hbm_info and makes
+#      npu-smi's HBM Capacity halve with it, independent of the patch. A probe, never
+#      product code.
+#   4. hami-vnpu-core (if staged at XB_HAMI) has the same blind spot the patch fixes:
+#      its hooked rtMemGetInfoEx reports the quota to the application while npu-smi
+#      keeps reporting the physical card. Rows WARN-skip when it is not staged.
 #
 # Where XB_HAMI's libvnpu.so comes from: NOTHING in this repo builds it — the
 # Dockerfile's LIB_HAMI_CORE_COMMIT is NVIDIA HAMi-core (libvgpu.so), a different
@@ -186,7 +190,7 @@ BASE_HBM="$(hbm_of "${base}")"
 [ -n "${BASE_HBM}" ] && row PASS "baseline npu-smi HBM Capacity(MB)" "${BASE_HBM}" \
   || { row FAIL "baseline npu-smi HBM Capacity(MB)" unreadable; fails=$((fails+1)); }
 
-# =================== 3. vcann-rt: enforced, but invisible to npu-smi ===================
+# =================== 3. vcann-rt: invisible with the gate off, visible with it on ===================
 vc="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENPU_LOG_LEVEL=3 \
   ${VC} "${IMG}" sh -c "npu-smi info -t usages -i ${NPU} -c ${CHIP}; echo '===enpu-monitor==='; /opt/enpu/vcann-rt/tools/enpu-monitor" 2>&1)"
 # npu-smi's own -t usages output contains "Usage Rate(%)" lines, so the
@@ -194,9 +198,9 @@ vc="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENP
 vc_em="$(echo "${vc}" | sed -n '/===enpu-monitor===/,$p')"
 VC_HBM="$(hbm_of "${vc}")"
 if [ "${VC_HBM:-x}" = "${BASE_HBM}" ]; then
-  row PASS "vcann-rt: npu-smi still shows the physical card" "${VC_HBM} (quota ${MEM}MB is not reflected)"
+  row PASS "gate off: npu-smi shows the physical card" "${VC_HBM} (ENPU_DSMI_HOOK unset => off, quota ${MEM}MB not reflected)"
 else
-  row FAIL "vcann-rt: npu-smi still shows the physical card" "${VC_HBM:-<none>} != baseline ${BASE_HBM}"; fails=$((fails+1))
+  row FAIL "gate off: npu-smi shows the physical card" "${VC_HBM:-<none>} != baseline ${BASE_HBM}"; fails=$((fails+1))
 fi
 mq="$(echo "${vc_em}" | awk -F: '/Memory Limit quota/{gsub(/ /,"",$2);print $2}')"
 [ "${mq}" = "${MEM}" ] && row PASS "vcann-rt: enpu-monitor reports the quota" "${mq}MB" \
@@ -204,6 +208,28 @@ mq="$(echo "${vc_em}" | awk -F: '/Memory Limit quota/{gsub(/ /,"",$2);print $2}'
 echo "${vc_em}" | grep -qiE 'Utilization|Usage Rate' \
   && row INFO "vcann-rt: enpu-monitor utilization" "present" \
   || row INFO "vcann-rt: enpu-monitor utilization" "absent — quota + Memory Usage only, no utilization percentage"
+
+# ---- the product: ENPU_DSMI_HOOK=1 makes npu-smi report the slice ----
+# Same injection as above plus the gate, so the pair differs by one env var. The rows
+# also check what a container-global strong dsmi definition could plausibly break:
+# enpu-monitor (which shares the library) and the plain non-CANN binaries.
+dh="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" -e ENPU_DSMI_HOOK=1 \
+  ${VC} "${IMG}" sh -c "npu-smi info -t usages -i ${NPU} -c ${CHIP}; echo '===enpu-monitor==='; /opt/enpu/vcann-rt/tools/enpu-monitor; echo '===others==='; /bin/true && ls / >/dev/null 2>&1 && python3 -c pass && echo OTHERS=ok" 2>&1)"
+DH_HBM="$(hbm_of "${dh}")"
+if [ "${DH_HBM:-x}" = "${MEM}" ]; then
+  row PASS "gate on: npu-smi reports the slice" "${DH_HBM}MB == the quota (baseline ${BASE_HBM})"
+elif [ "${DH_HBM:-x}" = "${BASE_HBM}" ]; then
+  row FAIL "gate on: npu-smi reports the slice" "still ${DH_HBM} — is the staged libvruntime.so patched? (ASCEND-CASE 1 judges that)"; fails=$((fails+1))
+else
+  row FAIL "gate on: npu-smi reports the slice" "${DH_HBM:-<none>}, expected the quota ${MEM}"; fails=$((fails+1))
+fi
+dh_em="$(echo "${dh}" | sed -n '/===enpu-monitor===/,/===others===/p')"
+dmq="$(echo "${dh_em}" | awk -F: '/Memory Limit quota/{gsub(/ /,"",$2);print $2}')"
+[ "${dmq}" = "${MEM}" ] && row PASS "gate on: enpu-monitor unaffected" "${dmq}MB" \
+  || { row FAIL "gate on: enpu-monitor reports the quota == ${MEM}" "${dmq:-none}"; fails=$((fails+1)); }
+echo "${dh}" | grep -q 'OTHERS=ok' \
+  && row PASS "gate on: non-CANN processes unaffected" "/bin/true, ls, python3 all ok" \
+  || { row FAIL "gate on: non-CANN processes unaffected" "one of /bin/true, ls, python3 failed"; fails=$((fails+1)); }
 
 # =================== 4. the dsmi layer CAN rewrite npu-smi ===================
 sh_out="$(docker run --rm --runtime=ascend -e ASCEND_VISIBLE_DEVICES="${NPU}" \
@@ -285,9 +311,11 @@ else
   else row FAIL "hami: quota enforced <= ${HQ_ENF}MB" "${hn:-?}MB"; fails=$((fails+1)); fi
 fi
 
-echo "--- vcann-rt injected: npu-smi (physical) then enpu-monitor (the slice) ---"
+echo "--- vcann-rt injected, gate off: npu-smi (physical) then enpu-monitor (the slice) ---"
 echo "${vc}" | grep -iE 'HBM Capacity|===enpu-monitor===|Limit [Qq]uota|Memory Usage' | sed 's/^/    /'
-echo "--- dsmi shim ---"
+echo "--- vcann-rt injected, ENPU_DSMI_HOOK=1: npu-smi now reports the slice ---"
+echo "${dh}" | grep -iE 'HBM Capacity|HBM Usage|===enpu-monitor===|Limit [Qq]uota|Memory Usage|OTHERS=' | sed 's/^/    /'
+echo "--- dsmi shim (mechanism control) ---"
 echo "${sh_out}" | grep -iE 'HBM Capacity|NOGCC|SHIMBUILDFAIL|error' | sed 's/^/    /'
 if [ -n "${HL}" ]; then
   echo "--- hami-vnpu-core ---"

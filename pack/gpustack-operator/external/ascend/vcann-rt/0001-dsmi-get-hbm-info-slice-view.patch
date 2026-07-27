@@ -1,0 +1,241 @@
+Make the logical slice visible in `npu-smi info`.
+
+WHAT: adds src/dsmi/dsmi_hook.c, a strong `dsmi_get_hbm_info` definition, and compiles
+it into libvruntime.so only (not into enpu-monitor). The hook passes every call through
+to the driver and then rewrites two fields for the sliced device: the HBM total becomes
+the container's `memory-quota` (clamped to the card's real total) and the HBM usage
+becomes the slice's own usage — the number `enpu-monitor` prints. `ENPU_DSMI_HOOK`
+gates it; absent means off.
+
+WHY: vcann-rt hooks the CANN runtime (rt*) layer, and `npu-smi` never enters it — it
+links libdrvdsmi_host.so + libascend_hal.so and imports zero rt symbols, so a sliced
+container's `npu-smi info` reports the whole physical card. Measured on a 910B2 (driver
+25.5.1): interposing this one dsmi getter moves `HBM Capacity(MB)` from 65536 to 32768,
+and libvruntime.so is already an entry of the sliced container's /etc/ld.so.preload, so
+no extra library, mount or preload entry is needed.
+
+AGAINST: ubs-virt 476bb968d477a4eab7719197af212c6c3470ff0b (the pin in
+pack/gpustack-operator/Dockerfile), subdir ubs-virt-enpu/vcann-rt. Applied by
+external/ascend/build-libvnpu.sh with `patch -p1` in its work copy of that subdir.
+
+LINE ENDINGS: upstream's CMakeLists.txt is CRLF, so this file's CMakeLists hunk carries
+CRLF context and must stay byte-exact - .gitattributes pins `-text` on it, because the
+repo's `eol=lf` normalisation would otherwise strip those CRs and the hunk would stop
+matching. Keep both facts together if either changes.
+
+TO REFRESH after a pin bump: clone the new pin, apply this patch, resolve the reject,
+then regenerate with `git add -N src/dsmi/dsmi_hook.c && git diff --relative` from the
+vcann-rt subdir and keep this header on top. Upstream would be the better home for it
+(see the spec's Open Question 1), which would let this file be dropped.
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8b3886e..7aa4150 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -49,7 +49,9 @@ set(LINK_DIRS
+ set(LINK_LIBS dcmi)
+ 
+ message(STATUS "CMakeList build start")
+-add_library(vruntime SHARED src/ascend/hook.c ${SRC_LIST})
++# src/dsmi/ is deliberately outside SRC_LIST's globs: the dsmi hook belongs to the
++# preloaded library only, never to the enpu-monitor tool.
++add_library(vruntime SHARED src/ascend/hook.c src/dsmi/dsmi_hook.c ${SRC_LIST})
+ add_custom_command(
+     TARGET vruntime POST_BUILD
+     COMMAND chmod 400 $<TARGET_FILE:vruntime>
+diff --git a/src/dsmi/dsmi_hook.c b/src/dsmi/dsmi_hook.c
+new file mode 100644
+index 0000000..c88c97c
+--- /dev/null
++++ b/src/dsmi/dsmi_hook.c
+@@ -0,0 +1,190 @@
++/*
++ * Copyright (c) GPUStack contributors. 2026.
++ * A vendored addition to ubs-virt-enpu/vcann-rt, licensed under Mulan PSL v2 like the
++ * tree it extends. You may obtain a copy of Mulan PSL v2 at:
++ *          http://license.coscl.org.cn/MulanPSL2
++ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
++ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
++ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
++ * See the Mulan PSL v2 for more details.
++ */
++
++/*
++ * dsmi_get_hbm_info — make the logical slice visible in `npu-smi info`.
++ *
++ * vcann-rt interposes the CANN runtime (rt*) layer, which npu-smi never enters: it
++ * links libdrvdsmi_host.so + libascend_hal.so, imports zero rt symbols, and therefore
++ * keeps reporting the whole physical card inside a sliced container. It does import
++ * the dsmi getters through its PLT, and libvruntime.so is already an entry of the
++ * sliced container's /etc/ld.so.preload — so defining the one getter npu-smi reads the
++ * HBM numbers from is enough, with no extra library, mount or preload entry.
++ *
++ * Two fields of one struct are rewritten:
++ *   memory_size  := the container's memory-quota, clamped to the card's real total
++ *   memory_usage := the slice's own usage, the same number enpu-monitor prints
++ * Every other field, getter and device is passed through, so power, temperature and
++ * Bus-Id stay card-wide by construction.
++ *
++ * Off unless ENPU_DSMI_HOOK enables it, and a pure passthrough whenever the process
++ * has no vcann-rt config or the queried device is not the sliced one — dsmi names
++ * devices by container-local logic id, so that last check has to translate.
++ */
++#define _GNU_SOURCE
++#include <dlfcn.h>
++#include <pthread.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include "common.h"
++#include "config.h"
++#include "dcmi_wrapper.h"
++#include "npu_manager.h"
++
++/*
++ * From driver/include/dsmi_common_interface.h, declared here rather than included:
++ * the build image carries no host HDK (build-libvnpu.sh stubs libdcmi from
++ * test/stub), so no dsmi header exists at compile time. Sizes are in KB.
++ */
++struct dsmi_hbm_info_stru {
++    unsigned long long memory_size;
++    unsigned int freq;
++    unsigned long long memory_usage;
++    int temp;
++    unsigned int bandwith_util_rate;
++};
++
++#define DSMI_HOOK_ENV "ENPU_DSMI_HOOK"
++#define B_TO_KB (1024ULL)
++
++typedef int (*dsmi_get_hbm_info_fn)(int device_id, struct dsmi_hbm_info_stru *info);
++/* dsmi_common_interface.h:2268 — the logic id is what the caller passes to every dsmi
++ * getter, and inside a container it is renumbered: a container scoped to physical NPU 1
++ * queries logic id 0. dcmi, and therefore npu_info.config's physical-npu-id, stays
++ * physical, so the two only line up on card 0 — hence this mapping (measured). */
++typedef int (*dsmi_get_phyid_from_logicid_fn)(unsigned int logicid, unsigned int *phyid);
++
++/*
++ * Which dcmi family the driver ships. enpu_soc_init() answers that with
++ * rtGetSocVersion, but npu-smi has no libruntime.so to ask, so probe the weak symbol
++ * instead: an Ascend950 driver ships the dcmiv2_* entry points, the others dcmi_*.
++ */
++extern int dcmi_get_card_id_device_id_from_phyid(int *card_id, int *device_id, unsigned int device_phy_id)
++    __attribute__((weak));
++
++static pthread_once_t g_hook_once = PTHREAD_ONCE_INIT;
++static dsmi_get_hbm_info_fn g_real_hbm_info = NULL;
++static dsmi_get_phyid_from_logicid_fn g_real_phyid_of = NULL;
++static bool g_hook_enabled = false; /* ENPU_DSMI_HOOK opted in */
++static bool g_quota_known = false;  /* config parsed, so memory_size can be rewritten */
++static bool g_usage_known = false;  /* dcmi ids resolved, so memory_usage can be too */
++static int g_card_id = -1;
++static int g_device_id = -1;
++static int g_logic_id = -1;
++
++static bool hook_enabled_by_env(void)
++{
++    const char *val = getenv(DSMI_HOOK_ENV);
++    if (val == NULL) {
++        return false;
++    }
++    if (strcmp(val, "1") == 0 || strcasecmp(val, "true") == 0 || strcasecmp(val, "on") == 0) {
++        return true;
++    }
++    if (strcmp(val, "0") == 0 || strcasecmp(val, "false") == 0 || strcasecmp(val, "off") == 0) {
++        return false;
++    }
++    /* The channel parse_level_env() uses for a bad ENPU_LOG_LEVEL: a plain tool process
++     * never initializes the log module, so stderr is the only one that reaches anyone. */
++    fprintf(stderr, "[eNPU] Invalid %s='%s', the dsmi hook stays off.\n", DSMI_HOOK_ENV, val);
++    return false;
++}
++
++static void dsmi_hook_init(void)
++{
++    g_real_hbm_info = (dsmi_get_hbm_info_fn)dlsym(RTLD_NEXT, "dsmi_get_hbm_info");
++    g_real_phyid_of = (dsmi_get_phyid_from_logicid_fn)dlsym(RTLD_NEXT, "dsmi_get_phyid_from_logicid");
++    g_hook_enabled = hook_enabled_by_env();
++    if (!g_hook_enabled || g_real_hbm_info == NULL) {
++        return;
++    }
++
++    if (check_init_success()) {
++        /* A CANN process: the rt hooks already ran the full init, so reuse the ids it
++         * resolved instead of re-deciding the dcmi family behind its back. */
++        g_card_id = get_card_id();
++        g_device_id = get_device_id();
++        g_logic_id = get_logic_id();
++        g_quota_known = true;
++        g_usage_known = true;
++        return;
++    }
++
++    /* npu-smi and every other non-CANN process: enpu_global_init() cannot get past
++     * enpu_soc_init() without libruntime.so, so do its rt-free half here. */
++    if (enpu_load_config() != ENPU_SUCCESS) {
++        fprintf(stderr, "[eNPU] %s is on but %s is unusable, so the physical card is reported.\n", DSMI_HOOK_ENV,
++                NPU_CONFIG_PATH);
++        return;
++    }
++    g_quota_known = true;
++
++    uint8_t soc = (dcmi_get_card_id_device_id_from_phyid != NULL) ? SOC_VERSION_NOT_ASCEND_950 : SOC_VERSION_ASCEND_950;
++    if (register_callback(soc) != ENPU_SUCCESS) {
++        return;
++    }
++    /* Out-params only: this leaves the npu manager's own state alone. */
++    if (enpu_dcmi_get_card_info((uint32_t)config.phy_npu_id, &g_card_id, &g_device_id, &g_logic_id, soc) !=
++        ENPU_SUCCESS) {
++        return; /* the quota is still reported; only the slice's own usage is lost */
++    }
++    g_usage_known = true;
++}
++
++__attribute__((visibility("default"))) int dsmi_get_hbm_info(int device_id, struct dsmi_hbm_info_stru *info)
++{
++    (void)pthread_once(&g_hook_once, dsmi_hook_init);
++
++    if (g_real_hbm_info == NULL) {
++        /* libdrvdsmi_host.so is not in this process, so there is nothing to report. */
++        return ENPU_FAIL;
++    }
++
++    int rc = g_real_hbm_info(device_id, info);
++    if (rc != 0 || info == NULL || !g_hook_enabled || !g_quota_known) {
++        return rc;
++    }
++    /* libvruntime.so is preloaded container-wide and this is a strong definition, so
++     * every process here lands in it: only the sliced device gets rewritten. The caller
++     * names the device by logic id, which the config does not carry, so translate — and
++     * report the card untouched when that mapping is unavailable rather than guess. */
++    unsigned int phy_id = 0;
++    if (g_real_phyid_of == NULL || g_real_phyid_of((unsigned int)device_id, &phy_id) != 0 ||
++        (int32_t)phy_id != config.phy_npu_id) {
++        return rc;
++    }
++
++    unsigned long long total_kb = info->memory_size;
++    unsigned long long quota_kb = (unsigned long long)get_mem_limit_quota() / B_TO_KB;
++    if (quota_kb > total_kb) {
++        /* What __enpu_global_init_post() spends rtMemGetInfoEx on: a quota larger than
++         * the card is not a slice. The passthrough already carries the card's total. */
++        quota_kb = total_kb;
++    }
++
++    unsigned long long usage_kb = info->memory_usage;
++    size_t used = 0;
++    if (g_usage_known &&
++        enpu_dcmi_get_device_resource_info(g_logic_id, g_card_id, g_device_id, &used) == ENPU_SUCCESS) {
++        usage_kb = (unsigned long long)used / B_TO_KB;
++    }
++    if (usage_kb > quota_kb) {
++        usage_kb = quota_kb;
++    }
++
++    LOG_DEBUG("Dsmi hook rewrote device %d: total %lluKB -> %lluKB, usage %lluKB -> %lluKB.", device_id, total_kb,
++              quota_kb, info->memory_usage, usage_kb);
++    info->memory_size = quota_kb;
++    info->memory_usage = usage_kb;
++    return rc;
++}
