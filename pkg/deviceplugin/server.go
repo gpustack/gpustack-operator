@@ -1206,7 +1206,7 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}
 
-	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocated)
+	ctrResp, err := s.visibilityResponse(ctx, pod, ctr, devs, allocated, owner)
 	if err != nil {
 		s.Logger.Error(err, "get container visibility allocate response")
 		return nil, err
@@ -1219,6 +1219,68 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		"pod", kubemeta.GetNamespacedNameKey(pod),
 		"response", resp)
 	return resp, nil
+}
+
+// visibilityResponse renders the visibility container's response over the cards its owner holds.
+//
+// A partition-backed owner is answered by the responder's partition capability, because a
+// visibility allocation is a device-cgroup grant and nothing else: naming the parent card would
+// open every partition carved on it, including other tenants'. The trigger is the owner
+// container's own resource request, which is in the Pod spec from the start and therefore immune
+// to the order in which the workload's Allocate publishes and re-publishes its reservation.
+//
+// Everything the branch cannot establish rejects the admission — an owner container missing from
+// the Pod spec, a responder without the capability, a capability that errors. Every other family
+// keeps the card-based response unchanged.
+func (s *ResourceServer) visibilityResponse(
+	ctx context.Context,
+	pod *core.Pod,
+	ctr *core.Container,
+	devs *workercore.Devices,
+	allocated map[Resource]int32,
+	owner string,
+) (*ContainerAllocateResponse, error) {
+	ownerCtr := containerByName(pod, owner)
+	if ownerCtr == nil {
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"pod %s has no container %q to co-allocate from; refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), owner)
+	}
+	profile, partitioned := partitionProfileOf(ownerCtr)
+	if !partitioned {
+		return s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocated)
+	}
+
+	responder, canRespond := s.Responder.(PhysicalSlicedResponder)
+	if !canRespond {
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"responder cannot name the partition profile %q container %q holds in pod %s; "+
+				"refusing to grant visibility",
+			profile, owner, kubemeta.GetNamespacedNameKey(pod))
+	}
+	ctrResp, err := responder.GetPhysicalSlicedVisibilityResponse(ctx, pod, ctr, devs, allocated, owner)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"name the partition profile %q container %q holds in pod %s: %v; refusing to grant visibility",
+			profile, owner, kubemeta.GetNamespacedNameKey(pod), err)
+	}
+	return ctrResp, nil
+}
+
+// containerByName returns the pod's container with the given name, init containers first, as the
+// allocating-pod scan visits them. It returns nil when the pod declares no such container.
+func containerByName(pod *core.Pod, name string) *core.Container {
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == name {
+			return &pod.Spec.InitContainers[i]
+		}
+	}
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return &pod.Spec.Containers[i]
+		}
+	}
+	return nil
 }
 
 func (s *ResourceServer) Start(ctx context.Context, kubeSocket string) error {

@@ -50,15 +50,19 @@ type (
 		) (*ContainerAllocateResponse, error)
 	}
 
-	// PhysicalSlicedResponder is an optional capability of a ContainerAllocateResponder that
-	// owns a hardware GPU partition (e.g. an NVIDIA MIG instance): materializing it for a
-	// container carrying a "<base>.partitioned.<kind>-<profile>" request. The server invokes it
-	// — under the vendor's own per-card lock — on the card IT chose, after reserving that card
-	// and before patching the allocation annotation, so the placement actually taken is recorded
-	// upward (AllocatedPhysicalProfile / AllocatedPhysicalPlacements) for the reconciler's
-	// placement-aware ledger. A responder that does not implement it cannot serve partition
-	// requests.
+	// PhysicalSlicedResponder is an optional capability of a ContainerAllocateResponder that owns
+	// a hardware GPU partition (e.g. an NVIDIA MIG instance) end to end: materializing it for the
+	// container that requests one, and naming it again for a container co-allocating the same
+	// partition. A responder that does not implement it cannot serve partition requests at all.
+	// The two live on one interface so that "a responder able to carve a partition can name it"
+	// is a compile-time invariant rather than a runtime hole.
 	PhysicalSlicedResponder interface {
+		// ActuatePhysicalSliced materializes the partition for a container carrying a
+		// "<base>.partitioned.<kind>-<profile>" request. The server invokes it — under the
+		// vendor's own per-card lock — on the card IT chose, after reserving that card and
+		// before patching the allocation annotation, so the placement actually taken is
+		// recorded upward (AllocatedPhysicalProfile / AllocatedPhysicalPlacements) for the
+		// reconciler's placement-aware ledger.
 		ActuatePhysicalSliced(
 			context.Context,
 			*core.Pod,
@@ -67,6 +71,26 @@ type (
 			map[Resource]int32,
 			string,
 		) (*PhysicalSlicedAllocation, error)
+
+		// GetPhysicalSlicedVisibilityResponse returns the container response naming the
+		// partitions the owner container already holds on the given cards. The server invokes it
+		// for a visibility Allocate whose accelerator-holding container requests a partition
+		// profile, passing the container being served, the cards the owner holds, and the
+		// owner's name. It must resolve from a durable, node-local record — not in-process
+		// state — and must return an error, never an empty or parent-card response, when the
+		// identity cannot be resolved or cannot be shown to still be live.
+		//
+		// It returns a whole container response, not an identity: vendors differ in how they
+		// make a device visible (an env for NVIDIA, injected device nodes elsewhere), so
+		// substituting a partition for a card stays inside the vendor's own response shape.
+		GetPhysicalSlicedVisibilityResponse(
+			context.Context,
+			*core.Pod,
+			*core.Container,
+			*workercore.Devices,
+			map[Resource]int32,
+			string,
+		) (*ContainerAllocateResponse, error)
 	}
 )
 

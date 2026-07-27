@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -1407,6 +1409,35 @@ type physicalActuatorResponder struct {
 	placements map[Resource][]workercore.AcceleratorPhysicalPlacement
 	rolledBack *bool
 	actErr     error
+	// visErr fails the visibility capability, and visCall records what the server asked it, so
+	// a test sees the cards and the owner name the sidecar's branch handed over.
+	visErr  error
+	visCall *visibilityCall
+}
+
+// visibilityCall is what the server passed to the partition-visibility capability.
+type visibilityCall struct {
+	allocated map[Resource]int32
+	owner     string
+}
+
+// visibilityPartitionEnv is the canned partition response, distinguishable at a glance from
+// stubResponder's empty card response.
+const visibilityPartitionEnv = "MIG-visible"
+
+func (r physicalActuatorResponder) GetPhysicalSlicedVisibilityResponse(
+	_ context.Context, _ *core.Pod, _ *core.Container, _ *workercore.Devices,
+	allocated map[Resource]int32, owner string,
+) (*ContainerAllocateResponse, error) {
+	if r.visErr != nil {
+		return nil, r.visErr
+	}
+	if r.visCall != nil {
+		*r.visCall = visibilityCall{allocated: allocated, owner: owner}
+	}
+	return &ContainerAllocateResponse{
+		Envs: map[string]string{"NVIDIA_VISIBLE_DEVICES": visibilityPartitionEnv},
+	}, nil
 }
 
 func (r physicalActuatorResponder) ActuatePhysicalSliced(
@@ -1429,6 +1460,15 @@ func (r physicalActuatorResponder) ActuatePhysicalSliced(
 type echoActuatorResponder struct {
 	stubResponder
 	rec *DevicesReconciler
+}
+
+// GetPhysicalSlicedVisibilityResponse completes the capability so this fake still satisfies it;
+// the actuation tests that use it never take the sidecar's branch.
+func (echoActuatorResponder) GetPhysicalSlicedVisibilityResponse(
+	_ context.Context, _ *core.Pod, _ *core.Container, _ *workercore.Devices,
+	_ map[Resource]int32, _ string,
+) (*ContainerAllocateResponse, error) {
+	return nil, errors.New("echoActuatorResponder serves no visibility request")
 }
 
 func (r echoActuatorResponder) ActuatePhysicalSliced(
@@ -2149,7 +2189,6 @@ func TestResourceServer_GetListAndWatch_Sliced(t *testing.T) {
 // Responder, without writing any allocation status (no ledger consumption).
 func TestResourceServer_Allocate_Visibility(t *testing.T) {
 	const nodeName = "node-v1"
-	visName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	devs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
@@ -2161,18 +2200,7 @@ func TestResourceServer_Allocate_Visibility(t *testing.T) {
 			}},
 		},
 	}
-	pod := &core.Pod{
-		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-v"},
-		Spec: core.PodSpec{
-			NodeName: nodeName,
-			Containers: []core.Container{{
-				Name: "sshd",
-				Resources: core.ResourceRequirements{
-					Limits: core.ResourceList{visName: resource.MustParse("1")},
-				},
-			}},
-		},
-	}
+	pod := sshVisibilityPod(nodeName, "pod-uid-v", slicedOwnerLimits, 1)
 
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
@@ -2217,7 +2245,6 @@ func TestResourceServer_Allocate_Visibility(t *testing.T) {
 // when the pod has no reservation, rather than emitting an empty visible-devices env.
 func TestResourceServer_Allocate_Visibility_FailsClosed(t *testing.T) {
 	const nodeName = "node-v2"
-	visName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	devs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
@@ -2229,18 +2256,7 @@ func TestResourceServer_Allocate_Visibility_FailsClosed(t *testing.T) {
 			}},
 		},
 	}
-	pod := &core.Pod{
-		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-v2"},
-		Spec: core.PodSpec{
-			NodeName: nodeName,
-			Containers: []core.Container{{
-				Name: "sshd",
-				Resources: core.ResourceRequirements{
-					Limits: core.ResourceList{visName: resource.MustParse("1")},
-				},
-			}},
-		},
-	}
+	pod := sshVisibilityPod(nodeName, "pod-uid-v2", slicedOwnerLimits, 1)
 
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
@@ -2270,7 +2286,6 @@ func TestResourceServer_Allocate_Visibility_FailsClosed(t *testing.T) {
 // delegating to the Responder (which would emit an empty visible-devices env).
 func TestResourceServer_Allocate_Visibility_StaleReservation(t *testing.T) {
 	const nodeName = "node-v3"
-	visName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	devs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
@@ -2282,18 +2297,7 @@ func TestResourceServer_Allocate_Visibility_StaleReservation(t *testing.T) {
 			}},
 		},
 	}
-	pod := &core.Pod{
-		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-v3"},
-		Spec: core.PodSpec{
-			NodeName: nodeName,
-			Containers: []core.Container{{
-				Name: "sshd",
-				Resources: core.ResourceRequirements{
-					Limits: core.ResourceList{visName: resource.MustParse("1")},
-				},
-			}},
-		},
-	}
+	pod := sshVisibilityPod(nodeName, "pod-uid-v3", slicedOwnerLimits, 1)
 
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
@@ -2329,7 +2333,6 @@ func TestResourceServer_Allocate_Visibility_StaleReservation(t *testing.T) {
 // visibility to the full reserved set (least-privilege: the grant must match the request exactly).
 func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 	const nodeName = "node-v4"
-	visName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	devs := &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
@@ -2342,18 +2345,7 @@ func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 		},
 	}
 	// The pod requests visibility for 2 devices, but only one device is reserved.
-	pod := &core.Pod{
-		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-v4"},
-		Spec: core.PodSpec{
-			NodeName: nodeName,
-			Containers: []core.Container{{
-				Name: "sshd",
-				Resources: core.ResourceRequirements{
-					Limits: core.ResourceList{visName: resource.MustParse("2")},
-				},
-			}},
-		},
-	}
+	pod := sshVisibilityPod(nodeName, "pod-uid-v4", slicedOwnerLimits, 2)
 
 	cli := ctrlfake.NewClientBuilder().
 		WithScheme(scheme.Scheme).
@@ -2388,6 +2380,175 @@ func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), "grp-0:dev-0")
 }
 
+// slicedOwnerLimits is a workload container's logical-slice request — an owner that is NOT
+// partition-backed, so the sidecar keeps the card-based response.
+var slicedOwnerLimits = core.ResourceList{
+	nodefeature.GetAcceleratableResourceName(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced): resource.MustParse("1"),
+}
+
+// sshVisibilityPod builds an SSH-enabled Pod: a workload container holding the accelerator under
+// ownerLimits, and an sshd sidecar asking for visibility to the same number of cards. Both
+// containers are declared, as a real Pod has them — the sidecar's branch reads the owner's own
+// request to decide whether it must name a partition.
+func sshVisibilityPod(nodeName, uid string, ownerLimits core.ResourceList, cards int) *core.Pod {
+	visName := nodefeature.GetAcceleratableResourceName(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: types.UID(uid)},
+		Spec: core.PodSpec{
+			NodeName: nodeName,
+			Containers: []core.Container{
+				{Name: workloadContainer, Resources: core.ResourceRequirements{Limits: ownerLimits}},
+				{Name: "sshd", Resources: core.ResourceRequirements{
+					Limits: core.ResourceList{visName: *resource.NewQuantity(int64(cards), resource.DecimalSI)},
+				}},
+			},
+		},
+	}
+}
+
+// multiCardReservation builds a reserved status over several cards, optionally stamped with the
+// partition profile a workload Allocate records after actuating.
+func multiCardReservation(profile string, devs ...string) workercore.DevicesStatus {
+	accels := make([]workercore.AcceleratorAllocation, 0, len(devs))
+	for _, dev := range devs {
+		accels = append(accels, workercore.AcceleratorAllocation{
+			ID: dev, Mode: workercore.DeviceAllocationModePartitioned, AllocatedPhysicalProfile: profile,
+		})
+	}
+	return workercore.DevicesStatus{Groups: []workercore.DevicesAllocationGroup{{
+		ID: "grp-0", Manufacturer: nodefeature.ManufacturerNVIDIA, Accelerators: accels,
+	}}}
+}
+
+// TestResourceServer_Allocate_VisibilityPartition covers the sidecar's branch: an owner container
+// that requests a hardware partition is answered by the responder's partition capability, so the
+// sidecar's device-cgroup grant is the partition and not the parent card that hosts it — along
+// with every other tenant's partition carved on that card. A responder that cannot answer rejects
+// the admission; every other family keeps the card-based response byte for byte.
+func TestResourceServer_Allocate_VisibilityPartition(t *testing.T) {
+	const nodeName = "node-v6"
+	const uid = "pod-uid-v6"
+	partitionLimits := core.ResourceList{
+		nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned): resource.MustParse("1"),
+		nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerNVIDIA, "3g.40gb"):                resource.MustParse("1"),
+	}
+	slicedLimits := core.ResourceList{
+		nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced): resource.MustParse("1"),
+	}
+
+	cases := []struct {
+		name        string
+		ownerLimits core.ResourceList
+		profile     string   // the reservation's AllocatedPhysicalProfile ("" → not yet stamped)
+		cards       []string // the cards the owner reserved
+		capable     bool     // the responder implements the partition capability
+		visErr      error
+
+		wantErr   bool
+		wantEnv   string   // the sidecar's visible-devices value ("" → the card responder's empty one)
+		wantCards []string // the cards the capability must be handed, sorted; nil → it is not called
+	}{
+		{
+			name: "a partition-backed owner is served its partition", ownerLimits: partitionLimits,
+			profile: "3g.40gb", cards: []string{"dev-0"}, capable: true,
+			wantEnv: visibilityPartitionEnv, wantCards: []string{"dev-0"},
+		},
+		{
+			// The reservation's bookkeeping is not the trigger: the owner's own request is, and
+			// it is in the Pod spec from the start, before any Allocate publishes anything.
+			name:        "the trigger is the owner's request, not the reservation's profile",
+			ownerLimits: partitionLimits, cards: []string{"dev-0"}, capable: true,
+			wantEnv: visibilityPartitionEnv, wantCards: []string{"dev-0"},
+		},
+		{
+			// Both cards, in devs order, so the sidecar's env matches the workload's card for card.
+			name: "a multi-card owner hands every card to the capability", ownerLimits: partitionLimits,
+			profile: "3g.40gb", cards: []string{"dev-1", "dev-0"}, capable: true,
+			wantEnv: visibilityPartitionEnv, wantCards: []string{"dev-0", "dev-1"},
+		},
+		{
+			// The regression this whole spec exists to prevent: silently dropping into the
+			// card-based path would grant the parent card.
+			name: "a responder without the capability fails closed", ownerLimits: partitionLimits,
+			profile: "3g.40gb", cards: []string{"dev-0"},
+			wantErr: true,
+		},
+		{
+			name: "a capability error fails closed", ownerLimits: partitionLimits,
+			profile: "3g.40gb", cards: []string{"dev-0"}, capable: true,
+			visErr: errors.New("marker missing"), wantErr: true,
+		},
+		{
+			// Unchanged for every non-partition family, even on a responder that could answer.
+			name: "a logically sliced owner keeps the card response", ownerLimits: slicedLimits,
+			cards: []string{"dev-0"}, capable: true,
+			wantEnv: "",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			devs := &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec: workercore.DevicesSpec{
+					Groups: []workercore.DevicesGroup{{
+						ID:           "grp-0",
+						Manufacturer: nodefeature.ManufacturerNVIDIA,
+						Accelerators: []workercore.Accelerator{{ID: "dev-0", Index: 0}, {ID: "dev-1", Index: 1}},
+					}},
+				},
+			}
+			pod := sshVisibilityPod(nodeName, uid, c.ownerLimits, len(c.cards))
+			rec := &DevicesReconciler{NodeName: nodeName, Client: nodeFixture(devs, pod)}
+			reserveWorkload(rec, types.UID(uid), multiCardReservation(c.profile, c.cards...))
+
+			var call visibilityCall
+			var responder ContainerAllocateResponder = &recordingResponder{}
+			if c.capable {
+				responder = physicalActuatorResponder{visErr: c.visErr, visCall: &call}
+			}
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: workercore.DeviceAllocationModeVisibility,
+				Reconciler:     rec,
+				Responder:      responder,
+			}
+
+			devIDs := make([]string, 0, len(c.cards))
+			for i := range c.cards {
+				devIDs = append(devIDs, fmt.Sprintf("visibility:%04d", i))
+			}
+			resp, err := s.Allocate(context.Background(), &AllocateRequest{
+				ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: devIDs}},
+			})
+
+			if c.wantErr {
+				require.Error(t, err, "a partition-backed sidecar must never be served the parent card")
+				assert.Nil(t, resp)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, resp.ContainerResponses, 1)
+			assert.Equal(t, c.wantEnv, resp.ContainerResponses[0].Envs["NVIDIA_VISIBLE_DEVICES"])
+
+			if c.wantCards == nil {
+				assert.Empty(t, call.owner, "a non-partition owner must not reach the capability")
+				return
+			}
+			assert.Equal(t, workloadContainer, call.owner, "the capability is told which container holds the cards")
+			got := make([]string, 0, len(call.allocated))
+			for res := range call.allocated {
+				got = append(got, res.Device)
+			}
+			sort.Strings(got)
+			assert.Equal(t, c.wantCards, got)
+		})
+	}
+}
+
 // visibilityAnnotation renders one container's accelerator record the way a workload Allocate
 // persists it — the durable source the sidecar falls back to.
 func visibilityAnnotation(container, dev string, allocated int32) PodAllocations {
@@ -2411,7 +2572,6 @@ func visibilityAnnotation(container, dev string, allocated int32) PodAllocations
 // usable record still fails the admission closed.
 func TestResourceServer_Allocate_VisibilityDurableFallback(t *testing.T) {
 	const nodeName = "node-v5"
-	visName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
 
 	cases := []struct {
 		name       string
@@ -2472,18 +2632,12 @@ func TestResourceServer_Allocate_VisibilityDurableFallback(t *testing.T) {
 					}},
 				},
 			}
-			pod := &core.Pod{
-				ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-v5"},
-				Spec: core.PodSpec{
-					NodeName: nodeName,
-					Containers: []core.Container{{
-						Name: "sshd",
-						Resources: core.ResourceRequirements{
-							Limits: core.ResourceList{visName: resource.MustParse("1")},
-						},
-					}},
-				},
-			}
+			pod := sshVisibilityPod(nodeName, "pod-uid-v5", slicedOwnerLimits, 1)
+			// A second accelerator-holding container, so the owner pick has two names to choose
+			// between and the choice is observable in the cards the Responder is handed.
+			pod.Spec.Containers = append(pod.Spec.Containers, core.Container{
+				Name: "init", Resources: core.ResourceRequirements{Limits: slicedOwnerLimits},
+			})
 			switch {
 			case c.rawAnno != "":
 				pod.Annotations = map[string]string{AllocatedAcceleratorAnnoKey: c.rawAnno}

@@ -431,7 +431,7 @@ GetPhysicalSlicedVisibilityResponse(
       to the pre-fallback one.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run 'Allocate_Visibility' ./pkg/deviceplugin/`
 
-- [ ] **T4 · The visibility path asks for a partition, not a card**
+- [x] **T4 · The visibility path asks for a partition, not a card**
       Blocked by: T1, T3
       Owns: `pkg/deviceplugin/types.go`, `pkg/deviceplugin/server.go`, `pkg/deviceplugin/server_test.go`
       Gate: review
