@@ -3,7 +3,6 @@ package worker
 import (
 	"context"
 
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/registry/rest"
@@ -50,47 +49,19 @@ func (h *InstanceTypeHandler) SetupHandler(
 
 	// Create table converter to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Entrance",
-				Type: "string",
-			},
-			Template: "{.status.entrance}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Unit(CPU/RAM)/Storage",
-				Type: "string",
-			},
-			Template: "{.spec.unitResources.cpu}/{.spec.unitResources.ram}/{.spec.localStorage}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Accelerator(EX/SH/SL/PT)",
-				Type: "string",
-			},
-			// Fold the exclusive/shared/sliced/partitioned four-view into one column: four
-			// space-separated onceMaxRequest/remaining groups, in the order named
-			// by the column header.
-			Template: "{.status.accelerator.onceMaxRequest}/{.status.accelerator.remaining} " +
-				"{.status.acceleratorShared.onceMaxRequest}/{.status.acceleratorShared.remaining} " +
-				"{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining} " +
-				"{.status.acceleratorPartitioned.onceMaxRequest}/{.status.acceleratorPartitioned.remaining}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "CPU",
-				Type: "string",
-			},
-			Template: "{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Phase",
-				Type: "string",
-			},
-			Template: "{.status.phase}",
-		})
+		extensionapi.JSONPathTemplateColumn("Entrance", "{.status.entrance}"),
+		extensionapi.JSONPathTemplateColumn("Unit(CPU/RAM)/Storage",
+			"{.spec.unitResources.cpu}/{.spec.unitResources.ram}/{.spec.localStorage}"),
+		// Fold the exclusive/shared/sliced/partitioned four-view into one column: four
+		// space-separated onceMaxRequest/remaining groups, in the order named
+		// by the column header.
+		extensionapi.JSONPathTemplateColumn("Accelerator(EX/SH/SL/PT)",
+			"{.status.accelerator.onceMaxRequest}/{.status.accelerator.remaining} "+
+				"{.status.acceleratorShared.onceMaxRequest}/{.status.acceleratorShared.remaining} "+
+				"{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining} "+
+				"{.status.acceleratorPartitioned.onceMaxRequest}/{.status.acceleratorPartitioned.remaining}"),
+		extensionapi.JSONPathTemplateColumn("CPU", "{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}"),
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
 	if err != nil {
 		return gvr, srs, err
 	}

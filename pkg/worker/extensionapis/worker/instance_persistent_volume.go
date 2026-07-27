@@ -65,41 +65,11 @@ func (h *InstancePersistentVolumeHandler) SetupHandler(
 
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTableConvertor(
-		extensionapi.JSONPathTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Type",
-				Type: "string",
-			},
-			JSONPath: ".spec.type",
-		},
-		extensionapi.JSONPathTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Capacity",
-				Type: "string",
-			},
-			JSONPath: ".spec.capacity",
-		},
-		extensionapi.JSONPathTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Access-Mode",
-				Type: "string",
-			},
-			JSONPath: ".spec.accessMode",
-		},
-		extensionapi.JSONPathTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Reclaim-Policy",
-				Type: "string",
-			},
-			JSONPath: ".spec.reclaimPolicy",
-		},
-		extensionapi.JSONPathTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Phase",
-				Type: "string",
-			},
-			JSONPath: ".status.phase",
-		})
+		extensionapi.JSONPathColumn("Type", ".spec.type"),
+		extensionapi.JSONPathColumn("Capacity", ".spec.capacity"),
+		extensionapi.JSONPathColumn("Access-Mode", ".spec.accessMode"),
+		extensionapi.JSONPathColumn("Reclaim-Policy", ".spec.reclaimPolicy"),
+		extensionapi.JSONPathColumn("Phase", ".status.phase"))
 	if err != nil {
 		return gvr, srs, err
 	}
