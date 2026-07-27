@@ -447,7 +447,7 @@ GetPhysicalSlicedVisibilityResponse(
       to today's response.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/deviceplugin/... ./pkg/devicemanager/allocator/nvidia/...` then `make lint`
 
-- [ ] **T5 · case-28 becomes the regression guard**
+- [x] **T5 · case-28 becomes the regression guard**
       Blocked by: T4
       Owns: `.claude/skills/gpustack-operator-e2e/cases/case-28.sh`,
       `.claude/skills/gpustack-operator-e2e/SKILL.md`
@@ -458,7 +458,7 @@ GetPhysicalSlicedVisibilityResponse(
       observation.
       Verify: `bash -n .claude/skills/gpustack-operator-e2e/cases/case-28.sh`; live in T7.
 
-- [ ] **T6 · Docs record the sidecar's grant and its new seam**
+- [x] **T6 · Docs record the sidecar's grant and its new seam**
       Blocked by: T4
       Owns: `docs/architecture.md`, `docs/operation/nvidia-mig.md`
       `architecture.md`'s SSH-Instance paragraph states that a partition-backed sidecar is served the partition
