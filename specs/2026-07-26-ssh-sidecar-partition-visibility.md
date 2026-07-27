@@ -1,6 +1,6 @@
 # Spec: SSH Sidecar Partition Visibility — give the sidecar its workload's partition, not the parent card
 
-Status: Building
+Status: Built
 Type: Bug fix
 
 ## Summary
@@ -53,6 +53,22 @@ that observation — `nvidia-smi -L` and a trivial CUDA init inside the sidecar 
 **inconclusive rather than reassuring**: `kubectl exec -c sshd` lands in the tooling-free Alpine rootfs, so an
 absent probe says nothing about what was injected. The env is decisive on its own, being what the container
 runtime consumes to build the device set and the cgroup rules.
+
+### Re-measured after the fix, on the same class of node
+
+The same workload, on a Kubernetes cluster with an 8-card MIG-capable NVIDIA node, running the operator image
+built from this branch (`case-28.sh`, profile `3g.40gb`, workload image `python:3.12-slim`, card
+`GPU-7b5a7507-…`):
+
+```
+main env : NVIDIA_VISIBLE_DEVICES=MIG-9f5d5c93-dc85-5287-952c-64b03644b0b0   cuInit=0 (CUDA_SUCCESS)
+sshd env : NVIDIA_VISIBLE_DEVICES=MIG-9f5d5c93-dc85-5287-952c-64b03644b0b0
+```
+
+Identical, and no `GPU-` card identity anywhere in the sidecar's grant — `main`'s `nvidia-smi -L` names the
+parent card and its one `3g.40gb` instance, while the sidecar is told about the instance alone. The sidecar's
+in-container probe stays INCONCLUSIVE for the same reason as before (no `nvidia-smi` in that image), so the
+guard asserts on the env, which is what the runtime consumes.
 
 ### Why it happens
 
@@ -266,8 +282,28 @@ that no longer exists.
   It does make an unresolvable identity a user-visible admission failure, so the error message must name the
   pod, the card and the owning container, and transient causes must be genuinely transient (kubelet retries
   container creation with backoff).
-- **A wrong-pod grant** remains gated by `getAllocatingPod`'s matching, unchanged by this spec and
-  pre-existing.
+- **A wrong-pod grant** is pre-existing and this spec does not close it, but the reason first recorded here —
+  that `getAllocatingPod`'s matching gates it — is **wrong for the visibility path**, and saying so mattered
+  enough that the correction is kept rather than quietly replaced. Nothing gates it. The workload path is
+  protected by `SkipReserved`: a container whose own `Allocate` already reserved its cards is set aside, so
+  the next call in a concurrent batch cannot re-pick it. Visibility deliberately opts out of that — it must
+  re-find its own pod — **and reserves nothing of its own**, so no marker distinguishes a visibility container
+  already served from one still waiting. `classify` compares only the resource name and quantity, and the
+  answer is `feasible[0]`, the oldest pending pod. Two SSH Instances admitted together on one node with the
+  same shape therefore have interchangeable sidecars, and `CreationTimestamp` is second-granular under a
+  non-stable sort, so which one wins is arbitrary.
+
+  Every fail-closed gate downstream then agrees, because they all evaluate inside the *mistaken* pod's
+  context: its cards are present, its counts match, its marker is live. This spec does change the failure's
+  shape — before it, a misresolved sidecar was granted the parent card, which happened to cover its own
+  partition when both Instances landed on the same card; after it, the sidecar is granted precisely another
+  tenant's partition and cannot see its own. Narrower, but no longer accidentally right.
+
+  Closing it needs a served-`(podUID, container)` set kept **separate** from `reservations` — reusing
+  `reserveDevices` would feed a visibility container into `reservedModeForResource`,
+  `reservedPhysicalOccupied` and `liveDeviceIDs`, corrupting the very per-card accounting those exist for —
+  so that visibility can take the `SkipReserved` semantics too, with the existing `reserved` bucket serving
+  replays exactly as it does for the workload path. Out of scope here; tracked as its own defect.
 
 ## Design Details
 
@@ -277,8 +313,9 @@ Go build, unit tests and lint run on the **local development host** (macOS): the
 vendor CGO detector packages — compiles and tests there, verified by a read-only smoke build of both target
 packages. The NVIDIA side is exercised through the existing driver seam, so the change and its regression
 tests need no GPU. Confirming it end to end needs a **Kubernetes cluster with a MIG-capable NVIDIA node**
-(provisioned from `testing/infra/clusters`, destroyed after the run) and an SSH client; container images are
-built on a **remote amd64 builder over SSH**.
+and an SSH client; container images are built on a **remote amd64 builder over SSH**. A cluster this run
+provisions itself (from `testing/infra/clusters`) is destroyed afterwards; a cluster the user brings is not —
+only the run's own resources are torn down.
 
 ```bash
 make test        # whole module, including the vendor CGO detectors
@@ -469,10 +506,22 @@ GetPhysicalSlicedVisibilityResponse(
       Verify: `grep -n "visibility" docs/architecture.md docs/operation/nvidia-mig.md` reads consistently with
       the shipped behavior.
 
-- [ ] **Checkpoint A — the whole module is green before any cluster time is spent**
+- [x] **T6b · The device layer stops naming the SSH sidecar**
+      Blocked by: T6
+      Owns: comments only, across `pkg/deviceplugin/**` and every `pkg/devicemanager/allocator/*/deviceplugin.go`
+      Added mid-build, on the observation that T0–T4 had propagated "the SSH sidecar" into comments on generic
+      device-layer code. The SSH sidecar serves Instances; the device layer serves whatever container holds a
+      visibility claim, and its comments must say that. A sweep of every pre-existing site says "a visibility
+      request" / "the owner container" instead. `api/worker/v1alpha1/devices.go` and `pkg/deviceplugin/helper.go`
+      are in scope for the same reason.
+      Acceptance: no comment on vendor-neutral or non-NVIDIA device-layer code names the SSH sidecar; the diff
+      is comment-only.
+      Verify: `git diff --stat` shows no `.go` statement changed; `make test` and `make lint` stay green.
+
+- [x] **Checkpoint A — the whole module is green before any cluster time is spent**
       `make test` and `make lint` pass on the branch.
 
-- [ ] **T7 · The cluster window: guard and no-regression sweep**
+- [x] **T7 · The cluster window: guard and no-regression sweep**
       Blocked by: T5, T6
       Owns: `specs/2026-07-26-ssh-sidecar-partition-visibility.md`
       Gate: review
@@ -481,9 +530,44 @@ GetPhysicalSlicedVisibilityResponse(
       `case-28.sh` and the partition block (`run-partition-block.sh`) as a no-regression sweep. Record the
       observed `main`/`sshd` readings in this spec. Destroy the cluster.
       Acceptance: `case-28.sh` passes with the sidecar's env naming exactly `main`'s partition; the partition
-      block shows no regression against its last recorded run; the readings are in this spec; the cluster is
-      destroyed.
+      block shows no regression against its last recorded run; the readings are in this spec; every resource
+      the run created is torn down, and a cluster the run provisioned itself is destroyed.
       Verify: `MIG_NODE_SSH=<user@host> .claude/skills/gpustack-operator-e2e/cases/case-28.sh <ns>`
+
+      Ran against a Kubernetes cluster with an 8-card MIG-capable NVIDIA node. The operator image was built on
+      a remote amd64 builder from a tree whose hash matches this branch's HEAD, deployed pinned by digest, and
+      the deployment's own revision guard confirmed the running binary is this branch. The user brought the
+      cluster, so it was not destroyed — only the run's own resources were torn down.
+
+      `case-28.sh` **PASS**, readings recorded above. The rest of the partition family, against the last
+      recorded run on `main`:
+
+      | Case | This branch | Last run on `main` |
+      |---|---|---|
+      | 24, 25, 27, 31, 32 | PASS | PASS |
+      | 34 | SKIP (node runs `topologyManagerPolicy: none`) | SKIP |
+      | 28 | **PASS** — the guard this spec exists for | PASS as an observation |
+      | 29 | PASS on re-run | PASS |
+      | 30 | PASS on re-run | PASS |
+      | 26 | 7 of 8 checks | already failing before this branch |
+
+      No case regressed. `case-29` and `case-30` failed only on their first attempt, and both failures are
+      recorded in the case log as the cluster's own connectivity dropping: `kubectl` reached the API through a
+      tunnel that intermittently timed out, surfacing both as the credential plugin failing to mint a token
+      and as a bare transport timeout to the API endpoint. Both passed every check once re-run over a
+      retry-wrapped credential path.
+
+      `case-26` is the one case still short of green, and it reproduces on a clean network, so it is a real
+      failure rather than an artifact. It was **already failing on `main` before this branch**, and it now
+      fails later than it did — the token-count assertion that failed on `main` passes here. The residual
+      check is `the freed room is usable again`: a fresh partition request placed immediately after a
+      whole-card instance is released is admitted while that instance is still being reclaimed, and hits
+      `UnexpectedAdmissionError`. That is the reclaim-window race `case-31` exists to observe, which the same
+      run recorded converging on its second attempt. It is tracked separately and is untouched by this spec:
+      no visibility path runs in it.
+
+      The only workload-path change this branch makes is the `allocatedCards` extraction and the responder
+      type's rename, and the five partition cases that carve instances all passed, which exercises both.
 
 ### Test Plan
 [ ] I/we understand the owners of the involved components may require updates to existing tests to make this
@@ -492,7 +576,9 @@ code solid enough prior to committing the changes necessary to implement this en
 #### Prerequisite testing updates
 - `physicalActuatorResponder` (`pkg/deviceplugin/server_test.go`) implements the capability being widened, so
   it must gain the new method in the same change that widens the interface (T4) or the package stops
-  compiling. This is the only pre-existing test that the interface change forces.
+  compiling. `echoActuatorResponder` in the same file needs it for the same reason: it is asserted to the
+  widened capability at runtime by the partition-actuation tests, so without the method those stop reaching
+  the actuation path at all — a silent skip rather than a build failure, which is the worse of the two.
 - T2's rename reaches three test comments and one test name
   (`TestInstanceWebhook_ValidateCreate_WholeCardOnSliceable`); the assertions themselves are unaffected,
   since the predicate's meaning does not change.
