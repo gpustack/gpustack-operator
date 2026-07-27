@@ -1,25 +1,26 @@
 #!/usr/bin/env bash
 #
-# CASE 28 — What the SSH sidecar of a partition-backed workload actually sees
+# CASE 28 — The SSH sidecar of a partition-backed workload is confined to that same partition
 #   (MUTATING, self-recovering; AUTO-SKIPS without a partition-capable node AND a node-SSH address)
 #
 #   MIG_NODE_SSH=<user@host> case-28.sh <NS>
 #
-# Goal:        RECORD, on real hardware, what the SSH sidecar of a hardware-partitioned workload
-#              receives. The sidecar does not select a device of its own: it co-allocates whatever the
-#              workload container holds, by reusing main's reserved CARD and asking the vendor
-#              responder for that card's visible-devices environment — while main's own environment
-#              names the PARTITION. The reservation carries the profile name and the memory slices the
-#              instance occupies, but not the partition's device identity, so the responder cannot
-#              reconstruct it; and handing a whole-card identifier to a container on a card that is in
-#              a partitioning mode is not obviously safe either. Which of those two actually happens is
-#              a measurement, not a guess, so this case captures the sidecar's visible-devices
-#              environment, its nvidia-smi device list, and whether a trivial CUDA initialisation
-#              succeeds inside it — alongside the same three readings from main, and prints them in a
-#              form that can be copied into the design record verbatim.
-#              Set F11_EXPECT=own to turn the observation into an assertion once the intended behavior
-#              is decided: the case then FAILS if the sidecar sees anything other than exactly main's
-#              own partition.
+# Goal:        The SSH sidecar of a hardware-partitioned workload must receive its workload's own
+#              PARTITION and nothing wider. The sidecar selects no device of its own: it co-allocates
+#              whatever the workload container holds, and that allocation buys exactly one thing, a
+#              device-cgroup grant — an SSH session enters main's namespaces and reads main's
+#              environment, but stays in the sidecar's cgroup, so the sidecar's own grant is what
+#              decides which device nodes the SSH user may open. A whole-card grant on a card that is
+#              in a partitioning mode is therefore broader than the Instance paid for: that card hosts
+#              every partition carved on it, including other tenants'. So the sidecar's response has to
+#              name the partition the workload container holds, which the vendor responder resolves
+#              from its own durable record of who owns which instance. This case captures the
+#              sidecar's visible-devices environment, its nvidia-smi device list, and whether a trivial
+#              CUDA initialisation succeeds inside it — alongside the same three readings from main —
+#              prints them in a form that can be copied into the design record verbatim, and FAILS if
+#              the sidecar sees anything other than exactly main's own partition.
+#              Set F11_EXPECT=observe to record the comparison without asserting it, when measuring a
+#              build that is not expected to hold the contract yet.
 # Environment: A reachable cluster whose active context is the GPU cluster, an nvidia node with at
 #              least one card that can be put into a hardware partitioning mode, AND SSH to that node
 #              (sudo nvidia-smi) supplied via MIG_NODE_SSH=<user@host>. It EXITS 2 (input required)
@@ -36,8 +37,9 @@
 # Expected:    - the Instance's Pod reaches 2/2 Running (main + sshd) on a partition;
 #              - main's readings are captured: visible-devices env, nvidia-smi device list, CUDA init;
 #              - the sidecar's three readings are captured;
-#              - the comparison verdict is recorded and printed for the design record. Under
-#                F11_EXPECT=own the verdict must be "the sidecar sees exactly main's partition".
+#              - the sidecar's visible-devices environment names EXACTLY main's partition and carries
+#                no whole-card identity; the comparison verdict is printed for the design record either
+#                way. Under F11_EXPECT=observe the verdict is recorded instead of asserted.
 # Cleanup:     Trap deletes the test Instance and its SSH secret, removes the temporary key directory,
 #              waits for the instance to reclaim, and restores the partitioning mode of the card this
 #              case toggled (a card found already partitioned is left as found). Idempotent; runs on
@@ -53,7 +55,7 @@ INST=gpustack-e2e-part-ssh
 SECRET=gpustack-e2e-part-ssh-key
 KEYDIR="$(mktemp -d)"
 F11_IMAGE="${F11_IMAGE:-python:3.12-slim}"
-F11_EXPECT="${F11_EXPECT:-observe}"
+F11_EXPECT="${F11_EXPECT:-own}"
 
 part_require_node_ssh "case-28.sh"
 part_require_mig_capable
@@ -110,7 +112,7 @@ for _ in $(seq 1 60); do
 done
 if [ -z "$ready" ]; then
   record FAIL "partition-backed SSH Instance reaches 2/2 Running" "${POD} not 2/2 Running (phase=$(kubectl -n default get pod "$POD" -o jsonpath='{.status.phase}' 2>/dev/null), held: $(held_reason "$POD")) — cannot observe the sidecar without a running Pod"
-  part_results "What the SSH sidecar of a partition-backed workload actually sees"
+  part_results "The SSH sidecar of a partition-backed workload is confined to that same partition"
   exit 1
 fi
 record PASS "partition-backed SSH Instance reaches 2/2 Running" "${POD} main+sshd Running on profile ${MID}, card(s) $(pod_cards "$POD")"
@@ -201,15 +203,16 @@ else
 fi
 VERDICT="${VERDICT}; in-container probe: ${SSHD_PROBE}"
 
-if [ "$F11_EXPECT" = own ]; then
+# Asserted unless F11_EXPECT explicitly demotes the guard, so a typo cannot silently downgrade it.
+if [ "$F11_EXPECT" = observe ]; then
+  record PASS "OBSERVED: verdict" "${VERDICT} (recorded, not asserted; F11_EXPECT=observe)"
+else
   [ "$VSTATE" = own ] \
     && record PASS "the sidecar sees exactly main's partition" "${VERDICT}" \
-    || record FAIL "the sidecar sees exactly main's partition" "${VERDICT} — asserted because F11_EXPECT=own"
-else
-  record PASS "OBSERVED: verdict" "${VERDICT} (recorded, not asserted; set F11_EXPECT=own to make it a guard)"
+    || record FAIL "the sidecar sees exactly main's partition" "${VERDICT}"
 fi
 
-part_results "What the SSH sidecar of a partition-backed workload actually sees"
+part_results "The SSH sidecar of a partition-backed workload is confined to that same partition"
 
 echo
 echo "---- fold back into the spec: SSH sidecar on a hardware partition ----"
@@ -223,12 +226,11 @@ echo "sshd   nvidia-smi : $(flat "$SSHD_SMI")"
 echo "sshd   cuda init  : $(flat "$SSHD_CUDA")"
 echo "verdict           : ${VERDICT}"
 if [ "$VSTATE" = own ]; then
-  echo "next step         : own → the intended behavior already holds; keep this case as the regression"
-  echo "                    guard by running it with F11_EXPECT=own"
+  echo "next step         : own → the guard holds; the sidecar's grant is exactly main's partition"
 else
-  echo "next step         : ${VSTATE} → the sidecar is NOT confined to main's partition. The fix is to carry"
-  echo "                    the actuator's chosen partition identity in the reservation, so the responder"
-  echo "                    can answer with the partition's env instead of the parent card's."
+  echo "next step         : ${VSTATE} → REGRESSION: the sidecar is NOT confined to main's partition. The"
+  echo "                    visibility path must ask the vendor responder for the partition the owner"
+  echo "                    container already holds, never fall back to the parent card's response."
 fi
 echo "----------------------------------------------------------------------"
 
