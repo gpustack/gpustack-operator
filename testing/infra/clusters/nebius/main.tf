@@ -157,6 +157,35 @@ resource "nebius_vpc_v1_security_rule" "ssh_ingress" {
   }
 }
 
+resource "nebius_vpc_v1_security_rule" "ephemeral_tcp_ingress" {
+  parent_id = nebius_vpc_v1_security_group.this.id
+  name      = "ephemeral-tcp-ingress"
+  access    = "ALLOW"
+  protocol  = "TCP"
+  priority  = 110
+  type      = "STATEFUL"
+
+  # Mirrors clusters/eks's NodePort ingress (30000-32767), so services reachable via a NodePort
+  # in e2e can be reached here too. Nebius security rules cap at 8 discrete ports per rule (no
+  # from/to range like AWS), so the full TCP range is opened instead of just the NodePort span.
+  ingress = {
+    source_cidrs = ["0.0.0.0/0"]
+  }
+}
+
+resource "nebius_vpc_v1_security_rule" "ephemeral_udp_ingress" {
+  parent_id = nebius_vpc_v1_security_group.this.id
+  name      = "ephemeral-udp-ingress"
+  access    = "ALLOW"
+  protocol  = "UDP"
+  priority  = 111
+  type      = "STATEFUL"
+
+  ingress = {
+    source_cidrs = ["0.0.0.0/0"]
+  }
+}
+
 resource "nebius_vpc_v1_security_rule" "egress" {
   parent_id = nebius_vpc_v1_security_group.this.id
   name      = "egress"
