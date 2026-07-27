@@ -29,7 +29,7 @@ func newInstanceWebhook(objs ...ctrlcli.Object) *InstanceWebhook {
 
 // sliceableDetail is the observed accelerator Detail that marks a fixture InstanceType as
 // slice-ready: a manufacturer (so Status.Detail.AcceleratorReady is true) plus a non-zero logical
-// slice count (so Status.Detail.IsSliceable is true). The webhook now reads sliceability and
+// slice count (so Status.Detail.IsLogicallySliceable is true). The webhook now reads sliceability and
 // readiness from Status.Detail, so a slice-path fixture must set it.
 var sliceableDetail = workercore.InstanceTypeDetail{
 	Manufacturer: "nvidia",
@@ -43,7 +43,7 @@ var sliceableDetail = workercore.InstanceTypeDetail{
 // partitionedDetail is the observed accelerator Detail of a pool whose cards are all in a
 // hardware partitioning mode: a manufacturer (so Status.Detail.AcceleratorReady is true), a
 // per-card VRAM the partition sizing anchors on, no logical slice count (so
-// Status.Detail.IsSliceable is false — a partitioned card serves no logical slice), and the
+// Status.Detail.IsLogicallySliceable is false — a partitioned card serves no logical slice), and the
 // profile inventory a partition request is validated against.
 var partitionedDetail = workercore.InstanceTypeDetail{
 	Manufacturer: "nvidia",
@@ -711,7 +711,7 @@ func TestInstanceWebhook_Default_SlicedZeroAccelerator(t *testing.T) {
 // slice percentage) on a sliceable InstanceType must be a single card: the accelerator count
 // must be exactly 1 (the slice is expressed through the memory/compute percentages, not the
 // card count). Whole-card (zero-percentage) requests are covered by
-// TestInstanceWebhook_ValidateCreate_WholeCardOnSliceable.
+// TestInstanceWebhook_ValidateCreate_WholeCardOnLogicallySliceable.
 func TestInstanceWebhook_ValidateCreate_SlicedAccelerator(t *testing.T) {
 	const typeName = "sliced-8s"
 
@@ -763,11 +763,11 @@ func TestInstanceWebhook_ValidateCreate_SlicedAccelerator(t *testing.T) {
 	}
 }
 
-// TestInstanceWebhook_ValidateCreate_WholeCardOnSliceable pins that a whole-card request (both
+// TestInstanceWebhook_ValidateCreate_WholeCardOnLogicallySliceable pins that a whole-card request (both
 // slice percentages zero) on a sliceable InstanceType is treated as an exclusive request: it
 // may span multiple cards up to the InstanceType's whole-card OnceMaxRequest, unlike a sliced
 // request which is pinned to one card.
-func TestInstanceWebhook_ValidateCreate_WholeCardOnSliceable(t *testing.T) {
+func TestInstanceWebhook_ValidateCreate_WholeCardOnLogicallySliceable(t *testing.T) {
 	const typeName = "sliced-8s"
 
 	cases := []struct {
@@ -923,6 +923,7 @@ func TestInstanceWebhook_ValidateCreate_PartitionedProfile(t *testing.T) {
 	cases := []struct {
 		name             string
 		manufacturer     string // "" → the fixture's own (nvidia)
+		logicalOnly      bool   // swap the pool for one whose cards only slice logically
 		profile          string
 		acc              string // "" → accelerator left unset
 		memPct, coresPct int32
@@ -933,8 +934,18 @@ func TestInstanceWebhook_ValidateCreate_PartitionedProfile(t *testing.T) {
 		{name: "offered profile accepted", profile: "3g.40gb", acc: "1"},
 		{name: "other offered profile accepted", profile: "2g.20gb", acc: "1"},
 		{
+			// A pool that CAN partition but not into this profile: the offered set is the useful
+			// answer, and it is what distinguishes this from the capability rejection below.
 			name: "unknown profile rejected with the offered set", profile: "7g.80gb", acc: "1",
 			wantErr: true, wantMessage: "2g.20gb 3g.40gb",
+		},
+		{
+			// A pool that cannot partition at all: without the capability guard this fell through
+			// to "offered: []", which reads as a mistyped profile rather than a pool that does
+			// not partition.
+			name:        "partition request against an all-logical pool names the missing capability",
+			logicalOnly: true, profile: "3g.40gb", acc: "1",
+			wantErr: true, wantMessage: "does not offer hardware partitioning",
 		},
 		{
 			name: "profile with memory percentage rejected", profile: "3g.40gb", acc: "1", memPct: 50,
@@ -965,6 +976,10 @@ func TestInstanceWebhook_ValidateCreate_PartitionedProfile(t *testing.T) {
 			instType := partitionedInstanceType(typeName)
 			if c.manufacturer != "" {
 				instType.Status.Detail.Manufacturer = c.manufacturer
+			}
+			if c.logicalOnly {
+				instType.Status.Detail = sliceableDetail
+				instType.Status.AcceleratorPartitioned = workercore.InstanceTypeResource{}
 			}
 			w := newInstanceWebhook(instType)
 
@@ -1024,8 +1039,10 @@ func TestInstanceWebhook_ValidateCreate_PoolCannotServe(t *testing.T) {
 		{name: "exclusive on a logically sliceable pool accepted", instType: sliceType},
 		{name: "logical slice on a logically sliceable pool accepted", instType: sliceType, memPct: 50, coresPct: 50},
 		{
+			// Its whole-card OnceMaxRequest is zero — the view counts free unpartitioned cards
+			// and it has none — so the generic cap check rejects the claim.
 			name: "exclusive on an all-partitioned pool rejected", instType: partType,
-			wantErr: true, wantMessage: "hardware-partitioned",
+			wantErr: true, wantMessage: "exceeds the maximum accelerator request",
 		},
 		{
 			name: "logical slice on an all-partitioned pool rejected", instType: partType, memPct: 50, coresPct: 50,

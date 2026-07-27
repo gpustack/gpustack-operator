@@ -380,9 +380,10 @@ GetPhysicalSlicedVisibilityResponse(
       instance's UUID differs (id reuse) → error; a single-card and a two-card case both covered.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run 'PhysicalSlicedVisibility' ./pkg/devicemanager/allocator/nvidia/`
 
-- [ ] **T2 · Name the pool's two slicing capabilities for what they are**
+- [x] **T2 · Name the pool's two slicing capabilities for what they are**
       Blocked by: None
-      Owns: `api/worker/v1alpha1/instance_type.go`, `pkg/worker/webhooks/worker/instance.go`,
+      Owns: `api/worker/v1alpha1/instance_type.go`, `api/worker/v1alpha1/instance_type_test.go`,
+      `pkg/worker/webhooks/worker/instance.go`,
       `pkg/worker/webhooks/worker/instance_test.go`, `pkg/worker/controllers/worker/instance.go`,
       `pkg/worker/controllers/worker/instance_test.go`
       Gate: review
@@ -392,15 +393,21 @@ GetPhysicalSlicedVisibilityResponse(
       name still claims the general concept. A sibling `IsPhysicallySliceable()` (`SlicedDetail.Physical.Count
       > 0`) joins it, and `validatePartitionedAcceleratorRequest` uses it for the guard its logical mirror
       already has: today a partition request against an all-logical pool falls through to
-      "does not offer this partition profile; offered: []", where the logical branch gets a purpose-written
-      `unservedLogicalSliceMessage`. Neither predicate may fold in the other: at the **pool** level the two
-      capabilities are independently true (a mixed node advertises both), unlike the per-card
-      `device.IsLogicallySliceable`, which does exclude partitioned cards.
+      "does not offer this partition profile; offered: []", which reads as a mistyped profile. Neither
+      predicate may fold in the other: at the **pool** level the two capabilities are independently true
+      (a mixed node advertises both), unlike the per-card `device.IsLogicallySliceable`, which does exclude
+      partitioned cards.
+      A rejection states the missing capability and stops there — it does not suggest the other request
+      shape (maintainer's call, mid-task). That retires `unservedLogicalSliceMessage`,
+      `unservedPartitionMessage` and, with them, `isAllPartitionedPool`: its remaining user
+      (`validateExclusiveAcceleratorRequest`) only restated a rejection the whole-card `OnceMaxRequest` cap
+      already delivers, since that view counts free unpartitioned cards and an all-partitioned pool has none.
       Acceptance: no `IsSliceable` identifier remains; the three logical call sites read
       `IsLogicallySliceable()` and behave identically; a partition request against a pool with no partitioned
-      card is rejected with a message that names the missing capability and points at the logical-slice
-      fields, and one against a partitioned pool that lacks the profile keeps today's offered-set message;
-      the doc comments state why the pool-level predicates do not mirror the per-card exclusivity.
+      card is rejected with a message naming only the missing capability, and one against a partitioned pool
+      that lacks the profile keeps today's offered-set message; a whole-card request on an all-partitioned
+      pool is still rejected, by the `OnceMaxRequest` cap; the doc comments state why the pool-level
+      predicates do not mirror the per-card exclusivity.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`
 
 - [ ] **T3 · The sidecar's co-allocation survives a device-manager restart**

@@ -29,7 +29,7 @@ func qty(s string) resource.Quantity { return resource.MustParse(s) }
 
 // slicedDetail builds the observed accelerator Status.Detail a fixture InstanceType carries: the
 // manufacturer (which getResourceRequirements reads for the accelerator resource names) and, when
-// sliceable, a non-zero logical slice count so Status.Detail.IsSliceable() is true. The Pod-sizing
+// sliceable, a non-zero logical slice count so Status.Detail.IsLogicallySliceable() is true. The Pod-sizing
 // path reads sliceability and manufacturer from Status.Detail, not the spec.
 func slicedDetail(manufacturer string, sliceable bool) workercore.InstanceTypeDetail {
 	d := workercore.InstanceTypeDetail{Manufacturer: manufacturer}
