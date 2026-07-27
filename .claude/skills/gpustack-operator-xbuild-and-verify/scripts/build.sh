@@ -15,9 +15,10 @@
 #   XB_REMOTE_CTX remote build-context dir    (default: ~/vcann-build, ssh mode only)
 #   XB_REPO       local repo root             (default: git rev-parse --show-toplevel)
 #
-# The build context is minimal: only the Dockerfile + the backend's external build
-# script are needed because each stage is `FROM <vendor base>` (independent of the
-# tools/builder stages). The LIB_*_COMMIT pins come from the Dockerfile ARG defaults.
+# The build context is minimal: the Dockerfile, the backend's external build script,
+# and — for ascend — the vendored vcann-rt patch dir the stage bind-mounts. Each stage
+# is `FROM <vendor base>`, independent of the tools/builder stages. The LIB_*_COMMIT
+# pins come from the Dockerfile ARG defaults.
 # Native build on a matching-arch host is fast (no qemu); cross-arch uses qemu.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -36,12 +37,14 @@ case "${TARGET}" in
   xbuild-ascend-cann-*)
     XB_BACKEND=ascend
     BUILDSH_REL="pack/gpustack-operator/external/ascend/build-libvnpu.sh"
+    PATCHES_REL="pack/gpustack-operator/external/ascend/vcann-rt"
     XB_IMAGE="${XB_IMAGE:-vcann-build:${TARGET#xbuild-ascend-cann-}}"
     XB_STAGE="${XB_STAGE:-/opt/enpu/vcann-rt}"
     ;;
   xbuild-nvidia-cuda-*)
     XB_BACKEND=nvidia
     BUILDSH_REL="pack/gpustack-operator/external/nvidia/build-libvgpu.sh"
+    PATCHES_REL=""   # HAMi-core is built from a pristine clone
     XB_IMAGE="${XB_IMAGE:-vgpu-build:${TARGET#xbuild-nvidia-cuda-}}"
     XB_STAGE="${XB_STAGE:-/opt/vgpu}"
     ;;
@@ -65,6 +68,15 @@ if [ "${XB_MODE}" = ssh ]; then
   CTX="${XB_REMOTE_CTX}"
   xput "${XB_REPO}/${DOCKERFILE_REL}" "${CTX}/${DOCKERFILE_REL}"
   xput "${XB_REPO}/${BUILDSH_REL}"    "${CTX}/${BUILDSH_REL}"
+  # The patch dir is bind-mounted by the stage, so it must exist in the remote context.
+  # Wipe it first: a patch dropped locally would otherwise linger here and be applied.
+  if [ -n "${PATCHES_REL}" ]; then
+    xrun "rm -rf '${CTX}/${PATCHES_REL}'" >/dev/null
+    for p in "${XB_REPO}/${PATCHES_REL}"/*.patch; do
+      [ -f "${p}" ] || { echo "build.sh: no *.patch under ${PATCHES_REL}" >&2; exit 1; }
+      xput "${p}" "${CTX}/${PATCHES_REL}/$(basename "${p}")"
+    done
+  fi
 else
   CTX="${XB_REPO}"
 fi

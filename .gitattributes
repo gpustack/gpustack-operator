@@ -19,3 +19,8 @@
 **/generated.*.go linguist-generated=true
 **/*.pb.go linguist-generated=true
 **/go.sum linguist-generated=true
+
+# Vendored patches must stay byte-exact: some of the upstream files they carry context
+# for use CRLF (vcann-rt's CMakeLists.txt does), and the eol=lf normalisation above
+# would strip those CRs, leaving a patch whose context no longer matches the source.
+pack/gpustack-operator/external/*/*/*.patch -text

@@ -13,8 +13,8 @@ ARG UBUNTU_IMAGE="ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49
 
 # Logical-slicing preload-library sources, cloned inline per build stage at a pinned
 # commit (no git submodule). Bump the commit to update; the ARG busts the build cache.
-ARG LIB_UBS_VIRT_ENPU_COMMIT="4d7e4b10ebc2416d761de7d9c1ab0282ae35dae9"
-ARG LIB_HAMI_CORE_COMMIT="0831874bce5af56cefca7093dfb2f9f95d1970aa"
+ARG LIB_UBS_VIRT_ENPU_COMMIT="476bb968d477a4eab7719197af212c6c3470ff0b"
+ARG LIB_HAMI_CORE_COMMIT="52f33fc7fa1fbb3f08148ab076d0e7447bec7f2a"
 
 # =============================================================================
 # Stage: tools
@@ -194,9 +194,10 @@ EOF
 # =============================================================================
 FROM quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11 AS xbuild-ascend-cann-8-910b
 ARG LIB_UBS_VIRT_ENPU_COMMIT
-RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
+    --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
     set -exo pipefail
-    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    command -v git >/dev/null 2>&1 && command -v patch >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git patch ca-certificates && rm -rf /var/lib/apt/lists/*; }
     rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
     git remote add origin https://gitcode.com/openeuler/ubs-virt.git
     git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
@@ -206,9 +207,10 @@ EOF
 
 FROM quay.io/ascend/cann:8.5.0-a3-ubuntu22.04-py3.11 AS xbuild-ascend-cann-8-910c
 ARG LIB_UBS_VIRT_ENPU_COMMIT
-RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
+    --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
     set -exo pipefail
-    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    command -v git >/dev/null 2>&1 && command -v patch >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git patch ca-certificates && rm -rf /var/lib/apt/lists/*; }
     rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
     git remote add origin https://gitcode.com/openeuler/ubs-virt.git
     git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
@@ -218,9 +220,10 @@ EOF
 
 FROM quay.io/ascend/cann:9.1.0-beta.1-910b-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910b
 ARG LIB_UBS_VIRT_ENPU_COMMIT
-RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
+    --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
     set -exo pipefail
-    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    command -v git >/dev/null 2>&1 && command -v patch >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git patch ca-certificates && rm -rf /var/lib/apt/lists/*; }
     rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
     git remote add origin https://gitcode.com/openeuler/ubs-virt.git
     git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
@@ -230,9 +233,10 @@ EOF
 
 FROM quay.io/ascend/cann:9.1.0-beta.1-a3-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-910c
 ARG LIB_UBS_VIRT_ENPU_COMMIT
-RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
+    --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
     set -exo pipefail
-    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    command -v git >/dev/null 2>&1 && command -v patch >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git patch ca-certificates && rm -rf /var/lib/apt/lists/*; }
     rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
     git remote add origin https://gitcode.com/openeuler/ubs-virt.git
     git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin
@@ -242,9 +246,10 @@ EOF
 
 FROM quay.io/ascend/cann:9.1.0-beta.1-950-ubuntu22.04-py3.12 AS xbuild-ascend-cann-9-950
 ARG LIB_UBS_VIRT_ENPU_COMMIT
-RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh <<EOF
+RUN --mount=type=bind,src=pack/gpustack-operator/external/ascend/build-libvnpu.sh,target=/build-libvnpu.sh \
+    --mount=type=bind,src=pack/gpustack-operator/external/ascend/vcann-rt,target=/vcann-rt-patches <<EOF
     set -exo pipefail
-    command -v git >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*; }
+    command -v git >/dev/null 2>&1 && command -v patch >/dev/null 2>&1 || { apt-get update -y && apt-get install -y --no-install-recommends git patch ca-certificates && rm -rf /var/lib/apt/lists/*; }
     rm -rf /tmp/ubs-virt && git init -q /tmp/ubs-virt && cd /tmp/ubs-virt
     git remote add origin https://gitcode.com/openeuler/ubs-virt.git
     git fetch --depth 1 origin "${LIB_UBS_VIRT_ENPU_COMMIT}" || git fetch origin

@@ -248,6 +248,16 @@ func (s *server) getSlicedContainerAllocateResponse(
 		envs["ENPU_LOG_LEVEL"] = "1"
 	}
 
+	// Show the slice in `npu-smi info` by default: our vendored vcann-rt patch defines
+	// dsmi_get_hbm_info, but leaves it off unless ENPU_DSMI_HOOK opts in, so a bare
+	// vcann-rt user sees no change. A container that names the variable in its own Env
+	// keeps its value — including an opt-out — so only inject the default when it has not.
+	// An envFrom-sourced value is invisible here (see ContainerEnvDeclared), so opting out
+	// that way needs an explicit Env entry.
+	if !deviceplugin.ContainerEnvDeclared(ctr, "ENPU_DSMI_HOOK") {
+		envs["ENPU_DSMI_HOOK"] = "1"
+	}
+
 	return &deviceplugin.ContainerAllocateResponse{
 		Envs:   envs,
 		Mounts: mounts,

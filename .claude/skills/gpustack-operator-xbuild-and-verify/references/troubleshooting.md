@@ -32,6 +32,24 @@ Concrete failure modes hit while building this skill, with fixes.
   `<arch>-linux` tree carries both the host HAL and the device-side (AArch64) HAL, so a path-name
   match picked the wrong-arch stub on amd64. Do not reintroduce it.
 - Cross-arch build is slow (qemu); build on a matching-arch host for a fast native build.
+- **`ERROR: listing workers: … "error reading server preface: http2: frame too large"`** — the
+  docker-container buildx builder is dead, not merely unreachable, and `docker ps` lies about it.
+  On a host whose **default runtime is `ascend`**, the builder container is owned by
+  `ascend-docker-runtime`, whose vendored runc types `State.init_process_start` as a string while
+  containerd writes a number; it therefore cannot report or tear down its own container, so
+  dockerd keeps a stale `Up` while `docker inspect` says `exited`, and `restart` fails with
+  `could not delete stale containerd task object`. Recover **without losing the build cache** —
+  the cache is in the *named* volume `buildx_buildkit_<builder>0_state`, which `docker rm` does
+  not delete and which the driver re-attaches by the same deterministic name:
+  ```bash
+  docker rm -f buildx_buildkit_<builder>0      # succeeds: it is already exited
+  docker buildx inspect --bootstrap <builder>  # recreates it on the same state volume
+  ```
+  This matters when the pinned base image (e.g. `quay.io/ascend/cann:8.5.0-910b-ubuntu22.04-py3.11`)
+  is **not** in the host's docker image store: it then lives only in that builder's cache, and
+  `docker buildx rm` or switching to the `default` builder forces a ~10 GB re-pull. Corollary:
+  under a default `ascend` runtime, prefer short-lived `docker run --rm` containers (as the cases
+  do) — any long-lived container can wedge this way.
 
 ## Runtime (in-container)
 - **`enpu-monitor` exits 139 (SIGSEGV) after "Successfully to initialize vnpu device"** — libdcmi
