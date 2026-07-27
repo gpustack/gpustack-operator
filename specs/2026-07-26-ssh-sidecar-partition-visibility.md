@@ -252,8 +252,13 @@ that no longer exists.
 - **A restart between the two Allocates loses the in-process co-allocation** → fall back to the Pod's durable
   allocation annotation; cover it with a unit test that empties the in-process map.
 - **The annotation fallback weakens the documented "reservation pruned ⇒ fail closed" meaning** — a pod whose
-  reservation was pruned but whose annotation survives now gets visibility. Confirm during implementation that
-  no prune path other than Pod deletion exists; if one does, gate the fallback on it.
+  reservation was pruned but whose annotation survives now gets visibility. Resolved in T3, ungated: the only
+  prune sweep runs from `Reconcile` over an unfiltered per-node Pod list that deliberately keeps terminating
+  pods, so a reservation outlives its pod until the Pod object leaves the informer — at which point
+  `getAllocatingPod` fails first and the fallback is never reached. The three `releaseReservation` rollbacks
+  all follow an Allocate that failed, so the workload container never starts and a sidecar grant in that
+  window buys nothing (and, for a partition, the rollback destroys the instance, so T1's liveness check
+  rejects it anyway).
 - **A vendor responder without the new capability silently regresses** → the fallback is the current code
   path, asserted byte-identical by a unit test; only a partition-requesting owner takes the new branch.
 - **Failing closed turns a today-degraded sidecar into a rejected Pod** → that is the intended trade: today's
@@ -410,7 +415,7 @@ GetPhysicalSlicedVisibilityResponse(
       predicates do not mirror the per-card exclusivity.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/worker/webhooks/worker/... ./pkg/worker/controllers/worker/...`
 
-- [ ] **T3 · The sidecar's co-allocation survives a device-manager restart**
+- [x] **T3 · The sidecar's co-allocation survives a device-manager restart**
       Blocked by: T0
       Owns: `pkg/deviceplugin/server.go`, `pkg/deviceplugin/controller.go`,
       `pkg/deviceplugin/server_test.go`, `pkg/deviceplugin/controller_test.go`
@@ -577,5 +582,6 @@ the unit tests against a fake client and fake responders, and by the e2e cases a
 - Does any non-NVIDIA vendor in the tree plan hardware partitioning? T-Head and Hygon are the candidates, and
   both inject device nodes rather than a visible-devices env — the contract is shaped for that, but the
   signature should be reviewed against the first real implementation before it is fixed by a shipped one.
-- Is Pod deletion the only path that prunes an in-process reservation? If another exists, T3's annotation
-  fallback must be gated on it (see Risks).
+- ~~Is Pod deletion the only path that prunes an in-process reservation?~~ Answered in T3: yes for the prune
+  sweep, and the three rollback releases cannot leave a startable container behind. The fallback ships
+  ungated (see Risks).

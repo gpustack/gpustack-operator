@@ -1003,6 +1003,38 @@ func (s *ResourceServer) priorPartitionAllocation(
 	return workercore.DevicesStatus{}, false
 }
 
+// coAllocatedAccelerators returns the accelerator devices a pod holds in a container other than
+// self — what a visibility request co-allocates — together with that container's name. It reads
+// the in-process reservation first and falls back to the Pod's durable allocation annotation, the
+// only record that survives a device-manager restart landing between the owner's Allocate and
+// this one. Both sources are resolved by the same owner pick, so the devices and the name always
+// describe one container.
+//
+// An unreadable annotation is an error rather than an empty result: the caller must reject the
+// admission, never fall through to a response it cannot substantiate. A pod with no record in
+// either source yields no devices and no error, which the caller's own gate rejects.
+func (s *ResourceServer) coAllocatedAccelerators(
+	pod *core.Pod, self string,
+) (workercore.DevicesStatus, string, error) {
+	if reserved, owner, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, self); ok && len(reserved.Groups) > 0 {
+		return reserved, owner, nil
+	}
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return workercore.DevicesStatus{}, "", fmt.Errorf(
+			"read the allocation annotation of pod %s: %w", kubemeta.GetNamespacedNameKey(pod), err)
+	}
+	names := make([]string, 0, len(allocations))
+	for name := range allocations {
+		names = append(names, name)
+	}
+	owner, ok := pickAcceleratorOwner(names, self)
+	if !ok {
+		return workercore.DevicesStatus{}, "", nil
+	}
+	return allocations[owner].Devices, owner, nil
+}
+
 // priorPartitionTokens re-derives Allocate's two per-card maps from an allocation this
 // container already holds, so a retry reuses the card and interval it recorded.
 func priorPartitionTokens(
@@ -1102,20 +1134,25 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
 	}
 
-	// Take the pod's accelerator reservation held by a container other than this sidecar: the
-	// sidecar co-allocates what the workload holds, and its own visibility request reserves
-	// nothing. Accelerator claims live in exactly one container group, so there is only one.
-	reserved, owner, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, ctr.Name)
-	if !ok || len(reserved.Groups) == 0 {
-		// Fail closed: the workload container's allocation has not been recorded yet (or was
-		// pruned). Returning an error rejects this admission rather than emitting an empty
-		// visible-devices env a runtime could read as "all devices". Because main is always
-		// allocated before sshd in the same pod, this path should not occur in practice; if it
-		// ever does, recovery is the controller recreating the Pod.
-		err = fmt.Errorf("no accelerator devices reserved for pod %s by a container other than %q "+
+	// Take the accelerator allocation the pod holds in a container other than this one: a
+	// visibility request co-allocates what its owner holds and reserves nothing of its own.
+	// Accelerator claims live in exactly one container group, so there is only one.
+	reserved, owner, err := s.coAllocatedAccelerators(pod, ctr.Name)
+	if err != nil {
+		s.Logger.Error(err, "resolve the visibility co-allocation")
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
+	}
+	if len(reserved.Groups) == 0 {
+		// Fail closed: the workload container's allocation is recorded in neither the in-process
+		// reservation nor the durable annotation. Returning an error rejects this admission
+		// rather than emitting an empty visible-devices env a runtime could read as "all
+		// devices". Because main is always allocated before sshd in the same pod, this path
+		// should not occur in practice; if it ever does, recovery is the controller recreating
+		// the Pod.
+		err = fmt.Errorf("no accelerator devices allocated for pod %s by a container other than %q "+
 			"(owner=%q); refusing to grant visibility",
 			kubemeta.GetNamespacedNameKey(pod), ctr.Name, owner)
-		s.Logger.Error(err, "visibility allocation without reservation")
+		s.Logger.Error(err, "visibility allocation without a co-allocation")
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}
 

@@ -2387,3 +2387,138 @@ func TestResourceServer_Allocate_Visibility_CountMismatch(t *testing.T) {
 	assert.Contains(t, err.Error(), workloadContainer)
 	assert.Contains(t, err.Error(), "grp-0:dev-0")
 }
+
+// visibilityAnnotation renders one container's accelerator record the way a workload Allocate
+// persists it — the durable source the sidecar falls back to.
+func visibilityAnnotation(container, dev string, allocated int32) PodAllocations {
+	return PodAllocations{container: ContainerAllocation{
+		Devices: workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.AcceleratorAllocation{
+					{ID: dev, Mode: workercore.DeviceAllocationModeSliced, Allocated: allocated},
+				},
+			}},
+		},
+	}}
+}
+
+// TestResourceServer_Allocate_VisibilityDurableFallback covers where the sidecar's co-allocation
+// comes from. The in-process reservation is lost on a device-manager restart, which can land
+// between the workload's Allocate and the sidecar's; the Pod's allocation annotation is the only
+// record that survives it. The reservation stays the fast path, and neither source producing a
+// usable record still fails the admission closed.
+func TestResourceServer_Allocate_VisibilityDurableFallback(t *testing.T) {
+	const nodeName = "node-v5"
+	visName := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeVisibility)
+
+	cases := []struct {
+		name       string
+		reserve    string         // "" → no in-process reservation (the post-restart state)
+		annotation PodAllocations // nil → no annotation
+		rawAnno    string         // non-empty → this literal annotation value instead
+
+		wantCards map[Resource]int32 // nil → the Allocate must fail closed
+	}{
+		{
+			name:       "the annotation serves the sidecar after a restart",
+			annotation: visibilityAnnotation(workloadContainer, "dev-0", 200000),
+			wantCards:  map[Resource]int32{{Group: "grp-0", Device: "dev-0"}: 200000},
+		},
+		{
+			// The reservation is read first, so a pod that has both is served without touching
+			// the annotation — pinned by making the two disagree.
+			name:       "the reservation is preferred over the annotation",
+			reserve:    "dev-0",
+			annotation: visibilityAnnotation(workloadContainer, "dev-1", 200000),
+			wantCards:  map[Resource]int32{{Group: "grp-0", Device: "dev-0"}: 0},
+		},
+		{
+			// The owner pick is one rule across both sources: exclude self, then the
+			// lexicographically smallest name. "init" holds dev-0, "main" holds dev-1.
+			name: "two annotated containers resolve to the same owner the reservation would",
+			annotation: PodAllocations{
+				workloadContainer: visibilityAnnotation(workloadContainer, "dev-1", 200000)[workloadContainer],
+				"init":            visibilityAnnotation("init", "dev-0", 100000)["init"],
+			},
+			wantCards: map[Resource]int32{{Group: "grp-0", Device: "dev-0"}: 100000},
+		},
+		{
+			name:    "an unreadable annotation fails closed rather than falling through",
+			rawAnno: "{not json",
+		},
+		{
+			name: "neither source fails closed",
+		},
+		{
+			// A card the annotation names but the node no longer reports: the present/count
+			// gates must reject it exactly as they reject a stale reservation.
+			name:       "an annotated card gone from the inventory fails closed",
+			annotation: visibilityAnnotation(workloadContainer, "dev-9", 200000),
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			devs := &workercore.Devices{
+				ObjectMeta: meta.ObjectMeta{Name: nodeName},
+				Spec: workercore.DevicesSpec{
+					Groups: []workercore.DevicesGroup{{
+						ID:           "grp-0",
+						Manufacturer: nodefeature.ManufacturerNVIDIA,
+						Accelerators: []workercore.Accelerator{{ID: "dev-0", Index: 0}, {ID: "dev-1", Index: 1}},
+					}},
+				},
+			}
+			pod := &core.Pod{
+				ObjectMeta: meta.ObjectMeta{Name: "p", Namespace: "default", UID: "pod-uid-v5"},
+				Spec: core.PodSpec{
+					NodeName: nodeName,
+					Containers: []core.Container{{
+						Name: "sshd",
+						Resources: core.ResourceRequirements{
+							Limits: core.ResourceList{visName: resource.MustParse("1")},
+						},
+					}},
+				},
+			}
+			switch {
+			case c.rawAnno != "":
+				pod.Annotations = map[string]string{AllocatedAcceleratorAnnoKey: c.rawAnno}
+			case c.annotation != nil:
+				pod.Annotations = allocationAnnotation(t, c.annotation)
+			}
+
+			cli := nodeFixture(devs, pod)
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			if c.reserve != "" {
+				reserveWorkload(rec, "pod-uid-v5", visibilityReservation(c.reserve))
+			}
+
+			responder := &recordingResponder{}
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: workercore.DeviceAllocationModeVisibility,
+				Reconciler:     rec,
+				Responder:      responder,
+			}
+
+			_, err := s.Allocate(context.Background(), &AllocateRequest{
+				ContainerRequests: []*ContainerAllocateRequest{{
+					DevicesIds: []string{"visibility:0000"},
+				}},
+			})
+
+			if c.wantCards == nil {
+				require.Error(t, err, "the sidecar must not be granted a device set it cannot substantiate")
+				assert.Nil(t, responder.gotAllocated, "the Responder must not be invoked")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.wantCards, responder.gotAllocated,
+				"the Responder must see exactly the cards the owner container holds")
+		})
+	}
+}
