@@ -358,18 +358,22 @@ GetPhysicalSlicedVisibilityResponse(
       container and the cards.
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/deviceplugin/...`
 
-- [ ] **T1 · NVIDIA names — and proves live — the partition a container already holds**
+- [x] **T1 · NVIDIA names — and proves live — the partition a container already holds**
       Blocked by: None
       Owns: `pkg/devicemanager/allocator/nvidia/mig_visibility.go`,
       `pkg/devicemanager/allocator/nvidia/mig_visibility_test.go`,
-      `pkg/devicemanager/allocator/nvidia/deviceplugin.go`
+      `pkg/devicemanager/allocator/nvidia/deviceplugin.go`,
+      `pkg/devicemanager/allocator/nvidia/mig.go`
       Gate: review
       A `GetPhysicalSlicedVisibilityResponse` method on the NVIDIA `*server` that, for each allocated card in
       `devs` order, reads the owner's MIG ownership marker (`markerPath(pod.UID, owner, cardUUID)`), verifies
       under `lockCard` that the recorded `MigUUID` is still the live instance's for that GPU-instance id, and
       joins the verified UUIDs into `NVIDIA_VISIBLE_DEVICES`. `New` constructs the MIG driver once, only when
       the partitioned server is registered, and shares it with the Visibility server so no second
-      `nvmlInit` is taken and a node without partitioning initializes nothing.
+      `nvmlInit` is taken and a node without partitioning initializes nothing. `mig.go` is owned for one
+      extraction: the "allocated cards in `devs` order" loop becomes `allocatedCards`, shared with
+      `ActuatePhysicalSliced`. Two copies could drift, and identical ordering is exactly what makes the
+      sidecar's env equal the workload's.
       Acceptance: table-driven over a temp `OperatorPodsDir` with the fake MIG driver — all markers present
       and live → the env is the MIG UUIDs in `devs` order; marker missing → error, nil response; marker
       malformed or incomplete → error; marker recording a different card → error; marker present but the live
