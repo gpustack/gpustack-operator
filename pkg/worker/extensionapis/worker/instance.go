@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/registry/rest"
@@ -54,42 +53,18 @@ func (h *InstanceHandler) SetupHandler(
 
 	// Create table converter to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Type",
-				Type: "string",
-			},
-			Template: "{.spec.type}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Access",
-				Type: "string",
-			},
-			Template: "{.status.accessAddresses[0]}",
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Port(s)",
-				Type: "string",
-			},
-			Render: func(obj runtime.Object) string {
-				ports := obj.(*worker.Instance).Status.Ports
-				parts := make([]string, 0, len(ports))
-				for i := range ports {
-					p := &ports[i]
-					parts = append(parts, fmt.Sprintf("%d:%d/%s", p.Port, p.NodePort, p.Protocol))
-				}
-				return strings.Join(parts, ",")
-			},
-		},
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Phase",
-				Type: "string",
-			},
-			Template: "{.status.phase}",
-		})
+		extensionapi.JSONPathTemplateColumn("Type", "{.spec.type}"),
+		extensionapi.JSONPathTemplateColumn("Access", "{.status.accessAddresses[0]}"),
+		extensionapi.RenderColumn("Port(s)", func(obj *worker.Instance) string {
+			ports := obj.Status.Ports
+			parts := make([]string, 0, len(ports))
+			for i := range ports {
+				p := &ports[i]
+				parts = append(parts, fmt.Sprintf("%d:%d/%s", p.Port, p.NodePort, p.Protocol))
+			}
+			return strings.Join(parts, ",")
+		}),
+		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
 	if err != nil {
 		return gvr, srs, err
 	}

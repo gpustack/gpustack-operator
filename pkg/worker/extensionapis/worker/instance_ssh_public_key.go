@@ -59,20 +59,14 @@ func (h *InstanceSSHPublicKeyHandler) SetupHandler(
 
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
-		extensionapi.JSONPathTemplateTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Data",
-				Type: "string",
-			},
-			Render: func(obj runtime.Object) string {
-				const tailLen = 27
-				data := obj.(*worker.InstanceSSHPublicKey).Spec.Data
-				if len(data) > tailLen {
-					data = "..." + data[len(data)-tailLen:]
-				}
-				return strings.TrimRightFunc(data, unicode.IsSpace)
-			},
-		})
+		extensionapi.RenderColumn("Data", func(obj *worker.InstanceSSHPublicKey) string {
+			const tailLen = 27
+			data := obj.Spec.Data
+			if len(data) > tailLen {
+				data = "..." + data[len(data)-tailLen:]
+			}
+			return strings.TrimRightFunc(data, unicode.IsSpace)
+		}))
 	if err != nil {
 		return gvr, srs, err
 	}

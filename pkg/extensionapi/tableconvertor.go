@@ -38,6 +38,17 @@ type (
 	_JSONPathTableColumnInternalDefinition = apiext.CustomResourceColumnDefinition
 )
 
+// JSONPathColumn returns a string-typed JSONPathTableColumnDefinition extracting the value
+// at the given JSONPath.
+//
+// It is the shorthand for the common case, i.e. a column without format, description or priority.
+func JSONPathColumn(name, jsonPath string) JSONPathTableColumnDefinition {
+	return JSONPathTableColumnDefinition{
+		TableColumnDefinition: meta.TableColumnDefinition{Name: name, Type: "string"},
+		JSONPath:              jsonPath,
+	}
+}
+
 // NewJSONPathTableConvertor creates a new table convertor that uses JSONPath to extract values from custom resources.
 //
 // It relies on apiexttableconvertor.New to create the table convertor.
@@ -146,6 +157,31 @@ type (
 		needsUnstructured bool
 	}
 )
+
+// JSONPathTemplateColumn returns a string-typed JSONPathTemplateTableColumnDefinition
+// rendering the given jsonpath template.
+//
+// It is the shorthand for the common case, i.e. a column without format, description or priority.
+func JSONPathTemplateColumn(name, template string) JSONPathTemplateTableColumnDefinition {
+	return JSONPathTemplateTableColumnDefinition{
+		TableColumnDefinition: meta.TableColumnDefinition{Name: name, Type: "string"},
+		Template:              template,
+	}
+}
+
+// RenderColumn returns a string-typed JSONPathTemplateTableColumnDefinition producing the cell
+// value with the given callback.
+//
+// T must be the concrete type that OnList / OnGet returned, as the object is asserted to it
+// before rendering.
+func RenderColumn[T runtime.Object](name string, render func(obj T) string) JSONPathTemplateTableColumnDefinition {
+	return JSONPathTemplateTableColumnDefinition{
+		TableColumnDefinition: meta.TableColumnDefinition{Name: name, Type: "string"},
+		Render: func(obj runtime.Object) string {
+			return render(obj.(T))
+		},
+	}
+}
 
 // NewJSONPathTemplateTableConvertor creates a new table convertor that renders each column
 // from a jsonpath template (kubectl `-o jsonpath` syntax).

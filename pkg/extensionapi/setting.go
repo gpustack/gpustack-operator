@@ -73,13 +73,7 @@ func (h *SettingHandler) SetupHandler(
 
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := NewJSONPathTableConvertor(
-		JSONPathTableColumnDefinition{
-			TableColumnDefinition: meta.TableColumnDefinition{
-				Name: "Value",
-				Type: "string",
-			},
-			JSONPath: ".status.value",
-		})
+		JSONPathColumn("Value", ".status.value"))
 	if err != nil {
 		return gvr, srs, err
 	}

@@ -59,13 +59,13 @@ func (h *InstanceTypeFlavorHandler) SetupHandler(
 
 	// Create table convertor to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTableConvertor(
-		instanceTypeFlavorColumn("GeneralGroup", ".spec.generalGroup"),
-		instanceTypeFlavorColumn("AcceleratorGroup", ".spec.acceleratorGroup"),
-		instanceTypeFlavorColumn("Acceleratable", ".spec.acceleratable"),
-		instanceTypeFlavorColumn("Manufacturer", ".spec.manufacturer"),
-		instanceTypeFlavorColumn("Product", ".spec.product"),
-		instanceTypeFlavorColumn("Memory", ".spec.memory"),
-		instanceTypeFlavorColumn("Cores", ".spec.cores"),
+		extensionapi.JSONPathColumn("GeneralGroup", ".spec.generalGroup"),
+		extensionapi.JSONPathColumn("AcceleratorGroup", ".spec.acceleratorGroup"),
+		extensionapi.JSONPathColumn("Acceleratable", ".spec.acceleratable"),
+		extensionapi.JSONPathColumn("Manufacturer", ".spec.manufacturer"),
+		extensionapi.JSONPathColumn("Product", ".spec.product"),
+		extensionapi.JSONPathColumn("Memory", ".spec.memory"),
+		extensionapi.JSONPathColumn("Cores", ".spec.cores"),
 	)
 	if err != nil {
 		return gvr, srs, err
@@ -79,13 +79,6 @@ func (h *InstanceTypeFlavorHandler) SetupHandler(
 	h.APIReader = opts.Manager.GetAPIReader()
 
 	return gvr, srs, err
-}
-
-func instanceTypeFlavorColumn(name, jsonPath string) extensionapi.JSONPathTableColumnDefinition {
-	return extensionapi.JSONPathTableColumnDefinition{
-		TableColumnDefinition: meta.TableColumnDefinition{Name: name, Type: "string"},
-		JSONPath:              jsonPath,
-	}
 }
 
 var (
