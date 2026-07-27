@@ -56,11 +56,11 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModePartitioned, mig),
 		)
 	}
-	// The visibility server co-allocates the SSH sidecar to the same physical GPU(s) its
-	// workload container was granted; for any non-sliced mode the responder emits only
-	// NVIDIA_VISIBLE_DEVICES, which is exactly what the sidecar needs (device-cgroup access,
-	// no HAMi logical-slicing artifacts). On a partition-backed card that env must name the
-	// workload's partition, not the parent card, which is what the shared MIG driver is for.
+	// The visibility server co-allocates a container to the same physical GPU(s) its owner
+	// container was granted; for any non-sliced mode the responder emits only
+	// NVIDIA_VISIBLE_DEVICES, which is exactly what a device-cgroup grant needs (no HAMi
+	// logical-slicing artifacts). On a partition-backed card that env must name the owner's
+	// partition, not the parent card, which is what the shared MIG driver is for.
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
 	)

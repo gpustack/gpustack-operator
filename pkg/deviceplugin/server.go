@@ -147,8 +147,8 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 			// partitioned card is no longer available as a whole card. Scope, not health, is
 			// the mechanism here — the populations are physically exclusive, so a card
 			// skipped this way could never become servable while it stays in that state.
-			// Visibility is exempt and advertised everywhere: the SSH sidecar must
-			// co-allocate the very card its workload holds, whatever state that card is in.
+			// Visibility is exempt and advertised everywhere: a visibility request must
+			// co-allocate the very card its owner holds, whatever state that card is in.
 			var poolSize int32
 			switch s.AllocationMode {
 			case workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared:
@@ -171,8 +171,8 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 			// Unhealthy devices to new pods, while the holding pod's existing allocation is
 			// unaffected. The hold is read from the ledger Status AND the in-process
 			// reservation, so a just-reserved card is withheld in the same ListAndWatch cycle.
-			// The Visibility server is exempt: the SSH sidecar must co-allocate the very card
-			// its workload holds, whatever mode that hold is.
+			// The Visibility server is exempt: a visibility request must co-allocate the very
+			// card its owner holds, whatever mode that hold is.
 			health := deviceplugin.Healthy
 			if devAccelerator.Status.Unhealthy {
 				health = deviceplugin.Unhealthy
@@ -892,8 +892,8 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 
 		// Reserve the cards in-process before releasing the mutex: the card is taken the instant
 		// the check passes, so the next serialized Allocate observes it (cross-mode check and
-		// getAllocatingPod's skip-reserved), and the SSH sidecar's visibility Allocate can
-		// co-allocate the same physical device without racing the annotation's cache propagation.
+		// getAllocatingPod's skip-reserved), and a visibility Allocate can co-allocate the same
+		// physical device without racing the annotation's cache propagation.
 		// The offered device IDs ride along so ListAndWatch can keep advertising exactly them
 		// Healthy for as long as this allocation lives.
 		s.Reconciler.reserveDevices(pod.UID, ctr.Name, allocatedStatus, allocatedDeviceIDs)
@@ -1112,19 +1112,19 @@ func applyPhysicalPlacements(
 	}
 }
 
-// allocateVisibility serves the SSH sidecar's visibility request: it does not select a
-// device but reuses the physical device(s) the workload container (main) was already
-// allocated, recorded in the in-process reservation. It returns only the vendor
-// visible-devices env (via the Responder), consuming no ledger units and writing no
-// allocation status. It fails closed when no reservation exists, rather than emitting an
-// empty visible-devices env a runtime could interpret as "all devices".
+// allocateVisibility serves a visibility request: it does not select a device but reuses the
+// physical device(s) another container of the same Pod — its owner — was already allocated,
+// recorded in the in-process reservation. It returns only the vendor visible-devices response
+// (via the Responder), consuming no ledger units and writing no allocation status. It fails
+// closed when no allocation can be resolved, rather than emitting an empty visible-devices env
+// a runtime could interpret as "all devices".
 func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRequest) (*AllocateResponse, error) {
 	ctrReq := req.GetContainerRequests()[0]
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	// Do not skip reserved containers: visibility re-finds its own pod (whose workload container
-	// already recorded a reservation) to co-allocate the same physical device to the sidecar.
+	// Do not skip reserved containers: visibility re-finds its own pod (whose owner container
+	// already recorded a reservation) to co-allocate the same physical device.
 	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
 		ResourceName: resName,
 		Quantity:     resQuantity,
@@ -1143,12 +1143,15 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}
 	if len(reserved.Groups) == 0 {
-		// Fail closed: the workload container's allocation is recorded in neither the in-process
+		// Fail closed: the owner container's allocation is recorded in neither the in-process
 		// reservation nor the durable annotation. Returning an error rejects this admission
 		// rather than emitting an empty visible-devices env a runtime could read as "all
-		// devices". Because main is always allocated before sshd in the same pod, this path
-		// should not occur in practice; if it ever does, recovery is the controller recreating
-		// the Pod.
+		// devices". Admission walks a Pod's init containers and then its containers in spec
+		// order, and every producer of a visibility claim today emits the owner ahead of it, so
+		// this path should not occur in practice; if it ever does, recovery is the controller
+		// recreating the Pod. Ordering the visibility container first — an init container with
+		// an always-on restart policy, say — would make it unresolvable every time, so a
+		// producer that wants that must give this path a source that does not depend on order.
 		err = fmt.Errorf("no accelerator devices allocated for pod %s by a container other than %q "+
 			"(owner=%q); refusing to grant visibility",
 			kubemeta.GetNamespacedNameKey(pod), ctr.Name, owner)
@@ -1195,8 +1198,8 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	// Fail closed unless every reserved device is still present AND the reservation matches the
 	// visibility request exactly. A partial/stale reservation (a reserved device gone from the
 	// inventory) or a request that does not match the reserved device count would otherwise grant
-	// the sidecar a different device set than the workload holds; refuse rather than emit a
-	// degraded (or empty) visible-devices env a runtime could misread.
+	// a different device set than the owner holds; refuse rather than emit a degraded (or empty)
+	// visible-devices env a runtime could misread.
 	requestCount := len(ctrReq.GetDevicesIds())
 	if len(allocated) != reservedCount || reservedCount != requestCount {
 		err = fmt.Errorf("visibility reservation for pod %s held by container %q does not match the "+

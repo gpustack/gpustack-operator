@@ -75,11 +75,11 @@ type (
 		lastLivePodUIDs []string
 
 		// reservations records, keyed by pod UID AND container name, the accelerator
-		// devices a container was allocated, so the SSH sidecar's visibility Allocate
-		// (same pod, same node, later in the same admission window) can co-allocate the
-		// same physical devices without re-selecting them or racing the annotation's
-		// cache propagation. Keying by pod alone would let the first served container of a
-		// pod mask every later one: the already-reserved skip would refuse to resolve them,
+		// devices a container was allocated, so a visibility Allocate (same pod, same
+		// node, later in the same admission window) can co-allocate the same physical
+		// devices without re-selecting them or racing the annotation's cache propagation.
+		// Keying by pod alone would let the first served container of a pod mask every later
+		// one: the already-reserved skip would refuse to resolve them,
 		// so two containers each holding a live claim could never both be served.
 		reservationsMutex sync.RWMutex
 		reservations      map[_ReservationKey]_Reservation
@@ -363,8 +363,8 @@ func (r *DevicesReconciler) getDevices(ctx context.Context) (*workercore.Devices
 // reserveDevices records the accelerator devices a container was allocated, keyed by pod UID
 // and container name, together with the device IDs kubelet offered for it. It mirrors the
 // AllocatedAcceleratorAnnoKey annotation the workload Allocate persists (which stays the
-// durable read fallback), giving the sidecar's visibility Allocate a race-free in-process
-// source for the same-pod, same-window co-allocation. A no-op for an empty UID, an empty
+// durable read fallback), giving a visibility Allocate a race-free in-process source for the
+// same-pod, same-window co-allocation. A no-op for an empty UID, an empty
 // container name or an empty allocation.
 func (r *DevicesReconciler) reserveDevices(
 	podUID types.UID, container string, allocated workercore.DevicesStatus, deviceIDs []string,

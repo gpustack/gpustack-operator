@@ -423,7 +423,7 @@ func twoCardDevices(nodeName string, dev0Status workercore.DeviceAllocationMode)
 // reports its tokens Unhealthy, so kubelet can never assign one to an opposite-mode pod
 // (removing the tokens would strand kubelet's checkpointed allocations on re-registration).
 // A same-mode hold and the Visibility server keep the tokens Healthy: the former still accepts
-// same-mode co-tenants, the latter must co-allocate the held card for the SSH sidecar.
+// same-mode co-tenants, the latter must co-allocate the held card to a visibility request.
 func TestResourceServer_GetListAndWatch_CrossModeWithhold(t *testing.T) {
 	const nodeName = "node-wh"
 	dev0 := Resource{Group: "grp-0", Device: "dev-0"}
@@ -465,7 +465,7 @@ func TestResourceServer_GetListAndWatch_CrossModeWithhold(t *testing.T) {
 	assert.Greater(t, cardHealthyTokenCount(resp, dev0), 0, "a same-mode hold keeps tokens healthy")
 	assert.Greater(t, cardHealthyTokenCount(resp, dev1), 0, "a same-mode hold keeps tokens healthy")
 
-	// Visibility server: exempt — the SSH sidecar must co-allocate the held card.
+	// Visibility server: exempt — a visibility request must co-allocate the held card.
 	resp, err = server(workercore.DeviceAllocationModeVisibility).getListAndWatchResponse(context.Background())
 	require.NoError(t, err)
 	assert.Greater(t, cardHealthyTokenCount(resp, dev0), 0, "visibility keeps a held card's tokens healthy")
