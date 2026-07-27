@@ -35,10 +35,10 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModeSliced),
 		)
 	}
-	// The visibility server co-allocates the SSH sidecar to the same physical device(s) its
-	// workload container (main) was granted: its Allocate reuses main's reserved device and
-	// the responder returns the same plain device-visibility response as the non-sliced modes
-	// (device-cgroup access only, no slicing artifacts).
+	// The visibility server co-allocates a container to the same physical device(s) its owner
+	// container was granted: its Allocate reuses the owner's reserved device and the responder
+	// returns the same plain device-visibility response as the non-sliced modes (device-cgroup
+	// access only, no slicing artifacts).
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility),
 	)

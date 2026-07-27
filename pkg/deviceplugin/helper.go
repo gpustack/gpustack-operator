@@ -63,8 +63,9 @@ func (in Resource) GetDeviceIds(mode workercore.DeviceAllocationMode, poolSize i
 
 	case workercore.DeviceAllocationModeVisibility:
 		// Visibility advertises, per card, a flat pool sized to SlicedResourceMaxSize — the
-		// most slices (hence sidecars) a card can host — so a sidecar can always co-allocate
-		// visibility to the card its workload was placed on. The tokens are interchangeable:
+		// most slices (hence co-allocating containers) a card can host — so one can always
+		// co-allocate visibility to the card its owner was placed on. The tokens are
+		// interchangeable:
 		// the visibility Allocate ignores which token kubelet picked and reads the pod's
 		// reserved device instead, so this never gates scheduling and consumes no ledger unit.
 		devIDs := make([]string, nodefeature.SlicedResourceMaxSize)

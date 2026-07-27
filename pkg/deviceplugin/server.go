@@ -147,8 +147,8 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 			// partitioned card is no longer available as a whole card. Scope, not health, is
 			// the mechanism here — the populations are physically exclusive, so a card
 			// skipped this way could never become servable while it stays in that state.
-			// Visibility is exempt and advertised everywhere: the SSH sidecar must
-			// co-allocate the very card its workload holds, whatever state that card is in.
+			// Visibility is exempt and advertised everywhere: a visibility request must
+			// co-allocate the very card its owner holds, whatever state that card is in.
 			var poolSize int32
 			switch s.AllocationMode {
 			case workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared:
@@ -171,8 +171,8 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 			// Unhealthy devices to new pods, while the holding pod's existing allocation is
 			// unaffected. The hold is read from the ledger Status AND the in-process
 			// reservation, so a just-reserved card is withheld in the same ListAndWatch cycle.
-			// The Visibility server is exempt: the SSH sidecar must co-allocate the very card
-			// its workload holds, whatever mode that hold is.
+			// The Visibility server is exempt: a visibility request must co-allocate the very
+			// card its owner holds, whatever mode that hold is.
 			health := deviceplugin.Healthy
 			if devAccelerator.Status.Unhealthy {
 				health = deviceplugin.Unhealthy
@@ -892,8 +892,8 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 
 		// Reserve the cards in-process before releasing the mutex: the card is taken the instant
 		// the check passes, so the next serialized Allocate observes it (cross-mode check and
-		// getAllocatingPod's skip-reserved), and the SSH sidecar's visibility Allocate can
-		// co-allocate the same physical device without racing the annotation's cache propagation.
+		// getAllocatingPod's skip-reserved), and a visibility Allocate can co-allocate the same
+		// physical device without racing the annotation's cache propagation.
 		// The offered device IDs ride along so ListAndWatch can keep advertising exactly them
 		// Healthy for as long as this allocation lives.
 		s.Reconciler.reserveDevices(pod.UID, ctr.Name, allocatedStatus, allocatedDeviceIDs)
@@ -913,7 +913,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	// no partition.
 	var physical *PhysicalSlicedAllocation
 	if profile != "" {
-		actuator, canActuate := s.Responder.(PhysicalSlicedActuator)
+		actuator, canActuate := s.Responder.(PhysicalSlicedResponder)
 		if !canActuate {
 			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
 			return nil, grpcstatus.Errorf(grpccodes.Internal,
@@ -1003,6 +1003,38 @@ func (s *ResourceServer) priorPartitionAllocation(
 	return workercore.DevicesStatus{}, false
 }
 
+// coAllocatedAccelerators returns the accelerator devices a pod holds in a container other than
+// self — what a visibility request co-allocates — together with that container's name. It reads
+// the in-process reservation first and falls back to the Pod's durable allocation annotation, the
+// only record that survives a device-manager restart landing between the owner's Allocate and
+// this one. Both sources are resolved by the same owner pick, so the devices and the name always
+// describe one container.
+//
+// An unreadable annotation is an error rather than an empty result: the caller must reject the
+// admission, never fall through to a response it cannot substantiate. A pod with no record in
+// either source yields no devices and no error, which the caller's own gate rejects.
+func (s *ResourceServer) coAllocatedAccelerators(
+	pod *core.Pod, self string,
+) (workercore.DevicesStatus, string, error) {
+	if reserved, owner, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, self); ok && len(reserved.Groups) > 0 {
+		return reserved, owner, nil
+	}
+	allocations, err := AllocatedAcceleratorsOf(pod)
+	if err != nil {
+		return workercore.DevicesStatus{}, "", fmt.Errorf(
+			"read the allocation annotation of pod %s: %w", kubemeta.GetNamespacedNameKey(pod), err)
+	}
+	names := make([]string, 0, len(allocations))
+	for name := range allocations {
+		names = append(names, name)
+	}
+	owner, ok := pickAcceleratorOwner(names, self)
+	if !ok {
+		return workercore.DevicesStatus{}, "", nil
+	}
+	return allocations[owner].Devices, owner, nil
+}
+
 // priorPartitionTokens re-derives Allocate's two per-card maps from an allocation this
 // container already holds, so a retry reuses the card and interval it recorded.
 func priorPartitionTokens(
@@ -1080,40 +1112,54 @@ func applyPhysicalPlacements(
 	}
 }
 
-// allocateVisibility serves the SSH sidecar's visibility request: it does not select a
-// device but reuses the physical device(s) the workload container (main) was already
-// allocated, recorded in the in-process reservation. It returns only the vendor
-// visible-devices env (via the Responder), consuming no ledger units and writing no
-// allocation status. It fails closed when no reservation exists, rather than emitting an
-// empty visible-devices env a runtime could interpret as "all devices".
+// allocateVisibility serves a visibility request: it does not select a device but reuses the
+// physical device(s) another container of the same Pod — its owner — was already allocated,
+// recorded in the in-process reservation. It returns only the vendor visible-devices response
+// (via the Responder), consuming no ledger units and writing no allocation status. It fails
+// closed when no allocation can be resolved, rather than emitting an empty visible-devices env
+// a runtime could interpret as "all devices".
 func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRequest) (*AllocateResponse, error) {
 	ctrReq := req.GetContainerRequests()[0]
 
 	resName := s.GetResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
-	// Do not skip reserved containers: visibility re-finds its own pod (whose workload container
-	// already recorded a reservation) to co-allocate the same physical device to the sidecar.
-	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
-		ResourceName: resName,
-		Quantity:     resQuantity,
-	})
+	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity)
 	if err != nil {
 		s.Logger.Error(err, "get allocating pod for visibility allocation")
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for visibility allocation: %v", err)
 	}
+	// Everything below can still reject this admission, and kubelet retries the same container.
+	// Keep the grant only if one is actually issued, so the retry resolves back to this container
+	// rather than to another pod's.
+	granted := false
+	defer func() {
+		if !granted {
+			s.Reconciler.revokeVisibility(pod.UID, ctr.Name)
+		}
+	}()
 
-	// Take the pod's accelerator reservation held by a container other than this sidecar: the
-	// sidecar co-allocates what the workload holds, and its own visibility request reserves
-	// nothing. Accelerator claims live in exactly one container group, so there is only one.
-	reserved, ok := s.Reconciler.reservedAcceleratorDevices(pod.UID, ctr.Name)
-	if !ok || len(reserved.Groups) == 0 {
-		// Fail closed: the workload container's allocation has not been recorded yet (or was
-		// pruned). Returning an error rejects this admission rather than emitting an empty
-		// visible-devices env a runtime could read as "all devices". Because main is always
-		// allocated before sshd in the same pod, this path should not occur in practice; if it
-		// ever does, recovery is the controller recreating the Pod.
-		err = fmt.Errorf("no reserved devices for pod %s; refusing to grant visibility", kubemeta.GetNamespacedNameKey(pod))
-		s.Logger.Error(err, "visibility allocation without reservation")
+	// Take the accelerator allocation the pod holds in a container other than this one: a
+	// visibility request co-allocates what its owner holds and reserves nothing of its own.
+	// Accelerator claims live in exactly one container group, so there is only one.
+	reserved, owner, err := s.coAllocatedAccelerators(pod, ctr.Name)
+	if err != nil {
+		s.Logger.Error(err, "resolve the visibility co-allocation")
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
+	}
+	if len(reserved.Groups) == 0 {
+		// Fail closed: the owner container's allocation is recorded in neither the in-process
+		// reservation nor the durable annotation. Returning an error rejects this admission
+		// rather than emitting an empty visible-devices env a runtime could read as "all
+		// devices". Admission walks a Pod's init containers and then its containers in spec
+		// order, and every producer of a visibility claim today emits the owner ahead of it, so
+		// this path should not occur in practice; if it ever does, recovery is the controller
+		// recreating the Pod. Ordering the visibility container first — an init container with
+		// an always-on restart policy, say — would make it unresolvable every time, so a
+		// producer that wants that must give this path a source that does not depend on order.
+		err = fmt.Errorf("no accelerator devices allocated for pod %s by a container other than %q "+
+			"(owner=%q); refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), ctr.Name, owner)
+		s.Logger.Error(err, "visibility allocation without a co-allocation")
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}
 
@@ -1139,12 +1185,14 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	// is not the sliced mode. No patchAllocatingPod/reserveDevices: visibility consumes no
 	// ledger units and holds no reservation of its own.
 	reservedCount := 0
+	var reservedCards []string
 	allocated := make(map[Resource]int32)
 	for i := range reserved.Groups {
 		grp := &reserved.Groups[i]
 		for j := range grp.Accelerators {
 			reservedCount++
 			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
+			reservedCards = append(reservedCards, res.String())
 			if _, ok := present[res]; !ok {
 				continue
 			}
@@ -1154,18 +1202,18 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	// Fail closed unless every reserved device is still present AND the reservation matches the
 	// visibility request exactly. A partial/stale reservation (a reserved device gone from the
 	// inventory) or a request that does not match the reserved device count would otherwise grant
-	// the sidecar a different device set than the workload holds; refuse rather than emit a
-	// degraded (or empty) visible-devices env a runtime could misread.
+	// a different device set than the owner holds; refuse rather than emit a degraded (or empty)
+	// visible-devices env a runtime could misread.
 	requestCount := len(ctrReq.GetDevicesIds())
 	if len(allocated) != reservedCount || reservedCount != requestCount {
-		err = fmt.Errorf("visibility reservation for pod %s does not match the request "+
-			"(reserved=%d, present=%d, requested=%d); refusing to grant visibility",
-			kubemeta.GetNamespacedNameKey(pod), reservedCount, len(allocated), requestCount)
+		err = fmt.Errorf("visibility reservation for pod %s held by container %q does not match the "+
+			"request (cards=%v, reserved=%d, present=%d, requested=%d); refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), owner, reservedCards, reservedCount, len(allocated), requestCount)
 		s.Logger.Error(err, "visibility allocation with mismatched or stale reservation")
 		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
 	}
 
-	ctrResp, err := s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocated)
+	ctrResp, err := s.visibilityResponse(ctx, pod, ctr, devs, allocated, owner)
 	if err != nil {
 		s.Logger.Error(err, "get container visibility allocate response")
 		return nil, err
@@ -1174,10 +1222,101 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 	resp := &AllocateResponse{
 		ContainerResponses: []*ContainerAllocateResponse{ctrResp},
 	}
+	granted = true
 	s.Logger.Info("visibility allocate response",
 		"pod", kubemeta.GetNamespacedNameKey(pod),
 		"response", resp)
 	return resp, nil
+}
+
+// claimVisibilityContainer identifies the container a visibility Allocate is serving and records
+// the grant, under the node allocate mutex so the record is written before the next call in a
+// concurrent batch reads it (see DevicesReconciler.allocateMutex).
+//
+// Reserved containers are deliberately NOT skipped: visibility re-finds its own pod, whose owner
+// container already recorded a reservation. Already-granted ones are, and that is the whole reason
+// the grant exists — a batch of identical Pods offers the search several indistinguishable
+// visibility containers, and without a per-container claim every one of them resolves to the
+// oldest pending pod, granting the later ones the first pod's cards and, when its owner is
+// partition-backed, the first pod's partition.
+func (s *ResourceServer) claimVisibilityContainer(
+	ctx context.Context, resName core.ResourceName, resQuantity resource.Quantity,
+) (*core.Pod, *core.Container, error) {
+	s.Reconciler.allocateMutex.Lock()
+	defer s.Reconciler.allocateMutex.Unlock()
+
+	pod, ctr, err := s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
+		ResourceName: resName,
+		Quantity:     resQuantity,
+		SkipGranted:  true,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	s.Reconciler.grantVisibility(pod.UID, ctr.Name)
+	return pod, ctr, nil
+}
+
+// visibilityResponse renders the visibility container's response over the cards its owner holds.
+//
+// A partition-backed owner is answered by the responder's partition capability, because a
+// visibility allocation is a device-cgroup grant and nothing else: naming the parent card would
+// open every partition carved on it, including other tenants'. The trigger is the owner
+// container's own resource request, which is in the Pod spec from the start and therefore immune
+// to the order in which the workload's Allocate publishes and re-publishes its reservation.
+//
+// Everything the branch cannot establish rejects the admission — an owner container missing from
+// the Pod spec, a responder without the capability, a capability that errors. Every other family
+// keeps the card-based response unchanged.
+func (s *ResourceServer) visibilityResponse(
+	ctx context.Context,
+	pod *core.Pod,
+	ctr *core.Container,
+	devs *workercore.Devices,
+	allocated map[Resource]int32,
+	owner string,
+) (*ContainerAllocateResponse, error) {
+	ownerCtr := containerByName(pod, owner)
+	if ownerCtr == nil {
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"pod %s has no container %q to co-allocate from; refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), owner)
+	}
+	profile, partitioned := partitionProfileOf(ownerCtr)
+	if !partitioned {
+		return s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocated)
+	}
+
+	responder, canRespond := s.Responder.(PhysicalSlicedResponder)
+	if !canRespond {
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"responder cannot name the partition profile %q container %q holds in pod %s; "+
+				"refusing to grant visibility",
+			profile, owner, kubemeta.GetNamespacedNameKey(pod))
+	}
+	ctrResp, err := responder.GetPhysicalSlicedVisibilityResponse(ctx, pod, ctr, devs, allocated, owner)
+	if err != nil {
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"name the partition profile %q container %q holds in pod %s: %v; refusing to grant visibility",
+			profile, owner, kubemeta.GetNamespacedNameKey(pod), err)
+	}
+	return ctrResp, nil
+}
+
+// containerByName returns the pod's container with the given name, init containers first, as the
+// allocating-pod scan visits them. It returns nil when the pod declares no such container.
+func containerByName(pod *core.Pod, name string) *core.Container {
+	for i := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[i].Name == name {
+			return &pod.Spec.InitContainers[i]
+		}
+	}
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == name {
+			return &pod.Spec.Containers[i]
+		}
+	}
+	return nil
 }
 
 func (s *ResourceServer) Start(ctx context.Context, kubeSocket string) error {

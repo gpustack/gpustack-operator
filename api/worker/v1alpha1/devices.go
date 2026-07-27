@@ -153,9 +153,8 @@ const (
 	DeviceAllocationModePartitioned
 	// DeviceAllocationModeVisibility is an internal-only mode: it grants a container
 	// device-cgroup visibility to the physical device(s) another container in the same Pod
-	// was allocated (used by the SSH sidecar to reach main's accelerator), without a real
-	// device selection or any resource accounting. It is never advertised on an InstanceType
-	// and never written to Devices status.
+	// was allocated, without a real device selection or any resource accounting. It is never
+	// advertised on an InstanceType and never written to Devices status.
 	DeviceAllocationModeVisibility
 )
 

@@ -389,10 +389,18 @@ resource "null_resource" "kubeconfig" {
   }
 }
 
-# Records the last SUCCESSFUL apply's inputs; Terraform auto-loads *.auto.tfvars.json on every
-# command (incl. destroy), and command-line -var still overrides it on apply. A managed
-# hashicorp/local local_file is not used here: it is deleted during destroy, which would strand
-# a failed/interrupted destroy retry with no values for server (a required variable).
+# Carries server — the one variable with no default — across a failed or interrupted destroy
+# retry. Terraform auto-loads *.auto.tfvars.json on every command (incl. destroy), and
+# command-line -var still overrides it on apply. A managed hashicorp/local local_file is not used
+# here: it is deleted during destroy, which is exactly when the value is still needed. A
+# destroy-time provisioner on this resource has the same defect: last_apply depends on every real
+# resource, so it is destroyed FIRST, and the file would be gone before the nodes were.
+#
+# Snapshot NOTHING that has a default. Auto-loading is indiscriminate — it feeds `apply` just as
+# readily as `destroy` — so a variable recorded here silently overrides its own default on every
+# later apply in this directory, with nothing on the command line to hint at it. Nothing else is
+# needed at destroy time either: every destroy provisioner reads its connection and its arguments
+# off self.triggers, which live in state.
 resource "null_resource" "last_apply" {
   depends_on = [
     null_resource.server_init,
@@ -404,18 +412,7 @@ resource "null_resource" "last_apply" {
 
   triggers = {
     snapshot = jsonencode({
-      server                   = var.server
-      agent                    = var.agent
-      server_ssh_port          = var.server_ssh_port
-      agent_ssh_port           = var.agent_ssh_port
-      ssh_user                 = var.ssh_user
-      ssh_private_key          = var.ssh_private_key
-      release                  = var.release
-      flannel_backend          = var.flannel_backend
-      cluster_cidr             = var.cluster_cidr
-      service_cidr             = var.service_cidr
-      server_https_listen_port = var.server_https_listen_port
-      service_node_port_range  = var.service_node_port_range
+      server = var.server
     })
   }
 

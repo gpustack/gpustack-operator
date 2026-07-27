@@ -120,22 +120,26 @@ func ControlOnWithoutBlock(obj, owner MetaObject, gvk schema.GroupVersionKind) {
 	obj.SetOwnerReferences(ors)
 }
 
-// ControlOff removes the owner reference of obj to owner with the given GVK.
+// ControlOff removes the owner reference of obj to owner with the given GVK,
+// and reports whether one was removed.
 //
 // ControlOff will remove the owner reference if obj has the given kind of owner.
-func ControlOff(obj, owner MetaObject, gvk schema.GroupVersionKind) {
+// A nil owner matches a reference of the given kind whatever owner it names, which is how a
+// reference to an owner that is unknown, gone, or no longer the intended one is dropped.
+func ControlOff(obj, owner MetaObject, gvk schema.GroupVersionKind) (removed bool) {
 	var (
 		gv  = gvk.GroupVersion().String()
 		ors = obj.GetOwnerReferences()
 	)
 
 	for i := range ors {
-		if ors[i].APIVersion == gv && ors[i].Kind == gvk.Kind && ors[i].UID == owner.GetUID() {
-			ors = append(ors[:i], ors[i+1:]...)
-			break
+		if ors[i].APIVersion == gv && ors[i].Kind == gvk.Kind &&
+			(owner == nil || ors[i].UID == owner.GetUID()) {
+			obj.SetOwnerReferences(append(ors[:i], ors[i+1:]...))
+			return true
 		}
 	}
-	obj.SetOwnerReferences(ors)
+	return false
 }
 
 // TryControlOn is similar to ControlOn,

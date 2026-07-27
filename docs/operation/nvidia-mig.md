@@ -165,6 +165,18 @@ past the bound. The node key frees on **Pod deletion** while the instance surviv
 so a same-profile replacement scheduled inside that window can fail its allocation closed and is retried by
 Kueue; the window closes on its own.
 
+**An SSH-enabled `Instance` sees its partition, not the card.** With SSH enabled the workload runs in `main`
+and the SSH server in an `sshd` sidecar that `nsenter`s into `main`, so the sidecar's own device allocation is
+a device-cgroup grant and nothing else — the session inherits `main`'s environment. That grant is **the MIG
+instance `main` holds**, never the parent card, which would otherwise expose every other partition carved on
+it. The identity comes from the same on-disk ownership marker the allocator writes when it materializes the
+instance — the record that already drives reuse and reclaim, and the one that survives a Device Manager
+restart — so the marker is the visibility path's authority too. The read is **liveness-checked under the card
+lock** before anything is injected: the recorded GPU instance must still exist *and* still carry the recorded
+MIG UUID, since a destroyed instance's id can be reassigned to somebody else's partition. A marker that is
+missing, names a different card, records a profile the card no longer offers, or whose instance is gone or has
+been recreated fails the sidecar's allocation closed — there is no fallback to the card.
+
 ## Prerequisites
 
 Before switching a card's MIG mode (enable or disable):

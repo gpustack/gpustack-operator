@@ -72,7 +72,7 @@ kubectl config use-context "$(terraform output -raw context_name)"
 kubectl get nodes
 ```
 
-Tear down (no `-var` needed -- reuses the last apply's variables):
+Tear down (no `-var` needed -- `server` is carried across from the last apply):
 
 ```bash
 terraform destroy

@@ -346,7 +346,7 @@ func (r *InstanceWebhook) Default(ctx context.Context, obj runtime.Object) error
 			if err = sizeAcceleratorUnitByPercent(instType, instRess, partitionPct, withGeneralOvercommit); err != nil {
 				return err
 			}
-		case instType.Status.Detail.IsSliceable() && (memPct > 0 || coresPct > 0):
+		case instType.Status.Detail.IsLogicallySliceable() && (memPct > 0 || coresPct > 0):
 			// A slice is a fraction of ONE card, so default an absent or explicitly zero
 			// accelerator count to 1 (nil was already defaulted above); otherwise
 			// validation would reject it for not being exactly 1.
@@ -531,10 +531,10 @@ func validateResourceRequests(instType *worker.InstanceType, instRess *workercor
 			// the request at all — on an all-partitioned pool it would otherwise be admitted
 			// and then stay Pending forever — so it is rejected here rather than reshaped
 			// into a whole-card request.
-			if !instType.Status.Detail.IsSliceable() {
+			if !instType.Status.Detail.IsLogicallySliceable() {
 				errs = append(errs, field.Forbidden(
 					field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage"),
-					unservedLogicalSliceMessage(instType)))
+					fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)))
 				break
 			}
 			memPath := field.NewPath("spec.resources.acceleratorSlicedMemoryPercentage")
@@ -630,34 +630,13 @@ func validateSingleCardRequest(instRess *workercore.InstanceResources, kind stri
 		fmt.Sprintf("accelerator request must be exactly 1 for a %s request", kind))}
 }
 
-// isAllPartitionedPool reports whether every card of the pool is in a hardware partitioning
-// mode: the partition view has a capacity while the whole-card view has none. Capacity — not
-// Remaining or OnceMaxRequest — is the structural question ("can this pool ever serve a whole
-// card?"); a pool that is merely saturated keeps its capacity and its request stays queued
-// instead of being rejected.
-func isAllPartitionedPool(instType *worker.InstanceType) bool {
-	return instType.Status.AcceleratorPartitioned.Capacity.Sign() > 0 &&
-		instType.Status.Accelerator.Capacity.Sign() == 0
-}
-
-// unservedLogicalSliceMessage explains why a pool cannot serve a logical slice request, pointing
-// an all-partitioned pool's user at the partition profile field instead.
-func unservedLogicalSliceMessage(instType *worker.InstanceType) string {
-	if isAllPartitionedPool(instType) {
-		return fmt.Sprintf("instance type %s does not offer logical slicing: its cards are all "+
-			"hardware-partitioned; request a partition with spec.resources.acceleratorPartitionedProfile",
-			instType.Name)
-	}
-	return fmt.Sprintf("instance type %s does not offer logical slicing", instType.Name)
-}
-
 // validatePartitionedAcceleratorRequest checks a hardware partition request: it is mutually
 // exclusive with the two logical slice percentages (hardware partitioning and software slicing
-// cannot both apply to one card), it names a profile the fronting pool actually offers — reported
-// with the offered set, since a profile the pool cannot build would otherwise sit Pending forever —
-// and it is exactly one card, one instance. A manufacturer with no hardware partitioning yields no
-// partition resource key at all, so its request is rejected here rather than shaped into an empty
-// key by the controller.
+// cannot both apply to one card), the fronting pool offers the capability at all, it names a
+// profile that pool actually offers — reported with the offered set, since a profile the pool
+// cannot build would otherwise sit Pending forever — and it is exactly one card, one instance. A
+// manufacturer with no hardware partitioning yields no partition resource key at all, so its
+// request is rejected here rather than shaped into an empty key by the controller.
 func validatePartitionedAcceleratorRequest(
 	instType *worker.InstanceType, instRess *workercore.InstanceResources,
 ) field.ErrorList {
@@ -675,6 +654,15 @@ func validatePartitionedAcceleratorRequest(
 	if nodefeature.GetAcceleratableResourceName(manufacturer, workercore.DeviceAllocationModePartitioned) == "" {
 		errs = append(errs, field.Invalid(profilePath, profile,
 			fmt.Sprintf("manufacturer %s does not support hardware partitioning", manufacturer)))
+		return errs
+	}
+
+	// The manufacturer can partition, but this pool's cards may not be in a partitioning mode.
+	// Reject on the missing capability before the profile lookup, which would otherwise report an
+	// empty offered set and read as a mistyped profile.
+	if !instType.Status.Detail.IsPhysicallySliceable() {
+		errs = append(errs, field.Forbidden(profilePath,
+			fmt.Sprintf("instance type %s does not offer hardware partitioning", instType.Name)))
 		return errs
 	}
 
@@ -704,11 +692,11 @@ func validatePartitionedAcceleratorRequest(
 	return errs
 }
 
-// validateExclusiveAcceleratorRequest checks a whole-card (exclusive) accelerator request:
-// the pool must have an unpartitioned card to serve it at all, and the request may not be
-// negative, must be a whole number of cards, and may not exceed the InstanceType's whole-card
-// OnceMaxRequest. A nil request is left to defaulting. It is shared by a non-sliceable type and
-// by a zero-percentage (whole-card) request on a sliceable type.
+// validateExclusiveAcceleratorRequest checks a whole-card (exclusive) accelerator request: it may
+// not be negative, must be a whole number of cards, and may not exceed the InstanceType's
+// whole-card OnceMaxRequest — which is zero for a pool with no free unpartitioned card, so an
+// all-partitioned pool rejects a positive claim here. A nil request is left to defaulting. It is
+// shared by a non-sliceable type and by a zero-percentage (whole-card) request on a sliceable type.
 func validateExclusiveAcceleratorRequest(
 	instType *worker.InstanceType, instRess *workercore.InstanceResources,
 ) field.ErrorList {
@@ -727,17 +715,6 @@ func validateExclusiveAcceleratorRequest(
 		return field.ErrorList{field.Invalid(
 			field.NewPath("spec.resources.accelerator"), instRess.Accelerator.String(),
 			"accelerator request must be a whole number of cards")}
-	}
-	// An all-partitioned pool can serve no whole-card claim — a partitioned card hosts nothing
-	// but partitions — so reject the request at admission instead of admitting a Pod that would
-	// stay Pending forever. Only a POSITIVE claim: a zero request asks for no accelerator at all
-	// and the controller emits no extended resource for it, so every pool serves it.
-	if instRess.Accelerator.Sign() > 0 && isAllPartitionedPool(instType) {
-		return field.ErrorList{field.Forbidden(
-			field.NewPath("spec.resources.accelerator"),
-			fmt.Sprintf("instance type %s serves no whole-card request: its cards are all "+
-				"hardware-partitioned; request a partition with spec.resources.acceleratorPartitionedProfile",
-				instType.Name))}
 	}
 	if instRess.Accelerator.Cmp(instType.Status.Accelerator.OnceMaxRequest) > 0 {
 		return field.ErrorList{field.Invalid(

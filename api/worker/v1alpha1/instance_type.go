@@ -195,14 +195,26 @@ type InstanceTypeAcceleratorDetail struct {
 	CPU InstanceTypeAcceleratorCPU `json:"cpu,omitempty" protobuf:"bytes,5,opt,name=cpu"`
 }
 
-// IsSliceable reports whether the accelerator can be sliced **logically** — the pool's aggregated
-// slicing detail carries a non-zero logical slice count. Physical partitioning is deliberately not
-// counted: a partitioned card serves no logical slice, so a pool of nothing but partitioned cards
-// must not read as sliceable. A partition request is expressed by
-// InstanceResources.AcceleratorPartitionedProfile and answered by the Physical profile inventory,
-// never by this predicate.
-func (in InstanceTypeAcceleratorDetail) IsSliceable() bool {
+// IsLogicallySliceable reports whether the pool can serve a logical (software) slice — its
+// aggregated slicing detail carries a non-zero logical slice count. A logical slice is requested
+// as InstanceResources.AcceleratorSlicedMemoryPercentage / AcceleratorSlicedCoresPercentage.
+//
+// It deliberately does not exclude a partitioned pool, and IsPhysicallySliceable does not exclude
+// a logically sliceable one. The two capabilities are mutually exclusive per CARD — which is why
+// the per-card device.IsLogicallySliceable folds in !IsPartitioned — but a pool aggregates cards
+// of both kinds, and a mixed node advertises both families at once. Folding either predicate into
+// the other here would starve a mixed pool of logical slices.
+func (in InstanceTypeAcceleratorDetail) IsLogicallySliceable() bool {
 	return in.SlicedDetail.Logical.Count > 0
+}
+
+// IsPhysicallySliceable reports whether the pool can serve a hardware partition — its aggregated
+// slicing detail carries a non-zero physical slice count. A partition is requested by name as
+// InstanceResources.AcceleratorPartitionedProfile and validated against the Physical profile
+// inventory; this predicate answers the prior question of whether the pool offers the capability
+// at all. See IsLogicallySliceable on why the two are independent at the pool level.
+func (in InstanceTypeAcceleratorDetail) IsPhysicallySliceable() bool {
+	return in.SlicedDetail.Physical.Count > 0
 }
 
 // InstanceTypeStatus describes the observed state of the InstanceType.

@@ -323,7 +323,12 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 			Groups: eGroups,
 		},
 	}
-	kubemeta.ControlOnWithoutBlock(eDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
+	// Owned by the Node, not by the NodeFeature above: Devices is cluster-scoped, and the garbage
+	// collector resolves a cluster-scoped dependent's owner in the EMPTY namespace. A namespaced
+	// owner is therefore unresolvable — it yields an OwnerRefInvalidNamespace warning on every
+	// sweep and the object is never collected, so a Devices outlives the node it describes and
+	// keeps reporting that node's cards to every consumer that lists them.
+	kubemeta.ControlOnWithoutBlock(eDevs, nd, core.SchemeGroupVersion.WithKind("Node"))
 	devsAlginFn := func(aDevs *workercore.Devices) (_ *workercore.Devices, skip bool, err error) {
 		skip = true
 		// Update groups.
@@ -345,8 +350,8 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 			}
 		}
 		// Update owner reference.
-		if !kubemeta.IsControlledBy(aDevs, aNf) {
-			kubemeta.ControlOnWithoutBlock(aDevs, aNf, nfd.SchemeGroupVersion.WithKind("NodeFeature"))
+		if !kubemeta.IsControlledBy(aDevs, nd) {
+			kubemeta.ControlOnWithoutBlock(aDevs, nd, core.SchemeGroupVersion.WithKind("Node"))
 			skip = false
 		}
 		return aDevs, skip, err

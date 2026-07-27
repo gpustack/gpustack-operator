@@ -23,35 +23,46 @@ const Manufacturer = nodefeature.ManufacturerNVIDIA
 
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
-	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive),
-	}
-	if !opts.NoShared {
-		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared),
-		)
-	}
-	if !opts.NoSliced {
-		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced),
-		)
-	}
+
 	// The hardware-partitioning server serves "<base>.partitioned" — MIG, under NVIDIA's own
 	// name for it. A manufacturer with no partition kind has no such resource name at all, so
 	// it registers no server rather than one advertising an empty name.
 	partitioned := !opts.NoPartitioned &&
 		nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModePartitioned) != ""
+	// The MIG driver takes an NVML init at construction, so it is built once — only where
+	// partitions are served — and shared by the two servers that address them: the partitioned
+	// server materializes an instance, the visibility server proves one is still live before
+	// naming it again. A node serving no partitioning initializes nothing.
+	var mig migDriver
 	if partitioned {
+		mig = newMigDriver()
+	}
+
+	servers := []deviceplugin.Server{
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
+	}
+	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModePartitioned),
+			newServer(logger, workercore.DeviceAllocationModeShared, nil),
 		)
 	}
-	// The visibility server co-allocates the SSH sidecar to the same physical GPU(s) its
-	// workload container was granted; for any non-sliced mode the responder emits only
-	// NVIDIA_VISIBLE_DEVICES, which is exactly what the sidecar needs (device-cgroup access,
-	// no HAMi logical-slicing artifacts).
+	if !opts.NoSliced {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModeSliced, nil),
+		)
+	}
+	if partitioned {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModePartitioned, mig),
+		)
+	}
+	// The visibility server co-allocates a container to the same physical GPU(s) its owner
+	// container was granted; for any non-sliced mode the responder emits only
+	// NVIDIA_VISIBLE_DEVICES, which is exactly what a device-cgroup grant needs (no HAMi
+	// logical-slicing artifacts). On a partition-backed card that env must name the owner's
+	// partition, not the parent card, which is what the shared MIG driver is for.
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
 	)
 
 	return aggregated{
@@ -133,12 +144,14 @@ func (in aggregated) Stop() {
 type server struct {
 	deviceplugin.ResourceServer
 
-	// mig is the NVML MIG actuator seam the partitioned responder drives for a
-	// "<base>.partitioned.mig-<profile>" request; nil for every other mode.
+	// mig is the NVML MIG seam: the partitioned responder drives it for a
+	// "<base>.partitioned.mig-<profile>" request, and the visibility responder reads it to prove
+	// a co-allocated partition is still live. It is nil for every other mode, and on a node that
+	// serves no partitioning at all.
 	mig migDriver
 }
 
-func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) deviceplugin.Server {
+func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig migDriver) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
 	s := &server{
@@ -148,9 +161,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
-	}
-	if mode == workercore.DeviceAllocationModePartitioned {
-		s.mig = newMigDriver()
+		mig: mig,
 	}
 	s.Responder = s
 

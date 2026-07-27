@@ -447,18 +447,7 @@ func (s *server) ActuatePhysicalSliced(
 		return nil, fmt.Errorf("mig actuator not configured")
 	}
 
-	// Allocate onto cards in devs order (= NVIDIA_VISIBLE_DEVICES order), so the injected UUID
-	// list is deterministic and matches the ledger's per-card records.
-	cards := make([]string, 0, len(allocated))
-	for i := range devs.Spec.Groups {
-		grp := &devs.Spec.Groups[i]
-		for j := range grp.Accelerators {
-			res := deviceplugin.Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
-			if _, ok := allocated[res]; ok {
-				cards = append(cards, grp.Accelerators[j].ID)
-			}
-		}
-	}
+	cards := allocatedCards(devs, allocated)
 	if len(cards) == 0 {
 		return nil, fmt.Errorf("no allocated card for physical-slice container %q", ctr.Name)
 	}
@@ -521,6 +510,23 @@ func (s *server) ActuatePhysicalSliced(
 		},
 		Rollback: rollback,
 	}, nil
+}
+
+// allocatedCards returns the UUIDs of the allocated cards in devs order — which is also
+// NVIDIA_VISIBLE_DEVICES order, so a container's partition list and a co-allocating container's
+// are assembled the same way and read the same.
+func allocatedCards(devs *workercore.Devices, allocated map[deviceplugin.Resource]int32) []string {
+	cards := make([]string, 0, len(allocated))
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			res := deviceplugin.Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
+			if _, ok := allocated[res]; ok {
+				cards = append(cards, grp.Accelerators[j].ID)
+			}
+		}
+	}
+	return cards
 }
 
 // resourceForCard returns the Resource (group:device) of the card with the given UUID.

@@ -45,7 +45,16 @@ locals {
             fi
             sleep 10
           done
-          systemctl disable --now nvidia-dcgm nvidia-dcgm-exporter 2>/dev/null || true
+          # Mask rather than disable: DCGM holds driver handles that make a MIG mode switch fail,
+          # and a disabled unit is still pulled back in by the vendor's own units and timers — it
+          # was observed running again hours after a clean disable. Masking is what actually
+          # keeps it down. Wait for the units to exist: the driver preset installs them after the
+          # first boot, so an early mask would silently no-op.
+          for _ in $(seq 1 60); do
+            systemctl list-unit-files 'nvidia-dcgm*' 2>/dev/null | grep -q nvidia-dcgm && break
+            sleep 10
+          done
+          systemctl mask --now nvidia-dcgm nvidia-dcgm-exporter 2>/dev/null || true
       - path: /etc/systemd/system/gpustack-node-prep.service
         content: |
           [Unit]
@@ -220,6 +229,19 @@ resource "nebius_mk8s_v1_node_group" "this" {
       drivers_preset = each.value.gpu.drivers_preset
     } : null
   }
+
+  # Putting a card into a hardware partitioning mode fails the provider's own GPU health check —
+  # its NVLink topology probe cannot read a partitioned card — which raises the NebiusGPUError
+  # node condition. The default auto-repair rule for that condition cordons the node and then
+  # shuts it down, so a partitioning test kills the very node it runs on. Turning the rule off
+  # leaves the condition reported and visible, but no longer node-fatal. Every other auto-repair
+  # rule (kernel deadlock, disk IO, container runtime) keeps its default.
+  auto_repair = each.value.gpu != null ? {
+    conditions = [{
+      type     = "NebiusGPUError"
+      disabled = true
+    }]
+  } : null
 }
 
 # Merges the cluster into ~/.kube/config as a new context (mirrors clusters/eks's
@@ -250,10 +272,16 @@ resource "null_resource" "kubeconfig" {
   }
 }
 
-# Records the last SUCCESSFUL apply's inputs; Terraform auto-loads *.auto.tfvars.json on every
-# command (incl. destroy), and command-line -var still overrides it on apply. A managed
-# hashicorp/local local_file is not used here: it is deleted during destroy, which would strand
-# a failed/interrupted destroy retry with no values for project_id (a required variable).
+# Carries project_id — the one variable with no default — across a failed or interrupted destroy
+# retry. Terraform auto-loads *.auto.tfvars.json on every command (incl. destroy), and
+# command-line -var still overrides it on apply. A managed hashicorp/local local_file is not used
+# here: it is deleted during destroy, which is exactly when the value is still needed.
+#
+# Snapshot NOTHING that has a default. Auto-loading is indiscriminate — it feeds `apply` just as
+# readily as `destroy` — so a variable recorded here silently overrides its own default on every
+# later apply in this directory, with nothing on the command line to hint at it. Recording the
+# cluster's shape here once made a plain `apply` keep rebuilding an 8-GPU node group long after
+# the default had been reduced to a single card.
 resource "null_resource" "last_apply" {
   depends_on = [
     nebius_mk8s_v1_cluster.this,
@@ -263,14 +291,7 @@ resource "null_resource" "last_apply" {
 
   triggers = {
     snapshot = jsonencode({
-      project_id             = var.project_id
-      name_prefix            = var.name_prefix
-      release                = var.release
-      ssh_public_key         = var.ssh_public_key
-      node_boot_disk_size_gb = var.node_boot_disk_size_gb
-      node_boot_disk_type    = var.node_boot_disk_type
-      cpu_instance_types     = var.cpu_instance_types
-      gpu_instance_types     = var.gpu_instance_types
+      project_id = var.project_id
     })
   }
 
