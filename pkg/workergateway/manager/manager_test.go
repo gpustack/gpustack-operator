@@ -2,8 +2,11 @@ package manager
 
 import (
 	"context"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -12,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
@@ -146,6 +150,136 @@ func TestSubscribeWorker_RepeatedSubscribeStartsOneLoop(t *testing.T) {
 
 	assert.EqualValues(t, 1, rec.Started.Load(), "only one readiness loop may run per cluster")
 	assert.EqualValues(t, 1, rec.InFlight.Load())
+}
+
+// _FakeReadiness stands in for the worker api service readiness wait, recording when each attempt
+// started so the loop around it can be driven without real probes.
+type _FakeReadiness struct {
+	mu     sync.Mutex
+	starts []time.Time
+
+	// err is returned by every attempt.
+	err error
+}
+
+func (f *_FakeReadiness) Wait(_ context.Context, _ kubernetes.Interface) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.starts = append(f.starts, time.Now())
+
+	return f.err
+}
+
+func (f *_FakeReadiness) Attempts() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	return len(f.starts)
+}
+
+func (f *_FakeReadiness) Gaps() []time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	gaps := make([]time.Duration, 0, len(f.starts))
+	for i := 1; i < len(f.starts); i++ {
+		gaps = append(gaps, f.starts[i].Sub(f.starts[i-1]))
+	}
+	return gaps
+}
+
+// newFakeReadinessManager returns a manager whose readiness wait is fake and whose retry backoff is
+// short enough to observe, so the loop's own behavior can be tested without real probes.
+func newFakeReadinessManager(t *testing.T, fake *_FakeReadiness) *_Manager {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	m, err := New(ctx, &Config{
+		ConstructRestConfig: func(_, _ string) (*rest.Config, error) {
+			return &rest.Config{Host: "https://worker.invalid"}, nil
+		},
+		ResyncPeriod: time.Minute,
+	})
+	require.NoError(t, err)
+
+	wm := m.(*_Manager)
+	wm.WaitForServicesReady = fake.Wait
+	wm.ReadinessBackoff = wait.Backoff{
+		Duration: 20 * time.Millisecond,
+		Factor:   2,
+		Cap:      time.Second,
+		Steps:    math.MaxInt32,
+	}
+
+	return wm
+}
+
+// TestSubscribeWorker_FailedReadinessRetriesUntilUnsubscribed guards the retry half of the loop: a
+// cluster whose api services never come up must keep being retried, and must stop the moment it is
+// unsubscribed. Before the fix the retry was immediate, so this ran as fast as the wait returned.
+func TestSubscribeWorker_FailedReadinessRetriesUntilUnsubscribed(t *testing.T) {
+	fake := &_FakeReadiness{err: errors.New("api services are not ready")}
+	wm := newFakeReadinessManager(t, fake)
+
+	require.NoError(t, wm.SubscribeWorker(context.Background(), "6", "token", nil, false))
+	assert.Eventually(t, func() bool { return fake.Attempts() >= 3 },
+		5*time.Second, 10*time.Millisecond, "a failed readiness wait must be retried")
+
+	wm.UnsubscribeWorker(context.Background(), "6")
+
+	// The loop can already be inside one last wait when the cancel lands, so let that
+	// one finish before taking the count. A surviving loop would retry many times over
+	// the window that follows.
+	time.Sleep(200 * time.Millisecond)
+	settled := fake.Attempts()
+	time.Sleep(500 * time.Millisecond)
+	assert.Equal(t, settled, fake.Attempts(), "unsubscribe must stop the retries")
+}
+
+// TestSubscribeWorker_BacksOffBetweenFailedAttempts guards the pacing itself: drop the backoff sleep
+// from the loop and the gaps collapse, putting the tight retry half of the bug back.
+func TestSubscribeWorker_BacksOffBetweenFailedAttempts(t *testing.T) {
+	fake := &_FakeReadiness{err: errors.New("api services are not ready")}
+	wm := newFakeReadinessManager(t, fake)
+
+	require.NoError(t, wm.SubscribeWorker(context.Background(), "6", "token", nil, false))
+	assert.Eventually(t, func() bool { return fake.Attempts() >= 4 },
+		5*time.Second, 10*time.Millisecond)
+	wm.UnsubscribeWorker(context.Background(), "6")
+
+	// A timer only ever overshoots, so each gap is compared against the step it was
+	// scheduled with rather than against another observed gap — which on a loaded runner
+	// says nothing. Drop the backoff and the gaps collapse; make it constant and the
+	// third one stays at the first one's step.
+	step := wm.ReadinessBackoff.Duration
+	gaps := fake.Gaps()
+	require.GreaterOrEqual(t, len(gaps), 3)
+	assert.GreaterOrEqual(t, gaps[0], step, "the first retry must wait its first step")
+	assert.GreaterOrEqual(t, gaps[2], 4*step, "each retry must wait longer than the last")
+}
+
+// TestReadinessBackoff_GrowsAndCapsAtAMinute pins the default schedule the loop is handed. The loop's
+// use of it is covered by TestSubscribeWorker_BacksOffBetweenFailedAttempts; this fixes the numbers.
+func TestReadinessBackoff_GrowsAndCapsAtAMinute(t *testing.T) {
+	backoff := newReadinessBackoff()
+
+	first := backoff.Step()
+	second := backoff.Step()
+	third := backoff.Step()
+
+	assert.Greater(t, second, first, "the gap between attempts must grow")
+	assert.Greater(t, third, first, "the gap between attempts must keep growing")
+
+	// However long a cluster stays unready, it is probed at least once a minute and no more.
+	var last time.Duration
+	for i := 0; i < 10; i++ {
+		last = backoff.Step()
+		assert.LessOrEqual(t, last, time.Minute, "the gap must not grow past the cap")
+	}
+	assert.EqualValues(t, time.Minute, last, "the gap must settle at the cap")
 }
 
 // newEmptyListServer serves every list request an empty result and counts the requests it saw, so a

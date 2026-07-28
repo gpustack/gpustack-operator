@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/cache"
 	klog "k8s.io/klog/v2"
@@ -112,6 +114,21 @@ const (
 	WorkerEventDeleted  = watch.Deleted
 )
 
+// newReadinessBackoff paces the retries of the worker api service readiness wait. Each wait already
+// polls for 30s, so this only spaces a failed attempt from the next one; capping it at a minute
+// keeps a cluster that never becomes ready from being probed — and logged — in a tight loop.
+//
+// It is handed out by value: wait.Backoff.Step has a pointer receiver, so a shared one would let a
+// single cluster's retries pace every other cluster's.
+func newReadinessBackoff() wait.Backoff {
+	return wait.Backoff{
+		Duration: 5 * time.Second,
+		Factor:   2,
+		Cap:      time.Minute,
+		Steps:    math.MaxInt32,
+	}
+}
+
 type (
 	Cluster = string
 
@@ -128,6 +145,10 @@ type (
 		Pending             map[Cluster]*_Pending
 		ConstructRestConfig ConstructRestConfigFunc
 		ResyncPeriod        time.Duration
+		// WaitForServicesReady and ReadinessBackoff are the readiness policy, defaulted by
+		// New. Tests replace them to drive the loop without waiting on real probes.
+		WaitForServicesReady func(context.Context, kubernetes.Interface) error
+		ReadinessBackoff     wait.Backoff
 	}
 
 	// _Pending is one subscribe attempt. It is compared by pointer, so an attempt that
@@ -155,6 +176,9 @@ func New(ctx context.Context, config *Config) (Manager, error) {
 		ResyncPeriod:        config.ResyncPeriod,
 		Workers:             make(map[Cluster]*_Worker),
 		Pending:             make(map[Cluster]*_Pending),
+
+		WaitForServicesReady: apis.WaitForServicesReady,
+		ReadinessBackoff:     newReadinessBackoff(),
 	}, nil
 }
 
@@ -198,6 +222,9 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 		// worker is registered, so no concurrent attempt can take it over.
 		defer wm.releasePending(cluster, pending)
 
+		backoff := wm.ReadinessBackoff
+		reported := false
+
 		for {
 			select {
 			case <-wkCtx.Done():
@@ -205,11 +232,31 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 			default:
 			}
 
-			logger.Info("checking worker api services")
-			if err := apis.WaitForServicesReady(wkCtx, cli); err != nil {
-				logger.Error(err, "wait for api services ready")
+			logger.V(2).Info("checking worker api services")
+			if err := wm.WaitForServicesReady(wkCtx, cli); err != nil {
+				if wkCtx.Err() != nil {
+					// Unsubscribed while waiting, so the wait was cut short on
+					// purpose rather than failing.
+					return
+				}
+				if reported {
+					// The wait retries until the cluster becomes reachable, so only the
+					// first failure of a run is reported as an error.
+					logger.V(2).Info("worker api services still not ready", "err", err)
+				} else {
+					logger.Error(err, "wait for api services ready")
+					reported = true
+				}
+
+				select {
+				case <-wkCtx.Done():
+					return
+				case <-time.After(backoff.Step()):
+				}
 				continue
 			}
+			backoff = wm.ReadinessBackoff
+			reported = false
 
 			wm.Lock()
 			// The wait can succeed just as this attempt is unsubscribed or replaced, and
@@ -226,7 +273,10 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 			wm.Unlock()
 
 			logger.Info("subscribing worker", "gvks", gvks)
-			if err := wk.Subscribe(); err != nil {
+			// Subscribe returns the worker context's own cancellation once it is
+			// unsubscribed, which is how it is meant to end — reporting that would put
+			// an error in the log on every unsubscribe.
+			if err := wk.Subscribe(); err != nil && wkCtx.Err() == nil {
 				logger.Error(err, "subscribe worker")
 			}
 
