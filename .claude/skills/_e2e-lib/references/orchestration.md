@@ -47,8 +47,11 @@ lead folds into the report. Specialists do not write the report themselves.
 
 ## Hard rules (carried from each SKILL.md, reinforced here)
 
-- **Never switch kube context** — confirm the active context is the intended local cluster; never
-  `kubectl config use-context`.
+- **Pin the run to the context the user confirms** — `preflight.sh` shows the active one. Never move
+  among the user's contexts on your own judgement. When the cluster the user confirms is one of their
+  contexts that is not currently active, switch only on their explicit say-so, record the context to
+  return to as an **outstanding environment mutation**, and restore it in Phase 8. Adopting the context
+  a cluster this run provisioned merged in itself needs no such record.
 - **Build locally and never push when the nodes can read this machine's image store** —
   `build-load.sh` keeps `PACKAGE_PUSH=false` in that mode. When they cannot (remote nodes, or a node
   architecture this machine does not build for), the same script's **remote mode** builds on a builder

@@ -25,7 +25,7 @@ NFD labels nodes → DeviceManager detects accelerators → Worker profiles capa
 Run as a **test-orchestration lead** (main agent) coordinating read-only **domain specialists** (`Agent` tool). **Read [`orchestration.md`](../_e2e-lib/references/orchestration.md) before Phase 0** — it owns roles, phases, parallelism/rendezvous rules, report layout, and the fix-and-retest loop. Below are the operator-e2e specifics.
 
 **Hard rules** (full list in `orchestration.md`; operator-e2e specifics):
-- **Never switch kube context** — confirm the active context is the intended cluster; never `kubectl config use-context`. The one exception is the context a cluster **this run provisioned** merged in itself.
+- **Pin the run to a user-confirmed context** — confirm the active context is the intended cluster. Never switch on your own judgement; on the user's explicit say-so, switch, record the context to return to as an outstanding environment mutation, and restore it in Phase 8. Adopting the context a cluster **this run provisioned** merged in itself needs no such record.
 - **Prefer the user's own cluster; provisioning is a separate opt-in** and a cluster this run provisioned **must** be destroyed in Phase 8 — see [`cluster-provisioning.md`](../_e2e-lib/references/cluster-provisioning.md).
 - **Offer a context checkpoint at the trigger points** (see Flow); compacting is the user's action, and the lead hands over a focus block that carries the teardown obligation.
 - **Build locally when the nodes share this machine's image store; otherwise build remote and push** — `build-load.sh` keeps `PACKAGE_PUSH=false` locally, and switches to a builder host + registry push when `E2E_BUILDER_SSH` / `E2E_IMAGE_NAMESPACE` are set inline (never written into a file).
