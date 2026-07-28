@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -117,12 +118,22 @@ type (
 	_Manager struct {
 		sync.RWMutex
 
-		Logger              klog.Logger
-		Context             context.Context
-		Clusters            []Cluster
-		Workers             map[Cluster]*_Worker
+		Logger  klog.Logger
+		Context context.Context
+		Workers map[Cluster]*_Worker
+		// Pending holds the subscribe attempts that have not registered a worker yet.
+		// A worker is registered only once its api services are ready, so without this
+		// a repeated subscribe starts a second readiness loop and an unsubscribe cannot
+		// stop the one already running.
+		Pending             map[Cluster]*_Pending
 		ConstructRestConfig ConstructRestConfigFunc
 		ResyncPeriod        time.Duration
+	}
+
+	// _Pending is one subscribe attempt. It is compared by pointer, so an attempt that
+	// finishes late never releases the claim of the attempt that replaced it.
+	_Pending struct {
+		Cancel context.CancelFunc
 	}
 
 	_Worker struct {
@@ -143,6 +154,7 @@ func New(ctx context.Context, config *Config) (Manager, error) {
 		ConstructRestConfig: config.ConstructRestConfig,
 		ResyncPeriod:        config.ResyncPeriod,
 		Workers:             make(map[Cluster]*_Worker),
+		Pending:             make(map[Cluster]*_Pending),
 	}, nil
 }
 
@@ -151,26 +163,41 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 
 	if force {
 		wm.UnsubscribeWorker(ctx, cluster)
-	} else if wm.hasWorker(cluster) {
-		logger.V(2).Info("worker already exists, skip")
+	}
+
+	wkCtx, wkCancel := context.WithCancel(klog.NewContext(wm.Context, logger))
+
+	// Claim the cluster before doing any work, so that a repeated subscribe cannot start a
+	// second readiness loop and an unsubscribe can stop this attempt while it is still
+	// waiting for the worker api services.
+	pending, claimed := wm.claimPending(cluster, wkCancel)
+	if !claimed {
+		wkCancel()
+		logger.V(2).Info("worker already subscribed or pending, skip")
 		return nil
 	}
 
 	cfg, err := wm.ConstructRestConfig(cluster, token)
 	if err != nil {
+		wm.releasePending(cluster, pending)
+		wkCancel()
 		logger.Error(err, "construct rest config")
 		return fmt.Errorf("construct rest config for cluster %q: %w", cluster, err)
 	}
 
 	cli, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
+		wm.releasePending(cluster, pending)
+		wkCancel()
 		logger.Error(err, "construct kubernetes client")
 		return fmt.Errorf("construct kubernetes client for cluster %q: %w", cluster, err)
 	}
 
-	wkCtx, wkCancel := context.WithCancel(klog.NewContext(wm.Context, logger))
-
 	gox.Go(func() {
+		// The claim is held for as long as this loop owns the cluster, including while its
+		// worker is registered, so no concurrent attempt can take it over.
+		defer wm.releasePending(cluster, pending)
+
 		for {
 			select {
 			case <-wkCtx.Done():
@@ -185,13 +212,16 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 			}
 
 			wm.Lock()
-			if _, ok := wm.Workers[cluster]; ok {
+			// The wait can succeed just as this attempt is unsubscribed or replaced, and
+			// registering then would hand out a worker on a canceled context and make the
+			// replacement stand down. Only the attempt that still owns the cluster registers.
+			if wkCtx.Err() != nil || wm.Pending[cluster] != pending {
 				wm.Unlock()
-				logger.Info("worker already exists, skip")
+				wkCancel()
+				logger.V(2).Info("attempt no longer owns the cluster, skip")
 				return
 			}
 			wk := newWorker(wkCtx, wkCancel, cluster, cli, wm.ResyncPeriod, gvks)
-			wm.Clusters = append(wm.Clusters, cluster)
 			wm.Workers[cluster] = wk
 			wm.Unlock()
 
@@ -201,7 +231,12 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 			}
 
 			wm.Lock()
-			delete(wm.Workers, cluster)
+			// Only this attempt's own registration may be dropped: a forced
+			// re-subscribe replaces it, and unregistering the replacement here would
+			// leave the cluster running with no entry.
+			if wm.Workers[cluster] == wk {
+				delete(wm.Workers, cluster)
+			}
 			wm.Unlock()
 		}
 	})
@@ -210,33 +245,82 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 }
 
 func (wm *_Manager) UnsubscribeWorker(ctx context.Context, cluster string) {
-	if !wm.hasWorker(cluster) {
-		return
-	}
-
 	wm.Lock()
-	defer wm.Unlock()
-	wk, ok := wm.Workers[cluster]
-	if !ok {
+
+	// Drop the claim here instead of leaving it to the attempt's own cleanup, so a
+	// following subscribe — a forced one in particular — can claim the cluster at once.
+	pending, isPending := wm.Pending[cluster]
+	delete(wm.Pending, cluster)
+
+	wk, hasWorker := wm.Workers[cluster]
+	delete(wm.Workers, cluster)
+	wm.Unlock()
+
+	if !isPending && !hasWorker {
 		return
 	}
-	wk.Unsubscribe(ctx)
-	delete(wm.Workers, cluster)
-	for i, c := range wm.Clusters {
-		if c == cluster {
-			wm.Clusters = append(wm.Clusters[:i], wm.Clusters[i+1:]...)
-			break
-		}
+	// Both teardowns run unlocked. Their targets are already unreachable through the
+	// manager, and Unsubscribe publishes to the event bus — calling out to another
+	// subsystem while holding this mutex is what makes a lock order a hazard.
+	if hasWorker {
+		wk.Unsubscribe(ctx)
 	}
-	wm.Logger.Info("unsubscribed worker", "cluster", cluster)
+	if isPending {
+		// Stops an attempt that never got as far as registering a worker, which would
+		// otherwise keep probing the cluster for its api services forever.
+		pending.Cancel()
+	}
+	if hasWorker {
+		wm.Logger.Info("unsubscribed worker", "cluster", cluster)
+	} else {
+		wm.Logger.Info("canceled pending worker subscription", "cluster", cluster)
+	}
 }
 
-func (wm *_Manager) hasWorker(cluster string) bool {
-	wm.RLock()
-	defer wm.RUnlock()
+// claimPending reserves the cluster for one subscribe attempt, reporting false when the cluster
+// already has a worker or another attempt in progress.
+func (wm *_Manager) claimPending(cluster string, cancel context.CancelFunc) (*_Pending, bool) {
+	wm.Lock()
+	defer wm.Unlock()
 
-	_, ok := wm.Workers[cluster]
-	return ok
+	if _, ok := wm.Workers[cluster]; ok {
+		return nil, false
+	}
+	if _, ok := wm.Pending[cluster]; ok {
+		return nil, false
+	}
+
+	pending := &_Pending{Cancel: cancel}
+	wm.Pending[cluster] = pending
+	return pending, true
+}
+
+// listClusters snapshots the clusters that currently have a registered worker, sorted so that
+// iterating all of them stays in a stable order. It is derived from the registrations rather than
+// tracked alongside them, so it cannot drift from them or report one cluster twice.
+func (wm *_Manager) listClusters() []Cluster {
+	wm.RLock()
+	clusters := make([]Cluster, 0, len(wm.Workers))
+	for cluster := range wm.Workers {
+		clusters = append(clusters, cluster)
+	}
+	wm.RUnlock()
+
+	// Ordered after unlocking: by then the snapshot is this call's own, and holding
+	// subscribes and unsubscribes off while sorting it buys nothing.
+	slices.Sort(clusters)
+
+	return clusters
+}
+
+// releasePending drops the claim on the cluster if the given attempt still holds it.
+func (wm *_Manager) releasePending(cluster string, pending *_Pending) {
+	wm.Lock()
+	defer wm.Unlock()
+
+	if wm.Pending[cluster] == pending {
+		delete(wm.Pending, cluster)
+	}
 }
 
 func (wm *_Manager) ListWorkers(_ context.Context) []WorkerInfo {
@@ -266,7 +350,7 @@ func (wm *_Manager) IterateWorkers(
 	processor ProcessObjectFunc,
 ) error {
 	if len(clusters) == 0 {
-		clusters = wm.Clusters
+		clusters = wm.listClusters()
 	}
 	if gvk.Empty() {
 		return nil
