@@ -314,7 +314,13 @@ the CSI drivers, which today's Go path does honour.
   `installNodeFeatureDiscovery`, `installCSIDriverNFS`, `installCSIDriverS3` and their values
   templates and template func-maps are deleted; `installGPUStackDeviceManager` generalises into
   the single bundled-chart installer.
-- `reapOrphanedKueue` and its helpers move to the chart's `pre-upgrade` hook script (F8).
+- `reapOrphanedKueue` and its helpers move to the chart's `pre-upgrade` hook script (F8), so
+  they outlive the installer collapse and are deleted with T15, not T12 — until the hook
+  exists, image mode would otherwise lose its self-heal. The reaper's webhook-configuration
+  selector must narrow with the move: `app.kubernetes.io/instance=gpustack-kueue` no longer
+  matches a Kueue the parent release owns. It becomes an `instance in (…)` set over the
+  releases this operator installs Kueue under. Selecting on the chart-name label instead would
+  also match a Kueue a user brought themselves, and the reaper deletes what it selects.
 - The `gpustack-node-devices` AdmissionCheck apply stays a runtime step in Go — Kueue ships its
   CRDs in `templates/crd/`, not `crds/`, so Helm cannot reliably create a Kueue CR in the same
   pass that creates its CRD — and moves out of `installKueue` into `Prepare()`'s unconditional
@@ -891,14 +897,16 @@ gen/chartvalues/                   # emits the nodefeature-derived values blocks
 testing/chart-baseline/            # values captured from `main` — the parity oracle
 
 pkg/worker/kuberess/
-├── apps.go                        # installs = [operator chart]
+├── apps.go                        # installs = [operator chart]; the disable-name table
 ├── apps_gpustack_operator.go      # the single bundled-chart installer (image mode)
-└── apps_kueue_admission_check.go  # AdmissionCheck retry-apply, lifted out of installKueue
+├── apps_kueue_admission_check.go  # AdmissionCheck retry-apply, lifted out of installKueue
+└── apps_kueue_reap.go             # the stranded-Kueue reaper, until T15's hook replaces it
 ```
 
-Deleted: `apps_kueue.go`, `apps_node_feature_discovery.go`, `apps_csi_driver_nfs.go`,
-`apps_csi_driver_s3.go` and their tests. `apps_gpustack_device_manager.go` is generalised into
-`apps_gpustack_operator.go`.
+Deleted: `apps_node_feature_discovery.go`, `apps_csi_driver_nfs.go`, `apps_csi_driver_s3.go`
+and their tests. `apps_kueue.go` keeps only its reaper, renamed `apps_kueue_reap.go` to pair
+with the test that was already named for it. `apps_gpustack_device_manager.go` is generalised
+into `apps_gpustack_operator.go`.
 
 ### Code Style
 
@@ -1113,9 +1121,9 @@ the baseline.
       Blocked by: T9
       Owns: `deploy/gpustack-operator/chart/values.yaml`
       Acceptance: both `csi-driver-*` blocks reproduce the baseline (driver names, tolerations,
-      priority classes, `storageClass.create: false`, `secret.create: false`), still
-      `enabled: false`. A Go test asserts `CSIProvisionerNFS` / `CSIProvisionerS3` equal the
-      chart's `driver.name` values.
+      priority classes, `storageClass.create: false`, `secret.create: false`). A Go test asserts
+      `CSIProvisionerNFS` / `CSIProvisionerS3` (now in `kuberess/alias.go`) equal the chart's
+      `driver.name` values, and T12's deferred defaults-parity render lands here too.
       Verify: rendered output diffed against the baseline slices; `go test ./pkg/worker/kuberess/ -run TestCSIDriverNamesMatchChart`
 
 - [ ] **T11 · Worker HA knobs + `worker.disableApplications`**
@@ -1134,7 +1142,7 @@ the baseline.
       a `DoNotSchedule` topology-spread constraint. All defaults stay at one replica, PDBs off.
       Verify: `.sbin/helm template x deploy/gpustack-operator/chart | grep -c 'kind: PodDisruptionBudget'` → `0`; with `-f values-ha.yaml` → `2` and `replicas: 3` on both Deployments
 
-- [ ] **T12 · Collapse `kuberess` to the bundled-chart installer**
+- [x] **T12 · Collapse `kuberess` to the bundled-chart installer**
       Blocked by: T6, T10
       Owns: `pkg/worker/kuberess/**`, `pkg/worker/worker.go`, `pkg/worker/option.go`,
       `pkg/system/control.go`
@@ -1147,6 +1155,11 @@ the baseline.
       moves into `Prepare()` with new retry-until-established behaviour; the
       `--disable-applications` name set is validated at flag-parse time; the Helm step treats an
       already-converged release as success.
+      Built ahead of T9/T10, so two of its checks move to the tasks that make them
+      expressible: the defaults-parity render, and the `driver.name` assertion (both
+      `csi-driver-*` blocks still carry nothing but `enabled`, so the assertion could only
+      fail). `pkg/system/control.go` needed no change — the name validation belongs to the
+      flag that carries it.
       Verify: `go test -race ./pkg/worker/... ./pkg/system/... && make lint`. Run
       `golangci-lint run ./pkg/worker/kuberess/...` **early**, not at the end: `unparam`'s
       `_test.go` exclusion is keyed on where a finding *lands*, so a test-only call site can push
@@ -1190,7 +1203,8 @@ the baseline.
       `deploy/gpustack-operator/chart/files/migrate-post.sh`,
       `deploy/gpustack-operator/chart/templates/migrate/**`
       Gate: review
-      Acceptance: a `pre-upgrade` Job reaps a stranded Kueue and server-side-applies the
+      Acceptance: `pkg/worker/kuberess/apps_kueue_reap.go` and its test are deleted here, once
+      the hook covers both modes; a `pre-upgrade` Job reaps a stranded Kueue and server-side-applies the
       vendored subchart `crds/`; a `post-upgrade` Job deletes the legacy release Secrets and
       prunes adopted objects absent from the new render. RBAC at weight -11, Jobs at -10. Both
       honour `global.imagePullSecrets` and an overridable image. Neither runs on a fresh install.

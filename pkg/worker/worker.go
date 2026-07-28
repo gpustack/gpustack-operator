@@ -133,6 +133,14 @@ func (w *Worker) Prepare(ctx context.Context) error {
 		return fmt.Errorf("install applications: %w", err)
 	}
 
+	// Install the node-devices AdmissionCheck. This is not an application install and
+	// stays outside the --disable-applications gate: whoever deploys Kueue, the
+	// scheduling chain needs the check to exist.
+	err = kuberess.InstallNodeDevicesAdmissionCheck(ctx)
+	if err != nil {
+		return fmt.Errorf("install node devices admission check: %w", err)
+	}
+
 	return nil
 }
 

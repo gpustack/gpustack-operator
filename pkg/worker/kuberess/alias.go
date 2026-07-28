@@ -10,6 +10,15 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
+const (
+	// CSIProvisionerNFS is the driver name of the bundled NFS CSI driver, as the
+	// csi-driver-nfs subchart's "driver.name" declares it.
+	CSIProvisionerNFS = "nfs.csi.gpustack.ai"
+	// CSIProvisionerS3 is the driver name of the bundled S3 CSI driver, as the
+	// csi-driver-s3 subchart's "driver.name" declares it.
+	CSIProvisionerS3 = "s3.csi.gpustack.ai"
+)
+
 var (
 	// SystemNamespaceName is the namespace name of the system resources.
 	SystemNamespaceName = systemname.NamespaceName

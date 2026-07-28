@@ -2,6 +2,8 @@ package kuberess
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -50,7 +52,7 @@ func kueueCRD(plural, kind string, terminating bool) *apiext.CustomResourceDefin
 // kueueWebhookConfigs returns the validating+mutating webhook configs the chart ships,
 // labeled with the Helm release instance the reaper selects on.
 func kueueWebhookConfigs() []runtime.Object {
-	labels := map[string]string{"app.kubernetes.io/instance": kueueReleaseName}
+	labels := map[string]string{"app.kubernetes.io/instance": gpustackOperatorReleaseName}
 	return []runtime.Object{
 		&admreg.ValidatingWebhookConfiguration{
 			ObjectMeta: meta.ObjectMeta{Name: "kueue-validating-webhook-configuration", Labels: labels},
@@ -276,8 +278,12 @@ func assertWebhookDeleteSelector(t *testing.T, actions []k8stesting.Action) {
 		}
 		found = true
 		dca := a.(k8stesting.DeleteCollectionAction)
-		assert.Equal(t, "app.kubernetes.io/instance="+kueueReleaseName, dca.GetListRestrictions().Labels.String(),
-			"webhook delete must select the kueue release label")
+		// A parsed selector renders its set values sorted, whatever order they were given in.
+		want := slices.Sorted(slices.Values(kueueReleaseNames))
+		assert.Equal(t,
+			"app.kubernetes.io/instance in ("+strings.Join(want, ",")+")",
+			dca.GetListRestrictions().Labels.String(),
+			"webhook delete must select only the releases this operator installs kueue under")
 	}
 	assert.True(t, found, "expected a delete-collection action")
 }
