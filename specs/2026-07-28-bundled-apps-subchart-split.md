@@ -646,6 +646,17 @@ pre-install/pre-upgrade hooks execute.
   the **install** action whenever `nextStep` returns install or reinstall, so it can hit either.
 - **Subchart CRDs are never upgraded by Helm** → the pre-upgrade hook server-side-applies the
   vendored `crds/`; the F8 AC asserts the 0.19.0 schema is present afterwards.
+- **Every conflict retry in `pkg/kubeclientset` is unbounded recursion with no backoff** — a
+  pre-existing shape in `Update`, `UpdateStatus`, the `Patch` pair and their `*WithCtrlClient`
+  twins, which `Create` now reaches too. Two realistic hot paths: a retry re-reads with
+  `ResourceVersion: "0"` from the API server's watch cache, which can lag the write that caused
+  the conflict, so a loser can spin on the same stale object with no sleep (`isRetryError` backs
+  off only for 429/410/timeout); and if a mutating webhook rewrites the object on every update,
+  two writers livelock. Because it recurses rather than loops, the failure is stack growth and a
+  crash, not a returned error — reproduced during T7, where the old certs-cache `Put` blew the
+  stack in seconds. → **not fixed here**: T7 keeps `Create` consistent with its siblings rather
+  than inventing a bound at one call site. Converting all of them to a bounded loop with backoff
+  is a contained follow-up task, recorded here so it is not lost.
 - **Concurrent worker boots break four ways** (non-retrying CRD/webhook applies, an unreachable
   conflict retry on the aggregated-APIService apply, mutual deletion of `gpustack-cert-*`
   Secrets, the Helm get-then-act) → four targeted fixes in F7, each with a unit test, plus a
@@ -933,7 +944,7 @@ the baseline.
       (which also absorb today's `IncludeCRDs` line) to make "reaches both actions" assertable.
       Verify: `go test ./pkg/kubeapp/... && make lint`
 
-- [ ] **T7 · `Prepare()` concurrent-boot fixes**
+- [x] **T7 · `Prepare()` concurrent-boot fixes**
       Blocked by: None
       Owns: `pkg/api/helper.go`, `pkg/api/helper_test.go`, `pkg/webhook/helper.go`,
       `pkg/webhook/helper_test.go`, `pkg/utils/certs/cache/kubernetes.go`,
@@ -1120,14 +1131,22 @@ code solid enough prior to committing the changes necessary to implement this en
   validation; `CSIProvisioner*` constants equal the chart's `driver.name`.
 - `pkg/kubeapp/helm`: 2026-07-28 - 10.6% → target ≥25%. `TakeOwnership` reaches both actions;
   default stays `false`.
-- `pkg/utils/certs/cache`: 2026-07-28 - 0.0% → target ≥60%. Two concurrent writers converge on
-  one Secret; no delete-all-duplicates path remains.
-- `pkg/kubeclientset`: 2026-07-28 - 0.0% → target ≥40%. A conflicting update retries when an
-  align function is supplied, and does **not** when none is — the second case is the guard that
-  pins why the installers must supply one. Plus the `Create` + `WithUpdateIfExisted` conflict
-  retry, which is dead code today. Conflicts cannot arise naturally against client-go's fake
-  `ObjectTracker` (no optimistic concurrency, no `GenerateName`), so they are injected with
-  `PrependReactor`.
+- `pkg/utils/certs/cache`: 2026-07-28 - 0.0% → **78.4%** (target ≥60%, met). Two concurrent
+  writers converge on one Secret; two separate cache instances share one Secret, which is the
+  per-replica case; no delete-all-duplicates path remains.
+- `pkg/kubeclientset`: 2026-07-28 - 0.0% → **27.4%** (target was ≥40%; **not met**, and
+  deliberately not padded). A conflicting update retries when an align function is supplied, and
+  does **not** when none is — the second case is the guard that pins why the installers must
+  supply one. Plus the `Create` + `WithUpdateIfExisted` conflict retry, which was dead code. The
+  covered functions are the two T7 edits: `Update` 83.3%, `Create` 66.1%. The uncovered remainder
+  — `UpdateStatus`, `Patch`, `Delete`, their `*WithCtrlClient` twins and the RBAC compare/align
+  factories — is roughly half the package and untouched by this spec, so reaching 40% means
+  testing unrelated functions. Left as its own task rather than written for the number.
+  Conflicts cannot arise naturally against client-go's fake `ObjectTracker` (no optimistic
+  concurrency, no `GenerateName`), so they are injected with `PrependReactor`. A fake-backed
+  informer additionally needs `SetFeatureDuringTest(t, clientfeatures.WatchListClient, false)`,
+  or the reflector's watch-list probe hangs the test for 10 s and fails on `sync informer`.
+- `pkg/api`: 2026-07-28 - 0.0% → 64.5%. `pkg/webhook`: 2026-07-28 - 0.0% → 51.7%.
 - `pkg/nodefeature`: 2026-07-28 - 76.0% — unchanged; the generator reads it, it is not modified.
 
 #### Integration tests

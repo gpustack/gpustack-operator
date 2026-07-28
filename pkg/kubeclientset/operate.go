@@ -181,12 +181,21 @@ func Create[T MetaObject](ctx context.Context, cli CreateClient[T], expected T, 
 		updated, err := updater.Update(ctx, copied, meta.UpdateOptions{
 			DryRun: co.DryRun,
 		})
-		if err == nil || !kerrors.IsConflict(err) || !kerrors.IsNotAcceptable(err) || !isRetryError(err) {
-			return updated, err
+		if err == nil {
+			return updated, nil
 		}
 
-		// Retry if conflicted.
-		return Create(ctx, cli, expected, opts...)
+		// Retry if the server asked to back off, or if another writer got there first:
+		// the next pass reads the actual resource again and aligns on top of it, so a
+		// writer that lost a concurrent update converges instead of failing.
+		//
+		// Any one of these reasons is enough to retry, hence the disjunction: they are
+		// mutually exclusive, so requiring them together could never hold.
+		if isRetryError(err) || kerrors.IsConflict(err) || kerrors.IsNotAcceptable(err) {
+			return Create(ctx, cli, expected, opts...)
+		}
+
+		return updated, err
 	case co.RecreateCompareFunc != nil:
 		skip := co.RecreateCompareFunc(actual.DeepCopyObject().(T))
 		if skip {
@@ -308,12 +317,17 @@ func CreateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 			DryRun: co.DryRun,
 			Raw:    &meta.UpdateOptions{DryRun: co.DryRun},
 		})
-		if err == nil || !kerrors.IsConflict(err) || !kerrors.IsNotAcceptable(err) || !isRetryError(err) {
-			return copied, err
+		if err == nil {
+			return copied, nil
 		}
 
-		// Retry if conflicted.
-		return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+		// Retry if the server asked to back off, or if another writer got there first,
+		// as in Create.
+		if isRetryError(err) || kerrors.IsConflict(err) || kerrors.IsNotAcceptable(err) {
+			return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+		}
+
+		return copied, err
 	case co.RecreateCompareFunc != nil:
 		skip := co.RecreateCompareFunc(actual.DeepCopyObject().(T))
 		if skip {

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 	klog "k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
-	"gpustack.ai/gpustack/pkg/kubemeta"
+	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/utils/certs"
 	"gpustack.ai/gpustack/pkg/utils/gox"
 	"gpustack.ai/gpustack/pkg/utils/stringx"
@@ -90,6 +91,13 @@ func NewK8sCache(ctx context.Context, group string, cli certs.SecretInterface) (
 					return nil, nil
 				}
 
+				// Index the secret holding the key only, so that a key resolves to one secret
+				// at most. Anything else claiming the key, like a secret an older release
+				// created under a generated name, is left alone.
+				if s.Name != secretName(group, annos[k8sManagedNameAnno]) {
+					return nil, nil
+				}
+
 				return []string{annos[k8sManagedNameAnno]}, nil
 			},
 		})
@@ -117,13 +125,13 @@ func NewK8sCache(ctx context.Context, group string, cli certs.SecretInterface) (
 }
 
 // Get reads a certificate data from the specified secret name.
-func (k k8sCache) Get(ctx context.Context, name string) ([]byte, error) {
+func (k k8sCache) Get(_ context.Context, name string) ([]byte, error) {
 	if name == "" {
 		return nil, certs.ErrCacheMiss
 	}
 
 	// Get existed secret.
-	sec := k.get(ctx, name)
+	sec := k.get(name)
 	if sec == nil || sec.DeletionTimestamp != nil {
 		return nil, certs.ErrCacheMiss
 	}
@@ -132,6 +140,9 @@ func (k k8sCache) Get(ctx context.Context, name string) ([]byte, error) {
 }
 
 // Put writes the certificate data to specified secret name.
+//
+// The secret holding a key is named after that key, so writers racing on one key create or
+// update one secret, whichever of them gets there first.
 func (k k8sCache) Put(ctx context.Context, name string, data []byte) error {
 	if name == "" || len(data) == 0 {
 		return nil
@@ -139,7 +150,7 @@ func (k k8sCache) Put(ctx context.Context, name string, data []byte) error {
 
 	sec := &core.Secret{
 		ObjectMeta: meta.ObjectMeta{
-			GenerateName: "gpustack-cert-",
+			Name: secretName(k.grp, name),
 			Annotations: map[string]string{
 				k8sManagedNameAnno:     name,
 				k8sManagedNameSumAnno:  sumName(name),
@@ -150,47 +161,55 @@ func (k k8sCache) Put(ctx context.Context, name string, data []byte) error {
 				k8sManagedGroupLabel: k.grp,
 			},
 		},
+		Type: core.SecretTypeOpaque,
 		Data: map[string][]byte{
 			k8sManagedValueKey: data,
 		},
 	}
 
-	// Update existed secret if found.
-	if asec := k.get(ctx, name); asec != nil && asec.Name != "" && asec.DeletionTimestamp == nil {
-		asecCopy := asec.DeepCopy()
-		asecCopy.Annotations = sec.Annotations
-		asecCopy.Labels = sec.Labels
-		asecCopy.Data = sec.Data
-		if kubemeta.DeepEqual(asecCopy, asec) {
-			return nil
-		}
-
-		var err error
-		asec, err = k.cli.Update(ctx, asecCopy, meta.UpdateOptions{})
-		if err != nil {
-			if !kerrors.IsConflict(err) && !kerrors.IsNotAcceptable(err) {
-				return fmt.Errorf("update secret: %w", err)
+	secAlignFn := func(aSec *core.Secret) (_ *core.Secret, skip bool, err error) {
+		skip = true
+		// Align annotations.
+		for ak, av := range sec.Annotations {
+			if aSec.Annotations[ak] == av {
+				continue
 			}
-			// Retry if conflict or not acceptable.
-			return k.Put(ctx, name, data)
+			if aSec.Annotations == nil {
+				aSec.Annotations = make(map[string]string, len(sec.Annotations))
+			}
+			aSec.Annotations[ak] = av
+			skip = false
 		}
-
-		k.logger.V(4).Info("updated secret", "object", klog.KObj(asec))
-
-		return nil
+		// Align labels.
+		for lk, lv := range sec.Labels {
+			if aSec.Labels[lk] == lv {
+				continue
+			}
+			if aSec.Labels == nil {
+				aSec.Labels = make(map[string]string, len(sec.Labels))
+			}
+			aSec.Labels[lk] = lv
+			skip = false
+		}
+		// Align value.
+		if !bytes.Equal(aSec.Data[k8sManagedValueKey], data) {
+			if aSec.Data == nil {
+				aSec.Data = make(map[string][]byte, 1)
+			}
+			aSec.Data[k8sManagedValueKey] = data
+			skip = false
+		}
+		return aSec, skip, err
 	}
 
-	// Otherwise, create new secret.
-	sec, err := k.cli.Create(ctx, sec, meta.CreateOptions{})
+	asec, err := kubeclientset.Update(ctx, k.cli, sec,
+		kubeclientset.WithCreateIfNotExisted[*core.Secret](),
+		kubeclientset.WithUpdateAlign(secAlignFn))
 	if err != nil {
-		if !kerrors.IsAlreadyExists(err) {
-			return fmt.Errorf("create secret: %w", err)
-		}
-		// Retry if already existed.
-		return k.Put(ctx, name, data)
+		return fmt.Errorf("put secret %q: %w", sec.Name, err)
 	}
 
-	k.logger.V(4).Info("created secret", "object", klog.KObj(sec))
+	k.logger.V(4).Info("put secret", "object", klog.KObj(asec))
 
 	return nil
 }
@@ -201,16 +220,22 @@ func (k k8sCache) Delete(ctx context.Context, name string) error {
 		return nil
 	}
 
-	// Get existed secret.
-	sec := k.get(ctx, name)
-	if sec == nil || sec.DeletionTimestamp != nil {
-		return nil
+	// Delete existed secret.
+	sn := secretName(k.grp, name)
+	err := k.cli.Delete(ctx, sn,
+		meta.DeleteOptions{
+			PropagationPolicy: ptr.To(meta.DeletePropagationBackground),
+		})
+	if err != nil && !kerrors.IsNotFound(err) {
+		return fmt.Errorf("delete secret %q: %w", sn, err)
 	}
 
-	return k.delete(ctx, sec)
+	k.logger.V(4).Info("deleted secret", "name", sn)
+
+	return nil
 }
 
-func (k k8sCache) get(ctx context.Context, name string) *core.Secret {
+func (k k8sCache) get(name string) *core.Secret {
 	if name == "" {
 		return nil
 	}
@@ -218,50 +243,22 @@ func (k k8sCache) get(ctx context.Context, name string) *core.Secret {
 	secs, err := k.inf.GetIndexer().ByIndex("_", name)
 	if err != nil {
 		k.logger.Error(err, "get indexed cached secrets")
-	}
-
-	switch len(secs) {
-	case 0:
-		// Not found.
 		return nil
-	case 1:
-		// Found.
-		return secs[0].(*core.Secret)
-	default:
-		// Found multiple.
 	}
 
-	// Clean up multiple secrets with the same key.
-	k.logger.Error(nil, "found multiple cached secrets with the same key, going to clean",
-		"objects", klog.KObjSlice(secs))
-
-	for i := range secs {
-		_ = k.delete(ctx, secs[i].(*core.Secret))
+	// Only the secret named after the key is indexed, so there is at most one.
+	if len(secs) == 0 {
+		return nil
 	}
 
-	// Not found.
-	return nil
+	return secs[0].(*core.Secret)
 }
 
-func (k k8sCache) delete(ctx context.Context, sec *core.Secret) error {
-	if sec == nil {
-		return nil
-	}
-
-	// Delete existed secret.
-	opts := meta.DeleteOptions{
-		PropagationPolicy: ptr.To(meta.DeletePropagationBackground),
-	}
-
-	err := k.cli.Delete(ctx, sec.Name, opts)
-	if err != nil && !kerrors.IsNotFound(err) {
-		return fmt.Errorf("delete secret: %w", err)
-	}
-
-	k.logger.V(4).Info("deleted secret",
-		"object", klog.KObj(sec))
-
-	return nil
+// secretName returns the name of the secret holding the given key of the given group.
+//
+// The name is a digest, as a key is not constrained to what an object name allows.
+func secretName(group, key string) string {
+	return "gpustack-cert-" + stringx.SumByFNV64a(group, "/", key)
 }
 
 func sumName(k string) string {

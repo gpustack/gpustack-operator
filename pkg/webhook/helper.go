@@ -16,6 +16,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubeclientset/review"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 )
 
 type (
@@ -160,17 +161,40 @@ func InstallConfigurations(
 	mwCli := cli.AdmissionregistrationV1().MutatingWebhookConfigurations()
 
 	vwc, mwc := MergeConfigurations(cc, prefix, getters)
+	// The align functions are what make a losing writer retry instead of returning the
+	// conflict: every replica installs the configurations before leader election, so
+	// without them a concurrent boot fails one of them.
 	if vwc != nil {
+		vwcAlignFn := func(aVwc *admreg.ValidatingWebhookConfiguration) (_ *admreg.ValidatingWebhookConfiguration, skip bool, err error) {
+			skip = true
+			// Align webhooks.
+			if !kubemeta.DeepEqual(aVwc.Webhooks, vwc.Webhooks) {
+				aVwc.Webhooks = vwc.DeepCopy().Webhooks
+				skip = false
+			}
+			return aVwc, skip, err
+		}
 		_, err := kubeclientset.Update(ctx, vwCli, vwc,
-			kubeclientset.WithCreateIfNotExisted[*admreg.ValidatingWebhookConfiguration]())
+			kubeclientset.WithCreateIfNotExisted[*admreg.ValidatingWebhookConfiguration](),
+			kubeclientset.WithUpdateAlign(vwcAlignFn))
 		if err != nil {
 			return fmt.Errorf("install validating webhook configuration %q: %w",
 				vwc.GetName(), err)
 		}
 	}
 	if mwc != nil {
+		mwcAlignFn := func(aMwc *admreg.MutatingWebhookConfiguration) (_ *admreg.MutatingWebhookConfiguration, skip bool, err error) {
+			skip = true
+			// Align webhooks.
+			if !kubemeta.DeepEqual(aMwc.Webhooks, mwc.Webhooks) {
+				aMwc.Webhooks = mwc.DeepCopy().Webhooks
+				skip = false
+			}
+			return aMwc, skip, err
+		}
 		_, err := kubeclientset.Update(ctx, mwCli, mwc,
-			kubeclientset.WithCreateIfNotExisted[*admreg.MutatingWebhookConfiguration]())
+			kubeclientset.WithCreateIfNotExisted[*admreg.MutatingWebhookConfiguration](),
+			kubeclientset.WithUpdateAlign(mwcAlignFn))
 		if err != nil {
 			return fmt.Errorf("install mutating webhook configuration %q: %w",
 				mwc.GetName(), err)
