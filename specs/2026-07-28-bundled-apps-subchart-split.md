@@ -626,6 +626,13 @@ pre-install/pre-upgrade hooks execute.
 - **`helm.Chart.SkippedCRDsInstallation` is a misnomer** — it sets Helm's `IncludeCRDs` (a
   render/manifest flag), not `SkipCRDs`, so NFD's `crds/` are installed today and will continue
   to be installed as a subchart. Behaviour is unchanged; the misnomer is out of scope.
+- **`mod_staging` carries the same two latent patch problems, deliberately unfixed.** Its
+  `patch -p1 -N --forward --silent <"${patch_dir}"/*.patch` neither checks the exit code nor
+  survives a second patch file (ambiguous redirect), and because it runs inside
+  `pushd … && patch … && popd` a failure short-circuits the `&&` chain *silently* rather than
+  aborting. Today every staging tree carries at most one patch, so neither has bitten. Fixing it
+  is out of scope here — staging is not what this spec touches — but `chart_staging` next door now
+  shows what the guarded form looks like.
 - Go conventions from `CLAUDE.md` apply to the shrunken `kuberess` package and the new
   generator; shell code follows the existing `hack/lib/*.sh` style.
 
@@ -1090,7 +1097,7 @@ the baseline.
       Verify: on kind — `helm install` then `helm list -n gpustack-system` → exactly one release,
       and `bash .claude/skills/_e2e-lib/scripts/assert-core.sh gpustack-system`
 
-- [ ] **T14 · Dockerfile + CI wiring**
+- [x] **T14 · Dockerfile + CI wiring**
       Blocked by: T3
       Owns: `pack/gpustack-operator/Dockerfile`, `.github/workflows/ci-chart.yml`, `hack/ci.sh`,
       `.github/configs/**`
