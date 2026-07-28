@@ -156,35 +156,45 @@ func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.S
 	return nil
 }
 
-// WaitForServicesReady waits for the api services to be ready.
-func WaitForServicesReady(ctx context.Context, cli kubernetes.Interface, getters []ServiceGetter) error {
+// IsServicesReady reports whether the api services are ready, checking each of them once. The error
+// names the first service found unavailable.
+//
+// Prefer this over WaitForServicesReady when the caller already retries on a schedule of its own, so
+// that the two do not stack and the caller's schedule is the rate the services are polled at.
+func IsServicesReady(ctx context.Context, cli kubernetes.Interface, getters []ServiceGetter) error {
 	svcCli := cli.ApiregistrationV1().APIServices()
 	svcs := MergeServices(apireg.ServiceReference{}, nil, getters)
 
+	for i := range svcs {
+		svc, err := svcCli.Get(ctx, svcs[i].Name,
+			meta.GetOptions{
+				ResourceVersion: "0",
+			})
+		if err != nil {
+			return err
+		}
+
+		ready := false
+		for j := range svc.Status.Conditions {
+			if svc.Status.Conditions[j].Type != apireg.Available {
+				continue
+			}
+			ready = svc.Status.Conditions[j].Status == apireg.ConditionTrue
+			break
+		}
+		if !ready {
+			return fmt.Errorf("api service %q is not ready", svc.Name)
+		}
+	}
+
+	return nil
+}
+
+// WaitForServicesReady waits for the api services to be ready, polling every 2 seconds and giving up
+// after 30 seconds, in which case it returns the last failure of the run.
+func WaitForServicesReady(ctx context.Context, cli kubernetes.Interface, getters []ServiceGetter) error {
 	return waitx.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, false,
 		func(ctx context.Context) error {
-			for i := range svcs {
-				svc, err := svcCli.Get(ctx, svcs[i].Name,
-					meta.GetOptions{
-						ResourceVersion: "0",
-					})
-				if err != nil {
-					return err
-				}
-
-				ready := false
-				for j := range svc.Status.Conditions {
-					if svc.Status.Conditions[j].Type != apireg.Available {
-						continue
-					}
-					ready = svc.Status.Conditions[j].Status == apireg.ConditionTrue
-					break
-				}
-				if !ready {
-					return fmt.Errorf("api service %q is not ready", svc.Name)
-				}
-			}
-
-			return nil
+			return IsServicesReady(ctx, cli, getters)
 		})
 }

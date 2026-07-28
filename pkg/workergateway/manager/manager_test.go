@@ -116,7 +116,7 @@ func newTestManager(t *testing.T, rec *_ProbeRecorder) *_Manager {
 }
 
 // TestSubscribeWorker_UnsubscribePendingStopsProbing guards gpustack#5947: unsubscribing a cluster
-// whose readiness wait has not finished must stop that wait. The pending attempt used to be
+// whose readiness check has not finished must stop that check. The pending attempt used to be
 // untracked, so UnsubscribeWorker found no worker and returned, leaving the loop probing the
 // cluster — through the gpustack server's own proxy — forever.
 func TestSubscribeWorker_UnsubscribePendingStopsProbing(t *testing.T) {
@@ -152,7 +152,37 @@ func TestSubscribeWorker_RepeatedSubscribeStartsOneLoop(t *testing.T) {
 	assert.EqualValues(t, 1, rec.InFlight.Load())
 }
 
-// _FakeReadiness stands in for the worker api service readiness wait, recording when each attempt
+// TestSubscribeWorker_StalledCheckIsAbandonedAndRetried guards the per-check time bound: a cluster
+// that accepts the connection and then never answers must have its check given up on and retried.
+// The check used to be a wait with a deadline of its own; taking that away left the bound to the
+// kubernetes client's timeout, which is minutes, so the loop sat in one probe for that long and the
+// backoff schedule stopped describing the rate the cluster was probed at.
+func TestSubscribeWorker_StalledCheckIsAbandonedAndRetried(t *testing.T) {
+	rec := newProbeRecorder()
+	wm := newTestManager(t, rec)
+	// The test server's rest config carries no timeout of its own, so a probe can only end
+	// by running out of the time this bound gives it.
+	wm.ReadinessCheckTimeout = 50 * time.Millisecond
+	wm.ReadinessBackoff = wait.Backoff{
+		Duration: 10 * time.Millisecond,
+		Factor:   1,
+		Steps:    math.MaxInt32,
+	}
+
+	require.NoError(t, wm.SubscribeWorker(context.Background(), "6", "token", nil, false))
+
+	// The handler never answers any of them, so a probe arriving after the first proves the
+	// one before it was abandoned rather than waited on.
+	assert.Eventually(t, func() bool { return rec.Started.Load() >= 3 },
+		5*time.Second, 20*time.Millisecond,
+		"a stalled readiness check must be given up on and retried")
+
+	wm.UnsubscribeWorker(context.Background(), "6")
+	assert.Eventually(t, func() bool { return rec.InFlight.Load() == 0 },
+		5*time.Second, 20*time.Millisecond, "no abandoned check may stay in flight")
+}
+
+// _FakeReadiness stands in for the worker api service readiness check, recording when each attempt
 // started so the loop around it can be driven without real probes.
 type _FakeReadiness struct {
 	mu     sync.Mutex
@@ -162,7 +192,7 @@ type _FakeReadiness struct {
 	err error
 }
 
-func (f *_FakeReadiness) Wait(_ context.Context, _ kubernetes.Interface) error {
+func (f *_FakeReadiness) Check(_ context.Context, _ kubernetes.Interface) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -189,7 +219,7 @@ func (f *_FakeReadiness) Gaps() []time.Duration {
 	return gaps
 }
 
-// newFakeReadinessManager returns a manager whose readiness wait is fake and whose retry backoff is
+// newFakeReadinessManager returns a manager whose readiness check is fake and whose retry backoff is
 // short enough to observe, so the loop's own behavior can be tested without real probes.
 func newFakeReadinessManager(t *testing.T, fake *_FakeReadiness) *_Manager {
 	t.Helper()
@@ -206,7 +236,7 @@ func newFakeReadinessManager(t *testing.T, fake *_FakeReadiness) *_Manager {
 	require.NoError(t, err)
 
 	wm := m.(*_Manager)
-	wm.WaitForServicesReady = fake.Wait
+	wm.IsServicesReady = fake.Check
 	wm.ReadinessBackoff = wait.Backoff{
 		Duration: 20 * time.Millisecond,
 		Factor:   2,
@@ -219,7 +249,7 @@ func newFakeReadinessManager(t *testing.T, fake *_FakeReadiness) *_Manager {
 
 // TestSubscribeWorker_FailedReadinessRetriesUntilUnsubscribed guards the retry half of the loop: a
 // cluster whose api services never come up must keep being retried, and must stop the moment it is
-// unsubscribed. Before the fix the retry was immediate, so this ran as fast as the wait returned.
+// unsubscribed. Before the fix the retry was immediate, so a cluster was probed continuously.
 func TestSubscribeWorker_FailedReadinessRetriesUntilUnsubscribed(t *testing.T) {
 	fake := &_FakeReadiness{err: errors.New("api services are not ready")}
 	wm := newFakeReadinessManager(t, fake)
@@ -261,8 +291,10 @@ func TestSubscribeWorker_BacksOffBetweenFailedAttempts(t *testing.T) {
 	assert.GreaterOrEqual(t, gaps[2], 4*step, "each retry must wait longer than the last")
 }
 
-// TestReadinessBackoff_GrowsAndCapsAtAMinute pins the default schedule the loop is handed. The loop's
-// use of it is covered by TestSubscribeWorker_BacksOffBetweenFailedAttempts; this fixes the numbers.
+// TestReadinessBackoff_GrowsAndCapsAtAMinute pins the default schedule the loop is handed. Since the
+// readiness check is a single pass, these gaps are the rate a cluster is actually probed at. The
+// loop's use of it is covered by TestSubscribeWorker_BacksOffBetweenFailedAttempts; this fixes the
+// numbers.
 func TestReadinessBackoff_GrowsAndCapsAtAMinute(t *testing.T) {
 	backoff := newReadinessBackoff()
 
