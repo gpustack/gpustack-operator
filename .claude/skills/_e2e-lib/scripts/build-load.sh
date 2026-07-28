@@ -90,7 +90,15 @@ fi
 IMAGE="gpustack/gpustack-operator:${TAG}"
 
 echo "== build ${IMAGE} (local only, no push) =="
-PACKAGE_TAG="$TAG" make package
+# This script runs without errexit, so a failed build would otherwise fall through to
+# the load step and report the image as built — the run then deploys whatever stale tag
+# the node still has, and the real cause surfaces later as an unrelated rollout or
+# version failure.
+if ! PACKAGE_TAG="$TAG" make package; then
+  echo
+  echo "build FAILED — no ${IMAGE} was produced, so nothing was loaded."
+  exit 1
+fi
 
 echo
 echo "== load into cluster runtime =="

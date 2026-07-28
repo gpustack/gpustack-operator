@@ -19,6 +19,7 @@ type Options struct {
 	WorkerConnMode              string
 	WorkerConnGPUStackAPIScheme string
 	WorkerConnGPUStackAPIPort   int
+	WorkerReadinessCheckTimeout time.Duration
 	InformerCacheResyncPeriod   time.Duration
 
 	// Connect Kubernetes.
@@ -31,9 +32,10 @@ type Options struct {
 func NewOptions() *Options {
 	return &Options{
 		// Control.
-		WorkerConnMode:            "gpustack-api",
-		WorkerConnGPUStackAPIPort: 30080,
-		InformerCacheResyncPeriod: 1 * time.Hour,
+		WorkerConnMode:              "gpustack-api",
+		WorkerConnGPUStackAPIPort:   30080,
+		WorkerReadinessCheckTimeout: defaultReadinessCheckTimeout,
+		InformerCacheResyncPeriod:   1 * time.Hour,
 
 		// Connect Kubernetes.
 		KubeConnTimeout: 5 * time.Minute,
@@ -51,6 +53,9 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 		"the scheme of the GPUStack server when using 'gpustack-api' connection mode, default to http or https based on the port.")
 	fs.IntVar(&o.WorkerConnGPUStackAPIPort, "worker-conn-gpustack-api-port", o.WorkerConnGPUStackAPIPort,
 		"the port of the GPUStack server when using 'gpustack-api' connection mode.")
+	fs.DurationVar(&o.WorkerReadinessCheckTimeout, "worker-readiness-check-timeout", o.WorkerReadinessCheckTimeout,
+		"the timeout for one check of a worker's api services, which a subscription retries on a backoff until it succeeds. "+
+			"Must not exceed --kube-conn-timeout, or that timeout bounds the check instead.")
 	fs.DurationVar(&o.InformerCacheResyncPeriod, "informer-cache-resync-period", o.InformerCacheResyncPeriod,
 		"the period at which the informer's cache is resynced.")
 
@@ -73,6 +78,9 @@ func (o *Options) Validate(_ context.Context) error {
 	if o.WorkerConnGPUStackAPIPort <= 0 || o.WorkerConnGPUStackAPIPort > 65535 {
 		return errors.New("--worker-conn-gpustack-api-port: invalid port")
 	}
+	if o.WorkerReadinessCheckTimeout < time.Second {
+		return errors.New("--worker-readiness-check-timeout: less than 1 second")
+	}
 	if o.InformerCacheResyncPeriod < 5*time.Minute {
 		return errors.New("--informer-cache-resync-period: less than 5 minutes")
 	}
@@ -88,6 +96,13 @@ func (o *Options) Validate(_ context.Context) error {
 		return errors.New("--kube-conn-burst: less than 10")
 	case float64(o.KubeConnBurst) <= o.KubeConnQPS:
 		return errors.New("--kube-conn-burst: less than --kube-conn-qps")
+	}
+
+	// The kubernetes client's own timeout already bounds every request it makes, so a readiness
+	// check allowed to outlast it is not the bound it looks like: the client's would cut the
+	// probe first, and a stalled cluster would hold an attempt for that much longer.
+	if o.WorkerReadinessCheckTimeout > o.KubeConnTimeout {
+		return errors.New("--worker-readiness-check-timeout: greater than --kube-conn-timeout")
 	}
 
 	return nil
@@ -109,8 +124,9 @@ func (o *Options) Complete(_ context.Context) (*Config, error) {
 	}
 
 	return &Config{
-		ConstructRestConfig: constructRestConfig,
-		ResyncPeriod:        o.InformerCacheResyncPeriod,
+		ConstructRestConfig:   constructRestConfig,
+		ResyncPeriod:          o.InformerCacheResyncPeriod,
+		ReadinessCheckTimeout: o.WorkerReadinessCheckTimeout,
 	}, nil
 }
 

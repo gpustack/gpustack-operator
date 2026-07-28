@@ -114,15 +114,23 @@ const (
 	WorkerEventDeleted  = watch.Deleted
 )
 
-// newReadinessBackoff paces the retries of the worker api service readiness wait. Each wait already
-// polls for 30s, so this only spaces a failed attempt from the next one; capping it at a minute
-// keeps a cluster that never becomes ready from being probed — and logged — in a tight loop.
+// defaultReadinessCheckTimeout bounds one readiness check when the config leaves it unset, so that a
+// cluster which accepts the connection and then stalls — the gpustack server's proxy holding one open
+// for a worker that is gone — cannot occupy an attempt until the client's own timeout, which defaults
+// to KubeConnTimeout. Without a bound the schedule below stops describing the rate a cluster is probed
+// at, which is the point of having it.
+const defaultReadinessCheckTimeout = 30 * time.Second
+
+// newReadinessBackoff is the whole retry schedule of the worker api service readiness check: the
+// check is a single bounded pass, so a cluster is probed exactly once per step. The first steps are
+// short, so a worker that is only just coming up is still picked up within seconds; the one-minute
+// cap keeps a cluster that never becomes ready from being probed — and logged — at that rate forever.
 //
 // It is handed out by value: wait.Backoff.Step has a pointer receiver, so a shared one would let a
 // single cluster's retries pace every other cluster's.
 func newReadinessBackoff() wait.Backoff {
 	return wait.Backoff{
-		Duration: 5 * time.Second,
+		Duration: 2 * time.Second,
 		Factor:   2,
 		Cap:      time.Minute,
 		Steps:    math.MaxInt32,
@@ -145,10 +153,13 @@ type (
 		Pending             map[Cluster]*_Pending
 		ConstructRestConfig ConstructRestConfigFunc
 		ResyncPeriod        time.Duration
-		// WaitForServicesReady and ReadinessBackoff are the readiness policy, defaulted by
-		// New. Tests replace them to drive the loop without waiting on real probes.
-		WaitForServicesReady func(context.Context, kubernetes.Interface) error
-		ReadinessBackoff     wait.Backoff
+		// IsServicesReady, ReadinessCheckTimeout and ReadinessBackoff are the readiness
+		// policy, defaulted by New. The check is a single pass bounded by the timeout, and
+		// the backoff alone paces the retries, so the schedule is the one a cluster is
+		// actually probed on. Tests replace them to drive the loop without real probes.
+		IsServicesReady       func(context.Context, kubernetes.Interface) error
+		ReadinessCheckTimeout time.Duration
+		ReadinessBackoff      wait.Backoff
 	}
 
 	// _Pending is one subscribe attempt. It is compared by pointer, so an attempt that
@@ -169,6 +180,13 @@ type (
 
 // New creates a Manager with the given context and configuration.
 func New(ctx context.Context, config *Config) (Manager, error) {
+	// A zero timeout would expire every check the moment it started, so an unset one takes
+	// the default rather than the value.
+	readinessCheckTimeout := config.ReadinessCheckTimeout
+	if readinessCheckTimeout <= 0 {
+		readinessCheckTimeout = defaultReadinessCheckTimeout
+	}
+
 	return &_Manager{
 		Logger:              klog.FromContext(ctx).WithName("manager"),
 		Context:             ctx,
@@ -177,8 +195,9 @@ func New(ctx context.Context, config *Config) (Manager, error) {
 		Workers:             make(map[Cluster]*_Worker),
 		Pending:             make(map[Cluster]*_Pending),
 
-		WaitForServicesReady: apis.WaitForServicesReady,
-		ReadinessBackoff:     newReadinessBackoff(),
+		IsServicesReady:       apis.IsServicesReady,
+		ReadinessCheckTimeout: readinessCheckTimeout,
+		ReadinessBackoff:      newReadinessBackoff(),
 	}, nil
 }
 
@@ -233,18 +252,24 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 			}
 
 			logger.V(2).Info("checking worker api services")
-			if err := wm.WaitForServicesReady(wkCtx, cli); err != nil {
+			checkCtx, checkCancel := context.WithTimeout(wkCtx, wm.ReadinessCheckTimeout)
+			err := wm.IsServicesReady(checkCtx, cli)
+			checkCancel()
+			if err != nil {
+				// The worker context, not the check's own: a check that ran out of
+				// time is a failure to retry, and reading the check's context here
+				// would mistake it for an unsubscribe and abandon the loop.
 				if wkCtx.Err() != nil {
-					// Unsubscribed while waiting, so the wait was cut short on
-					// purpose rather than failing.
+					// Unsubscribed mid-check, so it was cut short on purpose rather
+					// than failing.
 					return
 				}
 				if reported {
-					// The wait retries until the cluster becomes reachable, so only the
+					// The loop retries until the cluster becomes reachable, so only the
 					// first failure of a run is reported as an error.
 					logger.V(2).Info("worker api services still not ready", "err", err)
 				} else {
-					logger.Error(err, "wait for api services ready")
+					logger.Error(err, "check api services ready")
 					reported = true
 				}
 
@@ -259,7 +284,7 @@ func (wm *_Manager) SubscribeWorker(ctx context.Context, cluster, token string, 
 			reported = false
 
 			wm.Lock()
-			// The wait can succeed just as this attempt is unsubscribed or replaced, and
+			// The check can succeed just as this attempt is unsubscribed or replaced, and
 			// registering then would hand out a worker on a canceled context and make the
 			// replacement stand down. Only the attempt that still owns the cluster registers.
 			if wkCtx.Err() != nil || wm.Pending[cluster] != pending {

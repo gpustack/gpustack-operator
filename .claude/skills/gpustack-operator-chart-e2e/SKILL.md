@@ -18,7 +18,7 @@ Install the operator **from its Helm chart** onto a **local** cluster and verify
 Run as a **test-orchestration lead** (main agent) coordinating read-only **domain specialists** (`Agent` tool). **Read [`orchestration.md`](../_e2e-lib/references/orchestration.md) before Phase 0** — it owns roles, phases, parallelism/rendezvous rules, report layout, and the fix-and-retest loop. Below are the chart-e2e specifics.
 
 **Hard rules** (full list in `orchestration.md`; chart-e2e specifics):
-- **Never switch kube context** — `preflight.sh` shows the active context; proceed only after the user confirms it is the intended local cluster; never `kubectl config use-context`.
+- **Pin the run to a user-confirmed context** — `preflight.sh` shows the active one; proceed only after the user confirms the intended local cluster. Never switch on your own judgement; on the user's explicit say-so, switch, record the context to return to as an outstanding environment mutation, and restore it in Phase 8.
 - **Build locally, never push** — `build-load.sh` keeps `PACKAGE_PUSH=false`.
 - **Touch only what this run creates** — the Helm release + its cleanup. Never modify or delete the user's pre-existing resources.
 - **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, CASE 2, CASE 3); read-only steps (`preflight.sh`, CASE 1) run unprompted.

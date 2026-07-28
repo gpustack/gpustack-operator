@@ -161,6 +161,13 @@ RUN --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
         export VERSION="${GPUSTACK_GIT_VERSION}"
     fi
 
+    # Stamp the commit from the build-arg too. In-container git detection cannot supply it from a
+    # worktree checkout — .git points outside the build context — and an unstamped binary defeats
+    # every check that asks which revision is running.
+    if [[ -n "${GPUSTACK_GIT_COMMIT}" ]]; then
+        export COMMIT="${GPUSTACK_GIT_COMMIT}"
+    fi
+
     # Link staging modules under GOROOT/src for legacy lookups.
     for dir in $(find ${GPUSTACK_WORKSPACE}/staging -mindepth 1 -maxdepth 1 -type d); do
         target="$(go env GOROOT)/src/$(basename ${dir})"

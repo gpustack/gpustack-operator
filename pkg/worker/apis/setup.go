@@ -32,6 +32,11 @@ func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.S
 	return api.InstallServices(ctx, cli, svc, ca, apiSvcGetters)
 }
 
+// IsServicesReady reports whether the api services are ready, checking each of them once.
+func IsServicesReady(ctx context.Context, cli kubernetes.Interface) error {
+	return api.IsServicesReady(ctx, cli, apiSvcGetters)
+}
+
 // WaitForServicesReady waits for the api services to be ready.
 func WaitForServicesReady(ctx context.Context, cli kubernetes.Interface) error {
 	return api.WaitForServicesReady(ctx, cli, apiSvcGetters)

@@ -14,6 +14,9 @@ type (
 	Config struct {
 		ConstructRestConfig ConstructRestConfigFunc
 		ResyncPeriod        time.Duration
+		// ReadinessCheckTimeout bounds one worker api service readiness check. Unset
+		// takes the default, since a zero timeout would expire every check at once.
+		ReadinessCheckTimeout time.Duration
 	}
 )
 
