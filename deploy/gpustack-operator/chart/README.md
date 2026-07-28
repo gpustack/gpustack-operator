@@ -4,21 +4,35 @@ A Kubernetes operator that turns raw node hardware into a Kueue-based scheduling
 
 ## Introduction
 
-This chart deploys the GPUStack Operator control plane (`gpustack-operator-worker`) and
-the per-manufacturer device managers (`gpustack-operator-device-manager-<manufacturer>`)
-onto a Kubernetes cluster using the [Helm](https://helm.sh) package manager.
+This chart deploys the GPUStack Operator control plane (`gpustack-operator-worker`), the
+per-manufacturer device managers (`gpustack-operator-device-manager-<manufacturer>`), and the
+applications the scheduling chain is built on — [Kueue](https://kueue.sigs.k8s.io),
+[Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery) and the NFS/S3
+CSI drivers — onto a Kubernetes cluster using the [Helm](https://helm.sh) package manager.
 
-The operator turns raw node hardware into a [Kueue](https://kueue.sigs.k8s.io)-based
-scheduling chain for accelerators (GPU/NPU/TPU), built on
-[Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery) and Kueue.
+The operator turns raw node hardware into a Kueue-based scheduling chain for accelerators
+(GPU/NPU/TPU).
 
-> Node Feature Discovery, Kueue and the CSI drivers are bundled into the operator image and
-> installed by the worker at runtime, so they are not chart dependencies.
+> Those four applications are **vendored subcharts** of this chart, each behind an `enabled` switch,
+> and they are deployed as part of **this** release. Two consequences worth knowing before you
+> install:
+>
+> - `helm uninstall` deletes Kueue's CRDs, and therefore **every ClusterQueue, LocalQueue,
+>   ResourceFlavor, AdmissionCheck and Workload in the cluster**. To keep a Kueue this release does
+>   not own, install with `--set kueue.enabled=false` and bring your own. The same applies to
+>   `node-feature-discovery.enabled=false`, which still gives you the `gpustack-cpu-info`
+>   NodeFeatureRule the chain starts from.
+> - Upgrading an install from v0.7.x or earlier, where these ran as Helm releases of their own, is a
+>   **one-time ownership transfer**. See the
+>   [migration guide](https://github.com/gpustack/gpustack-operator/blob/main/docs/migration/to-subcharts.md).
+
+Running more than one replica of each control-plane component is described in the
+[high-availability guide](https://github.com/gpustack/gpustack-operator/blob/main/docs/operation/high-availability.md).
 
 ## Prerequisites
 
 Kubernetes: `>=1.23.0-0`
-- Helm 3.8.0+
+- Helm 3.8.0+ — or **3.21.0+** for the one-time upgrade of a v0.7.x-or-earlier install, which needs `--take-ownership`
 - (Optional) [cert-manager](https://cert-manager.io) when `worker.certmanager.enabled` is `"true"` (or `"auto"` with cert-manager present)
 
 ## Installing the Chart
@@ -41,6 +55,12 @@ To uninstall the `gpustack-operator` release:
 ```bash
 helm uninstall gpustack-operator --namespace gpustack-system
 ```
+
+`helm uninstall` removes only what the release owns. The finalizers the controllers leave on their
+objects, and the CRDs, aggregated APIServices and webhook configurations the worker registers itself,
+stay behind. Run the chart's `files/cleanup.sh` afterwards to clear them, or install with
+`--set cleanupOnUninstall=true` to have a gated post-delete Job do it — which is safe only where this
+release exclusively owns those CRDs.
 
 ## Requirements
 

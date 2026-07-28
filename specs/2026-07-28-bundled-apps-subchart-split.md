@@ -641,6 +641,17 @@ pre-install/pre-upgrade hooks execute.
 - New `docs/operation/high-availability.md` (including the single-URL webhook topology
   restriction) and `docs/migration/to-subcharts.md` (the `--take-ownership` command, the
   required release name, and the widened uninstall blast radius).
+- `docs/settings.md`: `GPUSTACK_PCI_CLASS_PREFIXES` is now **DM-only** — T12 deleted the WK reader
+  that injected it into the NFD chart and the NodeFeatureRule, but `binding/helper_linux.go` still
+  reads it for the DM's sysfs scan, so the row is corrected rather than removed. And
+  `GPUSTACK_<MFR>_PCI_VENDOR_ID` gains the warning that under the chart the `manufacturers` map is
+  the knob to set, since the chart derives the selectors, the rule's vendor list *and* that variable
+  from it — setting the variable alone leaves the other two on the old ID.
+- `docs/migration/from-v0.5.md`: two statements the migration hooks invalidate — that the Kueue reap
+  lives on the worker's Kueue install path, and that no hook runs on an upgrade.
+- The root `README.md` (**outside T17's `Owns:`**, taken because its "installed by the worker at
+  runtime" note is directly contradicted by this change): the subchart note, the uninstall blast
+  radius, and index entries for the two new docs.
 - Chart `README.md` regenerated from `values.yaml` annotations.
 - e2e: `_e2e-lib/scripts/assert-core.sh` replaces its sub-release loop with in-release workload
   assertions; `deploy.sh` header, `teardown.sh` and `cleanup.sh` updated; new HA,
@@ -1353,10 +1364,11 @@ the baseline.
       which covers every branch; on kind (T18) — install, `helm uninstall`, run `cleanup.sh`, then
       `kubectl get crd -o name | grep -cE 'gpustack|kueue|nfd'` → `0`
 
-- [ ] **T17 · Docs**
+- [x] **T17 · Docs**
       Blocked by: T13, T15, T16
       Owns: `docs/**`, `deploy/gpustack-operator/chart/README.md`,
-      `deploy/gpustack-operator/chart/README.md.gotmpl`
+      `deploy/gpustack-operator/chart/README.md.gotmpl`, and — recorded in F10, outside the declared
+      set — the root `README.md`, whose runtime-install note this change contradicts outright.
       Acceptance: architecture (two modes, NodeFeatureRule owner, `--disable-applications`
       scope and names, the `deviceManager.enabled=false` change) — including the
       `NodeDevicesAdmissionReconciler` bullet, which still says `installKueue` applies the
@@ -1372,7 +1384,14 @@ the baseline.
       `--take-ownership` command, the required release name **and namespace** — Kueue's
       `managedJobsNamespaceSelector` hard-codes `gpustack-system` because Helm cannot template a
       subchart value — and the widened uninstall blast radius). Chart README regenerated, never hand-edited.
-      Verify: `make generate chart && git diff --exit-code deploy/gpustack-operator/chart/README.md deploy/gpustack-operator/chart/values.schema.json`
+      Verify: `make generate chart` is idempotent over `README.md` / `values.schema.json` (the schema
+      does not move at all — no `values.yaml` edit here); `make lint chart` green; every relative link
+      and in-file anchor across the touched docs resolves; and — the check that actually tests the HA
+      guide — the values file **extracted verbatim from its first fenced block** renders: 3 PDBs at
+      `minAvailable: 2`, `replicas: 3` on `gpustack-operator-worker` / `kueue-controller-manager` /
+      `node-feature-discovery-master`, `2` on both CSI controllers, `RollingUpdate` on both,
+      `-enable-leader-election` added by NFD itself, the documented Kueue `labelSelector` matching the
+      controller-manager pod labels exactly, and the worker's selector-less entry defaulted to its own.
 
 - [ ] **T18 · e2e sync + new cases**
       Blocked by: T13, T15, T16

@@ -11,16 +11,26 @@ GPUStack Operator turns raw node hardware into a Kueue-based scheduling chain. I
 
 `cmd/gpustack-operator/main.go` wires a single binary with three cobra subcommands:
 
-- **`worker`** (alias `w`, `pkg/worker`) — the control-plane process. Runs an aggregated extension API server *and* a controller-runtime manager in one process, installs the NFD / Kueue / Device-Manager / CSI applications, and runs the scheduling-chain controllers (see [Stage 4](#stage-4-the-kueue-scheduling-chain)).
+- **`worker`** (alias `w`, `pkg/worker`) — the control-plane process. Runs an aggregated extension API server *and* a controller-runtime manager in one process, and runs the scheduling-chain controllers (see [Stage 4](#stage-4-the-kueue-scheduling-chain)). It can also install the bundled operator chart itself — see [Two install modes](#two-install-modes) — but does not by default.
 - **`worker-gateway`** (`pkg/workergateway`) — aggregates resources from upstream Kubernetes clusters.
 - **`device-manager`** (`pkg/devicemanager`) — the per-node DaemonSet. Subcommands `serve` / `detect` / `monitor`: detects and monitors local accelerators, reports a `NodeFeature` + `Devices` CR, and runs the device-plugin allocator for device injection.
 
 ### Worker startup order matters
 
 `pkg/worker/worker.go` runs `Prepare` (install system namespace → CRDs → extension API services →
-webhook configs → settings → NFD/Kueue/DM/CSI apps) then `Start`. In `Start`, the controller
-manager is deliberately started **only after** the extension API services report ready, so
-controllers can index extension-API resources. Preserve this ordering when adding startup steps.
+webhook configs → settings → applications → the `gpustack-node-devices` AdmissionCheck) then
+`Start`. In `Start`, the controller manager is deliberately started **only after** the extension API
+services report ready, so controllers can index extension-API resources. Preserve this ordering when
+adding startup steps.
+
+The AdmissionCheck step is last, and it **retries until Kueue's CRD is established** (5 min bound).
+The chart cannot ship that object: its CRD belongs to Kueue, and Kueue templates its CRDs rather than
+shipping them under `crds/`, so nothing orders the CRD ahead of a custom resource in the same render.
+A worker booting alongside the Kueue rollout therefore reaches this step before the CRD is served —
+which is why it waits instead of failing.
+
+Every step of `Prepare` runs in **all** replicas, before leader election, so each one is either
+conflict-tolerant or idempotent by construction. Keep it that way when adding a step.
 
 ### The worker gateway mirrors the cluster API, it does not embed it
 
@@ -60,11 +70,53 @@ stored in `schedule.gpustack.ai/*` **annotations**, not labels; LocalQueues are 
 `gpustack-fnv64-<hash>` (always 31 chars — see [Stage 4](#stage-4-the-kueue-scheduling-chain)). When
 generating any name that flows into a label value, check this limit.
 
+## Two install modes
+
+Kueue, Node Feature Discovery and the two CSI drivers are **vendored subcharts** of the operator
+chart (`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. There is exactly
+one configuration surface for them — the chart's `values.yaml` — and two ways to reach it:
+
+- **Chart mode (the default).** Helm renders everything: the worker, the device-manager DaemonSets,
+  the `gpustack-cpu-info` NodeFeatureRule, and the four subcharts, all in **one release**. The worker
+  is then started with `--disable-applications=*` (from `worker.disableApplications`, default `["*"]`)
+  so it installs nothing at runtime and cannot collide with what the chart already deployed.
+- **Image mode.** Nothing deploys the worker via Helm — it runs from a checkout or outside the
+  cluster — so the worker installs the chart **packaged into its own image**
+  (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) with an overlay it
+  computes from its own flags and settings: `worker.enabled=false`, `fullnameOverride:
+  gpustack-operator`, one `enabled` per component, and the manufacturer map. The release is named
+  `gpustack-operator-device-manager` — the name earlier versions gave the device-manager-only
+  release, kept so that no existing cluster needs a release migration. Image mode has **no
+  user-values channel**: the overlay is the whole surface, so a per-value override like
+  `kueue.controllerManager.replicas` cannot be expressed there.
+
+`--disable-applications` accepts `*` (all of them) plus `kueue`, `node-feature-discovery`,
+`csi-driver-nfs`, `csi-driver-s3` and `device-manager`; the names are validated at flag-parse time
+against `pkg/worker/kuberess`'s own map, which is also what renders the overlay's switches. The
+`gpustack-cpu-info` NodeFeatureRule has **no name in that set and no `enabled` switch**: the
+scheduling chain starts at that rule, so a release without it classifies no node. The chart therefore
+renders it unconditionally — including when `node-feature-discovery.enabled=false`, which is the
+supported way to run the chain against an NFD the cluster already has.
+
+Two switches are worth calling out because they change which mode installs what:
+
+- **`deviceManager.enabled=false`** — the chart renders no device-manager DaemonSets. Combined with a
+  `--disable-applications` list that omits `device-manager`, the worker installs them at runtime from
+  the bundled chart instead. This is how the device managers were always deployed before chart mode
+  covered them.
+- **`worker.enabled=false`** — the chart deploys only the applications, which is exactly what image
+  mode's overlay sets.
+
+Migrating a cluster from the pre-subchart layout is an ownership transfer, documented in
+[Migrating to the bundled subcharts](./migration/to-subcharts.md). For running more than one replica
+of each control-plane component, see [High Availability](./operation/high-availability.md).
+
 ## How It Works
 
 The chain is built in four stages:
 
-1. **Bootstrap** — install NFD and the Device Manager (DM) DaemonSets.
+1. **Bootstrap** — deploy NFD and the Device Manager (DM) DaemonSets (see [Two install
+   modes](#two-install-modes)).
 2. **Device discovery** — DM detects accelerators, reports per-device feature labels, and maintains the `Devices` CR ledger.
 3. **Capacity profiling** — the Worker (WK) derives per-node capacity labels (CPU cores + the four `.sliced.*` logical-slicing capacities and the `.partitioned.*` hardware-partitioning capacities).
 4. **Queue construction & admission** — WK controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, **no Cohort**) and a materialized `InstanceType` CRD, and gate admission with a per-card `AdmissionCheck` read from the `Devices` ledger.
@@ -96,9 +148,10 @@ flowchart TD
 
 ### Stage 1: Node Feature Discovery (NFD)
 
-At startup, `pkg/worker/kuberess` installs the NFD Helm chart. NFD performs three jobs:
+NFD is deployed as the `node-feature-discovery` subchart, or brought by the cluster itself (see [Two
+install modes](#two-install-modes)). It performs three jobs:
 
-1. Labels every Node that carries a PCI display/accelerator-class device (PCI classes `02`, `03`, `0b`, `12`, overridable via `GPUSTACK_PCI_CLASS_PREFIXES` — see [Settings & Environment Variables](settings.md)) with:
+1. Labels every Node that carries a PCI display/accelerator-class device (PCI classes `02`, `03`, `0b`, `12`, from the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist` — the DM's own sysfs scan reads `GPUSTACK_PCI_CLASS_PREFIXES` instead, see [Settings & Environment Variables](settings.md)) with:
 
    ```
    feature.node.kubernetes.io/pci-${PCI_VENDOR_ID}.present: "true"
@@ -136,7 +189,7 @@ At startup, `pkg/worker/kuberess` installs the NFD Helm chart. NFD performs thre
 
    The key deliberately **does not** encode os/arch. Instead, os/arch is appended in full to every ResourceFlavor / ClusterQueue / InstanceType **name** (`…-linux-arm64`, never an abbreviation) and pinned explicitly on the ResourceFlavor's `spec.nodeLabels` (`kubernetes.io/os`, `kubernetes.io/arch`). This is a correctness safeguard, not cosmetics: the cpu-model family/id labels are independent numbering spaces on x86 (CPUID) versus arm64 (MIDR), so a small value like `25-1` can legitimately appear on both architectures — amd64 and arm64 binaries are not interchangeable, so their capacity must never pool into one flavor/queue. Keeping os/arch out of the key (while pinning it on the name + nodeLabels) also reclaims label-length budget the old abbreviated `-ln-x64` suffix consumed.
 
-3. Labels Nodes that have **no** accelerator device from any known manufacturer (see `nodefeature.GetKnownAcceleratableManufacturers()`) with:
+3. Labels Nodes that have **no** accelerator device from any known manufacturer with:
 
    ```
    feature.gpustack.ai/acceleratable: "false"
@@ -144,9 +197,16 @@ At startup, `pkg/worker/kuberess` installs the NFD Helm chart. NFD performs thre
 
    This forms an explicit contrast with the `acceleratable: "true"` label reported later by the Device Manager, which also corrects false negatives if they occur.
 
+Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, which the chart renders
+unconditionally. Its two matcher lists are read from values that exist for other reasons — the PCI
+vendor IDs from `manufacturers` (the same map that drives the device-manager DaemonSets), the PCI
+classes from NFD's own `deviceClassWhitelist` — so a vendor added to `manufacturers` is labelled,
+detected and given a device manager in one edit. A Go test asserts that the shipped map matches
+`pkg/nodefeature`.
+
 ### Stage 2: GPUStack Operator Device Manager (DM)
 
-For each known manufacturer, a DaemonSet named `gpustack-operator-device-manager-${manufacturer}` is created with a node selector on the NFD PCI label. For example, nodes labeled `feature.node.kubernetes.io/pci-10de.present: "true"` receive a Pod from the `gpustack-operator-device-manager-nvidia` DaemonSet. These DaemonSets are normally rendered by the Helm chart itself (`deviceManager.enabled=true`, the default — the worker is then started with `--disable-applications=device-manager` so it does not install them again); when the chart is deployed with `deviceManager.enabled=false`, `pkg/worker/kuberess` instead installs them at runtime from the bundled operator chart (`gpustack-operator-<ver>.tgz`) as a separate Helm release `gpustack-operator-device-manager`.
+For each known manufacturer, a DaemonSet named `gpustack-operator-device-manager-${manufacturer}` is created with a node selector on the NFD PCI label. For example, nodes labeled `feature.node.kubernetes.io/pci-10de.present: "true"` receive a Pod from the `gpustack-operator-device-manager-nvidia` DaemonSet. These DaemonSets are normally rendered by the Helm chart itself (`deviceManager.enabled=true`, the default); with `deviceManager.enabled=false` the worker installs them at runtime instead, from the chart bundled into its own image — see [Two install modes](#two-install-modes).
 
 Once running, the DM detect loop (`pkg/devicemanager/detector/detector.go`) periodically detects accelerators and reports a NodeFeature object named `${NODE_NAME}-gpustack-device-manager` (owned by the Node), whose labels are built by `nodefeature.ConstructAcceleratableNodeLabels`. Each detected accelerator model is keyed by the accelerated device key `${aKey} = ${manufacturer}-${id}`, where `id` is the product name sanitized to satisfy Kubernetes label naming rules:
 
@@ -264,7 +324,7 @@ flowchart LR
 - **`InstanceTypeReconciler`** (`instance_type.go`) owns the backing `ClusterQueue`'s **existence and metadata** and the materialized `InstanceType` CRD's status — not its quota. `ensureClusterQueue` creates the name-identical queue when missing, stamping the pool's schedule labels (`nodefeature.PoolScheduleLabels` — the `feature.gpustack.ai/acceleratable` boolean, the general/accelerator feature key(s) selected by `instance-type-aware-cpu-manufacturer`, and `kubernetes.io/os|arch`, all derived from the InstanceType **spec** identity) and the fixed no-borrow **isolation** (empty cohort, never-reclaim/borrow preemption) at creation; it never fills the resource groups or references the AdmissionCheck (the `NodeQueueReconciler` owns those), and it prunes a stale feature-key label when the group/acceleratable changes so the re-pointed queue's selectors match the new pool. It watches the queue to keep the InstanceType `.status` fresh (the four-view / CPU projection below + `status.entrance`, DeepEqual-guarded) and to **recreate the queue if an admin accidentally deletes it** while the InstanceType still lives. It does **not** author InstanceTypes (the `NodeFlavorReconciler` does) and never deletes one for lack of flavors. On delete, a `gpustack.ai/controlled` finalizer runs a **delete-then-wait teardown**: mark the InstanceType `Inactive`, delete the backing queue once, and hold the finalizer until Kueue has actually removed it — it does not drain the queue itself; the `NodeQueueReconciler` observes the deletion and drives the drain. Separately, it keeps `it.Spec.Inactive` and the queue's `StopPolicy` in sync for the **admin `Inactive`** path — setting `StopPolicy=Hold` when `Inactive` (blocks new admission without evicting running workloads, never `HoldAndDrain`), clearing to `None` when an admin reactivates, and one-way/stickily backfilling `Inactive=true` whenever the queue is stopped by any means — so the `Hold↔None` toggle is owned here while `HoldAndDrain` stays owned by the `NodeQueueReconciler`.
 - **`NodeQueueReconciler`** (`node_queue.go`) owns the backing `ClusterQueue`'s **quota and admission gating** — resource groups, the `HoldAndDrain` drain policy (the admin `Hold↔None` toggle is owned by the `InstanceTypeReconciler`), and the node-devices AdmissionCheck reference — resolved from the pool's ResourceFlavors alone (it never looks at the owning InstanceType). It fills the groups from the live flavors, smallest per-node count first so Kueue packs small nodes first — an accelerated queue advertises only `credits.gpustack.ai/${manufacturer}` (nominal = `capacity × M`, one whole card = `M = 1,600,000` credit units so Kueue's int64 accounting never rounds fractional shared/sliced credits up to 1), a non-accelerated queue only CPU — and references the `gpustack-node-devices` AdmissionCheck on an accelerated derived queue once it is Active. A flavor Kueue is still **finalizing** (its nodes left, so `NodeFlavorReconciler` deleted it but Kueue holds its `resource-in-use` finalizer until no ClusterQueue references it) is treated as **absent**: dropping it from the groups is the very ClusterQueue update Kueue waits for to release that finalizer — a workload still admitted on a dropped *partial-pool* flavor is evicted by Kueue and re-admitted on the pool's remaining live flavors (its node has left the pool, so it must move regardless). When a queue is **being deleted** (an admin's delete or the InstanceType teardown) it drives `HoldAndDrain` unconditionally so Kueue evicts the admitted workloads and can then drop its own finalizer and remove the queue — Kueue never evicts on delete by itself. When a pool loses **all** live flavors while the queue still carries quota, gated by `instance-type-drain-when-no-flavors` (switch ④, default true) it drives `HoldAndDrain` and requeues until every reservation clears, then empties the groups (so Kueue's counters never go negative); it **reactivates** (StopPolicy `None`) a queue *it* drained to empty — a `HoldAndDrain`, never an admin `Hold` — once its flavors return, though the `InstanceTypeReconciler`'s sticky `Inactive` backfill then re-holds a type that had been drained, so a recovered pool stays inactive until an admin clears `Inactive`.
 - **`NodeQueueEntranceReconciler`** (`node_queue_entrance.go`) watches ClusterQueues and Namespaces, creating a `LocalQueue` in every non-system Namespace so workloads can submit from anywhere. Because workloads reference the LocalQueue through the `kueue.x-k8s.io/queue-name` **label** (63-char limit) while ClusterQueue names may be longer, the LocalQueue is named `gpustack-fnv64-${fnv64a(ClusterQueue name)}` — always 31 characters — and records the full ClusterQueue name in the `schedule.gpustack.ai/queue` annotation.
-- **`NodeDevicesAdmissionReconciler`** (`node_devices_admission.go`) provides the per-card **AdmissionCheck**. `installKueue` applies the `gpustack-node-devices` AdmissionCheck object right after the Kueue install (Kueue's CRD is runtime-installed, so the chart cannot); the reconciler keeps it `Active`, and the `NodeQueueReconciler` makes the accelerated queue reference it in `spec.admissionChecksStrategy` **only once it is Active**. After Kueue reserves quota, the check reads the assigned pool's `Devices` ledger (uncached, via `APIReader`) and computes per-card feasibility (`Remaining ≥ demand`: a whole card for exclusive, `.sliced.units` for sliced, an owner share for shared, and — for a partition request — a free placement of the requested profile). It carries one correlated `(cards, per-card demand, profile)` demand tuple **per family** and scopes every family to the cards that can serve it, so an exclusive or shared request is never judged feasible against a partitioned card and is left queued instead of being admitted into a permanent `Pending`. On the partition side a request's `cards` term counts *instances*, not distinct cards: one card hosts as many replicas as its remaining geometry allows. Since the ledger seeds every card at `M`, an exclusive over-admit that coarse `credits` let through (a scalar total can hide that no *single* card is free) is caught exactly and held with `Retry` — a transient state that self-heals when Kueue re-admits after the backoff. That self-healing is why the check also **skips an evicted Workload**: Kueue resets the checks to `Pending` and drops the quota reservation in two separate writes, so between them an evicted Workload still reports a reservation, and a verdict written into that window overwrites the reset. Whichever of the two writers wins is then final — Kueue stops resetting checks while the eviction condition is set, its scheduler will not reserve quota while a check is `Retry`, and without a reservation this reconciler stops evaluating — so the backoff loop would deadlock instead of self-healing. Re-reserving quota clears the eviction condition, which is what re-opens evaluation. This is a **check-only** gate: it never preempts and never `Rejected`.
+- **`NodeDevicesAdmissionReconciler`** (`node_devices_admission.go`) provides the per-card **AdmissionCheck**. The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck object as its last startup step, retrying until Kueue's CRD is established (the chart cannot ship it — Kueue templates its own CRDs, so nothing orders them ahead of a custom resource in the same render); the reconciler keeps it `Active`, and the `NodeQueueReconciler` makes the accelerated queue reference it in `spec.admissionChecksStrategy` **only once it is Active**. After Kueue reserves quota, the check reads the assigned pool's `Devices` ledger (uncached, via `APIReader`) and computes per-card feasibility (`Remaining ≥ demand`: a whole card for exclusive, `.sliced.units` for sliced, an owner share for shared, and — for a partition request — a free placement of the requested profile). It carries one correlated `(cards, per-card demand, profile)` demand tuple **per family** and scopes every family to the cards that can serve it, so an exclusive or shared request is never judged feasible against a partitioned card and is left queued instead of being admitted into a permanent `Pending`. On the partition side a request's `cards` term counts *instances*, not distinct cards: one card hosts as many replicas as its remaining geometry allows. Since the ledger seeds every card at `M`, an exclusive over-admit that coarse `credits` let through (a scalar total can hide that no *single* card is free) is caught exactly and held with `Retry` — a transient state that self-heals when Kueue re-admits after the backoff. That self-healing is why the check also **skips an evicted Workload**: Kueue resets the checks to `Pending` and drops the quota reservation in two separate writes, so between them an evicted Workload still reports a reservation, and a verdict written into that window overwrites the reset. Whichever of the two writers wins is then final — Kueue stops resetting checks while the eviction condition is set, its scheduler will not reserve quota while a check is `Retry`, and without a reservation this reconciler stops evaluating — so the backoff loop would deadlock instead of self-healing. Re-reserving quota clears the eviction condition, which is what re-opens evaluation. This is a **check-only** gate: it never preempts and never `Rejected`.
 
 **Five-gate admission.** Together these form a layered admission model where Kueue is a coarse gate, not the ledger — each gate produces or consumes the `.sliced.*` / `.partitioned.*` values at a distinct point along the path:
 
@@ -282,7 +342,7 @@ The `Devices` CR `AcceleratorAllocation` ledger is the single authoritative acco
 
 **Running-instance stop.** Before (re)creating an Instance's Pod, the `InstanceReconciler` (`instance.go`) reads the backing `ClusterQueue`'s `StopPolicy` and **stops** the Instance (`spec.stop=true`) — rather than recreating a Pod the queue can never admit — when that queue is `HoldAndDrain` (a pool drain or a teardown that evicts admitted workloads), or when the `InstanceType` is being deleted or gone. An admin `Hold` (the `Inactive` switch) is deliberately **not** a stop: already-running Pods keep running and a new Instance simply stays pending. The InstanceType phase cannot drive this — it collapses both `Hold` and a fully-drained `HoldAndDrain` to `Inactive`, and a fast drain clears the reservation before a durable `Draining` phase is ever observed — so the stop keys on the `StopPolicy`. A `ClusterQueue` watch (on its `StopPolicy`) re-enqueues the type's Instances so the stop is prompt even when no Pod event fires; the `InstanceType` watch is narrowed to the deletion signal for a prompt teardown stop.
 
-> **Known behavior:** the Kueue feature gate `AssignQueueLabelsForPods` is disabled at installation (`pkg/worker/kuberess/apps_kueue.go`), so Kueue never copies cluster/local queue names onto Pod labels — long ClusterQueue names would not fit a label value. The deployed Kueue Configuration also sets `resources.quotaCheckStrategy: IgnoreUndeclared`, so a single-dimension queue (only `cpu`, or only the manufacturer `credits`) does not reject a Workload for the other Pod resources (`memory`/`ephemeral-storage`) it does not cover.
+> **Known behavior:** the Kueue feature gate `AssignQueueLabelsForPods` is disabled in the deployed Kueue Configuration (`kueue.managerConfig.controllerManagerConfigYaml` in the chart's `values.yaml`), so Kueue never copies cluster/local queue names onto Pod labels — long ClusterQueue names would not fit a label value. That Configuration also sets `resources.quotaCheckStrategy: IgnoreUndeclared`, so a single-dimension queue (only `cpu`, or only the manufacturer `credits`) does not reject a Workload for the other Pod resources (`memory`/`ephemeral-storage`) it does not cover, and its `resources.transformations` list is generated from `pkg/nodefeature` by `make generate chart`.
 
 ## Walkthrough
 
