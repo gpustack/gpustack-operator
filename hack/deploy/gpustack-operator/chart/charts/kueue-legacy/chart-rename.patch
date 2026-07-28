@@ -1,0 +1,12 @@
+diff --git a/Chart.yaml b/Chart.yaml
+index 7f5d158..7335c05 100644
+--- a/Chart.yaml
++++ b/Chart.yaml
+@@ -3,6 +3,6 @@ appVersion: v0.17.8
+ description: Kueue is a set of APIs and controllers for job queueing. It is a job-level
+   manager that decides when a job should be admitted to start (as in pods can be created)
+   and when it should stop (as in active pods should be deleted).
+-name: kueue
++name: kueue-legacy
+ type: application
+ version: 0.17.8

@@ -1,0 +1,13 @@
+diff --git a/Chart.yaml b/Chart.yaml
+index 1441545..c4b16ca 100644
+--- a/Chart.yaml
++++ b/Chart.yaml
+@@ -5,7 +5,7 @@ home: https://github.com/thxcode/k8s-csi-s3
+ icon: https://raw.githubusercontent.com/yandex-cloud/geesefs/master/doc/geesefs.png
+ keywords:
+ - s3
+-name: csi-s3
++name: csi-driver-s3
+ sources:
+ - https://github.com/thxcode/k8s-csi-s3/deploy/helm
+ version: 0.43.7

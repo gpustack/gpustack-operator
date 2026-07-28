@@ -50,6 +50,10 @@ EOF
 function mod() {
   mod_staging
 
+  # Vendor the upstream Helm charts the operator chart depends on, the same way the
+  # staging modules above are vendored.
+  gpustack::helm::vendor
+
   if [[ "$*" =~ update ]]; then
     go get -u ./...
   fi

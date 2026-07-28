@@ -883,7 +883,7 @@ the baseline.
       (The `git status --porcelain testing/chart-baseline` form only works post-commit: new files
       stay `??` while the builder holds them, and the builder may not stage.)
 
-- [ ] **T3 · Vendoring machinery + five subchart trees, all disabled**
+- [x] **T3 · Vendoring machinery + five subchart trees, all disabled**
       Blocked by: None
       Owns: `hack/lib/helm.sh`, `hack/deps.sh`, `.gitattributes`,
       `deploy/gpustack-operator/chart/Chart.yaml`, `deploy/gpustack-operator/chart/.gitignore`,
@@ -918,7 +918,12 @@ the baseline.
       Gate: review
       Acceptance: every image reference in every vendored tree — workloads, sidecars and hook
       Jobs including NFD's `post-delete-job` — resolves through `global.imageRegistry` /
-      `global.imageNamespace`, falling back to the chart's own value when empty.
+      `global.imageNamespace`, falling back to the chart's own value when empty. Patches only
+      apply on a fresh unpack, so the edit loop is
+      `rm -rf deploy/gpustack-operator/chart/charts/<tree> && make deps`. `kueue-legacy` and
+      `csi-driver-s3` will then carry **two** patches each, applied in name order
+      (`chart-rename` before `global-image`) — the case the original single-redirect skeleton
+      could not handle.
       Verify: a script that renders with all subcharts enabled and
       `--set global.imageRegistry=reg.local --set global.imageNamespace=mirror`, extracts every
       `image:` value, and exits non-zero on any value not prefixed `reg.local/mirror/`

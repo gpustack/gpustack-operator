@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# Helm chart helpers for documenting, scheming, linting and testing the charts
-# under "deploy/". These functions rely on the following tunable versions:
+# Helm chart helpers for vendoring the dependencies of, documenting, scheming,
+# linting and testing the charts under "deploy/". These functions rely on the
+# following tunable versions:
 #
 #            HELM_VERSION  -  The Helm CLI version, default is v3.13.3.
 #       HELM_DOCS_VERSION  -  The norwoodj/helm-docs version, default is v1.14.2.
@@ -123,6 +124,69 @@ function gpustack::helm::schema::validate() {
 # Public functions.
 #
 
+# gpustack::helm::vendor vendors the upstream charts that the operator chart depends
+# on into "deploy/gpustack-operator/chart/charts", mirroring how "hack/deps.sh" vendors
+# the staging modules: pull, unpack, stamp "_VERSION_", then apply the patches kept
+# under "hack/<dest>". A tree whose stamp already matches the pinned version is left
+# untouched, so repeated runs are no-ops and a patched tree is never clobbered.
+#
+# Bumping a chart is an edit to the version list below. Mirror the new upstream images
+# before bumping, otherwise every install lands in ImagePullBackOff.
+function gpustack::helm::vendor() {
+  local charts_dir="${ROOT_DIR}/deploy/gpustack-operator/chart/charts"
+  mkdir -p "${charts_dir}"
+
+  local line url version dest vendored_version patch_dir patch_file
+  while read -r line; do
+    IFS=' ' read -r url version dest <<<"${line}"
+
+    vendored_version="$(cat "${dest}/_VERSION_" 2>/dev/null || echo "")"
+    if [[ "${vendored_version}" == "${version}" ]]; then
+      gpustack::log::info "vendored chart $(basename "${dest}") is up to date"
+      continue
+    fi
+
+    gpustack::log::info "vendoring chart $(basename "${dest}") ${version} ..."
+    rm -rf "${dest}"
+    mkdir -p "${dest}"
+    curl --retry 3 --retry-all-errors --retry-delay 3 \
+      -o /tmp/chart.tgz \
+      -sSfL "${url}"
+    # Every upstream release archives its chart under a single top-level directory,
+    # which is stripped so that the tree lands directly in the destination.
+    tar -zxf /tmp/chart.tgz \
+      --directory "${dest}" \
+      --no-same-owner \
+      --strip-components 1
+    # The parent chart's README documents the whole configuration surface.
+    rm -f "${dest}/README.md"
+    echo -n "${version}" >"${dest}/_VERSION_"
+
+    # Patch the freshly unpacked tree if any patches exist. The vendored trees are never
+    # edited in place, so every change to an upstream chart lives in a patch file.
+    patch_dir="${ROOT_DIR}/hack/${dest#"${ROOT_DIR}/"}"
+    if [[ ! -d "${patch_dir}" ]]; then
+      continue
+    fi
+    for patch_file in "${patch_dir}"/*.patch; do
+      # A patch directory may exist without carrying any patch yet.
+      if [[ ! -f "${patch_file}" ]]; then
+        continue
+      fi
+      gpustack::log::info "applying $(basename "${patch_file}") to $(basename "${dest}")"
+      patch -p1 -N --forward --silent --directory "${dest}" <"${patch_file}"
+    done
+  done < <(
+    cat <<EOF
+https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.4/kueue-0.18.4.tgz 0.18.4 ${charts_dir}/kueue
+https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.8/kueue-0.17.8.tgz 0.17.8 ${charts_dir}/kueue-legacy
+https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.19.0/node-feature-discovery-chart-0.19.0.tgz 0.19.0 ${charts_dir}/node-feature-discovery
+https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz 4.13.2 ${charts_dir}/csi-driver-nfs
+https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz 0.43.7 ${charts_dir}/csi-driver-s3
+EOF
+  )
+}
+
 # gpustack::helm::deps resolves the chart dependencies into "<chart>/charts".
 # It uses "dependency update" so the classic (https) repositories declared in
 # Chart.yaml are resolved without requiring a prior "helm repo add".
@@ -149,12 +213,16 @@ function gpustack::helm::docs() {
   local target="$1"
 
   gpustack::log::info "documenting ${target} ..."
+  # NB(thxCode): restrict the generation to the given chart. The search root also finds
+  # the vendored subcharts under "charts/", and helm-docs would otherwise write a
+  # generated README.md into every one of them.
   $(gpustack::helm::docs::bin) \
     --log-level=warning \
     --sort-values-order=file \
     --document-dependency-values=false \
     --template-files=README.md.gotmpl \
-    --chart-search-root="${target}"
+    --chart-search-root="${target}" \
+    --chart-to-generate="${target}"
 }
 
 # gpustack::helm::schema generates the values.schema.json of the given chart.
@@ -170,9 +238,16 @@ function gpustack::helm::schema() {
   # NB(thxCode): skip auto-generating "additionalProperties: false" so that the
   # free-form maps (env, nodeSelector, resources, labels, ...) and subchart value
   # passthrough are not rejected during values validation.
+  #
+  # NB(thxCode): "--dependencies-filter" names no declared dependency on purpose. It is
+  # what keeps helm-schema from parsing the values.yaml of the vendored subcharts, one of
+  # which (node-feature-discovery) carries a comment its parser rejects, failing the whole
+  # run. "--no-dependencies" only keeps those values out of the parent schema; it does not
+  # prevent the parse.
   $(gpustack::helm::schema::bin) \
     --chart-search-root="${target}" \
     --no-dependencies \
+    --dependencies-filter=none \
     --skip-auto-generation=additionalProperties \
     --add-schema-reference
 }
@@ -196,7 +271,8 @@ function gpustack::helm::ct::chart_repos() {
 function gpustack::helm::lint() {
   local target="$1"
 
-  if ! gpustack::helm::deps "${target}"; then
+  # The dependencies are vendored, patched trees: "dependency update" would clobber them.
+  if ! gpustack::helm::vendor; then
     return 1
   fi
 
@@ -222,7 +298,8 @@ function gpustack::helm::lint() {
 function gpustack::helm::test() {
   local target="$1"
 
-  if ! gpustack::helm::deps "${target}"; then
+  # The dependencies are vendored, patched trees: "dependency update" would clobber them.
+  if ! gpustack::helm::vendor; then
     return 1
   fi
 

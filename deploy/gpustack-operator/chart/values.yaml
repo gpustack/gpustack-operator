@@ -163,3 +163,44 @@ deviceManager:
   extraArgs: []
   # -- Extra environment variables for the device-manager, as a name/value map.
   env: {}
+
+# -- [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4), which needs Kubernetes
+# 1.31 or above. Disabled by default, as the worker installs Kueue at runtime.
+kueue:
+  # -- Deploy the bundled Kueue.
+  enabled: false
+  # -- Name the Kueue resources after a fixed "kueue" prefix instead of the release, so
+  # that both Kueue lines and the runtime install render identical resource names.
+  fullnameOverride: kueue
+
+# -- Legacy [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.17.8), for clusters
+# below Kubernetes 1.31, whose API server rejects the CRD selectable fields the main line
+# declares. Enable either this or `kueue`, never both.
+kueue-legacy:
+  # -- Deploy the bundled legacy Kueue.
+  enabled: false
+  # -- See `kueue.fullnameOverride`.
+  fullnameOverride: kueue
+  # -- Keep the "app.kubernetes.io/name" labels reading "kueue" although this chart is
+  # renamed to "kueue-legacy", so that both Kueue lines render identical labels. The label
+  # backs the immutable selector of the Kueue Deployment, so a divergence cannot be
+  # upgraded away.
+  nameOverride: kueue
+
+# -- [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery)
+# subchart (chart 0.19.0). Disabled by default, as the worker installs it at runtime.
+node-feature-discovery:
+  # -- Deploy the bundled Node Feature Discovery.
+  enabled: false
+
+# -- [csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart
+# 4.13.2). Disabled by default, as the worker installs it at runtime.
+csi-driver-nfs:
+  # -- Deploy the bundled NFS CSI driver.
+  enabled: false
+
+# -- [csi-driver-s3](https://github.com/thxcode/k8s-csi-s3) subchart (chart 0.43.7).
+# Disabled by default, as the worker installs it at runtime.
+csi-driver-s3:
+  # -- Deploy the bundled S3 CSI driver.
+  enabled: false

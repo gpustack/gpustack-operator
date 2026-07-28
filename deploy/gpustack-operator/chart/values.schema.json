@@ -19,6 +19,38 @@
       "title": "commonLabels",
       "type": "object"
     },
+    "csi-driver-nfs": {
+      "description": "[csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart\n4.13.2). Disabled by default, as the worker installs it at runtime.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Deploy the bundled NFS CSI driver.",
+          "title": "enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "csi-driver-nfs",
+      "type": "object"
+    },
+    "csi-driver-s3": {
+      "description": "[csi-driver-s3](https://github.com/thxcode/k8s-csi-s3) subchart (chart 0.43.7).\nDisabled by default, as the worker installs it at runtime.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Deploy the bundled S3 CSI driver.",
+          "title": "enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "csi-driver-s3",
+      "type": "object"
+    },
     "deviceManager": {
       "properties": {
         "createRuntimeClasses": {
@@ -210,6 +242,59 @@
       "title": "image",
       "type": "object"
     },
+    "kueue": {
+      "description": "[Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4), which needs Kubernetes\n1.31 or above. Disabled by default, as the worker installs Kueue at runtime.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Deploy the bundled Kueue.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "fullnameOverride": {
+          "default": "kueue",
+          "description": "Name the Kueue resources after a fixed \"kueue\" prefix instead of the release, so\nthat both Kueue lines and the runtime install render identical resource names.",
+          "title": "fullnameOverride",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "fullnameOverride"
+      ],
+      "title": "kueue",
+      "type": "object"
+    },
+    "kueue-legacy": {
+      "description": "Legacy [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.17.8), for clusters\nbelow Kubernetes 1.31, whose API server rejects the CRD selectable fields the main line\ndeclares. Enable either this or `kueue`, never both.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Deploy the bundled legacy Kueue.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "fullnameOverride": {
+          "default": "kueue",
+          "description": "See `kueue.fullnameOverride`.",
+          "title": "fullnameOverride",
+          "type": "string"
+        },
+        "nameOverride": {
+          "default": "kueue",
+          "description": "Keep the \"app.kubernetes.io/name\" labels reading \"kueue\" although this chart is\nrenamed to \"kueue-legacy\", so that both Kueue lines render identical labels. The label\nbacks the immutable selector of the Kueue Deployment, so a divergence cannot be\nupgraded away.",
+          "title": "nameOverride",
+          "type": "string"
+        }
+      },
+      "required": [
+        "enabled",
+        "fullnameOverride",
+        "nameOverride"
+      ],
+      "title": "kueue-legacy",
+      "type": "object"
+    },
     "manufacturers": {
       "description": "Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the\nsingle source for the worker `--manufacturer` list, the per-manufacturer device-manager\nDaemonSets, and the GPUSTACK_\u003cMANUFACTURER\u003e_PCI_VENDOR_ID environment variable propagated\nto both the worker and the device-managers. The manufacturer list is derived from these\nkeys (sorted for stable rendering); each device-manager DaemonSet only schedules on nodes\nlabelled by NFD with the matching PCI vendor.",
       "properties": {
@@ -284,6 +369,22 @@
       "description": "Namespace to deploy the resources into; defaults to the release namespace.",
       "title": "namespaceOverride",
       "type": "string"
+    },
+    "node-feature-discovery": {
+      "description": "[Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery)\nsubchart (chart 0.19.0). Disabled by default, as the worker installs it at runtime.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Deploy the bundled Node Feature Discovery.",
+          "title": "enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "node-feature-discovery",
+      "type": "object"
     },
     "worker": {
       "properties": {
@@ -474,7 +575,12 @@
     "image",
     "manufacturers",
     "worker",
-    "deviceManager"
+    "deviceManager",
+    "kueue",
+    "kueue-legacy",
+    "node-feature-discovery",
+    "csi-driver-nfs",
+    "csi-driver-s3"
   ],
   "type": "object"
 }

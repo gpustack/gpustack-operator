@@ -1,0 +1,174 @@
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: {{ .Values.node.name }}
+  namespace: {{ .Release.Namespace }}
+{{ include "s3.labels" . | indent 2 }}
+spec:
+  updateStrategy:
+    rollingUpdate:
+      maxUnavailable: {{ .Values.node.maxUnavailable }}
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: {{ .Values.node.name }}
+  template:
+    metadata:
+{{ include "s3.labels" . | indent 6 }}
+        app: {{ .Values.node.name }}
+    spec:
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{ toYaml .Values.imagePullSecrets | indent 8 }}
+      {{- end }}
+      hostNetwork: true
+      dnsPolicy: {{ .Values.node.dnsPolicy }}
+      serviceAccountName: {{ .Values.serviceAccount.node }}
+      priorityClassName: {{ .Values.node.priorityClassName }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+{{- with .Values.node.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+{{- end }}
+      nodeSelector:
+        kubernetes.io/os: linux
+{{- with .Values.node.nodeSelector }}
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.node.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+{{- end }}
+      containers:
+        - name: node-driver-registrar
+          image: {{ .Values.images.nodeDriverRegistrar }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args:
+            - "--v=2"
+            - "--csi-address=$(ADDRESS)"
+            - "--kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)"
+{{- if .Values.nodeDriverRegistrar.livenessProbe.enabled }}
+            - "--http-endpoint=localhost:{{ .Values.nodeDriverRegistrar.healthPort }}"
+{{- end }}
+          env:
+            - name: ADDRESS
+              value: /csi/csi.sock
+            - name: DRIVER_REG_SOCK_PATH
+              value: {{ .Values.kubeletDir }}/plugins/ru.yandex.s3.csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+{{- if .Values.nodeDriverRegistrar.livenessProbe.enabled }}
+          ports:
+            - name: healthz
+              containerPort: {{ .Values.nodeDriverRegistrar.healthPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              host: localhost
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: {{ .Values.nodeDriverRegistrar.livenessProbe.initialDelaySeconds }}
+            timeoutSeconds: {{ .Values.nodeDriverRegistrar.livenessProbe.timeoutSeconds }}
+            periodSeconds: {{ .Values.nodeDriverRegistrar.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.nodeDriverRegistrar.livenessProbe.failureThreshold }}
+{{- end }}
+          resources: {{- toYaml .Values.node.resources.nodeDriverRegistrar | nindent 12 }}
+          securityContext:
+            capabilities:
+              drop:
+                - ALL
+        - name: liveness-probe
+          image: {{ .Values.images.livenessProbe }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args:
+            - --csi-address=/csi/csi.sock
+            - --probe-timeout=3s
+            - "--http-endpoint=localhost:{{ .Values.node.livenessProbe.healthPort }}"
+            - --v=2
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+          resources: {{- toYaml .Values.node.resources.livenessProbe | nindent 12 }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+        - name: s3
+          image: {{ .Values.images.s3 }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--v={{ .Values.controller.logLevel }}"
+            - "--nodeid=$(NODE_ID)"
+            - "--endpoint=$(CSI_ENDPOINT)"
+            - "--drivername={{ .Values.driver.name }}"
+          env:
+            - name: NODE_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_ENDPOINT
+              value: unix:///csi/csi.sock
+          livenessProbe:
+            failureThreshold: 5
+            httpGet:
+              host: localhost
+              path: /healthz
+              port: {{ .Values.node.livenessProbe.healthPort }}
+            initialDelaySeconds: 30
+            timeoutSeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: plugin-dir
+              mountPath: /csi
+            - name: stage-dir
+              mountPath: {{ .Values.kubeletDir }}/plugins/kubernetes.io/csi
+              mountPropagation: "Bidirectional"
+            - name: pods-mount-dir
+              mountPath: {{ .Values.kubeletDir }}/pods
+              mountPropagation: "Bidirectional"
+            - name: fuse-device
+              mountPath: /dev/fuse
+            - name: systemd-control
+              mountPath: /run/systemd
+          resources: {{- toYaml .Values.node.resources.s3 | nindent 12 }}
+          securityContext:
+            privileged: true
+            capabilities:
+              add:
+                - "SYS_ADMIN"
+            allowPrivilegeEscalation: true
+      volumes:
+        - name: registration-dir
+          hostPath:
+            path: {{ .Values.kubeletDir }}/plugins_registry
+            type: DirectoryOrCreate
+        - name: plugin-dir
+          hostPath:
+            path: {{ .Values.kubeletDir }}/plugins/ru.yandex.s3.csi
+            type: DirectoryOrCreate
+        - name: stage-dir
+          hostPath:
+            path: {{ .Values.kubeletDir }}/plugins/kubernetes.io/csi
+            type: DirectoryOrCreate
+        - name: pods-mount-dir
+          hostPath:
+            path: {{ .Values.kubeletDir }}/pods
+            type: Directory
+        - name: fuse-device
+          hostPath:
+            path: /dev/fuse
+        - name: systemd-control
+          hostPath:
+            path: /run/systemd
+            type: DirectoryOrCreate
