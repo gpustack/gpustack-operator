@@ -40,9 +40,9 @@ spec:
         app: {{ .Values.externalSnapshotter.name }}
     spec:
       serviceAccountName: {{ .Values.externalSnapshotter.name }}
-      {{- if .Values.imagePullSecrets }}
+      {{- with (include "nfs.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
       imagePullSecrets:
-{{ toYaml .Values.imagePullSecrets | indent 8 }}
+{{ . | indent 8 }}
       {{- end }}
       nodeSelector:
         kubernetes.io/os: linux
@@ -77,17 +77,13 @@ spec:
 {{- end }}
       containers:
         - name: {{ .Values.externalSnapshotter.name }}
-{{- if hasPrefix "/" .Values.image.externalSnapshotter.repository }}
-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.externalSnapshotter.repository }}:{{ .Values.image.externalSnapshotter.tag }}"
-{{- else }}
-          image: {{ .Values.image.externalSnapshotter.repository }}:{{ .Values.image.externalSnapshotter.tag }}
-{{- end }}
+          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.externalSnapshotter) }}"
           args:
             - "--v=2"
             - "--leader-election=true"
             - "--leader-election-namespace={{ .Release.Namespace }}"
           resources: {{- toYaml .Values.externalSnapshotter.resources | nindent 12 }}
-          imagePullPolicy: {{ .Values.image.externalSnapshotter.pullPolicy }}
+          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.externalSnapshotter.pullPolicy) }}
           securityContext:
             capabilities:
               drop:

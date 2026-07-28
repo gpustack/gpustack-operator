@@ -175,9 +175,21 @@
       "properties": {
         "imageNamespace": {
           "default": "",
-          "description": "Image namespace override applied to the operator image. When non-empty it\nreplaces the namespace segment of `image.repository` (e.g. \"gpustack\").",
+          "description": "Image namespace override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included. When non-empty it replaces the namespace\nsegment of each image reference (e.g. \"gpustack\").",
           "title": "imageNamespace",
           "type": "string"
+        },
+        "imagePullPolicy": {
+          "default": "",
+          "description": "Image pull policy applied to every workload, the subcharts' included. It outranks a\ncomponent's own pull policy; when empty, each component's own is used.",
+          "enum": [
+            "",
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "required": [],
+          "title": "imagePullPolicy"
         },
         "imagePullSecrets": {
           "description": "Image pull secrets applied to all workloads.",
@@ -189,7 +201,7 @@
         },
         "imageRegistry": {
           "default": "",
-          "description": "Image registry override applied to the operator image (e.g. \"docker.io\").\nWhen empty, the registry encoded in `image.repository` is used as-is.",
+          "description": "Image registry override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included (e.g. \"docker.io\"). When empty, the registry\neach image reference already encodes is used as-is.",
           "title": "imageRegistry",
           "type": "string"
         },

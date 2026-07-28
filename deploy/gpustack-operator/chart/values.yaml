@@ -11,12 +11,20 @@ cleanupOnUninstall: false
 
 # -- Global values shared across the chart and its subcharts.
 global:
-  # -- Image registry override applied to the operator image (e.g. "docker.io").
-  # When empty, the registry encoded in `image.repository` is used as-is.
+  # -- Image registry override applied to every image this chart renders, the subcharts'
+  # workloads, sidecars and hook Jobs included (e.g. "docker.io"). When empty, the registry
+  # each image reference already encodes is used as-is.
   imageRegistry: ""
-  # -- Image namespace override applied to the operator image. When non-empty it
-  # replaces the namespace segment of `image.repository` (e.g. "gpustack").
+  # -- Image namespace override applied to every image this chart renders, the subcharts'
+  # workloads, sidecars and hook Jobs included. When non-empty it replaces the namespace
+  # segment of each image reference (e.g. "gpustack").
   imageNamespace: ""
+  # @schema
+  # enum: ["", Always, IfNotPresent, Never]
+  # @schema
+  # -- Image pull policy applied to every workload, the subcharts' included. It outranks a
+  # component's own pull policy; when empty, each component's own is used.
+  imagePullPolicy: ""
   # -- Image pull secrets applied to all workloads.
   imagePullSecrets: []
   # -- Node selector applied to all workloads when a component does not set its own.

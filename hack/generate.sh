@@ -124,9 +124,6 @@ function generate_binding() {
 function generate_chart() {
   local chart="${ROOT_DIR}/deploy/gpustack-operator/chart"
 
-  if ! gpustack::helm::vendor; then
-    return 1
-  fi
   if ! go run "${ROOT_DIR}/gen/chartvalues" -values "${chart}/values.yaml"; then
     return 1
   fi

@@ -1,0 +1,296 @@
+diff --git a/templates/_helpers.tpl b/templates/_helpers.tpl
+index 901a53f..fd9a5a2 100644
+--- a/templates/_helpers.tpl
++++ b/templates/_helpers.tpl
+@@ -17,3 +17,51 @@ labels:
+ {{ toYaml .Values.customLabels | indent 2 -}}
+   {{- end }}
+ {{- end -}}
++
++{{/* Image reference "{registry/}{namespace/}repository:tag" resolved against the parent
++     chart's global image overrides. A repository starting with "/" is a suffix of
++     image.baseRepo, which is folded in first; then a non-empty global.imageNamespace replaces
++     the namespace segment, and a non-empty global.imageRegistry replaces the registry segment,
++     which is the first path segment carrying a "." or a ":". Each falls back to what the
++     chart's own values already encode.
++     Pass a dict: (dict "root" $ "image" .Values.image.nfs). */}}
++{{- define "nfs.image" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- $repository := .image.repository -}}
++{{- if hasPrefix "/" $repository -}}
++{{- $repository = printf "%s%s" .root.Values.image.baseRepo $repository -}}
++{{- end -}}
++{{- $registry := "" -}}
++{{- $segments := splitList "/" $repository -}}
++{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
++{{- $registry = first $segments -}}
++{{- $repository = join "/" (rest $segments) -}}
++{{- end -}}
++{{- with $global.imageNamespace -}}
++{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
++{{- end -}}
++{{- with $global.imageRegistry -}}
++{{- $registry = trimSuffix "/" . -}}
++{{- end -}}
++{{- with $registry -}}
++{{- $repository = printf "%s/%s" . $repository -}}
++{{- end -}}
++{{- printf "%s:%s" $repository .image.tag -}}
++{{- end -}}
++
++{{/* Image pull policy, replaced by the parent chart's global.imagePullPolicy when non-empty.
++     Pass a dict: (dict "root" $ "pullPolicy" .Values.image.nfs.pullPolicy). */}}
++{{- define "nfs.imagePullPolicy" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- default .pullPolicy $global.imagePullPolicy -}}
++{{- end -}}
++
++{{/* Image pull secrets as YAML, falling back to the parent chart's global.imagePullSecrets
++     when the chart's own value is empty, and to nothing when both are.
++     Pass a dict: (dict "root" $ "secrets" .Values.imagePullSecrets). */}}
++{{- define "nfs.imagePullSecrets" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- with (default $global.imagePullSecrets .secrets) -}}
++{{- toYaml . -}}
++{{- end -}}
++{{- end -}}
+diff --git a/templates/csi-nfs-controller.yaml b/templates/csi-nfs-controller.yaml
+index 30eccdd..5221e91 100644
+--- a/templates/csi-nfs-controller.yaml
++++ b/templates/csi-nfs-controller.yaml
+@@ -17,9 +17,9 @@ spec:
+ {{ include "nfs.labels" . | indent 6 }}
+         app: {{ .Values.controller.name }}
+     spec:
+-      {{- if .Values.imagePullSecrets }}
++      {{- with (include "nfs.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
+       imagePullSecrets:
+-{{ toYaml .Values.imagePullSecrets | indent 8 }}
++{{ . | indent 8 }}
+       {{- end }}
+       hostNetwork: true  # controller also needs to mount nfs to create dir
+       dnsPolicy: {{ .Values.controller.dnsPolicy }}
+@@ -60,11 +60,7 @@ spec:
+ {{- end }}
+       containers:
+         - name: csi-provisioner
+-{{- if hasPrefix "/" .Values.image.csiProvisioner.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.csiProvisioner.repository }}:{{ .Values.image.csiProvisioner.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.csiProvisioner.repository }}:{{ .Values.image.csiProvisioner.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.csiProvisioner) }}"
+           args:
+             - "-v=2"
+             - "--csi-address=$(ADDRESS)"
+@@ -77,7 +73,7 @@ spec:
+           env:
+             - name: ADDRESS
+               value: /csi/csi.sock
+-          imagePullPolicy: {{ .Values.image.csiProvisioner.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.csiProvisioner.pullPolicy) }}
+           volumeMounts:
+             - mountPath: /csi
+               name: socket-dir
+@@ -88,11 +84,7 @@ spec:
+               drop:
+               - ALL
+         - name: csi-resizer
+-{{- if hasPrefix "/" .Values.image.csiResizer.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.csiResizer.repository }}:{{ .Values.image.csiResizer.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.csiResizer.repository }}:{{ .Values.image.csiResizer.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.csiResizer) }}"
+           args:
+             - "-csi-address=$(ADDRESS)"
+             - "-v=2"
+@@ -103,7 +95,7 @@ spec:
+           env:
+             - name: ADDRESS
+               value: /csi/csi.sock
+-          imagePullPolicy: {{ .Values.image.csiResizer.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.csiResizer.pullPolicy) }}
+           volumeMounts:
+             - name: socket-dir
+               mountPath: /csi
+@@ -114,11 +106,7 @@ spec:
+               - ALL
+ {{- if .Values.controller.enableSnapshotter }}
+         - name: csi-snapshotter
+-{{- if hasPrefix "/" .Values.image.csiSnapshotter.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.csiSnapshotter.repository }}:{{ .Values.image.csiSnapshotter.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.csiSnapshotter.repository }}:{{ .Values.image.csiSnapshotter.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.csiSnapshotter) }}"
+           args:
+             - "--v=2"
+             - "--csi-address=$(ADDRESS)"
+@@ -129,7 +117,7 @@ spec:
+           env:
+             - name: ADDRESS
+               value: /csi/csi.sock
+-          imagePullPolicy: {{ .Values.image.csiSnapshotter.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.csiSnapshotter.pullPolicy) }}
+           resources: {{- toYaml .Values.controller.resources.csiSnapshotter | nindent 12 }}
+           volumeMounts:
+             - name: socket-dir
+@@ -140,17 +128,13 @@ spec:
+               - ALL
+ {{- end }}
+         - name: liveness-probe
+-{{- if hasPrefix "/" .Values.image.livenessProbe.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.livenessProbe.repository }}:{{ .Values.image.livenessProbe.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.livenessProbe.repository }}:{{ .Values.image.livenessProbe.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.livenessProbe) }}"
+           args:
+             - --csi-address=/csi/csi.sock
+             - --probe-timeout=3s
+             - --http-endpoint=localhost:{{ .Values.controller.livenessProbe.healthPort }}
+             - --v=2
+-          imagePullPolicy: {{ .Values.image.livenessProbe.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.livenessProbe.pullPolicy) }}
+           volumeMounts:
+             - name: socket-dir
+               mountPath: /csi
+@@ -161,11 +145,7 @@ spec:
+               drop:
+               - ALL
+         - name: nfs
+-{{- if hasPrefix "/" .Values.image.nfs.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.nfs.repository }}:{{ .Values.image.nfs.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.nfs.repository }}:{{ .Values.image.nfs.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.nfs) }}"
+           securityContext:
+             privileged: true
+             capabilities:
+@@ -173,7 +153,7 @@ spec:
+               drop:
+               - ALL
+             allowPrivilegeEscalation: true
+-          imagePullPolicy: {{ .Values.image.nfs.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.nfs.pullPolicy) }}
+           args:
+             - "--v={{ .Values.controller.logLevel }}"
+             - "--nodeid=$(NODE_ID)"
+diff --git a/templates/csi-nfs-node.yaml b/templates/csi-nfs-node.yaml
+index 3878bb9..50a4323 100644
+--- a/templates/csi-nfs-node.yaml
++++ b/templates/csi-nfs-node.yaml
+@@ -18,9 +18,9 @@ spec:
+ {{ include "nfs.labels" . | indent 6 }}
+         app: {{ .Values.node.name }}
+     spec:
+-      {{- if .Values.imagePullSecrets }}
++      {{- with (include "nfs.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
+       imagePullSecrets:
+-{{ toYaml .Values.imagePullSecrets | indent 8 }}
++{{ . | indent 8 }}
+       {{- end }}
+       hostNetwork: true # original nfs connection would be broken without hostNetwork setting
+       dnsPolicy: {{ .Values.node.dnsPolicy }}
+@@ -44,17 +44,13 @@ spec:
+ {{- end }}
+       containers:
+         - name: liveness-probe
+-{{- if hasPrefix "/" .Values.image.livenessProbe.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.livenessProbe.repository }}:{{ .Values.image.livenessProbe.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.livenessProbe.repository }}:{{ .Values.image.livenessProbe.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.livenessProbe) }}"
+           args:
+             - --csi-address=/csi/csi.sock
+             - --probe-timeout=3s
+             - --http-endpoint=localhost:{{ .Values.node.livenessProbe.healthPort }}
+             - --v=2
+-          imagePullPolicy: {{ .Values.image.livenessProbe.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.livenessProbe.pullPolicy) }}
+           volumeMounts:
+             - name: socket-dir
+               mountPath: /csi
+@@ -65,11 +61,7 @@ spec:
+               drop:
+               - ALL
+         - name: node-driver-registrar
+-{{- if hasPrefix "/" .Values.image.nodeDriverRegistrar.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.nodeDriverRegistrar.repository }}:{{ .Values.image.nodeDriverRegistrar.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.nodeDriverRegistrar.repository }}:{{ .Values.image.nodeDriverRegistrar.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.nodeDriverRegistrar) }}"
+           args:
+             - --v=2
+             - --csi-address=/csi/csi.sock
+@@ -84,7 +76,7 @@ spec:
+               valueFrom:
+                 fieldRef:
+                   fieldPath: spec.nodeName
+-          imagePullPolicy: {{ .Values.image.nodeDriverRegistrar.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.nodeDriverRegistrar.pullPolicy) }}
+           volumeMounts:
+             - name: socket-dir
+               mountPath: /csi
+@@ -118,11 +110,7 @@ spec:
+               drop:
+               - ALL
+             allowPrivilegeEscalation: true
+-{{- if hasPrefix "/" .Values.image.nfs.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.nfs.repository }}:{{ .Values.image.nfs.tag }}"
+-{{- else }}
+-          image: "{{ .Values.image.nfs.repository }}:{{ .Values.image.nfs.tag }}"
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.nfs) }}"
+           args :
+             - "--v={{ .Values.node.logLevel }}"
+             - "--nodeid=$(NODE_ID)"
+@@ -145,7 +133,7 @@ spec:
+             initialDelaySeconds: 30
+             timeoutSeconds: 10
+             periodSeconds: 30
+-          imagePullPolicy: {{ .Values.image.nfs.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.nfs.pullPolicy) }}
+           volumeMounts:
+             - name: socket-dir
+               mountPath: /csi
+diff --git a/templates/csi-snapshot-controller.yaml b/templates/csi-snapshot-controller.yaml
+index d14f0f7..54d2a5c 100644
+--- a/templates/csi-snapshot-controller.yaml
++++ b/templates/csi-snapshot-controller.yaml
+@@ -40,9 +40,9 @@ spec:
+         app: {{ .Values.externalSnapshotter.name }}
+     spec:
+       serviceAccountName: {{ .Values.externalSnapshotter.name }}
+-      {{- if .Values.imagePullSecrets }}
++      {{- with (include "nfs.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
+       imagePullSecrets:
+-{{ toYaml .Values.imagePullSecrets | indent 8 }}
++{{ . | indent 8 }}
+       {{- end }}
+       nodeSelector:
+         kubernetes.io/os: linux
+@@ -77,17 +77,13 @@ spec:
+ {{- end }}
+       containers:
+         - name: {{ .Values.externalSnapshotter.name }}
+-{{- if hasPrefix "/" .Values.image.externalSnapshotter.repository }}
+-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.externalSnapshotter.repository }}:{{ .Values.image.externalSnapshotter.tag }}"
+-{{- else }}
+-          image: {{ .Values.image.externalSnapshotter.repository }}:{{ .Values.image.externalSnapshotter.tag }}
+-{{- end }}
++          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.externalSnapshotter) }}"
+           args:
+             - "--v=2"
+             - "--leader-election=true"
+             - "--leader-election-namespace={{ .Release.Namespace }}"
+           resources: {{- toYaml .Values.externalSnapshotter.resources | nindent 12 }}
+-          imagePullPolicy: {{ .Values.image.externalSnapshotter.pullPolicy }}
++          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.externalSnapshotter.pullPolicy) }}
+           securityContext:
+             capabilities:
+               drop:

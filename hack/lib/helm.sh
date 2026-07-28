@@ -124,69 +124,6 @@ function gpustack::helm::schema::validate() {
 # Public functions.
 #
 
-# gpustack::helm::vendor vendors the upstream charts that the operator chart depends
-# on into "deploy/gpustack-operator/chart/charts", mirroring how "hack/deps.sh" vendors
-# the staging modules: pull, unpack, stamp "_VERSION_", then apply the patches kept
-# under "hack/<dest>". A tree whose stamp already matches the pinned version is left
-# untouched, so repeated runs are no-ops and a patched tree is never clobbered.
-#
-# Bumping a chart is an edit to the version list below. Mirror the new upstream images
-# before bumping, otherwise every install lands in ImagePullBackOff.
-function gpustack::helm::vendor() {
-  local charts_dir="${ROOT_DIR}/deploy/gpustack-operator/chart/charts"
-  mkdir -p "${charts_dir}"
-
-  local line url version dest vendored_version patch_dir patch_file
-  while read -r line; do
-    IFS=' ' read -r url version dest <<<"${line}"
-
-    vendored_version="$(cat "${dest}/_VERSION_" 2>/dev/null || echo "")"
-    if [[ "${vendored_version}" == "${version}" ]]; then
-      gpustack::log::info "vendored chart $(basename "${dest}") is up to date"
-      continue
-    fi
-
-    gpustack::log::info "vendoring chart $(basename "${dest}") ${version} ..."
-    rm -rf "${dest}"
-    mkdir -p "${dest}"
-    curl --retry 3 --retry-all-errors --retry-delay 3 \
-      -o /tmp/chart.tgz \
-      -sSfL "${url}"
-    # Every upstream release archives its chart under a single top-level directory,
-    # which is stripped so that the tree lands directly in the destination.
-    tar -zxf /tmp/chart.tgz \
-      --directory "${dest}" \
-      --no-same-owner \
-      --strip-components 1
-    # The parent chart's README documents the whole configuration surface.
-    rm -f "${dest}/README.md"
-    echo -n "${version}" >"${dest}/_VERSION_"
-
-    # Patch the freshly unpacked tree if any patches exist. The vendored trees are never
-    # edited in place, so every change to an upstream chart lives in a patch file.
-    patch_dir="${ROOT_DIR}/hack/${dest#"${ROOT_DIR}/"}"
-    if [[ ! -d "${patch_dir}" ]]; then
-      continue
-    fi
-    for patch_file in "${patch_dir}"/*.patch; do
-      # A patch directory may exist without carrying any patch yet.
-      if [[ ! -f "${patch_file}" ]]; then
-        continue
-      fi
-      gpustack::log::info "applying $(basename "${patch_file}") to $(basename "${dest}")"
-      patch -p1 -N --forward --silent --directory "${dest}" <"${patch_file}"
-    done
-  done < <(
-    cat <<EOF
-https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.4/kueue-0.18.4.tgz 0.18.4 ${charts_dir}/kueue
-https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.8/kueue-0.17.8.tgz 0.17.8 ${charts_dir}/kueue-legacy
-https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.19.0/node-feature-discovery-chart-0.19.0.tgz 0.19.0 ${charts_dir}/node-feature-discovery
-https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz 4.13.2 ${charts_dir}/csi-driver-nfs
-https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz 0.43.7 ${charts_dir}/csi-driver-s3
-EOF
-  )
-}
-
 # gpustack::helm::docs generates the README.md of the given chart from its
 # README.md.gotmpl template and value annotations.
 function gpustack::helm::docs() {
@@ -252,14 +189,153 @@ function gpustack::helm::ct::chart_repos() {
     paste -sd, -
 }
 
+# gpustack::helm::verify_images::render renders the given chart with every subchart and
+# every image-bearing component enabled. The second argument selects the Kueue line; the
+# rest are passed to helm verbatim.
+function gpustack::helm::verify_images::render() {
+  local target="$1" line="$2"
+  shift 2
+
+  # The legacy line exists for the clusters below the 1.31 the main line requires.
+  local kube_version="1.33.0"
+  if [[ "${line}" == "kueue-legacy" ]]; then
+    kube_version="1.30.0"
+  fi
+
+  $(gpustack::helm::helm::bin) template gpustack-operator "${target}" \
+    --kube-version "${kube_version}" \
+    --set "${line}.enabled=true" \
+    --set "${line}.enableKueueViz=true" \
+    --set node-feature-discovery.enabled=true \
+    --set node-feature-discovery.topologyUpdater.enable=true \
+    --set csi-driver-nfs.enabled=true \
+    --set csi-driver-nfs.externalSnapshotter.enabled=true \
+    --set csi-driver-s3.enabled=true \
+    "$@"
+}
+
+# gpustack::helm::verify_images::values extracts the values of one rendered field. A key
+# carrying no value is skipped: the Kueue Workload CRD embeds a PodSpec schema whose
+# "image" and "imagePullPolicy" property names would otherwise read as container fields.
+function gpustack::helm::verify_images::values() {
+  local field="$1"
+
+  grep -E "^[[:space:]]*${field}:[[:space:]]*[^[:space:]]" |
+    sed -E "s/^[[:space:]]*${field}:[[:space:]]*//" |
+    tr -d "\"'" |
+    sort -u
+}
+
+# gpustack::helm::verify_images::field fails when a rendered value of the given field is
+# not the expected one, or when the field renders nothing at all — a check that passes
+# because it matched nothing is worse than no check.
+function gpustack::helm::verify_images::field() {
+  local subject="$1" field="$2" match="$3" expected="$4" rendered="$5"
+
+  local values=()
+  while IFS= read -r value; do
+    [[ -n "${value}" ]] && values+=("${value}")
+  done < <(gpustack::helm::verify_images::values "${field}" <<<"${rendered}")
+
+  if [[ ${#values[@]} -eq 0 ]]; then
+    gpustack::log::error "${subject}: no ${field} rendered, the check would pass vacuously"
+    return 1
+  fi
+
+  local failed=0 value
+  for value in "${values[@]}"; do
+    if [[ "${match}" == "prefix" && "${value}" == "${expected}"* ]]; then
+      continue
+    fi
+    if [[ "${match}" == "exact" && "${value}" == "${expected}" ]]; then
+      continue
+    fi
+    gpustack::log::error "${subject}: ${field} \"${value}\" does not honour the global override"
+    failed=1
+  done
+
+  if [[ ${failed} -ne 0 ]]; then
+    return 1
+  fi
+  gpustack::log::info "${subject}: ${#values[@]} distinct ${field} values honour the global override"
+}
+
+# gpustack::helm::verify_images::pull_secrets fails when a workload renders no image pull
+# secret, or renders one that is not the parent's. Two shapes are in play: a YAML list, and
+# the single-line JSON that the Node Feature Discovery chart emits natively.
+function gpustack::helm::verify_images::pull_secrets() {
+  local subject="$1" expected="$2" rendered="$3"
+
+  local workloads secrets names
+  workloads="$(grep -cE '^kind: (Deployment|DaemonSet|Job|StatefulSet)$' <<<"${rendered}" || true)"
+  # The indentation bound keeps the Kueue Workload CRD's PodSpec schema property out.
+  secrets="$(grep -cE '^ {1,10}imagePullSecrets:' <<<"${rendered}" || true)"
+
+  if [[ "${workloads}" -eq 0 ]] || [[ "${secrets}" -ne "${workloads}" ]]; then
+    gpustack::log::error "${subject}: ${secrets} of ${workloads} workloads carry an image pull secret"
+    return 1
+  fi
+
+  names="$( {
+    grep -oE '\{"name":"[^"]+"\}' <<<"${rendered}" | sed -E 's/.*"name":"([^"]+)".*/\1/'
+    awk '/^ {1,10}imagePullSecrets:$/{ found = 1; next } found && /^ *- +name: /{ print $3; next } { found = 0 }' <<<"${rendered}"
+  } | sort -u)"
+
+  if [[ "${names}" != "${expected}" ]]; then
+    gpustack::log::error "${subject}: image pull secrets resolve to \"${names//$'\n'/, }\""
+    return 1
+  fi
+  gpustack::log::info "${subject}: all ${workloads} workloads carry the global image pull secret"
+}
+
+# gpustack::helm::verify_images asserts that the given chart's "global.*" image knobs reach
+# every image reference it renders, the ones its staged subcharts contribute included.
+#
+# The chart is rendered with every subchart enabled and with the components upstream ships
+# switched off — KueueViz, the NFD topology updater, the NFS snapshot controller — switched
+# on, because a patched image field nobody renders is a field nobody verifies. Every value
+# is then extracted and asserted, so a missed field fails here instead of surfacing as an
+# ImagePullBackOff in an airgapped cluster.
+#
+# The two Kueue lines are rendered separately on purpose: they are mutually exclusive, and
+# the chart fails by design when both are enabled at once.
+function gpustack::helm::verify_images() {
+  if ! gpustack::helm::helm::validate; then
+    gpustack::log::error "cannot render the chart as helm hasn't installed"
+    return 1
+  fi
+
+  local target="$1"
+  local registry="reg.local" namespace="mirror"
+  local pull_policy="Always" pull_secret="mirror-pull-secret"
+
+  gpustack::log::info "verifying ${target} images ..."
+
+  local failed=0 line rendered
+  # Every assertion spans the whole render, the chart's own workloads and its subcharts'
+  # alike: one global knob is supposed to mean one behaviour everywhere, so a check that
+  # exempted the parent would be conceding the thing worth proving.
+  for line in kueue kueue-legacy; do
+    rendered="$(gpustack::helm::verify_images::render "${target}" "${line}" \
+      --set "global.imageRegistry=${registry}" \
+      --set "global.imageNamespace=${namespace}" \
+      --set "global.imagePullPolicy=${pull_policy}" \
+      --set "global.imagePullSecrets[0].name=${pull_secret}")"
+
+    gpustack::helm::verify_images::field \
+      "${line}" "image" prefix "${registry}/${namespace}/" "${rendered}" || failed=1
+    gpustack::helm::verify_images::field \
+      "${line}" "imagePullPolicy" exact "${pull_policy}" "${rendered}" || failed=1
+    gpustack::helm::verify_images::pull_secrets \
+      "${line}" "${pull_secret}" "${rendered}" || failed=1
+  done
+
+  return "${failed}"
+}
+
 # gpustack::helm::lint lints the given chart with chart-testing in a container.
 function gpustack::helm::lint() {
   local target="$1"
-
-  # The dependencies are vendored, patched trees: "dependency update" would clobber them.
-  if ! gpustack::helm::vendor; then
-    return 1
-  fi
 
   local chart_repos
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")
@@ -282,11 +358,6 @@ function gpustack::helm::lint() {
 # chart-testing in a container. Requires a reachable cluster (e.g. kind).
 function gpustack::helm::test() {
   local target="$1"
-
-  # The dependencies are vendored, patched trees: "dependency update" would clobber them.
-  if ! gpustack::helm::vendor; then
-    return 1
-  fi
 
   local chart_repos
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")

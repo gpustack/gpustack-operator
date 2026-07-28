@@ -1,0 +1,139 @@
+diff --git a/templates/_helpers.tpl b/templates/_helpers.tpl
+index 04f73c3..87376ab 100644
+--- a/templates/_helpers.tpl
++++ b/templates/_helpers.tpl
+@@ -17,3 +17,47 @@ labels:
+ {{ toYaml .Values.customLabels | indent 2 -}}
+   {{- end }}
+ {{- end -}}
++
++{{/* Image reference "{registry/}{namespace/}repository:tag" resolved against the parent
++     chart's global image overrides: a non-empty global.imageNamespace replaces the namespace
++     segment of the reference, and a non-empty global.imageRegistry replaces its registry
++     segment, which is the first path segment carrying a "." or a ":". Each falls back to what
++     the reference already encodes. The tag rides along in the last path segment.
++     Pass a dict: (dict "root" $ "reference" .Values.images.s3). */}}
++{{- define "s3.image" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- $repository := .reference -}}
++{{- $registry := "" -}}
++{{- $segments := splitList "/" $repository -}}
++{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
++{{- $registry = first $segments -}}
++{{- $repository = join "/" (rest $segments) -}}
++{{- end -}}
++{{- with $global.imageNamespace -}}
++{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
++{{- end -}}
++{{- with $global.imageRegistry -}}
++{{- $registry = trimSuffix "/" . -}}
++{{- end -}}
++{{- with $registry -}}
++{{- $repository = printf "%s/%s" . $repository -}}
++{{- end -}}
++{{- $repository -}}
++{{- end -}}
++
++{{/* Image pull policy, replaced by the parent chart's global.imagePullPolicy when non-empty.
++     Pass a dict: (dict "root" $ "pullPolicy" .Values.imagePullPolicy). */}}
++{{- define "s3.imagePullPolicy" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- default .pullPolicy $global.imagePullPolicy -}}
++{{- end -}}
++
++{{/* Image pull secrets as YAML, falling back to the parent chart's global.imagePullSecrets
++     when the chart's own value is empty, and to nothing when both are.
++     Pass a dict: (dict "root" $ "secrets" .Values.imagePullSecrets). */}}
++{{- define "s3.imagePullSecrets" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- with (default $global.imagePullSecrets .secrets) -}}
++{{- toYaml . -}}
++{{- end -}}
++{{- end -}}
+diff --git a/templates/csi-s3-controller.yaml b/templates/csi-s3-controller.yaml
+index bc3da38..0232366 100644
+--- a/templates/csi-s3-controller.yaml
++++ b/templates/csi-s3-controller.yaml
+@@ -16,9 +16,9 @@ spec:
+ {{ include "s3.labels" . | indent 6 }}
+         app: {{ .Values.controller.name }}
+     spec:
+-      {{- if .Values.imagePullSecrets }}
++      {{- with (include "s3.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
+       imagePullSecrets:
+-{{ toYaml .Values.imagePullSecrets | indent 8 }}
++{{ . | indent 8 }}
+       {{- end }}
+       serviceAccountName: {{ .Values.serviceAccount.controller }}
+       # runOnControlPlane=true or runOnMaster=true only takes effect if affinity is not set
+@@ -57,8 +57,8 @@ spec:
+ {{- end }}
+       containers:
+         - name: csi-provisioner
+-          image: {{ .Values.images.csiProvisioner }}
+-          imagePullPolicy: {{ .Values.imagePullPolicy }}
++          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.csiProvisioner) }}
++          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
+           args:
+             - "--v=2"
+             - "--csi-address=$(ADDRESS)"
+@@ -81,8 +81,8 @@ spec:
+               drop:
+                 - ALL
+         - name: s3
+-          image: {{ .Values.images.s3 }}
+-          imagePullPolicy: {{ .Values.imagePullPolicy }}
++          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.s3) }}
++          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
+           args:
+             - "--v={{ .Values.controller.logLevel }}"
+             - "--nodeid=$(NODE_ID)"
+diff --git a/templates/csi-s3-node.yaml b/templates/csi-s3-node.yaml
+index 131ed78..0f9101c 100644
+--- a/templates/csi-s3-node.yaml
++++ b/templates/csi-s3-node.yaml
+@@ -18,9 +18,9 @@ spec:
+ {{ include "s3.labels" . | indent 6 }}
+         app: {{ .Values.node.name }}
+     spec:
+-      {{- if .Values.imagePullSecrets }}
++      {{- with (include "s3.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
+       imagePullSecrets:
+-{{ toYaml .Values.imagePullSecrets | indent 8 }}
++{{ . | indent 8 }}
+       {{- end }}
+       hostNetwork: true
+       dnsPolicy: {{ .Values.node.dnsPolicy }}
+@@ -44,8 +44,8 @@ spec:
+ {{- end }}
+       containers:
+         - name: node-driver-registrar
+-          image: {{ .Values.images.nodeDriverRegistrar }}
+-          imagePullPolicy: {{ .Values.imagePullPolicy }}
++          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.nodeDriverRegistrar) }}
++          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
+           args:
+             - "--v=2"
+             - "--csi-address=$(ADDRESS)"
+@@ -88,8 +88,8 @@ spec:
+               drop:
+                 - ALL
+         - name: liveness-probe
+-          image: {{ .Values.images.livenessProbe }}
+-          imagePullPolicy: {{ .Values.imagePullPolicy }}
++          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.livenessProbe) }}
++          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
+           args:
+             - --csi-address=/csi/csi.sock
+             - --probe-timeout=3s
+@@ -105,8 +105,8 @@ spec:
+               drop:
+                 - ALL
+         - name: s3
+-          image: {{ .Values.images.s3 }}
+-          imagePullPolicy: IfNotPresent
++          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.s3) }}
++          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" "IfNotPresent") }}
+           args:
+             - "--v={{ .Values.controller.logLevel }}"
+             - "--nodeid=$(NODE_ID)"

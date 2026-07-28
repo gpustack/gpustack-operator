@@ -9,6 +9,9 @@ source "${ROOT_DIR}/hack/lib/init.sh"
 
 function lint() {
   if [[ "${1:-}" == "chart" ]]; then
+    # A static assertion over rendered output, needing no cluster, so it belongs to lint
+    # rather than to test.
+    gpustack::helm::verify_images "${ROOT_DIR}/deploy/gpustack-operator/chart"
     gpustack::helm::lint "${ROOT_DIR}/deploy/gpustack-operator/chart"
     return
   fi

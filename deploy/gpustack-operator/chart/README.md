@@ -59,9 +59,10 @@ Kubernetes: `>=1.23.0-0`
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | cleanupOnUninstall | bool | `false` | Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers the worker creates at runtime but Helm does not manage: the Kueue / Node Feature Discovery / CSI Helm releases, their CRDs, the finalizers pinning Kueue and Instance objects, and the aggregated APIServices / webhooks. Disabled by default because those CRDs may be shared with other workloads; enable only when this release exclusively owns them (e.g. CI / e2e). |
-| global | object | `{"imageNamespace":"","imagePullSecrets":[],"imageRegistry":"","nodeSelector":{}}` | Global values shared across the chart and its subcharts. |
-| global.imageRegistry | string | `""` | Image registry override applied to the operator image (e.g. "docker.io"). When empty, the registry encoded in `image.repository` is used as-is. |
-| global.imageNamespace | string | `""` | Image namespace override applied to the operator image. When non-empty it replaces the namespace segment of `image.repository` (e.g. "gpustack"). |
+| global | object | `{"imageNamespace":"","imagePullPolicy":"","imagePullSecrets":[],"imageRegistry":"","nodeSelector":{}}` | Global values shared across the chart and its subcharts. |
+| global.imageRegistry | string | `""` | Image registry override applied to every image this chart renders, the subcharts' workloads, sidecars and hook Jobs included (e.g. "docker.io"). When empty, the registry each image reference already encodes is used as-is. |
+| global.imageNamespace | string | `""` | Image namespace override applied to every image this chart renders, the subcharts' workloads, sidecars and hook Jobs included. When non-empty it replaces the namespace segment of each image reference (e.g. "gpustack"). |
+| global.imagePullPolicy | string | `""` | Image pull policy applied to every workload, the subcharts' included. It outranks a component's own pull policy; when empty, each component's own is used. |
 | global.imagePullSecrets | list | `[]` | Image pull secrets applied to all workloads. |
 | global.nodeSelector | object | `{}` | Node selector applied to all workloads when a component does not set its own. |
 | nameOverride | string | `""` | Override the chart name used in resource names. |

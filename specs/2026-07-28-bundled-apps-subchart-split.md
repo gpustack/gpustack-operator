@@ -211,11 +211,34 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   `csi-driver-nfs:` and `csi-driver-s3:` blocks holding today's defaults. `csi-driver-nfs` and
   `csi-driver-s3` default to `enabled: true`, matching today's behaviour.
 - Each vendored chart carries a `global-image.patch` resolving image references through
-  `global.imageRegistry` / `global.imageNamespace` and the parent pull policy, falling back to
-  its own value when the global is empty — mirroring the parent's existing
-  `gpustack-operator.image` helper. NFD 0.19.0 already honours `global.imagePullSecrets`
-  natively, so its patch covers registry/namespace only. **Hook Job images are in scope**,
-  notably NFD's `templates/post-delete-job.yaml`.
+  `global.imageRegistry` / `global.imageNamespace` / `global.imagePullPolicy` /
+  `global.imagePullSecrets`, each falling back to the chart's own value when the global is empty
+  — mirroring the parent's existing `gpustack-operator.image` helper. NFD 0.19.0 already honours
+  `global.imagePullSecrets` natively, so only the other three apply to it. **Hook Job images are
+  in scope**, notably NFD's `templates/post-delete-job.yaml`.
+- **`global.imagePullPolicy` is a new key** on the parent's `global:` block, alongside the
+  `imageRegistry` / `imageNamespace` / `imagePullSecrets` / `nodeSelector` already there. It
+  exists because today's Go path sets `pullPolicy` on **all five** applications from the
+  `ImagePullPolicy` setting (confirmed against the T2 baseline), so without a global an image-mode
+  user setting `GPUSTACK_IMAGE_PULL_POLICY=Always` would silently stop reaching Kueue, NFD and the
+  CSI drivers. The parent's own `image.pullPolicy` is not under `global:` and can never reach a
+  subchart.
+- **`global.imageRegistry` replaces an existing registry segment rather than prefixing it.** A
+  first path segment containing `.` or `:` is treated as a registry and dropped before the
+  override is applied. This is what the parent's own doc comment already promises ("Image registry
+  **override**… when empty, the registry encoded in `image.repository` is used as-is"); its
+  implementation only looks correct today because `gpustack/gpustack-operator` carries no
+  registry. The subchart repositories do carry one (`docker.io/gpustack/mirrored-kueue`), so
+  prefixing would render `reg.local/docker.io/gpustack/…` whenever `imageRegistry` is set without
+  `imageNamespace`. The parent helper takes the same change for one semantic behind one knob; it
+  is a behavioural no-op there, provable by the default render staying byte-identical.
+- The five charts expose **25** image sites, four of which the criteria below do not name because
+  they sit behind default-off gates: kueueViz backend and frontend (in **both** Kueue trees), NFD's
+  topology-updater, and csi-driver-nfs's `snapshot-controller` Deployment (distinct from the
+  `csi-snapshotter` sidecar). They are patched too, and the verify script flips those gates on —
+  a patch nothing renders is not verified. Two shape quirks matter: csi-driver-nfs resolves
+  `image.baseRepo` plus a leading-slash repository suffix, and csi-driver-s3 stores full
+  `registry/ns/name:tag` strings with no separate tag key.
 - Kueue values additionally pin `enableVisibilityAPF: false` (as today) and
   `enableVisibilityAuthReaderRoleBinding: false` (new), so the chart stops writing a RoleBinding
   into `kube-system`.
@@ -269,9 +292,12 @@ installs `${GPUSTACK_CONF_DIR}/charts/gpustack-operator-<ver>.tgz` as a single r
 today's release name `gpustack-operator-device-manager` unchanged, with a computed overlay:
 `worker.enabled=false`; each component enabled iff it is absent from `--disable-applications`;
 `kueue.enabled` / `kueue-legacy.enabled` chosen from the detected Kubernetes version;
-`global.imageRegistry` / `imageNamespace` / `imagePullSecrets` / `image.pullPolicy` from the
+`global.imageRegistry` / `imageNamespace` / `imagePullSecrets` / `imagePullPolicy` from the
 worker's settings; `manufacturers` from `--manufacturer`; and the running worker's own image
-reused for the device-managers (today's `extractWorkerImage`, unchanged).
+reused for the device-managers (today's `extractWorkerImage`, unchanged). The pull policy must go
+onto `global.imagePullPolicy`, not the parent's `image.pullPolicy` — the latter never reaches a
+subchart, so setting only it would silently drop `GPUSTACK_IMAGE_PULL_POLICY` for Kueue, NFD and
+the CSI drivers, which today's Go path does honour.
 
 - The four app installers collapse into one. `installKueue`,
   `installNodeFeatureDiscovery`, `installCSIDriverNFS`, `installCSIDriverS3` and their values
@@ -679,8 +705,13 @@ pre-install/pre-upgrade hooks execute.
   the hook image is overridable.
 - **Uninstall becomes destructive** (Kueue CRDs now belong to the operator release) → NOTES +
   README warning, a documented `kueue.enabled=false` escape, and the migration doc.
-- **Patch drift on an upstream bump** → `patch --forward` fails loudly, `_VERSION_` forces a
-  re-vendor, and CI runs the vendoring and fails on a dirty tree. F5 keeps NFD down to a single
+- **Patch drift on an upstream bump** → `chart_staging` checks `patch`'s exit code **and** asserts
+  no `*.rej`/`*.orig` remain, `_VERSION_` forces a re-stage, and CI runs `make deps` before
+  asserting the tree is clean. The original wording — "`patch --forward` fails loudly" — was
+  disproven: `--silent` prints no name, `.gitignore` hides the rejects, and a caller wrapping the
+  call in `if ! …` suspends `errexit` for the whole callee. Both guards are covered by tests,
+  including the reject branch, which BSD `patch` never reaches and which would otherwise have
+  shipped unexercised. F5 keeps NFD down to a single
   patch to limit this.
 - **Silent config regressions** (a value that used to be set by Go is dropped in translation) →
   golden-manifest parity against a baseline captured from `main` before the cut-over.
@@ -911,14 +942,23 @@ the baseline.
       (the loose `grep -c 'name: kueue-controller-manager'` reads `2` — it substring-matches
       `…-metrics-service`)
 
-- [ ] **T4 · `global-image` patches on the five trees**
+- [x] **T4 · `global-image` patches on the five trees**
       Blocked by: T3
       Owns: `hack/deploy/gpustack-operator/chart/charts/*/global-image.patch`,
-      `deploy/gpustack-operator/chart/charts/**`
+      `deploy/gpustack-operator/chart/charts/**`, `hack/verify-chart-images.sh`,
+      `deploy/gpustack-operator/chart/templates/_helpers.tpl`,
+      `deploy/gpustack-operator/chart/values.yaml` (the `global.imagePullPolicy` key only),
+      `deploy/gpustack-operator/chart/README.md`,
+      `deploy/gpustack-operator/chart/values.schema.json`
       Gate: review
-      Acceptance: every image reference in every vendored tree — workloads, sidecars and hook
-      Jobs including NFD's `post-delete-job` — resolves through `global.imageRegistry` /
-      `global.imageNamespace`, falling back to the chart's own value when empty. Patches only
+      Acceptance: all **25** image references in the five vendored trees — workloads, sidecars,
+      hook Jobs including NFD's `post-delete-job`, and the four behind default-off gates
+      (kueueViz ×2 trees, NFD topology-updater, csi-driver-nfs's `snapshot-controller`) —
+      resolve through `global.imageRegistry` / `global.imageNamespace` /
+      `global.imagePullPolicy` / `global.imagePullSecrets`, falling back to the chart's own value
+      when empty. `global.imageRegistry` **replaces** an existing registry segment, and the parent
+      helper takes the same change. The check script is committed, not run from `/tmp`: an
+      assertion that never lands guards nothing. Patches only
       apply on a fresh unpack, so the edit loop is
       `rm -rf deploy/gpustack-operator/chart/charts/<tree> && make deps`. `kueue-legacy` and
       `csi-driver-s3` will then carry **two** patches each, applied in name order
@@ -1056,7 +1096,9 @@ the baseline.
       `.github/configs/**`
       Acceptance: the four upstream chart `ADD` lines are gone; the packaged operator chart
       carries `charts/`; the chart CI job vendors before generating and asserts the tree stays
-      clean and `charts/` stays free of `*.tgz`. Additionally a **3-node** kind config and a
+      clean and `charts/` stays free of `*.tgz`. It also runs T4's
+      `hack/verify-chart-images.sh` as a cluster-free render check — once, not per Kubernetes
+      version — and the workflow's paths filter reaches that script. Additionally a **3-node** kind config and a
       local render path: today `.github/configs/kind-config.yaml.tmpl` is a 2-node
       (control-plane + worker) template substituted only inside `ci-chart.yml` from
       `$RUNNER_TEMP`, so there is no file a developer can pass to `kind create cluster`, and
@@ -1113,6 +1155,13 @@ the baseline.
       and the legacy Kueue line's scheduling chain; a visibility-APIService observation step.
       Verify: `bash .claude/skills/gpustack-operator-chart-e2e/cases/case-*.sh gpustack-system`
       on the 3-node kind cluster, all green
+
+**A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
+pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
+those paths. `helm.Chart.Install` falls back to `DownloadURL`, so image-mode application installs
+degrade to a network `helm pull` rather than failing — image mode keeps working but stops being
+airgapped for those four apps until T12 deletes the code and T13 cuts over. This is acceptable
+because no commit on this branch is independently releasable; the branch ships as one change.
 
 **Checkpoints.** **CP-A** after T3/T4/T5 — the chart resolves offline, both Kueue lines render,
 `global.*` reaches every image. **CP-B** after T10 — the full stack renders at parity with the

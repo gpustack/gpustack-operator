@@ -34,9 +34,9 @@ spec:
       labels:
         app: kueueviz-frontend
     spec:
-      {{- with .Values.kueueViz.frontend.imagePullSecrets  }}
+      {{- with (include "kueue.imagePullSecrets" (dict "root" $ "secrets" .Values.kueueViz.frontend.imagePullSecrets)) }}
       imagePullSecrets:
-      {{- toYaml . | nindent 8 }}
+      {{- . | nindent 8 }}
       {{- end }}
       {{- with  .Values.kueueViz.frontend.priorityClassName }}
       priorityClassName: {{ . }}
@@ -63,8 +63,8 @@ spec:
           env:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: '{{ .Values.kueueViz.frontend.image.repository }}:{{ .Values.kueueViz.frontend.image.tag | default .Chart.AppVersion }}'
-          imagePullPolicy: '{{ .Values.kueueViz.frontend.image.pullPolicy }}'
+          image: '{{ include "kueue.image" (dict "root" $ "image" .Values.kueueViz.frontend.image) }}'
+          imagePullPolicy: '{{ include "kueue.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.kueueViz.frontend.image.pullPolicy) }}'
           resources:
             {{- toYaml .Values.kueueViz.frontend.resources | nindent 12 }}
           {{- with .Values.kueueViz.frontend.containerSecurityContext }}

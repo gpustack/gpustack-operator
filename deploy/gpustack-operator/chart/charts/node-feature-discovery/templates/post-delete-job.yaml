@@ -73,8 +73,8 @@ spec:
         - name: nfd-master
           securityContext:
             {{- toYaml .Values.master.securityContext | nindent 12 }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ include "node-feature-discovery.image" $ }}"
+          imagePullPolicy: {{ include "node-feature-discovery.imagePullPolicy" $ }}
           command:
             - "nfd-master"
           args:

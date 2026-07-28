@@ -16,9 +16,9 @@ spec:
 {{ include "s3.labels" . | indent 6 }}
         app: {{ .Values.controller.name }}
     spec:
-      {{- if .Values.imagePullSecrets }}
+      {{- with (include "s3.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
       imagePullSecrets:
-{{ toYaml .Values.imagePullSecrets | indent 8 }}
+{{ . | indent 8 }}
       {{- end }}
       serviceAccountName: {{ .Values.serviceAccount.controller }}
       # runOnControlPlane=true or runOnMaster=true only takes effect if affinity is not set
@@ -57,8 +57,8 @@ spec:
 {{- end }}
       containers:
         - name: csi-provisioner
-          image: {{ .Values.images.csiProvisioner }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.csiProvisioner) }}
+          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
           args:
             - "--v=2"
             - "--csi-address=$(ADDRESS)"
@@ -81,8 +81,8 @@ spec:
               drop:
                 - ALL
         - name: s3
-          image: {{ .Values.images.s3 }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.s3) }}
+          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
           args:
             - "--v={{ .Values.controller.logLevel }}"
             - "--nodeid=$(NODE_ID)"

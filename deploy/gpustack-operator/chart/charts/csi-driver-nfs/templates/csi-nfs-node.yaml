@@ -18,9 +18,9 @@ spec:
 {{ include "nfs.labels" . | indent 6 }}
         app: {{ .Values.node.name }}
     spec:
-      {{- if .Values.imagePullSecrets }}
+      {{- with (include "nfs.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
       imagePullSecrets:
-{{ toYaml .Values.imagePullSecrets | indent 8 }}
+{{ . | indent 8 }}
       {{- end }}
       hostNetwork: true # original nfs connection would be broken without hostNetwork setting
       dnsPolicy: {{ .Values.node.dnsPolicy }}
@@ -44,17 +44,13 @@ spec:
 {{- end }}
       containers:
         - name: liveness-probe
-{{- if hasPrefix "/" .Values.image.livenessProbe.repository }}
-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.livenessProbe.repository }}:{{ .Values.image.livenessProbe.tag }}"
-{{- else }}
-          image: "{{ .Values.image.livenessProbe.repository }}:{{ .Values.image.livenessProbe.tag }}"
-{{- end }}
+          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.livenessProbe) }}"
           args:
             - --csi-address=/csi/csi.sock
             - --probe-timeout=3s
             - --http-endpoint=localhost:{{ .Values.node.livenessProbe.healthPort }}
             - --v=2
-          imagePullPolicy: {{ .Values.image.livenessProbe.pullPolicy }}
+          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.livenessProbe.pullPolicy) }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -65,11 +61,7 @@ spec:
               drop:
               - ALL
         - name: node-driver-registrar
-{{- if hasPrefix "/" .Values.image.nodeDriverRegistrar.repository }}
-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.nodeDriverRegistrar.repository }}:{{ .Values.image.nodeDriverRegistrar.tag }}"
-{{- else }}
-          image: "{{ .Values.image.nodeDriverRegistrar.repository }}:{{ .Values.image.nodeDriverRegistrar.tag }}"
-{{- end }}
+          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.nodeDriverRegistrar) }}"
           args:
             - --v=2
             - --csi-address=/csi/csi.sock
@@ -84,7 +76,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-          imagePullPolicy: {{ .Values.image.nodeDriverRegistrar.pullPolicy }}
+          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.nodeDriverRegistrar.pullPolicy) }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -118,11 +110,7 @@ spec:
               drop:
               - ALL
             allowPrivilegeEscalation: true
-{{- if hasPrefix "/" .Values.image.nfs.repository }}
-          image: "{{ .Values.image.baseRepo }}{{ .Values.image.nfs.repository }}:{{ .Values.image.nfs.tag }}"
-{{- else }}
-          image: "{{ .Values.image.nfs.repository }}:{{ .Values.image.nfs.tag }}"
-{{- end }}
+          image: "{{ include "nfs.image" (dict "root" $ "image" .Values.image.nfs) }}"
           args :
             - "--v={{ .Values.node.logLevel }}"
             - "--nodeid=$(NODE_ID)"
@@ -145,7 +133,7 @@ spec:
             initialDelaySeconds: 30
             timeoutSeconds: 10
             periodSeconds: 30
-          imagePullPolicy: {{ .Values.image.nfs.pullPolicy }}
+          imagePullPolicy: {{ include "nfs.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.image.nfs.pullPolicy) }}
           volumeMounts:
             - name: socket-dir
               mountPath: /csi

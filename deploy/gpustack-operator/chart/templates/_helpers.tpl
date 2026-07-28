@@ -55,7 +55,9 @@ Device-manager resource name: "<fullname>-device-manager".
 Resolved operator image reference "{registry/}{namespace/}repository:tag" for a component.
 Overlays the component's `image` overrides on the chart-level `image` defaults.
 When global.imageNamespace is non-empty it replaces the namespace segment of
-`image.repository`; when global.imageRegistry is non-empty it is prepended.
+`image.repository`; when global.imageRegistry is non-empty it replaces the registry
+segment, which is the first path segment carrying a "." or a ":". Each falls back to
+what `image.repository` already encodes.
 Pass a dict: (dict "root" $ "overrides" .Values.worker.image).
 Tag defaults to "v<.Chart.AppVersion>" when unset.
 */}}
@@ -63,11 +65,20 @@ Tag defaults to "v<.Chart.AppVersion>" when unset.
 {{- $root := .root -}}
 {{- $image := merge (deepCopy .overrides) $root.Values.image -}}
 {{- $repository := $image.repository -}}
+{{- $registry := "" -}}
+{{- $segments := splitList "/" $repository -}}
+{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
+{{- $registry = first $segments -}}
+{{- $repository = join "/" (rest $segments) -}}
+{{- end -}}
 {{- with $root.Values.global.imageNamespace -}}
 {{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
 {{- end -}}
 {{- with $root.Values.global.imageRegistry -}}
-{{- $repository = printf "%s/%s" (trimSuffix "/" .) $repository -}}
+{{- $registry = trimSuffix "/" . -}}
+{{- end -}}
+{{- with $registry -}}
+{{- $repository = printf "%s/%s" . $repository -}}
 {{- end -}}
 {{- $tag := default (printf "v%s" $root.Chart.AppVersion) $image.tag -}}
 {{- printf "%s:%s" $repository $tag -}}
@@ -75,12 +86,15 @@ Tag defaults to "v<.Chart.AppVersion>" when unset.
 
 {{/*
 Resolved image pull policy for a component, overlaying its `image` overrides on
-the chart-level `image` defaults.
+the chart-level `image` defaults. A non-empty global.imagePullPolicy outranks both,
+so that one value governs this chart's workloads and its subcharts' alike. It has to
+outrank rather than fill a gap: `image.pullPolicy` carries a non-empty default, which
+a fallback could never displace.
 Pass a dict: (dict "root" $ "overrides" .Values.worker.image).
 */}}
 {{- define "gpustack-operator.imagePullPolicy" -}}
 {{- $image := merge (deepCopy .overrides) .root.Values.image -}}
-{{- $image.pullPolicy -}}
+{{- default $image.pullPolicy .root.Values.global.imagePullPolicy -}}
 {{- end -}}
 
 {{/*

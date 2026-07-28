@@ -59,8 +59,8 @@ spec:
       - name: worker
         securityContext:
           {{- toYaml .Values.worker.securityContext | nindent 12 }}
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        image: "{{ include "node-feature-discovery.image" $ }}"
+        imagePullPolicy: {{ include "node-feature-discovery.imagePullPolicy" $ }}
         livenessProbe:
           httpGet:
             path: /healthz

@@ -1,0 +1,139 @@
+diff --git a/templates/_helpers.tpl b/templates/_helpers.tpl
+index 4c4ea4a..f01c79d 100644
+--- a/templates/_helpers.tpl
++++ b/templates/_helpers.tpl
+@@ -153,3 +153,53 @@ kind: Issuer
+ name: '{{ include "kueue.fullname" . }}-selfsigned-issuer'
+ {{- end }}
+ {{- end }}
++
++{{/*
++Image reference "{registry/}{namespace/}repository:tag" resolved against the parent chart's
++global image overrides: a non-empty global.imageNamespace replaces the namespace segment of
++`image.repository`, and a non-empty global.imageRegistry replaces its registry segment, which
++is the first path segment carrying a "." or a ":". Each falls back to what `image.repository`
++already encodes.
++Pass a dict: (dict "root" $ "image" .Values.controllerManager.manager.image).
++*/}}
++{{- define "kueue.image" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- $repository := .image.repository -}}
++{{- $registry := "" -}}
++{{- $segments := splitList "/" $repository -}}
++{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
++{{- $registry = first $segments -}}
++{{- $repository = join "/" (rest $segments) -}}
++{{- end -}}
++{{- with $global.imageNamespace -}}
++{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
++{{- end -}}
++{{- with $global.imageRegistry -}}
++{{- $registry = trimSuffix "/" . -}}
++{{- end -}}
++{{- with $registry -}}
++{{- $repository = printf "%s/%s" . $repository -}}
++{{- end -}}
++{{- printf "%s:%s" $repository (default .root.Chart.AppVersion .image.tag) -}}
++{{- end -}}
++
++{{/*
++Image pull policy, replaced by the parent chart's global.imagePullPolicy when non-empty.
++Pass a dict: (dict "root" $ "pullPolicy" .Values.controllerManager.manager.image.pullPolicy).
++*/}}
++{{- define "kueue.imagePullPolicy" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- default .pullPolicy $global.imagePullPolicy -}}
++{{- end -}}
++
++{{/*
++Image pull secrets as YAML, falling back to the parent chart's global.imagePullSecrets when
++the chart's own value is empty, and to nothing when both are.
++Pass a dict: (dict "root" $ "secrets" .Values.controllerManager.imagePullSecrets).
++*/}}
++{{- define "kueue.imagePullSecrets" -}}
++{{- $global := .root.Values.global | default dict -}}
++{{- with (default $global.imagePullSecrets .secrets) -}}
++{{- toYaml . -}}
++{{- end -}}
++{{- end -}}
+diff --git a/templates/kueueviz/backend-deployment.yaml b/templates/kueueviz/backend-deployment.yaml
+index 399cc89..1dd252e 100644
+--- a/templates/kueueviz/backend-deployment.yaml
++++ b/templates/kueueviz/backend-deployment.yaml
+@@ -32,9 +32,9 @@ spec:
+       labels:
+         app: kueueviz-backend
+     spec:
+-      {{- with .Values.kueueViz.backend.imagePullSecrets  }}
++      {{- with (include "kueue.imagePullSecrets" (dict "root" $ "secrets" .Values.kueueViz.backend.imagePullSecrets)) }}
+       imagePullSecrets:
+-      {{- toYaml . | nindent 8 }}
++      {{- . | nindent 8 }}
+       {{- end }}
+       {{- with  .Values.kueueViz.backend.priorityClassName }}
+       priorityClassName: {{ . }}
+@@ -67,8 +67,8 @@ spec:
+           env:
+             {{- toYaml $allEnv | nindent 12 }}
+           {{- end }}
+-          image: '{{ .Values.kueueViz.backend.image.repository }}:{{ .Values.kueueViz.backend.image.tag | default .Chart.AppVersion }}'
+-          imagePullPolicy: '{{ .Values.kueueViz.backend.image.pullPolicy }}'
++          image: '{{ include "kueue.image" (dict "root" $ "image" .Values.kueueViz.backend.image) }}'
++          imagePullPolicy: '{{ include "kueue.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.kueueViz.backend.image.pullPolicy) }}'
+           resources:
+             {{- toYaml .Values.kueueViz.backend.resources | nindent 12 }}
+           {{- with .Values.kueueViz.backend.containerSecurityContext }}
+diff --git a/templates/kueueviz/frontend-deployment.yaml b/templates/kueueviz/frontend-deployment.yaml
+index 161b9a0..9516d3c 100644
+--- a/templates/kueueviz/frontend-deployment.yaml
++++ b/templates/kueueviz/frontend-deployment.yaml
+@@ -34,9 +34,9 @@ spec:
+       labels:
+         app: kueueviz-frontend
+     spec:
+-      {{- with .Values.kueueViz.frontend.imagePullSecrets  }}
++      {{- with (include "kueue.imagePullSecrets" (dict "root" $ "secrets" .Values.kueueViz.frontend.imagePullSecrets)) }}
+       imagePullSecrets:
+-      {{- toYaml . | nindent 8 }}
++      {{- . | nindent 8 }}
+       {{- end }}
+       {{- with  .Values.kueueViz.frontend.priorityClassName }}
+       priorityClassName: {{ . }}
+@@ -63,8 +63,8 @@ spec:
+           env:
+             {{- toYaml . | nindent 12 }}
+           {{- end }}
+-          image: '{{ .Values.kueueViz.frontend.image.repository }}:{{ .Values.kueueViz.frontend.image.tag | default .Chart.AppVersion }}'
+-          imagePullPolicy: '{{ .Values.kueueViz.frontend.image.pullPolicy }}'
++          image: '{{ include "kueue.image" (dict "root" $ "image" .Values.kueueViz.frontend.image) }}'
++          imagePullPolicy: '{{ include "kueue.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.kueueViz.frontend.image.pullPolicy) }}'
+           resources:
+             {{- toYaml .Values.kueueViz.frontend.resources | nindent 12 }}
+           {{- with .Values.kueueViz.frontend.containerSecurityContext }}
+diff --git a/templates/manager/manager.yaml b/templates/manager/manager.yaml
+index ac932b0..c0bbbcd 100644
+--- a/templates/manager/manager.yaml
++++ b/templates/manager/manager.yaml
+@@ -47,8 +47,8 @@ spec:
+         {{- include "kueue.featureGates" . | indent 8 }}
+         command:
+         - /manager
+-        image: "{{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag | default .Chart.AppVersion }}"
+-        imagePullPolicy: {{ .Values.controllerManager.manager.image.pullPolicy }}
++        image: "{{ include "kueue.image" (dict "root" $ "image" .Values.controllerManager.manager.image) }}"
++        imagePullPolicy: {{ include "kueue.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.controllerManager.manager.image.pullPolicy) }}
+         livenessProbe:
+           httpGet:
+             path: /healthz
+@@ -99,9 +99,9 @@ spec:
+       securityContext:
+         {{- toYaml .Values.controllerManager.manager.podSecurityContext | nindent 8 }}
+       serviceAccountName: {{ include "kueue.fullname" . }}-controller-manager
+-      {{- with .Values.controllerManager.imagePullSecrets  }}
++      {{- with (include "kueue.imagePullSecrets" (dict "root" $ "secrets" .Values.controllerManager.imagePullSecrets)) }}
+       imagePullSecrets:
+-        {{- toYaml . | nindent 8 }}
++        {{- . | nindent 8 }}
+       {{- end }}
+       terminationGracePeriodSeconds: 10
+       {{- with .Values.controllerManager.nodeSelector }}

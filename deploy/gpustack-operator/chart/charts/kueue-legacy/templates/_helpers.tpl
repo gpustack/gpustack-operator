@@ -153,3 +153,53 @@ kind: Issuer
 name: '{{ include "kueue.fullname" . }}-selfsigned-issuer'
 {{- end }}
 {{- end }}
+
+{{/*
+Image reference "{registry/}{namespace/}repository:tag" resolved against the parent chart's
+global image overrides: a non-empty global.imageNamespace replaces the namespace segment of
+`image.repository`, and a non-empty global.imageRegistry replaces its registry segment, which
+is the first path segment carrying a "." or a ":". Each falls back to what `image.repository`
+already encodes.
+Pass a dict: (dict "root" $ "image" .Values.controllerManager.manager.image).
+*/}}
+{{- define "kueue.image" -}}
+{{- $global := .root.Values.global | default dict -}}
+{{- $repository := .image.repository -}}
+{{- $registry := "" -}}
+{{- $segments := splitList "/" $repository -}}
+{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
+{{- $registry = first $segments -}}
+{{- $repository = join "/" (rest $segments) -}}
+{{- end -}}
+{{- with $global.imageNamespace -}}
+{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
+{{- end -}}
+{{- with $global.imageRegistry -}}
+{{- $registry = trimSuffix "/" . -}}
+{{- end -}}
+{{- with $registry -}}
+{{- $repository = printf "%s/%s" . $repository -}}
+{{- end -}}
+{{- printf "%s:%s" $repository (default .root.Chart.AppVersion .image.tag) -}}
+{{- end -}}
+
+{{/*
+Image pull policy, replaced by the parent chart's global.imagePullPolicy when non-empty.
+Pass a dict: (dict "root" $ "pullPolicy" .Values.controllerManager.manager.image.pullPolicy).
+*/}}
+{{- define "kueue.imagePullPolicy" -}}
+{{- $global := .root.Values.global | default dict -}}
+{{- default .pullPolicy $global.imagePullPolicy -}}
+{{- end -}}
+
+{{/*
+Image pull secrets as YAML, falling back to the parent chart's global.imagePullSecrets when
+the chart's own value is empty, and to nothing when both are.
+Pass a dict: (dict "root" $ "secrets" .Values.controllerManager.imagePullSecrets).
+*/}}
+{{- define "kueue.imagePullSecrets" -}}
+{{- $global := .root.Values.global | default dict -}}
+{{- with (default $global.imagePullSecrets .secrets) -}}
+{{- toYaml . -}}
+{{- end -}}
+{{- end -}}

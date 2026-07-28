@@ -124,3 +124,39 @@ imagePullSecrets helper - uses local values or falls back to global values
 {{- $imagePullSecrets | toJson }}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Image reference "{registry/}{namespace/}repository:tag" resolved against the parent chart's
+global image overrides: a non-empty global.imageNamespace replaces the namespace segment of
+`image.repository`, and a non-empty global.imageRegistry replaces its registry segment, which
+is the first path segment carrying a "." or a ":". Each falls back to what `image.repository`
+already encodes.
+*/}}
+{{- define "node-feature-discovery.image" -}}
+{{- $global := .Values.global | default dict -}}
+{{- $repository := .Values.image.repository -}}
+{{- $registry := "" -}}
+{{- $segments := splitList "/" $repository -}}
+{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
+{{- $registry = first $segments -}}
+{{- $repository = join "/" (rest $segments) -}}
+{{- end -}}
+{{- with $global.imageNamespace -}}
+{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
+{{- end -}}
+{{- with $global.imageRegistry -}}
+{{- $registry = trimSuffix "/" . -}}
+{{- end -}}
+{{- with $registry -}}
+{{- $repository = printf "%s/%s" . $repository -}}
+{{- end -}}
+{{- printf "%s:%s" $repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- end -}}
+
+{{/*
+Image pull policy, replaced by the parent chart's global.imagePullPolicy when non-empty.
+*/}}
+{{- define "node-feature-discovery.imagePullPolicy" -}}
+{{- $global := .Values.global | default dict -}}
+{{- default .Values.image.pullPolicy $global.imagePullPolicy -}}
+{{- end -}}

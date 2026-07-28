@@ -18,9 +18,9 @@ spec:
 {{ include "s3.labels" . | indent 6 }}
         app: {{ .Values.node.name }}
     spec:
-      {{- if .Values.imagePullSecrets }}
+      {{- with (include "s3.imagePullSecrets" (dict "root" $ "secrets" .Values.imagePullSecrets)) }}
       imagePullSecrets:
-{{ toYaml .Values.imagePullSecrets | indent 8 }}
+{{ . | indent 8 }}
       {{- end }}
       hostNetwork: true
       dnsPolicy: {{ .Values.node.dnsPolicy }}
@@ -44,8 +44,8 @@ spec:
 {{- end }}
       containers:
         - name: node-driver-registrar
-          image: {{ .Values.images.nodeDriverRegistrar }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.nodeDriverRegistrar) }}
+          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
           args:
             - "--v=2"
             - "--csi-address=$(ADDRESS)"
@@ -88,8 +88,8 @@ spec:
               drop:
                 - ALL
         - name: liveness-probe
-          image: {{ .Values.images.livenessProbe }}
-          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.livenessProbe) }}
+          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" .Values.imagePullPolicy) }}
           args:
             - --csi-address=/csi/csi.sock
             - --probe-timeout=3s
@@ -105,8 +105,8 @@ spec:
               drop:
                 - ALL
         - name: s3
-          image: {{ .Values.images.s3 }}
-          imagePullPolicy: IfNotPresent
+          image: {{ include "s3.image" (dict "root" $ "reference" .Values.images.s3) }}
+          imagePullPolicy: {{ include "s3.imagePullPolicy" (dict "root" $ "pullPolicy" "IfNotPresent") }}
           args:
             - "--v={{ .Values.controller.logLevel }}"
             - "--nodeid=$(NODE_ID)"
