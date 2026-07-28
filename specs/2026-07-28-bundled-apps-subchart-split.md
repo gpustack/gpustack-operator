@@ -928,9 +928,14 @@ the baseline.
       `--set global.imageRegistry=reg.local --set global.imageNamespace=mirror`, extracts every
       `image:` value, and exits non-zero on any value not prefixed `reg.local/mirror/`
 
-- [ ] **T5 · `gen/chartvalues` generator**
-      Blocked by: None
-      Owns: `gen/chartvalues/**`, `hack/generate.sh`
+- [x] **T5 · `gen/chartvalues` generator**
+      Blocked by: None logically, but **commits after T3**: switching `generate_chart` to
+      `gpustack::helm::vendor` references a function T3 introduces, so landing T5 first would
+      leave `make generate chart` calling an undefined function. The two can be *built*
+      concurrently; only the commit order is constrained.
+      Owns: `gen/chartvalues/**`, `hack/generate.sh`, `hack/lib/helm.sh` (deleting the orphaned
+      `gpustack::helm::deps` only — T5's switch is what makes it dead, and T3's commit still
+      needs it)
       Acceptance: a `go run`-able generator emits the Kueue `transformations` block and the NFD
       PCI vendor/class matcher block from `pkg/nodefeature`, between begin/end markers;
       `generate_chart` invokes it ahead of helm-docs and helm-schema and no longer calls

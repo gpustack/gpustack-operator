@@ -187,21 +187,6 @@ EOF
   )
 }
 
-# gpustack::helm::deps resolves the chart dependencies into "<chart>/charts".
-# It uses "dependency update" so the classic (https) repositories declared in
-# Chart.yaml are resolved without requiring a prior "helm repo add".
-function gpustack::helm::deps() {
-  if ! gpustack::helm::helm::validate; then
-    gpustack::log::error "cannot execute helm as it hasn't installed"
-    return 1
-  fi
-
-  local target="$1"
-
-  gpustack::log::info "resolving dependencies of ${target} ..."
-  $(gpustack::helm::helm::bin) dependency update "${target}"
-}
-
 # gpustack::helm::docs generates the README.md of the given chart from its
 # README.md.gotmpl template and value annotations.
 function gpustack::helm::docs() {
