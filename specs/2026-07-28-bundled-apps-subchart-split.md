@@ -869,7 +869,7 @@ the baseline.
       both `linux/amd64` and `linux/arm64`, mirrored via a manual `sync-image.yml` dispatch.
       Verify: `docker manifest inspect docker.io/gpustack/mirrored-kueue:v0.18.4 && docker manifest inspect docker.io/gpustack/mirrored-node-feature-discovery:v0.19.0`
 
-- [ ] **T2 · Capture the pre-change values baseline**
+- [x] **T2 · Capture the pre-change values baseline**
       Blocked by: None
       Owns: `pkg/worker/kuberess/baseline_dump_test.go`, `testing/chart-baseline/**`
       Gate: review
@@ -1023,7 +1023,11 @@ the baseline.
       moves into `Prepare()` with new retry-until-established behaviour; the
       `--disable-applications` name set is validated at flag-parse time; the Helm step treats an
       already-converged release as success.
-      Verify: `go test -race ./pkg/worker/... ./pkg/system/... && make lint`
+      Verify: `go test -race ./pkg/worker/... ./pkg/system/... && make lint`. Run
+      `golangci-lint run ./pkg/worker/kuberess/...` **early**, not at the end: `unparam`'s
+      `_test.go` exclusion is keyed on where a finding *lands*, so a test-only call site can push
+      a finding into a non-test file, and deleting the installers reshuffles which helpers have
+      only-constant callers.
 
 - [ ] **T13 · Atomic cut-over**
       Blocked by: T11, T12
