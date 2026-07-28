@@ -51,7 +51,6 @@ Kubernetes: `>=1.23.0-0`
 |  | csi-driver-nfs | 4.13.2 |
 |  | csi-driver-s3 | 0.43.7 |
 |  | kueue | 0.18.4 |
-|  | kueue-legacy | 0.17.8 |
 |  | node-feature-discovery | 0.19.0 |
 
 ## Values
@@ -97,19 +96,22 @@ Kubernetes: `>=1.23.0-0`
 | deviceManager.tolerations | list | `[{"operator":"Exists"}]` | Tolerations for the device-manager DaemonSets. Defaults tolerate every taint so a manager schedules on any node carrying the matching accelerator. |
 | deviceManager.extraArgs | list | `[]` | Extra command-line arguments appended to each device-manager container args. |
 | deviceManager.env | object | `{}` | Extra environment variables for the device-manager, as a name/value map. |
-| kueue | object | `{"enabled":false,"fullnameOverride":"kueue"}` | [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4), which needs Kubernetes 1.31 or above. Disabled by default, as the worker installs Kueue at runtime. |
-| kueue.enabled | bool | `false` | Deploy the bundled Kueue. |
-| kueue.fullnameOverride | string | `"kueue"` | Name the Kueue resources after a fixed "kueue" prefix instead of the release, so that both Kueue lines and the runtime install render identical resource names. |
-| kueue-legacy | object | `{"enabled":false,"fullnameOverride":"kueue","nameOverride":"kueue"}` | Legacy [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.17.8), for clusters below Kubernetes 1.31, whose API server rejects the CRD selectable fields the main line declares. Enable either this or `kueue`, never both. |
-| kueue-legacy.enabled | bool | `false` | Deploy the bundled legacy Kueue. |
-| kueue-legacy.fullnameOverride | string | `"kueue"` | See `kueue.fullnameOverride`. |
-| kueue-legacy.nameOverride | string | `"kueue"` | Keep the "app.kubernetes.io/name" labels reading "kueue" although this chart is renamed to "kueue-legacy", so that both Kueue lines render identical labels. The label backs the immutable selector of the Kueue Deployment, so a divergence cannot be upgraded away. |
-| node-feature-discovery | object | `{"enabled":false}` | [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery) subchart (chart 0.19.0). Disabled by default, as the worker installs it at runtime. |
-| node-feature-discovery.enabled | bool | `false` | Deploy the bundled Node Feature Discovery. |
-| csi-driver-nfs | object | `{"enabled":false}` | [csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart 4.13.2). Disabled by default, as the worker installs it at runtime. |
-| csi-driver-nfs.enabled | bool | `false` | Deploy the bundled NFS CSI driver. |
-| csi-driver-s3 | object | `{"enabled":false}` | [csi-driver-s3](https://github.com/thxcode/k8s-csi-s3) subchart (chart 0.43.7). Disabled by default, as the worker installs it at runtime. |
-| csi-driver-s3.enabled | bool | `false` | Deploy the bundled S3 CSI driver. |
+| kueue | object | see the `kueue.*` keys below | [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4). |
+| kueue.enabled | bool | `true` | Deploy the bundled Kueue. |
+| kueue.fullnameOverride | string | `"kueue"` | Name the Kueue resources after a fixed "kueue" prefix instead of the release, so that this subchart and the runtime install render identical resource names. |
+| kueue.controllerManager.tolerations | list | `[{"operator":"Exists"}]` | Tolerations for the Kueue controller manager. Defaults tolerate every taint, so the manager keeps admitting workloads wherever the control plane runs. |
+| kueue.controllerManager.manager.image.repository | string | `"docker.io/gpustack/mirrored-kueue"` | Kueue controller manager image repository. |
+| kueue.controllerManager.manager.image.tag | string | `"v0.18.4"` | Kueue controller manager image tag. Both Kueue lines run this same image; only the CRD schema their charts ship differs. |
+| kueue.controllerManager.manager.image.pullPolicy | string | `"IfNotPresent"` | Kueue controller manager image pull policy. |
+| kueue.controllerManager.manager.podAnnotations | object | `{"gpustack.ai/managed":"true"}` | Annotations of the Kueue controller manager pods, marking them as managed by the operator. |
+| kueue.controllerManager.manager.resources | object | `{"limits":{"cpu":"2","memory":"4Gi"},"requests":{"cpu":"100m","memory":"128Mi"}}` | Resource requests and limits for the Kueue controller manager container. |
+| kueue.managerConfig.controllerManagerConfigYaml | string | controllerManagerConfigYaml | Kueue's controller_manager_config.yaml, delivered through the manager-config ConfigMap. The "resources.transformations" list is generated from `pkg/nodefeature` by `make generate chart` between its markers; everything else is maintained here. The managed-jobs namespace selector names "gpustack-system" literally because Helm merges subchart values instead of rendering them, so the release namespace cannot reach this string. |
+| node-feature-discovery | object | `{"enabled":true}` | [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery) subchart (chart 0.19.0). |
+| node-feature-discovery.enabled | bool | `true` | Deploy the bundled Node Feature Discovery. |
+| csi-driver-nfs | object | `{"enabled":true}` | [csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart 4.13.2). |
+| csi-driver-nfs.enabled | bool | `true` | Deploy the bundled NFS CSI driver. |
+| csi-driver-s3 | object | `{"enabled":true}` | [csi-driver-s3](https://github.com/thxcode/k8s-csi-s3) subchart (chart 0.43.7). |
+| csi-driver-s3.enabled | bool | `true` | Deploy the bundled S3 CSI driver. |
 
 ----------------------------------------------
 Autogenerated from chart metadata using [helm-docs](https://github.com/norwoodj/helm-docs).

@@ -189,28 +189,20 @@ function gpustack::helm::ct::chart_repos() {
     paste -sd, -
 }
 
-# gpustack::helm::verify_images::render renders the given chart with every subchart and
-# every image-bearing component enabled. The second argument selects the Kueue line; the
-# rest are passed to helm verbatim.
+# gpustack::helm::verify_images::render renders the given chart at its defaults, which is
+# what a user installing it gets: every component the operator deploys is on by default, and
+# every component an upstream chart ships switched off stays off, because the operator only
+# deploys the parts it uses. So this passes no component switch at all — anything the
+# assertion cannot see at the defaults is something the chart does not ship. Arguments past
+# the target are passed to helm verbatim. The Kubernetes version is pinned so the render is
+# deterministic; which version it is does not matter here, as no image reference varies with
+# it.
 function gpustack::helm::verify_images::render() {
-  local target="$1" line="$2"
-  shift 2
-
-  # The legacy line exists for the clusters below the 1.31 the main line requires.
-  local kube_version="1.33.0"
-  if [[ "${line}" == "kueue-legacy" ]]; then
-    kube_version="1.30.0"
-  fi
+  local target="$1"
+  shift 1
 
   $(gpustack::helm::helm::bin) template gpustack-operator "${target}" \
-    --kube-version "${kube_version}" \
-    --set "${line}.enabled=true" \
-    --set "${line}.enableKueueViz=true" \
-    --set node-feature-discovery.enabled=true \
-    --set node-feature-discovery.topologyUpdater.enable=true \
-    --set csi-driver-nfs.enabled=true \
-    --set csi-driver-nfs.externalSnapshotter.enabled=true \
-    --set csi-driver-s3.enabled=true \
+    --kube-version "1.33.0" \
     "$@"
 }
 
@@ -230,7 +222,7 @@ function gpustack::helm::verify_images::values() {
 # not the expected one, or when the field renders nothing at all — a check that passes
 # because it matched nothing is worse than no check.
 function gpustack::helm::verify_images::field() {
-  local subject="$1" field="$2" match="$3" expected="$4" rendered="$5"
+  local field="$1" match="$2" expected="$3" rendered="$4"
 
   local values=()
   while IFS= read -r value; do
@@ -238,7 +230,7 @@ function gpustack::helm::verify_images::field() {
   done < <(gpustack::helm::verify_images::values "${field}" <<<"${rendered}")
 
   if [[ ${#values[@]} -eq 0 ]]; then
-    gpustack::log::error "${subject}: no ${field} rendered, the check would pass vacuously"
+    gpustack::log::error "no ${field} rendered, the check would pass vacuously"
     return 1
   fi
 
@@ -250,21 +242,21 @@ function gpustack::helm::verify_images::field() {
     if [[ "${match}" == "exact" && "${value}" == "${expected}" ]]; then
       continue
     fi
-    gpustack::log::error "${subject}: ${field} \"${value}\" does not honour the global override"
+    gpustack::log::error "${field} \"${value}\" does not honour the global override"
     failed=1
   done
 
   if [[ ${failed} -ne 0 ]]; then
     return 1
   fi
-  gpustack::log::info "${subject}: ${#values[@]} distinct ${field} values honour the global override"
+  gpustack::log::info "${#values[@]} distinct ${field} values honour the global override"
 }
 
 # gpustack::helm::verify_images::pull_secrets fails when a workload renders no image pull
 # secret, or renders one that is not the parent's. Two shapes are in play: a YAML list, and
 # the single-line JSON that the Node Feature Discovery chart emits natively.
 function gpustack::helm::verify_images::pull_secrets() {
-  local subject="$1" expected="$2" rendered="$3"
+  local expected="$1" rendered="$2"
 
   local workloads secrets names
   workloads="$(grep -cE '^kind: (Deployment|DaemonSet|Job|StatefulSet)$' <<<"${rendered}" || true)"
@@ -272,7 +264,7 @@ function gpustack::helm::verify_images::pull_secrets() {
   secrets="$(grep -cE '^ {1,10}imagePullSecrets:' <<<"${rendered}" || true)"
 
   if [[ "${workloads}" -eq 0 ]] || [[ "${secrets}" -ne "${workloads}" ]]; then
-    gpustack::log::error "${subject}: ${secrets} of ${workloads} workloads carry an image pull secret"
+    gpustack::log::error "${secrets} of ${workloads} workloads carry an image pull secret"
     return 1
   fi
 
@@ -282,10 +274,10 @@ function gpustack::helm::verify_images::pull_secrets() {
   } | sort -u)"
 
   if [[ "${names}" != "${expected}" ]]; then
-    gpustack::log::error "${subject}: image pull secrets resolve to \"${names//$'\n'/, }\""
+    gpustack::log::error "image pull secrets resolve to \"${names//$'\n'/, }\""
     return 1
   fi
-  gpustack::log::info "${subject}: all ${workloads} workloads carry the global image pull secret"
+  gpustack::log::info "all ${workloads} workloads carry the global image pull secret"
 }
 
 # gpustack::helm::verify_images asserts that the given chart's "global.*" image knobs reach
@@ -296,9 +288,6 @@ function gpustack::helm::verify_images::pull_secrets() {
 # on, because a patched image field nobody renders is a field nobody verifies. Every value
 # is then extracted and asserted, so a missed field fails here instead of surfacing as an
 # ImagePullBackOff in an airgapped cluster.
-#
-# The two Kueue lines are rendered separately on purpose: they are mutually exclusive, and
-# the chart fails by design when both are enabled at once.
 function gpustack::helm::verify_images() {
   if ! gpustack::helm::helm::validate; then
     gpustack::log::error "cannot render the chart as helm hasn't installed"
@@ -311,24 +300,22 @@ function gpustack::helm::verify_images() {
 
   gpustack::log::info "verifying ${target} images ..."
 
-  local failed=0 line rendered
   # Every assertion spans the whole render, the chart's own workloads and its subcharts'
   # alike: one global knob is supposed to mean one behaviour everywhere, so a check that
   # exempted the parent would be conceding the thing worth proving.
-  for line in kueue kueue-legacy; do
-    rendered="$(gpustack::helm::verify_images::render "${target}" "${line}" \
-      --set "global.imageRegistry=${registry}" \
-      --set "global.imageNamespace=${namespace}" \
-      --set "global.imagePullPolicy=${pull_policy}" \
-      --set "global.imagePullSecrets[0].name=${pull_secret}")"
+  local failed=0 rendered
+  rendered="$(gpustack::helm::verify_images::render "${target}" \
+    --set "global.imageRegistry=${registry}" \
+    --set "global.imageNamespace=${namespace}" \
+    --set "global.imagePullPolicy=${pull_policy}" \
+    --set "global.imagePullSecrets[0].name=${pull_secret}")"
 
-    gpustack::helm::verify_images::field \
-      "${line}" "image" prefix "${registry}/${namespace}/" "${rendered}" || failed=1
-    gpustack::helm::verify_images::field \
-      "${line}" "imagePullPolicy" exact "${pull_policy}" "${rendered}" || failed=1
-    gpustack::helm::verify_images::pull_secrets \
-      "${line}" "${pull_secret}" "${rendered}" || failed=1
-  done
+  gpustack::helm::verify_images::field \
+    "image" prefix "${registry}/${namespace}/" "${rendered}" || failed=1
+  gpustack::helm::verify_images::field \
+    "imagePullPolicy" exact "${pull_policy}" "${rendered}" || failed=1
+  gpustack::helm::verify_images::pull_secrets \
+    "${pull_secret}" "${rendered}" || failed=1
 
   return "${failed}"
 }

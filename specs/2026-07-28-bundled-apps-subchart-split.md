@@ -17,8 +17,8 @@ The operator keeps **two delivery modes over one set of chart defaults**: a char
 the worker deploys the operator chart bundled in its own image with a computed overlay. The
 Go-side values templates disappear either way.
 
-The move is taken together with a version refresh: Kueue to 0.18.4 (legacy line 0.17.8, both on
-the v0.18.4 controller image) and Node Feature Discovery to **upstream** 0.19.0, dropping the
+The move is taken together with a version refresh: Kueue to 0.18.4 and Node Feature Discovery
+to **upstream** 0.19.0, dropping the
 `thxCode/node-feature-discovery` fork by relocating the one capability it added — rendering the
 `NodeFeatureRule` — into the operator chart itself. With every upstream value reachable from
 `values.yaml`, this delivers
@@ -49,8 +49,9 @@ cluster has to tear down its Kueue CRDs to upgrade.
   bundled operator chart. Image mode consumes the chart's **defaults plus a computed overlay**;
   it deliberately has no user-values channel (see Non-Goals), so per-value tuning such as
   `kueue.controllerManager.replicas` is a chart-mode capability.
-- **Refresh the pinned versions and drop the NFD fork.** Kueue chart 0.18.4 / legacy 0.17.8,
-  both on the v0.18.4 controller image; NFD 0.19.0 straight from
+- **Refresh the pinned versions and drop the NFD fork.** Kueue chart 0.18.4, whose one CRD
+  field no cluster below Kubernetes 1.31 accepts is patched behind a version guard so a single
+  vendored tree serves every supported cluster; NFD 0.19.0 straight from
   `kubernetes-sigs/node-feature-discovery`. The only chart capability the fork added — a
   `NodeFeatureRule` template — moves into the operator chart, so the fork stops being a
   dependency.
@@ -77,16 +78,16 @@ node-spread control plane; and the v0.7.x → new-chart upgrade e2e case passes.
   unchanged).
 - Patching Kueue's visibility server out of the chart — see the caveat under
   "Notes / Constraints / Caveats".
-- Maintaining upstream chart forks for anything beyond the `global.*` image plumbing and the
-  `kueue-legacy` rename.
+- Maintaining upstream chart forks for anything beyond the `global.*` image plumbing, the
+  `csi-driver-s3` rename and the Kueue `selectableFields` version guard.
 - A non-Helm (pure `kubectl apply`) install path.
 - Multi-cluster / MultiKueue, and any change to the device-manager DaemonSets (already per-node).
 
 ## Proposal
 
-The operator chart becomes the single source of deployment configuration. It declares five
-dependencies (Kueue 0.18.4, Kueue 0.17.8 as the legacy line, NFD 0.19.0, csi-driver-nfs 4.13.2,
-csi-driver-s3 0.43.7), each vendored unpacked into `chart/charts/` and carrying a small patch
+The operator chart becomes the single source of deployment configuration. It declares four
+dependencies (Kueue 0.18.4, NFD 0.19.0, csi-driver-nfs 4.13.2, csi-driver-s3 0.43.7), each
+vendored unpacked into `chart/charts/` and carrying a small patch
 that teaches its image fields to honour the parent's `global.*` values. The parent
 `values.yaml` carries today's opinionated defaults, so a default install produces the same
 cluster state as today — but every one of those settings is now a value a user can override.
@@ -166,29 +167,28 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   | dir | version | source |
   | --- | --- | --- |
   | `kueue` | 0.18.4 | `github.com/kubernetes-sigs/kueue` release `kueue-0.18.4.tgz` |
-  | `kueue-legacy` | 0.17.8 | `github.com/kubernetes-sigs/kueue` release `kueue-0.17.8.tgz` |
   | `node-feature-discovery` | 0.19.0 | `kubernetes-sigs/node-feature-discovery` release `node-feature-discovery-chart-0.19.0.tgz` (note the `-chart-` infix) |
   | `csi-driver-nfs` | 4.13.2 | `kubernetes-csi/csi-driver-nfs` charts tree |
   | `csi-driver-s3` | 0.43.7 | `thxcode.github.io/k8s-csi-s3/charts` (tarball and `metadata.name` are both `csi-s3`; renamed by patch) |
 
-- `Chart.yaml` declares all five as `dependencies` with `repository: ""` — the Helm convention
+- `Chart.yaml` declares all four as `dependencies` with `repository: ""` — the Helm convention
   for "already present in `charts/`" — plus `condition`. Declaring them is mandatory:
   `condition` only applies to declared dependencies, and an undeclared tree under `charts/`
   always renders.
 - **A `condition` alone cannot default a dependency off.** Helm resets every declared dependency
   to `enabled = true` before evaluating conditions, and a `condition` whose values path is
   *absent* leaves it enabled. So `enabled: false` in `Chart.yaml` is inert, and the only place the
-  switches exist is the parent `values.yaml`. Verified by rendering: with the five declared and no
-  parent keys, a default template emits all 190 subchart objects; with five `enabled: false`
+  switches exist is the parent `values.yaml`. Verified by rendering: with the four declared and no
+  parent keys, a default template emits all 111 subchart objects; with four `enabled: false`
   parent keys it emits none.
 - The `csi-driver-s3` tree's upstream `metadata.name` is **`csi-s3`**, so declaring
   `name: csi-driver-s3` fails with "found in Chart.yaml, but missing in charts/ directory". A
-  one-line `chart-rename.patch` renames it, mirroring `kueue-legacy`, which keeps the directory,
-  the chart name, the values key and T4's patch directory all spelled the same. The `alias:`
-  alternative was rejected on evidence: an alias whose directory name differs from the chart name
-  breaks `helm dependency build`, i.e. `make lint chart`.
+  one-line `chart-rename.patch` renames it, which keeps the directory, the chart name, the values
+  key and T4's patch directory all spelled the same. The `alias:` alternative was rejected on
+  evidence: an alias whose directory name differs from the chart name breaks
+  `helm dependency build`, i.e. `make lint chart`.
 - AC: running `make deps` twice leaves `git status --porcelain` empty.
-- AC: the unpacked, patched charts are committed (≈4.5 MB). `chart/.gitignore` keeps ignoring
+- AC: the unpacked, patched charts are committed (≈2.7 MB). `chart/.gitignore` keeps ignoring
   `charts/*.tgz` and `Chart.lock`, and the unpacked directories are tracked.
 - AC: `helm template deploy/gpustack-operator/chart` and `helm lint` both succeed from a fresh
   clone with the network disabled (`unshare -n` or equivalent).
@@ -207,8 +207,8 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   pull.
 
 **F2 — Unified configuration surface**
-- Parent `values.yaml` gains `kueue:`, `kueue-legacy:`, `node-feature-discovery:`,
-  `csi-driver-nfs:` and `csi-driver-s3:` blocks holding today's defaults. `csi-driver-nfs` and
+- Parent `values.yaml` gains `kueue:`, `node-feature-discovery:`, `csi-driver-nfs:` and
+  `csi-driver-s3:` blocks holding today's defaults. `csi-driver-nfs` and
   `csi-driver-s3` default to `enabled: true`, matching today's behaviour.
 - Each vendored chart carries a `global-image.patch` resolving image references through
   `global.imageRegistry` / `global.imageNamespace` / `global.imagePullPolicy` /
@@ -239,9 +239,21 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   a patch nothing renders is not verified. Two shape quirks matter: csi-driver-nfs resolves
   `image.baseRepo` plus a leading-slash repository suffix, and csi-driver-s3 stores full
   `registry/ns/name:tag` strings with no separate tag key.
-- Kueue values additionally pin `enableVisibilityAPF: false` (as today) and
-  `enableVisibilityAuthReaderRoleBinding: false` (new), so the chart stops writing a RoleBinding
-  into `kube-system`.
+- **The parent exposes a subchart key only where it deliberately differs from that chart's own
+  default.** A key that merely repeats upstream is noise, and a component an upstream chart ships
+  switched off is one the operator does not deploy — so the parent neither exposes nor opens it.
+  That removes `enableKueueViz`, `enablePrometheus`, `enableVisibilityAPF`,
+  `enableCertManager` and `enableVisibilityAuthReaderRoleBinding` from the Kueue block, leaving it
+  `enabled` + `fullnameOverride` + the settings that genuinely differ. It also keeps the verify
+  render free of component switches: it asserts the defaults, which is what a user installs.
+- **`enableVisibilityAuthReaderRoleBinding` is one of those, and it matters why.** An earlier
+  draft pinned it `false` to keep the release from writing into `kube-system`. That is not
+  hardening, it is an outage: the Kueue manager starts its visibility server unconditionally, and
+  without the binding it cannot read `kube-system/extension-apiserver-authentication`, so startup
+  aborts. Verified live — the controller crash-looped six times with the binding absent and went
+  Ready within a minute of it being created. Upstream's default is `true`, so the correct action
+  is for the parent to say nothing about it. The one RoleBinding outside the release namespace is
+  the price of a running Kueue, and it is what ships today too.
 - AC: `helm template --set global.imageRegistry=reg.local --set global.imageNamespace=mirror`
   renders **every** image under `reg.local/mirror/…` — worker, device-managers, Kueue manager,
   NFD master/worker/gc, NFD's post-delete hook, both CSI plugin + sidecar sets, and the chart's
@@ -291,7 +303,6 @@ must be lifted out — left under the disable gate it would be skipped by `*` in
 installs `${GPUSTACK_CONF_DIR}/charts/gpustack-operator-<ver>.tgz` as a single release, keeping
 today's release name `gpustack-operator-device-manager` unchanged, with a computed overlay:
 `worker.enabled=false`; each component enabled iff it is absent from `--disable-applications`;
-`kueue.enabled` / `kueue-legacy.enabled` chosen from the detected Kubernetes version;
 `global.imageRegistry` / `imageNamespace` / `imagePullSecrets` / `imagePullPolicy` from the
 worker's settings; `manufacturers` from `--manufacturer`; and the running worker's own image
 reused for the device-managers (today's `extractWorkerImage`, unchanged). The pull policy must go
@@ -328,8 +339,8 @@ the CSI drivers, which today's Go path does honour.
   diffs them; the two agree apart from the worker Deployment and release-name labels. The test
   is explicitly a *defaults* parity check — it cannot detect a value the overlay fails to
   forward, because image mode forwards none by design.
-- AC (image mode): the Kueue line is still auto-selected by `helmCli.KubeVersion`, so a <1.31
-  cluster gets the legacy line without user action.
+- AC (image mode): no Kubernetes-version branch is needed for Kueue — the one vendored tree
+  installs on any supported cluster (F6), so the overlay carries no version-dependent switch.
 - AC: on worker restart with changed computed values, the release is upgraded in place (the
   existing `nextStep` DeepEqual path), not reinstalled.
 - AC (behaviour change): in chart mode, `deviceManager.enabled=false` no longer causes a
@@ -355,35 +366,64 @@ the CSI drivers, which today's Go path does honour.
   today (asserted against the captured baseline).
 - AC: the NFD subchart carries **no** template patch — only `global-image.patch` — so an NFD
   bump is a re-vendor with nothing to re-align.
+- **Two deliberate divergences from the captured NFD baseline**, so the parity diff is expected
+  rather than a failure:
+  1. **`fullnameOverride: node-feature-discovery`** — without it the subchart renders
+     release-prefixed names that do not collide with the runtime install's, and the two NFD
+     deployments then run side by side with no error (observed live). The collision is the point:
+     it is what `--take-ownership` turns into an adoption.
+  2. **`master.config.nodeFeatureNamespaceSelector` is dropped, not reproduced.** Today's Go
+     template pins it to the install namespace, which means NFD master ignores every
+     `NodeFeature` created elsewhere. That defeats the takeover this spec is built on: a cluster
+     already running NVIDIA gpu-operator has its NFD — and its `NodeFeature` objects — in the
+     `gpu-operator` namespace, and adopting that NFD while keeping the selector would silently
+     discard exactly the features being adopted. Upstream 0.19.0 ships the key commented out
+     (unset means all namespaces), so dropping it also satisfies the "only diverge deliberately"
+     rule in F2.
+     - Trust-surface note: unset, combined with the `allowOverwrite: true` /
+       `denyNodeFeatureLabels: false` this chart already carries, means a `NodeFeature` in any
+       namespace can influence node labels. That is inherent to taking over cluster-wide NFD; it
+       is recorded here rather than mitigated, and `denyNodeFeatureLabels` remains the lever if a
+       deployment needs to tighten it.
 
-**F6 — Kueue dual-version selection**
-- `kueue` (chart 0.18.4, `enabled: true`) and `kueue-legacy` (chart 0.17.8, `enabled: false`)
-  are declared with `condition`. A patch renames the legacy chart's `metadata.name` to
-  `kueue-legacy` so the two vendored trees are unambiguous; both set `fullnameOverride: kueue`
-  so rendered object names are identical either way.
-- **The legacy line additionally needs `nameOverride: kueue`.** `fullnameOverride` fixes object
-  *names*, but `app.kubernetes.io/name` renders from `default .Chart.Name .Values.nameOverride`,
-  so the rename alone rewrites that label in 81 places — including the `kueue-controller-manager`
-  Deployment's **immutable** `selector`. Without it the legacy line is not merely mislabelled, it
-  cannot be upgraded into or adopted, which defeats the whole reason both lines keep identical
-  object names.
-- Both lines run the **same controller image**, `v0.18.4`. The CRD *kind list* is identical
-  across the two charts and only the schema differs (`selectableFields`, which needs Kubernetes
-  ≥1.31); their RBAC, webhook and Service templates also differ slightly, which is accepted
-  practice — today's code already runs the v0.18.2 image on the 0.17.6 chart.
-- A parent template `fail`s with an actionable message when the cluster is `<1.31` and `kueue`
-  is enabled, and when both lines are enabled at once. The second guard is **load-bearing, not
-  cosmetic**: with both enabled Helm silently renders two `kueue-controller-manager`
-  Deployments and 22 CRDs and exits 0.
-- AC: `helm template --kube-version 1.30.0` fails with the guidance message.
-- AC: `helm template --kube-version 1.30.0 --set kueue.enabled=false --set
-  kueue-legacy.enabled=true` renders the 0.17.8 CRDs (no `selectableFields`) and a
-  `kueue-controller-manager` Deployment on the `v0.18.4` image.
-- AC: `--set kueue-legacy.enabled=true` alongside the default fails the guard.
-- AC: the object names rendered by the two lines are byte-identical.
-- AC: the `ci-chart.yml` 1.23→1.35 kind matrix passes, with the sub-1.31 legs setting the
-  legacy switch.
-- AC: the legacy line gets a real scheduling-chain e2e, not only a render test.
+**F6 — One Kueue tree across every supported Kubernetes version**
+- A single `kueue` dependency (chart 0.18.4) declared with `condition: kueue.enabled` and
+  `fullnameOverride: kueue`, so the subchart and the runtime install render identical object
+  names and either can be adopted into the other.
+- **Why a second vendored tree was considered, and why it is not needed.** The only thing about
+  chart 0.18.4 that a cluster below Kubernetes 1.31 rejects is the `selectableFields` its
+  `Workload` CRD declares. That is **two lines in one file**,
+  `templates/crd/kueue.x-k8s.io_workloads.yaml`, and Kueue ships its CRDs under `templates/`
+  rather than `crds/`, so they are rendered — and therefore conditionalable. An earlier draft
+  pinned a whole second tree (chart 0.17.8, `kueue-legacy`) to dodge those two lines.
+- `selectable-fields.patch` wraps them in
+  `{{- if semverCompare ">=1.31.0-0" .Capabilities.KubeVersion.Version }}`. The field is an API
+  server indexing optimisation for the `status.admission.clusterQueue` field selector; the
+  v0.18.4 controller runs fine without it, which the status quo already proves — today's code
+  pairs the v0.18.2 image with the 0.17.6 chart, whose CRDs also lack the field.
+- Measured, not assumed. On kind `kindest/node:v1.29.14` with
+  `kubectl apply --server-side --force-conflicts --dry-run=server`:
+
+  | render | objects accepted | failures |
+  | --- | --- | --- |
+  | chart 0.17.8 (the dropped legacy line) | 68 | 0 |
+  | chart 0.18.4 without `selectableFields` | 68 | 0 |
+  | chart 0.18.4 unmodified | 67 | 1 — `.spec.versions[1].selectableFields: field not declared in schema` |
+
+  A direct apply of the unmodified CRD fails the same way
+  (`strict decoding error: unknown field "spec.versions[1].selectableFields"`), so the field is
+  **rejected, not pruned** — which is what makes the guard load-bearing rather than cosmetic.
+- **Caveat on verifying it offline.** `helm template` with no `--kube-version` defaults
+  `.Capabilities.KubeVersion` to the helm binary's own built-in (high) version, so a bare render
+  still emits the field. Only a real install, or an explicit `--kube-version`, exercises the
+  sub-1.31 branch — every render AC below therefore pins the version.
+- AC: `helm template --kube-version 1.29.14 --set kueue.enabled=true` renders zero
+  `selectableFields` lines; the same render at `--kube-version 1.33.12` renders one.
+- AC: the two renders differ **only** in those two lines, and both emit the same document count.
+- AC: `make deps` over a removed `charts/kueue` re-applies `selectable-fields.patch` and
+  reproduces the committed tree byte for byte.
+- AC: the `ci-chart.yml` 1.23→1.35 kind matrix passes with no per-leg Kueue switch — one set of
+  values installs everywhere.
 
 **F7 — Control-plane HA (issue #52)**
 - Worker: keep `worker.replicas` (default `1`); add
@@ -477,10 +517,9 @@ pre-install/pre-upgrade hooks execute.
      never `helm uninstall`, which would delete the adopted resources. Otherwise `helm list`
      keeps showing releases that point at objects the parent now owns, and a later
      `helm uninstall gpustack-kueue` would destroy them.
-  2. Prune objects that the legacy releases created but the new render does not contain — the
-     `kube-system` visibility auth-reader RoleBinding is the concrete case, since today's Go
-     template leaves `enableVisibilityAuthReaderRoleBinding` at its `true` default and the new
-     values pin it `false`. `--take-ownership` never visits these, so they linger unowned.
+  2. Prune objects that the legacy releases created but the new render does not contain.
+     `--take-ownership` never visits these, so they would linger unowned. The visibility
+     auth-reader RoleBinding is **not** such a case: both the old and the new render create it.
 - Hook plumbing: the Job honours `global.imagePullSecrets` and the resolved registry/namespace;
   the image is overridable so an upgrade is not blocked by an unmirrored new tag. Hook RBAC
   carries a **distinct, lower** `hook-weight` than the Job (-11 vs -10): same-weight hooks are
@@ -587,16 +626,24 @@ pre-install/pre-upgrade hooks execute.
   returns empty fields for a digest reference, so the chart composes its own default tag
   instead — a known failure mode that now rolls back the *whole* application release rather
   than just the device-managers, because the bundled-chart install is atomic.
-- **Kueue visibility is only partly disabled.** `enableVisibilityAuthReaderRoleBinding: false`
-  gates exactly one object — the `kube-system` auth-reader RoleBinding. The two aggregated
-  APIServices (`v1beta1`/`v1beta2.visibility.kueue.x-k8s.io`), the `kueue-visibility-server`
-  Service and the manager's `:8082` listener are **unconditional** in the 0.18.4 / 0.17.8
-  charts; no value gates them, and this spec deliberately does not patch them out. The residual
-  is recorded as a risk with an e2e observation step.
-- **Two Kueue charts share `metadata.name: kueue`.** The legacy tree is renamed by patch to
-  `kueue-legacy`; both keep `fullnameOverride: kueue` so object names — and therefore the
-  adoption path — are identical. Enabling both at once renders duplicates silently, hence the
-  guard.
+- **Kueue visibility cannot be disabled at all.** The two aggregated APIServices
+  (`v1beta1`/`v1beta2.visibility.kueue.x-k8s.io`), the `kueue-visibility-server` Service and the
+  manager's `:8082` listener are **unconditional** in the 0.18.4 chart — only the auth-reader
+  RoleBinding has a switch, and turning that off aborts manager startup rather than trimming the
+  feature. So the chart ships the whole visibility surface, including one RoleBinding in
+  `kube-system`, and this spec deliberately does not patch it out. The residual is recorded as a
+  risk with an e2e observation step.
+- **The Kueue subchart keeps `fullnameOverride: kueue`.** Its rendered object names then match
+  what the runtime install produces, which is what makes the adoption path in F8 possible at all.
+- **The NFD subchart needs the same treatment, and for a sharper reason.** Without a
+  `fullnameOverride` its objects render release-prefixed
+  (`gpustack-operator-node-feature-discovery-master`) while the runtime install renders
+  `node-feature-discovery-master`. Those names do not collide, so enabling both produces **two
+  live NFD masters and no error at all** — observed on a live cluster, where Kueue and both CSI
+  drivers failed loudly on ownership metadata while NFD quietly doubled. Two masters contend over
+  the same node labels, which is a known way to lose worker-contributed labels permanently. So the
+  NFD block must pin `fullnameOverride: node-feature-discovery`: a collision that fails is the
+  desired behaviour, because it is what `--take-ownership` then converts into an adoption.
 - **NFD 0.19.0 is a straight upstream chart.** The `thxCode/node-feature-discovery` fork's chart
   delta (commit `5c898b2`) was: a `NodeFeatureRule` template, its value stubs, a Chart.yaml
   rebrand and a fork-local default image. Only the first is load-bearing, and it moves to the
@@ -626,6 +673,19 @@ pre-install/pre-upgrade hooks execute.
 - **`helm.Chart.SkippedCRDsInstallation` is a misnomer** — it sets Helm's `IncludeCRDs` (a
   render/manifest flag), not `SkipCRDs`, so NFD's `crds/` are installed today and will continue
   to be installed as a subchart. Behaviour is unchanged; the misnomer is out of scope.
+- **`managedJobsNamespaceSelector` names `gpustack-system` literally**, and cannot do otherwise:
+  Helm merges subchart values instead of rendering them, so the release namespace cannot reach
+  that string — today's Go template interpolated it. Faithful to the baseline and correct for
+  every install into `gpustack-system`, but an install into a different namespace would not
+  exclude its own namespace from Kueue's managed-jobs selector, so Kueue would gate the
+  operator's own workloads. This joins the required-release-name constraint in F8: the chart
+  expects release `gpustack-operator` in namespace `gpustack-system`, and the docs must say so.
+- **Block-scalar values keys need `# @default --` or helm-docs inlines them.** Without it the
+  whole 200-line Kueue config string lands in one README table cell and the file goes from 11 KB
+  to 33 KB. The same applies to the NFD and CSI blocks that follow.
+- **A `null` subchart block re-enables a dependency.** `kueue: null` in a user values file
+  deletes the block, and per Helm's dependency handling an absent condition path leaves the
+  dependency *enabled*. Pathological input; recorded rather than coded around.
 - **`mod_staging` carries the same two latent patch problems, deliberately unfixed.** Its
   `patch -p1 -N --forward --silent <"${patch_dir}"/*.patch` neither checks the exit code nor
   survives a second patch file (ambiguous redirect), and because it runs inside
@@ -694,19 +754,21 @@ pre-install/pre-upgrade hooks execute.
   conflict retry on the aggregated-APIService apply, mutual deletion of `gpustack-cert-*`
   Secrets, the Helm get-then-act) → four targeted fixes in F7, each with a unit test, plus a
   three-replica e2e.
-- **Two `kueue`-named vendored trees, or both lines enabled**, render duplicates silently →
-  the legacy tree is renamed by patch and `_guards.tpl` fails the both-enabled case; both switch
-  positions are covered by render tests.
+- **Chart 0.18.4's `selectableFields` is rejected outright by a pre-1.31 API server**, so one
+  vendored tree could not serve every supported cluster → `selectable-fields.patch` puts the two
+  offending lines behind a `.Capabilities.KubeVersion` guard, verified by rendering at both
+  versions and applied server-side against a real 1.29 cluster (F6).
 - **The two install modes drift apart** → the F4 defaults-parity test plus both modes exercised
   end to end in CI. The known, accepted limit is that image mode forwards no user values.
 - **NFD 0.18.3 → 0.19.0 changes the label surface** the algebra depends on
   (`feature.node.kubernetes.io/pci-<vendor>.present`, `cpu.model.*`, the
   `^(pci-|cpu-model\.|acceleratable)` whitelist) → the scheduling-chain e2e is the gate; the
   value shapes were verified identical up front, so the residual risk is runtime behaviour.
-- **Residual Kueue visibility APIServices** stay registered while their auth-reader RoleBinding
-  is gone; a broken aggregated APIService can slow or pollute cluster-wide discovery → e2e
-  records their `Available` condition and the `kubectl api-resources` round-trip; if it degrades,
-  a follow-up spec adds the gating patch.
+- **Kueue's visibility APIServices are registered unconditionally**; a degraded aggregated
+  APIService can slow or pollute cluster-wide discovery → e2e records their `Available` condition
+  and the `kubectl api-resources` round-trip; if it degrades, a follow-up spec adds the gating
+  patch. Note the auth-reader RoleBinding is not the lever here — removing it stops the manager,
+  not the APIServices.
 - **Missing mirrored image tags** would make every install `ImagePullBackOff`, and would also
   block the migration because the hook Job runs the new image → mirror-first is an F1 AC, and
   the hook image is overridable.
@@ -763,8 +825,12 @@ make build                # cross build
 # `.sbin/helm version --short`. Note `make lint chart` / `make test chart` run chart-testing in
 # a container with its own bundled helm, which this pin does not govern.
 .sbin/helm template gpustack-operator deploy/gpustack-operator/chart
-.sbin/helm template gpustack-operator deploy/gpustack-operator/chart --kube-version 1.30.0 \
-  --set kueue.enabled=false --set kueue-legacy.enabled=true
+# The Kueue CRD selectable fields are version-guarded, so pin --kube-version on both sides of
+# the 1.31 boundary; without the flag helm substitutes its own built-in (high) version.
+.sbin/helm template gpustack-operator deploy/gpustack-operator/chart --kube-version 1.29.14 \
+  --set kueue.enabled=true | grep -c selectableFields   # 0
+.sbin/helm template gpustack-operator deploy/gpustack-operator/chart --kube-version 1.33.12 \
+  --set kueue.enabled=true | grep -c selectableFields   # 1
 .sbin/helm template gpustack-operator deploy/gpustack-operator/chart \
   --set global.imageRegistry=reg.local --set global.imageNamespace=mirror
 .sbin/helm template gpustack-operator deploy/gpustack-operator/chart \
@@ -808,11 +874,9 @@ deploy/gpustack-operator/chart/
 │   ├── worker/                    # + poddisruptionbudget.yaml, topology spread
 │   ├── device-manager/
 │   ├── nodefeaturerule.yaml       # gpustack-cpu-info, independent of the NFD subchart
-│   ├── migrate/                   # hook Jobs + scoped RBAC (RBAC weight -11, Jobs -10)
-│   └── _guards.tpl                # kube-version / dual-kueue fail-fast
-└── charts/                        # vendored + patched, COMMITTED (~4.5 MB)
-    ├── kueue/                     # 0.18.4
-    ├── kueue-legacy/              # 0.17.8, metadata.name patched
+│   └── migrate/                   # hook Jobs + scoped RBAC (RBAC weight -11, Jobs -10)
+└── charts/                        # vendored + patched, COMMITTED (~2.7 MB)
+    ├── kueue/                     # 0.18.4, selectableFields version-guarded
     ├── node-feature-discovery/    # 0.19.0, upstream (fork dropped)
     ├── csi-driver-nfs/            # 4.13.2
     └── csi-driver-s3/             # 0.43.7
@@ -875,7 +939,6 @@ function gpustack::helm::vendor() {
   done < <(
     cat <<EOF
 https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.4/kueue-0.18.4.tgz 0.18.4 ${charts_dir}/kueue
-https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.8/kueue-0.17.8.tgz 0.17.8 ${charts_dir}/kueue-legacy
 https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.19.0/node-feature-discovery-chart-0.19.0.tgz 0.19.0 ${charts_dir}/node-feature-discovery
 https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz 4.13.2 ${charts_dir}/csi-driver-nfs
 https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz 0.43.7 ${charts_dir}/csi-driver-s3
@@ -921,7 +984,7 @@ the baseline.
       (The `git status --porcelain testing/chart-baseline` form only works post-commit: new files
       stay `??` while the builder holds them, and the builder may not stage.)
 
-- [x] **T3 · Vendoring machinery + five subchart trees, all disabled**
+- [x] **T3 · Vendoring machinery + four subchart trees, all disabled**
       Blocked by: None
       Owns: `hack/lib/helm.sh`, `hack/deps.sh`, `.gitattributes`,
       `deploy/gpustack-operator/chart/Chart.yaml`, `deploy/gpustack-operator/chart/.gitignore`,
@@ -929,27 +992,25 @@ the baseline.
       `deploy/gpustack-operator/chart/README.md`,
       `deploy/gpustack-operator/chart/values.schema.json`,
       `deploy/gpustack-operator/chart/charts/**`,
-      `hack/deploy/gpustack-operator/chart/charts/{kueue-legacy,csi-driver-s3}/chart-rename.patch`
+      `hack/deploy/gpustack-operator/chart/charts/csi-driver-s3/chart-rename.patch`
       Gate: review
       Acceptance: `gpustack::helm::vendor` replaces two of the three `helm dependency update` call
       sites (`generate_chart` is T5's handoff, so `gpustack::helm::deps` stays defined until then);
-      the five trees are vendored, patched and committed; `Chart.yaml` declares them with
+      the four trees are vendored, patched and committed; `Chart.yaml` declares them with
       `repository: ""` and `condition`, and the parent `values.yaml` carries a **switch-only**
-      stanza — five `enabled: false` keys plus `fullnameOverride: kueue` on both Kueue lines and
-      `nameOverride: kueue` on `kueue-legacy` — because a `condition` alone cannot default a
-      dependency off. The legacy tree's `metadata.name` is `kueue-legacy` and the s3 tree's is
-      renamed from `csi-s3`. `helm-docs` gets `--chart-to-generate` and `helm-schema`
+      stanza — four `enabled: false` keys plus `fullnameOverride: kueue` — because a `condition`
+      alone cannot default a dependency off. The s3 tree's `metadata.name` is renamed from
+      `csi-s3`. `helm-docs` gets `--chart-to-generate` and `helm-schema`
       `--dependencies-filter=none`, without which the vendored trees gain generated READMEs and
       `make generate chart` exits 1.
       Verify: `make deps` twice leaves the `charts/**` checksum and the untracked-file list
       identical (the `git status --porcelain | wc -l` → `0` form only holds after the trees are
       committed); a default render emits **zero** subchart objects; then
-      `.sbin/helm template x deploy/gpustack-operator/chart --set kueue.enabled=true --kube-version 1.33.0 | grep -cE '^  name: kueue-controller-manager$'` → `1`, and the same with
-      `--set kueue-legacy.enabled=true --kube-version 1.30.0` → `1` with zero `selectableFields`
+      `.sbin/helm template x deploy/gpustack-operator/chart --set kueue.enabled=true --kube-version 1.33.0 | grep -cE '^  name: kueue-controller-manager$'` → `1`
       (the loose `grep -c 'name: kueue-controller-manager'` reads `2` — it substring-matches
       `…-metrics-service`)
 
-- [x] **T4 · `global-image` patches on the five trees**
+- [x] **T4 · `global-image` patches on the four trees**
       Blocked by: T3
       Owns: `hack/deploy/gpustack-operator/chart/charts/*/global-image.patch`,
       `deploy/gpustack-operator/chart/charts/**`, `hack/verify-chart-images.sh`,
@@ -958,19 +1019,18 @@ the baseline.
       `deploy/gpustack-operator/chart/README.md`,
       `deploy/gpustack-operator/chart/values.schema.json`
       Gate: review
-      Acceptance: all **25** image references in the five vendored trees — workloads, sidecars,
-      hook Jobs including NFD's `post-delete-job`, and the four behind default-off gates
-      (kueueViz ×2 trees, NFD topology-updater, csi-driver-nfs's `snapshot-controller`) —
+      Acceptance: all **22** image references in the four vendored trees — workloads, sidecars,
+      hook Jobs including NFD's `post-delete-job`, and the three behind default-off gates
+      (kueueViz, NFD topology-updater, csi-driver-nfs's `snapshot-controller`) —
       resolve through `global.imageRegistry` / `global.imageNamespace` /
       `global.imagePullPolicy` / `global.imagePullSecrets`, falling back to the chart's own value
       when empty. `global.imageRegistry` **replaces** an existing registry segment, and the parent
       helper takes the same change. The check script is committed, not run from `/tmp`: an
       assertion that never lands guards nothing. Patches only
       apply on a fresh unpack, so the edit loop is
-      `rm -rf deploy/gpustack-operator/chart/charts/<tree> && make deps`. `kueue-legacy` and
-      `csi-driver-s3` will then carry **two** patches each, applied in name order
-      (`chart-rename` before `global-image`) — the case the original single-redirect skeleton
-      could not handle.
+      `rm -rf deploy/gpustack-operator/chart/charts/<tree> && make deps`. `csi-driver-s3` and
+      `kueue` then carry **two** patches each, applied in name order — the case the original
+      single-redirect skeleton could not handle.
       Verify: a script that renders with all subcharts enabled and
       `--set global.imageRegistry=reg.local --set global.imageNamespace=mirror`, extracts every
       `image:` value, and exits non-zero on any value not prefixed `reg.local/mirror/`
@@ -1019,28 +1079,32 @@ the baseline.
       generic `pkg/kubeclientset` test cannot prove that *they* pass an align function.
       Verify: `go test -race ./pkg/api/... ./pkg/webhook/... ./pkg/utils/certs/... ./pkg/kubeclientset/... && make lint`
 
-- [ ] **T8 · Kueue values block + `_guards.tpl`**
+- [x] **T8 · Kueue values block + `selectableFields` version guard**
       Blocked by: T2, T4, T5
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
-      `deploy/gpustack-operator/chart/templates/_guards.tpl`
+      `hack/deploy/gpustack-operator/chart/charts/kueue/selectable-fields.patch`
       Gate: review
-      Acceptance: the `kueue:` / `kueue-legacy:` blocks reproduce the baseline's Kueue values,
-      growing T3's switch stanza rather than replacing it — the `fullnameOverride: kueue` on both
-      lines and `nameOverride: kueue` on the legacy line are load-bearing for the immutable
-      Deployment selector and must survive
-      (managerConfig, generated transformations, tolerations, resources,
-      `enableCertManager: false`, `enableVisibilityAPF: false`,
-      `enableVisibilityAuthReaderRoleBinding: false`); both remain `enabled: false`.
-      `_guards.tpl` fails on `<1.31` with the main line enabled, and on both lines enabled.
-      Verify: `.sbin/helm template x deploy/gpustack-operator/chart --set kueue.enabled=true --kube-version 1.33.0` diffed against the baseline slice; plus
-      `--kube-version 1.30.0 --set kueue.enabled=true` and
-      `--set kueue.enabled=true --set kueue-legacy.enabled=true` both exit non-zero
+      Acceptance: the `kueue:` block reproduces the baseline's Kueue values, growing T3's switch
+      stanza rather than replacing it — `fullnameOverride: kueue` is load-bearing for the
+      immutable Deployment selector and must survive (managerConfig, generated transformations,
+      tolerations, resources); keys that merely repeat an upstream default are not exposed —
+      notably `enableVisibilityAuthReaderRoleBinding`, whose upstream `true` must not be
+      overridden because turning it off aborts the Kueue manager's startup.
+      `selectable-fields.patch` puts the `Workload` CRD's two `selectableFields` lines behind
+      `semverCompare ">=1.31.0-0" .Capabilities.KubeVersion.Version`, which is what lets one
+      vendored tree serve every supported cluster (F6).
+      Verify: `.sbin/helm template x deploy/gpustack-operator/chart --set kueue.enabled=true --kube-version 1.33.0` diffed against the baseline slice; the same render at
+      `--kube-version 1.29.14` differs **only** by the two `selectableFields` lines; and
+      `rm -rf deploy/gpustack-operator/chart/charts/kueue && make deps` reproduces the committed
+      tree byte for byte
 
 - [ ] **T9 · NFD values block + `NodeFeatureRule` template**
       Blocked by: T8
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/nodefeaturerule.yaml`
-      Acceptance: the `node-feature-discovery:` block reproduces the baseline's NFD values; the
+      Acceptance: the `node-feature-discovery:` block reproduces the baseline's NFD values apart
+      from F5's two deliberate divergences — it adds `fullnameOverride: node-feature-discovery`
+      and it does **not** carry `master.config.nodeFeatureNamespaceSelector`; the
       `NodeFeatureRule` renders from the generated matchers, is gated only by
       `nodeFeatureRule.enabled` (default true), and renders even with the NFD subchart disabled.
       Verify: `.sbin/helm template x deploy/gpustack-operator/chart --set node-feature-discovery.enabled=false | grep -c 'kind: NodeFeatureRule'` → `1`; the enabled render diffed against the baseline slice
@@ -1060,7 +1124,10 @@ the baseline.
       `deploy/gpustack-operator/chart/templates/worker/poddisruptionbudget.yaml`,
       `deploy/gpustack-operator/chart/templates/worker/deployment.yaml`,
       `deploy/gpustack-operator/chart/values-ha.yaml`
-      Acceptance: `worker.podDisruptionBudget.{enabled,minAvailable}` (default off),
+      Acceptance: the Kueue HA passthrough keys F7 promises to document —
+      `kueue.controllerManager.{replicas,podDisruptionBudget,topologySpreadConstraints,nodeSelector}`
+      — land here rather than in T8, where they would have been keys duplicating an upstream
+      default for no purpose. Plus `worker.podDisruptionBudget.{enabled,minAvailable}` (default off),
       `worker.topologySpreadConstraints`, `worker.affinity` override, and
       `worker.disableApplications` (default `["*"]`) rendered into the container args.
       `values-ha.yaml` at the chart root sets three worker + three Kueue replicas, both PDBs and
@@ -1090,10 +1157,12 @@ the baseline.
       Blocked by: T11, T12
       Owns: `deploy/gpustack-operator/chart/values.yaml`
       Gate: review
-      Acceptance: the four subcharts flip to `enabled: true` (`kueue-legacy` stays false) in the
-      same change that makes chart mode authoritative. Before this task both modes work via the
-      worker's single bundled-chart release; after it, chart mode renders everything and the
-      worker installs nothing. No intermediate state has two owners for the same object.
+      Acceptance: chart mode becomes authoritative. The four subcharts already default to
+      `enabled: true`; the ordering constraint that flip carries is that **T12 must land with or
+      before it**, because until the worker stops installing at runtime the two owners collide.
+      Measured on kind 1.23.17: with the defaults on and the runtime installer still live, the
+      worker's `Prepare()` fails all three colliding installs (`must equal "gpustack-kueue":
+      current value is "gpustack-operator"`) and crash-loops, while NFD silently runs twice.
       Verify: on kind — `helm install` then `helm list -n gpustack-system` → exactly one release,
       and `bash .claude/skills/_e2e-lib/scripts/assert-core.sh gpustack-system`
 
@@ -1149,8 +1218,9 @@ the baseline.
       the sentence goes stale. Also: development (vendoring and
       patch workflow, mirror-first), new `docs/operation/high-availability.md` (including the
       single-URL webhook restriction) and `docs/migration/to-subcharts.md` (the
-      `--take-ownership` command, the required release name, the widened uninstall blast
-      radius). Chart README regenerated, never hand-edited.
+      `--take-ownership` command, the required release name **and namespace** — Kueue's
+      `managedJobsNamespaceSelector` hard-codes `gpustack-system` because Helm cannot template a
+      subchart value — and the widened uninstall blast radius). Chart README regenerated, never hand-edited.
       Verify: `make generate chart && git diff --exit-code deploy/gpustack-operator/chart/README.md deploy/gpustack-operator/chart/values.schema.json`
 
 - [ ] **T18 · e2e sync + new cases**
@@ -1227,9 +1297,8 @@ concrete test names to be added after the implementation PR merges.
 - Defaults parity: chart-mode render at defaults vs the captured baseline, CRDs excluded.
 - Global image fan-out: every `image:` under a rewritten registry/namespace, including hook Jobs.
 - Global pull secrets on every pod spec.
-- Dual Kueue: main line on 1.33 renders `selectableFields`; legacy line on 1.30 does not; object
-  names byte-identical between them; both-enabled fails the guard; `<1.31` with the main line
-  fails the guard.
+- Kueue CRD version guard: the render at `--kube-version 1.33.12` carries `selectableFields`,
+  the one at `1.29.14` does not, and the two differ in nothing else.
 - `NodeFeatureRule` renders with the NFD subchart disabled and disappears only with
   `nodeFeatureRule.enabled=false`.
 - No RoleBinding is rendered into `kube-system`.
@@ -1266,8 +1335,9 @@ On a local 3-node kind cluster, via the two e2e skills.
   recovers; re-running the upgrade is a no-op.
 - **Hook image unavailable** — set the migration hook image to a non-pullable tag: the upgrade
   aborts cleanly and the cluster is unchanged.
-- **Legacy Kueue line** — a full scheduling-chain run on a <1.31 kind node with
-  `kueue.enabled=false --set kueue-legacy.enabled=true`, not merely a render check.
+- **Sub-1.31 Kueue** — a full scheduling-chain run on a <1.31 kind node with the single Kueue
+  line enabled, proving the version-guarded CRD is accepted and admission works; not merely a
+  render check.
 - **Digest-pinned worker image** — image mode with a digest-pinned worker: assert the failure is
   loud (the device-manager image falls back to a composed tag) rather than a silent atomic
   rollback of the whole application release.
@@ -1327,12 +1397,15 @@ On a local 3-node kind cluster, via the two e2e skills.
   "no visibility capability" and avoid a registered-but-broken aggregated APIService. Rejected
   for this cycle in favour of the zero-patch route; e2e observes whether the residual actually
   harms discovery.
-- **Bump the Kueue legacy line's controller image separately from the main line.** Rejected:
-  the two lines exist only to differ in CRD shape, and one controller version means one
-  mirrored image tag.
-- **Drop Kubernetes <1.31 and ship only Kueue 0.18.4.** Removes the dual-version machinery
-  entirely. Rejected: the chart advertises `kubeVersion: ">=1.23.0-0"` and CI tests 1.23→1.35,
-  so this is a public compatibility break, and the second chart costs only ~200 KB.
+- **Vendor a second Kueue tree (chart 0.17.8, `kueue-legacy`) for pre-1.31 clusters.** The
+  original design, carried through T3 and T8 and then withdrawn: it bought a two-line CRD
+  difference with 106 files, a `chart-rename.patch`, a duplicated 290-line values block, a
+  `nameOverride` subtlety load-bearing for an immutable selector, a both-enabled fail guard, and
+  a per-CI-leg switch. F6's version-guard patch obtains the same compatibility for two lines of
+  template.
+- **Drop Kubernetes <1.31 and ship chart 0.18.4 unmodified.** Rejected: the chart advertises
+  `kubeVersion: ">=1.23.0-0"` and CI tests 1.23→1.35, so this is a public compatibility break,
+  and the guard costs two lines.
 - **Promote the worker's pod anti-affinity to `required` when `replicas > 1`.** Rejected: a
   2-node cluster asking for 3 replicas would leave one permanently Pending. Node spread is
   expressed with `topologySpreadConstraints` in the HA recipe instead.

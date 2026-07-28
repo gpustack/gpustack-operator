@@ -15,9 +15,8 @@
 // Running with -values rewrites the text between each pair found in that file to
 // the freshly generated content, re-indented to the begin marker's own
 // indentation (see patch.go); a block whose markers are absent is left untouched,
-// so a target file can adopt one block at a time. A marker name may repeat (e.g.
-// once under a "kueue:" values block and once under "kueue-legacy:"); every
-// occurrence is kept in sync.
+// so a target file can adopt one block at a time. A marker name may repeat, and
+// every occurrence is kept in sync.
 //
 // -stdout prints every block, wrapped in its markers, instead of patching a file —
 // useful to inspect the generated shape before wiring it into a target.

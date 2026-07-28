@@ -26,9 +26,8 @@ func endMarker(name string) string   { return "# gpustack:chartvalues:" + name +
 // each block with that block's Content, re-indented to match the begin marker's
 // own leading whitespace. A block whose markers are absent from src is left
 // untouched, so a target file can adopt the markers one block at a time. A marker
-// name may occur more than once in src (e.g. once under a "kueue:" values block
-// and once under "kueue-legacy:"); every occurrence is kept in sync. It returns an
-// error if a begin marker has no matching end marker.
+// name may occur more than once in src, and every occurrence is kept in sync. It
+// returns an error if a begin marker has no matching end marker.
 func Patch(src []byte, blocks []Block) ([]byte, error) {
 	lines := strings.Split(string(src), "\n")
 	for _, b := range blocks {
