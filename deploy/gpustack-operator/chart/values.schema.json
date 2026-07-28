@@ -1068,6 +1068,22 @@
       "title": "manufacturers",
       "type": "object"
     },
+    "migrate": {
+      "description": "Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an\ninterrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm\nitself applies on install only. A post-upgrade Job retires the release records of the\nper-application releases these subcharts replaced and prunes what they left behind. Both run\nthe operator image, which bundles kubectl, helm and this chart; `helm upgrade --no-hooks`\nskips them.",
+      "properties": {
+        "image": {
+          "description": "Per-hook image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the\nchart-level `image`. Overridable so an upgrade is never blocked by an operator tag that is\nnot mirrored yet — at the cost that the CRDs the hook applies are then the ones vendored by\nthe image it does run.",
+          "required": [],
+          "title": "image",
+          "type": "object"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "title": "migrate",
+      "type": "object"
+    },
     "nameOverride": {
       "default": "",
       "description": "Override the chart name used in resource names.",
@@ -1779,6 +1795,7 @@
     "manufacturers",
     "worker",
     "deviceManager",
+    "migrate",
     "kueue",
     "node-feature-discovery",
     "csi-driver-nfs",

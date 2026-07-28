@@ -1,0 +1,40 @@
+{{- /*
+  Dedicated ServiceAccount for the migration hook Jobs. They clear finalizers on Kueue's custom
+  resources, apply CRDs and delete cluster-scoped objects across the cluster, so it is bound to
+  cluster-admin — the same binding the worker itself holds. Hook-managed and removed on success,
+  so the broad grant exists only for the duration of an install or upgrade.
+
+  Weight -11, one below the Jobs: hooks of equal weight are ordered by name, and "…-migrate-post"
+  sorts before "…-migrate" would, so relying on that ordering would leave a Job without its
+  ServiceAccount.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-migrate
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-upgrade
+    "helm.sh/hook-weight": "-11"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-migrate
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-upgrade
+    "helm.sh/hook-weight": "-11"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "gpustack-operator.fullname" . }}-migrate
+    namespace: {{ include "gpustack-operator.namespace" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin

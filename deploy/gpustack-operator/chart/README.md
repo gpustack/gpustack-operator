@@ -101,6 +101,8 @@ Kubernetes: `>=1.23.0-0`
 | deviceManager.tolerations | list | `[{"operator":"Exists"}]` | Tolerations for the device-manager DaemonSets. Defaults tolerate every taint so a manager schedules on any node carrying the matching accelerator. |
 | deviceManager.extraArgs | list | `[]` | Extra command-line arguments appended to each device-manager container args. |
 | deviceManager.env | object | `{}` | Extra environment variables for the device-manager, as a name/value map. |
+| migrate | object | `{"image":{}}` | Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an interrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm itself applies on install only. A post-upgrade Job retires the release records of the per-application releases these subcharts replaced and prunes what they left behind. Both run the operator image, which bundles kubectl, helm and this chart; `helm upgrade --no-hooks` skips them. |
+| migrate.image | object | `{}` | Per-hook image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the chart-level `image`. Overridable so an upgrade is never blocked by an operator tag that is not mirrored yet — at the cost that the CRDs the hook applies are then the ones vendored by the image it does run. |
 | kueue | object | see the `kueue.*` keys below | [Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4). |
 | kueue.enabled | bool | `true` | Deploy the bundled Kueue. |
 | kueue.fullnameOverride | string | `"kueue"` | Name the Kueue resources after a fixed "kueue" prefix instead of the release, so that this subchart and the runtime install render identical resource names. |

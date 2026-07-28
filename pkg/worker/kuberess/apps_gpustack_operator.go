@@ -75,13 +75,6 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 
 	values := getGPUStackOperatorChartTemplateValues(gpustackOperatorChartName, valuesContext)
 
-	// Self-heal a Kueue left deadlocked by an earlier upgrade before (re)installing:
-	// a Terminating Kueue CRD would otherwise make every install below fail forever
-	// and block the operator from starting. No-op on a healthy cluster.
-	if err := reapOrphanedKueue(ctx, helmCli); err != nil {
-		return fmt.Errorf("reap orphaned kueue: %w", err)
-	}
-
 	takeOwnership, err := hasLegacyApplicationRelease(ctx, helmCli.KubeClientSet(), helmCli.DefaultNamespace())
 	if err != nil {
 		return fmt.Errorf("detect legacy application releases: %w", err)

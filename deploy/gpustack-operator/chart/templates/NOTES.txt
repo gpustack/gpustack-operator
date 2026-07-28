@@ -8,15 +8,39 @@ Components:
   - Device managers: one DaemonSet per manufacturer ({{ join ", " (keys .Values.manufacturers | sortAlpha) }})
     Each only schedules on nodes that NFD labels with the matching PCI vendor.
 {{- end }}
+{{- if (index .Values "node-feature-discovery").enabled }}
+  - Node Feature Discovery, and the gpustack-cpu-info NodeFeatureRule the scheduling chain starts from
+{{- else }}
+  - The gpustack-cpu-info NodeFeatureRule only: Node Feature Discovery is disabled, so the cluster must run its own
+{{- end }}
+{{- if .Values.kueue.enabled }}
+  - Kueue, including its CRDs
+{{- end }}
+{{- if (index .Values "csi-driver-nfs").enabled }}
+  - NFS CSI driver ({{ (index .Values "csi-driver-nfs").driver.name }})
+{{- end }}
+{{- if (index .Values "csi-driver-s3").enabled }}
+  - S3 CSI driver ({{ (index .Values "csi-driver-s3").driver.name }})
+{{- end }}
 {{- if .Values.worker.enabled }}
 
 Check the worker rollout:
 
   kubectl -n {{ include "gpustack-operator.namespace" . }} rollout status deployment/{{ include "gpustack-operator.worker.fullname" . }}
 {{- end }}
+{{- if .Values.kueue.enabled }}
 
-{{- if .Values.worker.enabled }}
+WARNING: this release owns Kueue and its CRDs, so `helm uninstall {{ .Release.Name }}` deletes
+every ClusterQueue, LocalQueue, ResourceFlavor, AdmissionCheck and Workload in the cluster along
+with them. Earlier versions installed Kueue as a release of its own, which outlived an operator
+uninstall; this one does not. To keep a Kueue this release does not own, install with
+`--set kueue.enabled=false` and bring your own.
+{{- end }}
+{{- if not .Values.cleanupOnUninstall }}
 
-NOTE: Node Feature Discovery, Kueue and the CSI drivers are bundled into the operator
-image and installed by the worker at runtime.
+NOTE: `helm uninstall` removes only what this release owns. The finalizers the controllers leave
+on their objects, the CRDs and aggregated APIServices the worker registers itself, and its
+webhook configurations stay behind. Run the chart's files/cleanup.sh afterwards to clear them, or
+install with `--set cleanupOnUninstall=true` to have a post-delete Job do it — which is safe only
+where this release exclusively owns those CRDs.
 {{- end }}

@@ -547,30 +547,54 @@ pre-install/pre-upgrade hooks execute.
   of its own legacy releases** (`gpustack-kueue`, `gpustack-node-feature-discovery`,
   `gpustack-csi-driver-nfs`, `gpustack-csi-driver-s3`), never unconditionally — the flag is
   blunt and would otherwise silently adopt a user's hand-rolled Kueue.
-- **`pre-upgrade` hook Job** (upgrade only; a fresh install needs neither step), running the
-  operator image, which bundles `helm` and `kubectl`:
+- **`pre-install,pre-upgrade` hook Job**, running the operator image, which bundles `helm`,
+  `kubectl`, `jq` and the packaged chart itself:
   1. Reap a stranded Kueue — list `*.kueue.x-k8s.io` CRDs carrying a `deletionTimestamp`; if any
      exist, delete the Kueue webhook configurations selected by
-     `app.kubernetes.io/instance=gpustack-kueue` **first** (their `failurePolicy: Fail` would
-     otherwise reject the finalizer-clearing patch), strip finalizers from the Terminating CRs
-     using each CRD's storage version, and wait up to 90 s for them to drain. No-op on a healthy
-     cluster.
-  2. Server-side-apply the vendored subchart `crds/` (NFD's `nfd-api-crds.yaml`). Helm applies
-     `crds/` only on install; an upgrade never touches them, so without this step a newly
-     enabled NFD subchart has no CRD for the parent's `NodeFeatureRule`, and NFD CRD schema
-     changes never land.
+     `app.kubernetes.io/instance in (<release>,gpustack-operator-device-manager,gpustack-kueue)`
+     **first** (their `failurePolicy: Fail` would otherwise reject the finalizer-clearing patch),
+     strip finalizers from the Terminating CRs using each CRD's storage version, and wait up to
+     90 s for them to drain. No-op on a healthy cluster. The drain poll asks for one CRD at a
+     time so it stays a table lookup: re-listing every CRD every three seconds would re-download
+     Kueue's schemas, megabytes a round.
+  2. Server-side-apply the vendored subchart `crds/` (NFD's `nfd-api-crds.yaml`), with
+     `--force-conflicts`, since Helm's client-side apply owns those fields until this hand-over.
+     Helm applies `crds/` only on install; an upgrade never touches them, so without this step a
+     newly enabled NFD subchart has no CRD for the parent's `NodeFeatureRule`, and NFD CRD schema
+     changes never land. The files come from the packaged chart inside the image, because a parent
+     chart's `.Files` **cannot** reach `charts/**` (verified: `.Files.Get` on a subchart path
+     returns empty and `.Files.Glob "charts/**"` matches nothing), so a ConfigMap of CRD YAML
+     rendered by the parent is not available. Skipped on install, where Helm has just applied them.
+- **Why the reap also runs on install.** A first install onto a cluster whose previous Kueue was
+  torn down mid-flight fails on its Terminating CRDs — forever, with no way forward — and this is
+  the live failure the worker's Go reaper was written for. Deleting that reaper (T15) while gating
+  the hook on upgrades would have lost the rescue, and in chart mode it never existed at all. The
+  cost is one Job on every fresh install, which reports having had nothing to do; the alternative,
+  rendering the Job only when a `lookup` finds a stranded CRD, buys nothing, since that lookup
+  costs the same cluster-wide CRD read the Job itself performs.
 - **`post-upgrade` hook Job** — runs only after the adoption succeeded:
   1. Delete the stale legacy release records (`kubectl delete secret -l owner=helm,name=<rel>`),
      never `helm uninstall`, which would delete the adopted resources. Otherwise `helm list`
      keeps showing releases that point at objects the parent now owns, and a later
      `helm uninstall gpustack-kueue` would destroy them.
   2. Prune objects that the legacy releases created but the new render does not contain.
-     `--take-ownership` never visits these, so they would linger unowned. The visibility
-     auth-reader RoleBinding is **not** such a case: both the old and the new render create it.
-- Hook plumbing: the Job honours `global.imagePullSecrets` and the resolved registry/namespace;
-  the image is overridable so an upgrade is not blocked by an unmirrored new tag. Hook RBAC
-  carries a **distinct, lower** `hook-weight` than the Job (-11 vs -10): same-weight hooks are
-  ordered by name, and `…-job` sorts before `…-sa`.
+     `--take-ownership` never visits these, so they would linger unowned. The rule needs no list
+     of names: all four subcharts label their objects `app.kubernetes.io/instance:
+     {{ .Release.Name }}`, and the adopting apply rewrites that label on everything the new
+     render resolves — so an object still carrying a legacy release's instance label afterwards is
+     exactly one the new render never mentions. `app.kubernetes.io/managed-by=Helm` is required
+     alongside it, so a hand-labelled object is never swept. **CRDs are excluded** (deleting one
+     takes every custom resource with it), as are PVs and PVCs, and namespaced kinds are swept
+     inside the release namespace only. The visibility auth-reader RoleBinding is **not** such a
+     case: both the old and the new render create it, and it lives in `kube-system`, which the
+     sweep never enters.
+- Hook plumbing: the Jobs honour `global.imagePullSecrets` and the resolved registry/namespace;
+  the image is overridable through `migrate.image` so an upgrade is not blocked by an unmirrored
+  new tag — at the cost that the CRDs the hook applies are then the ones vendored by the image it
+  does run. Hook RBAC and the script ConfigMap carry a **distinct, lower** `hook-weight` than the
+  Jobs (-11 vs -10) rather than relying on Helm's same-weight tie-break, which orders by name and
+  would happily schedule a Job before the ServiceAccount it runs as. `helm upgrade --no-hooks` is
+  the escape hatch, so no values switch is added for one.
 - AC (e2e): install the last released chart on kind, then
   `helm upgrade --take-ownership` → the upgrade succeeds, no ClusterQueue / Workload /
   ResourceFlavor is lost, NFD node labels survive, and `helm list -A` afterwards shows exactly
@@ -580,7 +604,8 @@ pre-install/pre-upgrade hooks execute.
 - AC: the NFD 0.19.0 CRD schema is present after the upgrade (proving hook step 2 ran); this is
   explicitly **not** something Helm does for us.
 - AC: re-running the upgrade is a no-op, and `helm list -A` still shows exactly one release.
-- AC: on a fresh install neither hook runs.
+- AC: on a fresh install the post-upgrade hook is not rendered at all, and the pre-install hook
+  reports having had nothing to reap.
 - AC: with the hook image set to a non-pullable tag, the upgrade aborts cleanly and the cluster
   is left in its pre-upgrade state.
 - AC (documented constraint): the migration assumes the parent release is named
@@ -594,7 +619,10 @@ pre-install/pre-upgrade hooks execute.
   part of the release. `files/cleanup.sh` keeps finalizer stripping, CRD draining and
   APIService/webhook removal; its per-release `helm uninstall` loop keeps targeting
   `gpustack-operator-device-manager` (now the image-mode release) plus a best-effort
-  compatibility pass over the other pre-upgrade release names.
+  compatibility pass over the other pre-upgrade release names. Its APIService and webhook sweep
+  matches the same `gpustack|kueue|nfd` name pattern as its CRD step, so Kueue's visibility
+  APIService and `kueue-*` webhook configurations are in scope; and it clears the objects a
+  failed F8 hook leaves behind, one of which is a binding to cluster-admin.
 - The chart NOTES and README warn that uninstalling now deletes the Kueue CRDs — and therefore
   every ClusterQueue and Workload — unless the release was installed with `kueue.enabled=false`.
   This is a deliberate widening of the blast radius relative to today, where `gpustack-kueue`
@@ -1279,28 +1307,50 @@ the baseline.
       `tar -tzf <image-extracted>/gpustack-operator-*.tgz | grep -c 'charts/kueue/Chart.yaml'` → `1`;
       plus the 3-node cluster comes up and `kubectl get nodes --no-headers | wc -l` → `3`
 
-- [ ] **T15 · Upgrade migration hooks**
+- [x] **T15 · Upgrade migration hooks**
       Blocked by: T13
       Owns: `deploy/gpustack-operator/chart/files/migrate-pre.sh`,
       `deploy/gpustack-operator/chart/files/migrate-post.sh`,
-      `deploy/gpustack-operator/chart/templates/migrate/**`
+      `deploy/gpustack-operator/chart/templates/migrate/**`, and — as built —
+      `deploy/gpustack-operator/chart/values.yaml` for the `migrate.image` override plus
+      `pkg/worker/kuberess/apps_kueue_reap.go`, its test and the call site in
+      `apps_gpustack_operator.go`
       Gate: review
       Acceptance: `pkg/worker/kuberess/apps_kueue_reap.go` and its test are deleted here, once
-      the hook covers both modes; a `pre-upgrade` Job reaps a stranded Kueue and server-side-applies the
-      vendored subchart `crds/`; a `post-upgrade` Job deletes the legacy release Secrets and
-      prunes adopted objects absent from the new render. RBAC at weight -11, Jobs at -10. Both
-      honour `global.imagePullSecrets` and an overridable image. Neither runs on a fresh install.
-      Verify: the upgrade e2e case (T18) plus
-      `.sbin/helm template x deploy/gpustack-operator/chart | grep -A2 'hook-weight'`
+      the hook covers both modes — which it does because the Go Helm client never disables hooks,
+      so the worker's own install of the bundled chart runs the same Jobs a `helm` invocation
+      would. The reap therefore had to move to `pre-install,pre-upgrade`, not upgrade alone: the
+      stranded-Kueue rescue it replaces ran before *any* install (see F8's note). The pre Job
+      reaps a stranded Kueue and, on an upgrade only, server-side-applies the vendored subchart
+      `crds/` out of the packaged chart in its own image, since a parent chart's `.Files` cannot
+      reach `charts/**`. The post-upgrade Job retires the legacy release records and prunes what
+      the new render does not contain, keyed on the instance label the adopting apply rewrites.
+      RBAC and the script ConfigMap at weight -11, Jobs at -10. Both Jobs honour
+      `global.imagePullSecrets` and `migrate.image`. The post Job is not rendered on a fresh
+      install at all.
+      Verify: `bash -n` on both scripts; `helm template` renders the pre Job with
+      `GPUSTACK_PHASE=install` and no post Job, `--is-upgrade` renders both with
+      `GPUSTACK_PHASE=upgrade`; hook weights read -11/-10; `go build ./...` after the reaper's
+      deletion; the upgrade e2e case (T18) is what exercises the scripts against a cluster
 
-- [ ] **T16 · Uninstall/cleanup + NOTES warning**
+- [x] **T16 · Uninstall/cleanup + NOTES warning**
       Blocked by: T13
       Owns: `deploy/gpustack-operator/chart/files/cleanup.sh`,
       `deploy/gpustack-operator/chart/templates/NOTES.txt`
-      Acceptance: `cleanup.sh` targets the image-mode release plus a compatibility pass over the
-      legacy names, and additionally removes the `*.visibility.kueue.x-k8s.io` APIServices;
-      NOTES warns that uninstall now deletes the Kueue CRDs.
-      Verify: on kind — install, `helm uninstall`, run `cleanup.sh`, then
+      Acceptance: `cleanup.sh`'s release loop already named the image-mode release and the four
+      legacy ones, so what it needed was reach: the APIService and webhook sweep now matches by
+      the same `gpustack|kueue|nfd` name pattern its CRD step has always used, which is what
+      reaches Kueue's `*.visibility.kueue.x-k8s.io` APIService and its `kueue-*` webhook
+      configurations — the old sweep grepped for `gpustack` alone and matched neither. It also
+      deletes what a **failed** migration hook leaves behind (T15's Jobs, ConfigMap,
+      ServiceAccount and its cluster-admin ClusterRoleBinding, which Helm keeps on failure on
+      purpose), selected by label and then by name so it never deletes the binding the cleanup
+      hook is itself running under. NOTES lists what the release now deploys, warns that
+      uninstalling it deletes the Kueue CRDs and therefore every ClusterQueue and Workload, and
+      points at `cleanup.sh` for what `helm uninstall` cannot reach.
+      Verify: `bash -n`; the rendered NOTES read back through Helm's Go SDK at defaults and with
+      `kueue.enabled=false` / `node-feature-discovery.enabled=false` / `cleanupOnUninstall=true`,
+      which covers every branch; on kind (T18) — install, `helm uninstall`, run `cleanup.sh`, then
       `kubectl get crd -o name | grep -cE 'gpustack|kueue|nfd'` → `0`
 
 - [ ] **T17 · Docs**
