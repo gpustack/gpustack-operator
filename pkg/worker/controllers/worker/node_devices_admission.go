@@ -456,9 +456,17 @@ func (r *NodeDevicesAdmissionReconciler) Reconcile(ctx context.Context, req ctrl
 
 	// Evaluate only a live, unfinished Workload that already holds a quota
 	// reservation; before reservation there is nothing to confirm, after eviction
-	// or finish the verdict is moot.
-	if !kueueworkload.HasQuotaReservation(wl) || kueueworkload.IsFinished(wl) || !kueueworkload.IsActive(wl) {
-		logger.V(3).Info("skip workload not holding quota reservation or already finished")
+	// or finish the verdict is moot. Eviction needs its own test because Kueue
+	// resets the checks to Pending and drops the reservation in two separate
+	// writes, so in between an evicted Workload still reports one. Overwriting that
+	// reset with a fresh verdict wedges the Workload for good: Kueue stops resetting
+	// checks while the eviction condition is set, its scheduler refuses to reserve
+	// quota while a check is Retry, and without a reservation this controller stops
+	// evaluating. Re-reserving quota clears the eviction condition, which is what
+	// re-opens evaluation.
+	if !kueueworkload.HasQuotaReservation(wl) || kueueworkload.IsEvicted(wl) ||
+		kueueworkload.IsFinished(wl) || !kueueworkload.IsActive(wl) {
+		logger.V(3).Info("skip workload not holding quota reservation, evicted, finished or deactivated")
 		return ctrl.Result{}, nil
 	}
 
