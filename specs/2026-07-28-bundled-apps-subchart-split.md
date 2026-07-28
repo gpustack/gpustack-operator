@@ -169,12 +169,24 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   | `kueue-legacy` | 0.17.8 | `github.com/kubernetes-sigs/kueue` release `kueue-0.17.8.tgz` |
   | `node-feature-discovery` | 0.19.0 | `kubernetes-sigs/node-feature-discovery` release `node-feature-discovery-chart-0.19.0.tgz` (note the `-chart-` infix) |
   | `csi-driver-nfs` | 4.13.2 | `kubernetes-csi/csi-driver-nfs` charts tree |
-  | `csi-driver-s3` | 0.43.7 | `thxcode.github.io/k8s-csi-s3/charts` |
+  | `csi-driver-s3` | 0.43.7 | `thxcode.github.io/k8s-csi-s3/charts` (tarball and `metadata.name` are both `csi-s3`; renamed by patch) |
 
 - `Chart.yaml` declares all five as `dependencies` with `repository: ""` — the Helm convention
   for "already present in `charts/`" — plus `condition`. Declaring them is mandatory:
   `condition` only applies to declared dependencies, and an undeclared tree under `charts/`
   always renders.
+- **A `condition` alone cannot default a dependency off.** Helm resets every declared dependency
+  to `enabled = true` before evaluating conditions, and a `condition` whose values path is
+  *absent* leaves it enabled. So `enabled: false` in `Chart.yaml` is inert, and the only place the
+  switches exist is the parent `values.yaml`. Verified by rendering: with the five declared and no
+  parent keys, a default template emits all 190 subchart objects; with five `enabled: false`
+  parent keys it emits none.
+- The `csi-driver-s3` tree's upstream `metadata.name` is **`csi-s3`**, so declaring
+  `name: csi-driver-s3` fails with "found in Chart.yaml, but missing in charts/ directory". A
+  one-line `chart-rename.patch` renames it, mirroring `kueue-legacy`, which keeps the directory,
+  the chart name, the values key and T4's patch directory all spelled the same. The `alias:`
+  alternative was rejected on evidence: an alias whose directory name differs from the chart name
+  breaks `helm dependency build`, i.e. `make lint chart`.
 - AC: running `make deps` twice leaves `git status --porcelain` empty.
 - AC: the unpacked, patched charts are committed (≈4.5 MB). `chart/.gitignore` keeps ignoring
   `charts/*.tgz` and `Chart.lock`, and the unpacked directories are tracked.
@@ -323,6 +335,12 @@ reused for the device-managers (today's `extractWorkerImage`, unchanged).
   are declared with `condition`. A patch renames the legacy chart's `metadata.name` to
   `kueue-legacy` so the two vendored trees are unambiguous; both set `fullnameOverride: kueue`
   so rendered object names are identical either way.
+- **The legacy line additionally needs `nameOverride: kueue`.** `fullnameOverride` fixes object
+  *names*, but `app.kubernetes.io/name` renders from `default .Chart.Name .Values.nameOverride`,
+  so the rename alone rewrites that label in 81 places — including the `kueue-controller-manager`
+  Deployment's **immutable** `selector`. Without it the legacy line is not merely mislabelled, it
+  cannot be upgraded into or adopted, which defeats the whole reason both lines keep identical
+  object names.
 - Both lines run the **same controller image**, `v0.18.4`. The CRD *kind list* is identical
   across the two charts and only the schema differs (`selectableFields`, which needs Kubernetes
   ≥1.31); their RBAC, webhook and Service templates also differ slightly, which is accepted
@@ -570,9 +588,15 @@ pre-install/pre-upgrade hooks execute.
   upgrade e2e must observe this window.
 - **`namespaceOverride` disappears** from the subchart values: as dependencies they render into
   the release namespace already.
-- **`helm-schema` runs with `--no-dependencies`**, so subchart values are not schema-validated
-  by our generator. A typo under `kueue:` is silently ignored by Helm. Mitigated by
-  golden-manifest tests over the keys the parent defaults.
+- **The generators must be told to ignore the vendored trees, and `--no-dependencies` is not
+  enough.** Once NFD is vendored, `helm-schema` **fails the build** — `error parsing comment of
+  key pullPolicy: unclosed schema block`, exit 1 — because it walks the subcharts' own
+  `values.yaml`. `--no-dependencies` does not prevent that walk; `--dependencies-filter=none`
+  does, and leaves the parent's generated schema byte-identical. Separately, `helm-docs` writes a
+  `README.md` into all five vendored trees unless given `--chart-to-generate=<parent>`. Both
+  flags live in `hack/lib/helm.sh`. The consequence for values is unchanged: subchart values are
+  not schema-validated by our generator, so a typo under `kueue:` is silently ignored by Helm —
+  mitigated by golden-manifest tests over the keys the parent defaults.
 - **`helm.Chart.SkippedCRDsInstallation` is a misnomer** — it sets Helm's `IncludeCRDs` (a
   render/manifest flag), not `SkipCRDs`, so NFD's `crds/` are installed today and will continue
   to be installed as a subchart. Behaviour is unchanged; the misnomer is out of scope.
@@ -614,7 +638,12 @@ pre-install/pre-upgrade hooks execute.
 - **Kueue's runtime-injected `caBundle` can be cleared by the adopting apply**, breaking its
   `failurePolicy: Fail` webhooks until the cert controller re-injects → the upgrade e2e measures
   the window and asserts recovery; if it is not self-healing, pin `enableCertManager` or add a
-  wait to the post-upgrade hook.
+  wait to the post-upgrade hook. Note the two paths are **not** symmetric: install-path adoption
+  goes through `UpdateThreeWayMerge` (`install.go:459`), which gives an unmanaged live field a
+  chance to survive, while upgrade-path adoption swaps only the validation function and keeps its
+  normal apply. So the risk is the worse one on `helm upgrade` — the documented chart-mode
+  migration — and an observation on one path does not carry over to the other. Image mode reaches
+  the **install** action whenever `nextStep` returns install or reinstall, so it can hit either.
 - **Subchart CRDs are never upgraded by Helm** → the pre-upgrade hook server-side-applies the
   vendored `crds/`; the F8 AC asserts the 0.19.0 schema is present afterwards.
 - **Concurrent worker boots break four ways** (non-retrying CRD/webhook applies, an unreachable
@@ -740,7 +769,8 @@ deploy/gpustack-operator/chart/
     └── csi-driver-s3/             # 0.43.7
 
 hack/
-├── lib/helm.sh                    # vendoring fn replaces the 3 `helm dependency update` sites
+├── lib/helm.sh                    # vendoring fn replaces the `helm dependency update` sites;
+│                                  # also carries the helm-docs/helm-schema subchart-ignore flags
 ├── deps.sh                        # calls it from mod()
 └── deploy/gpustack-operator/chart/charts/<name>/*.patch   # mirrors hack/staging/<dest>/
 
@@ -779,18 +809,20 @@ function gpustack::helm::vendor() {
     fi
     rm -rf "${dest}" || true
     curl --retry 3 --retry-all-errors --retry-delay 3 -sSfL "${url}" -o /tmp/chart.tgz
-    local top
-    top="$(tar -tzf /tmp/chart.tgz | head -1 | cut -d/ -f1)"
-    tar -xzf /tmp/chart.tgz --directory "$(dirname "${dest}")" --no-same-owner
-    mv "$(dirname "${dest}")/${top}" "${dest}"
-    rm -rf "${dest}/README.md"
+    # Every upstream tarball has exactly one top-level directory, so strip it rather
+    # than reading the name back through a `tar -tzf | head` pipeline, which would
+    # trip `set -o pipefail`.
+    mkdir -p "${dest}"
+    tar -xzf /tmp/chart.tgz --directory "${dest}" --strip-components 1 --no-same-owner
+    rm -f "${dest}/README.md"
     echo -n "${version}" >"${dest}/_VERSION_"
-    if [[ -d "${patch_dir}" ]]; then
-      gpustack::log::info "applying ${patch_dir} patches"
-      pushd "${dest}" >/dev/null 2>&1 &&
-        patch -p1 -N --forward --silent <"${patch_dir}"/*.patch &&
-        popd >/dev/null 2>&1
-    fi
+    # One `patch` call per file: a single `<"${patch_dir}"/*.patch` redirect is an
+    # `ambiguous redirect` error the moment a tree carries a second patch.
+    for p in "${patch_dir}"/*.patch; do
+      [[ -f "${p}" ]] || continue
+      gpustack::log::info "applying ${p}"
+      patch -p1 -N --forward --silent --directory "${dest}" <"${p}"
+    done
   done < <(
     cat <<EOF
 https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.4/kueue-0.18.4.tgz 0.18.4 ${charts_dir}/kueue
@@ -844,17 +876,29 @@ the baseline.
       Blocked by: None
       Owns: `hack/lib/helm.sh`, `hack/deps.sh`, `.gitattributes`,
       `deploy/gpustack-operator/chart/Chart.yaml`, `deploy/gpustack-operator/chart/.gitignore`,
+      `deploy/gpustack-operator/chart/values.yaml` (switch stanza only),
+      `deploy/gpustack-operator/chart/README.md`,
+      `deploy/gpustack-operator/chart/values.schema.json`,
       `deploy/gpustack-operator/chart/charts/**`,
-      `hack/deploy/gpustack-operator/chart/charts/kueue-legacy/chart-rename.patch`
+      `hack/deploy/gpustack-operator/chart/charts/{kueue-legacy,csi-driver-s3}/chart-rename.patch`
       Gate: review
-      Acceptance: `gpustack::helm::vendor` replaces all three `helm dependency update` call
-      sites; the five trees are vendored, patched and committed; `Chart.yaml` declares them with
-      `repository: ""` and `condition`, all five defaulting to `enabled: false` so the existing
-      runtime install path keeps working unchanged; the legacy tree's `metadata.name` is
-      `kueue-legacy`.
-      Verify: `make deps && make deps && git status --porcelain | wc -l` → `0`; then
-      `.sbin/helm template x deploy/gpustack-operator/chart --set kueue.enabled=true --kube-version 1.33.0 | grep -c 'name: kueue-controller-manager'` → `1`, and the same with
+      Acceptance: `gpustack::helm::vendor` replaces two of the three `helm dependency update` call
+      sites (`generate_chart` is T5's handoff, so `gpustack::helm::deps` stays defined until then);
+      the five trees are vendored, patched and committed; `Chart.yaml` declares them with
+      `repository: ""` and `condition`, and the parent `values.yaml` carries a **switch-only**
+      stanza — five `enabled: false` keys plus `fullnameOverride: kueue` on both Kueue lines and
+      `nameOverride: kueue` on `kueue-legacy` — because a `condition` alone cannot default a
+      dependency off. The legacy tree's `metadata.name` is `kueue-legacy` and the s3 tree's is
+      renamed from `csi-s3`. `helm-docs` gets `--chart-to-generate` and `helm-schema`
+      `--dependencies-filter=none`, without which the vendored trees gain generated READMEs and
+      `make generate chart` exits 1.
+      Verify: `make deps` twice leaves the `charts/**` checksum and the untracked-file list
+      identical (the `git status --porcelain | wc -l` → `0` form only holds after the trees are
+      committed); a default render emits **zero** subchart objects; then
+      `.sbin/helm template x deploy/gpustack-operator/chart --set kueue.enabled=true --kube-version 1.33.0 | grep -cE '^  name: kueue-controller-manager$'` → `1`, and the same with
       `--set kueue-legacy.enabled=true --kube-version 1.30.0` → `1` with zero `selectableFields`
+      (the loose `grep -c 'name: kueue-controller-manager'` reads `2` — it substring-matches
+      `…-metrics-service`)
 
 - [ ] **T4 · `global-image` patches on the five trees**
       Blocked by: T3
@@ -877,7 +921,7 @@ the baseline.
       `helm dependency update`. A golden test in `gen/chartvalues/testdata` pins the output.
       Verify: `go test ./gen/chartvalues/... && go run ./gen/chartvalues -stdout | head -40`
 
-- [ ] **T6 · `TakeOwnership` plumbing in `pkg/kubeapp/helm`**
+- [x] **T6 · `TakeOwnership` plumbing in `pkg/kubeapp/helm`**
       Blocked by: None
       Owns: `pkg/kubeapp/helm/chart.go`, `pkg/kubeapp/helm/client.go`,
       `pkg/kubeapp/helm/client_test.go`, `pkg/kubeapp/helm/chart_test.go`
@@ -912,8 +956,11 @@ the baseline.
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/_guards.tpl`
       Gate: review
-      Acceptance: the `kueue:` / `kueue-legacy:` blocks reproduce the baseline's Kueue values
-      (managerConfig, generated transformations, tolerations, resources, `fullnameOverride`,
+      Acceptance: the `kueue:` / `kueue-legacy:` blocks reproduce the baseline's Kueue values,
+      growing T3's switch stanza rather than replacing it — the `fullnameOverride: kueue` on both
+      lines and `nameOverride: kueue` on the legacy line are load-bearing for the immutable
+      Deployment selector and must survive
+      (managerConfig, generated transformations, tolerations, resources,
       `enableCertManager: false`, `enableVisibilityAPF: false`,
       `enableVisibilityAuthReaderRoleBinding: false`); both remain `enabled: false`.
       `_guards.tpl` fails on `<1.31` with the main line enabled, and on both lines enabled.

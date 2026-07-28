@@ -110,3 +110,35 @@ func Test_Client_nextStep(t *testing.T) {
 		})
 	}
 }
+
+// Test_Client_InstallWith pins the argument guards, which reject before the first
+// cluster call. The convergence loop itself needs a cluster and is covered by e2e.
+func Test_Client_InstallWith(t *testing.T) {
+	cases := []struct {
+		name    string
+		chart   *Chart
+		next    NextStepConditionFunc
+		wantErr string
+	}{
+		{
+			name:    "with invalid chart",
+			chart:   &Chart{},
+			next:    func(*helmrelease.Release) NextStepType { return NextStepDone },
+			wantErr: "validate chart: name is required",
+		},
+		{
+			name:    "without next",
+			chart:   &Chart{Name: "kueue", Release: "gpustack-kueue", Path: "kueue.tgz"},
+			wantErr: "next is required",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cli := &Client{}
+			got, err := cli.InstallWith(t.Context(), c.chart, c.next)
+			assert.EqualError(t, err, c.wantErr)
+			assert.Nil(t, got)
+		})
+	}
+}
