@@ -134,16 +134,3 @@ func TestKueueTransformations(t *testing.T) {
 		})
 	}
 }
-
-// TestNFDPciVendorIDs pins the generated block against its golden file and ties
-// its vendor ID list back to pkg/nodefeature.GetAcceleratablePciVendorIDs.
-func TestNFDPciVendorIDs(t *testing.T) {
-	got := nfdPciVendorIDs()
-	assertGolden(t, "nfd-pci-vendor-ids.yaml", got)
-
-	var doc struct {
-		PciVendorIDs []string `yaml:"pciVendorIDs"`
-	}
-	require.NoError(t, yaml.Unmarshal([]byte(got), &doc))
-	assert.Equal(t, nodefeature.GetAcceleratablePciVendorIDs(), doc.PciVendorIDs)
-}

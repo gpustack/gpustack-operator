@@ -113,8 +113,10 @@ whether the NFD subchart is enabled** — an operator running their own NFD stil
 for the scheduling chain to start.
 
 On top of that surface, the chart exposes a coherent HA story: replicas, PDB and topology
-spread for the worker, and passthrough of the same three knobs for Kueue, NFD and the CSI
-controllers, with a documented `values-ha.yaml` recipe.
+spread for the worker, and every knob its own chart supports for Kueue, the NFD master and the two
+CSI controllers — all declared in `values.yaml` at their single-replica defaults, so the surface is
+discoverable where a user already edits, with the walkthrough in the docs rather than in a recipe
+file to copy.
 
 ### User Stories
 
@@ -328,8 +330,9 @@ the CSI drivers, which today's Go path does honour.
   `kubeappyaml.ApplyWithRestClientGetter` hard-fails today when the CRD's RESTMapping is absent
   and nothing retries; it only works now because of the ordering inside `installKueue`.
 - `--disable-applications` accepts exactly `*`, `kueue`, `node-feature-discovery`,
-  `csi-driver-nfs`, `csi-driver-s3`, `device-manager`, `node-feature-rule`; an unknown name is
-  rejected at flag-parse time with the valid list.
+  `csi-driver-nfs`, `csi-driver-s3`, `device-manager`; an unknown name is rejected at flag-parse
+  time with the valid list. There is deliberately no name for the `NodeFeatureRule` — F5 makes
+  it unconditional.
 - AC: no Kueue/NFD/CSI chart-values template remains in `pkg/worker/kuberess`.
 - AC: `CSIProvisionerNFS` / `CSIProvisionerS3` driver-name constants stay in Go (other packages
   consume them) and are asserted to match the chart's `driver.name` values by a test.
@@ -356,14 +359,23 @@ the CSI drivers, which today's Go path does honour.
 **F5 — `NodeFeatureRule` owned by the operator chart**
 - The `gpustack-cpu-info` rule (CPU-identity annotations, the `has-acceleratable-devices`
   detection rule, and the negative `feature.gpustack.ai/acceleratable=false` marker) is rendered
-  by `chart/templates/nodefeaturerule.yaml` from generated values (F3), replacing the
-  `nodeFeatureRule` / `nodeFeatureRules` values that only the `thxCode` NFD fork understood.
-- The rule is gated by its own `nodeFeatureRule.enabled` (default `true`) and is **independent
-  of `node-feature-discovery.enabled`**: an operator running their own NFD still needs it, and
-  without it the scheduling chain never starts.
+  by `chart/templates/nodefeaturerule.yaml`, replacing the `nodeFeatureRule` /
+  `nodeFeatureRules` values that only the `thxCode` NFD fork understood.
+- The rule carries **no switch at all** and is **independent of
+  `node-feature-discovery.enabled`**: the scheduling chain starts at this rule, so a release
+  without it classifies no node and nothing downstream ever materializes — there is no
+  configuration in which omitting it is correct. An operator running their own NFD still gets
+  it. The consequence is deliberate: on a cluster with no NFD API whatsoever the install fails
+  on the missing CRD instead of silently deploying a chain that can never start.
+- Neither matcher list is stated twice. The PCI class prefixes are read from the NFD subchart's
+  own `worker.config.sources.pci.deviceClassWhitelist`; the vendor IDs are the values of
+  `manufacturers`, which already maps every managed manufacturer to its PCI vendor ID for the
+  device-managers and the worker's environment. So the rule matches exactly the devices NFD was
+  told to label, for exactly the vendors this release manages, and a manufacturer added to
+  `manufacturers` is detected with no second edit.
 - AC: `helm template --set node-feature-discovery.enabled=false` still renders the
-  `NodeFeatureRule`; `--set nodeFeatureRule.enabled=false` is the escape hatch for a cluster
-  with no NFD API at all.
+  `NodeFeatureRule`, and no value can remove it.
+- AC: the rendered vendor list equals the sorted PCI vendor IDs of `manufacturers`.
 - AC: `helm install` with the NFD subchart enabled succeeds in one pass — Helm applies `crds/`
   before building capabilities and rendering templates, so the CR's CRD exists.
 - AC: `helm upgrade` that newly enables the NFD subchart also succeeds — Helm never applies
@@ -438,17 +450,46 @@ the CSI drivers, which today's Go path does honour.
   cluster must still be able to schedule 3 replicas) and becomes overridable via
   `worker.affinity`; node spread is therefore expressed by `topologySpreadConstraints` in the
   HA recipe, not by anti-affinity.
-- Kueue: reachable natively as `kueue.controllerManager.{replicas,podDisruptionBudget,
-  topologySpreadConstraints,nodeSelector,tolerations}`; documented in the parent values, all
-  left at their upstream single-replica defaults.
-- NFD and the CSI controllers: the same knobs exposed and documented (free passthrough), also
-  left at their defaults.
+- Every HA knob is **declared in `values.yaml`** at its component's default, so a user finds the
+  whole surface in the file they already edit and needs no recipe file to copy from. This is a
+  deliberate exception to F2's surface rule — these keys restate a subchart default instead of
+  differing from it — and it is priced: a subchart bump that changes one of these defaults is
+  pinned to the old value until the parent block is re-aligned, which `chart_staging`'s drift
+  check does not catch because the value is legal either way. Accepted because a knob a user
+  cannot find is a knob that does not exist.
+- Kueue: `kueue.controllerManager.{replicas,podDisruptionBudget.{enabled,minAvailable},
+  topologySpreadConstraints}`. Its spread constraints render verbatim, so a `DoNotSchedule` spread
+  needs its own `labelSelector` — stated in the key's own documentation.
+- NFD master: `node-feature-discovery.master.{replicaCount,podDisruptionBudget.{enable,
+  minAvailable}}` — NFD spells the switch `enable`, and above one replica its chart adds
+  `-enable-leader-election` itself. NFD renders **no** topology spread constraints, so spread goes
+  through `master.affinity`, which replaces NFD's own control-plane node preference rather than
+  adding to it. The NFD **gc** is left alone: a stalled garbage collector only delays cleanup.
+- The CSI controllers: `csi-driver-{nfs,s3}.controller.{replicas,strategyType}`. Both charts run
+  their sidecars with `--leader-election`, so replicas do buy failover, but neither renders a PDB
+  or spread constraints and both honour `controller.affinity` **only when it carries
+  `nodeSelectorTerms`** — a pod anti-affinity is silently dropped, so replicas may share a node.
+  `strategyType` is exposed because the charts default to `Recreate`, which takes every replica
+  down on upgrade and gives back the failover `replicas` just bought. All three limitations are
+  stated in the values file rather than patched around: a provisioner outage delays volume
+  operations while mounted volumes keep working, since the mounting side is the node DaemonSet.
+- Both CSI drivers also declare the placement surface of **both** their workloads —
+  `controller.{name,dnsPolicy,affinity,nodeSelector,priorityClassName,tolerations}` and the same
+  for `node` — at each chart's own defaults. The node DaemonSet has no replicas or budget to
+  configure, but it is the mounting side, so which nodes it runs on and with what DNS policy is
+  exactly what an operator needs to reach; leaving those keys undeclared while documenting
+  `controller.affinity` in prose would have been the worst of both. Two asymmetries are stated
+  where they are: the S3 chart renders no `dnsPolicy` for its controller, so no key exists for
+  it, and `node.affinity` is rendered as given while `controller.affinity` is honoured only when
+  it carries `nodeSelectorTerms`.
 - Leader election is already **on by default** for the worker (`pkg/manager/option.go`
   `KubeLeaderElection: true`, ID overridden to `worker.gpustack.ai` in `pkg/worker/option.go`);
   no flag is passed and none is added. Kueue's `managerConfig` already sets `leaderElect: true`.
   Both are asserted, not introduced.
-- The HA recipe ships as `values-ha.yaml` at the **chart root**, not under `ci/` — `.helmignore`
-  excludes `ci/` from the packaged tgz.
+- **No HA recipe file ships with the chart.** Every knob being declared in `values.yaml` makes a
+  second file redundant: it would only restate keys the user can now see and read about in place,
+  and it would drift from them. The HA walkthrough — which knobs, which values, how many nodes —
+  lives in `docs/operation/high-availability.md` (T17), which `values.yaml` points at.
 - Concurrent-start correctness. `Prepare()` runs before leader election and four of its steps
   genuinely race with N replicas. None needs a distributed lock; each needs a targeted fix:
   1. **CRD and webhook-configuration applies do not retry conflicts.** `pkg/kubeclientset`'s
@@ -472,7 +513,7 @@ the CSI drivers, which today's Go path does honour.
      already-`deployed` release at the expected values as converged; the existing `nextStep`
      DeepEqual path covers the rest.
   Settings-Secret note churn (a fresh UUID per boot) is benign and left alone.
-- AC (e2e, 3-node kind): `-f values-ha.yaml` with `worker.replicas=3` and
+- AC (e2e, 3-node kind): an HA values file written by the test with `worker.replicas=3` and
   `kueue.controllerManager.replicas=3` → all six pods Ready; exactly one `worker.gpustack.ai`
   Lease holder and one `c1f6bfd2.kueue.x-k8s.io` Lease holder; spread asserted through the
   topology-spread constraint, not through `preferred` anti-affinity.
@@ -850,7 +891,11 @@ kind create cluster --name gpustack-ha --config .github/configs/kind-config-ha.y
 
 # Chart mode
 helm install gpustack-operator deploy/gpustack-operator/chart -n gpustack-system \
-  --create-namespace -f deploy/gpustack-operator/chart/values-ha.yaml
+  --create-namespace
+# ... highly available (the knobs are all declared in values.yaml; see
+# docs/operation/high-availability.md), passed as the user's own values file
+helm install gpustack-operator deploy/gpustack-operator/chart -n gpustack-system \
+  --create-namespace -f my-ha-values.yaml
 
 # One-time migration from a pre-subchart release (chart mode)
 helm upgrade gpustack-operator deploy/gpustack-operator/chart -n gpustack-system --take-ownership
@@ -868,8 +913,7 @@ mode) and the `gpustack-operator-e2e` skill (scheduling chain).
 ```
 deploy/gpustack-operator/chart/
 ├── Chart.yaml                     # + dependencies (repository: "") + conditions
-├── values.yaml                    # + per-subchart blocks; generated derived values
-├── values-ha.yaml                 # HA recipe — chart ROOT, because .helmignore excludes ci/
+├── values.yaml                    # + per-subchart blocks; HA knobs; generated derived values
 ├── values.schema.json             # generated
 ├── README.md                      # generated
 ├── files/
@@ -1106,41 +1150,79 @@ the baseline.
       `rm -rf deploy/gpustack-operator/chart/charts/kueue && make deps` reproduces the committed
       tree byte for byte
 
-- [ ] **T9 · NFD values block + `NodeFeatureRule` template**
+- [x] **T9 · NFD values block + `NodeFeatureRule` template**
       Blocked by: T8
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
-      `deploy/gpustack-operator/chart/templates/nodefeaturerule.yaml`
+      `deploy/gpustack-operator/chart/templates/nodefeaturerule.yaml`, and — as built —
+      `gen/chartvalues/**` with its test and golden file, plus `pkg/worker/kuberess/apps.go`,
+      `apps_gpustack_operator.go` and `chart_test.go`: the `nfd-pci-vendor-ids` generator block
+      is **deleted**, because `manufacturers` already carries every vendor ID the rule needs and
+      a generated second copy could only drift from it. What the generator guaranteed —
+      chart defaults that match `pkg/nodefeature` — is now asserted by
+      `TestChartManufacturersMatchNodeFeature` instead. The two Go files lose the
+      `node-feature-rule` switch F5 retired, and with it the overlay's `nodeFeatureRule` block.
       Acceptance: the `node-feature-discovery:` block reproduces the baseline's NFD values apart
       from F5's two deliberate divergences — it adds `fullnameOverride: node-feature-discovery`
       and it does **not** carry `master.config.nodeFeatureNamespaceSelector`; the
-      `NodeFeatureRule` renders from the generated matchers, is gated only by
-      `nodeFeatureRule.enabled` (default true), and renders even with the NFD subchart disabled.
+      `NodeFeatureRule` carries no switch, renders even with the NFD subchart disabled, and
+      takes its vendor IDs from `manufacturers`.
+      The rule's PCI class matchers are **read from** the subchart's own
+      `worker.config.sources.pci.deviceClassWhitelist` rather than restated: a rule can only
+      match devices NFD was told to label, and a disabled subchart's values stay readable from
+      the parent (verified), so the one list survives either switch. Applying F2's surface rule
+      leaves the block at the keys that genuinely differ from NFD 0.19.0 — the mirrored image,
+      the tolerate-everything tolerations, the managed-by annotations, the worker's
+      source/label configuration, and the `restrictions` block, which restates NFD's own
+      defaults on purpose because F5's trust-surface note makes them the levers.
       Verify: `.sbin/helm template x deploy/gpustack-operator/chart --set node-feature-discovery.enabled=false | grep -c 'kind: NodeFeatureRule'` → `1`; the enabled render diffed against the baseline slice
 
-- [ ] **T10 · CSI values blocks (nfs + s3)**
+- [x] **T10 · CSI values blocks (nfs + s3)**
       Blocked by: T9
-      Owns: `deploy/gpustack-operator/chart/values.yaml`
-      Acceptance: both `csi-driver-*` blocks reproduce the baseline (driver names, tolerations,
-      priority classes, `storageClass.create: false`, `secret.create: false`). A Go test asserts
-      `CSIProvisionerNFS` / `CSIProvisionerS3` (now in `kuberess/alias.go`) equal the chart's
-      `driver.name` values, and T12's deferred defaults-parity render lands here too.
-      Verify: rendered output diffed against the baseline slices; `go test ./pkg/worker/kuberess/ -run TestCSIDriverNamesMatchChart`
+      Owns: `deploy/gpustack-operator/chart/values.yaml`,
+      `pkg/worker/kuberess/chart_test.go`
+      Acceptance: both `csi-driver-*` blocks reproduce the baseline, which under F2's surface
+      rule is a much shorter list than this task assumed: the vendored trees already default to
+      the baseline's tolerations, priority classes, resource names, health ports,
+      `storageClass.create: false`, `secret.create: false` and `volumeSnapshotClass.create:
+      false`, so only the gpustack driver names, the mirrored images, `rbac.name` and
+      `nodeDriverRegistrar.livenessProbe.enabled: false` are stated. The NFS driver image stays
+      pinned at v4.13.0, the tag this operator has always run and mirrored, rather than
+      following the chart's 4.13.2 — a bump would need a new mirror and is a Non-Goal. Every other
+      `csi-driver-nfs` sidecar tag is spelled out too, at the value chart 4.13.2 ships, so the tags
+      this release pulls are all readable in one place and a subchart bump cannot move one without
+      showing up in the diff — the same shape `csi-driver-s3` already has, where the chart stores
+      whole `name:tag` references. `externalSnapshotter` stays absent: it is off, and turning it on
+      needs a mirror first. A Go test
+      asserts `CSIProvisionerNFS` / `CSIProvisionerS3` (now in `kuberess/alias.go`) equal the
+      chart's `driver.name` values, and T12's deferred defaults-parity render lands here too,
+      rendering both passes through Helm's own Go SDK so it needs no `helm` binary.
+      Verify: rendered output diffed against the baseline slices; `go test ./pkg/worker/kuberess/ -run 'TestCSIDriverNamesMatchChart|TestChartDefaultsMatchImageModeOverlay'`
 
-- [ ] **T11 · Worker HA knobs + `worker.disableApplications`**
+- [x] **T11 · HA knobs (worker + every subchart controller) + `worker.disableApplications`**
       Blocked by: T10
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/worker/poddisruptionbudget.yaml`,
-      `deploy/gpustack-operator/chart/templates/worker/deployment.yaml`,
-      `deploy/gpustack-operator/chart/values-ha.yaml`
-      Acceptance: the Kueue HA passthrough keys F7 promises to document —
-      `kueue.controllerManager.{replicas,podDisruptionBudget,topologySpreadConstraints,nodeSelector}`
-      — land here rather than in T8, where they would have been keys duplicating an upstream
-      default for no purpose. Plus `worker.podDisruptionBudget.{enabled,minAvailable}` (default off),
-      `worker.topologySpreadConstraints`, `worker.affinity` override, and
-      `worker.disableApplications` (default `["*"]`) rendered into the container args.
-      `values-ha.yaml` at the chart root sets three worker + three Kueue replicas, both PDBs and
-      a `DoNotSchedule` topology-spread constraint. All defaults stay at one replica, PDBs off.
-      Verify: `.sbin/helm template x deploy/gpustack-operator/chart | grep -c 'kind: PodDisruptionBudget'` → `0`; with `-f values-ha.yaml` → `2` and `replicas: 3` on both Deployments
+      `deploy/gpustack-operator/chart/templates/worker/deployment.yaml`
+      Acceptance: the worker gets `podDisruptionBudget.{enabled,minAvailable}` (default off), its
+      own PDB template, `topologySpreadConstraints` (an entry that omits `labelSelector` is given
+      the worker's own, so no hand-written selector can be broken by a non-default release name)
+      and an `affinity` override for the deliberately-`preferred` default anti-affinity. **Every
+      subchart controller's HA knobs are declared in `values.yaml` too**, at each chart's own
+      default, per F7's exception to the surface rule: `kueue.controllerManager.{replicas,
+      podDisruptionBudget.{enabled,minAvailable},topologySpreadConstraints}`,
+      `node-feature-discovery.master.{replicaCount,podDisruptionBudget.{enable,minAvailable}}`, and
+      `csi-driver-{nfs,s3}.controller.{replicas,strategyType}`. Each key's documentation states what
+      its chart cannot do — Kueue's spread needs a hand-written `labelSelector`, NFD renders no
+      spread at all (use `master.affinity`, which replaces its control-plane preference), the CSI
+      controllers render neither a PDB nor spread and drop a pod anti-affinity unless it carries
+      `nodeSelectorTerms`. No `values-ha.yaml`: declaring the knobs where the user already reads
+      makes a recipe file redundant, and the walkthrough belongs in the docs (T17). Plus
+      `worker.disableApplications` (default `["*"]`) rendered into the container args, replacing
+      the conditional `--disable-applications=device-manager` that let chart mode install the
+      other three at runtime — which is what made the enabled subcharts collide. Adding the knobs
+      at their own defaults leaves the default render **byte-identical**, which is the check that
+      they were restated faithfully.
+      Verify: `.sbin/helm template x deploy/gpustack-operator/chart` byte-identical to the pre-change render, and `grep -c 'kind: PodDisruptionBudget'` → `0`; with an HA values file → `3` PDBs, `replicas: 3` on worker/Kueue/NFD-master, `2` on both CSI controllers, `-enable-leader-election` on the NFD master, `minAvailable: "50%"` accepted by the generated schema
 
 - [x] **T12 · Collapse `kuberess` to the bundled-chart installer**
       Blocked by: T6, T10
@@ -1230,8 +1312,13 @@ the baseline.
       `NodeDevicesAdmissionReconciler` bullet, which still says `installKueue` applies the
       AdmissionCheck "right after the Kueue install"; T12 moves that apply into `Prepare()`, so
       the sentence goes stale. Also: development (vendoring and
-      patch workflow, mirror-first), new `docs/operation/high-availability.md` (including the
-      single-URL webhook restriction) and `docs/migration/to-subcharts.md` (the
+      patch workflow, mirror-first), new `docs/operation/high-availability.md` — the walkthrough
+      `values.yaml` already points at, so until this task lands that reference dangles: which knob
+      to raise per component (worker, `kueue.controllerManager`, `node-feature-discovery.master`,
+      both `csi-driver-*.controller`), the values to give them, the node count a hard spread needs,
+      and what each subchart cannot do (no spread for NFD, no PDB or spread for the CSI
+      controllers, `Recreate` by default) — including the
+      single-URL webhook restriction; and `docs/migration/to-subcharts.md` (the
       `--take-ownership` command, the required release name **and namespace** — Kueue's
       `managedJobsNamespaceSelector` hard-codes `gpustack-system` because Helm cannot template a
       subchart value — and the widened uninstall blast radius). Chart README regenerated, never hand-edited.
@@ -1313,11 +1400,12 @@ concrete test names to be added after the implementation PR merges.
 - Global pull secrets on every pod spec.
 - Kueue CRD version guard: the render at `--kube-version 1.33.12` carries `selectableFields`,
   the one at `1.29.14` does not, and the two differ in nothing else.
-- `NodeFeatureRule` renders with the NFD subchart disabled and disappears only with
-  `nodeFeatureRule.enabled=false`.
+- `NodeFeatureRule` renders with the NFD subchart disabled, no value removes it, and its vendor
+  matcher equals the sorted PCI vendor IDs of `manufacturers`.
 - No RoleBinding is rendered into `kube-system`.
-- HA recipe: `-f values-ha.yaml` yields two PDBs, three replicas each, and a `DoNotSchedule`
-  topology-spread constraint.
+- HA knobs: an HA values file yields three PDBs (worker, Kueue, NFD master), the requested replica
+  count on all five controllers, a `DoNotSchedule` spread on the worker and Kueue, and a default
+  render that is byte-identical to the one before the knobs were declared.
 - Offline guarantee: `helm template` **and** `helm lint` from a fresh clone with networking
   disabled.
 - Vendoring hygiene: `make lint chart` / `make test chart` leave the tree clean and `charts/`
@@ -1336,7 +1424,7 @@ On a local 3-node kind cluster, via the two e2e skills.
 - **Concurrent image-mode startup** — three workers boot simultaneously: exactly one release in
   `deployed`, no replica CrashLoops, exactly one `gpustack-cert-*` Secret on a fresh cluster, and no transient
   AdmissionCheck apply failure in the logs.
-- **HA failover** — `-f values-ha.yaml`; six pods Ready, one Lease holder each, spread satisfied
+- **HA failover** — an HA values file the case writes itself; six pods Ready, one Lease holder each, spread satisfied
   via the topology-spread constraint; delete the worker leader → a standby takes the Lease within
   60 s and the chain still materializes; repeat for the Kueue leader; PDBs allow ≥1 disruption.
 - **Upgrade adoption, negative** — install the last released chart, then `helm upgrade` **without**

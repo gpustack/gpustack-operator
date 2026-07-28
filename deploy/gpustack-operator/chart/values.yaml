@@ -60,10 +60,15 @@ image:
 
 # -- Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the
 # single source for the worker `--manufacturer` list, the per-manufacturer device-manager
-# DaemonSets, and the GPUSTACK_<MANUFACTURER>_PCI_VENDOR_ID environment variable propagated
-# to both the worker and the device-managers. The manufacturer list is derived from these
-# keys (sorted for stable rendering); each device-manager DaemonSet only schedules on nodes
-# labelled by NFD with the matching PCI vendor.
+# DaemonSets, the GPUSTACK_<MANUFACTURER>_PCI_VENDOR_ID environment variable propagated
+# to both the worker and the device-managers, and the vendor IDs the `gpustack-cpu-info`
+# NodeFeatureRule detects. The manufacturer list is derived from these keys (sorted for
+# stable rendering); each device-manager DaemonSet only schedules on nodes labelled by NFD
+# with the matching PCI vendor, so adding an entry here is all it takes for a new vendor's
+# devices to be labelled, detected and given a device-manager. The defaults are every
+# manufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema
+# requires; a cluster that carries only some of them runs the other device-managers empty,
+# since each one only schedules where its vendor label exists.
 manufacturers:
   amd: "1002"
   ascend: "19e5"
@@ -74,6 +79,15 @@ manufacturers:
   mthreads: "1ed5"
   nvidia: "10de"
   thead: "1ded"
+
+# High availability. Every control-plane component this chart deploys elects a leader, so extra
+# replicas stand by instead of sharing the work: they buy failover, not throughput. A highly
+# available install raises the replica count of each one and enables the disruption budget that
+# goes with it — `worker`, `kueue.controllerManager`, `node-feature-discovery.master`, and the
+# `controller` of both CSI drivers. Spreading those replicas across nodes is per-component and
+# each key below says what its component supports; the cluster needs as many schedulable nodes as
+# the largest replica count for a hard spread to be satisfiable. Everything else here is a
+# DaemonSet, one pod per node already. docs/operation/high-availability.md walks through it.
 
 worker:
   # -- Deploy the worker (control plane). Disable to deploy only the device-managers.
@@ -95,8 +109,27 @@ worker:
       name: ""
       # -- Issuer kind ("Issuer" or "ClusterIssuer"); only used when `issuer.name` is set.
       kind: Issuer
-  # -- Number of operator (control plane) replicas.
+  # -- Number of operator (control plane) replicas. Leader election is always on, so extra
+  # replicas stand by; the reconcilers only ever run in one of them.
   replicas: 1
+  # -- Applications the worker must not install at runtime, or `*` for all of them. This chart
+  # deploys every one of them itself, so the default takes the worker out of that business
+  # entirely; name individual applications to hand some back to it. The value is templated
+  # rather than appended through `extraArgs` because the flag accumulates across occurrences,
+  # so a second one could only ever disable more. Accepted names: `*`, `kueue`,
+  # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.
+  disableApplications:
+    - "*"
+  podDisruptionBudget:
+    # -- Create a PodDisruptionBudget for the worker. Leave it off on a single-replica install,
+    # where it would only block node drains.
+    enabled: false
+    # @schema
+    # type: [integer, string]
+    # @schema
+    # -- Minimum number of worker pods that must stay available, as a count or a percentage.
+    # Keep it below `replicas`, or no node can ever be drained.
+    minAvailable: 1
   # -- Secure serving port of the worker container.
   securePort: 31443
   # -- Per-worker image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall
@@ -134,6 +167,18 @@ worker:
     - key: "CriticalAddonsOnly"
       operator: "Exists"
       effect: "NoSchedule"
+  # @schema
+  # type: array
+  # items:
+  #   type: object
+  # @schema
+  # -- Topology spread constraints for the worker. This is where node spread belongs: the
+  # default anti-affinity is only `preferred`, on purpose, so three replicas still schedule on a
+  # two-node cluster. An entry that omits `labelSelector` gets the worker's own.
+  topologySpreadConstraints: []
+  # -- Affinity for the worker, replacing the default `preferred` pod anti-affinity that keeps
+  # replicas off one node without ever making one unschedulable.
+  affinity: {}
   # -- Extra command-line arguments appended to the worker container args.
   extraArgs: []
   # -- Extra environment variables for the worker, as a name/value map.
@@ -181,6 +226,31 @@ kueue:
   # that this subchart and the runtime install render identical resource names.
   fullnameOverride: kueue
   controllerManager:
+    # -- Number of Kueue controller manager replicas. `managerConfig` below elects a leader, so
+    # extra replicas stand by — but every one of them serves the admission webhook, and that is
+    # what a highly available install buys: with a single replica, losing its node blocks Pod
+    # creation in every namespace Kueue manages until it is rescheduled.
+    replicas: 1
+    podDisruptionBudget:
+      # -- Create a PodDisruptionBudget for the Kueue controller manager. Enable it together with
+      # `replicas` above; on a single replica it would only block node drains.
+      enabled: false
+      # @schema
+      # type: [integer, string]
+      # @schema
+      # -- Minimum number of Kueue controller manager pods that must stay available, as a count or
+      # a percentage. Keep it below `replicas`, or no node can ever be drained.
+      minAvailable: 1
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Topology spread constraints for the Kueue controller manager, rendered as given. Unlike
+    # the worker's, these carry no selector of their own, so a `DoNotSchedule` spread across nodes
+    # needs `labelSelector: {matchLabels: {app.kubernetes.io/name: kueue, control-plane:
+    # controller-manager}}` spelled out.
+    topologySpreadConstraints: []
     # @schema
     # type: array
     # items:
@@ -456,17 +526,360 @@ kueue:
 
 # -- [Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery)
 # subchart (chart 0.19.0).
+# @default -- see the `node-feature-discovery.*` keys below
 node-feature-discovery:
   # -- Deploy the bundled Node Feature Discovery.
   enabled: true
+  # -- Name the NFD resources after a fixed "node-feature-discovery" prefix instead of the
+  # release, so that this subchart and an NFD installed by anything else render identical
+  # resource names. Without it the two run side by side, each labelling the same nodes.
+  fullnameOverride: node-feature-discovery
+  image:
+    # -- NFD image repository; the master, the worker and the gc all run it.
+    repository: docker.io/gpustack/mirrored-node-feature-discovery
+  master:
+    # -- Number of NFD master replicas. The master is what turns a device-manager's detections into
+    # node labels, so while it is down no node is ever (re)classified and the scheduling chain
+    # stalls for new or changed nodes. Above one, NFD's own chart adds `-enable-leader-election`
+    # for you; the standbys watch without writing. NFD's templates render no topology spread
+    # constraints, so spreading these replicas across nodes means setting `master.affinity` — which
+    # replaces NFD's own preference for control-plane nodes rather than adding to it.
+    replicaCount: 1
+    podDisruptionBudget:
+      # -- Create a PodDisruptionBudget for the NFD master. Enable it together with `replicaCount`
+      # above; on a single replica it would only block node drains. NFD spells this key `enable`,
+      # not `enabled`.
+      enable: false
+      # @schema
+      # type: [integer, string]
+      # @schema
+      # -- Minimum number of NFD master pods that must stay available, as a count or a percentage.
+      # Keep it below `replicaCount`, or no node can ever be drained.
+      minAvailable: 1
+    # -- Annotations added to the NFD master pods.
+    annotations:
+      gpustack.ai/managed: "true"
+    # -- Annotations added to the NFD master Deployment.
+    deploymentAnnotations:
+      gpustack.ai/managed: "true"
+    serviceAccount:
+      # -- Annotations added to the NFD master ServiceAccount.
+      annotations:
+        gpustack.ai/managed: "true"
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations for the NFD master. Defaults tolerate every taint, so labelling keeps
+    # working wherever the control plane runs.
+    tolerations:
+      - operator: "Exists"
+    config:
+      # -- What the NFD master is allowed to write. Every value here restates an NFD default,
+      # stated because the whole chain depends on it: labels, taints, annotations and extended
+      # resources all stay enabled, an existing label may be overwritten, and the labels a
+      # NodeFeature asks for are honoured — that last one is how a device-manager's detections
+      # reach its node.
+      #
+      # `nodeFeatureNamespaceSelector` is deliberately absent. Pinned to one namespace it makes
+      # the master ignore every NodeFeature created anywhere else, which is exactly what taking
+      # over a cluster's existing NFD must not do: a vendor GPU operator keeps its NodeFeatures
+      # in its own namespace, and they are the features being adopted. Unset means every
+      # namespace, so — together with the two permissive keys above — a NodeFeature anywhere can
+      # influence node labels; `denyNodeFeatureLabels` is the lever that tightens it.
+      restrictions:
+        disableLabels: false
+        disableTaints: false
+        disableAnnotations: false
+        disableExtendedResources: false
+        allowOverwrite: true
+        denyNodeFeatureLabels: false
+  worker:
+    # -- Annotations added to the NFD worker pods.
+    annotations:
+      gpustack.ai/managed: "true"
+    # -- Annotations added to the NFD worker DaemonSet.
+    daemonsetAnnotations:
+      gpustack.ai/managed: "true"
+    serviceAccount:
+      # -- Annotations added to the NFD worker ServiceAccount.
+      annotations:
+        gpustack.ai/managed: "true"
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations for the NFD worker. Defaults tolerate every taint, so a node is discovered
+    # whatever it is tainted for.
+    tolerations:
+      - operator: "Exists"
+    config:
+      core:
+        # -- Feature sources the worker collects. `custom` is what makes the chart's
+        # `gpustack-cpu-info` NodeFeatureRule evaluate.
+        labelSources:
+          - "cpu"
+          - "pci"
+          - "custom"
+        # -- Only the labels this chart consumes are published, so NFD does not cover the nodes
+        # in features nothing reads.
+        labelWhiteList: '^(pci-|cpu-model\.|acceleratable)'
+      sources:
+        pci:
+          # -- PCI device classes to label, as class-code prefixes: display controllers,
+          # processing accelerators and the co-processors accelerators present as (see
+          # https://admin.pci-ids.ucw.cz/read/PD). The `gpustack-cpu-info` NodeFeatureRule reads
+          # this same list, so it matches exactly the devices NFD was told to label.
+          deviceClassWhitelist:
+            - "02"
+            - "03"
+            - "0b"
+            - "12"
+          # -- Device fields to label. `vendor` is what the NodeFeatureRule matches the managed
+          # `manufacturers`' PCI vendor IDs against.
+          deviceLabelFields:
+            - vendor
+  gc:
+    # -- Annotations added to the NFD gc pods.
+    annotations:
+      gpustack.ai/managed: "true"
+    # -- Annotations added to the NFD gc Deployment.
+    deploymentAnnotations:
+      gpustack.ai/managed: "true"
+    serviceAccount:
+      # -- Annotations added to the NFD gc ServiceAccount.
+      annotations:
+        gpustack.ai/managed: "true"
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations for the NFD gc. Defaults tolerate every taint, so stale NodeFeature and
+    # NodeResourceTopology objects are collected wherever the control plane runs.
+    tolerations:
+      - operator: "Exists"
 
 # -- [csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart
 # 4.13.2).
+# @default -- see the `csi-driver-nfs.*` keys below
 csi-driver-nfs:
   # -- Deploy the bundled NFS CSI driver.
   enabled: true
+  driver:
+    # -- CSI driver name. Namespaced to gpustack so this driver coexists with a cluster's own
+    # csi-driver-nfs, and matched by `kuberess.CSIProvisionerNFS`, which the worker writes into
+    # the StorageClasses it provisions.
+    name: nfs.csi.gpustack.ai
+  # -- Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is
+  # stated rather than inherited from the chart, so what this release pulls is readable here and a
+  # subchart bump cannot move an image without the diff showing it. The driver tag stays at v4.13.0
+  # — the image this operator has always run and mirrored — rather than following the chart's
+  # 4.13.2; the sidecar tags are the ones chart 4.13.2 ships. The `externalSnapshotter` image is
+  # absent because that component is off, and turning it on would need a mirror first.
+  image:
+    baseRepo: docker.io
+    nfs:
+      repository: /gpustack/mirrored-csi-nfs-driver
+      tag: v4.13.0
+    csiProvisioner:
+      repository: /gpustack/mirrored-csi-provisioner
+      tag: v6.1.0
+    csiResizer:
+      repository: /gpustack/mirrored-csi-resizer
+      tag: v2.0.0
+    csiSnapshotter:
+      repository: /gpustack/mirrored-csi-snapshotter
+      tag: v8.4.0
+    livenessProbe:
+      repository: /gpustack/mirrored-csi-livenessprobe
+      tag: v2.17.0
+    nodeDriverRegistrar:
+      repository: /gpustack/mirrored-csi-node-driver-registrar
+      tag: v2.15.0
+  controller:
+    # -- Number of NFS controller (provisioner) replicas. Every sidecar runs with
+    # `--leader-election`, so extra replicas stand by. Losing the controller delays volume
+    # provisioning, resizing and snapshotting; volumes already mounted keep working, because the
+    # mounting side is the node DaemonSet. This chart renders neither a PodDisruptionBudget nor
+    # topology spread constraints for the controller, and it honours `controller.affinity` only
+    # when that affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped —
+    # so replicas may share a node.
+    replicas: 1
+    # @schema
+    # enum: [Recreate, RollingUpdate]
+    # @schema
+    # -- Deployment strategy of the NFS controller. The chart's `Recreate` takes every replica down
+    # before starting the new one, which gives up the failover `replicas` above just bought; set
+    # `RollingUpdate` alongside it.
+    strategyType: Recreate
+    # -- Name of the NFS controller Deployment and of the pods it owns.
+    name: csi-nfs-controller
+    # @schema
+    # enum: [Default, ClusterFirst, ClusterFirstWithHostNet]
+    # @schema
+    # -- DNS policy of the NFS controller pods.
+    dnsPolicy: ClusterFirstWithHostNet
+    # -- Affinity of the NFS controller pods. Honoured only when it carries `nodeSelectorTerms`
+    # (see `replicas` above), which makes it a node-placement knob and nothing else.
+    affinity: {}
+    # -- Node selector of the NFS controller pods.
+    nodeSelector: {}
+    # -- Priority class of the NFS controller pods. `system-cluster-critical` keeps provisioning
+    # working while a node is under pressure.
+    priorityClassName: system-cluster-critical
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations of the NFS controller pods. The defaults let the provisioner run on
+    # control-plane nodes.
+    tolerations:
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/controlplane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+        effect: "NoSchedule"
+  node:
+    # -- Name of the NFS node DaemonSet and of the pods it owns. This is the mounting side: one
+    # pod per node, so it has no replica count or disruption budget to configure.
+    name: csi-nfs-node
+    # @schema
+    # enum: [Default, ClusterFirst, ClusterFirstWithHostNet]
+    # @schema
+    # -- DNS policy of the NFS node pods. `ClusterFirstWithHostNet` is what lets an NFS server
+    # named in the cluster's DNS resolve from a host-networked mount.
+    dnsPolicy: ClusterFirstWithHostNet
+    # -- Affinity of the NFS node pods. Rendered as given, unlike the controller's.
+    affinity: {}
+    # -- Node selector of the NFS node pods, narrowing which nodes can mount NFS volumes. The
+    # chart adds `kubernetes.io/os: linux` on top of whatever is set here.
+    nodeSelector: {}
+    # -- Priority class of the NFS node pods.
+    priorityClassName: system-cluster-critical
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations of the NFS node pods. The defaults tolerate every taint, so a volume can be
+    # mounted on any node the scheduler picks.
+    tolerations:
+      - operator: "Exists"
+  nodeDriverRegistrar:
+    livenessProbe:
+      # -- Leave the node-driver-registrar's own liveness probe off; the node plugin already
+      # runs one on its health port.
+      enabled: false
+  rbac:
+    # -- Prefix of the driver's ClusterRole and ClusterRoleBinding names.
+    name: csi-nfs
 
 # -- [csi-driver-s3](https://github.com/thxcode/k8s-csi-s3) subchart (chart 0.43.7).
+# @default -- see the `csi-driver-s3.*` keys below
 csi-driver-s3:
   # -- Deploy the bundled S3 CSI driver.
   enabled: true
+  driver:
+    # -- CSI driver name. Namespaced to gpustack so this driver coexists with a cluster's own
+    # S3 CSI driver, and matched by `kuberess.CSIProvisionerS3`, which the worker writes into
+    # the StorageClasses it provisions.
+    name: s3.csi.gpustack.ai
+  # -- Mirrored images. This chart stores whole `registry/namespace/name:tag` references with
+  # no separate tag key.
+  images:
+    s3: docker.io/gpustack/mirrored-csi-s3-driver:v0.43.7
+    csiProvisioner: docker.io/gpustack/mirrored-csi-provisioner:v6.1.0
+    livenessProbe: docker.io/gpustack/mirrored-csi-livenessprobe:v2.17.0
+    nodeDriverRegistrar: docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.15.0
+  controller:
+    # -- Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with
+    # `--leader-election`, so extra replicas stand by. Losing the controller delays volume
+    # provisioning; volumes already mounted keep working, because the mounting side is the node
+    # DaemonSet. Like the NFS chart, this one renders neither a PodDisruptionBudget nor topology
+    # spread constraints for the controller, and it honours `controller.affinity` only when that
+    # affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas
+    # may share a node.
+    replicas: 1
+    # @schema
+    # enum: [Recreate, RollingUpdate]
+    # @schema
+    # -- Deployment strategy of the S3 controller. The chart's `Recreate` takes every replica down
+    # before starting the new one, which gives up the failover `replicas` above just bought; set
+    # `RollingUpdate` alongside it.
+    strategyType: Recreate
+    # -- Name of the S3 controller Deployment and of the pods it owns.
+    name: csi-s3-controller
+    # -- Affinity of the S3 controller pods. Honoured only when it carries `nodeSelectorTerms`
+    # (see `replicas` above), which makes it a node-placement knob and nothing else. This chart
+    # renders no `dnsPolicy` for the controller, so there is no key for it.
+    affinity: {}
+    # -- Node selector of the S3 controller pods.
+    nodeSelector: {}
+    # -- Priority class of the S3 controller pods. `system-cluster-critical` keeps provisioning
+    # working while a node is under pressure.
+    priorityClassName: system-cluster-critical
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations of the S3 controller pods. The defaults let the provisioner run on
+    # control-plane nodes.
+    tolerations:
+      - key: "node-role.kubernetes.io/master"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/controlplane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "node-role.kubernetes.io/control-plane"
+        operator: "Exists"
+        effect: "NoSchedule"
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+        effect: "NoSchedule"
+  node:
+    # -- Name of the S3 node DaemonSet and of the pods it owns. This is the mounting side: one pod
+    # per node, so it has no replica count or disruption budget to configure.
+    name: csi-s3-node
+    # @schema
+    # enum: [Default, ClusterFirst, ClusterFirstWithHostNet]
+    # @schema
+    # -- DNS policy of the S3 node pods. `ClusterFirstWithHostNet` is what lets an in-cluster
+    # object store endpoint resolve from a host-networked mount.
+    dnsPolicy: ClusterFirstWithHostNet
+    # -- Affinity of the S3 node pods. Rendered as given, unlike the controller's.
+    affinity: {}
+    # -- Node selector of the S3 node pods, narrowing which nodes can mount S3 volumes. The chart
+    # adds `kubernetes.io/os: linux` on top of whatever is set here.
+    nodeSelector: {}
+    # -- Priority class of the S3 node pods.
+    priorityClassName: system-cluster-critical
+    # @schema
+    # type: array
+    # items:
+    #   type: object
+    # @schema
+    # -- Tolerations of the S3 node pods. The defaults tolerate every taint, so a volume can be
+    # mounted on any node the scheduler picks.
+    tolerations:
+      - operator: "Exists"
+  nodeDriverRegistrar:
+    livenessProbe:
+      # -- Leave the node-driver-registrar's own liveness probe off; the node plugin already
+      # runs one on its health port.
+      enabled: false
+  rbac:
+    # -- Prefix of the driver's ClusterRole and ClusterRoleBinding names.
+    name: csi-s3

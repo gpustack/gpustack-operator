@@ -37,6 +37,24 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.worker.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - {{- toYaml . | nindent 10 }}
+          {{- if not .labelSelector }}
+          labelSelector:
+            matchLabels:
+              {{- include "gpustack-operator.worker.selectorLabels" $ | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      # Deliberately `preferred`: spreading replicas across nodes must never leave one
+      # unschedulable on a cluster with fewer nodes than replicas. Node spread that has to hold
+      # belongs in `worker.topologySpreadConstraints`.
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -46,6 +64,7 @@ spec:
                 labelSelector:
                   matchLabels:
                     {{- include "gpustack-operator.worker.selectorLabels" . | nindent 20 }}
+      {{- end }}
       containers:
         - name: main
           image: {{ include "gpustack-operator.image" (dict "root" . "overrides" .Values.worker.image) | quote }}
@@ -61,10 +80,10 @@ spec:
             {{- if .Values.manufacturers }}
             - --manufacturer={{ keys .Values.manufacturers | sortAlpha | join "," }}
             {{- end }}
-            {{- if .Values.deviceManager.enabled }}
-            # The chart renders the device-manager DaemonSets directly, so the worker must
-            # not also install them at runtime.
-            - --disable-applications=device-manager
+            {{- with .Values.worker.disableApplications }}
+            # One flag carrying the whole list: the flag accumulates across occurrences, so a
+            # second one could only ever disable more.
+            - --disable-applications={{ join "," . }}
             {{- end }}
             {{- with .Values.worker.extraArgs }}
             {{- toYaml . | nindent 12 }}

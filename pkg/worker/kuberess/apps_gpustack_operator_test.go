@@ -151,7 +151,6 @@ func Test_componentSwitches(t *testing.T) {
 	allEnabled := map[string]bool{
 		"kueue":                  true,
 		"node-feature-discovery": true,
-		"nodeFeatureRule":        true,
 		"csi-driver-nfs":         true,
 		"csi-driver-s3":          true,
 		"deviceManager":          true,
@@ -173,7 +172,6 @@ func Test_componentSwitches(t *testing.T) {
 			want: map[string]bool{
 				"kueue":                  true,
 				"node-feature-discovery": true,
-				"nodeFeatureRule":        true,
 				"csi-driver-nfs":         false,
 				"csi-driver-s3":          false,
 				"deviceManager":          true,
@@ -203,7 +201,6 @@ func Test_ApplicationNames(t *testing.T) {
 		"device-manager",
 		"kueue",
 		"node-feature-discovery",
-		"node-feature-rule",
 	}, ApplicationNames())
 }
 

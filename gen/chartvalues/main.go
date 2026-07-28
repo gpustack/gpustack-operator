@@ -1,16 +1,13 @@
 // Command chartvalues generates the YAML blocks the operator Helm chart's
 // values.yaml embeds from pkg/nodefeature, so pkg/nodefeature stays their single
-// source of truth: the Kueue managerConfig "resources.transformations" list and
-// the NodeFeatureRule PCI vendor ID list (see generate.go).
+// source of truth: today the Kueue managerConfig "resources.transformations" list
+// (see generate.go).
 //
 // A target file adopts a block by embedding a matching pair of marker comments,
 // indented however the surrounding YAML requires:
 //
 //	# gpustack:chartvalues:kueue-transformations:begin
 //	# gpustack:chartvalues:kueue-transformations:end
-//
-//	# gpustack:chartvalues:nfd-pci-vendor-ids:begin
-//	# gpustack:chartvalues:nfd-pci-vendor-ids:end
 //
 // Running with -values rewrites the text between each pair found in that file to
 // the freshly generated content, re-indented to the begin marker's own

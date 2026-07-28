@@ -1,0 +1,74 @@
+{{- /*
+  Rendered unconditionally: the scheduling chain starts here, so a release without this rule
+  classifies no node at all. It carries no switch of its own and does not follow
+  node-feature-discovery.enabled either — a cluster running its own NFD still needs the rule.
+
+  Both matcher lists are read from values that already exist for another reason, so neither can
+  drift from what it describes. The class prefixes come from the NFD subchart's own
+  deviceClassWhitelist, because a rule can only match devices NFD was told to label; they stay
+  readable with the subchart disabled, since this chart's values.yaml declares them either way.
+  The vendor IDs are the managed manufacturers' own PCI vendor IDs, which is what makes a
+  manufacturer added to (or dropped from) `manufacturers` immediately detected (or ignored).
+*/}}
+{{- $pciClasses := (index .Values "node-feature-discovery").worker.config.sources.pci.deviceClassWhitelist }}
+{{- $pciVendorIDs := values .Values.manufacturers | sortAlpha | uniq }}
+apiVersion: nfd.k8s-sigs.io/v1alpha1
+kind: NodeFeatureRule
+metadata:
+  name: gpustack-cpu-info
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+    app.kubernetes.io/component: node-feature-rule
+    app.kubernetes.io/name: gpustack-cpu-info
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  rules:
+    - name: "attached cpu info to annotations"
+      annotations:
+        feature.gpustack.ai/cpu-name: "@cpu.model.name"
+        feature.gpustack.ai/cpu-family: "@cpu.model.family"
+        feature.gpustack.ai/cpu-physical-cores: "@cpu.model.physical_cores"
+        feature.gpustack.ai/cpu-threads-per-core: "@cpu.model.threads_per_core"
+        feature.gpustack.ai/cpu-logical-cores: "@cpu.model.logical_cores"
+        feature.gpustack.ai/cpu-stepping: "@cpu.model.stepping"
+        feature.gpustack.ai/cpu-cache-line: "@cpu.model.cache_line"
+        feature.gpustack.ai/cpu-hz: "@cpu.model.hz"
+        feature.gpustack.ai/cpu-boost-freq: "@cpu.model.boost_freq"
+        feature.gpustack.ai/cpu-cache-l1i: "@cpu.model.cache_l1i"
+        feature.gpustack.ai/cpu-cache-l1d: "@cpu.model.cache_l1d"
+        feature.gpustack.ai/cpu-cache-l2: "@cpu.model.cache_l2"
+        feature.gpustack.ai/cpu-cache-l3: "@cpu.model.cache_l3"
+      matchFeatures:
+        - feature: cpu.model
+          matchExpressions:
+            vendor_id:
+              op: Exists
+    - name: "detect whether the node has acceleratable devices"
+      vars:
+        has-acceleratable-devices: "true"
+      matchFeatures:
+        - feature: pci.device
+          matchExpressions:
+            class:
+              op: InRegexp
+              value:
+              {{- range $pciClasses }}
+                - {{ printf "^%s" . | quote }}
+              {{- end }}
+            vendor:
+              op: In
+              value:
+              {{- range $pciVendorIDs }}
+                - {{ . | quote }}
+              {{- end }}
+    - name: "identify the node without any acceleratable device"
+      labels:
+        feature.gpustack.ai/acceleratable: "false"
+      matchFeatures:
+        - feature: rule.matched
+          matchExpressions:
+            has-acceleratable-devices:
+              op: DoesNotExist

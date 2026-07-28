@@ -19,10 +19,12 @@ const applicationWildcard = "*"
 // applicationValuesKeys maps each name --disable-applications accepts to the chart
 // values key that switches that component off. It is the authoritative name set: the
 // worker validates the flag against it, and the overlay renders one switch per entry.
+//
+// The gpustack-cpu-info NodeFeatureRule has no entry because it has no switch: the
+// scheduling chain starts at that rule, so a release without it classifies no node.
 var applicationValuesKeys = map[string]string{
 	"kueue":                  "kueue",
 	"node-feature-discovery": "node-feature-discovery",
-	"node-feature-rule":      "nodeFeatureRule",
 	"csi-driver-nfs":         "csi-driver-nfs",
 	"csi-driver-s3":          "csi-driver-s3",
 	"device-manager":         "deviceManager",

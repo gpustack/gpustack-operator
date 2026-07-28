@@ -13,15 +13,12 @@ const (
 	// kueueTransformationsBlockName names the Kueue managerConfig
 	// "resources.transformations" block.
 	kueueTransformationsBlockName = "kueue-transformations"
-	// nfdPciVendorIDsBlockName names the NodeFeatureRule PCI vendor ID list block.
-	nfdPciVendorIDsBlockName = "nfd-pci-vendor-ids"
 )
 
 // blocks returns every block this command generates, in a stable order.
 func blocks() []Block {
 	return []Block{
 		{Name: kueueTransformationsBlockName, Content: kueueTransformations()},
-		{Name: nfdPciVendorIDsBlockName, Content: nfdPciVendorIDs()},
 	}
 }
 
@@ -67,26 +64,6 @@ func kueueTransformations() string {
 			fmt.Fprintf(&b, "- input: %s\n  strategy: Replace\n  outputs:\n    %s: %q\n",
 				partitionedUnits, credits, strconv.Itoa(unitsFactor))
 		}
-	}
-	return b.String()
-}
-
-// nfdPciVendorIDs renders the PCI vendor ID list the operator chart's own
-// NodeFeatureRule matches against to detect an acceleratable device, annotated
-// with the manufacturer each ID belongs to for readability. The PCI device-class
-// prefixes the same rule matches on are not manufacturer data — they classify a
-// PCI device's function (display/3D/accelerator), not its vendor — so they stay a
-// plain, hand-maintained default in the chart's own values.
-func nfdPciVendorIDs() string {
-	nameByID := make(map[string]string)
-	for _, manu := range nodefeature.GetKnownAcceleratableManufacturers() {
-		nameByID[nodefeature.GetPciVendorID(manu)] = manu
-	}
-
-	var b strings.Builder
-	b.WriteString("pciVendorIDs:\n")
-	for _, id := range nodefeature.GetAcceleratablePciVendorIDs() {
-		fmt.Fprintf(&b, "- %q # %s\n", id, nameByID[id])
 	}
 	return b.String()
 }

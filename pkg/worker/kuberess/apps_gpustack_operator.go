@@ -198,9 +198,6 @@ deviceManager:
     {{- end }}
 {{- end }}
 
-nodeFeatureRule:
-  enabled: {{ index $.ComponentSwitches "nodeFeatureRule" }}
-
 kueue:
   enabled: {{ index $.ComponentSwitches "kueue" }}
 
