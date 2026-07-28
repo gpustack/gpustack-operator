@@ -49,7 +49,9 @@ function gpustack::version::get_version_vars() {
     return
   fi
 
-  # find out git info via git client.
+  # find out git info via git client. The assignment below lands even when the command fails,
+  # leaving GIT_COMMIT empty rather than the "unknown" it started as, so restore that before
+  # anything reads it.
   if GIT_COMMIT=$(git rev-parse "HEAD^{commit}" 2>/dev/null); then
     # specify as dirty if the tree is not clean.
     if git_status=$(git status --porcelain 2>/dev/null) && [[ -n ${git_status} ]]; then
@@ -71,8 +73,13 @@ function gpustack::version::get_version_vars() {
     elif ! [[ "${GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
       GIT_VERSION="dev"
     fi
-
-    # respect specified version
-    GIT_VERSION=${VERSION:-${GIT_VERSION}}
   fi
+
+  # respect the specified version and commit, whether or not the repository could be read.
+  # Leaving this inside the branch above dropped values handed in on purpose — the image build
+  # passes both as build-args — whenever git was present but could not read the tree, as it
+  # cannot from a worktree checkout, and stamped the binary "unknown ()" instead. The two paths
+  # that return earlier honour the version, so this one has to as well.
+  GIT_VERSION=${VERSION:-${GIT_VERSION}}
+  GIT_COMMIT=${COMMIT:-${GIT_COMMIT:-unknown}}
 }
