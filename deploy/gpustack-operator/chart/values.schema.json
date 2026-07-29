@@ -596,7 +596,7 @@
       "properties": {
         "createRuntimeClasses": {
           "default": true,
-          "description": "Create the nvidia/mthreads RuntimeClass objects. Disable when the cluster\nalready provides them (e.g. via the NVIDIA GPU operator).",
+          "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row states a\n`runtimeName`, where the cluster does not already have one. Disable when something else\nprovides them all (e.g. a vendor GPU operator).",
           "title": "createRuntimeClasses",
           "type": "boolean"
         },
@@ -746,6 +746,258 @@
           "title": "imageRegistry",
           "type": "string"
         },
+        "manufacturers": {
+          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. `runtimeInjectsDriver` is the exception, a\ndeployment fact no Go code holds: it marks a manufacturer whose user-space driver reaches\na container only through its container runtime, so that manufacturer's device-manager runs\nunder the RuntimeClass too. Every other vendor's device-manager reads its management\nlibrary from a hostPath mount the DaemonSet already makes.\n\n`runtimeName` is what decides which manufacturers this chart creates a RuntimeClass for\n(`deviceManager.createRuntimeClasses`), so it is stated only where a vendor's container\nruntime registers a handler by that name: the operator attaches a RuntimeClass to a\nworkload whenever one exists, and a class no runtime backs would fail every Pod of that\nvendor. `pkg/nodefeature` knows two more names than are stated here, which is deliberate —\na cluster whose vendor operator created that class still has it used, while this chart\nnever conjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema\nrequires.",
+          "properties": {
+            "amd": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1002",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "amd.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "amd",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName",
+                "runtimeName"
+              ],
+              "title": "amd",
+              "type": "object"
+            },
+            "ascend": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "19e5",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "huawei.com/npu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "ascend",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName",
+                "runtimeName"
+              ],
+              "title": "ascend",
+              "type": "object"
+            },
+            "cambricon": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "cabc",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "cambricon.com/mlu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "cambricon",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName",
+                "runtimeName"
+              ],
+              "title": "cambricon",
+              "type": "object"
+            },
+            "hygon": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1d94",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "hygon.com/dcu",
+                  "title": "resourceName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName"
+              ],
+              "title": "hygon",
+              "type": "object"
+            },
+            "iluvatar": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1e3e",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "iluvatar.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "iluvatar",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName",
+                "runtimeName"
+              ],
+              "title": "iluvatar",
+              "type": "object"
+            },
+            "metax": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "9999",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "metax-tech.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName"
+              ],
+              "title": "metax",
+              "type": "object"
+            },
+            "mthreads": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1ed5",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "mthreads.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeInjectsDriver": {
+                  "default": true,
+                  "title": "runtimeInjectsDriver",
+                  "type": "boolean"
+                },
+                "runtimeName": {
+                  "default": "mthreads",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName",
+                "runtimeName",
+                "runtimeInjectsDriver"
+              ],
+              "title": "mthreads",
+              "type": "object"
+            },
+            "nvidia": {
+              "properties": {
+                "partitionKind": {
+                  "default": "mig",
+                  "title": "partitionKind",
+                  "type": "string"
+                },
+                "pciVendorID": {
+                  "default": "10de",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "nvidia.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeInjectsDriver": {
+                  "default": true,
+                  "title": "runtimeInjectsDriver",
+                  "type": "boolean"
+                },
+                "runtimeName": {
+                  "default": "nvidia",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName",
+                "runtimeName",
+                "runtimeInjectsDriver",
+                "partitionKind"
+              ],
+              "title": "nvidia",
+              "type": "object"
+            },
+            "thead": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1ded",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "alibabacloud.com/ppu",
+                  "title": "resourceName",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "pciVendorID",
+                "resourceName"
+              ],
+              "title": "thead",
+              "type": "object"
+            }
+          },
+          "required": [
+            "amd",
+            "ascend",
+            "cambricon",
+            "hygon",
+            "iluvatar",
+            "metax",
+            "mthreads",
+            "nvidia",
+            "thead"
+          ],
+          "title": "manufacturers",
+          "type": "object"
+        },
         "nodeSelector": {
           "description": "Node selector applied to all workloads when a component does not set its own.",
           "required": [],
@@ -757,7 +1009,8 @@
         "imageRegistry",
         "imageNamespace",
         "imagePullSecrets",
-        "nodeSelector"
+        "nodeSelector",
+        "manufacturers"
       ],
       "title": "global",
       "type": "object"
@@ -1003,69 +1256,6 @@
         "managerConfig"
       ],
       "title": "kueue",
-      "type": "object"
-    },
-    "manufacturers": {
-      "description": "Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the\nsingle source for the worker `--manufacturer` list, the per-manufacturer device-manager\nDaemonSets, and the GPUSTACK_\u003cMANUFACTURER\u003e_PCI_VENDOR_ID environment variable propagated\nto both the worker and the device-managers. It reaches the `gpustack-cpu-info`\nNodeFeatureRule through that `--manufacturer` list, since the worker renders the rule\nitself. The manufacturer list is derived from these keys (sorted for stable\nrendering); each device-manager DaemonSet only schedules on nodes labelled by NFD\nwith the matching PCI vendor, so adding an entry here is all it takes for a new vendor's\ndevices to be labelled, detected and given a device-manager. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema\nrequires; a cluster that carries only some of them runs the other device-managers empty,\nsince each one only schedules where its vendor label exists.",
-      "properties": {
-        "amd": {
-          "default": "1002",
-          "title": "amd",
-          "type": "string"
-        },
-        "ascend": {
-          "default": "19e5",
-          "title": "ascend",
-          "type": "string"
-        },
-        "cambricon": {
-          "default": "cabc",
-          "title": "cambricon",
-          "type": "string"
-        },
-        "hygon": {
-          "default": "1d94",
-          "title": "hygon",
-          "type": "string"
-        },
-        "iluvatar": {
-          "default": "1e3e",
-          "title": "iluvatar",
-          "type": "string"
-        },
-        "metax": {
-          "default": "9999",
-          "title": "metax",
-          "type": "string"
-        },
-        "mthreads": {
-          "default": "1ed5",
-          "title": "mthreads",
-          "type": "string"
-        },
-        "nvidia": {
-          "default": "10de",
-          "title": "nvidia",
-          "type": "string"
-        },
-        "thead": {
-          "default": "1ded",
-          "title": "thead",
-          "type": "string"
-        }
-      },
-      "required": [
-        "amd",
-        "ascend",
-        "cambricon",
-        "hygon",
-        "iluvatar",
-        "metax",
-        "mthreads",
-        "nvidia",
-        "thead"
-      ],
-      "title": "manufacturers",
       "type": "object"
     },
     "migrate": {
@@ -1443,7 +1633,7 @@
                           "type": "array"
                         },
                         "deviceLabelFields": {
-                          "description": "Device fields to label. `vendor` is what the NodeFeatureRule matches the managed\n`manufacturers`' PCI vendor IDs against.",
+                          "description": "Device fields to label. `vendor` is what the NodeFeatureRule matches the managed\n`global.manufacturers`' PCI vendor IDs against.",
                           "items": {
                             "anyOf": [
                               {
@@ -1792,7 +1982,6 @@
     "commonLabels",
     "commonAnnotations",
     "image",
-    "manufacturers",
     "worker",
     "deviceManager",
     "migrate",

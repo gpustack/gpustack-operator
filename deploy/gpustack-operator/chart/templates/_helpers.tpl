@@ -148,6 +148,32 @@ app.kubernetes.io/name: {{ include "gpustack-operator.deviceManager.fullname" . 
 {{- end -}}
 
 {{/*
+One manufacturer's identity as the environment variables pkg/nodefeature reads it from, so a
+row of global.manufacturers decides those facts instead of restating them. Only the fields the
+row states are emitted: an unstated one leaves the operator's own default in force.
+Takes a dict of "name" (the manufacturer) and "identity" (its row).
+*/}}
+{{- define "gpustack-operator.manufacturer.env" -}}
+{{- $prefix := printf "GPUSTACK_%s" (upper .name) -}}
+{{- with .identity.pciVendorID }}
+- name: {{ $prefix }}_PCI_VENDOR_ID
+  value: {{ . | quote }}
+{{- end }}
+{{- with .identity.resourceName }}
+- name: {{ $prefix }}_ACCELERATABLE_RESOURCE_NAME
+  value: {{ . | quote }}
+{{- end }}
+{{- with .identity.runtimeName }}
+- name: {{ $prefix }}_ACCELERATABLE_RUNTIME_NAME
+  value: {{ . | quote }}
+{{- end }}
+{{- with .identity.partitionKind }}
+- name: {{ $prefix }}_PARTITION_KIND
+  value: {{ . | quote }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Resolve whether the worker consumes a cert-manager-issued serving certificate.
 Returns "true" when enabled and "" (empty) otherwise.
 .Values.worker.certmanager.enabled is a string:

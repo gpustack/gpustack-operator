@@ -77,8 +77,8 @@ spec:
             {{- if $certmanager }}
             - --cert-dir=/var/run/gpustack/certs
             {{- end }}
-            {{- if .Values.manufacturers }}
-            - --manufacturer={{ keys .Values.manufacturers | sortAlpha | join "," }}
+            {{- if .Values.global.manufacturers }}
+            - --manufacturer={{ keys .Values.global.manufacturers | sortAlpha | join "," }}
             {{- end }}
             {{- with .Values.worker.disableApplications }}
             # One flag carrying the whole list: the flag accumulates across occurrences, so a
@@ -126,11 +126,13 @@ spec:
               value: "{{ range $i, $s := .Values.global.imagePullSecrets }}{{ if $i }},{{ end }}{{ if kindIs "string" $s }}{{ $s }}{{ else }}{{ $s.name }}{{ end }}{{ end }}"
             - name: GPUSTACK_IMAGE_PULL_POLICY
               value: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.worker.image) | quote }}
-            # Propagate each manufacturer's PCI vendor ID so the worker renders the NFD and
-            # Kueue manifests with the same values configured here.
-            {{- range $manu, $vendorID := .Values.manufacturers }}
-            - name: GPUSTACK_{{ upper $manu }}_PCI_VENDOR_ID
-              value: {{ $vendorID | quote }}
+            # Propagate each manufacturer's identity, so the worker reads the same facts the
+            # chart states: its NodeFeatureRule, its resource accounting and the RuntimeClass
+            # it attaches to a workload all come from these.
+            {{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
+            {{- include "gpustack-operator.manufacturer.env"
+                  (dict "name" $manu "identity" (index $.Values.global.manufacturers $manu))
+                  | trim | nindent 12 }}
             {{- end }}
           ports:
             - name: https

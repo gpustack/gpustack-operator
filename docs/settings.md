@@ -79,9 +79,11 @@ on the Worker Deployment propagates to the DMs automatically.
 
 Three override patterns are expanded for every known manufacturer (`amd`, `ascend`, `cambricon`, `hygon`, `iluvatar`, `metax`, `mthreads`, `nvidia`, `thead`). They are read by both the WK and the DM, so the WK-to-DM propagation described above keeps the two sides consistent.
 
-- `GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID` — overrides the PCI vendor ID used for NFD node selection and device scanning. Accepts either `${vendor}` or `${class}_${vendor}`. **When installed by the chart, set the `manufacturers` value instead of this variable**: the chart derives the DaemonSet node selectors, the `gpustack-cpu-info` NodeFeatureRule's vendor list *and* this variable from that one map, so setting the variable alone leaves the rule and the selectors on the old ID.
+**When installed by the chart, set the `global.manufacturers` row instead of any of these variables.** Each of the four overrides in this section is a field of that row (`pciVendorID`, `resourceName`, `runtimeName`, `partitionKind`), and the chart fans every stated field out as the matching variable to the worker *and* to the device-managers. It also derives things a variable cannot reach: the DaemonSet node selectors, the RuntimeClasses it creates, and Kueue's credits mapping. Setting the variable alone therefore leaves those on the old value, and the chart's next render overwrites the variable itself.
+
+- `GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID` — overrides the PCI vendor ID used for NFD node selection and device scanning. Accepts either `${vendor}` or `${class}_${vendor}`.
 - `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RESOURCE_NAME` — overrides the extended resource name the scheduling chain allocates against.
-- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — overrides the container runtime class name used for accelerated workloads.
+- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — overrides the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached to a workload only when one exists in the cluster; the chart creates it for the six manufacturers whose container runtime registers a handler by that name (see `global.manufacturers`), and never for `hygon` or `metax`, whose defaults below are honored only if something else created the class.
 
 Defaults:
 

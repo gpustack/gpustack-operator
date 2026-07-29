@@ -17,6 +17,7 @@ import (
 	"helm.sh/helm/v3/pkg/releaseutil"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
@@ -51,22 +52,57 @@ func TestCSIDriverNamesMatchChart(t *testing.T) {
 	}
 }
 
-// TestChartManufacturersMatchNodeFeature ties the chart's default manufacturer map to the
-// manufacturers the operator knows. The map is the chart's single source for the device-manager
-// DaemonSets, the worker's --manufacturer list and the NodeFeatureRule's PCI vendor IDs, so a
-// manufacturer added to pkg/nodefeature and forgotten here is detected by nothing.
+// TestChartManufacturersMatchNodeFeature ties every row of the chart's manufacturer map to what
+// pkg/nodefeature states about that manufacturer. The map is the chart's single source for the
+// device-manager DaemonSets, the worker's --manufacturer list, the RuntimeClasses the chart
+// creates, the Kueue credits mapping and the GPUSTACK_<MANUFACTURER>_* variables it fans out, so a
+// row drifting from the code that consumes it is detected by nothing else.
+//
+// runtimeName is asserted as a subset: the chart deliberately states one only for the vendors
+// whose container runtime registers a handler by that name, because the operator attaches a
+// RuntimeClass to a workload whenever one exists and a class no runtime backs would fail every
+// Pod of that vendor. runtimeInjectsDriver is the chart's own fact — no Go code holds it — so it
+// is asserted only to name a runtime that is actually there.
 func TestChartManufacturersMatchNodeFeature(t *testing.T) {
-	var values map[string]any
+	var values struct {
+		Global struct {
+			Manufacturers map[string]struct {
+				PciVendorID          string `yaml:"pciVendorID"`
+				ResourceName         string `yaml:"resourceName"`
+				RuntimeName          string `yaml:"runtimeName"`
+				RuntimeInjectsDriver bool   `yaml:"runtimeInjectsDriver"`
+				PartitionKind        string `yaml:"partitionKind"`
+			} `yaml:"manufacturers"`
+		} `yaml:"global"`
+	}
 	raw, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
 	require.NoError(t, err, "read the chart values")
 	require.NoError(t, yaml.Unmarshal(raw, &values))
 
-	want := make(map[string]any)
-	for _, manufacturer := range nodefeature.GetKnownAcceleratableManufacturers() {
-		want[manufacturer] = nodefeature.GetPciVendorID(manufacturer)
-	}
+	assert.ElementsMatch(t, nodefeature.GetKnownAcceleratableManufacturers(),
+		sets.KeySet(values.Global.Manufacturers).UnsortedList(),
+		"the chart states every manufacturer the operator knows, and no other")
 
-	assert.Equal(t, want, values["manufacturers"])
+	for _, manufacturer := range nodefeature.GetKnownAcceleratableManufacturers() {
+		t.Run(manufacturer, func(t *testing.T) {
+			row, ok := values.Global.Manufacturers[manufacturer]
+			require.True(t, ok, "the chart states this manufacturer")
+
+			assert.Equal(t, nodefeature.GetPciVendorID(manufacturer), row.PciVendorID)
+			assert.Equal(t, string(nodefeature.GetAcceleratableResourceName(
+				manufacturer, workercore.DeviceAllocationModeExclusive)), row.ResourceName)
+			assert.Equal(t, nodefeature.GetPartitionKind(manufacturer), row.PartitionKind)
+
+			if row.RuntimeName != "" {
+				assert.Equal(t, nodefeature.GetAcceleratableRuntimeName(manufacturer),
+					row.RuntimeName, "a stated runtime name is the operator's own")
+			}
+			if row.RuntimeInjectsDriver {
+				assert.NotEmpty(t, row.RuntimeName,
+					"a device-manager can only run under a runtime the row names")
+			}
+		})
+	}
 }
 
 // TestChartPciClassWhitelistMatchesNodeFeature ties the PCI device classes the chart tells NFD

@@ -4,8 +4,8 @@
 {{- $imagePullPolicy := include "gpustack-operator.imagePullPolicy" (dict "root" $root "overrides" $root.Values.deviceManager.image) }}
 {{- $name := include "gpustack-operator.deviceManager.fullname" . }}
 {{- $securePort := .Values.deviceManager.securePort }}
-{{- range $manu := (keys .Values.manufacturers | sortAlpha) }}
-{{- $vendorID := index $root.Values.manufacturers $manu }}
+{{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
+{{- $identity := index $root.Values.global.manufacturers $manu }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -38,8 +38,13 @@ spec:
         - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
         {{- end }}
       {{- end }}
-      {{- if has $manu (list "nvidia" "mthreads") }}
-      runtimeClassName: {{ $manu }}
+      {{- /*
+        This manufacturer's user-space driver reaches a container only through its container
+        runtime, so the device-manager has to run under it to read the management library at all.
+        Every other vendor's is on a hostPath mount below.
+      */}}
+      {{- if $identity.runtimeInjectsDriver }}
+      runtimeClassName: {{ $identity.runtimeName }}
       {{- end }}
       # A vendor management library reports the host PIDs holding a device and reaches its
       # driver over host IPC; this pod is already privileged with /dev and /sys mounted.
@@ -47,7 +52,7 @@ spec:
       hostIPC: true
       nodeSelector:
         # Rely on NFD to label nodes carrying this manufacturer's PCI vendor.
-        feature.node.kubernetes.io/pci-{{ $vendorID }}.present: "true"
+        feature.node.kubernetes.io/pci-{{ $identity.pciVendorID }}.present: "true"
       serviceAccountName: {{ $name }}
       priorityClassName: system-cluster-critical
       {{- with $root.Values.deviceManager.tolerations }}
@@ -115,8 +120,8 @@ spec:
                   fieldPath: spec.nodeName
             - name: KUBERNETES_SERVICE_NAME
               value: {{ $name | quote }}
-            - name: GPUSTACK_{{ upper $manu }}_PCI_VENDOR_ID
-              value: {{ $vendorID | quote }}
+            {{- include "gpustack-operator.manufacturer.env"
+                  (dict "name" $manu "identity" $identity) | trim | nindent 12 }}
           ports:
             - name: https
               containerPort: {{ $securePort }}

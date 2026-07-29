@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeapp/helm"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -58,11 +59,13 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 	// operator in use; fall back to the chart-composed image when it cannot be determined.
 	imageRepository, imageTag := splitImageReference(extractWorkerImage(ctx, helmCli.KubeClientSet()))
 
-	// Build the manufacturer -> PCI vendor ID map from the worker's --manufacturer list.
+	// Restate the identity of every manufacturer on the worker's --manufacturer list, so the
+	// chart renders the device-managers and Kueue's credits mapping on the values in force
+	// here rather than on its own defaults.
 	manufacturers, _ := globalValuesContext["Manufacturers"].([]string)
-	manufacturerVendorIDs := make(map[string]string, len(manufacturers))
+	manufacturerIdentities := make(map[string]map[string]string, len(manufacturers))
 	for _, m := range manufacturers {
-		manufacturerVendorIDs[m] = nodefeature.GetPciVendorID(m)
+		manufacturerIdentities[m] = manufacturerIdentity(m)
 	}
 
 	valuesContext := globalValuesContext
@@ -70,7 +73,7 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 	valuesContext["Namespace"] = helmCli.DefaultNamespace()
 	valuesContext["ImageRepository"] = imageRepository
 	valuesContext["ImageTag"] = imageTag
-	valuesContext["ManufacturerVendorIDs"] = manufacturerVendorIDs
+	valuesContext["ManufacturerIdentities"] = manufacturerIdentities
 	valuesContext["ComponentSwitches"] = componentSwitches(disable)
 
 	values := getGPUStackOperatorChartTemplateValues(gpustackOperatorChartName, valuesContext)
@@ -103,6 +106,27 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 	}
 
 	return installConvergedChart(ctx, helmCli, chart)
+}
+
+// manufacturerIdentity returns a manufacturer's identity as a row of the chart's
+// global.manufacturers map, carrying the values in force in this process — each one a
+// pkg/nodefeature default a GPUSTACK_<MANUFACTURER>_* variable may have overridden.
+//
+// A field the operator has no value for is left out, and so is runtimeName: pkg/nodefeature
+// names a runtime for two more manufacturers than the chart creates a RuntimeClass for, and
+// Helm merges these values into the chart's defaults row by row, so stating it here would
+// conjure classes a chart-mode install never creates.
+func manufacturerIdentity(manufacturer string) map[string]string {
+	identity := map[string]string{
+		"pciVendorID": nodefeature.GetPciVendorID(manufacturer),
+		"resourceName": string(nodefeature.GetAcceleratableResourceName(
+			manufacturer, workercore.DeviceAllocationModeExclusive)),
+	}
+	if partitionKind := nodefeature.GetPartitionKind(manufacturer); partitionKind != "" {
+		identity["partitionKind"] = partitionKind
+	}
+
+	return identity
 }
 
 // installConvergedChart installs the chart, tolerating the release a concurrently booting
@@ -159,7 +183,7 @@ func hasLegacyApplicationRelease(ctx context.Context, cli kubernetes.Interface, 
 // The pull policy goes onto global.imagePullPolicy, which reaches the subcharts too; the
 // parent's own image.pullPolicy never does.
 const gpustackOperatorChartTemplate = `
-{{- if or (not $.ImageRepository) $.ImagePullPolicy $.ImagePullSecrets }}
+{{- if or (not $.ImageRepository) $.ImagePullPolicy $.ImagePullSecrets $.ManufacturerIdentities }}
 global:
   {{- if not $.ImageRepository }}
   imageRegistry: {{ default "" $.ContainerRegistry | quote }}
@@ -172,6 +196,15 @@ global:
   imagePullSecrets:
   {{- range $.ImagePullSecrets }}
     - name: {{ . }}
+  {{- end }}
+  {{- end }}
+  {{- if $.ManufacturerIdentities }}
+  manufacturers:
+  {{- range $manu, $identity := $.ManufacturerIdentities }}
+    {{ $manu }}:
+    {{- range $field, $value := $identity }}
+      {{ $field }}: {{ $value | quote }}
+    {{- end }}
   {{- end }}
   {{- end }}
 {{- end }}
@@ -208,13 +241,6 @@ csi-driver-nfs:
 
 csi-driver-s3:
   enabled: {{ index $.ComponentSwitches "csi-driver-s3" }}
-
-{{- if $.ManufacturerVendorIDs }}
-manufacturers:
-{{- range $manu, $vendorID := $.ManufacturerVendorIDs }}
-  {{ $manu }}: {{ $vendorID | quote }}
-{{- end }}
-{{- end }}
 `
 
 func getGPUStackOperatorChartTemplateValues(name string, data map[string]any) helm.TemplateValues {

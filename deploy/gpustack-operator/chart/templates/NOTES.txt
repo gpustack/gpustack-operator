@@ -4,10 +4,12 @@ Components:
 {{- if .Values.worker.enabled }}
   - Worker (control plane): {{ include "gpustack-operator.worker.fullname" . }} ({{ .Values.worker.replicas }} replica(s))
     On startup it applies the two custom resources no chart can carry — the gpustack-cpu-info
-    NodeFeatureRule the chain starts from, and the gpustack-node-devices AdmissionCheck it ends at.
+    NodeFeatureRule the chain starts from, and the gpustack-node-devices AdmissionCheck it ends at
+    — retrying until each one's CRD is served, so a component disabled below leaves the worker
+    waiting for whatever provides it.
 {{- end }}
 {{- if .Values.deviceManager.enabled }}
-  - Device managers: one DaemonSet per manufacturer ({{ join ", " (keys .Values.manufacturers | sortAlpha) }})
+  - Device managers: one DaemonSet per manufacturer ({{ join ", " (keys .Values.global.manufacturers | sortAlpha) }})
     Each only schedules on nodes that NFD labels with the matching PCI vendor.
 {{- end }}
 {{- if (index .Values "node-feature-discovery").enabled }}
@@ -17,12 +19,20 @@ Components:
 {{- end }}
 {{- if .Values.kueue.enabled }}
   - Kueue, including its CRDs
+{{- else }}
+  - No Kueue: it is disabled, so the cluster must run its own
 {{- end }}
 {{- if (index .Values "csi-driver-nfs").enabled }}
   - NFS CSI driver ({{ (index .Values "csi-driver-nfs").driver.name }})
+{{- else }}
+  - No NFS CSI driver: it is disabled, so the cluster must register its own as
+    {{ (index .Values "csi-driver-nfs").driver.name }} — the provisioner the worker writes into every StorageClass it manages
 {{- end }}
 {{- if (index .Values "csi-driver-s3").enabled }}
   - S3 CSI driver ({{ (index .Values "csi-driver-s3").driver.name }})
+{{- else }}
+  - No S3 CSI driver: it is disabled, so the cluster must register its own as
+    {{ (index .Values "csi-driver-s3").driver.name }} — the provisioner the worker writes into every StorageClass it manages
 {{- end }}
 {{- if .Values.worker.enabled }}
 

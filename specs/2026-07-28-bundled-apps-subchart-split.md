@@ -327,7 +327,7 @@ installs `${GPUSTACK_CONF_DIR}/charts/gpustack-operator-<ver>.tgz` as a single r
 today's release name `gpustack-operator-device-manager` unchanged, with a computed overlay:
 `worker.enabled=false`; each component enabled iff it is absent from `--disable-applications`;
 `global.imageRegistry` / `imageNamespace` / `imagePullSecrets` / `imagePullPolicy` from the
-worker's settings; `manufacturers` from `--manufacturer`; and the running worker's own image
+worker's settings; `global.manufacturers` from `--manufacturer`; and the running worker's own image
 reused for the device-managers (today's `extractWorkerImage`, unchanged). The pull policy must go
 onto `global.imagePullPolicy`, not the parent's `image.pullPolicy` — the latter never reaches a
 subchart, so setting only it would silently drop `GPUSTACK_IMAGE_PULL_POLICY` for Kueue, NFD and
@@ -393,8 +393,8 @@ the CSI drivers, which today's Go path does honour.
   fails the whole install on the unmapped kind (measured; see T22).
 - Neither matcher list is stated twice on the path that renders the rule. The vendor IDs are the
   PCI vendor IDs of the manufacturers the worker manages — `--manufacturer`, which the chart
-  fills from `manufacturers` — so a manufacturer added there is detected with no second edit. The
-  PCI class prefixes come from `pkg/nodefeature`, and a Go test holds them equal to the NFD
+  fills from `global.manufacturers` — so a manufacturer added there is detected with no second
+  edit. The PCI class prefixes come from `pkg/nodefeature`, and a Go test holds them equal to the NFD
   subchart's `worker.config.sources.pci.deviceClassWhitelist`, so the rule still matches exactly
   the devices NFD was told to label.
 - AC: `helm install --set node-feature-discovery.enabled=false` succeeds against a cluster with
@@ -670,15 +670,21 @@ pre-install/pre-upgrade hooks execute.
   reads it for the DM's sysfs scan, so the row is corrected rather than removed. T22 leaves it
   DM-only and names the two other statements of the same list (the chart's `deviceClassWhitelist`,
   which decides what NFD labels, and `pkg/nodefeature`, which the rule matches). And
-  `GPUSTACK_<MFR>_PCI_VENDOR_ID` gains the warning that under the chart the `manufacturers` map is
-  the knob to set, since the chart derives the selectors, the rule's vendor list *and* that variable
-  from it — setting the variable alone leaves the other two on the old ID.
+  the four `GPUSTACK_<MFR>_*` overrides gain the warning that under the chart a
+  `global.manufacturers` row is the knob to set, since the chart derives the selectors, the
+  RuntimeClasses it creates and Kueue's credits mapping from it *and* fans the row back out as those
+  very variables — setting one alone leaves the rest on the old value until the next render
+  overwrites it.
 - `docs/migration/from-v0.5.md`: two statements the migration hooks invalidate — that the Kueue reap
   lives on the worker's Kueue install path, and that no hook runs on an upgrade.
 - The root `README.md` (**outside T17's `Owns:`**, taken because its "installed by the worker at
   runtime" note is directly contradicted by this change): the subchart note, the uninstall blast
   radius, and index entries for the two new docs.
-- Chart `README.md` regenerated from `values.yaml` annotations.
+- Chart `README.md` regenerated from `values.yaml` annotations, and `NOTES.txt` states what is
+  **not** installed as well as what is: every subchart switch prints either its component or the
+  line that the cluster must provide it — for a CSI driver, under the exact provisioner name the
+  worker writes into its StorageClasses — and the worker's own bullet says it waits for whatever
+  serves the CRDs of the two custom resources it applies.
 - e2e: `_e2e-lib/scripts/assert-core.sh` replaces its sub-release loop with in-release workload
   assertions (instance label + rollout, Kueue and the NFD pair required, a switched-off CSI driver
   SKIPped) and adds the guard that the four per-application releases have **not** come back;
@@ -1631,7 +1637,7 @@ the baseline.
       Verify: `go test ./pkg/worker/kuberess/...` (the overlay render must still agree with the
       default one); the render diff against `HEAD` is exactly those two lines per DaemonSet.
 
-- [ ] **T19 · `manufacturers` carries a manufacturer's whole identity**
+- [x] **T19 · `manufacturers` carries a manufacturer's whole identity**
       Blocked by: T22, T23 (both rewrite `device-manager/daemonset.yaml`)
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/**`, `pkg/worker/kuberess/chart_test.go`,
@@ -1652,7 +1658,10 @@ the baseline.
       which becomes one helper fanning out all four Go-backed fields to the worker **and** the
       device-managers, since a value nothing propagates decides nothing — `NOTES.txt` (keys,
       unchanged), and the image-mode overlay in `apps_gpustack_operator.go`, which emits the whole
-      map instead of a vendor-ID pair.
+      map instead of a vendor-ID pair — minus `runtimeName`, deliberately, because Go names one for
+      two manufacturers the chart withholds and Helm merges these rows into the chart's defaults.
+      `NOTES.txt` also gains the "disabled, so the cluster must run its own" line for Kueue and both
+      CSI drivers, which only Node Feature Discovery had.
       `TestChartManufacturersMatchNodeFeature` widens from the vendor ID to the four Go-backed
       fields, with `runtimeName` asserted as a subset (equal wherever stated) so the chart can
       deliberately withhold hygon and metax, and `runtimeInjectsDriver` asserted to imply a

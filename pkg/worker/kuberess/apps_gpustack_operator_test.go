@@ -15,22 +15,22 @@ import (
 // given overrides applied.
 func operatorChartValuesContext(overrides map[string]any) map[string]any {
 	manufacturers := nodefeature.GetKnownAcceleratableManufacturers()
-	manufacturerVendorIDs := make(map[string]string, len(manufacturers))
+	manufacturerIdentities := make(map[string]map[string]string, len(manufacturers))
 	for _, m := range manufacturers {
-		manufacturerVendorIDs[m] = nodefeature.GetPciVendorID(m)
+		manufacturerIdentities[m] = manufacturerIdentity(m)
 	}
 
 	data := map[string]any{
-		"ContainerRegistry":     "",
-		"ContainerNamespace":    "",
-		"ImagePullSecrets":      []string(nil),
-		"ImagePullPolicy":       "",
-		"ImageRepository":       "",
-		"ImageTag":              "",
-		"ManufacturerVendorIDs": manufacturerVendorIDs,
-		"ComponentSwitches":     componentSwitches(sets.New[string]()),
-		"Namespace":             SystemNamespaceName,
-		"Release":               gpustackOperatorReleaseName,
+		"ContainerRegistry":      "",
+		"ContainerNamespace":     "",
+		"ImagePullSecrets":       []string(nil),
+		"ImagePullPolicy":        "",
+		"ImageRepository":        "",
+		"ImageTag":               "",
+		"ManufacturerIdentities": manufacturerIdentities,
+		"ComponentSwitches":      componentSwitches(sets.New[string]()),
+		"Namespace":              SystemNamespaceName,
+		"Release":                gpustackOperatorReleaseName,
 	}
 	for k, v := range overrides {
 		data[k] = v
@@ -88,11 +88,6 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 			worker, _ := values["worker"].(map[string]any)
 			assert.Equal(t, false, worker["enabled"], "worker disabled")
 
-			// Every manufacturer is mapped to its PCI vendor ID.
-			manus, _ := values["manufacturers"].(map[string]any)
-			assert.Len(t, manus, len(nodefeature.GetKnownAcceleratableManufacturers()),
-				"all manufacturers rendered")
-
 			// The image is either pinned to the running worker image or composed by the chart. It is
 			// set on the chart's own image knob, which every component that runs this image reads
 			// through the same merging helper — the device-managers and the migration hook Jobs
@@ -109,6 +104,10 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 			assert.Nil(t, deviceManager["image"], "device-managers inherit the chart image, never their own")
 
 			global, _ := values["global"].(map[string]any)
+			// Every manufacturer carries its identity, on the channel the subcharts read.
+			manus, _ := global["manufacturers"].(map[string]any)
+			assert.Len(t, manus, len(nodefeature.GetKnownAcceleratableManufacturers()),
+				"all manufacturers rendered")
 			if tc.expectGlobalRegistry {
 				assert.NotNil(t, global, "global block rendered")
 				assert.Contains(t, global, "imageRegistry")

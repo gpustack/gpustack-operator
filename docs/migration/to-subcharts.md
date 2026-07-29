@@ -96,7 +96,35 @@ When the worker installs the bundled chart from inside its own image, it detects
 legacy releases and sets the ownership transfer for that install only — never unconditionally, for
 the same reason you should drop the flag again after the chart-mode upgrade. There is nothing to run.
 
-## Two things that change permanently
+## Three things that change permanently
+
+### `manufacturers` moved to `global.manufacturers`, and each entry became a row
+
+The map that used to be a top-level `manufacturers: {nvidia: "10de", ...}` is now
+`global.manufacturers`, and each entry carries a manufacturer's whole identity rather than only its
+PCI vendor ID:
+
+```yaml
+global:
+  manufacturers:
+    nvidia:
+      pciVendorID: "10de"
+      resourceName: nvidia.com/gpu
+      runtimeName: nvidia
+      runtimeInjectsDriver: true
+      partitionKind: mig
+```
+
+It sits under `global` because the bundled Kueue subchart reads it too, and `global` is the only
+channel Helm gives a subchart to the parent's values. If you never set `manufacturers`, nothing is
+required of you — the defaults moved with it. If you did, translate your override into a row under
+`global.manufacturers`, and drop the old key — nothing reads a top-level `manufacturers` any more,
+so one left behind is ignored and its device-managers fall back to the default vendor IDs.
+
+One visible consequence: the chart now creates a RuntimeClass for every manufacturer whose row
+states a `runtimeName` — `ascend`, `amd`, `cambricon` and `iluvatar` in addition to `nvidia` and
+`mthreads` — and still only where that class is absent, or already belongs to this release.
+`deviceManager.createRuntimeClasses=false` remains the way to opt out of all of them.
 
 ### `helm uninstall` now takes Kueue with it
 

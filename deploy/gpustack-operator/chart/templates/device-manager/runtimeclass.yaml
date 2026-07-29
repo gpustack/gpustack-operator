@@ -1,7 +1,14 @@
 {{- if and .Values.deviceManager.enabled .Values.deviceManager.createRuntimeClasses }}
-{{- range $manu := (keys .Values.manufacturers | sortAlpha) }}
-{{- if has $manu (list "nvidia" "mthreads") }}
-{{- $existing := lookup "node.k8s.io/v1" "RuntimeClass" "" $manu }}
+{{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
+{{- /*
+  A manufacturer states a runtimeName only where its container runtime registers a handler by that
+  name, so this is the list of classes the chart may create — the operator attaches a RuntimeClass
+  to a workload whenever one exists, and a class no runtime backs would fail every Pod of that
+  vendor.
+*/}}
+{{- $runtimeName := (index $.Values.global.manufacturers $manu).runtimeName }}
+{{- if $runtimeName }}
+{{- $existing := lookup "node.k8s.io/v1" "RuntimeClass" "" $runtimeName }}
 {{- /*
   A RuntimeClass is a cluster-scoped, fixed-name object that another component (e.g. a vendor GPU
   operator) may already own. Render it only when it is absent, or when this release already owns it.
@@ -12,10 +19,10 @@
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
-  name: {{ $manu }}
+  name: {{ $runtimeName }}
   labels:
     {{- include "gpustack-operator.deviceManager.labels" $ | nindent 4 }}
-handler: {{ $manu }}
+handler: {{ $runtimeName }}
 ---
 {{- end }}
 {{- end }}

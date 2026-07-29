@@ -73,7 +73,8 @@ Detection (`pkg/devicemanager/detector/<mfr>`) and allocation (`pkg/devicemanage
 have one subpackage per manufacturer: nvidia, amd, ascend, cambricon, hygon, iluvatar, metax,
 mthreads, thead. Platform-specific code is split into `_linux.go` / `_other.go` build-constrained
 files. The set of supported manufacturers and their PCI vendor IDs / resource names live in
-`pkg/nodefeature` (overridable via `GPUSTACK_*` env vars).
+`pkg/nodefeature` (overridable via `GPUSTACK_*` env vars, which the chart fans out from
+`global.manufacturers`).
 
 ### CGO bindings (`binding/`)
 
@@ -233,11 +234,22 @@ Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, which 
 startup in every install mode (see [The chart deploys
 workloads](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)). Its two matcher
 lists come from facts that exist for other reasons: the PCI vendor IDs of the manufacturers the
-worker manages — `--manufacturer`, which the chart fills from `manufacturers`, the same map that
-drives the device-manager DaemonSets — so a vendor added there is labelled, detected and given a
-device manager in one edit; and the PCI classes `pkg/nodefeature` calls acceleratable, which are the
-classes NFD is configured to publish. Two Go tests hold the chart's `manufacturers` map and its
-`deviceClassWhitelist` equal to what `pkg/nodefeature` says.
+worker manages — `--manufacturer`, which the chart fills from `global.manufacturers`, the same map
+that drives the device-manager DaemonSets — so a vendor added there is labelled, detected and given
+a device manager in one edit; and the PCI classes `pkg/nodefeature` calls acceleratable, which are
+the classes NFD is configured to publish. Two Go tests hold the chart's `global.manufacturers` map
+and its `deviceClassWhitelist` equal to what `pkg/nodefeature` says.
+
+That map is where a manufacturer's whole identity lives: one row per manufacturer carrying its
+`pciVendorID`, the `resourceName` its device-plugin advertises, the `runtimeName` its workloads run
+under, its `partitionKind`, and `runtimeInjectsDriver` — the last saying that this vendor's
+user-space driver reaches a container only through its container runtime, which is why the NVIDIA
+and MThreads device-managers run under a RuntimeClass while every other vendor's reads its
+management library from a hostPath mount. `runtimeName` also decides which RuntimeClasses the chart
+creates (`deviceManager.createRuntimeClasses`, and only where the class is absent or already this
+release's): it is stated for the six vendors whose container runtime registers a handler by that
+name, because the operator attaches a RuntimeClass to a workload whenever one exists and a class no
+runtime backs would fail every Pod of that vendor.
 
 ### Stage 2: GPUStack Operator Device Manager (DM)
 
