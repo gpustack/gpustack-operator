@@ -177,19 +177,25 @@ global:
 {{- end }}
 
 fullnameOverride: gpustack-operator
+{{- if $.ImageRepository }}
+
+# The chart's own image knob, not deviceManager's: every component that runs this image reads it
+# through the same helper, which merges a per-component override over this one. Setting it here
+# reaches the device-managers AND the migration hook Jobs, which run this image too and would
+# otherwise resolve the chart's default tag — a tag that need not exist wherever this build came
+# from, leaving the hook to fail the install on a pull it can never satisfy.
+image:
+  repository: {{ $.ImageRepository | quote }}
+  {{- if $.ImageTag }}
+  tag: {{ $.ImageTag | quote }}
+  {{- end }}
+{{- end }}
 
 worker:
   enabled: false
 
 deviceManager:
   enabled: {{ index $.ComponentSwitches "deviceManager" }}
-{{- if $.ImageRepository }}
-  image:
-    repository: {{ $.ImageRepository | quote }}
-    {{- if $.ImageTag }}
-    tag: {{ $.ImageTag | quote }}
-    {{- end }}
-{{- end }}
 
 kueue:
   enabled: {{ index $.ComponentSwitches "kueue" }}

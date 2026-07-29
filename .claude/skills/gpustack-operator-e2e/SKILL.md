@@ -239,7 +239,7 @@ kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=400 | grep -iE 'err
 bash .claude/skills/_e2e-lib/scripts/teardown.sh gpustack-system 2>&1 | tee "$RPT"/raw/90-teardown.txt
 ```
 
-`teardown.sh` removes the test artifacts, the operator release, the worker-installed Kueue/NFD/CSI sub-releases, their CRDs/finalizers (including the operator's `gpustack.ai/controlled` on **Instances and InstanceTypes**), and the runtime APIServices/webhooks. The `gpustack-system` namespace is kept on purpose. Never delete the user's pre-existing resources. Then walk the report's **environment mutations** list and restore anything still outstanding (node preparation, disabled static Pod / DCGM service, toggled card mode).
+`teardown.sh` removes the test artifacts, the operator release — which now takes Kueue / NFD / the CSI drivers with it, since they are subcharts of it — the releases it does not own (the worker's own image-mode release, and the pre-subchart per-application ones), their CRDs/finalizers (including the operator's `gpustack.ai/controlled` on **Instances and InstanceTypes**), and the runtime APIServices/webhooks. The `gpustack-system` namespace is kept on purpose. Never delete the user's pre-existing resources. Then walk the report's **environment mutations** list and restore anything still outstanding (node preparation, disabled static Pod / DCGM service, toggled card mode).
 
 *Level 2 — infrastructure (ONLY when this run provisioned the cluster):*
 

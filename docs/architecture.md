@@ -98,12 +98,22 @@ scheduling chain starts at that rule, so a release without it classifies no node
 renders it unconditionally — including when `node-feature-discovery.enabled=false`, which is the
 supported way to run the chain against an NFD the cluster already has.
 
-Two switches are worth calling out because they change which mode installs what:
+**The two modes are exclusive.** Both installs render the same chart, so their objects overlap, and
+Helm refuses to import an object another release owns — the worker's install fails on the first such
+object, and because it gates its startup on installing its applications, it never starts. (Measured:
+`ServiceAccount "csi-nfs-controller-sa" ... invalid ownership metadata`; Helm names whichever shared
+object it maps first.) What makes this true even for the narrowest overlap is the
+`gpustack-cpu-info` NodeFeatureRule: it is cluster-scoped, fixed-name, carries no switch, and is
+therefore in *both* renders even when every application is handed to one side. Wherever this chart
+deploys the worker, `worker.disableApplications` must keep the `*`; image mode is for clusters where
+no chart deploys the worker at all.
 
-- **`deviceManager.enabled=false`** — the chart renders no device-manager DaemonSets. Combined with a
-  `--disable-applications` list that omits `device-manager`, the worker installs them at runtime from
-  the bundled chart instead. This is how the device managers were always deployed before chart mode
-  covered them.
+Two switches are worth calling out because they change what a mode installs:
+
+- **`deviceManager.enabled=false`** — the chart renders no device-manager DaemonSets, and that is all
+  it does. It does **not** hand that install back to the worker: with the wildcard in place the worker
+  installs nothing, so the cluster simply has no device managers (useful when only the control plane
+  is wanted). Before chart mode covered them, this switch was how the worker came to install them.
 - **`worker.enabled=false`** — the chart deploys only the applications, which is exactly what image
   mode's overlay sets.
 

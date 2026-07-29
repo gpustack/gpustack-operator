@@ -108,6 +108,22 @@ echo "active context: ${ctx}"
 # docker-desktop shares the docker image store with the node — no import needed.
 # k3s (containerd, separate store) needs an explicit import.
 case "$ctx" in
+  kind-*)
+    # Every kind node is a container with its OWN containerd store, so sharing this
+    # machine's docker store is not enough — the image has to be loaded into each of
+    # them, which is what `kind load` does. The cluster name is the context minus the
+    # "kind-" prefix, which is how kind writes it.
+    cluster="${ctx#kind-}"
+    echo "kind detected — loading into every node of cluster '${cluster}'"
+    if ! command -v kind >/dev/null 2>&1; then
+      echo "kind is not on PATH; load by hand: kind load docker-image '${IMAGE}' --name '${cluster}'"
+      exit 1
+    fi
+    if ! kind load docker-image "$IMAGE" --name "$cluster"; then
+      echo "kind load FAILED — the nodes do not have ${IMAGE}, so nothing would run it."
+      exit 1
+    fi
+    ;;
   *k3s*|k3d*)
     echo "k3s detected — importing via 'k3s ctr images import'"
     docker save "$IMAGE" | sudo k3s ctr images import -

@@ -2,16 +2,18 @@
 #
 # Shared READ-ONLY assertions common to both E2E skills: the operator rolls out,
 # the RUNNING binary is built from HEAD, the aggregated APIs are Available, the
-# CRDs are established, and the worker's inlined sub-releases are deployed.
+# CRDs are established, and the four bundled applications run as workloads of the
+# operator's own release.
 #
-#   assert-core.sh <NS>
+#   assert-core.sh <NS> [RELEASE]
 #
 # Prints a STATUS|CHECK|OBJECT table and exits non-zero if any check FAILs.
 # Level-based and safe to re-run. Callers (case-1 of each skill) run this first,
 # then append their skill-specific assertions.
 set -uo pipefail
 
-NS="${1:?usage: assert-core.sh <NS>}"
+NS="${1:?usage: assert-core.sh <NS> [RELEASE]}"
+RELEASE="${2:-gpustack-operator}"
 WORKER=deploy/gpustack-operator-worker
 
 FAILS=0
@@ -67,25 +69,81 @@ for crd in instances.worker.gpustack.ai devices.worker.gpustack.ai; do
   fi
 done
 
-# 5. The worker self-installs the bundled charts as separate Helm releases. Poll
-#    a few seconds — they install shortly after the worker is Ready. The
-#    device-manager release exists only with deviceManager.enabled=false, so it
-#    is not asserted here (see chart-e2e for that path).
-for rel in gpustack-kueue gpustack-node-feature-discovery gpustack-csi-driver-nfs gpustack-csi-driver-s3; do
-  ok=""
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if [ "$(helm status "$rel" -n "$NS" -o json 2>/dev/null | grep -o '"status":"deployed"')" ]; then
-      ok=1
-      break
+# 5. Kueue, NFD and the two CSI drivers run as workloads of the operator's OWN release.
+#    They used to be four Helm releases the worker installed at runtime; as subcharts what
+#    proves it is Helm's own ownership annotation, which is exactly the field an ownership
+#    transfer rewrites. It is read instead of app.kubernetes.io/instance because Helm stamps it
+#    on everything it manages while the label is up to each chart's templates — the
+#    csi-driver-s3 chart labels its controller Deployment `managed-by` only, with no `instance`.
+#    Kueue and the NFD pair are required — the scheduling chain cannot start without them —
+#    while a CSI driver an install switched off is SKIPped. `rollout status` covers Deployments
+#    and DaemonSets alike.
+for entry in \
+  "deploy/kueue-controller-manager|required" \
+  "deploy/node-feature-discovery-master|required" \
+  "daemonset/node-feature-discovery-worker|required" \
+  "deploy/csi-nfs-controller|optional" \
+  "daemonset/csi-nfs-node|optional" \
+  "deploy/csi-s3-controller|optional" \
+  "daemonset/csi-s3-node|optional"; do
+  obj="${entry%|*}"
+  posture="${entry#*|}"
+  if ! kubectl -n "$NS" get "$obj" >/dev/null 2>&1; then
+    if [ "$posture" = required ]; then
+      record FAIL "application in release" "$obj missing — the scheduling chain needs it"
+    else
+      record SKIP "application in release" "$obj not installed (switched off)"
     fi
-    sleep 3
-  done
-  if [ -n "$ok" ]; then
-    record PASS "sub-release deployed" "$rel"
+    continue
+  fi
+  owner=$(kubectl -n "$NS" get "$obj" -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}' 2>/dev/null)
+  if [ "$owner" != "$RELEASE" ]; then
+    record FAIL "application in release" \
+      "$obj belongs to [${owner:-none}], not ${RELEASE} — installed as a separate release?"
+  elif kubectl -n "$NS" rollout status "$obj" --timeout=180s >/dev/null 2>&1; then
+    record PASS "application in release" "$obj"
   else
-    record FAIL "sub-release deployed" "$rel not deployed (helm status)"
+    record FAIL "application in release" "$obj not rolled out within 180s"
   fi
 done
+
+# The four per-application releases must NOT be back. Their reappearance means the worker
+# started installing applications at runtime again — the regression this layout removed.
+legacy=$(helm list -n "$NS" -q 2>/dev/null \
+  | grep -E '^gpustack-(kueue|node-feature-discovery|csi-driver-nfs|csi-driver-s3)$' | tr '\n' ' ')
+if [ -z "$legacy" ]; then
+  record PASS "no per-application releases" "none"
+else
+  record FAIL "no per-application releases" "$legacy — the worker is installing at runtime again"
+fi
+
+# 6. Kueue's visibility APIServices. These are aggregated APIs, so an unavailable one costs
+#    every client in the cluster — not just Kueue's own callers — because each discovery round
+#    trip waits on it. Assert the condition, then time a full discovery as the evidence.
+if kubectl -n "$NS" get deploy/kueue-controller-manager >/dev/null 2>&1; then
+  for api in v1beta1.visibility.kueue.x-k8s.io v1beta2.visibility.kueue.x-k8s.io; do
+    st=""
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      st=$(kubectl get apiservice "$api" -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null)
+      [ "$st" = "True" ] && break
+      sleep 3
+    done
+    if [ "$st" = "True" ]; then
+      record PASS "visibility apiservice Available" "$api"
+    else
+      record FAIL "visibility apiservice Available" "$api (Available=${st:-missing})"
+    fi
+  done
+  started=$SECONDS
+  if kubectl api-resources >/dev/null 2>&1; then
+    record PASS "discovery round trip" "$((SECONDS - started))s for kubectl api-resources"
+  else
+    record FAIL "discovery round trip" \
+      "kubectl api-resources errored after $((SECONDS - started))s — an aggregated API is wedged"
+  fi
+else
+  record SKIP "visibility apiservice Available" "kueue not installed (switched off)"
+fi
 
 echo
 echo "== assert-core: CPU-only operator core =="

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Tear down an E2E deployment and remove every runtime-installed leftover.
+# Tear down an E2E deployment and remove every leftover `helm uninstall` does not take.
 # MUTATING — the skill confirms before running this.
 #
 #   teardown.sh <NS>
@@ -17,6 +17,11 @@
 set -uo pipefail
 
 NS="${1:?usage: teardown.sh <NS>}"
+# Prefer the client hack/lib/helm.sh pins (3.21+). A PATH helm can be old enough to lack
+# flags this suite needs — a 3.13 client has no --take-ownership at all.
+HELM=helm
+[ -x .sbin/helm ] && HELM=.sbin/helm
+
 echo "[teardown] namespace=${NS}"
 
 # 0. E2E test artifacts this skill creates. Delete the test Instance before the
@@ -26,36 +31,43 @@ kubectl -n default delete instance gpustack-e2e-instance --ignore-not-found 2>/d
 kubectl -n "$NS" delete nodefeature --all 2>/dev/null || true
 
 # 1. The operator's own release (worker, device-managers, RBAC, webhooks).
-if command -v helm >/dev/null 2>&1 && helm status gpustack-operator -n "$NS" >/dev/null 2>&1; then
+if command -v "$HELM" >/dev/null 2>&1 && "$HELM" status gpustack-operator -n "$NS" >/dev/null 2>&1; then
   echo "[teardown] helm uninstall gpustack-operator"
-  helm uninstall gpustack-operator -n "$NS" 2>/dev/null || true
+  "$HELM" uninstall gpustack-operator -n "$NS" 2>/dev/null || true
 fi
 
-# 2. The Helm releases the worker installed at runtime. gpustack-operator-device-manager
-#    exists only when installed with deviceManager.enabled=false; the status guard skips
-#    it otherwise.
-if command -v helm >/dev/null 2>&1; then
+# 2. The releases the operator chart does not own. gpustack-operator-device-manager is the one
+#    the worker installs from the chart bundled into its own image (image mode); the four
+#    gpustack-<application> names are the per-application releases earlier versions installed
+#    before Kueue / NFD / the CSI drivers became subcharts. Any of them may be absent — the
+#    status guard skips those — and after a chart-mode uninstall all of them usually are.
+if command -v "$HELM" >/dev/null 2>&1; then
   for r in gpustack-operator-device-manager gpustack-csi-driver-nfs gpustack-csi-driver-s3 gpustack-node-feature-discovery gpustack-kueue; do
-    if helm status "$r" -n "$NS" >/dev/null 2>&1; then
+    if "$HELM" status "$r" -n "$NS" >/dev/null 2>&1; then
       echo "[teardown] helm uninstall ${r}"
-      helm uninstall "$r" -n "$NS" --wait --timeout 120s 2>/dev/null \
-        || helm uninstall "$r" -n "$NS" 2>/dev/null || true
+      "$HELM" uninstall "$r" -n "$NS" --wait --timeout 120s 2>/dev/null \
+        || "$HELM" uninstall "$r" -n "$NS" 2>/dev/null || true
     fi
   done
 fi
 
-# 3. Delete the aggregated APIServices and admission webhooks the worker registered at runtime,
-#    BEFORE stripping finalizers or deleting CRDs. Once the worker is gone their backing Service
-#    is unreachable, so a finalizer-clearing patch (an update) would be rejected by the still-
-#    registered validating webhook (failurePolicy: Fail) and hang; and leaving the aggregated
+# 3. Delete the aggregated APIServices and admission webhooks these releases registered, BEFORE
+#    stripping finalizers or deleting CRDs. Once the workloads are gone their backing Services are
+#    unreachable, so a finalizer-clearing patch (an update) would be rejected by a still-registered
+#    validating webhook (failurePolicy: Fail) and hang; and leaving the aggregated
 #    worker.gpustack.ai/v1 proxy registered makes an unversioned `kubectl get instancetypes`
 #    resolve to it and fail, silently skipping the strip below.
-for a in v1.gpustack.ai v1.worker.gpustack.ai; do
-  kubectl delete apiservice "$a" --ignore-not-found 2>/dev/null || true
+#
+#    Matched by name pattern rather than an explicit list, which is what reaches Kueue's
+#    *.visibility.kueue.x-k8s.io APIServices and its kueue-* webhook configurations whatever
+#    version they carry — they belong to the operator release now, so a partial uninstall
+#    strands them exactly like the worker's own.
+gpustack_pattern='gpustack|kueue|nfd'
+for r in apiservice mutatingwebhookconfigurations validatingwebhookconfigurations; do
+  kubectl get "$r" -o name 2>/dev/null \
+    | grep -Ei "$gpustack_pattern" \
+    | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 done
-kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name 2>/dev/null \
-  | grep -i gpustack \
-  | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 
 # 4. Strip the finalizers that pin objects once their controllers are gone. Kueue pins
 #    workloads/flavors/queues/checks with kueue.x-k8s.io/resource-in-use and the operator pins
@@ -78,9 +90,9 @@ strip_gpustack_finalizers() {
   done
 }
 
-# 5. Delete the worker / sub-release CRDs (gpustack, kueue, nfd) and drain them. Kick the delete off
-#    non-blocking, then keep stripping finalizers so any CR the delete just marked Terminating is
-#    released and the CRD drains instead of hanging.
+# 5. Delete the operator's and its applications' CRDs (gpustack, kueue, nfd) and drain them. Kick
+#    the delete off non-blocking, then keep stripping finalizers so any CR the delete just marked
+#    Terminating is released and the CRD drains instead of hanging.
 crd_pattern='\.(worker\.)?gpustack\.ai$|\.kueue\.x-k8s\.io$|\.nfd\.k8s-sigs\.io$'
 strip_gpustack_finalizers
 kubectl get crd -o name 2>/dev/null | grep -E "${crd_pattern}" \
@@ -103,7 +115,19 @@ for s in "$worker_cert_secret" gpustack-settings; do
   kubectl -n "$NS" delete secret "$s" --ignore-not-found 2>/dev/null || true
 done
 
-# 7. E2E-ONLY (NOT part of the cleanup.sh mirror): reverse-patch the Node extended resources GPUStack
+# 7. Delete what a FAILED migration hook leaves behind. Helm removes its hook objects once they
+#    succeed, but not when they fail — deliberately, so the logs survive — and among them is a
+#    ClusterRoleBinding to cluster-admin. Selected by our own label and then by name.
+for r in jobs configmaps serviceaccounts; do
+  kubectl -n "$NS" get "$r" -l app.kubernetes.io/part-of=gpustack-operator -o name 2>/dev/null \
+    | grep -E 'migrate' \
+    | xargs -r -I{} kubectl -n "$NS" delete {} --ignore-not-found 2>/dev/null || true
+done
+kubectl get clusterrolebindings -l app.kubernetes.io/part-of=gpustack-operator -o name 2>/dev/null \
+  | grep -E 'migrate' \
+  | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
+
+# 8. E2E-ONLY (NOT part of the cleanup.sh mirror): reverse-patch the Node extended resources GPUStack
 #    advertised, so the NEXT case sees a pristine node. Node extended resources do not self-remove when
 #    their advertiser is gone, and the two families clear differently — the removal below is genuinely
 #    needed for one and only cosmetic for the other:

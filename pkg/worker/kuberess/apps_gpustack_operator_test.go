@@ -93,15 +93,20 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 			assert.Len(t, manus, len(nodefeature.GetKnownAcceleratableManufacturers()),
 				"all manufacturers rendered")
 
-			// The image is either pinned to the running worker image or composed by the chart.
-			deviceManager, _ := values["deviceManager"].(map[string]any)
+			// The image is either pinned to the running worker image or composed by the chart. It is
+			// set on the chart's own image knob, which every component that runs this image reads
+			// through the same merging helper — the device-managers and the migration hook Jobs
+			// alike, the latter being what fails the install when it resolves a tag that does not
+			// exist wherever this build came from.
 			if tc.expectImageOverride {
-				image, _ := deviceManager["image"].(map[string]any)
+				image, _ := values["image"].(map[string]any)
 				assert.Equal(t, "registry.example.com/myns/gpustack-operator", image["repository"])
 				assert.Equal(t, "v0.5.0", image["tag"])
 			} else {
-				assert.Nil(t, deviceManager["image"], "no device-manager image override")
+				assert.Nil(t, values["image"], "no chart-level image override")
 			}
+			deviceManager, _ := values["deviceManager"].(map[string]any)
+			assert.Nil(t, deviceManager["image"], "device-managers inherit the chart image, never their own")
 
 			global, _ := values["global"].(map[string]any)
 			if tc.expectGlobalRegistry {

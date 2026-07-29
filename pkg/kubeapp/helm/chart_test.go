@@ -14,32 +14,34 @@ import (
 
 // Test_Chart_configureActions pins the chart-declared options that reach the Helm
 // actions: TakeOwnership must reach both the install and the upgrade action and
-// default to false, while SkippedCRDsInstallation must keep driving the install
-// action's IncludeCRDs alone.
+// default to false, while SkippedCRDsInstallation must drive the install action's
+// SkipCRDs alone — never IncludeCRDs, which would put the crds/ files into the
+// manifest and make the ownership check reject the CRDs Helm's own CRD phase just
+// created without ownership metadata.
 func Test_Chart_configureActions(t *testing.T) {
 	cases := []struct {
 		name              string
 		chart             Chart
 		wantTakeOwnership bool
-		wantIncludeCRDs   bool
+		wantSkipCRDs      bool
 	}{
 		{
 			name:              "zero chart takes no ownership",
 			chart:             Chart{},
 			wantTakeOwnership: false,
-			wantIncludeCRDs:   true,
+			wantSkipCRDs:      false,
 		},
 		{
 			name:              "take ownership reaches both actions",
 			chart:             Chart{TakeOwnership: true},
 			wantTakeOwnership: true,
-			wantIncludeCRDs:   true,
+			wantSkipCRDs:      false,
 		},
 		{
-			name:              "skipped CRDs installation excludes CRDs only",
+			name:              "skipped CRDs installation skips the CRD phase only",
 			chart:             Chart{SkippedCRDsInstallation: true},
 			wantTakeOwnership: false,
-			wantIncludeCRDs:   false,
+			wantSkipCRDs:      true,
 		},
 	}
 
@@ -54,7 +56,8 @@ func Test_Chart_configureActions(t *testing.T) {
 
 			assert.Equal(t, c.wantTakeOwnership, i.TakeOwnership, "install action take ownership")
 			assert.Equal(t, c.wantTakeOwnership, u.TakeOwnership, "upgrade action take ownership")
-			assert.Equal(t, c.wantIncludeCRDs, i.IncludeCRDs, "install action include CRDs")
+			assert.Equal(t, c.wantSkipCRDs, i.SkipCRDs, "install action skip CRDs")
+			assert.False(t, i.IncludeCRDs, "install action must never render crds/ into the manifest")
 		})
 	}
 }

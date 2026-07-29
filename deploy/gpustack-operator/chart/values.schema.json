@@ -1613,7 +1613,7 @@
           "type": "string"
         },
         "disableApplications": {
-          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely; name individual applications to hand some back to it. The value is templated\nrather than appended through `extraArgs` because the flag accumulates across occurrences,\nso a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.",
+          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Even handing back nothing but `device-manager` overlaps, because the\ncluster-scoped `gpustack-cpu-info` NodeFeatureRule carries no switch and both renders contain\nit. The worker installs applications only where no chart deploys it (see\ndocs/architecture.md, \"Two install modes\"). The value is\ntemplated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.",
           "items": {
             "anyOf": [
               {

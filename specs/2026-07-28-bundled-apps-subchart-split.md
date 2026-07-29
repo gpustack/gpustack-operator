@@ -654,10 +654,21 @@ pre-install/pre-upgrade hooks execute.
   radius, and index entries for the two new docs.
 - Chart `README.md` regenerated from `values.yaml` annotations.
 - e2e: `_e2e-lib/scripts/assert-core.sh` replaces its sub-release loop with in-release workload
-  assertions; `deploy.sh` header, `teardown.sh` and `cleanup.sh` updated; new HA,
-  upgrade-adoption and image-mode cases added to `gpustack-operator-chart-e2e`; an observation
-  step records the `*.visibility.kueue.x-k8s.io` APIServices' `Available` condition and the
-  `kubectl api-resources` round-trip time (see the visibility caveat).
+  assertions (instance label + rollout, Kueue and the NFD pair required, a switched-off CSI driver
+  SKIPped) and adds the guard that the four per-application releases have **not** come back;
+  `deploy.sh` header and `teardown.sh` updated (the latter now mirrors `cleanup.sh`'s widened
+  `gpustack|kueue|nfd` webhook/APIService sweep and its failed-migration-hook step); CASE 4 (HA
+  failover), CASE 5 (adoption, with **and** without `--take-ownership`) and CASE 6 (image mode) added
+  to `gpustack-operator-chart-e2e`; an observation step records the `*.visibility.kueue.x-k8s.io`
+  APIServices' `Available` condition and the `kubectl api-resources` round-trip time (see the
+  visibility caveat).
+- **T18 found the two install modes are mutually exclusive** — see the caveat below. Two statements
+  written earlier in this spec's own docs pass were wrong and are corrected **outside T18's `Owns:`**
+  for the same reason the root `README.md` was: `worker.disableApplications`'s values comment invited
+  a partial list ("hand some back to it"), and `docs/architecture.md`'s `deviceManager.enabled=false`
+  bullet described handing the device-manager install back to the worker. Both configurations fail
+  the worker's startup. The values comment and that bullet now say so, and
+  `_e2e-lib/references/troubleshooting.md` names the symptom.
 - AC: `make lint chart`, `make test chart`, `gpustack-operator-chart-e2e` and
   `gpustack-operator-e2e` all pass.
 
@@ -684,6 +695,21 @@ pre-install/pre-upgrade hooks execute.
   it once a gpustack legacy release has been positively identified. On the install path the
   adopting apply is additionally routed through `UpdateThreeWayMerge` rather than a plain update
   (`install.go:459`), which is what gives a live object's unmanaged fields a chance to survive.
+- **The two install modes are mutually exclusive** (found in T18, then measured). Both installs
+  render the same chart, so their objects overlap and Helm refuses to import one another release
+  owns; since `Prepare()` returns that error (`pkg/worker/worker.go:131`), the worker never starts.
+  Verified on kind by running an image-mode worker against a live chart release: `ServiceAccount
+  "csi-nfs-controller-sa" ... invalid ownership metadata` — Helm names whichever shared object it
+  maps first, so the object in the message is not fixed. What makes the exclusion hold even for the
+  narrowest overlap is the `NodeFeatureRule`: cluster-scoped, fixed-name, no switch, and therefore
+  in *both* renders even when every application is handed to one side. The rule cannot be gated to fix this:
+  it must be installed in every mode, including when the user brings their own NFD, which is what a
+  `lookup`-based skip would break — and at the one-time adoption upgrade the rule is still owned by
+  `gpustack-node-feature-discovery`, so a skip would drop it from the parent manifest and the
+  post-upgrade prune (matching the legacy instance label) would delete it. The consequence is
+  therefore a boundary, not a bug to fix: wherever this chart deploys the worker,
+  `worker.disableApplications` keeps the `*`; image mode is for clusters with no chart release, which
+  is how CASE 6 stands it up.
 - **Helm never applies `crds/` on upgrade.** `installCRDs` is referenced only from the install
   path; `upgrade.go` has no CRD handling at all. Every subchart CRD update is therefore a
   manual/hook step forever, not just during this migration.
@@ -1287,7 +1313,7 @@ the baseline.
       a finding into a non-test file, and deleting the installers reshuffles which helpers have
       only-constant callers.
 
-- [ ] **T13 · Atomic cut-over**
+- [x] **T13 · Atomic cut-over**
       Blocked by: T11, T12
       Owns: `deploy/gpustack-operator/chart/values.yaml`
       Gate: review
@@ -1297,6 +1323,26 @@ the baseline.
       Measured on kind 1.23.17: with the defaults on and the runtime installer still live, the
       worker's `Prepare()` fails all three colliding installs (`must equal "gpustack-kueue":
       current value is "gpustack-operator"`) and crash-loops, while NFD silently runs twice.
+      Verified on kind (1 control-plane + 2 workers, k8s 1.36.1, arm64): one release, the worker
+      carrying `--disable-applications=*`, `gpustack-cpu-info` owned by that release, and CASE 1
+      green including the four applications in it. Image mode needed **two product fixes** first, both
+      found by CASE 6, both outside this task's declared `Owns:`, and both fatal there because
+      applications are installed during the worker's own startup:
+      (1) `pkg/kubeapp/helm/chart.go` wired `SkippedCRDsInstallation` to the install action's
+      `IncludeCRDs` (main does the same at `client.go:309`) when the flag it means is `SkipCRDs`.
+      `IncludeCRDs` renders `crds/` into the manifest **as well**, so Helm installed each subchart
+      CRD twice: once in its CRD phase, which creates them with no ownership metadata, and once as a
+      release resource, whose ownership check then rejected the very objects that phase had just
+      created — `CustomResourceDefinition "nodefeatures.nfd.k8s-sigs.io" ... cannot be imported`,
+      and with it the worker's whole startup. It never bit before because the NFD chart version main
+      pulled kept its CRDs in `templates/`; the vendored 0.19.0 ships `crds/nfd-api-crds.yaml`.
+      (2) the values overlay pinned the running worker's image on `deviceManager.image`, so the
+      migration hook Jobs — which run this image too — resolved the chart's default tag instead, a
+      tag that need not exist wherever the build came from; the pre-install hook then failed the
+      install on a pull it could never satisfy (`job gpustack-operator-migrate-pre failed:
+      DeadlineExceeded`, after its `activeDeadlineSeconds: 600`). The overlay now sets the chart's
+      own `image` knob, which every component reads through the same merging helper, so the hooks
+      and the device-managers run one build.
       Verify: on kind — `helm install` then `helm list -n gpustack-system` → exactly one release,
       and `bash .claude/skills/_e2e-lib/scripts/assert-core.sh gpustack-system`
 
@@ -1393,15 +1439,93 @@ the baseline.
       `-enable-leader-election` added by NFD itself, the documented Kueue `labelSelector` matching the
       controller-manager pod labels exactly, and the worker's selector-less entry defaulted to its own.
 
-- [ ] **T18 · e2e sync + new cases**
+- [x] **T18 · e2e sync + new cases**
       Blocked by: T13, T15, T16
       Owns: `.claude/skills/_e2e-lib/**`, `.claude/skills/gpustack-operator-chart-e2e/**`,
       `.claude/skills/gpustack-operator-e2e/**`
+      Also `deploy/gpustack-operator/chart/values.yaml` and `docs/architecture.md`, outside the
+      declared `Owns:` and recorded in F10: two statements this task proved wrong.
       Acceptance: `assert-core.sh` asserts in-release workloads instead of sub-releases; new
-      cases for HA failover, upgrade adoption (with and without `--take-ownership`), image mode,
-      and the legacy Kueue line's scheduling chain; a visibility-APIService observation step.
-      Verify: `bash .claude/skills/gpustack-operator-chart-e2e/cases/case-*.sh gpustack-system`
-      on the 3-node kind cluster, all green
+      cases for HA failover, upgrade adoption (with and without `--take-ownership`) and image mode;
+      a visibility-APIService observation step. The "legacy Kueue line" clause this acceptance
+      carried is **dropped as stale**: `hack/deps.sh` pins a single Kueue (0.18.4, with a
+      conditional `selectable-fields.patch`), so there is no second line to cover.
+      Run on kind (1 control-plane + 2 workers, k8s 1.36.1, arm64), all five cases green at one
+      commit: CASE 1 (19 checks), CASE 4 (17), CASE 5 (9), CASE 2 (4), CASE 6 (12). CASE 5 needs a
+      helm client with `--take-ownership` (3.21+, which is what `.sbin/helm` is; the PATH one is
+      3.13.3 and the case AUTO-SKIPS on it), and CASE 6 needs the chart release **absent**, so it ran
+      after CASE 2's teardown. **One gap, stated rather than hidden:** CASE 4 ran at `REPLICAS=2`
+      because the cluster had two untainted nodes, so the HA guide's own `replicas: 3` values are
+      render-verified (T17) and their mechanism is runtime-verified, but that exact count is not.
+      Three findings the run produced, each folded into the code or the case that owns it: the
+      `csi-driver-s3` chart labels its controller `managed-by` only, so ownership is asserted on
+      Helm's annotation instead of `app.kubernetes.io/instance`; `build-load.sh` had no kind branch
+      (each kind node has its own containerd store); and `deploy.sh`/`teardown.sh` used the PATH helm
+      rather than the pinned one.
+      Verify: `bash .claude/skills/gpustack-operator-chart-e2e/cases/case-{1,4,5}.sh gpustack-system`
+      against the install, then CASE 2, then CASE 6 on the emptied cluster — all green
+
+- [ ] **T19 · `manufacturers` carries a manufacturer's whole identity**
+      Blocked by: T18
+      Owns: `deploy/gpustack-operator/chart/values.yaml`,
+      `deploy/gpustack-operator/chart/templates/**`, `pkg/worker/kuberess/chart_test.go`,
+      `docs/settings.md`, `docs/architecture.md`
+      Gate: review
+      Acceptance: `manufacturers` stops being a name→PCI-vendor-ID map and becomes a map of objects
+      carrying `pciVendorID` plus the three identities that are hardcoded somewhere today —
+      `resourceName`, `runtimeName`, `partitionKind`. The payoff is in the templates: the
+      RuntimeClass template currently decides which vendors get one with a literal
+      `has $manu (list "nvidia" "mthreads")`, and after this it renders one for whichever
+      manufacturers declare a `runtimeName` — the vendor list stops living inside a template. All
+      five readers move with it: `nodefeaturerule.yaml`'s `values .Values.manufacturers` becomes a
+      pluck of `pciVendorID`, `device-manager/daemonset.yaml`'s `index $root.Values.manufacturers
+      $manu`, `worker/deployment.yaml`'s `--manufacturer` (keys, unchanged) and its
+      `GPUSTACK_<MFR>_PCI_VENDOR_ID` env loop, and `NOTES.txt` (keys, unchanged).
+      `TestChartManufacturersMatchNodeFeature` widens from the vendor ID to all four fields against
+      `pkg/nodefeature`, which is what stops a chart value drifting from the code that consumes it.
+      Also rewrites the sentences T17 wrote about this map in `docs/settings.md` (the
+      `GPUSTACK_<MFR>_PCI_VENDOR_ID` row's "set the `manufacturers` value instead") and
+      `docs/architecture.md`.
+      Verify: `make generate chart` idempotent; `go test ./pkg/worker/kuberess/...`; and the check
+      that matters — the **default map renders byte-identically** to before the shape change
+      (`helm template` diff empty), so the migration is a values-surface change and nothing else.
+
+- [ ] **T20 · The generated Kueue transformations leave the values surface**
+      Blocked by: T19 (both rewrite `values.yaml`; disjoint in intent, not in file)
+      Owns: `deploy/gpustack-operator/chart/values.yaml`,
+      `deploy/gpustack-operator/chart/templates/_helpers.tpl`,
+      `hack/deploy/gpustack-operator/chart/charts/kueue/**`, `gen/chartvalues/**`
+      Acceptance: the 28 generated `transformations` entries — 123 lines of `values.yaml`, sitting
+      **inside** the user-editable `kueue.managerConfig.controllerManagerConfigYaml` string —
+      move into a named template in the parent's `_helpers.tpl`, which a new patch has
+      `charts/kueue/templates/manager/manager-config.yaml` `include`. The reason is the one thing
+      the current shape cannot survive: a user who copies `controllerManagerConfigYaml` to change
+      one feature gate silently drops the credits mapping the whole scheduling chain is built on,
+      with no error anywhere. `make generate chart` writes the helper between its markers instead
+      of writing values, so the marker pair moves file too.
+      Verify: `make generate chart` idempotent; the rendered `kueue-manager-config` ConfigMap is
+      **byte-identical** to today's (the point is where the text lives, not what it says);
+      `make lint chart`; `gen/chartvalues`'s golden test updated to the new target.
+
+- [ ] **T21 · One cert-manager answer for the whole release**
+      Blocked by: T20
+      Owns: `deploy/gpustack-operator/chart/values.yaml`,
+      `deploy/gpustack-operator/chart/templates/worker/**`,
+      `hack/deploy/gpustack-operator/chart/charts/kueue/**`,
+      `deploy/gpustack-operator/chart/README.md.gotmpl`, `docs/**`
+      Gate: review
+      Acceptance: `worker.certmanager` hoists to a top-level `certmanager` and reaches the
+      subcharts as `global.certmanager`, so the release has one answer instead of two that can
+      disagree — today Kueue's `enableCertManager` and the worker's `certmanager.enabled: auto` are
+      set independently, and the `auto` detection cannot reach Kueue at all because Helm merges
+      subchart values rather than rendering them. Kueue reads it in **28 places across 23 files**
+      (measured), which would be the largest patch on the branch and would conflict on every Kueue
+      bump. So the patch adds **one** helper to the subchart's own `_helpers.tpl` that reads the
+      global, and the 28 sites call that helper: a future bump then conflicts only where upstream
+      also touched those lines, instead of across 23 files of ours.
+      Verify: `make generate chart`; `make lint chart`; render three ways — cert-manager absent,
+      present, and forced off — and assert the worker's and Kueue's certificate paths agree in all
+      three; `hack/deps.sh` re-applies the patch cleanly from a clean vendor tree.
 
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
@@ -1410,10 +1534,14 @@ degrade to a network `helm pull` rather than failing — image mode keeps workin
 airgapped for those four apps until T12 deletes the code and T13 cuts over. This is acceptable
 because no commit on this branch is independently releasable; the branch ships as one change.
 
-**Checkpoints.** **CP-A** after T3/T4/T5 — the chart resolves offline, both Kueue lines render,
-`global.*` reaches every image. **CP-B** after T10 — the full stack renders at parity with the
+**Checkpoints.** **CP-A** after T3/T4/T5 — the chart resolves offline, the single pinned Kueue
+renders with its conditional patch applied, `global.*` reaches every image. **CP-B** after T10 — the full stack renders at parity with the
 baseline, subcharts still disabled, nothing in the cluster has changed. **CP-C** after T13 — the
-cut-over; both modes install cleanly on kind. **CP-D** after T18 — docs and e2e green.
+cut-over; both modes install cleanly on kind. **CP-D** after T18 — docs and e2e green. **CP-E**
+after T19/T20/T21 — the values surface is the one a user should have to read: every manufacturer
+identity in one map, no generated text inside an editable string, one cert-manager answer. These
+three land after CP-D on purpose: each rewrites text or tests that T17 and T18 have just written,
+and doing them before would mean writing that text twice.
 
 ### Test Plan
 
@@ -1436,7 +1564,7 @@ code solid enough prior to committing the changes necessary to implement this en
 - `gen/chartvalues`: new — target ≥80%. Golden test over the emitted Kueue transformations and
   NFD matcher blocks; a test that a change to `nodefeature.CreditsPerCard` changes the output.
 - `pkg/worker/kuberess`: 2026-07-28 - 37.6% → target ≥45% after the collapse. Overlay
-  computation per `--disable-applications` set; Kueue line selection by Kubernetes version;
+  computation per `--disable-applications` set;
   `TakeOwnership` set only when a legacy release is present; `--disable-applications` name
   validation; `CSIProvisioner*` constants equal the chart's `driver.name`.
 - `pkg/kubeapp/helm`: 2026-07-28 - 10.6% → target ≥25%. `TakeOwnership` reaches both actions;

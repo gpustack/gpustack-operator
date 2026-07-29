@@ -114,9 +114,15 @@ worker:
   replicas: 1
   # -- Applications the worker must not install at runtime, or `*` for all of them. This chart
   # deploys every one of them itself, so the default takes the worker out of that business
-  # entirely; name individual applications to hand some back to it. The value is templated
-  # rather than appended through `extraArgs` because the flag accumulates across occurrences,
-  # so a second one could only ever disable more. Accepted names: `*`, `kueue`,
+  # entirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the
+  # list makes the worker install a SECOND release of this same chart, whose render overlaps this
+  # one's. Helm refuses an object another release owns, so that install fails and the worker's
+  # startup with it. Even handing back nothing but `device-manager` overlaps, because the
+  # cluster-scoped `gpustack-cpu-info` NodeFeatureRule carries no switch and both renders contain
+  # it. The worker installs applications only where no chart deploys it (see
+  # docs/architecture.md, "Two install modes"). The value is
+  # templated rather than appended through `extraArgs` because the flag accumulates across
+  # occurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,
   # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.
   disableApplications:
     - "*"

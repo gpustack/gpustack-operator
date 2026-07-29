@@ -133,7 +133,14 @@ func (ch Chart) GetValues(ctx context.Context) (map[string]any, error) {
 // Only the options the Chart declares are set; the caller still owns the action's
 // release name, namespace, timeout and atomicity.
 func (ch Chart) configureInstall(i *helmaction.Install) {
-	i.IncludeCRDs = !ch.SkippedCRDsInstallation
+	// SkipCRDs is the flag that gates installing a chart's crds/ directory; IncludeCRDs only
+	// renders those files into the manifest as well, which is a different thing entirely. Setting
+	// the latter makes Helm install every crds/ CRD twice over: once in its CRD phase, which
+	// creates them with no ownership metadata, and once as a release resource, whose ownership
+	// check then rejects the very objects that phase just created. Leaving IncludeCRDs false keeps
+	// the CRD phase the only installer, and it already tolerates a CRD that exists — which is what
+	// lets a cluster keep the copy its own operator installed.
+	i.SkipCRDs = ch.SkippedCRDsInstallation
 	i.TakeOwnership = ch.TakeOwnership
 }
 

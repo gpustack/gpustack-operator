@@ -15,7 +15,7 @@
 #              assert-core.sh). Nothing mocked. Optional 2nd arg EXPECTED_TAG (the tag just built)
 #              enables the deployed-image-tag assertion.
 # Expected:    - assert-core.sh passes (rollout / running revision == HEAD / apiservices / CRDs /
-#                sub-releases);
+#                the four bundled applications in this release, Kueue's visibility APIs);
 #              - the running binary version equals the bundled chart tgz version;
 #              - when EXPECTED_TAG is passed, the deployed image tag equals it.
 # Cleanup:     None — read-only, no trap.
@@ -26,7 +26,7 @@ EXPECTED_TAG="${2:-}"
 WORKER=deploy/gpustack-operator-worker
 LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
 
-# Operator core first (rollout / revision==HEAD / apiservices / CRDs / sub-releases).
+# Operator core first (rollout / revision==HEAD / apiservices / CRDs / bundled applications).
 bash "$LIB/assert-core.sh" "$NS" || exit 1
 
 FAILS=0
