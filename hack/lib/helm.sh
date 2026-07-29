@@ -344,22 +344,17 @@ function gpustack::helm::lint() {
 # gpustack::helm::test installs the given chart onto the current cluster with
 # chart-testing in a container. Requires a reachable cluster (e.g. kind).
 #
-# The namespace is pinned rather than left to chart-testing, which would generate a random
-# one per release: Kueue validates that its own managedJobsNamespaceSelector does not match
-# the namespace it runs in and exits when it does, and the selector excludes gpustack-system
-# by name because Helm cannot template a subchart's values. So gpustack-system is the only
-# namespace this chart installs into, here as in production.
-#
-# It has to be created first, because chart-testing only creates the namespaces it generates
-# itself, and `--helm-extra-args` cannot carry `--create-namespace`: the same string is passed
-# to `helm delete`, which has no such flag. The image already carries kubectl.
+# The namespace is chart-testing's own, generated per release: nothing in the chart names a
+# namespace any more. Kueue exits when its managedJobsNamespaceSelector matches the namespace
+# it runs in, and that selector used to exclude gpustack-system by name because Helm cannot
+# template a subchart's value — so this install used to have to be pinned to that one
+# namespace. The parent now renders the selector from .Release.Namespace, and a random
+# namespace here is what proves it.
 function gpustack::helm::test() {
   local target="$1"
 
   local chart_repos
   chart_repos=$(gpustack::helm::ct::chart_repos "${target}")
-
-  local namespace="gpustack-system"
 
   gpustack::log::info "testing ${target} ..."
   docker run \
@@ -368,12 +363,9 @@ function gpustack::helm::test() {
     --volume "${ROOT_DIR}:/workspace" \
     --volume "${HOME}/.kube/config:/root/.kube/config:ro" \
     --workdir /workspace \
-    --entrypoint bash \
     "quay.io/helmpack/chart-testing:${chart_testing_version}" \
-    -ec "kubectl get namespace '${namespace}' >/dev/null 2>&1 || kubectl create namespace '${namespace}'
-ct install \
-  --charts '${target#"${ROOT_DIR}/"}' \
-  --chart-repos '${chart_repos}' \
-  --namespace '${namespace}' \
-  --helm-extra-args '--timeout 600s'"
+    ct install \
+    --charts "${target#"${ROOT_DIR}/"}" \
+    --chart-repos "${chart_repos}" \
+    --helm-extra-args '--timeout 600s'
 }

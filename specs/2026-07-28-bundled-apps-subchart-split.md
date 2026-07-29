@@ -1674,7 +1674,7 @@ the baseline.
       added RuntimeClasses and the fanned-out environment variables, so the migration is a
       values-surface change and nothing else.
 
-- [ ] **T20 · Kueue's config is rendered from the manufacturers map**
+- [x] **T20 · Kueue's config is rendered from the manufacturers map**
       Blocked by: T19 (the helper reads the map T19 shapes and hoists)
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/_helpers.tpl`,
@@ -1711,6 +1711,12 @@ the baseline.
       point is where the text lives, not what it says); `make test chart` green with no namespace
       pin; `make lint chart`; `hack/deps.sh` re-applies the new patch cleanly from a clean vendor
       tree.
+      Measured: the rendered ConfigMap is byte-identical to the generated one, selector included,
+      because this release's namespace *is* `gpustack-system`; rendered into another namespace the
+      selector follows it. A user replacing the whole `controllerManagerConfigYaml` still gets all
+      28 credits rules — the silent-drop this task exists to prevent. `make test chart` on a
+      random namespace is the one proof that needs a cluster with no conflicting release, so it is
+      taken together with T24's, in one cycle.
 
 - [ ] **T21 · One cert-manager answer for the whole release**
       Blocked by: T20

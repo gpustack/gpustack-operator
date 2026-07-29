@@ -107,8 +107,8 @@ jobs:
       # NB(thxCode): the chart deploys Node Feature Discovery, Kueue and the CSI drivers
       # itself, and ci/smoke-values.yaml pins the operator to the published ":dev" image, so
       # this phase needs network egress for all of those; the device-manager DaemonSets stay
-      # at 0 desired on the GPU-less kind nodes. It installs into gpustack-system, the only
-      # namespace this chart is installable into — see hack/lib/helm.sh.
+      # at 0 desired on the GPU-less kind nodes. chart-testing installs into a namespace it
+      # generates, which is also what proves the chart names no namespace of its own.
       - name: Test
         run: make test chart
       # Vendoring lives in "make deps" only — "make generate chart" / "make lint chart" /

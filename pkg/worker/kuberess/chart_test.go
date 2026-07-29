@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -130,6 +131,120 @@ func TestChartPciClassWhitelistMatchesNodeFeature(t *testing.T) {
 
 	assert.Equal(t, nodefeature.GetAcceleratablePciClassPrefixes(),
 		values.NodeFeatureDiscovery.Worker.Config.Sources.PCI.DeviceClassWhitelist)
+}
+
+// TestChartKueueTransformationsMatchNodeFeature holds the credits mapping Kueue is configured
+// with equal to what pkg/nodefeature computes. The chart renders that mapping from
+// global.manufacturers through a template the vendored Kueue chart includes, so the constants it
+// is scored on — CreditsPerCard, SharedResourceMaxSize, ResourceMaxUnits — are restated in a
+// template and nothing but this test holds the two statements together.
+//
+// It renders the whole chart on purpose: the mapping only reaches Kueue if the helper, the patch
+// and the values all agree, and a check on any one of them in isolation would pass while the
+// scheduling chain admitted nothing.
+func TestChartKueueTransformationsMatchNodeFeature(t *testing.T) {
+	const (
+		exclusiveCredits = nodefeature.CreditsPerCard
+		sharedCredits    = nodefeature.CreditsPerCard / nodefeature.SharedResourceMaxSize
+		unitCredits      = nodefeature.CreditsPerCard / nodefeature.ResourceMaxUnits
+	)
+
+	var want []transformation
+	for _, manufacturer := range nodefeature.GetKnownAcceleratableManufacturers() {
+		credits := string(nodefeature.GetAcceleratableCreditsResourceName(manufacturer))
+		resource := func(mode workercore.DeviceAllocationMode) string {
+			return string(nodefeature.GetAcceleratableResourceName(manufacturer, mode))
+		}
+		output := func(credit int) map[string]string {
+			return map[string]string{credits: strconv.Itoa(credit)}
+		}
+
+		want = append(want,
+			transformation{
+				Input:    resource(workercore.DeviceAllocationModeExclusive),
+				Strategy: "Replace",
+				Outputs:  output(exclusiveCredits),
+			},
+			transformation{
+				Input:    resource(workercore.DeviceAllocationModeShared),
+				Strategy: "Replace",
+				Outputs:  output(sharedCredits),
+			},
+			transformation{
+				Input:      string(nodefeature.GetAcceleratableSlicedUnitsResourceName(manufacturer)),
+				Strategy:   "Replace",
+				MultiplyBy: resource(workercore.DeviceAllocationModeSliced),
+				Outputs:    output(unitCredits),
+			})
+
+		// A manufacturer with no partition kind advertises no ".partitioned" family at all,
+		// so it has no fourth rule.
+		if partitionedUnits := nodefeature.GetAcceleratablePartitionedUnitsResourceName(
+			manufacturer); partitionedUnits != "" {
+			want = append(want, transformation{
+				Input:    string(partitionedUnits),
+				Strategy: "Replace",
+				Outputs:  output(unitCredits),
+			})
+		}
+	}
+
+	assert.Equal(t, want, renderKueueConfig(t, nil).Resources.Transformations)
+}
+
+// TestChartKueueManagedNamespacesFollowTheRelease covers the other half of what the chart renders
+// into Kueue's config. Kueue exits when this selector matches the namespace it runs in, so a
+// hard-coded namespace makes the chart installable into exactly one — and a subchart value cannot
+// be templated, which is why the default is rendered by the parent instead of stated in values.
+func TestChartKueueManagedNamespacesFollowTheRelease(t *testing.T) {
+	selector := renderKueueConfig(t, nil).ManagedJobsNamespaceSelector
+
+	require.Len(t, selector.MatchExpressions, 1)
+	assert.Equal(t, "kubernetes.io/metadata.name", selector.MatchExpressions[0].Key)
+	assert.Equal(t, "NotIn", selector.MatchExpressions[0].Operator)
+	assert.Equal(t, []string{"kube-system", SystemNamespaceName},
+		selector.MatchExpressions[0].Values, "the release's own namespace is excluded")
+}
+
+// transformation is one entry of Kueue's resources.transformations.
+type transformation struct {
+	Input      string            `yaml:"input"`
+	Strategy   string            `yaml:"strategy"`
+	MultiplyBy string            `yaml:"multiplyBy,omitempty"`
+	Outputs    map[string]string `yaml:"outputs"`
+}
+
+// kueueConfig is the part of Kueue's Configuration this chart renders rather than states.
+type kueueConfig struct {
+	Resources struct {
+		Transformations []transformation `yaml:"transformations"`
+	} `yaml:"resources"`
+	ManagedJobsNamespaceSelector struct {
+		MatchExpressions []struct {
+			Key      string   `yaml:"key"`
+			Operator string   `yaml:"operator"`
+			Values   []string `yaml:"values"`
+		} `yaml:"matchExpressions"`
+	} `yaml:"managedJobsNamespaceSelector"`
+}
+
+// renderKueueConfig renders the chart and returns the Configuration the Kueue controller reads.
+func renderKueueConfig(t *testing.T, values map[string]any) kueueConfig {
+	t.Helper()
+
+	object, ok := renderChart(t, values)["ConfigMap/"+SystemNamespaceName+"/kueue-manager-config"]
+	require.True(t, ok, "the render carries Kueue's manager config")
+
+	var manifest struct {
+		Data map[string]string `yaml:"data"`
+	}
+	require.NoError(t, yaml.Unmarshal([]byte(object.manifest), &manifest))
+
+	var config kueueConfig
+	require.NoError(t, yaml.Unmarshal(
+		[]byte(manifest.Data["controller_manager_config.yaml"]), &config))
+
+	return config
 }
 
 // TestChartDefaultsMatchImageModeOverlay renders the chart twice — once at its defaults, as a

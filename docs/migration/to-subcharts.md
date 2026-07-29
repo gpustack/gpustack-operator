@@ -46,12 +46,12 @@ the install instructions use. Both are load-bearing here:
   through `fullnameOverride`, so their objects are adopted whatever the release is called — but a
   differently-named release renames the worker and its device managers, which is a rollout, not an
   adoption.
-- The **namespace** is named literally inside Kueue's configuration. Kueue's
-  `managedJobsNamespaceSelector` excludes `kube-system` and `gpustack-system` so that Kueue does not
-  try to manage the operator's own Jobs — including the migration hooks below. Helm merges subchart
-  values instead of rendering them, so the release namespace cannot reach that string. Installing
-  into another namespace therefore also means overriding
-  `kueue.managerConfig.controllerManagerConfigYaml` to name it.
+- The **namespace** is where your current install already is, and an upgrade cannot move a release
+  between namespaces. Nothing in the chart requires this particular one any more: Kueue's
+  `managedJobsNamespaceSelector` — which keeps Kueue from managing the operator's own Jobs,
+  including the migration hooks below — is rendered from the release namespace, so a fresh install
+  can go anywhere. Only state that selector yourself if you want a different rule, and remember
+  Kueue refuses to start when it matches the namespace Kueue runs in.
 
 ## What runs during the upgrade
 

@@ -148,6 +148,68 @@ app.kubernetes.io/name: {{ include "gpustack-operator.deviceManager.fullname" . 
 {{- end -}}
 
 {{/*
+Kueue's "resources.transformations": every accelerator resource key mapped onto its
+manufacturer's single credits resource, so a ClusterQueue can advertise one credit budget
+instead of one per allocation mode. Derived from global.manufacturers rather than stated, so a
+row added there is admissible with no second edit — and rendered here, in the parent, because
+a subchart's values are merged rather than templated (a patch has Kueue's manager-config
+include this).
+
+The credit basis is pkg/nodefeature's: one whole card is CreditsPerCard credits, a shared
+ownership CreditsPerCard/SharedResourceMaxSize, and one fine-grained unit — sliced or
+partitioned — CreditsPerCard/ResourceMaxUnits. Every per-mode value stays an integer, so
+Kueue's int64 quantization (which ceils a non-CPU resource) never rounds a fractional credit up
+to 1. The three constants are restated here; a Go test renders this chart and holds the result
+equal to what pkg/nodefeature computes.
+*/}}
+{{- define "gpustack-operator.kueue.transformations" -}}
+{{- $creditsPerCard := 1600000 -}}
+{{- $sharedMaxSize := 10 -}}
+{{- $resourceMaxUnits := 1600000 -}}
+{{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
+{{- $row := index $.Values.global.manufacturers $manu }}
+{{- $credits := printf "credits.gpustack.ai/%s" $manu }}
+- input: {{ $row.resourceName }}
+  strategy: Replace
+  outputs:
+    {{ $credits }}: {{ $creditsPerCard | quote }}
+- input: {{ $row.resourceName }}.shared
+  strategy: Replace
+  outputs:
+    {{ $credits }}: {{ div $creditsPerCard $sharedMaxSize | quote }}
+- input: {{ $row.resourceName }}.sliced.units
+  strategy: Replace
+  multiplyBy: {{ $row.resourceName }}.sliced
+  outputs:
+    {{ $credits }}: {{ div $creditsPerCard $resourceMaxUnits | quote }}
+{{- if $row.partitionKind }}
+{{- /*
+  A partition request is confined to a single card, so its units already carry the whole charge
+  and are multiplied by no counting resource — unlike the logical/sliced family, whose units are
+  spread across however many cards the ".sliced" token grants.
+*/}}
+- input: {{ $row.resourceName }}.partitioned.units
+  strategy: Replace
+  outputs:
+    {{ $credits }}: {{ div $creditsPerCard $resourceMaxUnits | quote }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/*
+The namespaces Kueue manages jobs in, defaulted to every namespace but kube-system and this
+release's own. Kueue refuses to start when this selector matches the namespace it runs in, and
+a subchart value cannot be templated, so rendering the default here is what lets the release
+install anywhere. A "managedJobsNamespaceSelector" stated in values takes precedence.
+*/}}
+{{- define "gpustack-operator.kueue.managedJobsNamespaceSelector" -}}
+matchExpressions:
+  - key: kubernetes.io/metadata.name
+    operator: NotIn
+    values: [ kube-system, {{ .Release.Namespace }} ]
+{{- end -}}
+
+{{/*
 One manufacturer's identity as the environment variables pkg/nodefeature reads it from, so a
 row of global.manufacturers decides those facts instead of restating them. Only the fields the
 row states are emitted: an unstated one leaves the operator's own default in force.

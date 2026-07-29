@@ -34,4 +34,18 @@ data:
 {{- if not $config.internalCertManagement }}
   {{- $_ := set $config "internalCertManagement" $defaultInternalCert }}
 {{- end }}
+{{- /*
+GPUStack: the credits mapping every accelerated ClusterQueue is admitted on, and the default set
+of managed namespaces, are rendered by the parent chart — a subchart's values are merged rather
+than templated, so neither could follow global.manufacturers or .Release.Namespace from here.
+Both are set on the dict this template already builds, so a value stated in
+controllerManagerConfigYaml still wins for the selector, while the mapping is not something a
+user edit may silently drop.
+*/}}
+{{- $resources := $config.resources | default dict }}
+{{- $_ := set $resources "transformations" (include "gpustack-operator.kueue.transformations" . | fromYamlArray) }}
+{{- $_ := set $config "resources" $resources }}
+{{- if not $config.managedJobsNamespaceSelector }}
+  {{- $_ := set $config "managedJobsNamespaceSelector" (include "gpustack-operator.kueue.managedJobsNamespaceSelector" . | fromYaml) }}
+{{- end }}
 {{ $config | toYaml | indent 4 }}
