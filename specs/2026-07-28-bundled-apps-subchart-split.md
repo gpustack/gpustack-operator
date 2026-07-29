@@ -1776,7 +1776,7 @@ the baseline.
       crash-loop it. The S3 controller is 2/2 on provisioner v6.3.0, the NFS controller 5/5 (its
       two sidecar restarts are the ordinary race for `/csi/csi.sock`, present before this bump).
 
-- [ ] **T25 · A skill for the vendored subcharts**
+- [x] **T25 · A skill for the vendored subcharts**
       Blocked by: None
       Owns: `.claude/skills/gpustack-operator-chart-subcharts-manage/**`
       Acceptance: a skill that carries the add / upgrade / patch / remove workflows this branch
@@ -1790,6 +1790,16 @@ the baseline.
       chart` on a cluster carrying no conflicting release.
       Verify: the main task reads the skill against the files it cites and fixes every claim it
       cannot ground; T24 is the worked example it has to describe correctly.
+      Measured: 237 lines. Spot-checked against source — `chart_staging()`'s stamp/patch loop and
+      its `.rej`/`.orig` assertion, `gpustack::helm::helm::validate`'s early return on a PATH helm,
+      helm-schema's `--dependencies-filter=none` and helm-docs' `--chart-search-root`,
+      `.gitattributes` keeping patches byte-exact, `ci/smoke-values.yaml`'s `:dev` tag and
+      `cleanupOnUninstall: true`, and `sync-image.yml` all check out. Three corrections came out of
+      T24 and are in it: after a version bump a `git diff` inside the vendored tree is **not** a
+      patch (it mixes the version delta, so a pristine baseline has to be built and diffed against);
+      `.orig` with no `.rej` means the patch applied correctly with offsets and needs re-capturing,
+      not re-authoring; and an interrupted `ct install` leaves cluster-scoped debris that has to be
+      swept by release annotation, since Helm names only one blocker per run.
 
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
