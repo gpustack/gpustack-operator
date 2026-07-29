@@ -245,11 +245,15 @@ That map is where a manufacturer's whole identity lives: one row per manufacture
 under, its `partitionKind`, and `runtimeInjectsDriver` — the last saying that this vendor's
 user-space driver reaches a container only through its container runtime, which is why the NVIDIA
 and MThreads device-managers run under a RuntimeClass while every other vendor's reads its
-management library from a hostPath mount. `runtimeName` also decides which RuntimeClasses the chart
-creates (`deviceManager.createRuntimeClasses`, and only where the class is absent or already this
-release's): it is stated for the six vendors whose container runtime registers a handler by that
-name, because the operator attaches a RuntimeClass to a workload whenever one exists and a class no
-runtime backs would fail every Pod of that vendor.
+management library from a hostPath mount. `runtimeInjectsDriver` also decides which RuntimeClasses
+the chart creates (`deviceManager.createRuntimeClasses`, and only where the class is absent or
+already this release's) — deliberately a narrower set than the six vendors that state a
+`runtimeName`. The two answer different questions: `runtimeName` is the class the operator will
+*use*, while `runtimeInjectsDriver` marks the only vendors whose runtime is certain to be installed,
+since their accelerators cannot work at all unless its handler is registered. Every other vendor's
+device plugin needs no RuntimeClass, so creating one would break them: the operator attaches a
+RuntimeClass whenever one exists, and the kubelet rejects a Pod naming a runtime nothing configured.
+A class the vendor's own operator created is still used; the chart never conjures one.
 
 ### Stage 2: GPUStack Operator Device Manager (DM)
 

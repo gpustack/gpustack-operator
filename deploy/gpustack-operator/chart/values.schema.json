@@ -20,7 +20,7 @@
       "type": "object"
     },
     "csi-driver-nfs": {
-      "description": "[csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart\n4.13.2).",
+      "description": "[csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart\n4.13.4).",
       "properties": {
         "controller": {
           "properties": {
@@ -85,13 +85,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "replicas",
-            "name",
-            "affinity",
-            "nodeSelector",
-            "priorityClassName"
-          ],
+          "required": [],
           "title": "controller",
           "type": "object"
         },
@@ -104,9 +98,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "name"
-          ],
+          "required": [],
           "title": "driver",
           "type": "object"
         },
@@ -137,10 +129,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
+              "required": [],
               "title": "csiProvisioner",
               "type": "object"
             },
@@ -157,10 +146,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
+              "required": [],
               "title": "csiResizer",
               "type": "object"
             },
@@ -177,10 +163,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
+              "required": [],
               "title": "csiSnapshotter",
               "type": "object"
             },
@@ -197,10 +180,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
+              "required": [],
               "title": "livenessProbe",
               "type": "object"
             },
@@ -217,10 +197,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
+              "required": [],
               "title": "nfs",
               "type": "object"
             },
@@ -237,23 +214,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "repository",
-                "tag"
-              ],
+              "required": [],
               "title": "nodeDriverRegistrar",
               "type": "object"
             }
           },
-          "required": [
-            "baseRepo",
-            "nfs",
-            "csiProvisioner",
-            "csiResizer",
-            "csiSnapshotter",
-            "livenessProbe",
-            "nodeDriverRegistrar"
-          ],
+          "required": [],
           "title": "image",
           "type": "object"
         },
@@ -304,12 +270,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "name",
-            "affinity",
-            "nodeSelector",
-            "priorityClassName"
-          ],
+          "required": [],
           "title": "node",
           "type": "object"
         },
@@ -324,16 +285,12 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "enabled"
-              ],
+              "required": [],
               "title": "livenessProbe",
               "type": "object"
             }
           },
-          "required": [
-            "livenessProbe"
-          ],
+          "required": [],
           "title": "nodeDriverRegistrar",
           "type": "object"
         },
@@ -346,22 +303,12 @@
               "type": "string"
             }
           },
-          "required": [
-            "name"
-          ],
+          "required": [],
           "title": "rbac",
           "type": "object"
         }
       },
-      "required": [
-        "enabled",
-        "driver",
-        "image",
-        "controller",
-        "node",
-        "nodeDriverRegistrar",
-        "rbac"
-      ],
+      "required": [],
       "title": "csi-driver-nfs",
       "type": "object"
     },
@@ -420,13 +367,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "replicas",
-            "name",
-            "affinity",
-            "nodeSelector",
-            "priorityClassName"
-          ],
+          "required": [],
           "title": "controller",
           "type": "object"
         },
@@ -439,9 +380,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "name"
-          ],
+          "required": [],
           "title": "driver",
           "type": "object"
         },
@@ -475,12 +414,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "s3",
-            "csiProvisioner",
-            "livenessProbe",
-            "nodeDriverRegistrar"
-          ],
+          "required": [],
           "title": "images",
           "type": "object"
         },
@@ -531,12 +465,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "name",
-            "affinity",
-            "nodeSelector",
-            "priorityClassName"
-          ],
+          "required": [],
           "title": "node",
           "type": "object"
         },
@@ -551,16 +480,12 @@
                   "type": "boolean"
                 }
               },
-              "required": [
-                "enabled"
-              ],
+              "required": [],
               "title": "livenessProbe",
               "type": "object"
             }
           },
-          "required": [
-            "livenessProbe"
-          ],
+          "required": [],
           "title": "nodeDriverRegistrar",
           "type": "object"
         },
@@ -573,22 +498,12 @@
               "type": "string"
             }
           },
-          "required": [
-            "name"
-          ],
+          "required": [],
           "title": "rbac",
           "type": "object"
         }
       },
-      "required": [
-        "enabled",
-        "driver",
-        "images",
-        "controller",
-        "node",
-        "nodeDriverRegistrar",
-        "rbac"
-      ],
+      "required": [],
       "title": "csi-driver-s3",
       "type": "object"
     },
@@ -596,7 +511,7 @@
       "properties": {
         "createRuntimeClasses": {
           "default": true,
-          "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row states a\n`runtimeName`, where the cluster does not already have one. Disable when something else\nprovides them all (e.g. a vendor GPU operator).",
+          "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row sets\n`runtimeInjectsDriver`, where the cluster does not already have one. That is the only set\nwhose container runtime is certain to be installed — see the note on `global.manufacturers`.\nDisable when something else provides them (e.g. a vendor GPU operator).",
           "title": "createRuntimeClasses",
           "type": "boolean"
         },
@@ -642,10 +557,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "limits",
               "type": "object"
             },
@@ -662,18 +574,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "requests",
               "type": "object"
             }
           },
-          "required": [
-            "limits",
-            "requests"
-          ],
+          "required": [],
           "title": "resources",
           "type": "object"
         },
@@ -693,15 +599,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "enabled",
-        "securePort",
-        "image",
-        "createRuntimeClasses",
-        "resources",
-        "extraArgs",
-        "env"
-      ],
+      "required": [],
       "title": "deviceManager",
       "type": "object"
     },
@@ -749,17 +647,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "name",
-                "kind"
-              ],
+              "required": [],
               "title": "issuer",
               "type": "object"
             }
           },
-          "required": [
-            "issuer"
-          ],
+          "required": [],
           "title": "certmanager",
           "type": "object"
         },
@@ -796,7 +689,7 @@
           "type": "string"
         },
         "manufacturers": {
-          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. `runtimeInjectsDriver` is the exception, a\ndeployment fact no Go code holds: it marks a manufacturer whose user-space driver reaches\na container only through its container runtime, so that manufacturer's device-manager runs\nunder the RuntimeClass too. Every other vendor's device-manager reads its management\nlibrary from a hostPath mount the DaemonSet already makes.\n\n`runtimeName` is what decides which manufacturers this chart creates a RuntimeClass for\n(`deviceManager.createRuntimeClasses`), so it is stated only where a vendor's container\nruntime registers a handler by that name: the operator attaches a RuntimeClass to a\nworkload whenever one exists, and a class no runtime backs would fail every Pod of that\nvendor. `pkg/nodefeature` knows two more names than are stated here, which is deliberate —\na cluster whose vendor operator created that class still has it used, while this chart\nnever conjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema\nrequires.",
+          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. `runtimeInjectsDriver` is the exception, a\ndeployment fact no Go code holds: it marks a manufacturer whose user-space driver reaches\na container only through its container runtime, so that manufacturer's device-manager runs\nunder the RuntimeClass too. Every other vendor's device-manager reads its management\nlibrary from a hostPath mount the DaemonSet already makes.\n\n`runtimeInjectsDriver` — not `runtimeName` — is also what decides which RuntimeClasses this\nchart creates (`deviceManager.createRuntimeClasses`). The two differ on purpose:\n`runtimeName` is the class the operator will USE for a vendor, while\n`runtimeInjectsDriver` is the only case where the runtime's presence can be inferred, since\nsuch a vendor's accelerators cannot work at all unless its container toolkit registered the\nhandler. Every other vendor's device plugin needs no RuntimeClass, so the handler may well\nbe absent while its accelerators work — and creating one there would break them: the\noperator attaches a RuntimeClass to a workload whenever one exists, so the kubelet would\nreject every Pod of that vendor for a runtime nothing configured. A class the vendor's own\noperator created is still used; this chart just never conjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts. Narrow the list by setting a\nrow to `null` — an unwanted row is otherwise harmless (its DaemonSet schedules on no node),\nso this is about how much a release renders, not about what works.",
           "properties": {
             "amd": {
               "properties": {
@@ -816,11 +709,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName",
-                "runtimeName"
-              ],
+              "required": [],
               "title": "amd",
               "type": "object"
             },
@@ -842,11 +731,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName",
-                "runtimeName"
-              ],
+              "required": [],
               "title": "ascend",
               "type": "object"
             },
@@ -868,11 +753,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName",
-                "runtimeName"
-              ],
+              "required": [],
               "title": "cambricon",
               "type": "object"
             },
@@ -889,10 +770,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName"
-              ],
+              "required": [],
               "title": "hygon",
               "type": "object"
             },
@@ -914,11 +792,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName",
-                "runtimeName"
-              ],
+              "required": [],
               "title": "iluvatar",
               "type": "object"
             },
@@ -935,10 +809,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName"
-              ],
+              "required": [],
               "title": "metax",
               "type": "object"
             },
@@ -965,12 +836,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName",
-                "runtimeName",
-                "runtimeInjectsDriver"
-              ],
+              "required": [],
               "title": "mthreads",
               "type": "object"
             },
@@ -1002,13 +868,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName",
-                "runtimeName",
-                "runtimeInjectsDriver",
-                "partitionKind"
-              ],
+              "required": [],
               "title": "nvidia",
               "type": "object"
             },
@@ -1025,25 +885,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "pciVendorID",
-                "resourceName"
-              ],
+              "required": [],
               "title": "thead",
               "type": "object"
             }
           },
-          "required": [
-            "amd",
-            "ascend",
-            "cambricon",
-            "hygon",
-            "iluvatar",
-            "metax",
-            "mthreads",
-            "nvidia",
-            "thead"
-          ],
+          "required": [],
           "title": "manufacturers",
           "type": "object"
         },
@@ -1054,14 +901,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "imageRegistry",
-        "imageNamespace",
-        "imagePullSecrets",
-        "nodeSelector",
-        "certmanager",
-        "manufacturers"
-      ],
+      "required": [],
       "title": "global",
       "type": "object"
     },
@@ -1092,9 +932,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "repository"
-      ],
+      "required": [],
       "title": "image",
       "type": "object"
     },
@@ -1131,10 +969,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "repository",
-                    "tag"
-                  ],
+                  "required": [],
                   "title": "image",
                   "type": "object"
                 },
@@ -1147,9 +982,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "gpustack.ai/managed"
-                  ],
+                  "required": [],
                   "title": "podAnnotations",
                   "type": "object"
                 },
@@ -1169,10 +1002,7 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "cpu",
-                        "memory"
-                      ],
+                      "required": [],
                       "title": "limits",
                       "type": "object"
                     },
@@ -1189,27 +1019,17 @@
                           "type": "string"
                         }
                       },
-                      "required": [
-                        "cpu",
-                        "memory"
-                      ],
+                      "required": [],
                       "title": "requests",
                       "type": "object"
                     }
                   },
-                  "required": [
-                    "limits",
-                    "requests"
-                  ],
+                  "required": [],
                   "title": "resources",
                   "type": "object"
                 }
               },
-              "required": [
-                "image",
-                "podAnnotations",
-                "resources"
-              ],
+              "required": [],
               "title": "manager",
               "type": "object"
             },
@@ -1232,9 +1052,7 @@
                   ]
                 }
               },
-              "required": [
-                "enabled"
-              ],
+              "required": [],
               "title": "podDisruptionBudget",
               "type": "object"
             },
@@ -1263,11 +1081,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "replicas",
-            "podDisruptionBudget",
-            "manager"
-          ],
+          "required": [],
           "title": "controllerManager",
           "type": "object"
         },
@@ -1292,19 +1106,12 @@
               "type": "string"
             }
           },
-          "required": [
-            "controllerManagerConfigYaml"
-          ],
+          "required": [],
           "title": "managerConfig",
           "type": "object"
         }
       },
-      "required": [
-        "enabled",
-        "fullnameOverride",
-        "controllerManager",
-        "managerConfig"
-      ],
+      "required": [],
       "title": "kueue",
       "type": "object"
     },
@@ -1318,9 +1125,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "image"
-      ],
+      "required": [],
       "title": "migrate",
       "type": "object"
     },
@@ -1362,9 +1167,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "gpustack.ai/managed"
-              ],
+              "required": [],
               "title": "annotations",
               "type": "object"
             },
@@ -1377,9 +1180,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "gpustack.ai/managed"
-              ],
+              "required": [],
               "title": "deploymentAnnotations",
               "type": "object"
             },
@@ -1394,16 +1195,12 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "gpustack.ai/managed"
-                  ],
+                  "required": [],
                   "title": "annotations",
                   "type": "object"
                 }
               },
-              "required": [
-                "annotations"
-              ],
+              "required": [],
               "title": "serviceAccount",
               "type": "object"
             },
@@ -1417,11 +1214,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "annotations",
-            "deploymentAnnotations",
-            "serviceAccount"
-          ],
+          "required": [],
           "title": "gc",
           "type": "object"
         },
@@ -1434,9 +1227,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "repository"
-          ],
+          "required": [],
           "title": "image",
           "type": "object"
         },
@@ -1451,9 +1242,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "gpustack.ai/managed"
-              ],
+              "required": [],
               "title": "annotations",
               "type": "object"
             },
@@ -1493,21 +1282,12 @@
                       "type": "boolean"
                     }
                   },
-                  "required": [
-                    "disableLabels",
-                    "disableTaints",
-                    "disableAnnotations",
-                    "disableExtendedResources",
-                    "allowOverwrite",
-                    "denyNodeFeatureLabels"
-                  ],
+                  "required": [],
                   "title": "restrictions",
                   "type": "object"
                 }
               },
-              "required": [
-                "restrictions"
-              ],
+              "required": [],
               "title": "config",
               "type": "object"
             },
@@ -1520,9 +1300,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "gpustack.ai/managed"
-              ],
+              "required": [],
               "title": "deploymentAnnotations",
               "type": "object"
             },
@@ -1545,9 +1323,7 @@
                   ]
                 }
               },
-              "required": [
-                "enable"
-              ],
+              "required": [],
               "title": "podDisruptionBudget",
               "type": "object"
             },
@@ -1568,16 +1344,12 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "gpustack.ai/managed"
-                  ],
+                  "required": [],
                   "title": "annotations",
                   "type": "object"
                 }
               },
-              "required": [
-                "annotations"
-              ],
+              "required": [],
               "title": "serviceAccount",
               "type": "object"
             },
@@ -1591,14 +1363,7 @@
               "type": "array"
             }
           },
-          "required": [
-            "replicaCount",
-            "podDisruptionBudget",
-            "annotations",
-            "deploymentAnnotations",
-            "serviceAccount",
-            "config"
-          ],
+          "required": [],
           "title": "master",
           "type": "object"
         },
@@ -1613,9 +1378,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "gpustack.ai/managed"
-              ],
+              "required": [],
               "title": "annotations",
               "type": "object"
             },
@@ -1649,10 +1412,7 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "labelSources",
-                    "labelWhiteList"
-                  ],
+                  "required": [],
                   "title": "core",
                   "type": "object"
                 },
@@ -1696,25 +1456,17 @@
                           "type": "array"
                         }
                       },
-                      "required": [
-                        "deviceClassWhitelist",
-                        "deviceLabelFields"
-                      ],
+                      "required": [],
                       "title": "pci",
                       "type": "object"
                     }
                   },
-                  "required": [
-                    "pci"
-                  ],
+                  "required": [],
                   "title": "sources",
                   "type": "object"
                 }
               },
-              "required": [
-                "core",
-                "sources"
-              ],
+              "required": [],
               "title": "config",
               "type": "object"
             },
@@ -1727,9 +1479,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "gpustack.ai/managed"
-              ],
+              "required": [],
               "title": "daemonsetAnnotations",
               "type": "object"
             },
@@ -1744,16 +1494,12 @@
                       "type": "string"
                     }
                   },
-                  "required": [
-                    "gpustack.ai/managed"
-                  ],
+                  "required": [],
                   "title": "annotations",
                   "type": "object"
                 }
               },
-              "required": [
-                "annotations"
-              ],
+              "required": [],
               "title": "serviceAccount",
               "type": "object"
             },
@@ -1767,24 +1513,12 @@
               "type": "array"
             }
           },
-          "required": [
-            "annotations",
-            "daemonsetAnnotations",
-            "serviceAccount",
-            "config"
-          ],
+          "required": [],
           "title": "worker",
           "type": "object"
         }
       },
-      "required": [
-        "enabled",
-        "fullnameOverride",
-        "image",
-        "master",
-        "worker",
-        "gc"
-      ],
+      "required": [],
       "title": "node-feature-discovery",
       "type": "object"
     },
@@ -1867,9 +1601,7 @@
               ]
             }
           },
-          "required": [
-            "enabled"
-          ],
+          "required": [],
           "title": "podDisruptionBudget",
           "type": "object"
         },
@@ -1895,10 +1627,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "limits",
               "type": "object"
             },
@@ -1915,18 +1644,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "requests",
               "type": "object"
             }
           },
-          "required": [
-            "limits",
-            "requests"
-          ],
+          "required": [],
           "title": "resources",
           "type": "object"
         },
@@ -1955,40 +1678,11 @@
           "type": "array"
         }
       },
-      "required": [
-        "enabled",
-        "replicas",
-        "disableApplications",
-        "podDisruptionBudget",
-        "securePort",
-        "image",
-        "dataDir",
-        "resources",
-        "nodeSelector",
-        "affinity",
-        "extraArgs",
-        "env"
-      ],
+      "required": [],
       "title": "worker",
       "type": "object"
     }
   },
-  "required": [
-    "cleanupOnUninstall",
-    "global",
-    "nameOverride",
-    "fullnameOverride",
-    "namespaceOverride",
-    "commonLabels",
-    "commonAnnotations",
-    "image",
-    "worker",
-    "deviceManager",
-    "migrate",
-    "kueue",
-    "node-feature-discovery",
-    "csi-driver-nfs",
-    "csi-driver-s3"
-  ],
+  "required": [],
   "type": "object"
 }

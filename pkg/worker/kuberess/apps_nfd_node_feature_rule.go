@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	klog "k8s.io/klog/v2"
 
 	"gpustack.ai/gpustack/pkg/kubeappyaml"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -109,7 +110,16 @@ func InstallCPUInfoNodeFeatureRule(ctx context.Context, manufacturers []string) 
 	err = waitx.PollUntilContextTimeout(ctx,
 		cpuInfoNodeFeatureRuleInterval, cpuInfoNodeFeatureRuleTimeout, true,
 		func(ctx context.Context) error {
-			return kubeappyaml.Apply(ctx, content, restCfg)
+			err := kubeappyaml.Apply(ctx, content, restCfg)
+			if err != nil {
+				// Report every attempt. This wait runs before the server answers a probe, so
+				// a container can be killed inside it, and the error below only prints if the
+				// poll gives up — without this the wait is indistinguishable from a hang.
+				klog.InfoS("waiting for node feature discovery's NodeFeatureRule CRD",
+					"err", err)
+			}
+
+			return err
 		})
 	if err != nil {
 		return fmt.Errorf("waiting for node feature discovery's NodeFeatureRule CRD: %w", err)

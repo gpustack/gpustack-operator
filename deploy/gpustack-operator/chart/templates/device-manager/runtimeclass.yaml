@@ -1,13 +1,21 @@
 {{- if and .Values.deviceManager.enabled .Values.deviceManager.createRuntimeClasses }}
 {{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
 {{- /*
-  A manufacturer states a runtimeName only where its container runtime registers a handler by that
-  name, so this is the list of classes the chart may create — the operator attaches a RuntimeClass
-  to a workload whenever one exists, and a class no runtime backs would fail every Pod of that
-  vendor.
+  Creating a class is gated on runtimeInjectsDriver, not on runtimeName, and the two say different
+  things. runtimeName is the class the operator will USE for that vendor; runtimeInjectsDriver marks
+  a vendor whose user-space driver reaches a container ONLY through that runtime, which is also the
+  only case where the runtime's presence can be inferred — if such a vendor's accelerators work at
+  all, its container toolkit registered the handler.
+  Every other vendor's driver arrives over a hostPath mount and its device plugin needs no
+  RuntimeClass, so the handler may well be absent while the accelerators work fine. Creating a class
+  there would be actively harmful: the operator attaches a RuntimeClass to a workload whenever one
+  exists (pkg/worker/controllers/worker/instance.go), so the kubelet would then reject every Pod of
+  that vendor for a runtime nothing configured. A class such a vendor's own operator created is
+  still used — that is what runtimeName is for; this chart just never conjures one.
 */}}
-{{- $runtimeName := (index $.Values.global.manufacturers $manu).runtimeName }}
-{{- if $runtimeName }}
+{{- $identity := index $.Values.global.manufacturers $manu }}
+{{- $runtimeName := $identity.runtimeName }}
+{{- if and $runtimeName $identity.runtimeInjectsDriver }}
 {{- $existing := lookup "node.k8s.io/v1" "RuntimeClass" "" $runtimeName }}
 {{- /*
   A RuntimeClass is a cluster-scoped, fixed-name object that another component (e.g. a vendor GPU

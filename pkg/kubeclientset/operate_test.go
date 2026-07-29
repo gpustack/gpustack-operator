@@ -207,6 +207,35 @@ func Test_Update_conflict(t *testing.T) {
 	}
 }
 
+// Test_Update_conflict_persists covers what the flaky cases cannot: a peer writer that never
+// stops winning. Every operation here converges by re-entering itself, so an unbounded one would
+// recurse until the stack aborted the process — and the caller would never see the conflict it
+// could report or set a condition from. The budget is what turns that into an error.
+//
+// It also pins the shape of the bound. maxAttempts re-entries means maxAttempts+1 update calls,
+// and the error handed back is the server's own conflict rather than something about retrying,
+// because callers switch on kerrors.IsConflict.
+func Test_Update_conflict_persists(t *testing.T) {
+	expected := newTestVwc(expectedWebhook)
+	cli := kubefake.NewSimpleClientset(newTestVwc(staleWebhook))
+
+	// Larger than any budget: the point is that the writer never yields.
+	updates := &flakyUpdates{remain: maxAttempts * 10}
+	cli.PrependReactor("update", testVwcResource, updates.react)
+
+	_, err := Update(t.Context(),
+		cli.AdmissionregistrationV1().ValidatingWebhookConfigurations(), expected,
+		WithUpdateAlign(alignTestVwc(expected)))
+	require.Error(t, err, "a conflict that never clears has to be reported")
+	assert.True(t, kerrors.IsConflict(err), "want the server's conflict, got %v", err)
+
+	calls, conflicts := updates.stats()
+	assert.Equal(t, maxAttempts+1, calls, "one attempt, then the budget's worth of re-entries")
+	assert.Equal(t, calls, conflicts, "every attempt conflicted")
+	assert.Equal(t, staleWebhook, getTestVwc(t, cli).Webhooks[0].Name,
+		"nothing was written, so the object is untouched")
+}
+
 // Test_Create_conflict covers the contract the extension API service installer relies on: with
 // an align function supplied, a writer that loses the create and a writer that loses the update
 // both converge on the expected object.

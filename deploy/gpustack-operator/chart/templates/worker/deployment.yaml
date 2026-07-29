@@ -137,12 +137,19 @@ spec:
           ports:
             - name: https
               containerPort: {{ .Values.worker.securePort }}
-          # The worker installs NFD/Kueue/CSI on boot and can self-heal a stranded Kueue
-          # (reap orphaned finalizers, then a Kueue upgrade that recreates its controller);
-          # give startup generous headroom so a long first boot is not killed mid-repair,
-          # which would strand the Kueue release pending-rollback and never converge.
+          # The startup budget has to cover everything Prepare() does before the server serves,
+          # because none of it answers this probe. That is, in the worst case: an image-mode
+          # install of the bundled chart, which can also self-heal a stranded Kueue (reap
+          # orphaned finalizers, then a Kueue upgrade that recreates its controller), plus the
+          # two custom resources it then installs — each of which polls for a CRD another
+          # component owns, for up to cpuInfoNodeFeatureRuleTimeout and
+          # nodeDevicesAdmissionCheckTimeout respectively (5 minutes each, sequential, in
+          # pkg/worker/kuberess). 180 x 5s = 900s leaves 300s for the install on top of those
+          # 600s. Raising either timeout means raising this too: a budget below their sum turns
+          # "the worker waits for whatever provides the CRD" into a CrashLoopBackOff whose
+          # cause never prints, since the poll's own error only surfaces when it gives up.
           startupProbe:
-            failureThreshold: 60
+            failureThreshold: 180
             periodSeconds: 5
             httpGet:
               scheme: HTTPS

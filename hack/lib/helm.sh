@@ -161,6 +161,12 @@ function gpustack::helm::schema() {
   # free-form maps (env, nodeSelector, resources, labels, ...) and subchart value
   # passthrough are not rejected during values validation.
   #
+  # NB(thxCode): skip auto-generating "required" as well. helm-schema derives it from every
+  # key present in values.yaml, which then forbids the only way Helm has of removing a map
+  # entry: setting it to null. That turns documented-extensible maps — global.manufacturers
+  # above all — into fixed lists a release cannot narrow. It is skipped globally because
+  # helm-schema honours no per-key override (an explicit "required: []" annotation is ignored).
+  #
   # NB(thxCode): "--dependencies-filter" names no declared dependency on purpose. It is
   # what keeps helm-schema from parsing the values.yaml of the vendored subcharts, one of
   # which (node-feature-discovery) carries a comment its parser rejects, failing the whole
@@ -170,7 +176,7 @@ function gpustack::helm::schema() {
     --chart-search-root="${target}" \
     --no-dependencies \
     --dependencies-filter=none \
-    --skip-auto-generation=additionalProperties \
+    --skip-auto-generation=additionalProperties,required \
     --add-schema-reference
 }
 

@@ -720,16 +720,20 @@ pre-install/pre-upgrade hooks execute.
   propagated, so a `resourceName` set in values changed nothing — the map named identities it
   could not actually decide. A field is emitted only when the row states it, which is what leaves
   `pkg/nodefeature`'s default in force for a row that says nothing.
-- **The vendor lists leave the templates.** `runtimeName` decides which manufacturers get a
-  RuntimeClass, replacing `has $manu (list "nvidia" "mthreads")` in `runtimeclass.yaml`; the
-  chart states one for the six vendors whose container runtime registers a handler by that name
-  (nvidia, mthreads, ascend, amd, cambricon, iluvatar). `pkg/nodefeature` knows two more (hygon,
-  metax) and keeps them: `InstanceReconciler` attaches a RuntimeClass **whenever one exists**, so
-  creating a class no container runtime backs would fail every Instance Pod of that vendor, while
-  leaving Go's name in place still uses a class the vendor's own operator created. Emptying a
-  row's `runtimeName` therefore stops the chart creating the class; it does not stop the operator
-  using one that is already there. `deviceManager.createRuntimeClasses` (unchanged) remains the
-  switch for all of them, and the `lookup` guard remains what keeps a foreign class un-adopted.
+- **The vendor lists leave the templates.** `runtimeInjectsDriver` decides which manufacturers get
+  a RuntimeClass, replacing `has $manu (list "nvidia" "mthreads")` in `runtimeclass.yaml` with a
+  row-driven test that resolves to the same two vendors. `runtimeName` is a **different** question
+  — the class the operator will *use* — and the chart states one for six vendors (nvidia,
+  mthreads, ascend, amd, cambricon, iluvatar) while `pkg/nodefeature` knows two more (hygon,
+  metax). Gating creation on `runtimeName` was the first attempt and T29 reverted it: it conflates
+  "this vendor's runtime uses that handler name" with "this cluster runs that runtime".
+  `InstanceReconciler` attaches a RuntimeClass **whenever one exists**, so a class no runtime
+  backs makes the kubelet reject every Instance Pod of that vendor — and only a driver-injecting
+  vendor's runtime can be inferred present, since its accelerators cannot work without it. Every
+  other vendor's device plugin needs no RuntimeClass at all. So a stated `runtimeName` still uses
+  a class the vendor's own operator created, and the chart never conjures one.
+  `deviceManager.createRuntimeClasses` (unchanged) remains the switch, and the `lookup` guard
+  remains what keeps a foreign class un-adopted.
 - `runtimeInjectsDriver` replaces the same literal in `daemonset.yaml`'s `runtimeClassName`, and
   says why the two lists differ: nvidia and mthreads are the only manufacturers whose user-space
   driver reaches a container **only** through the container runtime. Every other vendor's
@@ -1880,6 +1884,100 @@ the baseline.
       own path ends in the tree path being matched. A one-line `# --` edit in `values.yaml`
       regenerated `README.md` and reported it.
 
+The five tasks below come out of the end-of-build review. Each fixes a finding verified against
+source, and the two findings deliberately left are recorded under Open Questions.
+
+- [x] **T29 · Create a RuntimeClass only where the runtime injects the driver**
+      Blocked by: T19
+      Owns: `deploy/gpustack-operator/chart/templates/device-manager/runtimeclass.yaml`,
+      `deploy/gpustack-operator/chart/values.yaml`, `pkg/worker/kuberess/chart_test.go`,
+      `docs/architecture.md`, `docs/migration/to-subcharts.md`
+      Acceptance: T19 gated creation on a row stating a `runtimeName`, which took the chart from
+      two RuntimeClasses to six. That conflates "this vendor's runtime uses that handler name"
+      with "this cluster runs that runtime". `InstanceReconciler` attaches a RuntimeClass whenever
+      one **exists**, so on a cluster running the stock ROCm plugin and no AMD container toolkit,
+      the chart would create `amd`, the operator would stamp it on every AMD Instance Pod, and the
+      kubelet would reject each one — Pods that ran before this branch. Only a driver-injecting
+      vendor's runtime can be inferred present, since its accelerators cannot work without it.
+      So creation is gated on `runtimeInjectsDriver` and resolves to nvidia and mthreads again,
+      while a stated `runtimeName` keeps doing its own job: using a class the vendor's own
+      operator created. A Go test pins which vendors get one, which no test did before.
+      Verify: `go test ./pkg/worker/kuberess/...`; upgrade a live release and watch the extra
+      classes be pruned.
+      Measured: the render goes 6 → 2. On the cluster, `helm upgrade` took the release from
+      `amd ascend cambricon iluvatar mthreads nvidia` to `mthreads nvidia`, all 18 pods healthy.
+
+- [x] **T30 · Fit the boot polls inside the startup budget**
+      Blocked by: T22
+      Owns: `deploy/gpustack-operator/chart/templates/worker/deployment.yaml`,
+      `pkg/worker/kuberess/apps_nfd_node_feature_rule.go`,
+      `pkg/worker/kuberess/apps_kueue_admission_check.go`
+      Acceptance: T22 added two CRD polls to `Prepare()`, 5 minutes each and sequential, in front
+      of a `startupProbe` budget of 60 × 5s = 300s that nothing raised. So the case NOTES.txt
+      promises — install with `kueue.enabled=false` on a cluster that does not serve the CRD, and
+      "the worker waits for whatever provides it" — is a container SIGKILLed at 300s, whose poll
+      error never prints because it only surfaces when the poll gives up. The budget becomes
+      180 × 5s = 900s, stating the arithmetic and naming both timeouts so raising either is
+      visibly coupled to it, and both polls now log every attempt so a slow boot is legible
+      instead of silent.
+      Verify: render and read the probe; the live Deployment carries it.
+      Measured: 180 × 5s on the cluster's Deployment. 900s covers the 600s of polls with 300s left
+      for the install the same probe has to cover in image mode.
+
+- [x] **T31 · Let the migration hook's identity die with a failed hook**
+      Blocked by: T15
+      Owns: `deploy/gpustack-operator/chart/templates/migrate/rbac.yaml`
+      Acceptance: the hook ServiceAccount and its `cluster-admin` ClusterRoleBinding carried
+      `hook-succeeded,before-hook-creation` — no `hook-failed`. Helm 3 records no hook object in
+      the release, so a hook that dies (unpullable image, its own `activeDeadlineSeconds`, any
+      `kubectl` error reaching `die`) strands a ServiceAccount bound to cluster-admin in the
+      release namespace indefinitely, surviving even `helm uninstall`; anyone able to create a Pod
+      there could then use it. The test plan's own "hook image unavailable" case produces exactly
+      that state. Both objects now delete on `hook-failed` too, while the Jobs keep their policy
+      so a failure's logs survive — a failed Job's pod has already stopped and needs neither.
+      Verify: the render carries the widened policy on both objects and the unchanged one on the
+      Jobs and the script ConfigMap.
+      Measured: two objects at `hook-succeeded,hook-failed,before-hook-creation`, two at the
+      original.
+
+- [x] **T32 · Bound and back off every re-entry**
+      Blocked by: T2
+      Owns: `pkg/kubeclientset/operate.go`, `pkg/kubeclientset/operate_test.go`
+      Acceptance: every operation in `pkg/kubeclientset` converges by re-reading the live resource
+      and aligning on top of it — a retry loop written as recursion, at 32 sites across 10
+      functions, none of them bounded. A Conflict also reached none of `isRetryError`'s sleeps, so
+      the next attempt was immediate, and the re-read asked for `ResourceVersion: "0"`, which the
+      watch cache can answer with the very object the write just lost to. A peer writing the same
+      CRD or webhook configuration in a loop therefore turned the pre-leader-election boot path
+      into a hot recursion: API-server QPS burned and, in the end, a stack-limit abort instead of
+      an error the caller could report. All 32 sites now go through one budget of 8 attempts with
+      exponential backoff (a server-suggested delay winning over it), carried on the context —
+      the only channel every one of them already threads through its own recursion, the options
+      being typed per operation. `isRetryError` becomes a pure predicate, so it no longer sleeps
+      where it is used as a guard. Every pre-write read goes through one helper that drops the
+      cache hint on a re-entry.
+      Verify: `go test ./...`; a new test drives a writer that never yields.
+      Measured: 0 unbounded self-calls left. `Test_Update_conflict_persists` gets 9 update calls
+      (one attempt plus the budget), all conflicting, and the caller receives the server's own
+      Conflict with the object untouched — where before it recursed until the stack aborted.
+      Whole-repo `go test` and `make lint` clean.
+
+- [x] **T33 · Two contract slips the review caught**
+      Blocked by: T19
+      Owns: `hack/lib/helm.sh`, `deploy/gpustack-operator/chart/values.yaml`
+      Acceptance: the generated schema `require`d all nine `global.manufacturers` keys and every
+      field of each row, so the map documented as "the manufacturer list" could be added to but
+      never narrowed — `--set global.manufacturers.amd=null`, Helm's only way to drop a map entry,
+      was rejected by the chart's own schema. helm-schema honours no per-key override (an explicit
+      `required: []` annotation is ignored), so `required` is skipped globally alongside
+      `additionalProperties`; with Helm's merge semantics every default key is present anyway
+      unless a user nulls it deliberately, which is the case being allowed. And the
+      `csi-driver-nfs` values header still said "chart 4.13.2" after T24's bump to 4.13.4, a
+      string the generated README copied.
+      Verify: `--set global.manufacturers.amd=null` renders; no 4.13.2 anywhere.
+      Measured: narrowing renders 133 objects with 8 device-manager DaemonSets instead of 9. The
+      stale string is gone from `values.yaml` and `README.md`.
+
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
 those paths. `helm.Chart.Install` falls back to `DownloadURL`, so image-mode application installs
@@ -2076,7 +2174,28 @@ On a local 3-node kind cluster, via the two e2e skills.
 
 ## Open Questions
 
-None outstanding. The design was red-teamed by two independent second-opinion toolchains; both
-independently identified the hook-ordering blocker, which is fixed above and covered by a
-negative e2e case. Every other finding was verified against the Helm 3.21 source or this
-repository and either folded into the features above or recorded in Notes / Risks.
+None outstanding for the design. The design was red-teamed by two independent second-opinion
+toolchains; both independently identified the hook-ordering blocker, which is fixed above and
+covered by a negative e2e case. Every other finding was verified against the Helm 3.21 source or
+this repository and either folded into the features above or recorded in Notes / Risks.
+
+**Two findings from the end-of-build review are deliberately deferred**, both verified as real and
+both pre-existing rather than introduced here:
+
+- **CI cannot detect a patch-only vendoring edit.** `chart_staging()` skips any tree whose
+  `_VERSION_` stamp matches, so editing `hack/deploy/**/*.patch` without bumping the pinned
+  version leaves `make deps` a no-op, `git status` clean and CI green while the shipped chart lacks
+  the fix. T28 warns about it at the end of a turn locally, which is where the mistake is made, but
+  CI stays blind. The fix is to fold a hash of a chart's patch directory into its `_VERSION_`
+  stamp so a patch edit forces a re-stage; it touches the vendoring contract every task on this
+  branch rests on, which is why it is not being done at the end of the branch.
+- **NFD's `nodeFeatureNamespaceSelector` is unset, so any namespace can label and taint any node.**
+  The Go template it replaced pinned the selector to the release namespace. Unsetting it is what
+  lets the release adopt NodeFeatures a vendor GPU operator publishes (F5), but the blast radius
+  is not scoped to that: a tenant with namespaced `create` on `nodefeatures.nfd.k8s-sigs.io` can
+  mint node extended resources, overwrite `feature.gpustack.ai/acceleratable`, or add a
+  `NoExecute` taint — and `denyNodeFeatureLabels`, the lever the values comment names as the way
+  to tighten this, is itself `false`. The scoped form is an explicit namespace list
+  (`matchExpressions: kubernetes.io/metadata.name In [gpustack-system, <vendor ns>]`), which
+  requires knowing every namespace a supported vendor operator publishes from — a survey, not an
+  edit.

@@ -1,8 +1,14 @@
 {{- /*
   Dedicated ServiceAccount for the migration hook Jobs. They clear finalizers on Kueue's custom
   resources, apply CRDs and delete cluster-scoped objects across the cluster, so it is bound to
-  cluster-admin — the same binding the worker itself holds. Hook-managed and removed on success,
-  so the broad grant exists only for the duration of an install or upgrade.
+  cluster-admin — the same binding the worker itself holds.
+
+  Removed on failure as well as on success, unlike the Jobs, which are kept on failure so their
+  logs survive. Helm 3 records no hook object in the release, so anything a failed hook leaves
+  behind outlives even `helm uninstall`: without hook-failed here, a hook that dies — an
+  unpullable image, the Job's own deadline, any kubectl error — would strand a ServiceAccount
+  bound to cluster-admin in this namespace indefinitely, and anyone able to create a Pod there
+  could then use it. A failed Job's pod has already stopped, so it needs neither.
 
   Weight -11, one below the Jobs: hooks of equal weight are ordered by name, and "…-migrate-post"
   sorts before "…-migrate" would, so relying on that ordering would leave a Job without its
@@ -18,7 +24,7 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade,post-upgrade
     "helm.sh/hook-weight": "-11"
-    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed,before-hook-creation
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -29,7 +35,7 @@ metadata:
   annotations:
     "helm.sh/hook": pre-install,pre-upgrade,post-upgrade
     "helm.sh/hook-weight": "-11"
-    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed,before-hook-creation
 subjects:
   - kind: ServiceAccount
     name: {{ include "gpustack-operator.fullname" . }}-migrate

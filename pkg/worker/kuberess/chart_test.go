@@ -106,6 +106,53 @@ func TestChartManufacturersMatchNodeFeature(t *testing.T) {
 	}
 }
 
+// TestChartRuntimeClassesFollowTheDriverInjectors pins WHICH manufacturers the chart creates a
+// RuntimeClass for, which is the assertion that keeps two similar-looking fields apart.
+// `runtimeName` is the class the operator will use for a vendor; `runtimeInjectsDriver` marks a
+// vendor whose driver reaches a container only through that runtime, and only there can the
+// runtime's presence be inferred from the accelerators working at all.
+//
+// Creating one anywhere else breaks the vendor it was meant to serve: InstanceReconciler attaches
+// a RuntimeClass whenever one exists, so a class no container runtime backs makes the kubelet
+// reject every Pod of that vendor — on a cluster where, without the class, they ran.
+func TestChartRuntimeClassesFollowTheDriverInjectors(t *testing.T) {
+	var values struct {
+		Global struct {
+			Manufacturers map[string]struct {
+				RuntimeName          string `yaml:"runtimeName"`
+				RuntimeInjectsDriver bool   `yaml:"runtimeInjectsDriver"`
+			} `yaml:"manufacturers"`
+		} `yaml:"global"`
+	}
+	raw, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+	require.NoError(t, err, "read the chart values")
+	require.NoError(t, yaml.Unmarshal(raw, &values))
+
+	want, useOnly := sets.New[string](), sets.New[string]()
+	for _, row := range values.Global.Manufacturers {
+		switch {
+		case row.RuntimeInjectsDriver:
+			want.Insert(row.RuntimeName)
+		case row.RuntimeName != "":
+			useOnly.Insert(row.RuntimeName)
+		}
+	}
+	require.NotEmpty(t, want, "some manufacturer's runtime injects its driver")
+	require.NotEmpty(t, useOnly, "some manufacturer names a runtime it does not create")
+
+	got := sets.New[string]()
+	for key := range renderChart(t, nil) {
+		if name, ok := strings.CutPrefix(key, "RuntimeClass//"); ok {
+			got.Insert(name)
+		}
+	}
+
+	assert.Equal(t, sorted(want), sorted(got),
+		"the chart creates a RuntimeClass exactly where the runtime injects the driver")
+	assert.Empty(t, sorted(useOnly.Intersection(got)),
+		"a runtime this chart does not install is never conjured, only used where it exists")
+}
+
 // TestChartPciClassWhitelistMatchesNodeFeature ties the PCI device classes the chart tells NFD
 // to label to the ones the gpustack-cpu-info NodeFeatureRule matches. The rule is rendered in
 // Go (see apps_nfd_node_feature_rule.go), so the two lists are no longer one value read twice:

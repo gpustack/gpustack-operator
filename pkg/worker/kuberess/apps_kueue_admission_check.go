@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	klog "k8s.io/klog/v2"
+
 	"gpustack.ai/gpustack/pkg/kubeappyaml"
 	"gpustack.ai/gpustack/pkg/system"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
@@ -49,7 +51,15 @@ func InstallNodeDevicesAdmissionCheck(ctx context.Context) error {
 	err := waitx.PollUntilContextTimeout(ctx,
 		nodeDevicesAdmissionCheckInterval, nodeDevicesAdmissionCheckTimeout, true,
 		func(ctx context.Context) error {
-			return kubeappyaml.Apply(ctx, nodeDevicesAdmissionCheckYAML, restCfg)
+			err := kubeappyaml.Apply(ctx, nodeDevicesAdmissionCheckYAML, restCfg)
+			if err != nil {
+				// Report every attempt. This wait runs before the server answers a probe, so
+				// a container can be killed inside it, and the error below only prints if the
+				// poll gives up — without this the wait is indistinguishable from a hang.
+				klog.InfoS("waiting for kueue's AdmissionCheck CRD", "err", err)
+			}
+
+			return err
 		})
 	if err != nil {
 		return fmt.Errorf("waiting for kueue's AdmissionCheck CRD: %w", err)

@@ -121,10 +121,11 @@ required of you — the defaults moved with it. If you did, translate your overr
 `global.manufacturers`, and drop the old key — nothing reads a top-level `manufacturers` any more,
 so one left behind is ignored and its device-managers fall back to the default vendor IDs.
 
-One visible consequence: the chart now creates a RuntimeClass for every manufacturer whose row
-states a `runtimeName` — `ascend`, `amd`, `cambricon` and `iluvatar` in addition to `nvidia` and
-`mthreads` — and still only where that class is absent, or already belongs to this release.
-`deviceManager.createRuntimeClasses=false` remains the way to opt out of all of them.
+The RuntimeClasses this chart creates are unchanged — `nvidia` and `mthreads`, and still only where
+the class is absent or already belongs to this release. A row's `runtimeName` says which class the
+operator will *use* for that vendor, and six rows state one; creating a class is gated on the
+narrower `runtimeInjectsDriver` instead, because that is the only case where the container runtime
+is certain to be installed. `deviceManager.createRuntimeClasses=false` remains the way to opt out.
 
 ### `worker.certmanager` moved to `global.certmanager`, and now answers for Kueue too
 
