@@ -77,6 +77,16 @@ accelerator schedulable on this node" signal, with one caveat about timing:
   `wait`, `delete`, `port-forward` — completely untouched. Knobs: `E2E_KUBECTL_TIMEOUT` (30s),
   `E2E_KUBECTL_RETRIES` (2), `E2E_KUBECTL_BACKOFF` (2).
 
+- **Everything lands on the wrong cluster** — the run was pinned to a context that is not the current
+  one and something dropped the pin. Do not fix it by switching the user's current context; the pin is
+  the `KUBECONFIG=<path>` from `kube-context.sh` and it has to be on **every** command (each tool call
+  is a fresh shell). It composes with the shim above:
+
+  ```bash
+  KUBECONFIG=<path> PATH="$(pwd)/.claude/skills/_e2e-lib/scripts/kubectl-shim:$PATH" \
+    bash .claude/skills/gpustack-operator-e2e/cases/case-1.sh <NS>
+  ```
+
 ## Extension APIs / startup order
 
 - **Extension APIService not `Available`** — the aggregated apiserver isn't ready; check the worker

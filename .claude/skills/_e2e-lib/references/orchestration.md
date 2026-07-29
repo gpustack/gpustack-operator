@@ -48,10 +48,26 @@ lead folds into the report. Specialists do not write the report themselves.
 ## Hard rules (carried from each SKILL.md, reinforced here)
 
 - **Pin the run to the context the user confirms** — `preflight.sh` shows the active one. Never move
-  among the user's contexts on your own judgement. When the cluster the user confirms is one of their
-  contexts that is not currently active, switch only on their explicit say-so, record the context to
-  return to as an **outstanding environment mutation**, and restore it in Phase 8. Adopting the context
-  a cluster this run provisioned merged in itself needs no such record.
+  among the user's contexts on your own judgement. When the cluster the user confirms is **not** the
+  active context — one of theirs, or one this run provisioned with
+  `-var='switch_kube_context=false'` — do not switch: take an isolated kubeconfig for it and prefix
+  every command in the run with it, so the current context is never a thing this run has to remember
+  to put back.
+
+  ```bash
+  bash .claude/skills/_e2e-lib/scripts/kube-context.sh <ctx>   # prints: export KUBECONFIG=<path>
+  KUBECONFIG=<path> bash .claude/skills/_e2e-lib/scripts/preflight.sh
+  KUBECONFIG=<path> bash .claude/skills/gpustack-operator-e2e/cases/case-1.sh <NS>
+  ```
+
+  The copy names the target as its own current-context, so nothing else changes: cases pass no
+  `--context`, `helm` follows the same file, and `build-load.sh` / `preflight.sh` read the targeted
+  context out of `kubectl config current-context`. Re-run the script after anything rewrites
+  `~/.kube/config`; a **shell alias** is not an option (aliases are not expanded in the
+  non-interactive shells the cases run in). Switching with `kubectl config use-context` remains
+  allowed only on the user's explicit say-so — then record the context to return to as an
+  **outstanding environment mutation** and restore it in Phase 8. Adopting the context a cluster this
+  run provisioned merged in itself needs no such record.
 - **Build locally and never push when the nodes can read this machine's image store** —
   `build-load.sh` keeps `PACKAGE_PUSH=false` in that mode. When they cannot (remote nodes, or a node
   architecture this machine does not build for), the same script's **remote mode** builds on a builder
@@ -75,7 +91,10 @@ The lead advances through these in order, writing to `run-log.md` as it goes.
 1. **Phase 0 — Environment (lead, read-only, then optionally provisioning).** Run `preflight.sh`; show
    host tools, active context, and `kubectl get nodes -o wide`. Enumerate the user's other contexts
    (`kubectl config get-contexts`) and offer them — **an existing reachable cluster is the default
-   choice**. **Do not continue until the user confirms** the cluster to verify against. Only if the
+   choice**. **Do not continue until the user confirms** the cluster to verify against. If the one they
+   confirm is not the active context, take its isolated kubeconfig here (`kube-context.sh`, see the
+   hard rule) and re-run `preflight.sh` through it — that output, not the first one, is what the rest
+   of the run is pinned to. Only if the
    user has none, or explicitly opts in, provision one from `testing/infra/clusters/<modality>` per
    [`cluster-provisioning.md`](cluster-provisioning.md) — two confirmations, cost stated, credential
    prechecked — and then perform its **node preparation** step before Phase 3. Record
