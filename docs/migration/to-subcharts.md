@@ -96,6 +96,61 @@ When the worker installs the bundled chart from inside its own image, it detects
 legacy releases and sets the ownership transfer for that install only — never unconditionally, for
 the same reason you should drop the flag again after the chart-mode upgrade. There is nothing to run.
 
+## If Kueue or NFD was not installed by Helm
+
+Everything above assumes you are coming from Helm releases. Kueue and NFD are also commonly installed
+from raw manifests, by kustomize, or by another operator that bundles them — and nothing adopts those.
+The detection in image mode looks for a Helm release record (a Secret labelled `owner=helm,name=…`), so
+an install that left none is never detected and the ownership transfer is never set. In chart mode
+`--take-ownership` would get past the error below, but the error is not the problem worth solving.
+
+- **Kueue collides, on its CRDs.** This chart templates them, so they carry ownership metadata, and
+  their names come from the API group rather than from any release — `workloads.kueue.x-k8s.io` is
+  `workloads.kueue.x-k8s.io` however it was installed. Helm refuses an object carrying *no* ownership
+  metadata as firmly as one carrying another release's: `invalid ownership metadata`, this time for a
+  missing `app.kubernetes.io/managed-by: Helm` label and a missing `meta.helm.sh/release-name`
+  annotation.
+- **NFD's CRDs do not collide.** They ship in the subchart's `crds/` directory, which Helm applies on
+  install, skips when the object already exists, and never records — so they carry no ownership
+  metadata and are never ownership-checked.
+- **The namespaced objects not colliding is the real hazard.** A manifest-installed Kueue lives in
+  `kueue-system` while this chart puts its own in the release namespace. Different namespace, no
+  conflict, no error — so an install forced through leaves two Kueue controllers running, both watching
+  the whole cluster and both reconciling the same Workloads.
+
+So pick a starting point rather than forcing it through.
+
+**Keep what you have** — the right answer whenever something else in the cluster depends on that Kueue:
+
+```bash
+helm upgrade --install gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+  --namespace gpustack-system --create-namespace \
+  --set kueue.enabled=false --set node-feature-discovery.enabled=false
+```
+
+Both switches are supported paths, not workarounds — and NFD off still leaves you the
+`gpustack-cpu-info` `NodeFeatureRule` the scheduling chain starts from, because the worker applies it
+unconditionally against whichever NFD is present. What you take on is keeping both components at
+versions the operator works with, since the chart no longer states their configuration for you.
+
+**Or hand them over.** Delete the non-Helm install's workloads, Services, RBAC and — importantly — its
+webhook configurations, whose `failurePolicy: Fail` would otherwise reject every Workload write once
+their Service is gone. Leave the CRDs alone: deleting one deletes every custom resource of that kind,
+which is what you are trying to keep. Then give those CRDs the ownership Helm looks for:
+
+```bash
+for crd in $(kubectl get crd -o name | grep 'kueue\.x-k8s\.io'); do
+  kubectl label    "$crd" app.kubernetes.io/managed-by=Helm --overwrite
+  kubectl annotate "$crd" meta.helm.sh/release-name=gpustack-operator \
+                          meta.helm.sh/release-namespace=gpustack-system --overwrite
+done
+```
+
+and install normally. That is the same adoption `--take-ownership` performs, narrowed to the objects
+that need it. Read [Do not roll back](#do-not-roll-back-with-helm-rollback) first: from here on the
+release owns those CRDs, so `helm uninstall` and `helm rollback` take every ClusterQueue, Workload and
+ResourceFlavor with them.
+
 ## Four things that change permanently
 
 ### `manufacturers` moved to `global.manufacturers`, and each entry became a row
