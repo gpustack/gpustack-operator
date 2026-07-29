@@ -719,7 +719,7 @@
           "properties": {
             "enabled": {
               "default": "auto",
-              "description": "Whether to issue the serving certificates with cert-manager. Accepts a string (or the\nequivalent boolean): \"auto\" creates the cert-manager resources only when the cert-manager\nCRDs are detected in the cluster; \"true\" always creates them (cert-manager must be\ninstalled); \"false\" never creates them and each component generates and manages its own\ncertificate.",
+              "description": "Whether to issue the serving certificates with cert-manager. Accepts a string (or the\nequivalent boolean): \"auto\" creates the cert-manager resources only when the cert-manager\nCRDs are detected in the cluster; \"true\" always creates them (cert-manager must be\ninstalled); \"false\" never creates them and each component generates and manages its own\ncertificate.\n\nTurning it ON later is a plain `helm upgrade`. Turning it OFF again is not: cert-manager\nowns the Secret Kueue's chart wants to template and writes CA bundles Helm never recorded,\nso `helm upgrade` refuses the Secret before it starts, and forcing past that fails\nmid-apply on the visibility APIServices. docs/migration/to-subcharts.md carries the\nsequence that does work. The same applies when cert-manager is uninstalled from a cluster\nwhile this is \"auto\", which flips the answer without anyone editing a value.",
               "enum": [
                 "auto",
                 "true",

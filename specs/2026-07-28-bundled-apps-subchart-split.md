@@ -1831,6 +1831,36 @@ the baseline.
       `git status` calls clean; a drifted context line fails at `cert-manager.patch` with
       `_helpers.tpl.rej` and a non-zero exit.
 
+- [x] **T27 · Say what turning cert-manager back off actually costs**
+      Blocked by: T21
+      Owns: `deploy/gpustack-operator/chart/values.yaml`, `docs/migration/to-subcharts.md`
+      Acceptance: T21's migration note offered `global.certmanager.enabled: "false"` as a plain
+      way out for a cluster that has cert-manager. Verifying it on a cluster disproved that, so
+      the values comment and the migration doc state the real cost instead. Turning cert-manager
+      **on** is a plain `helm upgrade` — everything it undoes, Helm wrote. Turning it **off**
+      unwinds what cert-manager wrote and fails twice: `helm upgrade` refuses
+      `Secret/kueue-webhook-server-cert` for want of ownership metadata (Kueue's chart templates
+      that Secret when self-managing, cert-manager creates it otherwise — same name), and past
+      that it fails **non-atomically** on both visibility APIServices, where self-management sets
+      `insecureSkipTLSVerify` while the live object still carries cainjector's `caBundle`. The doc
+      carries the sequence that works — delete the two APIServices, then upgrade with
+      `--take-ownership` — and says the same applies when cert-manager is *uninstalled* from a
+      cluster left on `auto`, where the answer flips with nobody editing a value.
+      No chart-side fix is possible for the first half: Helm validates ownership **before**
+      pre-upgrade hooks, so the hook that would free the Secret never runs (measured — the Job and
+      its ConfigMap were never created). A hook could clear the APIServices, but half a fix that
+      still needs `--take-ownership` is worse than a documented sequence. Renaming the Secret in
+      one of the two paths would fix that half at the price of permanent divergence from upstream
+      Kueue in three files, and would not touch the APIService half at all.
+      Verify: on a cluster with cert-manager v1.21.0, run the transition both ways.
+      Measured: plain upgrade off → refused atomically, release untouched at revision 1.
+      With `--take-ownership` → past the Secret, then failed on both APIServices; release `failed`
+      at revision 2 with the visibility API `FailedDiscoveryCheck`. Deleting the two APIServices
+      and repeating → revision 3 `deployed`, Certificates and Issuers gone, both APIServices
+      `True`, worker and Kueue 1/1. Flipping back to `auto` with a plain upgrade → revision 4
+      `deployed`, four Certificates `Ready`, `internalCertManagement.enable: false`, both
+      APIServices `True`, both pods 1/1.
+
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
 those paths. `helm.Chart.Install` falls back to `DownloadURL`, so image-mode application installs

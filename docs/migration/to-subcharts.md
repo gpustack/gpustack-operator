@@ -149,12 +149,49 @@ ways, and the CRD detection behind `auto` never reached Kueue at all.
 **On a cluster that has cert-manager, this upgrade therefore moves Kueue onto it.** Kueue stops
 generating and rotating its own webhook certificate and starts consuming a `Certificate` this chart
 creates, with cert-manager's cainjector filling in the CA bundles its webhooks and CRD conversion
-carry. Set `global.certmanager.enabled: "false"` to keep every component self-managing instead —
-that is one answer for the whole release, so it takes the worker with it. A `worker.certmanager`
-left in your values is ignored.
+carry. Decide before you upgrade: pass `--set global.certmanager.enabled=false` in the same command
+to keep every component self-managing instead — that is one answer for the whole release, so it
+takes the worker with it. A `worker.certmanager` left in your values is ignored.
 
 Naming an existing issuer (`global.certmanager.issuer.name`) now points Kueue's certificates at it
 too, instead of only the worker's, and no self-signed Issuer is created for either.
+
+#### Turning cert-manager back off is not a plain upgrade
+
+Turning it **on** later is: `helm upgrade --set global.certmanager.enabled=auto` (or `true`) needs
+no flags, because everything it undoes — the `insecureSkipTLSVerify` on the visibility APIServices,
+Kueue's self-managed Secret — is something Helm itself wrote and therefore knows how to remove.
+
+Going the other way has to unwind what **cert-manager** wrote, which Helm never recorded, and it
+fails in two places:
+
+- `Secret "kueue-webhook-server-cert" ... cannot be imported into the current release: invalid
+  ownership metadata`. Kueue's chart templates that Secret when it self-manages and cert-manager
+  creates it when it does not — same name, no Helm ownership. This one is checked **before** any
+  hook runs, so no amount of chart machinery can clear it, and deleting the Secret by hand does not
+  help either: the `Certificate` is still live, so cert-manager reissues it within seconds.
+- Past that, `spec.insecureSkipTLSVerify: Invalid value: true: may not be true if caBundle is
+  present` on both `visibility.kueue.x-k8s.io` APIServices. Self-management sets that field while
+  the live object still carries the CA bundle cainjector wrote. **This failure is not atomic** —
+  the release lands in `failed` with the visibility API `FailedDiscoveryCheck`.
+
+The sequence that completes cleanly, verified on a cluster:
+
+```bash
+# 1. Drop the two APIServices carrying cert-manager's CA bundle. The release recreates them.
+kubectl delete apiservice v1beta1.visibility.kueue.x-k8s.io v1beta2.visibility.kueue.x-k8s.io
+
+# 2. --take-ownership lets Helm adopt the Secret cert-manager owns (Helm 3.21+).
+helm upgrade gpustack-operator <chart> --namespace gpustack-system --reuse-values \
+  --set global.certmanager.enabled=false --take-ownership --wait
+```
+
+If you have already hit the second failure, that same sequence recovers the release.
+
+**This is also what happens if cert-manager is uninstalled from the cluster** while
+`global.certmanager.enabled` is `auto`: the answer flips with nobody editing a value, and the next
+upgrade — even one that only bumps the image — fails the same way. On a cluster where cert-manager
+comes and goes, state the answer (`"true"` or `"false"`) instead of leaving it to `auto`.
 
 ### `helm uninstall` now takes Kueue with it
 
