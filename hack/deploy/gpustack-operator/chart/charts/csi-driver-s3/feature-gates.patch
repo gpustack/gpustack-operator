@@ -1,0 +1,13 @@
+diff --git a/templates/csi-s3-controller.yaml b/templates/csi-s3-controller.yaml
+index 02323668..c1124e8c 100644
+--- a/templates/csi-s3-controller.yaml
++++ b/templates/csi-s3-controller.yaml
+@@ -65,7 +65,7 @@ spec:
+             - "--leader-election"
+             - "--leader-election-namespace={{ .Release.Namespace }}"
+             - "--extra-create-metadata=true"
+-            - "--feature-gates=HonorPVReclaimPolicy=true,VolumeAttributesClass=false"
++            - "--feature-gates=VolumeAttributesClass=false"
+             - "--timeout=1200s"
+             - "--retry-interval-max=30m"
+           env:

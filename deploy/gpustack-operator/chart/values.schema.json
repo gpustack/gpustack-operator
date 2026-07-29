@@ -117,7 +117,7 @@
           "type": "boolean"
         },
         "image": {
-          "description": "Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is\nstated rather than inherited from the chart, so what this release pulls is readable here and a\nsubchart bump cannot move an image without the diff showing it. The driver tag stays at v4.13.0\n— the image this operator has always run and mirrored — rather than following the chart's\n4.13.2; the sidecar tags are the ones chart 4.13.2 ships. The `externalSnapshotter` image is\nabsent because that component is off, and turning it on would need a mirror first.",
+          "description": "Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is\nstated rather than inherited from the chart, so what this release pulls is readable here and a\nsubchart bump cannot move an image without the diff showing it. These are the tags chart\n4.13.4 ships, the driver's included, and each one is mirrored — an unmirrored tag would put\nevery install in ImagePullBackOff. The three sidecars this driver shares with `csi-driver-s3`\n(`csiProvisioner`, `livenessProbe`, `nodeDriverRegistrar`) carry the same tag on both, so a\nrelease ships one image per component rather than two versions of each. The\n`externalSnapshotter` image is absent because that component is off, and turning it on would\nneed a mirror first.",
           "properties": {
             "baseRepo": {
               "default": "docker.io",
@@ -132,7 +132,7 @@
                   "type": "string"
                 },
                 "tag": {
-                  "default": "v6.1.0",
+                  "default": "v6.3.0",
                   "title": "tag",
                   "type": "string"
                 }
@@ -152,7 +152,7 @@
                   "type": "string"
                 },
                 "tag": {
-                  "default": "v2.0.0",
+                  "default": "v2.2.0",
                   "title": "tag",
                   "type": "string"
                 }
@@ -172,7 +172,7 @@
                   "type": "string"
                 },
                 "tag": {
-                  "default": "v8.4.0",
+                  "default": "v8.6.0",
                   "title": "tag",
                   "type": "string"
                 }
@@ -192,7 +192,7 @@
                   "type": "string"
                 },
                 "tag": {
-                  "default": "v2.17.0",
+                  "default": "v2.19.0",
                   "title": "tag",
                   "type": "string"
                 }
@@ -212,7 +212,7 @@
                   "type": "string"
                 },
                 "tag": {
-                  "default": "v4.13.0",
+                  "default": "v4.13.4",
                   "title": "tag",
                   "type": "string"
                 }
@@ -232,7 +232,7 @@
                   "type": "string"
                 },
                 "tag": {
-                  "default": "v2.15.0",
+                  "default": "v2.17.0",
                   "title": "tag",
                   "type": "string"
                 }
@@ -452,20 +452,20 @@
           "type": "boolean"
         },
         "images": {
-          "description": "Mirrored images. This chart stores whole `registry/namespace/name:tag` references with\nno separate tag key.",
+          "description": "Mirrored images. This chart stores whole `registry/namespace/name:tag` references with\nno separate tag key. The three sidecars are the same images, at the same tags, that\n`csi-driver-nfs` pulls: they are shared components, and shipping one tag per component keeps\na release from carrying two versions of each. Upstream pins all three lower than the NFS\nchart does, so they follow the NFS chart rather than this one — which is what the\n`feature-gates.patch` is for: provisioner v6.3.0 has no `HonorPVReclaimPolicy` gate left to\nset, and this chart's controller still passed it.",
           "properties": {
             "csiProvisioner": {
-              "default": "docker.io/gpustack/mirrored-csi-provisioner:v6.1.0",
+              "default": "docker.io/gpustack/mirrored-csi-provisioner:v6.3.0",
               "title": "csiProvisioner",
               "type": "string"
             },
             "livenessProbe": {
-              "default": "docker.io/gpustack/mirrored-csi-livenessprobe:v2.17.0",
+              "default": "docker.io/gpustack/mirrored-csi-livenessprobe:v2.19.0",
               "title": "livenessProbe",
               "type": "string"
             },
             "nodeDriverRegistrar": {
-              "default": "docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.15.0",
+              "default": "docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0",
               "title": "nodeDriverRegistrar",
               "type": "string"
             },

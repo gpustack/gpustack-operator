@@ -73,8 +73,9 @@ node-spread control plane; and the v0.7.x → new-chart upgrade e2e case passes.
 - Any change to the scheduling-chain semantics, the `pkg/nodefeature` label algebra, or the
   credit/quota model. Rendered manifests must be behaviour-equivalent to today's, modulo the
   version bumps above.
-- Version bumps of the CSI drivers (csi-driver-nfs 4.13.2 and csi-driver-s3 0.43.7 carry over
-  unchanged).
+- Version bumps beyond the one T24 takes: `csi-driver-nfs` moves to 4.13.4, whose images were
+  mirrored first, and `csi-driver-s3` stays at 0.43.7 with only its shared sidecars following that
+  bump. Nothing else is re-pinned.
 - Patching Kueue's visibility server out of the chart — see the caveat under
   "Notes / Constraints / Caveats".
 - Maintaining upstream chart forks for anything beyond the `global.*` image plumbing, the
@@ -85,7 +86,7 @@ node-spread control plane; and the v0.7.x → new-chart upgrade e2e case passes.
 ## Proposal
 
 The operator chart becomes the single source of deployment configuration. It declares four
-dependencies (Kueue 0.18.4, NFD 0.19.0, csi-driver-nfs 4.13.2, csi-driver-s3 0.43.7), each
+dependencies (Kueue 0.18.4, NFD 0.19.0, csi-driver-nfs 4.13.4, csi-driver-s3 0.43.7), each
 vendored unpacked into `chart/charts/` and carrying a small patch
 that teaches its image fields to honour the parent's `global.*` values. The parent
 `values.yaml` carries today's opinionated defaults, so a default install produces the same
@@ -169,7 +170,7 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   | --- | --- | --- |
   | `kueue` | 0.18.4 | `github.com/kubernetes-sigs/kueue` release `kueue-0.18.4.tgz` |
   | `node-feature-discovery` | 0.19.0 | `kubernetes-sigs/node-feature-discovery` release `node-feature-discovery-chart-0.19.0.tgz` (note the `-chart-` infix) |
-  | `csi-driver-nfs` | 4.13.2 | `kubernetes-csi/csi-driver-nfs` charts tree |
+  | `csi-driver-nfs` | 4.13.4 | `kubernetes-csi/csi-driver-nfs` charts tree |
   | `csi-driver-s3` | 0.43.7 | `thxcode.github.io/k8s-csi-s3/charts` (tarball and `metadata.name` are both `csi-s3`; renamed by patch) |
 
 - `Chart.yaml` declares all four as `dependencies` with `repository: ""` — the Helm convention
@@ -1064,7 +1065,7 @@ deploy/gpustack-operator/chart/
 └── charts/                        # vendored + patched, COMMITTED (~2.7 MB)
     ├── kueue/                     # 0.18.4, selectableFields version-guarded
     ├── node-feature-discovery/    # 0.19.0, upstream (fork dropped)
-    ├── csi-driver-nfs/            # 4.13.2
+    ├── csi-driver-nfs/            # 4.13.4
     └── csi-driver-s3/             # 0.43.7
 
 hack/
@@ -1125,7 +1126,7 @@ function gpustack::helm::vendor() {
     cat <<EOF
 https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.4/kueue-0.18.4.tgz 0.18.4 ${charts_dir}/kueue
 https://github.com/kubernetes-sigs/node-feature-discovery/releases/download/v0.19.0/node-feature-discovery-chart-0.19.0.tgz 0.19.0 ${charts_dir}/node-feature-discovery
-https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz 4.13.2 ${charts_dir}/csi-driver-nfs
+https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.4/csi-driver-nfs-4.13.4.tgz 4.13.4 ${charts_dir}/csi-driver-nfs
 https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz 0.43.7 ${charts_dir}/csi-driver-s3
 EOF
   )
@@ -1320,8 +1321,9 @@ the baseline.
       false`, so only the gpustack driver names, the mirrored images, `rbac.name` and
       `nodeDriverRegistrar.livenessProbe.enabled: false` are stated. The NFS driver image stays
       pinned at v4.13.0, the tag this operator has always run and mirrored, rather than
-      following the chart's 4.13.2 — a bump would need a new mirror and is a Non-Goal. Every other
-      `csi-driver-nfs` sidecar tag is spelled out too, at the value chart 4.13.2 ships, so the tags
+      following the chart's 4.13.2 — a bump would need a new mirror, which is what T24 later did.
+      Every other `csi-driver-nfs` sidecar tag is spelled out too, at the value chart 4.13.2
+      ships, so the tags
       this release pulls are all readable in one place and a subchart bump cannot move one without
       showing up in the diff — the same shape `csi-driver-s3` already has, where the chart stores
       whole `name:tag` references. `externalSnapshotter` stays absent: it is off, and turning it on
@@ -1737,6 +1739,57 @@ the baseline.
       Verify: `make generate chart`; `make lint chart`; render three ways — cert-manager absent,
       present, and forced off — and assert the worker's and Kueue's certificate paths agree in all
       three; `hack/deps.sh` re-applies the patch cleanly from a clean vendor tree.
+
+- [x] **T24 · csi-driver-nfs 4.13.4, and one tag per shared component**
+      Blocked by: None
+      Owns: `hack/deps.sh`, `hack/deploy/gpustack-operator/chart/charts/csi-driver-nfs/**`,
+      `deploy/gpustack-operator/chart/charts/csi-driver-nfs/**`,
+      `deploy/gpustack-operator/chart/Chart.yaml`, `deploy/gpustack-operator/chart/values.yaml`
+      Acceptance: the vendored `csi-driver-nfs` moves 4.13.2 → 4.13.4 and the parent states the
+      seven tags that chart ships, the driver's own included — which finally retires the v4.13.0
+      pin T9 had to keep, since every 4.13.4 image is now mirrored (checked against the registry,
+      not assumed). The three sidecars the two CSI drivers share — `csiProvisioner`,
+      `livenessProbe`, `nodeDriverRegistrar` — move on **both** charts, so a release ships one
+      image per component instead of two versions of each; `csi-driver-s3` stays at 0.43.7
+      otherwise, and its own upstream pins those sidecars lower, so it follows the NFS chart
+      rather than its own defaults. Measured: it could not — provisioner v6.3.0 **removed** the
+      `HonorPVReclaimPolicy` feature gate, and the S3 chart still passed it, so its controller
+      exited on the unrecognized gate. The remedy is a one-line `feature-gates.patch` making the
+      same edit upstream `csi-driver-nfs` made in 4.13.4, rather than holding the provisioner back:
+      pinning it to v6.1.0 would have paired 4.13.4's gate-less arguments with a version whose
+      default for that gate is its own business, and it would ship the older image everywhere to
+      accommodate one chart.
+      The `global-image.patch` is regenerated against 4.13.4: 4.13.4 moved the three templates it
+      touches, so it applied with offsets and left `.orig` backups, which `hack/deps.sh` treats as
+      a failure by design.
+      Verify: `make deps` from a deleted tree applies the patch with no `.rej`/`.orig`;
+      `make generate chart` idempotent; `make lint chart`; `go test ./pkg/worker/kuberess/...`;
+      the render diff carries nothing but the version labels, the two new upstream keys
+      (`revisionHistoryLimit`, `timeout`) and the tags; and the image inventory of the whole
+      render shows one tag per component. On a cluster, both CSI drivers reach Ready with the new
+      sidecars.
+      Measured: `make deps` from a deleted tree applies all three S3 patches and the regenerated
+      NFS patch with no rejects or backups; the render diff carries only the version labels, the
+      two new upstream keys and the tags, and its image inventory is one tag per component.
+      `make test chart` passes on chart-testing's own random namespace — which also closes T20's
+      last verification: Kueue came up 1/1 in `chart-<random>`, the namespace that used to
+      crash-loop it. The S3 controller is 2/2 on provisioner v6.3.0, the NFS controller 5/5 (its
+      two sidecar restarts are the ordinary race for `/csi/csi.sock`, present before this bump).
+
+- [ ] **T25 · A skill for the vendored subcharts**
+      Blocked by: None
+      Owns: `.claude/skills/gpustack-operator-chart-subcharts-manage/**`
+      Acceptance: a skill that carries the add / upgrade / patch / remove workflows this branch
+      worked out, so the next bump does not rediscover them: the unpacked-and-patched vendoring
+      contract, `hack/deps.sh`'s `_VERSION_` sentinel and its `.rej`/`.orig` assertion, how a
+      patch is authored (edit the vendored tree, capture with `git diff --relative` from inside
+      it) and why it must be regenerated when upstream moves under it, the rule that every image
+      tag is stated in the parent and must be mirrored *before* the bump, and the verification
+      ladder with what each rung proves — `make generate chart` twice, `make lint chart`,
+      `go test ./pkg/worker/kuberess/...`, a read of the `helm template` diff, then `make test
+      chart` on a cluster carrying no conflicting release.
+      Verify: the main task reads the skill against the files it cites and fixes every claim it
+      cannot ground; T24 is the worked example it has to describe correctly.
 
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at

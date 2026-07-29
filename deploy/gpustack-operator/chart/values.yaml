@@ -624,30 +624,33 @@ csi-driver-nfs:
     name: nfs.csi.gpustack.ai
   # -- Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is
   # stated rather than inherited from the chart, so what this release pulls is readable here and a
-  # subchart bump cannot move an image without the diff showing it. The driver tag stays at v4.13.0
-  # — the image this operator has always run and mirrored — rather than following the chart's
-  # 4.13.2; the sidecar tags are the ones chart 4.13.2 ships. The `externalSnapshotter` image is
-  # absent because that component is off, and turning it on would need a mirror first.
+  # subchart bump cannot move an image without the diff showing it. These are the tags chart
+  # 4.13.4 ships, the driver's included, and each one is mirrored — an unmirrored tag would put
+  # every install in ImagePullBackOff. The three sidecars this driver shares with `csi-driver-s3`
+  # (`csiProvisioner`, `livenessProbe`, `nodeDriverRegistrar`) carry the same tag on both, so a
+  # release ships one image per component rather than two versions of each. The
+  # `externalSnapshotter` image is absent because that component is off, and turning it on would
+  # need a mirror first.
   image:
     baseRepo: docker.io
     nfs:
       repository: /gpustack/mirrored-csi-nfs-driver
-      tag: v4.13.0
+      tag: v4.13.4
     csiProvisioner:
       repository: /gpustack/mirrored-csi-provisioner
-      tag: v6.1.0
+      tag: v6.3.0
     csiResizer:
       repository: /gpustack/mirrored-csi-resizer
-      tag: v2.0.0
+      tag: v2.2.0
     csiSnapshotter:
       repository: /gpustack/mirrored-csi-snapshotter
-      tag: v8.4.0
+      tag: v8.6.0
     livenessProbe:
       repository: /gpustack/mirrored-csi-livenessprobe
-      tag: v2.17.0
+      tag: v2.19.0
     nodeDriverRegistrar:
       repository: /gpustack/mirrored-csi-node-driver-registrar
-      tag: v2.15.0
+      tag: v2.17.0
   controller:
     # -- Number of NFS controller (provisioner) replicas. Every sidecar runs with
     # `--leader-election`, so extra replicas stand by. Losing the controller delays volume
@@ -745,12 +748,17 @@ csi-driver-s3:
     # the StorageClasses it provisions.
     name: s3.csi.gpustack.ai
   # -- Mirrored images. This chart stores whole `registry/namespace/name:tag` references with
-  # no separate tag key.
+  # no separate tag key. The three sidecars are the same images, at the same tags, that
+  # `csi-driver-nfs` pulls: they are shared components, and shipping one tag per component keeps
+  # a release from carrying two versions of each. Upstream pins all three lower than the NFS
+  # chart does, so they follow the NFS chart rather than this one — which is what the
+  # `feature-gates.patch` is for: provisioner v6.3.0 has no `HonorPVReclaimPolicy` gate left to
+  # set, and this chart's controller still passed it.
   images:
     s3: docker.io/gpustack/mirrored-csi-s3-driver:v0.43.7
-    csiProvisioner: docker.io/gpustack/mirrored-csi-provisioner:v6.1.0
-    livenessProbe: docker.io/gpustack/mirrored-csi-livenessprobe:v2.17.0
-    nodeDriverRegistrar: docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.15.0
+    csiProvisioner: docker.io/gpustack/mirrored-csi-provisioner:v6.3.0
+    livenessProbe: docker.io/gpustack/mirrored-csi-livenessprobe:v2.19.0
+    nodeDriverRegistrar: docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0
   controller:
     # -- Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with
     # `--leader-election`, so extra replicas stand by. Losing the controller delays volume

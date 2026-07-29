@@ -41,7 +41,7 @@ dependencies:
     repository: ""
     condition: node-feature-discovery.enabled
   - name: csi-driver-nfs
-    version: 4.13.2
+    version: 4.13.4
     repository: ""
     condition: csi-driver-nfs.enabled
   - name: csi-driver-s3
