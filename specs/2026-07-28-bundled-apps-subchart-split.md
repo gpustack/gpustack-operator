@@ -1619,7 +1619,7 @@ the baseline.
       chart is installable into `gpustack-system` alone, which `docs/migration/to-subcharts.md`
       states, and T20's Kueue patch is what can make the selector follow `.Release.Namespace`.
 
-- [ ] **T23 · The device-manager sees the host's processes and IPC**
+- [x] **T23 · The device-manager sees the host's processes and IPC**
       Blocked by: None
       Owns: `deploy/gpustack-operator/chart/templates/device-manager/daemonset.yaml`
       Acceptance: every device-manager pod runs with `hostPID: true` and `hostIPC: true`. A vendor

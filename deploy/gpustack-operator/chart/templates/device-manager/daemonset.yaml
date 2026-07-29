@@ -41,6 +41,10 @@ spec:
       {{- if has $manu (list "nvidia" "mthreads") }}
       runtimeClassName: {{ $manu }}
       {{- end }}
+      # A vendor management library reports the host PIDs holding a device and reaches its
+      # driver over host IPC; this pod is already privileged with /dev and /sys mounted.
+      hostPID: true
+      hostIPC: true
       nodeSelector:
         # Rely on NFD to label nodes carrying this manufacturer's PCI vendor.
         feature.node.kubernetes.io/pci-{{ $vendorID }}.present: "true"
