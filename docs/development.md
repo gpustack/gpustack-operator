@@ -53,7 +53,10 @@ To change an upstream chart:
    that is what you are doing, and re-run `make deps`.
 3. A patch that no longer applies **fails `make deps`**, and so does one that leaves a `.rej`. That is
    deliberate: without it, an upstream chart that moved under a patch would ship as a half-patched
-   tree and nothing would say so.
+   tree and nothing would say so. A hunk that merely lands at a **shifted line number** is not that:
+   `patch` runs with `-F0`, so every context line must match exactly and it never guesses, which is
+   what makes a shift safe to accept silently. Two patches touching one file shift each other, so
+   treating a shift as a failure would demand re-capturing one whenever the other is edited.
 
 **Mirror the images before bumping a pinned version.** Every image the chart renders points at a
 `gpustack/mirrored-*` repository; a bump to a version whose images are not mirrored yet lands every

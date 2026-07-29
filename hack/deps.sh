@@ -109,14 +109,21 @@ function chart_staging() {
         continue
       fi
       gpustack::log::info "applying $(basename "${patch_file}") to $(basename "${dest}")"
-      if ! patch -p1 -N --forward --silent --directory "${dest}" <"${patch_file}"; then
+      # "-F0" demands that every context line match exactly, so a patch may land at a shifted
+      # line number but never on drifted context, which is the case where "patch" would
+      # otherwise guess. That makes a shift harmless, and "--no-backup-if-mismatch" drops the
+      # ".orig" one leaves behind: the content is right, only the recorded line numbers moved,
+      # and a patch is content. Two patches touching one file shift each other, so without
+      # this an edit to either would demand re-capturing the other for nothing.
+      if ! patch -p1 -N --forward --silent -F0 --no-backup-if-mismatch \
+        --directory "${dest}" <"${patch_file}"; then
         gpustack::log::error "failed to apply ${patch_file}, the upstream chart moved under it"
         return 1
       fi
       # A rejected hunk does not always cost an exit code, and the ".rej" it leaves is
       # ignored by ".gitignore", so neither the status line nor "git status" can be what
       # notices a half-applied patch. Assert here, while the tree is known freshly unpacked.
-      rejects="$(find "${dest}" -type f \( -name '*.rej' -o -name '*.orig' \))"
+      rejects="$(find "${dest}" -type f -name '*.rej')"
       if [[ -n "${rejects}" ]]; then
         gpustack::log::error "applying ${patch_file} left rejects: ${rejects//$'\n'/ }"
         return 1

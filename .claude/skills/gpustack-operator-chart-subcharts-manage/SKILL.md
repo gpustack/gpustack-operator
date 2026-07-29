@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-chart-subcharts-manage
-description: "Add, upgrade, patch, or remove a **vendored subchart** of the operator Helm chart (`deploy/gpustack-operator/chart/charts/*` — Kueue, Node Feature Discovery, csi-driver-nfs, csi-driver-s3): the pinned version list in `hack/deps.sh`, the patch files under `hack/deploy/gpustack-operator/chart/charts/<name>/*.patch`, the parent `Chart.yaml` dependency + `values.yaml` block, and the `make deps` / `make generate chart` / `make lint chart` / `make test chart` ladder CI enforces. Invoke when bumping a bundled upstream chart, writing or rebasing a patch against one, when `make deps` fails to apply a patch or leaves `.rej`/`.orig`, or when dropping a bundled app. Background: `docs/development.md` (*Helm chart* / *Vendored subcharts*) and `specs/2026-07-28-bundled-apps-subchart-split.md` F1–F2. Examples: \"bump Kueue to 0.18.5\", \"vendor a new subchart\", \"my patch no longer applies\", \"patch the NFD chart to honour global.imageRegistry\", \"remove the S3 CSI driver from the chart\"."
+description: "Add, upgrade, patch, or remove a **vendored subchart** of the operator Helm chart (`deploy/gpustack-operator/chart/charts/*` — Kueue, Node Feature Discovery, csi-driver-nfs, csi-driver-s3): the pinned version list in `hack/deps.sh`, the patch files under `hack/deploy/gpustack-operator/chart/charts/<name>/*.patch`, the parent `Chart.yaml` dependency + `values.yaml` block, and the `make deps` / `make generate chart` / `make lint chart` / `make test chart` ladder CI enforces. Invoke when bumping a bundled upstream chart, writing or rebasing a patch against one, when `make deps` fails to apply a patch or leaves `.rej`, or when dropping a bundled app. Background: `docs/development.md` (*Helm chart* / *Vendored subcharts*) and `specs/2026-07-28-bundled-apps-subchart-split.md` F1–F2. Examples: \"bump Kueue to 0.18.5\", \"vendor a new subchart\", \"my patch no longer applies\", \"patch the NFD chart to honour global.imageRegistry\", \"remove the S3 CSI driver from the chart\"."
 allowed-tools: "Read, Edit, Write, Grep, Glob, Bash(make deps*), Bash(make generate chart*), Bash(make lint chart*), Bash(make test chart*), Bash(go test ./pkg/worker/kuberess/*), Bash(git status*), Bash(git diff*), Bash(git log*), Bash(git rm*), Bash(git checkout --*), Bash(git -C /tmp/*), Bash(git init*), Bash(./.sbin/helm*), Bash(curl -sSfL*), Bash(tar -zxf*), Bash(rsync -a*), Bash(mktemp -d*), Bash(find deploy/gpustack-operator/chart/charts*), Bash(ls*), Bash(cat deploy/gpustack-operator/chart/*), Bash(cat hack/deploy/gpustack-operator/chart/*), Bash(rm -rf deploy/gpustack-operator/chart/charts/*), Bash(rm -f deploy/gpustack-operator/chart/Chart.lock), Bash(kubectl get*), Bash(kubectl patch*), Bash(kubectl delete*), Bash(kubectl config current-context), Bash(helm list*), Bash(helm uninstall*)"
 model: sonnet
 ---
@@ -31,9 +31,12 @@ extra upstream chart or dropping one; any edit under `deploy/gpustack-operator/c
 `make deps` → `chart_staging()`: per line, compare `<dest>/_VERSION_` with the pinned version and **skip
 the tree when it matches**; otherwise `rm -rf` the tree, download the archive, `tar --strip-components 1`
 into it, `rm -f README.md`, stamp `_VERSION_`, then apply `hack/<dest>/*.patch` — **one `patch` call per
-file, alphabetical order** — with `patch -p1 -N --forward --silent --directory <dest>`. A patch that fails
-to apply is a hard error, and so is one that leaves `*.rej`/`*.orig`: those are gitignored, so nothing else
-would notice a half-applied patch.
+file, alphabetical order** — with `patch -p1 -N --forward --silent -F0 --no-backup-if-mismatch --directory
+<dest>`. A patch that fails to apply is a hard error, and so is one that leaves a `*.rej`: those are
+gitignored, so nothing else would notice a half-applied patch. `-F0` is what makes that check sharp — every
+context line must match exactly, so `patch` never guesses — while a hunk landing at a **shifted line
+number** is fine and leaves no backup. Two patches touching one file shift each other; before this, editing
+either meant re-capturing the other for nothing.
 
 Two rules follow: **never keep a change by editing a staged tree in place** (the next re-extract deletes
 it — the patch file is the change), and **no `*.tgz` under `charts/`** (CI fails on any archive there, and
@@ -89,12 +92,10 @@ or parent values — a patch making the subchart template `include` a parent hel
 
 ## Workflow C — write, re-capture or rebase a patch
 
-**First, which failure are you in?** `find deploy/gpustack-operator/chart/charts/<name> -name '*.rej'`
-
-- **No `.rej`, only `.orig`** — the patch applied in full and correctly, just with offsets; BSD `patch` left
-  backups and `chart_staging()` failed on *those*, not on the content. The tree is already right. Delete the
-  backups and **re-capture** the patch so the next apply is offset-free. No re-authoring.
-- **A `.rej` exists** — a hunk found no home. Re-apply that change by hand to the new templates, then capture.
+A `.rej` under `deploy/gpustack-operator/chart/charts/<name>` means a hunk found no home: upstream moved the
+lines that hunk's context named. Re-apply that change by hand to the new templates, then capture. There is no
+lesser failure to triage — a hunk that merely shifted position applies silently, so `make deps` failing is
+always real drift, never bookkeeping.
 
 ### Capture, when the tree is already at the committed version
 
@@ -114,7 +115,7 @@ the upstream version delta into the patch. Build a pristine baseline of the **ne
 
 ```bash
 T=deploy/gpustack-operator/chart/charts/<name>; V=<new-version>; S=$(mktemp -d)
-find "$T" \( -name '*.orig' -o -name '*.rej' \) -delete       # else they land in the patch
+find "$T" -name '*.rej' -delete                                # else they land in the patch
 curl -sSfL -o "$S/c.tgz" '<archive-url>'                      # extract exactly as chart_staging() does
 tar -zxf "$S/c.tgz" --directory "$S" --strip-components 1 --no-same-owner && rm -f "$S/c.tgz" "$S/README.md"
 printf '%s' "$V" > "$S/_VERSION_"                             # or the stamp reads as an addition
@@ -229,8 +230,8 @@ strip CRs. Regenerate it with the commands above.
   it after any `Chart.yaml` dependency edit.
 - **`make deps` is a no-op on an up-to-date tree** — a new or changed patch does nothing until the tree (or
   its `_VERSION_`) is gone.
-- **`*.rej`/`*.orig` are gitignored**, so nothing but `chart_staging()`'s own assertion reveals a half-applied
-  patch. Triage it with Workflow C's first question; never work around the error.
+- **`*.rej` is gitignored**, so nothing but `chart_staging()`'s own assertion reveals a half-applied patch.
+  Rebase it per Workflow C; never work around the error.
 - **helm-schema deliberately skips subchart values** (`--dependencies-filter=none`) because NFD's `values.yaml`
   carries a comment its parser rejects; a subchart's keys are absent from `values.schema.json` by design.
 - **helm-docs is restricted to the parent chart**, else it writes a generated `README.md` into every vendored

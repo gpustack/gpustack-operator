@@ -960,8 +960,11 @@ pre-install/pre-upgrade hooks execute.
 - **Uninstall becomes destructive** (Kueue CRDs now belong to the operator release) → NOTES +
   README warning, a documented `kueue.enabled=false` escape, and the migration doc.
 - **Patch drift on an upstream bump** → `chart_staging` checks `patch`'s exit code **and** asserts
-  no `*.rej`/`*.orig` remain, `_VERSION_` forces a re-stage, and CI runs `make deps` before
-  asserting the tree is clean. The original wording — "`patch --forward` fails loudly" — was
+  no `*.rej` remains, `_VERSION_` forces a re-stage, and CI runs `make deps` before
+  asserting the tree is clean. What makes that pair sufficient is `-F0`: every context line has to
+  match exactly, so a hunk is never resolved by guessing, and the only thing left for a shifted
+  line number to be is harmless (T26 — asserting on `*.orig` too cost two re-captures of correct
+  patches before it came out). The original wording — "`patch --forward` fails loudly" — was
   disproven: `--silent` prints no name, `.gitignore` hides the rejects, and a caller wrapping the
   call in `if ! …` suspends `errexit` for the whole callee. Both guards are covered by tests,
   including the reject branch, which BSD `patch` never reaches and which would otherwise have
@@ -1787,7 +1790,7 @@ the baseline.
       Owns: `.claude/skills/gpustack-operator-chart-subcharts-manage/**`
       Acceptance: a skill that carries the add / upgrade / patch / remove workflows this branch
       worked out, so the next bump does not rediscover them: the unpacked-and-patched vendoring
-      contract, `hack/deps.sh`'s `_VERSION_` sentinel and its `.rej`/`.orig` assertion, how a
+      contract, `hack/deps.sh`'s `_VERSION_` sentinel and its `.rej` assertion, how a
       patch is authored (edit the vendored tree, capture with `git diff --relative` from inside
       it) and why it must be regenerated when upstream moves under it, the rule that every image
       tag is stated in the parent and must be mirrored *before* the bump, and the verification
@@ -1797,7 +1800,7 @@ the baseline.
       Verify: the main task reads the skill against the files it cites and fixes every claim it
       cannot ground; T24 is the worked example it has to describe correctly.
       Measured: 237 lines. Spot-checked against source — `chart_staging()`'s stamp/patch loop and
-      its `.rej`/`.orig` assertion, `gpustack::helm::helm::validate`'s early return on a PATH helm,
+      its reject assertion, `gpustack::helm::helm::validate`'s early return on a PATH helm,
       helm-schema's `--dependencies-filter=none` and helm-docs' `--chart-search-root`,
       `.gitattributes` keeping patches byte-exact, `ci/smoke-values.yaml`'s `:dev` tag and
       `cleanupOnUninstall: true`, and `sync-image.yml` all check out. Three corrections came out of
@@ -1805,7 +1808,28 @@ the baseline.
       patch (it mixes the version delta, so a pristine baseline has to be built and diffed against);
       `.orig` with no `.rej` means the patch applied correctly with offsets and needs re-capturing,
       not re-authoring; and an interrupted `ct install` leaves cluster-scoped debris that has to be
-      swept by release annotation, since Helm names only one blocker per run.
+      swept by release annotation, since Helm names only one blocker per run. T26 then retires the
+      second of those three corrections at the source, so the skill states the new contract instead.
+
+- [x] **T26 · A shifted patch is not a failure**
+      Blocked by: T21
+      Owns: `hack/deps.sh`, `docs/development.md`,
+      `.claude/skills/gpustack-operator-chart-subcharts-manage/**`
+      Acceptance: `chart_staging()` applies patches with `-F0 --no-backup-if-mismatch` and asserts
+      on `*.rej` alone. Two patches touching one file shift each other's line numbers, so the old
+      assertion on `*.orig` turned any edit to one into a re-capture of the other — twice on this
+      branch (T24 and T21), each time for a patch whose content was already correct. `-F0` is what
+      makes dropping it safe rather than lax: every context line must match exactly, so `patch`
+      never resolves a hunk by guessing, and the check gets *stricter* than the default fuzz of 2 it
+      replaces. A documented trap is not a fix — the skill only fires when someone invokes it, and
+      nothing invokes it on a `make deps` run in CI.
+      Verify: restore T21's pre-re-capture `global-image.patch` (the one whose `_helpers.tpl` hunk
+      is 18 lines stale) and re-vendor from a deleted tree — it must apply silently and reproduce
+      the committed tree byte-for-byte; then drift one context line of a patch and re-vendor again —
+      it must fail hard with a `.rej`. `docs/development.md` and the skill state the new rule.
+      Measured: both halves confirmed. The stale patch applies with no `.orig` and yields a tree
+      `git status` calls clean; a drifted context line fails at `cert-manager.patch` with
+      `_helpers.tpl.rej` and a non-zero exit.
 
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
