@@ -87,6 +87,38 @@ func TestResource_GetDeviceIds(t *testing.T) {
 	}
 }
 
+// TestResourceUnit_String pins the token form a ResourceUnit renders, and its round-trip through
+// ConvertResourceUnitFromDeviceIds. A unit names one token of one card, so it must render the same
+// three-segment form the card advertises and the parser accepts — dropping the index yields a string
+// no consumer can read back.
+func TestResourceUnit_String(t *testing.T) {
+	unit := func(group, device string, index uint64) ResourceUnit {
+		return ResourceUnit{Resource: Resource{Group: group, Device: device}, Index: index}
+	}
+
+	cases := []struct {
+		name string
+		unit ResourceUnit
+		want string
+	}{
+		{"first token pads to four digits", unit("grp-0", "dev-0", 0), "grp-0:dev-0:0000"},
+		{"two-digit index", unit("grp-0", "dev-0", 34), "grp-0:dev-0:0034"},
+		{"three-digit index", unit("grp-0", "dev-0", 511), "grp-0:dev-0:0511"},
+		{"index beyond four digits is not truncated", unit("grp-0", "dev-0", 12800), "grp-0:dev-0:12800"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := c.unit.String()
+			assert.Equal(t, c.want, got)
+
+			back, err := ConvertResourceUnitFromDeviceIds(got)
+			require.NoError(t, err, "a rendered unit must parse back as a device ID")
+			assert.Equal(t, c.unit, back, "round-trip must preserve the card and the token index")
+		})
+	}
+}
+
 func TestSlicedCoresPercent(t *testing.T) {
 	const coresName core.ResourceName = "nvidia.com/gpu.sliced.cores-percentage"
 	ctrWith := func(limits core.ResourceList) *core.Container {

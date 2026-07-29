@@ -18,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	kubeletdeviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -2779,6 +2780,113 @@ func TestResourceServer_Allocate_VisibilityDurableFallback(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, c.wantCards, responder.gotAllocated,
 				"the Responder must see exactly the cards the owner container holds")
+		})
+	}
+}
+
+// slicedLedgerDevices builds a logically sliceable node whose ledger replays a real per-card
+// ".sliced.units" remaining — one entry per card, in card order. A card with units committed
+// (remaining below the full per-card budget) is recorded Sliced; an untouched card is free.
+func slicedLedgerDevices(nodeName string, tokensPerCard int32, remaining ...int32) *workercore.Devices {
+	accelerators := make([]workercore.Accelerator, 0, len(remaining))
+	allocations := make([]workercore.AcceleratorAllocation, 0, len(remaining))
+	for i := range remaining {
+		id := fmt.Sprintf("dev-%d", i)
+		accelerators = append(accelerators, workercore.Accelerator{
+			ID:     id,
+			Index:  uint32(i),
+			Status: workercore.AcceleratorStatus{LogicalSliced: workercore.AcceleratorLogicalSliced{Count: tokensPerCard}},
+		})
+		mode := workercore.DeviceAllocationModeNone
+		if remaining[i] < nodefeature.ResourceMaxUnits {
+			mode = workercore.DeviceAllocationModeSliced
+		}
+		allocations = append(allocations, workercore.AcceleratorAllocation{
+			ID:        id,
+			Index:     uint32(i),
+			Mode:      mode,
+			Remaining: remaining[i],
+		})
+	}
+	return &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: accelerators,
+			}},
+		},
+		Status: workercore.DevicesStatus{
+			Groups: []workercore.DevicesAllocationGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: allocations,
+			}},
+		},
+	}
+}
+
+// availableDeviceIDsFor is kubelet's free-token view of devs for mode: every card's own pool,
+// rendered by the same production helper that advertises them.
+func availableDeviceIDsFor(devs *workercore.Devices, mode workercore.DeviceAllocationMode, tokensPerCard int32) []string {
+	var ids []string
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
+			ids = append(ids, res.GetDeviceIds(mode, tokensPerCard)...)
+		}
+	}
+	return ids
+}
+
+// slicedUnitsContainer is a container carrying the per-card ".sliced.units" budget the Pod webhook
+// folds a slice's memory request into — the figure the per-card fit is decided on.
+func slicedUnitsContainer(units int64) *core.Container {
+	return &core.Container{
+		Name: workloadContainer,
+		Resources: core.ResourceRequirements{
+			Limits: core.ResourceList{
+				nodefeature.GetAcceleratableSlicedUnitsResourceName(nodefeature.ManufacturerNVIDIA): *resource.NewQuantity(units, resource.DecimalSI),
+			},
+		},
+	}
+}
+
+// TestResourceServer_PreferredAllocation_HintNamesAnAvailableToken pins the contract kubelet holds
+// the hint to: every device ID returned must be one of the tokens kubelet offered. kubelet
+// intersects the hint with its available set and falls back to an arbitrary token when the
+// intersection is empty, so an ID it cannot read is not cosmetic — it discards the placement
+// decision silently. All three card-bound modes render their IDs through the same code, so all
+// three are pinned here.
+func TestResourceServer_PreferredAllocation_HintNamesAnAvailableToken(t *testing.T) {
+	const tokensPerCard = 64
+	devs := slicedLedgerDevices("node-hint", tokensPerCard, nodefeature.ResourceMaxUnits, 800_000)
+
+	modes := []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeExclusive,
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeSliced,
+	}
+	for _, mode := range modes {
+		t.Run(mode.String(), func(t *testing.T) {
+			availableDeviceIDs := availableDeviceIDsFor(devs, mode, tokensPerCard)
+			s := &ResourceServer{Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: mode}
+
+			resp, err := s.getContainerPreferredAllocationResponse(
+				&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
+				&core.Pod{}, slicedUnitsContainer(800_000), devs)
+			require.NoError(t, err)
+			require.NotEmpty(t, resp.GetDeviceIDs(), "a fitting card must yield a hint")
+
+			offered := sets.New(availableDeviceIDs...)
+			for _, id := range resp.GetDeviceIDs() {
+				unit, err := ConvertResourceUnitFromDeviceIds(id)
+				require.NoError(t, err, "kubelet can only read a three-segment device ID")
+				assert.Equal(t, id, unit.String(), "a hint ID must round-trip")
+				assert.True(t, offered.Has(id), "the hint must name a token kubelet offered: %q", id)
+			}
 		})
 	}
 }
