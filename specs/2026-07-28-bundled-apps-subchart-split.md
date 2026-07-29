@@ -234,10 +234,11 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   prefixing would render `reg.local/docker.io/gpustack/…` whenever `imageRegistry` is set without
   `imageNamespace`. The parent helper takes the same change for one semantic behind one knob; it
   is a behavioural no-op there, provable by the default render staying byte-identical.
-- The five charts expose **25** image sites, four of which the criteria below do not name because
-  they sit behind default-off gates: kueueViz backend and frontend (in **both** Kueue trees), NFD's
+- The four charts expose **22** image sites, four of which the criteria below do not name because
+  they sit behind default-off gates: kueueViz backend and frontend, NFD's
   topology-updater, and csi-driver-nfs's `snapshot-controller` Deployment (distinct from the
-  `csi-snapshotter` sidecar). They are patched too, and the verify script flips those gates on —
+  `csi-snapshotter` sidecar). (The count read 25 across five charts while the second Kueue tree was
+  still carried; T33 corrected it.) They are patched too, and the verify script flips those gates on —
   a patch nothing renders is not verified. Two shape quirks matter: csi-driver-nfs resolves
   `image.baseRepo` plus a leading-slash repository suffix, and csi-driver-s3 stores full
   `registry/ns/name:tag` strings with no separate tag key.
@@ -266,7 +267,13 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   tolerations, resources, priority classes, driver names, `fullnameOverride`, the NFD config
   and the Kueue `managerConfig`. CRDs are **excluded** from the comparison — `helm template`
   does not emit subchart `crds/`.
-- AC: the rendered output contains no RoleBinding in the `kube-system` namespace.
+- AC: the only RoleBinding the render places in `kube-system` is Kueue's
+  `visibility-server-auth-reader`, which belongs there — it binds to the built-in
+  `extension-apiserver-authentication-reader` Role, which exists nowhere else. (This AC read "no
+  RoleBinding in `kube-system`" until T33. It contradicted this feature's own conclusion twelve
+  lines above — that pinning `enableVisibilityAuthReaderRoleBinding` false "is not hardening, it is
+  an outage" — and F8's statement that both the old and the new render create it. The
+  implementation followed those two; the AC was never reconciled with them.)
 - AC: `make generate chart` regenerates `README.md` and `values.schema.json`; the CI
   "Verify Generated" step passes.
 
@@ -1978,6 +1985,65 @@ source, and the two findings deliberately left are recorded under Open Questions
       Measured: narrowing renders 133 objects with 8 device-manager DaemonSets instead of 9. The
       stale string is gone from `values.yaml` and `README.md`.
 
+- [x] **T34 · What the spec axis of the review found**
+      Blocked by: T29
+      Owns: `pkg/worker/kuberess/apps_gpustack_operator.go`,
+      `pkg/worker/kuberess/apps_gpustack_operator_test.go`, `hack/lib/helm.sh`,
+      `deploy/gpustack-operator/chart/values.yaml`, `docs/architecture.md`,
+      `docs/development.md`, `pack/gpustack-operator/Dockerfile`, this spec
+      Acceptance: the second review axis asked the one question the five quality dimensions never
+      do — was this what the spec ordered — and found one break of a Goal plus a set of statements
+      the diff had overtaken.
+      - **The airgap Goal was broken in image mode.** `{{- if not $.ImageRepository }}` gated
+        `global.imageRegistry` along with `imageNamespace`, so on the normal path — a worker whose
+        own image resolves — neither reached the release, and all nine subchart images stayed on
+        `docker.io`. A regression against `main`, where each of the four installers applied
+        `$.ContainerRegistry` unconditionally, and invisible to F4's parity test by construction
+        (it compares defaults against defaults). It was even asserted as intended by a unit test.
+        The registry now goes out whatever the worker's image is: rewriting a mirrored deployment's
+        own registry with itself is a no-op, and image mode has no other channel to a mirror. The
+        namespace stays gated, because it replaces the namespace segment of *every* reference —
+        including the operator image this same overlay just pinned to the running worker — and the
+        two need not agree: a packaged build puts the operator in its own namespace while the
+        mirrored dependencies stay in the default one. Rewriting it there points the
+        device-managers and the hook Jobs at an image that does not exist.
+      - **The image fan-out verifier never rendered the four sites it exists for.** F2 says the
+        verify script flips the default-off gates on, "because a patch nothing renders is not
+        verified"; it passed only the four `global.*` flags, and `hack/lib/helm.sh` contradicted
+        itself about it in two comments. It now sets `kueue.enableKueueViz`,
+        `node-feature-discovery.topologyUpdater.enable` (NFD's gate is `enable`, not `enabled`) and
+        `csi-driver-nfs.externalSnapshotter.enabled`.
+      - **`docs/architecture.md` still carried the sentence F10 records as corrected** — the
+        `deviceManager.enabled=false` bullet pointing at a runtime install, 124 lines from its own
+        correction, aimed at a configuration the exclusive-modes caveat says never starts the
+        worker. **`docs/development.md`** documented two behaviours T5 and T20 deleted: chart
+        dependency updates in `make generate chart`, and a generated transformations list.
+      - **The withdrawn second Kueue tree left three user-visible traces** — a values comment about
+        "both Kueue lines" copied into the generated README, and "Kueue legacy" in the Dockerfile —
+        along with F2's arithmetic of 25 image sites across five charts, where 22 across four ship.
+      - **NFD's one spread knob was undeclared** while both CSI drivers declare theirs, against
+        F7's own rule that a knob a user cannot find is a knob that does not exist. It is now
+        stated, which pins NFD's default — the same trade every image tag here already makes, and
+        the bump workflow already says to re-read upstream defaults. Stating it also fixed the
+        default: NFD matches the control-plane role label with `In [""]`, and that label's value is
+        a convention rather than an API — kubeadm and kind set it empty, k3s and RKE2 set it to
+        "true" — so on those distributions the preference silently matched nothing. It is matched
+        with `Exists` here, which is what every other control-plane matcher in this chart uses.
+      - **Two of the spec's own statements were stale**: F2's AC forbidding any `kube-system`
+        RoleBinding, which its own reasoning twelve lines later and F8 both contradict, and the
+        `pkg/worker/kuberess` coverage target, recorded as a floor to rise from while the figure
+        fell to 26.0%.
+      Verify: `go test ./...`; `make lint`; `make lint chart` reports the extra image sites.
+      Measured: the verifier goes from 10 distinct image values to **13** — kueueViz's two and
+      snapshot-controller. A new test case pins the regression pair: with a mirror configured and
+      the worker's image reused, `imageRegistry` is emitted and `imageNamespace` is not. The
+      declared NFD affinity changes the whole render by exactly the two matchers it fixes — the
+      master Deployment and NFD's post-delete Job, the two workloads that read `master.affinity`.
+      One finding was **rejected**: the reviewer read an uncommitted working tree and reported a
+      third pre-hook step (`free_kueue_cert_secrets`) as shipped under T27. It is in neither the
+      commit nor `HEAD` — it was the experiment T27 records as impossible, since Helm validates
+      ownership before it runs any hook. F8's two steps are the two that ship.
+
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
 those paths. `helm.Chart.Install` falls back to `DownloadURL`, so image-mode application installs
@@ -2020,17 +2086,23 @@ code solid enough prior to committing the changes necessary to implement this en
   in `pkg/worker/kuberess`: the chart is rendered in-process and the Kueue ConfigMap's
   transformations are asserted equal to what `pkg/nodefeature` computes, so a change to
   `nodefeature.CreditsPerCard` still fails a test.
-- `pkg/worker/kuberess`: 2026-07-28 - 37.6% → target ≥45% after the collapse. Overlay
-  computation per `--disable-applications` set;
-  `TakeOwnership` set only when a legacy release is present; `--disable-applications` name
-  validation; `CSIProvisioner*` constants equal the chart's `driver.name`.
+- `pkg/worker/kuberess`: 2026-07-28 - 37.6% → **26.0%** measured 2026-07-29 (target was ≥45%;
+  **not met**, and the figure fell rather than rose). The collapse deleted the four Go installers,
+  which were the package's best-covered code — the render templates a unit test could exercise
+  offline — and what replaced them is `chart.go`'s install / adopt / repair paths, which need a
+  live Helm release and a cluster to reach. Those are covered by the chart e2e cases instead,
+  which no `go test -cover` figure sees. Covered here: overlay computation per
+  `--disable-applications` set; the registry reaching the subcharts while the namespace is
+  withheld; `TakeOwnership` set only when a legacy release is present; `--disable-applications`
+  name validation; `CSIProvisioner*` constants equal the chart's `driver.name`; and five chart
+  render tests holding the chart's values against `pkg/nodefeature`.
 - `pkg/kubeapp/helm`: 2026-07-28 - 10.6% → target ≥25%. `TakeOwnership` reaches both actions;
   default stays `false`.
 - `pkg/utils/certs/cache`: 2026-07-28 - 0.0% → **78.4%** (target ≥60%, met). Two concurrent
   writers converge on one Secret; two separate cache instances share one Secret, which is the
   per-replica case; no delete-all-duplicates path remains.
-- `pkg/kubeclientset`: 2026-07-28 - 0.0% → **27.4%** (target was ≥40%; **not met**, and
-  deliberately not padded). A conflicting update retries when an align function is supplied, and
+- `pkg/kubeclientset`: 2026-07-28 - 0.0% → **29.0%** measured 2026-07-29, T32's
+  persistent-conflict test included (target was ≥40%; **not met**, and deliberately not padded). A conflicting update retries when an align function is supplied, and
   does **not** when none is — the second case is the guard that pins why the installers must
   supply one. Plus the `Create` + `WithUpdateIfExisted` conflict retry, which was dead code. The
   covered functions are the two T7 edits: `Update` 83.3%, `Create` 66.1%. The uncovered remainder
@@ -2189,6 +2261,28 @@ both pre-existing rather than introduced here:
   CI stays blind. The fix is to fold a hash of a chart's patch directory into its `_VERSION_`
   stamp so a patch edit forces a re-stage; it touches the vendoring contract every task on this
   branch rests on, which is why it is not being done at the end of the branch.
+- **Seven test-and-AC gaps the spec axis reported are real and remain open**, all of the same
+  shape — the spec ordered an assertion that does not exist, so the behaviour is claimed by a
+  task's `Verify` line rather than guarded by anything that re-runs. In severity order: F8's
+  upgrade-adoption e2e ships as a scoped proxy (`case-5.sh` adopts one stand-in subchart release
+  instead of installing the last released chart, and none of the AC's four survival assertions
+  exist — and because the stand-in is the one subchart with no `crds/`, hook step 2 goes
+  unexercised); F7's three-replica concurrent-boot e2e is absent (`case-6.sh` stands up a single
+  worker, and the four concurrency fixes ship with unit tests only); F2's golden-manifest parity
+  test was spent and deleted with the baseline and nothing replaced it, which is the objection T4
+  itself raises about an assertion that never lands; F8's hook-image-unavailable AC, the Test
+  Plan's digest-pinned-worker case and its sub-1.31 scheduling-chain run (covered only by `ct
+  install` across the matrix, which is an install, not the admission run asked for) have no case;
+  and T14's "runs the render check once, not per Kubernetes version" is not what ships — the check
+  landed inside `make lint chart`, which every one of the seven matrix legs runs. Closing them is
+  e2e authoring against a real cluster, which is why they are listed rather than done at the end of
+  a branch.
+- **The Non-Goal on upstream forks no longer describes what ships.** It names the `global.*` image
+  plumbing, the `csi-driver-s3` rename and the Kueue `selectableFields` guard; three further
+  patches are authorized by their tasks (T20's Kueue `manager-config`, T21's 22-file
+  `cert-manager`, T24's `csi-driver-s3` `feature-gates`), so Kueue now carries four patches where
+  F5 argues NFD's single patch is what limits bump cost. Each is justified where it was added;
+  the Non-Goal was never widened to admit them.
 - **NFD's `nodeFeatureNamespaceSelector` is unset, so any namespace can label and taint any node.**
   The Go template it replaced pinned the selector to the release namespace. Unsetting it is what
   lets the release adopt NodeFeatures a vendor GPU operator publishes (F5), but the blast radius

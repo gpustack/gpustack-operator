@@ -195,20 +195,24 @@ function gpustack::helm::ct::chart_repos() {
     paste -sd, -
 }
 
-# gpustack::helm::verify_images::render renders the given chart at its defaults, which is
-# what a user installing it gets: every component the operator deploys is on by default, and
-# every component an upstream chart ships switched off stays off, because the operator only
-# deploys the parts it uses. So this passes no component switch at all — anything the
-# assertion cannot see at the defaults is something the chart does not ship. Arguments past
-# the target are passed to helm verbatim. The Kubernetes version is pinned so the render is
-# deterministic; which version it is does not matter here, as no image reference varies with
-# it.
+# gpustack::helm::verify_images::render renders the given chart at its defaults PLUS the
+# components an upstream chart ships switched off, because the point of this render is the
+# image fields, and a patched image field nobody renders is a field nobody verifies. Those
+# four sites — kueueViz's backend and frontend, the NFD topology updater, csi-driver-nfs's
+# snapshot-controller — are patched exactly like the rest and would otherwise be guarded by
+# nothing. Note NFD's gate is `enable`, not `enabled`; the misspelling silently renders
+# nothing. Arguments past the target are passed to helm verbatim. The Kubernetes version is
+# pinned so the render is deterministic; which version it is does not matter here, as no
+# image reference varies with it.
 function gpustack::helm::verify_images::render() {
   local target="$1"
   shift 1
 
   $(gpustack::helm::helm::bin) template gpustack-operator "${target}" \
     --kube-version "1.33.0" \
+    --set kueue.enableKueueViz=true \
+    --set node-feature-discovery.topologyUpdater.enable=true \
+    --set csi-driver-nfs.externalSnapshotter.enabled=true \
     "$@"
 }
 

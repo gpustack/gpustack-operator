@@ -414,7 +414,7 @@ EOF
 ARG GPUSTACK_CHARTS_DIR
 
 ## GPUStack Operator
-## The chart carries its five upstream dependencies (Kueue, Kueue legacy, Node Feature
+## The chart carries its four upstream dependencies (Kueue, Node Feature
 ## Discovery, CSI Driver NFS, CSI Driver S3) vendored, patched and committed under its own
 ## "charts/" directory, so packaging it below is what makes image mode self-contained —
 ## no separate upstream chart ADDs are needed.

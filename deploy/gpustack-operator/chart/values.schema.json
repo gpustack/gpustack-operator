@@ -964,7 +964,7 @@
                     },
                     "tag": {
                       "default": "v0.18.4",
-                      "description": "Kueue controller manager image tag. Both Kueue lines run this same image;\nonly the CRD schema their charts ship differs.",
+                      "description": "Kueue controller manager image tag, stated rather than inherited so a subchart\nbump cannot move the image without the diff showing it.",
                       "title": "tag",
                       "type": "string"
                     }
@@ -1233,6 +1233,73 @@
         },
         "master": {
           "properties": {
+            "affinity": {
+              "description": "Affinity for the NFD master, and the only way to spread its replicas across nodes: NFD\nrenders no topology spread constraints. Stated here because a spread knob a user cannot find\nin this file is a knob that does not exist, and because replacing it wholesale is what\nsetting it does.\n\nIt is NFD's own default — a preference for control-plane nodes — with one deliberate change:\nthe role label is matched with `Exists` rather than `In [\"\"]`. That label's value is a\nconvention, not an API: kubeadm and kind set it empty, k3s and RKE2 set it to \"true\", so a\nvalue test silently matches nothing on those and the preference quietly stops existing.\n`Exists` is also what every other control-plane matcher in this file uses, tolerations and\nboth CSI drivers included. Being stated pins the rest of the block: re-read NFD's default\nwhen bumping the subchart, as with every image tag here.",
+              "properties": {
+                "nodeAffinity": {
+                  "properties": {
+                    "preferredDuringSchedulingIgnoredDuringExecution": {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "preference": {
+                                "properties": {
+                                  "matchExpressions": {
+                                    "items": {
+                                      "anyOf": [
+                                        {
+                                          "properties": {
+                                            "key": {
+                                              "default": "node-role.kubernetes.io/control-plane",
+                                              "title": "key",
+                                              "type": "string"
+                                            },
+                                            "operator": {
+                                              "default": "Exists",
+                                              "title": "operator",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [],
+                                          "type": "object"
+                                        }
+                                      ],
+                                      "required": []
+                                    },
+                                    "title": "matchExpressions",
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [],
+                                "title": "preference",
+                                "type": "object"
+                              },
+                              "weight": {
+                                "default": 1,
+                                "title": "weight",
+                                "type": "integer"
+                              }
+                            },
+                            "required": [],
+                            "type": "object"
+                          }
+                        ],
+                        "required": []
+                      },
+                      "title": "preferredDuringSchedulingIgnoredDuringExecution",
+                      "type": "array"
+                    }
+                  },
+                  "required": [],
+                  "title": "nodeAffinity",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "affinity",
+              "type": "object"
+            },
             "annotations": {
               "description": "Annotations added to the NFD master pods.",
               "properties": {
@@ -1329,7 +1396,7 @@
             },
             "replicaCount": {
               "default": 1,
-              "description": "Number of NFD master replicas. The master is what turns a device-manager's detections into\nnode labels, so while it is down no node is ever (re)classified and the scheduling chain\nstalls for new or changed nodes. Above one, NFD's own chart adds `-enable-leader-election`\nfor you; the standbys watch without writing. NFD's templates render no topology spread\nconstraints, so spreading these replicas across nodes means setting `master.affinity` — which\nreplaces NFD's own preference for control-plane nodes rather than adding to it.",
+              "description": "Number of NFD master replicas. The master is what turns a device-manager's detections into\nnode labels, so while it is down no node is ever (re)classified and the scheduling chain\nstalls for new or changed nodes. Above one, NFD's own chart adds `-enable-leader-election`\nfor you; the standbys watch without writing. NFD's templates render no topology spread\nconstraints, so spreading these replicas across nodes means setting `master.affinity` below —\nwhich replaces NFD's own preference for control-plane nodes rather than adding to it.",
               "title": "replicaCount",
               "type": "integer"
             },

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -51,11 +52,16 @@ func renderOperatorChartValues(t *testing.T, data map[string]any) map[string]any
 
 func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 	testCases := []struct {
-		name                 string
-		data                 map[string]any
-		expectImageOverride  bool
-		expectGlobalRegistry bool
-		expectPullPolicy     string
+		name                string
+		data                map[string]any
+		expectImageOverride bool
+		// wantRegistry is the global.imageRegistry expected, or "" for the key being absent.
+		wantRegistry string
+		// wantNamespaceKey is whether global.imageNamespace is emitted at all, which is a
+		// different question from its value: it is withheld exactly where it could rewrite a
+		// pinned image, and emitted (empty) where nothing is pinned.
+		wantNamespaceKey bool
+		expectPullPolicy string
 	}{
 		{
 			name: "compose image from settings",
@@ -63,9 +69,19 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 				"ImagePullSecrets": []string{"abc", "def"},
 				"ImagePullPolicy":  "Always",
 			}),
-			expectImageOverride:  false,
-			expectGlobalRegistry: true,
-			expectPullPolicy:     "Always",
+			expectImageOverride: false,
+			wantNamespaceKey:    true,
+			expectPullPolicy:    "Always",
+		},
+		{
+			name: "mirror settings with a chart-composed image",
+			data: operatorChartValuesContext(map[string]any{
+				"ContainerRegistry":  "reg.local",
+				"ContainerNamespace": "mirror",
+			}),
+			expectImageOverride: false,
+			wantRegistry:        "reg.local",
+			wantNamespaceKey:    true,
 		},
 		{
 			name: "reuse running worker image",
@@ -73,9 +89,25 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 				"ImageRepository": "registry.example.com/myns/gpustack-operator",
 				"ImageTag":        "v0.5.0",
 			}),
-			expectImageOverride:  true,
-			expectGlobalRegistry: false,
-			expectPullPolicy:     "",
+			expectImageOverride: true,
+			wantNamespaceKey:    false,
+		},
+		{
+			// The regression this pair of expectations exists for: image mode has no
+			// user-values channel, so a registry withheld here leaves every subchart pulling
+			// from wherever its own reference points — the airgap gone, silently. The
+			// namespace still cannot travel, because it would rewrite the operator image
+			// this same overlay pinned to the running worker.
+			name: "mirror settings while reusing the running worker image",
+			data: operatorChartValuesContext(map[string]any{
+				"ContainerRegistry":  "reg.local",
+				"ContainerNamespace": "mirror",
+				"ImageRepository":    "reg.local/team/gpustack-operator",
+				"ImageTag":           "v0.7.0",
+			}),
+			expectImageOverride: true,
+			wantRegistry:        "reg.local",
+			wantNamespaceKey:    false,
 		},
 	}
 
@@ -95,8 +127,8 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 			// exist wherever this build came from.
 			if tc.expectImageOverride {
 				image, _ := values["image"].(map[string]any)
-				assert.Equal(t, "registry.example.com/myns/gpustack-operator", image["repository"])
-				assert.Equal(t, "v0.5.0", image["tag"])
+				assert.Equal(t, tc.data["ImageRepository"], image["repository"])
+				assert.Equal(t, tc.data["ImageTag"], image["tag"])
 			} else {
 				assert.Nil(t, values["image"], "no chart-level image override")
 			}
@@ -108,13 +140,18 @@ func Test_getGPUStackOperatorChartTemplateValues(t *testing.T) {
 			manus, _ := global["manufacturers"].(map[string]any)
 			assert.Len(t, manus, len(nodefeature.GetKnownAcceleratableManufacturers()),
 				"all manufacturers rendered")
-			if tc.expectGlobalRegistry {
-				assert.NotNil(t, global, "global block rendered")
-				assert.Contains(t, global, "imageRegistry")
+			require.NotNil(t, global, "global block rendered")
+			if tc.wantRegistry != "" {
+				assert.Equal(t, tc.wantRegistry, global["imageRegistry"],
+					"the registry reaches the subcharts whatever the operator image is")
+			} else {
+				assert.NotContains(t, global, "imageRegistry", "no registry configured")
+			}
+			if tc.wantNamespaceKey {
 				assert.Contains(t, global, "imageNamespace")
 			} else {
-				assert.NotContains(t, global, "imageRegistry",
-					"no registry override when reusing the worker image")
+				assert.NotContains(t, global, "imageNamespace",
+					"the namespace would rewrite the pinned worker image")
 			}
 
 			// The pull policy must reach the subcharts, which only global.imagePullPolicy does.

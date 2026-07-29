@@ -183,10 +183,27 @@ func hasLegacyApplicationRelease(ctx context.Context, cli kubernetes.Interface, 
 // The pull policy goes onto global.imagePullPolicy, which reaches the subcharts too; the
 // parent's own image.pullPolicy never does.
 const gpustackOperatorChartTemplate = `
-{{- if or (not $.ImageRepository) $.ImagePullPolicy $.ImagePullSecrets $.ManufacturerIdentities }}
+{{- if or $.ContainerRegistry (not $.ImageRepository) $.ImagePullPolicy $.ImagePullSecrets $.ManufacturerIdentities }}
 global:
+  {{- /*
+    The registry goes out whatever the worker's own image turns out to be, because it is the
+    subcharts' only route to a mirror: image mode has no user-values channel, so a registry
+    withheld here means every subchart pulling from wherever its reference already points.
+    Rewriting the pinned operator image's registry with it is a no-op in any deployment that
+    has a mirror at all — that image came from it.
+
+    The namespace cannot travel the same way. It replaces the namespace segment of every
+    reference, the operator image this overlay just pinned to the running worker's included,
+    and the two need not agree: a packaged build puts the operator in its own namespace while
+    the mirrored dependencies stay in the default one. Rewriting it there points the
+    device-managers and the hook Jobs at an image that does not exist, which fails the install
+    on a pull it can never satisfy. So it is emitted only where no worker image was resolved
+    and nothing is at risk of being rewritten.
+  */}}
+  {{- with $.ContainerRegistry }}
+  imageRegistry: {{ . | quote }}
+  {{- end }}
   {{- if not $.ImageRepository }}
-  imageRegistry: {{ default "" $.ContainerRegistry | quote }}
   imageNamespace: {{ default "" $.ContainerNamespace | quote }}
   {{- end }}
   {{- if $.ImagePullPolicy }}

@@ -25,7 +25,7 @@ The `generate`, `lint`, and `test` targets take a `chart` argument that operates
 `deploy/gpustack-operator/chart` (via [chart-testing](https://github.com/helm/chart-testing),
 [helm-docs](https://github.com/norwoodj/helm-docs), and helm-schema):
 
-- `make generate chart` — update chart dependencies, then regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two files**; edit `values.yaml`/value annotations/`README.md.gotmpl` and re-run. Re-run it after **any** `values.yaml` edit — the generated schema is what rejects an install otherwise, and it also refreshes the Kueue `resources.transformations` list from `pkg/nodefeature` between its markers.
+- `make generate chart` — regenerate `README.md` (from `README.md.gotmpl`) and `values.schema.json`. **Never hand-edit those two files**; edit `values.yaml`/value annotations/`README.md.gotmpl` and re-run. Re-run it after **any** `values.yaml` edit — the generated schema is what rejects an install otherwise. Nothing in `values.yaml` is generated: Kueue's `resources.transformations` is rendered at install time by a chart helper a patch makes its config include, not written into values by a generator.
 - `make lint chart` — lint the chart with `ct lint` in a container, then assert that the `global.*` image knobs reach every image the chart renders, its subcharts' included (`gpustack::helm::verify_images`).
 - `make test chart` — install the chart onto the current cluster with `ct install` in a container; needs a reachable cluster (e.g. kind) and `~/.kube/config`.
 
