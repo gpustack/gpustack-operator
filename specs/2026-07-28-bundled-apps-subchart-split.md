@@ -1458,9 +1458,12 @@ the baseline.
       commit: CASE 1 (19 checks), CASE 4 (17), CASE 5 (9), CASE 2 (4), CASE 6 (12). CASE 5 needs a
       helm client with `--take-ownership` (3.21+, which is what `.sbin/helm` is; the PATH one is
       3.13.3 and the case AUTO-SKIPS on it), and CASE 6 needs the chart release **absent**, so it ran
-      after CASE 2's teardown. **One gap, stated rather than hidden:** CASE 4 ran at `REPLICAS=2`
-      because the cluster had two untainted nodes, so the HA guide's own `replicas: 3` values are
-      render-verified (T17) and their mechanism is runtime-verified, but that exact count is not.
+      after CASE 2's teardown. CASE 4 first ran at `REPLICAS=2`, the cluster having two untainted
+      nodes, which left the HA guide's own `replicas: 3` render-verified (T17) but not run; **that
+      gap is now closed** — re-run at `REPLICAS=3` on a three-worker cluster (commit `95ed1a4a`),
+      17 checks green: 3/3 ready on the worker, `kueue-controller-manager`,
+      `node-feature-discovery-master` and both CSI controllers, all three PDBs at `minAvailable=2`,
+      both leases changing holder, and the aggregated APIServices surviving the failover.
       Three findings the run produced, each folded into the code or the case that owns it: the
       `csi-driver-s3` chart labels its controller `managed-by` only, so ownership is asserted on
       Helm's annotation instead of `app.kubernetes.io/instance`; `build-load.sh` had no kind branch
@@ -1545,14 +1548,17 @@ the baseline.
       passed all 20 checks, the new `chain rule applied` row among them. `make lint`, `make lint
       chart` and `go test ./pkg/worker/... ./pkg/nodefeature/...` green; `make generate chart` moves
       nothing on a second run.
-      One finding this task's `make test chart` run turned up, **unrelated to it and left open**:
-      `ct install` picks a random namespace, and Kueue refuses to start in any namespace its own
+      One finding this task's `make test chart` run turned up, **unrelated to it**: `ct install`
+      picks a random namespace, and Kueue refuses to start in any namespace its own
       `managedJobsNamespaceSelector` does not exclude — ours hard-codes `gpustack-system` — so the
-      controller crash-loops and `make test chart` (which `ci-chart.yml` runs) cannot pass. It is
-      also a product limitation, not just a test one: this chart is only installable into
-      `gpustack-system`, which `docs/migration/to-subcharts.md` states. T20 is where it belongs,
-      since the patch it adds to the Kueue tree is what would let the selector follow
-      `.Release.Namespace`.
+      controller crash-looped and `make test chart` (which `ci-chart.yml` runs across a seven-version
+      kind matrix) could not pass at all. The test half is fixed here, since it reddens CI:
+      `hack/lib/helm.sh` pins `ct install --namespace gpustack-system` and pre-creates that
+      namespace, because chart-testing only creates the ones it generates and `--helm-extra-args`
+      cannot carry `--create-namespace` (the same string reaches `helm delete`, which has no such
+      flag — measured). `make test chart` then passes. The **product** half stays open with T20: this
+      chart is installable into `gpustack-system` alone, which `docs/migration/to-subcharts.md`
+      states, and T20's Kueue patch is what can make the selector follow `.Release.Namespace`.
 
 - [ ] **T19 · `manufacturers` carries a manufacturer's whole identity**
       Blocked by: T22
@@ -1599,8 +1605,9 @@ the baseline.
       should not match the "<ns>" namespace`), and `ct install`, which picks a random namespace,
       cannot pass at all. Once the config is rendered through the parent's helper, that selector
       follows `.Release.Namespace` and the limitation `docs/migration/to-subcharts.md` documents
-      goes away. Until then `make test chart` — which `ci-chart.yml` runs — needs
-      `ct install --namespace gpustack-system`, and this task should decide which of the two lands.
+      goes away. The CI half already landed with T22 (`ct install --namespace gpustack-system`), so
+      what is left here is the product half — and once it lands, that pin can go back to
+      chart-testing's own random namespace, which is what would prove it.
       Verify: `make generate chart` idempotent; the rendered `kueue-manager-config` ConfigMap is
       **byte-identical** to today's apart from that selector (the point is where the text lives, not
       what it says); `make test chart` green — the check that proves the namespace fix;
