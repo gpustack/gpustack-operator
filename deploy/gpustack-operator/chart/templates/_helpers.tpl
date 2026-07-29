@@ -236,16 +236,18 @@ Takes a dict of "name" (the manufacturer) and "identity" (its row).
 {{- end -}}
 
 {{/*
-Resolve whether the worker consumes a cert-manager-issued serving certificate.
-Returns "true" when enabled and "" (empty) otherwise.
-.Values.worker.certmanager.enabled is a string:
+Resolve whether this release's serving certificates are issued by cert-manager. One answer for
+every component that needs one — the worker and the vendored Kueue alike, whose templates a patch
+has call this through a helper of their own. Returns "true" when enabled and "" (empty) otherwise,
+so that both `if` and `if not` read it correctly.
+.Values.global.certmanager.enabled is a string:
   - "true"  always enables it (cert-manager must be installed);
-  - "false" disables it (the worker self-manages its certificate);
+  - "false" disables it (each component self-manages its certificate);
   - "auto"  (default) enables it only when the cert-manager CRD is present,
             mirroring the operator bootstrap apply.sh CRD probe via Helm lookup.
 */}}
-{{- define "gpustack-operator.worker.certmanager.enabled" -}}
-{{- $mode := .Values.worker.certmanager.enabled | toString -}}
+{{- define "gpustack-operator.certmanager.enabled" -}}
+{{- $mode := .Values.global.certmanager.enabled | toString -}}
 {{- if eq $mode "true" -}}
 true
 {{- else if eq $mode "false" -}}

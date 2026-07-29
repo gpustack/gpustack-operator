@@ -714,6 +714,55 @@
     "global": {
       "description": "Global values shared across the chart and its subcharts.",
       "properties": {
+        "certmanager": {
+          "description": "Configure cert-manager integration for every serving certificate this release needs: the\nworker's webhook certificate and Kueue's. It lives under `global` because Kueue is a vendored\nsubchart and `global` is the only channel Helm gives a subchart to this chart's values. Each\ncomponent used to be switched on its own, so a cluster with cert-manager installed issued the\nworker's certificate through it while Kueue went on self-signing — two answers to one question,\nand the detection behind `auto` could never reach Kueue at all.",
+          "properties": {
+            "enabled": {
+              "default": "auto",
+              "description": "Whether to issue the serving certificates with cert-manager. Accepts a string (or the\nequivalent boolean): \"auto\" creates the cert-manager resources only when the cert-manager\nCRDs are detected in the cluster; \"true\" always creates them (cert-manager must be\ninstalled); \"false\" never creates them and each component generates and manages its own\ncertificate.",
+              "enum": [
+                "auto",
+                "true",
+                "false",
+                true,
+                false
+              ],
+              "required": [],
+              "title": "enabled",
+              "type": [
+                "string",
+                "boolean"
+              ]
+            },
+            "issuer": {
+              "properties": {
+                "kind": {
+                  "default": "Issuer",
+                  "description": "Issuer kind (\"Issuer\" or \"ClusterIssuer\"); only used when `issuer.name` is set.",
+                  "title": "kind",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "description": "Existing issuer name to use; when empty a self-signed Issuer is created per component.",
+                  "title": "name",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind"
+              ],
+              "title": "issuer",
+              "type": "object"
+            }
+          },
+          "required": [
+            "issuer"
+          ],
+          "title": "certmanager",
+          "type": "object"
+        },
         "imageNamespace": {
           "default": "",
           "description": "Image namespace override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included. When non-empty it replaces the namespace\nsegment of each image reference (e.g. \"gpustack\").",
@@ -1010,6 +1059,7 @@
         "imageNamespace",
         "imagePullSecrets",
         "nodeSelector",
+        "certmanager",
         "manufacturers"
       ],
       "title": "global",
@@ -1747,55 +1797,6 @@
           "title": "affinity",
           "type": "object"
         },
-        "certmanager": {
-          "description": "Configure cert-manager integration for the worker webhook serving certificate.",
-          "properties": {
-            "enabled": {
-              "default": "auto",
-              "description": "Whether to issue the worker webhook serving certificate with cert-manager.\nAccepts a string (or the equivalent boolean): \"auto\" creates the cert-manager\nresources only when the cert-manager CRDs are detected in the cluster; \"true\"\nalways creates them (cert-manager must be installed); \"false\" never creates\nthem and the worker generates and manages its own certificate.",
-              "enum": [
-                "auto",
-                "true",
-                "false",
-                true,
-                false
-              ],
-              "required": [],
-              "title": "enabled",
-              "type": [
-                "string",
-                "boolean"
-              ]
-            },
-            "issuer": {
-              "properties": {
-                "kind": {
-                  "default": "Issuer",
-                  "description": "Issuer kind (\"Issuer\" or \"ClusterIssuer\"); only used when `issuer.name` is set.",
-                  "title": "kind",
-                  "type": "string"
-                },
-                "name": {
-                  "default": "",
-                  "description": "Existing issuer name to use; when empty a self-signed Issuer is created.",
-                  "title": "name",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "name",
-                "kind"
-              ],
-              "title": "issuer",
-              "type": "object"
-            }
-          },
-          "required": [
-            "issuer"
-          ],
-          "title": "certmanager",
-          "type": "object"
-        },
         "dataDir": {
           "default": "/var/lib/gpustack",
           "description": "Host path mounted at /var/lib/gpustack for persistent operator data.",
@@ -1956,7 +1957,6 @@
       },
       "required": [
         "enabled",
-        "certmanager",
         "replicas",
         "disableApplications",
         "podDisruptionBudget",

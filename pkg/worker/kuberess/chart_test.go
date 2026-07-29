@@ -216,6 +216,9 @@ type transformation struct {
 
 // kueueConfig is the part of Kueue's Configuration this chart renders rather than states.
 type kueueConfig struct {
+	InternalCertManagement struct {
+		Enable bool `yaml:"enable"`
+	} `yaml:"internalCertManagement"`
 	Resources struct {
 		Transformations []transformation `yaml:"transformations"`
 	} `yaml:"resources"`
@@ -245,6 +248,53 @@ func renderKueueConfig(t *testing.T, values map[string]any) kueueConfig {
 		[]byte(manifest.Data["controller_manager_config.yaml"]), &config))
 
 	return config
+}
+
+// TestChartCertManagerPathsAgree holds the release to one answer about cert-manager. The worker and
+// Kueue each carry a full certificate machinery, and each used to be switched on its own — so a
+// cluster with cert-manager installed issued the worker's serving certificate through it while
+// Kueue went on self-signing, and no value could line the two up: Helm merges a subchart's values
+// instead of templating them, so the CRD probe behind "auto" never reached Kueue at all.
+//
+// The offline render performs no lookup, which is exactly the cluster without cert-manager; the
+// other two cases state the answer, and stating "true" is the same code path the probe takes when
+// it finds the CRD.
+func TestChartCertManagerPathsAgree(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		enabled     string
+		certManager bool
+	}{
+		{name: "auto with cert-manager absent", enabled: "auto", certManager: false},
+		{name: "forced on", enabled: "true", certManager: true},
+		{name: "forced off", enabled: "false", certManager: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			values := map[string]any{
+				"global": map[string]any{
+					"certmanager": map[string]any{"enabled": tc.enabled},
+				},
+			}
+
+			objects := renderChart(t, values)
+			for _, key := range []string{
+				"Certificate/" + SystemNamespaceName + "/gpustack-operator-worker-cert",
+				"Issuer/" + SystemNamespaceName + "/gpustack-operator-worker-selfsigned-issuer",
+				"Certificate/" + SystemNamespaceName + "/kueue-serving-cert",
+				"Issuer/" + SystemNamespaceName + "/kueue-selfsigned-issuer",
+			} {
+				_, ok := objects[key]
+				assert.Equal(t, tc.certManager, ok, "%s is rendered only for cert-manager", key)
+			}
+
+			// The certificate Kueue generates itself, which is the path it takes instead.
+			_, ok := objects["Secret/"+SystemNamespaceName+"/kueue-webhook-server-cert"]
+			assert.Equal(t, !tc.certManager, ok, "Kueue's self-managed certificate")
+			assert.Equal(t, !tc.certManager,
+				renderKueueConfig(t, values).InternalCertManagement.Enable,
+				"Kueue manages its own certificate exactly when cert-manager is not used")
+		})
+	}
 }
 
 // TestChartDefaultsMatchImageModeOverlay renders the chart twice — once at its defaults, as a

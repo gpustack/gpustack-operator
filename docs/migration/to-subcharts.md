@@ -96,7 +96,7 @@ When the worker installs the bundled chart from inside its own image, it detects
 legacy releases and sets the ownership transfer for that install only — never unconditionally, for
 the same reason you should drop the flag again after the chart-mode upgrade. There is nothing to run.
 
-## Three things that change permanently
+## Four things that change permanently
 
 ### `manufacturers` moved to `global.manufacturers`, and each entry became a row
 
@@ -125,6 +125,36 @@ One visible consequence: the chart now creates a RuntimeClass for every manufact
 states a `runtimeName` — `ascend`, `amd`, `cambricon` and `iluvatar` in addition to `nvidia` and
 `mthreads` — and still only where that class is absent, or already belongs to this release.
 `deviceManager.createRuntimeClasses=false` remains the way to opt out of all of them.
+
+### `worker.certmanager` moved to `global.certmanager`, and now answers for Kueue too
+
+The block that used to sit under `worker` is `global.certmanager`, with the same keys and the same
+`auto` default:
+
+```yaml
+global:
+  certmanager:
+    enabled: auto
+    issuer:
+      name: ""
+      kind: Issuer
+```
+
+It moved for the reason `manufacturers` did: the bundled Kueue reads it, and `global` is the only
+channel Helm gives a subchart. That closes a split the old layout could not. The worker decided
+cert-manager for itself while Kueue decided separately — and always said no, its upstream default
+being off — so a cluster with cert-manager installed ran two components' certificates two different
+ways, and the CRD detection behind `auto` never reached Kueue at all.
+
+**On a cluster that has cert-manager, this upgrade therefore moves Kueue onto it.** Kueue stops
+generating and rotating its own webhook certificate and starts consuming a `Certificate` this chart
+creates, with cert-manager's cainjector filling in the CA bundles its webhooks and CRD conversion
+carry. Set `global.certmanager.enabled: "false"` to keep every component self-managing instead —
+that is one answer for the whole release, so it takes the worker with it. A `worker.certmanager`
+left in your values is ignored.
+
+Naming an existing issuer (`global.certmanager.issuer.name`) now points Kueue's certificates at it
+too, instead of only the worker's, and no self-signed Issuer is created for either.
 
 ### `helm uninstall` now takes Kueue with it
 

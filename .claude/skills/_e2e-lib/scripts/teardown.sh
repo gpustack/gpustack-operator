@@ -108,10 +108,12 @@ done
 #    Secret is named "<worker-fullname>-cert", release-dependent via the chart fullname; accept the
 #    resolved name as $2 (mirroring cleanup.sh), defaulting to gpustack-operator-worker-cert as this
 #    harness always installs under that release. Neither Secret is helm-owned, so `helm uninstall`
-#    leaves them behind. Delete by exact name, never a label sweep, so a co-located standalone GPUStack
-#    app's own Secrets are untouched.
+#    leaves them behind, and so are Kueue's three where cert-manager issued them (fixed names, the
+#    subchart being pinned to a "kueue" prefix). Delete by exact name, never a label sweep, so a
+#    co-located standalone GPUStack app's own Secrets are untouched.
 worker_cert_secret="${2:-gpustack-operator-worker-cert}"
-for s in "$worker_cert_secret" gpustack-settings; do
+for s in "$worker_cert_secret" gpustack-settings \
+  kueue-webhook-server-cert kueue-metrics-server-cert kueue-visibility-server-cert; do
   kubectl -n "$NS" delete secret "$s" --ignore-not-found 2>/dev/null || true
 done
 

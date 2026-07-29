@@ -1,7 +1,7 @@
-{{- if and .Values.worker.enabled (eq (include "gpustack-operator.worker.certmanager.enabled" .) "true") }}
+{{- if and .Values.worker.enabled (eq (include "gpustack-operator.certmanager.enabled" .) "true") }}
 {{- $name := include "gpustack-operator.worker.fullname" . }}
 {{- $namespace := include "gpustack-operator.namespace" . }}
-{{- if not .Values.worker.certmanager.issuer.name }}
+{{- if not .Values.global.certmanager.issuer.name }}
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
@@ -23,9 +23,9 @@ metadata:
 spec:
   secretName: {{ $name }}-cert
   issuerRef:
-    {{- if .Values.worker.certmanager.issuer.name }}
-    name: {{ .Values.worker.certmanager.issuer.name }}
-    kind: {{ .Values.worker.certmanager.issuer.kind }}
+    {{- if .Values.global.certmanager.issuer.name }}
+    name: {{ .Values.global.certmanager.issuer.name }}
+    kind: {{ .Values.global.certmanager.issuer.kind }}
     {{- else }}
     name: {{ $name }}-selfsigned-issuer
     kind: Issuer

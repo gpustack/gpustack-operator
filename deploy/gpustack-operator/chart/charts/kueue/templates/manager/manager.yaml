@@ -91,7 +91,7 @@ spec:
         - mountPath: /controller_manager_config.yaml
           name: manager-config
           subPath: controller_manager_config.yaml
-        {{- if .Values.enableCertManager }}
+        {{- if (include "kueue.enableCertManager" .) }}
         - mountPath: /etc/kueue/metrics/certs
           name: metrics-certs
           readOnly: true
@@ -124,7 +124,7 @@ spec:
       - name: manager-config
         configMap:
           name: {{ include "kueue.fullname" . }}-manager-config
-      {{- if .Values.enableCertManager }}
+      {{- if (include "kueue.enableCertManager" .) }}
       - name: metrics-certs
         secret:
           secretName: {{ include "kueue.fullname" . }}-metrics-server-cert

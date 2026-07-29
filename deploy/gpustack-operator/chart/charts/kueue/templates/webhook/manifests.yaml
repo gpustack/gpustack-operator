@@ -24,7 +24,7 @@ metadata:
   labels:
   {{- include "kueue.labels" . | nindent 4 }}
   name: '{{ include "kueue.fullname" . }}-mutating-webhook-configuration'
-  {{- if .Values.enableCertManager }}
+  {{- if (include "kueue.enableCertManager" .) }}
   annotations:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "kueue.fullname" . }}-serving-cert
   {{- end }}
@@ -670,7 +670,7 @@ metadata:
   labels:
   {{- include "kueue.labels" . | nindent 4 }}
   name: '{{ include "kueue.fullname" . }}-validating-webhook-configuration'
-  {{- if .Values.enableCertManager }}
+  {{- if (include "kueue.enableCertManager" .) }}
   annotations:
     cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "kueue.fullname" . }}-serving-cert
   {{- end }}

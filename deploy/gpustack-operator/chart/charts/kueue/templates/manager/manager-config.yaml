@@ -28,7 +28,7 @@ data:
       "enable" true
       "webhookServiceName" (printf "%s-webhook-service" (include "kueue.fullname" .))
       "webhookSecretName" (printf "%s-webhook-server-cert" (include "kueue.fullname" .)) }}
-{{- if .Values.enableCertManager }}
+{{- if (include "kueue.enableCertManager" .) }}
   {{- $defaultInternalCert = dict "enable" false }}
 {{- end }}
 {{- if not $config.internalCertManagement }}

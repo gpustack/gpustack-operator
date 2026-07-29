@@ -35,7 +35,7 @@ Running more than one replica of each control-plane component is described in th
 
 {{ template "chart.kubeVersionLine" . }}
 - Helm 3.8.0+ — or **3.21.0+** for the one-time upgrade of a v0.7.x-or-earlier install, which needs `--take-ownership`
-- (Optional) [cert-manager](https://cert-manager.io) when `worker.certmanager.enabled` is `"true"` (or `"auto"` with cert-manager present)
+- (Optional) [cert-manager](https://cert-manager.io) when `global.certmanager.enabled` is `"true"` (or `"auto"` with cert-manager present); it then issues every serving certificate this release needs, the bundled Kueue's included
 
 ## Installing the Chart
 

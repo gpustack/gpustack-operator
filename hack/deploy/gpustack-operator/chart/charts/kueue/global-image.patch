@@ -1,8 +1,8 @@
 diff --git a/templates/_helpers.tpl b/templates/_helpers.tpl
-index 4c4ea4a..f01c79d 100644
+index db0be6b..7d2fba1 100644
 --- a/templates/_helpers.tpl
 +++ b/templates/_helpers.tpl
-@@ -153,3 +153,53 @@ kind: Issuer
+@@ -171,3 +171,53 @@ kind: Issuer
  name: '{{ include "kueue.fullname" . }}-selfsigned-issuer'
  {{- end }}
  {{- end }}
@@ -111,7 +111,7 @@ index 161b9a0..9516d3c 100644
              {{- toYaml .Values.kueueViz.frontend.resources | nindent 12 }}
            {{- with .Values.kueueViz.frontend.containerSecurityContext }}
 diff --git a/templates/manager/manager.yaml b/templates/manager/manager.yaml
-index ac932b0..c0bbbcd 100644
+index c4f651a..27ba1fd 100644
 --- a/templates/manager/manager.yaml
 +++ b/templates/manager/manager.yaml
 @@ -47,8 +47,8 @@ spec:

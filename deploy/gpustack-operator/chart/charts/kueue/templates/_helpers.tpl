@@ -143,11 +143,29 @@ Usage:
 {{- end }}
 
 {{/*
+GPUStack: whether cert-manager issues this chart's certificates. Every template that used to read
+this chart's own `enableCertManager` value reads this instead, so that the release answers the
+question once for Kueue and for the operator's own webhook — a subchart's values are merged rather
+than templated, so the two could never follow each other, and the CRD probe behind "auto" could not
+reach here at all. Returns "true" or "" (empty), which is what keeps `if not` reading correctly.
+Going through a helper is also what keeps a Kueue upgrade cheap: the patch touches one definition
+instead of every site.
+*/}}
+{{- define "kueue.enableCertManager" -}}
+{{- include "gpustack-operator.certmanager.enabled" . -}}
+{{- end }}
+
+{{/*
 Cert-manager issuerRef for the chart-managed certificates.
+GPUStack: an issuer named by the parent's global.certmanager is used when this chart's own
+`certManager.issuerRef` says nothing, so that one issuer serves the whole release.
 */}}
 {{- define "kueue.certManager.issuerRef" -}}
 {{- if .Values.certManager.issuerRef }}
 {{- toYaml .Values.certManager.issuerRef }}
+{{- else if .Values.global.certmanager.issuer.name }}
+kind: {{ .Values.global.certmanager.issuer.kind }}
+name: '{{ .Values.global.certmanager.issuer.name }}'
 {{- else }}
 kind: Issuer
 name: '{{ include "kueue.fullname" . }}-selfsigned-issuer'

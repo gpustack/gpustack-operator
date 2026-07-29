@@ -1,6 +1,6 @@
 # Spec: Ship Kueue / NFD / CSI as Helm Subcharts and Make the Control Plane HA
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -1720,12 +1720,14 @@ the baseline.
       random namespace is the one proof that needs a cluster with no conflicting release, so it is
       taken together with T24's, in one cycle.
 
-- [ ] **T21 · One cert-manager answer for the whole release**
+- [x] **T21 · One cert-manager answer for the whole release**
       Blocked by: T20
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
-      `deploy/gpustack-operator/chart/templates/worker/**`,
+      `deploy/gpustack-operator/chart/templates/**`,
+      `deploy/gpustack-operator/chart/files/cleanup.sh`,
       `hack/deploy/gpustack-operator/chart/charts/kueue/**`,
-      `deploy/gpustack-operator/chart/README.md.gotmpl`, `docs/**`
+      `deploy/gpustack-operator/chart/README.md.gotmpl`, `README.md`, `docs/**`,
+      `pkg/worker/kuberess/chart_test.go`, `.claude/skills/_e2e-lib/scripts/teardown.sh`
       Gate: review
       Acceptance: `worker.certmanager` hoists to `global.certmanager`, the same channel T19 put
       the manufacturers map on, so the release has one answer instead of two that can
@@ -1735,7 +1737,11 @@ the baseline.
       (measured), which would be the largest patch on the branch and would conflict on every Kueue
       bump. So the patch adds **one** helper to the subchart's own `_helpers.tpl` that reads the
       global, and the 28 sites call that helper: a future bump then conflicts only where upstream
-      also touched those lines, instead of across 23 files of ours.
+      also touched those lines, instead of across 23 files of ours. The hoisted block carries
+      `issuer` as well, so Kueue's own `certManager.issuerRef` falls back to an issuer the release
+      names and neither component invents a self-signed one beside it. The three certificate
+      Secrets cert-manager then creates for Kueue join the post-delete cleanup list, since a
+      cert-manager-issued Secret is not helm-owned and `helm uninstall` leaves it behind.
       Verify: `make generate chart`; `make lint chart`; render three ways — cert-manager absent,
       present, and forced off — and assert the worker's and Kueue's certificate paths agree in all
       three; `hack/deps.sh` re-applies the patch cleanly from a clean vendor tree.

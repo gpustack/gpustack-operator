@@ -35,6 +35,28 @@ global:
   imagePullSecrets: []
   # -- Node selector applied to all workloads when a component does not set its own.
   nodeSelector: {}
+  # -- Configure cert-manager integration for every serving certificate this release needs: the
+  # worker's webhook certificate and Kueue's. It lives under `global` because Kueue is a vendored
+  # subchart and `global` is the only channel Helm gives a subchart to this chart's values. Each
+  # component used to be switched on its own, so a cluster with cert-manager installed issued the
+  # worker's certificate through it while Kueue went on self-signing — two answers to one question,
+  # and the detection behind `auto` could never reach Kueue at all.
+  certmanager:
+    # @schema
+    # type: [string, boolean]
+    # enum: [auto, "true", "false", true, false]
+    # @schema
+    # -- Whether to issue the serving certificates with cert-manager. Accepts a string (or the
+    # equivalent boolean): "auto" creates the cert-manager resources only when the cert-manager
+    # CRDs are detected in the cluster; "true" always creates them (cert-manager must be
+    # installed); "false" never creates them and each component generates and manages its own
+    # certificate.
+    enabled: auto
+    issuer:
+      # -- Existing issuer name to use; when empty a self-signed Issuer is created per component.
+      name: ""
+      # -- Issuer kind ("Issuer" or "ClusterIssuer"); only used when `issuer.name` is set.
+      kind: Issuer
   # -- Accelerator manufacturers to manage, one row per manufacturer holding everything the
   # release needs to know about it. `pciVendorID` is what NFD labels its devices with,
   # `resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the
@@ -146,23 +168,6 @@ image:
 worker:
   # -- Deploy the worker (control plane). Disable to deploy only the device-managers.
   enabled: true
-  # -- Configure cert-manager integration for the worker webhook serving certificate.
-  certmanager:
-    # @schema
-    # type: [string, boolean]
-    # enum: [auto, "true", "false", true, false]
-    # @schema
-    # -- Whether to issue the worker webhook serving certificate with cert-manager.
-    # Accepts a string (or the equivalent boolean): "auto" creates the cert-manager
-    # resources only when the cert-manager CRDs are detected in the cluster; "true"
-    # always creates them (cert-manager must be installed); "false" never creates
-    # them and the worker generates and manages its own certificate.
-    enabled: auto
-    issuer:
-      # -- Existing issuer name to use; when empty a self-signed Issuer is created.
-      name: ""
-      # -- Issuer kind ("Issuer" or "ClusterIssuer"); only used when `issuer.name` is set.
-      kind: Issuer
   # -- Number of operator (control plane) replicas. Leader election is always on, so extra
   # replicas stand by; the reconcilers only ever run in one of them.
   replicas: 1
