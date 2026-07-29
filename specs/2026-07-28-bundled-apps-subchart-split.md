@@ -287,8 +287,8 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
 
 **F4 — Two install modes, one set of chart defaults**
 
-*Chart mode (default).* `helm install` renders the worker, the device-managers, the
-`NodeFeatureRule` and every enabled subchart. The worker Deployment passes
+*Chart mode (default).* `helm install` renders the worker, the device-managers and every enabled
+subchart. The worker Deployment passes
 `--disable-applications={{ join "," .Values.worker.disableApplications }}`, defaulting to `["*"]`,
 so `pkg/worker/kuberess` performs **no application install at all**. The value is templated
 rather than hard-coded because `--disable-applications` is a `pflag.StringSliceVar`: repeated
@@ -361,17 +361,16 @@ the CSI drivers, which today's Go path does honour.
 - The `gpustack-cpu-info` rule (CPU-identity annotations, the `has-acceleratable-devices`
   detection rule, and the negative `feature.gpustack.ai/acceleratable=false` marker) becomes the
   operator's own object, replacing the `nodeFeatureRule` / `nodeFeatureRules` values that only
-  the `thxCode` NFD fork understood. It was first written as `chart/templates/nodefeaturerule.yaml`
-  (T11); **T22 moved it into `pkg/worker/kuberess`**, where the worker applies it at startup,
-  because the next bullet's consequence turned out to be a failure rather than a choice.
+  the `thxCode` NFD fork understood. It lives in `pkg/worker/kuberess`, and the worker applies it
+  at startup, retrying until NFD's CRD is served — the same shape the `gpustack-node-devices`
+  AdmissionCheck already had.
 - The rule carries **no switch at all** and is **independent of
   `node-feature-discovery.enabled`**: the scheduling chain starts at this rule, so a cluster
   without it classifies no node and nothing downstream ever materializes — there is no
   configuration in which omitting it is correct. An operator running their own NFD still gets it.
-  That is precisely why it cannot be a chart template: with NFD disabled and no NFD in the
-  cluster, Helm cannot map the manifest and the whole install fails (measured; see T22). Applying
-  it from the worker, retrying until the CRD is served, is the same shape the AdmissionCheck
-  already had.
+  That requirement is what puts the rule in Go rather than in a template: a chart cannot own a
+  custom resource whose CRD it does not ship, and with NFD disabled and none in the cluster Helm
+  fails the whole install on the unmapped kind (measured; see T22).
 - Neither matcher list is stated twice on the path that renders the rule. The vendor IDs are the
   PCI vendor IDs of the manufacturers the worker manages — `--manufacturer`, which the chart
   fills from `manufacturers` — so a manufacturer added there is detected with no second edit. The
@@ -564,9 +563,9 @@ pre-install/pre-upgrade hooks execute.
      Kueue's schemas, megabytes a round.
   2. Server-side-apply the vendored subchart `crds/` (NFD's `nfd-api-crds.yaml`), with
      `--force-conflicts`, since Helm's client-side apply owns those fields until this hand-over.
-     Helm applies `crds/` only on install; an upgrade never touches them, so without this step a
-     newly enabled NFD subchart has no CRD for the parent's `NodeFeatureRule`, and NFD CRD schema
-     changes never land. The files come from the packaged chart inside the image, because a parent
+     Helm applies `crds/` only on install; an upgrade never touches them, so without this step an
+     NFD subchart enabled by an upgrade runs with no CRDs at all, and NFD CRD schema changes never
+     land. The files come from the packaged chart inside the image, because a parent
      chart's `.Files` **cannot** reach `charts/**` (verified: `.Files.Get` on a subchart path
      returns empty and `.Files.Glob "charts/**"` matches nothing), so a ConfigMap of CRD YAML
      rendered by the parent is not available. Skipped on install, where Helm has just applied them.
@@ -708,12 +707,11 @@ pre-install/pre-upgrade hooks execute.
   (`pkg/worker/worker.go:131`), the worker never starts. Verified on kind by running an image-mode
   worker against a live chart release: `ServiceAccount "csi-nfs-controller-sa" ... invalid ownership
   metadata` — Helm names whichever shared object it maps first, so the object in the message is not
-  fixed. T22 removed what used to make the exclusion hold structurally even for the narrowest split
-  (the cluster-scoped, switchless `NodeFeatureRule`, in *both* renders by construction), so what
-  remains is the operational statement: the two sides' switches are independent, and a hand-off
-  would have to disable the same component on both, in step, through every upgrade, with nothing
-  checking it. Wherever this chart deploys the worker, `worker.disableApplications` keeps the `*`;
-  image mode is for clusters with no chart release, which is how CASE 6 stands it up.
+  fixed. Nothing keeps the two sides' switches in step, either: handing a component over would mean
+  disabling it in this chart and in `worker.disableApplications` together, through every upgrade,
+  with no check anywhere. So wherever this chart deploys the worker,
+  `worker.disableApplications` keeps the `*`; image mode is for clusters with no chart release,
+  which is how CASE 6 stands it up.
 - **Helm never applies `crds/` on upgrade.** `installCRDs` is referenced only from the install
   path; `upgrade.go` has no CRD handling at all. Every subchart CRD update is therefore a
   manual/hook step forever, not just during this migration.
@@ -950,7 +948,7 @@ make build                # cross build
 .sbin/helm template gpustack-operator deploy/gpustack-operator/chart \
   --set global.imageRegistry=reg.local --set global.imageNamespace=mirror
 .sbin/helm template gpustack-operator deploy/gpustack-operator/chart \
-  --set node-feature-discovery.enabled=false   # NodeFeatureRule must still render
+  --set node-feature-discovery.enabled=false   # no NFD objects; the rule is the worker's
 unshare -n .sbin/helm lint deploy/gpustack-operator/chart   # offline guarantee (linux CI leg)
 
 # Local 3-node kind cluster for chart tests and e2e. The 3-node config and its local render
@@ -992,7 +990,6 @@ deploy/gpustack-operator/chart/
 ├── templates/
 │   ├── worker/                    # + poddisruptionbudget.yaml, topology spread
 │   ├── device-manager/
-│   ├── nodefeaturerule.yaml       # gpustack-cpu-info, independent of the NFD subchart
 │   └── migrate/                   # hook Jobs + scoped RBAC (RBAC weight -11, Jobs -10)
 └── charts/                        # vendored + patched, COMMITTED (~2.7 MB)
     ├── kueue/                     # 0.18.4, selectableFields version-guarded
@@ -1704,8 +1701,10 @@ concrete test names to be added after the implementation PR merges.
 - Global pull secrets on every pod spec.
 - Kueue CRD version guard: the render at `--kube-version 1.33.12` carries `selectableFields`,
   the one at `1.29.14` does not, and the two differ in nothing else.
-- `NodeFeatureRule` renders with the NFD subchart disabled, no value removes it, and its vendor
-  matcher equals the sorted PCI vendor IDs of `manufacturers`.
+- `NodeFeatureRule`: the worker applies it in every mode and no value removes it; its vendor matcher
+  equals the sorted PCI vendor IDs of the managed manufacturers and its class matcher the prefixes
+  a Go test holds equal to the NFD subchart's `deviceClassWhitelist`; and an install with
+  `node-feature-discovery.enabled=false` maps against a cluster carrying no NFD CRD.
 - No RoleBinding is rendered into `kube-system`.
 - HA knobs: an HA values file yields three PDBs (worker, Kueue, NFD master), the requested replica
   count on all five controllers, a `DoNotSchedule` spread on the worker and Kueue, and a default
@@ -1795,10 +1794,11 @@ On a local 3-node kind cluster, via the two e2e skills.
   as an NFD subchart patch.** Both keep the rule inside the NFD chart. Rejected because the rule
   must survive `node-feature-discovery.enabled=false` — an operator with their own NFD still
   needs it — and because a template patch is one more thing to re-align on every NFD bump.
-- **Apply the `NodeFeatureRule` from the worker at runtime**, like the Kueue AdmissionCheck.
-  Rejected: it pulls a declarative object back into Go and works against the one-source goal.
-  The AdmissionCheck stays in Go only because Kueue ships its CRDs in `templates/crd/`, where
-  the same-pass ordering does not hold.
+- **Keep the `NodeFeatureRule` a chart template and gate it on the CRD's presence** with a
+  `lookup`. Rejected: `lookup` returns empty on every `helm template` and `--dry-run=client`, so
+  the rule would silently vanish from exactly the renders the tests read, and it would still be
+  missing from an install whose NFD arrives afterwards. Applying it from the worker — the design
+  F5 states — is what survives both, at the cost of `helm template` not showing it.
 - **Patch Kueue's visibility APIServices and Service out of the chart.** Would fully honour
   "no visibility capability" and avoid a registered-but-broken aggregated APIService. Rejected
   for this cycle in favour of the zero-patch route; e2e observes whether the residual actually
