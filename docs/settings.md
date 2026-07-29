@@ -72,7 +72,7 @@ on the Worker Deployment propagates to the DMs automatically.
 |----------|---------|-----------|--------|
 | `GPUSTACK_DATA_DIR` | `/var/lib/gpustack` | all | Root directory for data storage. |
 | `GPUSTACK_CONF_DIR` | `/etc/gpustack` | all | Root directory for configuration and metadata, e.g. bundled Helm charts. |
-| `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Applied to the DM's local sysfs PCI scan. The NFD side of the same list is **not** read from here: it is the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist`, which the `gpustack-cpu-info` NodeFeatureRule reads too, so set both if you change either. |
+| `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Applied to the DM's local sysfs PCI scan, and to nothing else. The same list appears twice more, and neither reads this variable: the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist` decides which classes NFD labels, and `pkg/nodefeature` is what the `gpustack-cpu-info` NodeFeatureRule matches (a Go test holds those two equal). Change one and change all three. |
 | `GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY` | `false` | DM | When `true`, the devices group ID gains a memory-size suffix (e.g. `nvidia-tesla-t4-16g` instead of `nvidia-tesla-t4`), so same-model devices with different VRAM sizes form distinct groups. |
 
 ### Per-Manufacturer Overrides

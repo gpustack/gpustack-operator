@@ -12,10 +12,9 @@
 #      webhook configurations are deleted first.
 #
 #   2. Server-side-apply the vendored subcharts' crds/. Helm applies crds/ on install
-#      only — an upgrade never touches them — so without this a newly enabled Node
-#      Feature Discovery has no CRD for the parent chart's NodeFeatureRule, and NFD's
-#      CRD schema changes never land. Skipped on install, where Helm has just applied
-#      them itself.
+#      only — an upgrade never touches them — so without this a Node Feature Discovery
+#      enabled by an upgrade runs with no CRDs at all, and NFD's CRD schema changes
+#      never land. Skipped on install, where Helm has just applied them itself.
 #
 # Every input arrives as an environment variable, all set by the hook Job:
 #   GPUSTACK_NAMESPACE      release namespace

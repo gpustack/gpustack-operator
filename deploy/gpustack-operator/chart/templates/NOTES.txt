@@ -3,15 +3,17 @@ GPUStack Operator {{ .Chart.AppVersion }} has been deployed as release "{{ .Rele
 Components:
 {{- if .Values.worker.enabled }}
   - Worker (control plane): {{ include "gpustack-operator.worker.fullname" . }} ({{ .Values.worker.replicas }} replica(s))
+    On startup it applies the two custom resources no chart can carry — the gpustack-cpu-info
+    NodeFeatureRule the chain starts from, and the gpustack-node-devices AdmissionCheck it ends at.
 {{- end }}
 {{- if .Values.deviceManager.enabled }}
   - Device managers: one DaemonSet per manufacturer ({{ join ", " (keys .Values.manufacturers | sortAlpha) }})
     Each only schedules on nodes that NFD labels with the matching PCI vendor.
 {{- end }}
 {{- if (index .Values "node-feature-discovery").enabled }}
-  - Node Feature Discovery, and the gpustack-cpu-info NodeFeatureRule the scheduling chain starts from
+  - Node Feature Discovery, including its CRDs
 {{- else }}
-  - The gpustack-cpu-info NodeFeatureRule only: Node Feature Discovery is disabled, so the cluster must run its own
+  - No Node Feature Discovery: it is disabled, so the cluster must run its own
 {{- end }}
 {{- if .Values.kueue.enabled }}
   - Kueue, including its CRDs

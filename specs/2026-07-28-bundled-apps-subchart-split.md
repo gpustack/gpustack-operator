@@ -20,7 +20,7 @@ Go-side values templates disappear either way.
 The move is taken together with a version refresh: Kueue to 0.18.4 and Node Feature Discovery
 to **upstream** 0.19.0, dropping the
 `thxCode/node-feature-discovery` fork by relocating the one capability it added — rendering the
-`NodeFeatureRule` — into the operator chart itself. With every upstream value reachable from
+`NodeFeatureRule` — into the operator itself. With every upstream value reachable from
 `values.yaml`, this delivers
 [issue #52](https://github.com/gpustack/gpustack-operator/issues/52): configurable replicas,
 leader election, topology spread and PodDisruptionBudgets for `gpustack-operator-worker` and
@@ -52,9 +52,8 @@ cluster has to tear down its Kueue CRDs to upgrade.
 - **Refresh the pinned versions and drop the NFD fork.** Kueue chart 0.18.4, whose one CRD
   field no cluster below Kubernetes 1.31 accepts is patched behind a version guard so a single
   vendored tree serves every supported cluster; NFD 0.19.0 straight from
-  `kubernetes-sigs/node-feature-discovery`. The only chart capability the fork added — a
-  `NodeFeatureRule` template — moves into the operator chart, so the fork stops being a
-  dependency.
+  `kubernetes-sigs/node-feature-discovery`. The only chart capability the fork added — rendering a
+  `NodeFeatureRule` — becomes the operator's own, so the fork stops being a dependency.
 - **Keep the airgap/mirror story intact.** `global.imageRegistry` / `global.imageNamespace` /
   `global.imagePullSecrets` still fan out to every workload, including subchart workloads and
   subchart hook Jobs.
@@ -93,7 +92,7 @@ that teaches its image fields to honour the parent's `global.*` values. The pare
 cluster state as today — but every one of those settings is now a value a user can override.
 
 That chart is consumed two ways. In **chart mode** the user runs `helm install`; the chart
-renders the worker, the device-managers, the `NodeFeatureRule` and every enabled subchart, and
+renders the worker, the device-managers and every enabled subchart, and
 starts the worker with `--disable-applications=*`. In **image mode** the operator image is run
 directly with no chart driving it; `Prepare()` installs the operator chart bundled inside that
 image as a single release with `worker.enabled=false` and each component enabled according to
@@ -107,10 +106,10 @@ cover — reaping a stranded Kueue and applying subchart CRDs on upgrade — plu
 sweep that retires the stale legacy release records and prunes objects the new render no longer
 contains.
 
-The `gpustack-cpu-info` `NodeFeatureRule` becomes a first-class template of the operator chart
-rather than a fork-only NFD chart feature, gated by its own switch that is **independent of
-whether the NFD subchart is enabled** — an operator running their own NFD still needs the rule
-for the scheduling chain to start.
+The `gpustack-cpu-info` `NodeFeatureRule` stops being a fork-only NFD chart feature and becomes the
+operator's own, applied by the worker at startup **independently of whether the NFD subchart is
+enabled** — an operator running their own NFD still needs the rule for the scheduling chain to
+start, and that install is exactly the one no chart can carry the rule through.
 
 On top of that surface, the chart exposes a coherent HA story: replicas, PDB and topology
 spread for the worker, and every knob its own chart supports for Kueue, the NFD master and the two
@@ -271,11 +270,13 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
   "Verify Generated" step passes.
 
 **F3 — Go-derived values generated, one source of truth**
-- The Kueue `managerConfig` `resources.transformations` block and the PCI vendor/class matchers
-  that feed the operator chart's own `NodeFeatureRule` (F5) are emitted into `values.yaml` by a
+- The Kueue `managerConfig` `resources.transformations` block is emitted into `values.yaml` by a
   generator reading `pkg/nodefeature` (`CreditsPerCard`, `SharedResourceMaxSize`,
-  `ResourceMaxUnits`, `GetAcceleratable*ResourceName`, `GetAcceleratablePciVendorIDs`,
-  `GetPciVendorID`), between explicit begin/end markers.
+  `ResourceMaxUnits`, `GetAcceleratable*ResourceName`), between explicit begin/end markers.
+- The `NodeFeatureRule`'s matchers are **not** generated values: the worker reads them from
+  `pkg/nodefeature` when it applies the rule (F5). The two lists the chart still states for its
+  own reasons — the `manufacturers` map and the NFD subchart's `deviceClassWhitelist` — are held
+  equal to that package by Go tests, which is the same guarantee without a generation step.
 - The generator runs from `generate_chart` in `hack/generate.sh`, ahead of helm-docs and
   helm-schema, so `make generate chart` is the single regeneration entry point.
 - AC: changing `nodefeature.CreditsPerCard` and running `make generate chart` updates
@@ -356,32 +357,36 @@ the CSI drivers, which today's Go path does honour.
   runtime install — it means no device-managers. Recovering the old hybrid requires
   `worker.disableApplications`, documented in `docs/architecture.md` and the migration doc.
 
-**F5 — `NodeFeatureRule` owned by the operator chart**
+**F5 — `NodeFeatureRule` owned by the operator, not by the NFD fork**
 - The `gpustack-cpu-info` rule (CPU-identity annotations, the `has-acceleratable-devices`
-  detection rule, and the negative `feature.gpustack.ai/acceleratable=false` marker) is rendered
-  by `chart/templates/nodefeaturerule.yaml`, replacing the `nodeFeatureRule` /
-  `nodeFeatureRules` values that only the `thxCode` NFD fork understood.
+  detection rule, and the negative `feature.gpustack.ai/acceleratable=false` marker) becomes the
+  operator's own object, replacing the `nodeFeatureRule` / `nodeFeatureRules` values that only
+  the `thxCode` NFD fork understood. It was first written as `chart/templates/nodefeaturerule.yaml`
+  (T11); **T22 moved it into `pkg/worker/kuberess`**, where the worker applies it at startup,
+  because the next bullet's consequence turned out to be a failure rather than a choice.
 - The rule carries **no switch at all** and is **independent of
-  `node-feature-discovery.enabled`**: the scheduling chain starts at this rule, so a release
+  `node-feature-discovery.enabled`**: the scheduling chain starts at this rule, so a cluster
   without it classifies no node and nothing downstream ever materializes — there is no
-  configuration in which omitting it is correct. An operator running their own NFD still gets
-  it. The consequence is deliberate: on a cluster with no NFD API whatsoever the install fails
-  on the missing CRD instead of silently deploying a chain that can never start.
-- Neither matcher list is stated twice. The PCI class prefixes are read from the NFD subchart's
-  own `worker.config.sources.pci.deviceClassWhitelist`; the vendor IDs are the values of
-  `manufacturers`, which already maps every managed manufacturer to its PCI vendor ID for the
-  device-managers and the worker's environment. So the rule matches exactly the devices NFD was
-  told to label, for exactly the vendors this release manages, and a manufacturer added to
-  `manufacturers` is detected with no second edit.
-- AC: `helm template --set node-feature-discovery.enabled=false` still renders the
-  `NodeFeatureRule`, and no value can remove it.
-- AC: the rendered vendor list equals the sorted PCI vendor IDs of `manufacturers`.
+  configuration in which omitting it is correct. An operator running their own NFD still gets it.
+  That is precisely why it cannot be a chart template: with NFD disabled and no NFD in the
+  cluster, Helm cannot map the manifest and the whole install fails (measured; see T22). Applying
+  it from the worker, retrying until the CRD is served, is the same shape the AdmissionCheck
+  already had.
+- Neither matcher list is stated twice on the path that renders the rule. The vendor IDs are the
+  PCI vendor IDs of the manufacturers the worker manages — `--manufacturer`, which the chart
+  fills from `manufacturers` — so a manufacturer added there is detected with no second edit. The
+  PCI class prefixes come from `pkg/nodefeature`, and a Go test holds them equal to the NFD
+  subchart's `worker.config.sources.pci.deviceClassWhitelist`, so the rule still matches exactly
+  the devices NFD was told to label.
+- AC: `helm install --set node-feature-discovery.enabled=false` succeeds against a cluster with
+  no NFD API at all, and the rule materializes once an NFD arrives.
+- AC: the rendered vendor list equals the sorted PCI vendor IDs of the managed manufacturers.
 - AC: `helm install` with the NFD subchart enabled succeeds in one pass — Helm applies `crds/`
-  before building capabilities and rendering templates, so the CR's CRD exists.
+  before building capabilities and rendering templates.
 - AC: `helm upgrade` that newly enables the NFD subchart also succeeds — Helm never applies
   `crds/` on upgrade, so the F8 pre-upgrade hook must have applied the vendored CRDs first.
-- AC: the rendered rule is semantically identical to what `nfdChartValuesTemplate` produces
-  today (asserted against the captured baseline).
+- AC: the applied rule is semantically identical to what `nfdChartValuesTemplate` produced
+  before this refactor.
 - AC: the NFD subchart carries **no** template patch — only `global-image.patch` — so an NFD
   bump is a re-vendor with nothing to re-align.
 - **Two deliberate divergences from the captured NFD baseline**, so the parity diff is expected
@@ -643,7 +648,9 @@ pre-install/pre-upgrade hooks execute.
   required release name, and the widened uninstall blast radius).
 - `docs/settings.md`: `GPUSTACK_PCI_CLASS_PREFIXES` is now **DM-only** — T12 deleted the WK reader
   that injected it into the NFD chart and the NodeFeatureRule, but `binding/helper_linux.go` still
-  reads it for the DM's sysfs scan, so the row is corrected rather than removed. And
+  reads it for the DM's sysfs scan, so the row is corrected rather than removed. T22 leaves it
+  DM-only and names the two other statements of the same list (the chart's `deviceClassWhitelist`,
+  which decides what NFD labels, and `pkg/nodefeature`, which the rule matches). And
   `GPUSTACK_<MFR>_PCI_VENDOR_ID` gains the warning that under the chart the `manufacturers` map is
   the knob to set, since the chart derives the selectors, the rule's vendor list *and* that variable
   from it — setting the variable alone leaves the other two on the old ID.
@@ -696,20 +703,17 @@ pre-install/pre-upgrade hooks execute.
   adopting apply is additionally routed through `UpdateThreeWayMerge` rather than a plain update
   (`install.go:459`), which is what gives a live object's unmanaged fields a chance to survive.
 - **The two install modes are mutually exclusive** (found in T18, then measured). Both installs
-  render the same chart, so their objects overlap and Helm refuses to import one another release
-  owns; since `Prepare()` returns that error (`pkg/worker/worker.go:131`), the worker never starts.
-  Verified on kind by running an image-mode worker against a live chart release: `ServiceAccount
-  "csi-nfs-controller-sa" ... invalid ownership metadata` — Helm names whichever shared object it
-  maps first, so the object in the message is not fixed. What makes the exclusion hold even for the
-  narrowest overlap is the `NodeFeatureRule`: cluster-scoped, fixed-name, no switch, and therefore
-  in *both* renders even when every application is handed to one side. The rule cannot be gated to fix this:
-  it must be installed in every mode, including when the user brings their own NFD, which is what a
-  `lookup`-based skip would break — and at the one-time adoption upgrade the rule is still owned by
-  `gpustack-node-feature-discovery`, so a skip would drop it from the parent manifest and the
-  post-upgrade prune (matching the legacy instance label) would delete it. The consequence is
-  therefore a boundary, not a bug to fix: wherever this chart deploys the worker,
-  `worker.disableApplications` keeps the `*`; image mode is for clusters with no chart release, which
-  is how CASE 6 stands it up.
+  render the same chart under the same `fullnameOverride`, so their objects overlap and Helm refuses
+  to import one another release owns; since `Prepare()` returns that error
+  (`pkg/worker/worker.go:131`), the worker never starts. Verified on kind by running an image-mode
+  worker against a live chart release: `ServiceAccount "csi-nfs-controller-sa" ... invalid ownership
+  metadata` — Helm names whichever shared object it maps first, so the object in the message is not
+  fixed. T22 removed what used to make the exclusion hold structurally even for the narrowest split
+  (the cluster-scoped, switchless `NodeFeatureRule`, in *both* renders by construction), so what
+  remains is the operational statement: the two sides' switches are independent, and a hand-off
+  would have to disable the same component on both, in step, through every upgrade, with nothing
+  checking it. Wherever this chart deploys the worker, `worker.disableApplications` keeps the `*`;
+  image mode is for clusters with no chart release, which is how CASE 6 stands it up.
 - **Helm never applies `crds/` on upgrade.** `installCRDs` is referenced only from the install
   path; `upgrade.go` has no CRD handling at all. Every subchart CRD update is therefore a
   manual/hook step forever, not just during this migration.
@@ -1003,7 +1007,6 @@ hack/
 └── deploy/gpustack-operator/chart/charts/<name>/*.patch   # mirrors hack/staging/<dest>/
 
 gen/chartvalues/                   # emits the nodefeature-derived values blocks
-testing/chart-baseline/            # values captured from `main` — the parity oracle
 
 pkg/worker/kuberess/
 ├── apps.go                        # installs = [operator chart]; the disable-name table
@@ -1296,7 +1299,8 @@ the baseline.
       Gate: review
       Acceptance: the four app installers and their values templates are deleted — but
       `testing/chart-baseline/**` is **not** T12's to delete: `baseline_dump_test.go` dies with
-      the templates it renders, while the captured YAML stays as T8–T10's parity oracle;
+      the templates it renders, while the captured YAML stays as T8–T10's parity oracle (and was
+      deleted after T8–T10 had spent it, once nothing read it any more);
       `apps_gpustack_operator.go` installs the bundled chart with the computed overlay and sets
       `TakeOwnership` only when a gpustack legacy release is detected; the AdmissionCheck apply
       moves into `Prepare()` with new retry-until-established behaviour; the
@@ -1465,8 +1469,93 @@ the baseline.
       Verify: `bash .claude/skills/gpustack-operator-chart-e2e/cases/case-{1,4,5}.sh gpustack-system`
       against the install, then CASE 2, then CASE 6 on the emptied cluster — all green
 
-- [ ] **T19 · `manufacturers` carries a manufacturer's whole identity**
+- [x] **T22 · Two custom resources, one owner**
       Blocked by: T18
+      Owns: `pkg/worker/kuberess/**`,
+      `deploy/gpustack-operator/chart/templates/nodefeaturerule.yaml` (deleted),
+      `deploy/gpustack-operator/chart/values.yaml`,
+      `.claude/skills/_e2e-lib/scripts/assert-core.sh`, `docs/architecture.md`, `docs/settings.md`
+      Also, outside the declared `Owns:` and each a direct consequence of the move: `pkg/nodefeature`
+      (the class prefixes' new home), `pkg/worker/worker.go` (the new `Prepare()` step),
+      `templates/NOTES.txt` and `files/migrate-pre.sh` (both described the rule as the chart's),
+      `_e2e-lib/scripts/deploy.sh` and `chart-e2e/cases/case-6.sh` (both explained the
+      mutually-exclusive modes *by* the rule), and this spec's F3 / F5 / exclusive-modes caveat,
+      which stated the chart-template design T22 reverses.
+      Gate: review
+      Acceptance: the `gpustack-cpu-info` NodeFeatureRule joins the `gpustack-node-devices`
+      AdmissionCheck in `pkg/worker/kuberess`, applied by `Prepare()` with the same
+      retry-until-the-CRD-is-served. The two are the same kind of object — a custom resource whose
+      CRD belongs to something else, required in every install mode, appliable only once that CRD is
+      served — and they are split today for a reason that is nobody's design: NFD ships its CRDs
+      under `crds/`, which Helm's CRD phase establishes **before** it maps the manifest, while Kueue
+      templates its own. **This reverses part of T11, on measured grounds.** With
+      `node-feature-discovery.enabled=false` — which `docs/architecture.md` calls the supported way
+      to run against a cluster's own NFD — and that NFD not yet installed, the chart install does not
+      degrade, it fails outright:
+      `unable to build kubernetes objects from release manifest: resource mapping not found for
+      name: "gpustack-cpu-info" ... no matches for kind "NodeFeatureRule"` (measured on kind against
+      an empty cluster). A chart cannot own a custom resource whose CRD it does not ship; the same
+      error is what keeps the AdmissionCheck out of the chart. So the boundary becomes statable, and
+      `docs/architecture.md` states it: **the chart deploys workloads and configuration; the worker
+      applies the custom resources whose CRDs the chart cannot order.** That boundary already exists
+      — the worker's own CRDs, APIServices and webhook configurations are all applied in Go — so this
+      removes an inconsistency rather than adding an exception.
+      The rule's two matcher lists move one hop back to `pkg/nodefeature`: the PCI vendor IDs from
+      the `manufacturers` values map to the worker's `--manufacturer` flag (which the chart still
+      derives from that same map, so nothing about "the vendor list follows `manufacturers`" changes),
+      and the PCI class prefixes from the NFD subchart's `deviceClassWhitelist` to the package that
+      held them before. `TestChartManufacturersMatchNodeFeature` becomes a Go-side consistency test.
+      Cleanup needs nothing new: the rule stops being release-owned, but `files/cleanup.sh` deletes
+      the NFD CRDs and takes it with them; and the post-upgrade prune cannot touch it, because its
+      kind list is built-in kinds only.
+      Costs, both accepted: `helm template` no longer shows the rule (it already shows neither the
+      AdmissionCheck nor the worker's own CRDs/APIServices/webhooks), and `docs/settings.md`'s
+      sentence about the chart value replacing `GPUSTACK_PCI_CLASS_PREFIXES` needs rewriting.
+      A third cost surfaced while building and is stated rather than hidden: the class-prefix list
+      now appears in three places (`pkg/nodefeature` for the rule, the NFD subchart's
+      `deviceClassWhitelist` for what NFD labels, `GPUSTACK_PCI_CLASS_PREFIXES` for the DM's sysfs
+      scan) where the template read one value twice. The first two are held equal by a new Go test,
+      `TestChartPciClassWhitelistMatchesNodeFeature`; the third stays a separate knob because T12
+      deliberately removed the worker's env reader, and `docs/settings.md` now names all three.
+      Also settled here, from a question the values surface raised: the kebab/camel split in
+      `values.yaml` is **not** ours to unify. Helm requires a subchart's values key to equal that
+      subchart's `Chart.yaml` name, so `kueue` / `node-feature-discovery` / `csi-driver-nfs` /
+      `csi-driver-s3` are upstream names; our own keys follow Helm's camelCase convention. Renaming
+      `deviceManager` to `device-manager` would break every dot-notation reference in the templates
+      (a hyphenated key needs `index .Values "…"`, which is exactly why the deleted
+      `nodefeaturerule.yaml` had to write `(index .Values "node-feature-discovery")`) and would break
+      users' `--set deviceManager.*`; aliasing the subcharts to camelCase would hide the upstream
+      names their own docs use. Decision: neither. The asymmetry is documented in `values.yaml`'s
+      header as the signal it is — kebab means a vendored subchart, camel means ours.
+      Acceptance also covers the win: `--set node-feature-discovery.enabled=false` installs on a
+      cluster with no NFD at all, and the worker materializes the rule once an NFD arrives.
+      Verify: `go test ./pkg/worker/... && make lint`; `make generate chart` idempotent;
+      `helm install --dry-run=server --set node-feature-discovery.enabled=false` succeeds on a
+      cluster with no `nodefeaturerules` CRD (the exact command that fails today); on kind, install
+      with NFD disabled, then install NFD, then assert `gpustack-cpu-info` appears — plus CASE 1
+      green, with `assert-core.sh` gaining the rule as an assertion since it is where the chain
+      starts.
+      Verified on kind (1 control-plane + 2 workers, k8s 1.36.1, arm64) at commit `4ab3d182`, in the
+      order the acceptance claims it: `--dry-run=server --set node-feature-discovery.enabled=false`
+      against a cluster with no NFD CRD now maps and reports `deployed` — the command whose failure
+      motivated this task; the same install for real also reported `deployed`, with the worker
+      Running-but-not-Ready while it waited for the CRD instead of the install failing; installing
+      an NFD of the cluster's own then made `gpustack-cpu-info` appear within ~5s and the worker go
+      Ready, the rule carrying all nine managed vendor IDs and the four class prefixes; and CASE 1
+      passed all 20 checks, the new `chain rule applied` row among them. `make lint`, `make lint
+      chart` and `go test ./pkg/worker/... ./pkg/nodefeature/...` green; `make generate chart` moves
+      nothing on a second run.
+      One finding this task's `make test chart` run turned up, **unrelated to it and left open**:
+      `ct install` picks a random namespace, and Kueue refuses to start in any namespace its own
+      `managedJobsNamespaceSelector` does not exclude — ours hard-codes `gpustack-system` — so the
+      controller crash-loops and `make test chart` (which `ci-chart.yml` runs) cannot pass. It is
+      also a product limitation, not just a test one: this chart is only installable into
+      `gpustack-system`, which `docs/migration/to-subcharts.md` states. T20 is where it belongs,
+      since the patch it adds to the Kueue tree is what would let the selector follow
+      `.Release.Namespace`.
+
+- [ ] **T19 · `manufacturers` carries a manufacturer's whole identity**
+      Blocked by: T22
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/**`, `pkg/worker/kuberess/chart_test.go`,
       `docs/settings.md`, `docs/architecture.md`
@@ -1503,8 +1592,18 @@ the baseline.
       one feature gate silently drops the credits mapping the whole scheduling chain is built on,
       with no error anywhere. `make generate chart` writes the helper between its markers instead
       of writing values, so the marker pair moves file too.
+      The same patch answers a defect T22's `make test chart` run exposed: Kueue **refuses to start**
+      in any namespace its own `managedJobsNamespaceSelector` does not exclude, and ours hard-codes
+      `gpustack-system` because Helm cannot template a subchart value — so installing this chart
+      anywhere else crash-loops the controller (`managedJobsNamespaceSelector: Invalid value ...:
+      should not match the "<ns>" namespace`), and `ct install`, which picks a random namespace,
+      cannot pass at all. Once the config is rendered through the parent's helper, that selector
+      follows `.Release.Namespace` and the limitation `docs/migration/to-subcharts.md` documents
+      goes away. Until then `make test chart` — which `ci-chart.yml` runs — needs
+      `ct install --namespace gpustack-system`, and this task should decide which of the two lands.
       Verify: `make generate chart` idempotent; the rendered `kueue-manager-config` ConfigMap is
-      **byte-identical** to today's (the point is where the text lives, not what it says);
+      **byte-identical** to today's apart from that selector (the point is where the text lives, not
+      what it says); `make test chart` green — the check that proves the namespace fix;
       `make lint chart`; `gen/chartvalues`'s golden test updated to the new target.
 
 - [ ] **T21 · One cert-manager answer for the whole release**
@@ -1538,10 +1637,11 @@ because no commit on this branch is independently releasable; the branch ships a
 renders with its conditional patch applied, `global.*` reaches every image. **CP-B** after T10 — the full stack renders at parity with the
 baseline, subcharts still disabled, nothing in the cluster has changed. **CP-C** after T13 — the
 cut-over; both modes install cleanly on kind. **CP-D** after T18 — docs and e2e green. **CP-E**
-after T19/T20/T21 — the values surface is the one a user should have to read: every manufacturer
-identity in one map, no generated text inside an editable string, one cert-manager answer. These
-three land after CP-D on purpose: each rewrites text or tests that T17 and T18 have just written,
-and doing them before would mean writing that text twice.
+after T22/T19/T20/T21 — one owner per custom resource, and a values surface a user should have to
+read: every manufacturer identity in one map, no generated text inside an editable string, one
+cert-manager answer. T22 leads because taking the NodeFeatureRule out of the chart shrinks T19; the
+rest land after CP-D on purpose, since each rewrites text or tests that T17 and T18 have just
+written, and doing them earlier would mean writing that text twice.
 
 ### Test Plan
 

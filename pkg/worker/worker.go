@@ -133,9 +133,17 @@ func (w *Worker) Prepare(ctx context.Context) error {
 		return fmt.Errorf("install applications: %w", err)
 	}
 
-	// Install the node-devices AdmissionCheck. This is not an application install and
-	// stays outside the --disable-applications gate: whoever deploys Kueue, the
-	// scheduling chain needs the check to exist.
+	// Install the two custom resources the scheduling chain needs but no chart can carry:
+	// their CRDs belong to Node Feature Discovery and to Kueue, and Helm maps a whole
+	// manifest before creating anything, so a chart cannot order a CRD ahead of a custom
+	// resource that needs it. Both stay outside the --disable-applications gate — whoever
+	// deploys NFD and Kueue, the chain does not start without them — and both retry until
+	// their CRD is served.
+	err = kuberess.InstallCPUInfoNodeFeatureRule(ctx, w.Manufacturers)
+	if err != nil {
+		return fmt.Errorf("install cpu info node feature rule: %w", err)
+	}
+
 	err = kuberess.InstallNodeDevicesAdmissionCheck(ctx)
 	if err != nil {
 		return fmt.Errorf("install node devices admission check: %w", err)

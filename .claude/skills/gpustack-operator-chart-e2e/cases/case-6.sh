@@ -10,9 +10,9 @@
 #              This is the only mode in which the bundled tgz is actually consumed, so it is the one
 #              place the version the worker computes is proven to resolve to a file that exists.
 # Environment: A reachable cluster where the operator chart is NOT installed — the case AUTO-SKIPS
-#              if it is. The two modes are exclusive by construction: both renders contain the
-#              cluster-scoped gpustack-cpu-info NodeFeatureRule, so a worker installing its own
-#              release while a chart release owns that rule is refused by Helm and never starts.
+#              if it is. The two modes are exclusive: both installs render the same chart under the
+#              same fullnameOverride, so a worker installing its own release is refused the objects
+#              a chart release already owns, and never starts.
 #              Needs the TAG image loaded on the cluster's nodes (build-load.sh). No GPU.
 # Inputs:      A deliberately minimal worker: ServiceAccount + cluster-admin binding + Service +
 #              Deployment, standing in for whatever deploys the worker when this chart does not.

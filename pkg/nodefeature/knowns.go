@@ -1,6 +1,7 @@
 package nodefeature
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -120,6 +121,11 @@ var (
 	_SlicedResourceOperatedSizesSet           sets.Set[string]
 	_SlicedResourceUnitsPerSlice              map[int64]int64
 )
+
+// _AcceleratablePciClassPrefixes are the PCI device-class prefixes a device carrying an
+// accelerator presents as. NFD is configured to label exactly these classes, and the
+// gpustack-cpu-info NodeFeatureRule matches them, so the two lists are one fact.
+var _AcceleratablePciClassPrefixes = []string{"02", "03", "0b", "12"}
 
 func init() {
 	// Map manufacturer to PCI vendor ID.
@@ -281,6 +287,13 @@ func GetAcceleratablePciVendorIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// GetAcceleratablePciClassPrefixes returns the PCI device-class prefixes an accelerator
+// presents as: display controllers, processing accelerators and the co-processor class
+// (see https://admin.pci-ids.ucw.cz/read/PD).
+func GetAcceleratablePciClassPrefixes() []string {
+	return slices.Clone(_AcceleratablePciClassPrefixes)
 }
 
 // GetAcceleratableResourceName returns the resource name advertised by the device-plugin

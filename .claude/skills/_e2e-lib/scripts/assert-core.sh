@@ -2,8 +2,8 @@
 #
 # Shared READ-ONLY assertions common to both E2E skills: the operator rolls out,
 # the RUNNING binary is built from HEAD, the aggregated APIs are Available, the
-# CRDs are established, and the four bundled applications run as workloads of the
-# operator's own release.
+# CRDs are established, the four bundled applications run as workloads of the
+# operator's own release, and the NodeFeatureRule the chain starts from is applied.
 #
 #   assert-core.sh <NS> [RELEASE]
 #
@@ -117,7 +117,25 @@ else
   record FAIL "no per-application releases" "$legacy — the worker is installing at runtime again"
 fi
 
-# 6. Kueue's visibility APIServices. These are aggregated APIs, so an unavailable one costs
+# 6. The gpustack-cpu-info NodeFeatureRule, where the scheduling chain starts. It is asserted
+#    outside the release above on purpose: no chart can carry it, because its CRD belongs to NFD
+#    and the rule is needed even by an install that deploys no NFD, so the worker applies it
+#    itself at startup. Its vendor matcher is the payload — a rule matching no PCI vendor
+#    classifies no node.
+RULE=gpustack-cpu-info
+if ! kubectl get nodefeaturerule "$RULE" >/dev/null 2>&1; then
+  record FAIL "chain rule applied" "nodefeaturerule/$RULE missing — the chain classifies no node"
+else
+  vendors=$(kubectl get nodefeaturerule "$RULE" \
+    -o jsonpath='{range .spec.rules[*]}{range .matchFeatures[*]}{.matchExpressions.vendor.value}{end}{end}' 2>/dev/null)
+  if [ -n "$vendors" ]; then
+    record PASS "chain rule applied" "nodefeaturerule/$RULE matches vendors $vendors"
+  else
+    record FAIL "chain rule applied" "nodefeaturerule/$RULE matches no PCI vendor"
+  fi
+fi
+
+# 7. Kueue's visibility APIServices. These are aggregated APIs, so an unavailable one costs
 #    every client in the cluster — not just Kueue's own callers — because each discovery round
 #    trip waits on it. Assert the condition, then time a full discovery as the evidence.
 if kubectl -n "$NS" get deploy/kueue-controller-manager >/dev/null 2>&1; then

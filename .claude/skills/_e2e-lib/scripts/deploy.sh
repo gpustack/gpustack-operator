@@ -12,8 +12,8 @@
 # Feature Discovery / the two CSI drivers as subcharts of this one release — and
 # passes --disable-applications=* to the worker, so the worker installs nothing
 # at runtime. Leave that wildcard alone: a partial list makes the worker install
-# a second release of this same chart, which collides with this release's
-# cluster-scoped NodeFeatureRule and fails the worker's startup.
+# a second release of this same chart, whose objects this release already owns —
+# Helm refuses them and the worker's startup fails with the install.
 #
 # Pass extra --set flags to vary the install, e.g.:
 #   deploy.sh gpustack-system dev-abc123 --set deviceManager.enabled=false

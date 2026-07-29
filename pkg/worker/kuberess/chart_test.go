@@ -69,6 +69,33 @@ func TestChartManufacturersMatchNodeFeature(t *testing.T) {
 	assert.Equal(t, want, values["manufacturers"])
 }
 
+// TestChartPciClassWhitelistMatchesNodeFeature ties the PCI device classes the chart tells NFD
+// to label to the ones the gpustack-cpu-info NodeFeatureRule matches. The rule is rendered in
+// Go (see apps_nfd_node_feature_rule.go), so the two lists are no longer one value read twice:
+// a class NFD publishes but the rule ignores labels nothing, and a class the rule matches but
+// NFD never publishes matches nothing.
+func TestChartPciClassWhitelistMatchesNodeFeature(t *testing.T) {
+	var values struct {
+		NodeFeatureDiscovery struct {
+			Worker struct {
+				Config struct {
+					Sources struct {
+						PCI struct {
+							DeviceClassWhitelist []string `yaml:"deviceClassWhitelist"`
+						} `yaml:"pci"`
+					} `yaml:"sources"`
+				} `yaml:"config"`
+			} `yaml:"worker"`
+		} `yaml:"node-feature-discovery"`
+	}
+	raw, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+	require.NoError(t, err, "read the chart values")
+	require.NoError(t, yaml.Unmarshal(raw, &values))
+
+	assert.Equal(t, nodefeature.GetAcceleratablePciClassPrefixes(),
+		values.NodeFeatureDiscovery.Worker.Config.Sources.PCI.DeviceClassWhitelist)
+}
+
 // TestChartDefaultsMatchImageModeOverlay renders the chart twice — once at its defaults, as a
 // user installs it, and once with the overlay the worker computes for its own install — and
 // asserts the two agree on everything but the worker itself, which the worker never redeploys.

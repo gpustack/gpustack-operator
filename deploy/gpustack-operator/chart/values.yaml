@@ -1,5 +1,11 @@
 # yaml-language-server: $schema=values.schema.json
 # Default values for gpustack-operator.
+#
+# Two key styles appear below and the difference carries meaning. A kebab-case key — `kueue`,
+# `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3` — is a vendored subchart: Helm
+# requires the key to be exactly that subchart's own name, and everything under it is the
+# upstream chart's surface, documented upstream. Every other key belongs to this chart and
+# follows Helm's camelCase convention (`deviceManager`, `cleanupOnUninstall`).
 
 # -- Run a post-delete cleanup Job on `helm uninstall` that removes the leftovers
 # the worker creates at runtime but Helm does not manage: the Kueue / Node Feature
@@ -60,10 +66,11 @@ image:
 
 # -- Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the
 # single source for the worker `--manufacturer` list, the per-manufacturer device-manager
-# DaemonSets, the GPUSTACK_<MANUFACTURER>_PCI_VENDOR_ID environment variable propagated
-# to both the worker and the device-managers, and the vendor IDs the `gpustack-cpu-info`
-# NodeFeatureRule detects. The manufacturer list is derived from these keys (sorted for
-# stable rendering); each device-manager DaemonSet only schedules on nodes labelled by NFD
+# DaemonSets, and the GPUSTACK_<MANUFACTURER>_PCI_VENDOR_ID environment variable propagated
+# to both the worker and the device-managers. It reaches the `gpustack-cpu-info`
+# NodeFeatureRule through that `--manufacturer` list, since the worker renders the rule
+# itself. The manufacturer list is derived from these keys (sorted for stable
+# rendering); each device-manager DaemonSet only schedules on nodes labelled by NFD
 # with the matching PCI vendor, so adding an entry here is all it takes for a new vendor's
 # devices to be labelled, detected and given a device-manager. The defaults are every
 # manufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema
@@ -117,10 +124,10 @@ worker:
   # entirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the
   # list makes the worker install a SECOND release of this same chart, whose render overlaps this
   # one's. Helm refuses an object another release owns, so that install fails and the worker's
-  # startup with it. Even handing back nothing but `device-manager` overlaps, because the
-  # cluster-scoped `gpustack-cpu-info` NodeFeatureRule carries no switch and both renders contain
-  # it. The worker installs applications only where no chart deploys it (see
-  # docs/architecture.md, "Two install modes"). The value is
+  # startup with it. Handing a component back would mean disabling it here and in this chart's
+  # own switch for it, in step, through every upgrade — nothing checks that, which is why the
+  # supported split is all or nothing. The worker installs applications only where no chart
+  # deploys it (see docs/architecture.md, "Two install modes"). The value is
   # templated rather than appended through `extraArgs` because the flag accumulates across
   # occurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,
   # `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.
@@ -636,8 +643,8 @@ node-feature-discovery:
       - operator: "Exists"
     config:
       core:
-        # -- Feature sources the worker collects. `custom` is what makes the chart's
-        # `gpustack-cpu-info` NodeFeatureRule evaluate.
+        # -- Feature sources the worker collects. `custom` is what makes the
+        # `gpustack-cpu-info` NodeFeatureRule the operator applies evaluate.
         labelSources:
           - "cpu"
           - "pci"
@@ -649,8 +656,11 @@ node-feature-discovery:
         pci:
           # -- PCI device classes to label, as class-code prefixes: display controllers,
           # processing accelerators and the co-processors accelerators present as (see
-          # https://admin.pci-ids.ucw.cz/read/PD). The `gpustack-cpu-info` NodeFeatureRule reads
-          # this same list, so it matches exactly the devices NFD was told to label.
+          # https://admin.pci-ids.ucw.cz/read/PD). The `gpustack-cpu-info` NodeFeatureRule
+          # matches the same classes, so it sees exactly the devices NFD was told to label; the
+          # operator renders that rule from `pkg/nodefeature`, and a Go test holds the two lists
+          # equal. Narrowing this list without narrowing that one labels fewer devices than the
+          # rule expects.
           deviceClassWhitelist:
             - "02"
             - "03"

@@ -18,19 +18,39 @@ GPUStack Operator turns raw node hardware into a Kueue-based scheduling chain. I
 ### Worker startup order matters
 
 `pkg/worker/worker.go` runs `Prepare` (install system namespace → CRDs → extension API services →
-webhook configs → settings → applications → the `gpustack-node-devices` AdmissionCheck) then
-`Start`. In `Start`, the controller manager is deliberately started **only after** the extension API
-services report ready, so controllers can index extension-API resources. Preserve this ordering when
-adding startup steps.
+webhook configs → settings → applications → the `gpustack-cpu-info` NodeFeatureRule → the
+`gpustack-node-devices` AdmissionCheck) then `Start`. In `Start`, the controller manager is
+deliberately started **only after** the extension API services report ready, so controllers can
+index extension-API resources. Preserve this ordering when adding startup steps.
 
-The AdmissionCheck step is last, and it **retries until Kueue's CRD is established** (5 min bound).
-The chart cannot ship that object: its CRD belongs to Kueue, and Kueue templates its CRDs rather than
-shipping them under `crds/`, so nothing orders the CRD ahead of a custom resource in the same render.
-A worker booting alongside the Kueue rollout therefore reaches this step before the CRD is served —
-which is why it waits instead of failing.
+The last two steps are the two ends of the scheduling chain, and both **retry until their CRD is
+established** (5 min bound each): a worker booting alongside the rollout that brings those CRDs
+reaches them before they are served, so it waits instead of failing. They are in Go rather than in
+the chart because of the boundary below.
 
 Every step of `Prepare` runs in **all** replicas, before leader election, so each one is either
 conflict-tolerant or idempotent by construction. Keep it that way when adding a step.
+
+### The chart deploys workloads; the worker applies the custom resources
+
+**A chart cannot own a custom resource whose CRD it does not ship.** Helm REST-maps the *entire*
+manifest before it creates anything, so an unserved kind fails the whole install rather than
+degrading. The two objects that sit on the wrong side of that line are therefore applied by the
+worker:
+
+- the `gpustack-node-devices` **AdmissionCheck** — its CRD belongs to Kueue, and Kueue templates its
+  CRDs, so nothing can order them ahead of a custom resource in the same render;
+- the `gpustack-cpu-info` **NodeFeatureRule** — its CRD belongs to NFD, and the rule is required even
+  when `node-feature-discovery.enabled=false`, which is the supported way to run against a cluster's
+  own NFD. That install ships no NFD CRD at all, so a chart-owned rule fails it outright:
+  `resource mapping not found ... no matches for kind "NodeFeatureRule"`.
+
+So the division is: **the chart deploys workloads and configuration; the worker applies the custom
+resources whose CRDs the chart cannot order.** It is the boundary the worker's own CRDs, aggregated
+APIServices and webhook configurations already sit on, all of them installed in Go for the same
+reason. The cost is that `helm template` shows neither object — the same as for those. Both are
+*applied*, not created, so a repeat run only sets `spec` and never clobbers a controller-owned
+status.
 
 ### The worker gateway mirrors the cluster API, it does not embed it
 
@@ -76,10 +96,10 @@ Kueue, Node Feature Discovery and the two CSI drivers are **vendored subcharts**
 chart (`deploy/gpustack-operator/chart/charts/`), each behind an `enabled` switch. There is exactly
 one configuration surface for them — the chart's `values.yaml` — and two ways to reach it:
 
-- **Chart mode (the default).** Helm renders everything: the worker, the device-manager DaemonSets,
-  the `gpustack-cpu-info` NodeFeatureRule, and the four subcharts, all in **one release**. The worker
-  is then started with `--disable-applications=*` (from `worker.disableApplications`, default `["*"]`)
-  so it installs nothing at runtime and cannot collide with what the chart already deployed.
+- **Chart mode (the default).** Helm renders everything: the worker, the device-manager DaemonSets
+  and the four subcharts, all in **one release**. The worker is then started with
+  `--disable-applications=*` (from `worker.disableApplications`, default `["*"]`) so it installs
+  nothing at runtime and cannot collide with what the chart already deployed.
 - **Image mode.** Nothing deploys the worker via Helm — it runs from a checkout or outside the
   cluster — so the worker installs the chart **packaged into its own image**
   (`${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts/gpustack-operator-<version>.tgz`) with an overlay it
@@ -94,19 +114,21 @@ one configuration surface for them — the chart's `values.yaml` — and two way
 `csi-driver-nfs`, `csi-driver-s3` and `device-manager`; the names are validated at flag-parse time
 against `pkg/worker/kuberess`'s own map, which is also what renders the overlay's switches. The
 `gpustack-cpu-info` NodeFeatureRule has **no name in that set and no `enabled` switch**: the
-scheduling chain starts at that rule, so a release without it classifies no node. The chart therefore
-renders it unconditionally — including when `node-feature-discovery.enabled=false`, which is the
-supported way to run the chain against an NFD the cluster already has.
+scheduling chain starts at that rule, so it is required in every mode — including when
+`node-feature-discovery.enabled=false`, which is the supported way to run the chain against an NFD
+the cluster already has. That is exactly why the worker applies it rather than the chart (see [The
+chart deploys workloads](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)).
 
-**The two modes are exclusive.** Both installs render the same chart, so their objects overlap, and
+**The two modes are exclusive.** Both installs render the same chart under the same
+`fullnameOverride`, so any component enabled on both sides produces identically named objects, and
 Helm refuses to import an object another release owns — the worker's install fails on the first such
 object, and because it gates its startup on installing its applications, it never starts. (Measured:
 `ServiceAccount "csi-nfs-controller-sa" ... invalid ownership metadata`; Helm names whichever shared
-object it maps first.) What makes this true even for the narrowest overlap is the
-`gpustack-cpu-info` NodeFeatureRule: it is cluster-scoped, fixed-name, carries no switch, and is
-therefore in *both* renders even when every application is handed to one side. Wherever this chart
-deploys the worker, `worker.disableApplications` must keep the `*`; image mode is for clusters where
-no chart deploys the worker at all.
+object it maps first.) The two sides' switches are independent knobs, so handing a component over
+would mean disabling it in this chart and in `worker.disableApplications` in step, through every
+upgrade, with nothing checking it. Wherever this chart deploys the worker,
+`worker.disableApplications` keeps the `*`; image mode is for clusters where no chart deploys the
+worker at all.
 
 Two switches are worth calling out because they change what a mode installs:
 
@@ -161,7 +183,7 @@ flowchart TD
 NFD is deployed as the `node-feature-discovery` subchart, or brought by the cluster itself (see [Two
 install modes](#two-install-modes)). It performs three jobs:
 
-1. Labels every Node that carries a PCI display/accelerator-class device (PCI classes `02`, `03`, `0b`, `12`, from the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist` — the DM's own sysfs scan reads `GPUSTACK_PCI_CLASS_PREFIXES` instead, see [Settings & Environment Variables](settings.md)) with:
+1. Labels every Node that carries a PCI display/accelerator-class device (PCI classes `02`, `03`, `0b`, `12`, from the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist`; the rule below matches the same classes from `pkg/nodefeature`, and the DM's own sysfs scan reads `GPUSTACK_PCI_CLASS_PREFIXES`, see [Settings & Environment Variables](settings.md)) with:
 
    ```
    feature.node.kubernetes.io/pci-${PCI_VENDOR_ID}.present: "true"
@@ -207,12 +229,15 @@ install modes](#two-install-modes)). It performs three jobs:
 
    This forms an explicit contrast with the `acceleratable: "true"` label reported later by the Device Manager, which also corrects false negatives if they occur.
 
-Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, which the chart renders
-unconditionally. Its two matcher lists are read from values that exist for other reasons — the PCI
-vendor IDs from `manufacturers` (the same map that drives the device-manager DaemonSets), the PCI
-classes from NFD's own `deviceClassWhitelist` — so a vendor added to `manufacturers` is labelled,
-detected and given a device manager in one edit. A Go test asserts that the shipped map matches
-`pkg/nodefeature`.
+Jobs 2 and 3 are the work of the `gpustack-cpu-info` **NodeFeatureRule**, which the worker applies at
+startup in every install mode (see [The chart deploys
+workloads](#the-chart-deploys-workloads-the-worker-applies-the-custom-resources)). Its two matcher
+lists come from facts that exist for other reasons: the PCI vendor IDs of the manufacturers the
+worker manages — `--manufacturer`, which the chart fills from `manufacturers`, the same map that
+drives the device-manager DaemonSets — so a vendor added there is labelled, detected and given a
+device manager in one edit; and the PCI classes `pkg/nodefeature` calls acceleratable, which are the
+classes NFD is configured to publish. Two Go tests hold the chart's `manufacturers` map and its
+`deviceClassWhitelist` equal to what `pkg/nodefeature` says.
 
 ### Stage 2: GPUStack Operator Device Manager (DM)
 

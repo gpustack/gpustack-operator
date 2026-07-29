@@ -1006,7 +1006,7 @@
       "type": "object"
     },
     "manufacturers": {
-      "description": "Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the\nsingle source for the worker `--manufacturer` list, the per-manufacturer device-manager\nDaemonSets, the GPUSTACK_\u003cMANUFACTURER\u003e_PCI_VENDOR_ID environment variable propagated\nto both the worker and the device-managers, and the vendor IDs the `gpustack-cpu-info`\nNodeFeatureRule detects. The manufacturer list is derived from these keys (sorted for\nstable rendering); each device-manager DaemonSet only schedules on nodes labelled by NFD\nwith the matching PCI vendor, so adding an entry here is all it takes for a new vendor's\ndevices to be labelled, detected and given a device-manager. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema\nrequires; a cluster that carries only some of them runs the other device-managers empty,\nsince each one only schedules where its vendor label exists.",
+      "description": "Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the\nsingle source for the worker `--manufacturer` list, the per-manufacturer device-manager\nDaemonSets, and the GPUSTACK_\u003cMANUFACTURER\u003e_PCI_VENDOR_ID environment variable propagated\nto both the worker and the device-managers. It reaches the `gpustack-cpu-info`\nNodeFeatureRule through that `--manufacturer` list, since the worker renders the rule\nitself. The manufacturer list is derived from these keys (sorted for stable\nrendering); each device-manager DaemonSet only schedules on nodes labelled by NFD\nwith the matching PCI vendor, so adding an entry here is all it takes for a new vendor's\ndevices to be labelled, detected and given a device-manager. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts and the generated schema\nrequires; a cluster that carries only some of them runs the other device-managers empty,\nsince each one only schedules where its vendor label exists.",
       "properties": {
         "amd": {
           "default": "1002",
@@ -1384,7 +1384,7 @@
                 "core": {
                   "properties": {
                     "labelSources": {
-                      "description": "Feature sources the worker collects. `custom` is what makes the chart's\n`gpustack-cpu-info` NodeFeatureRule evaluate.",
+                      "description": "Feature sources the worker collects. `custom` is what makes the\n`gpustack-cpu-info` NodeFeatureRule the operator applies evaluate.",
                       "items": {
                         "anyOf": [
                           {
@@ -1421,7 +1421,7 @@
                     "pci": {
                       "properties": {
                         "deviceClassWhitelist": {
-                          "description": "PCI device classes to label, as class-code prefixes: display controllers,\nprocessing accelerators and the co-processors accelerators present as (see\nhttps://admin.pci-ids.ucw.cz/read/PD). The `gpustack-cpu-info` NodeFeatureRule reads\nthis same list, so it matches exactly the devices NFD was told to label.",
+                          "description": "PCI device classes to label, as class-code prefixes: display controllers,\nprocessing accelerators and the co-processors accelerators present as (see\nhttps://admin.pci-ids.ucw.cz/read/PD). The `gpustack-cpu-info` NodeFeatureRule\nmatches the same classes, so it sees exactly the devices NFD was told to label; the\noperator renders that rule from `pkg/nodefeature`, and a Go test holds the two lists\nequal. Narrowing this list without narrowing that one labels fewer devices than the\nrule expects.",
                           "items": {
                             "anyOf": [
                               {
@@ -1613,7 +1613,7 @@
           "type": "string"
         },
         "disableApplications": {
-          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Even handing back nothing but `device-manager` overlaps, because the\ncluster-scoped `gpustack-cpu-info` NodeFeatureRule carries no switch and both renders contain\nit. The worker installs applications only where no chart deploys it (see\ndocs/architecture.md, \"Two install modes\"). The value is\ntemplated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.",
+          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it (see docs/architecture.md, \"Two install modes\"). The value is\ntemplated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.",
           "items": {
             "anyOf": [
               {
