@@ -2890,3 +2890,188 @@ func TestResourceServer_PreferredAllocation_HintNamesAnAvailableToken(t *testing
 		})
 	}
 }
+
+// TestResourceServer_PreferredAllocation_SlicedPacks pins which card a sliced claim is hinted onto:
+// the fullest card whose ledger can still take the request. Filling a card already carrying a slice
+// keeps its untouched siblings whole, so a later whole-card or large-slice claim still has somewhere
+// to go — the rule device.SelectPartitionPlacements already applies to hardware partitions. A card
+// that cannot take the request without over-committing is never hinted.
+func TestResourceServer_PreferredAllocation_SlicedPacks(t *testing.T) {
+	const tokensPerCard = 64
+	const full = int32(nodefeature.ResourceMaxUnits)
+
+	cases := []struct {
+		name string
+		// remaining is the ledger's per-card free ".sliced.units", one entry per card.
+		remaining []int32
+		units     int64
+		// wantCard is the card the hint must name, or "" when no card fits and the hint must
+		// stay empty rather than name one it would over-commit.
+		wantCard string
+	}{
+		{
+			// The field ledger this bug was reported from: a 50% slice on card 4, a 20% slice on
+			// card 6, six untouched cards. A second 50% claim belongs beside the first.
+			name:      "the fullest card that still fits wins over an untouched one",
+			remaining: []int32{full, full, full, full, 800_000, full, 1_280_000, full},
+			units:     800_000,
+			wantCard:  "dev-4",
+		},
+		{
+			name:      "a first claim on an untouched node takes the lowest card",
+			remaining: []int32{full, full},
+			units:     320_000,
+			wantCard:  "dev-0",
+		},
+		{
+			// The previous case's outcome, replayed: 20% then 50% must share one card. This pins
+			// co-location only, not the preference — natural index order reaches the same card
+			// here, so the two cases that name a non-lowest card are what the ordering rests on.
+			name:      "a second, larger claim joins the card the first one opened",
+			remaining: []int32{1_280_000, full},
+			units:     800_000,
+			wantCard:  "dev-0",
+		},
+		{
+			name:      "an exactly-fitting card beats one with room to spare",
+			remaining: []int32{900_000, 800_000},
+			units:     800_000,
+			wantCard:  "dev-1",
+		},
+		{
+			name:      "a card too full to fit is skipped for a whole one",
+			remaining: []int32{200_000, full, full},
+			units:     800_000,
+			wantCard:  "dev-1",
+		},
+		{
+			name:      "no fitting card yields no hint rather than an over-committing one",
+			remaining: []int32{200_000, 100_000},
+			units:     800_000,
+			wantCard:  "",
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			devs := slicedLedgerDevices("node-pack", tokensPerCard, c.remaining...)
+			availableDeviceIDs := availableDeviceIDsFor(devs, workercore.DeviceAllocationModeSliced, tokensPerCard)
+			s := &ResourceServer{
+				Manufacturer:   nodefeature.ManufacturerNVIDIA,
+				AllocationMode: workercore.DeviceAllocationModeSliced,
+			}
+
+			resp, err := s.getContainerPreferredAllocationResponse(
+				&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
+				&core.Pod{}, slicedUnitsContainer(c.units), devs)
+			require.NoError(t, err)
+
+			if c.wantCard == "" {
+				assert.Empty(t, resp.GetDeviceIDs(), "a claim no card can take must not be hinted anywhere")
+				return
+			}
+			require.Len(t, resp.GetDeviceIDs(), 1, "a one-card claim is hinted exactly one token")
+			unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+			require.NoError(t, err)
+			assert.Equal(t, c.wantCard, unit.Device)
+		})
+	}
+}
+
+// TestResourceServer_PreferredAllocation_SlicedPinnedCardThatCannotFit pins what a
+// preferred-accelerator annotation buys when the card it names cannot take the claim. The annotation
+// is a best-effort request — nothing in the operator writes it, and the caller only logs when it
+// cannot be honored — so honoring it by over-committing the named card would trade a runtime CUDA
+// OOM for a placement preference. The hint names a card that fits instead.
+func TestResourceServer_PreferredAllocation_SlicedPinnedCardThatCannotFit(t *testing.T) {
+	const tokensPerCard = 64
+	// dev-0 is the pinned card but has only 200k units left; dev-1 is untouched.
+	devs := slicedLedgerDevices("node-pinned", tokensPerCard, 200_000, nodefeature.ResourceMaxUnits)
+	availableDeviceIDs := availableDeviceIDsFor(devs, workercore.DeviceAllocationModeSliced, tokensPerCard)
+
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{
+		Annotations: map[string]string{_PreferredAcceleratorIDAnnoKey: "dev-0"},
+	}}
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+
+	resp, err := s.getContainerPreferredAllocationResponse(
+		&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
+		pod, slicedUnitsContainer(800_000), devs)
+	require.NoError(t, err)
+	require.Len(t, resp.GetDeviceIDs(), 1)
+
+	unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+	require.NoError(t, err)
+	assert.Equal(t, "dev-1", unit.Device,
+		"a pinned card that cannot take the claim must not be hinted — over-committing it costs a runtime OOM")
+}
+
+// TestResourceServer_PreferredAllocation_SlicedMustIncludeComesFirst pins that a card kubelet has
+// already allocated to this container is hinted ahead of the card that would win on occupancy alone.
+// Echoing it spends one of the claim's slots, which is what leaves kubelet's intersection of the hint
+// with its still-available set holding exactly the devices it has left to place, rather than a wider
+// set it would then pick from in map order.
+func TestResourceServer_PreferredAllocation_SlicedMustIncludeComesFirst(t *testing.T) {
+	const tokensPerCard = 64
+	// dev-1 is the fuller card and would win the packing order; dev-0 is the one kubelet reused.
+	devs := slicedLedgerDevices("node-must", tokensPerCard, nodefeature.ResourceMaxUnits, 800_000)
+	availableDeviceIDs := availableDeviceIDsFor(devs, workercore.DeviceAllocationModeSliced, tokensPerCard)
+
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+
+	resp, err := s.getContainerPreferredAllocationResponse(
+		&ContainerPreferredAllocationRequest{
+			AvailableDeviceIDs:   availableDeviceIDs,
+			MustIncludeDeviceIDs: []string{"grp-0:dev-0:0000"},
+			AllocationSize:       1,
+		},
+		&core.Pod{}, slicedUnitsContainer(800_000), devs)
+	require.NoError(t, err)
+	require.Len(t, resp.GetDeviceIDs(), 1)
+
+	unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+	require.NoError(t, err)
+	assert.Equal(t, "dev-0", unit.Device,
+		"the card kubelet already allocated to this container must be hinted ahead of a fuller one")
+}
+
+// TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard pins that the per-card fit
+// check never drops a must-include token. Such a token is one kubelet has ALREADY allocated to this
+// container, so its units are counted in that card's Remaining — measuring it against Remaining charges
+// the container for its own claim a second time, and on a card the claim filled to the brim that
+// arithmetic drops a token the response is obliged to echo. The reachable-today guard is Rule 2
+// (`<base>.sliced` is exactly 1, so kubelet never asks for more while holding one); this pins the
+// ordering so that lifting that cap cannot turn into a silently truncated hint.
+func TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard(t *testing.T) {
+	const tokensPerCard = 64
+	// dev-0 is the card kubelet reused and it has NO room left; dev-1 is free and would fit.
+	devs := slicedLedgerDevices("node-must-full", tokensPerCard, 0, nodefeature.ResourceMaxUnits)
+	availableDeviceIDs := availableDeviceIDsFor(devs, workercore.DeviceAllocationModeSliced, tokensPerCard)
+
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+
+	resp, err := s.getContainerPreferredAllocationResponse(
+		&ContainerPreferredAllocationRequest{
+			AvailableDeviceIDs:   availableDeviceIDs,
+			MustIncludeDeviceIDs: []string{"grp-0:dev-0:0000"},
+			AllocationSize:       1,
+		},
+		&core.Pod{}, slicedUnitsContainer(800_000), devs)
+	require.NoError(t, err)
+	require.Len(t, resp.GetDeviceIDs(), 1)
+
+	unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+	require.NoError(t, err)
+	assert.Equal(t, "dev-0", unit.Device,
+		"a must-include token must be echoed even on a card with no room left; the fit check belongs to cards this call is choosing, not to one already allocated")
+}

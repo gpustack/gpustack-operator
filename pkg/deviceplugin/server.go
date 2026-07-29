@@ -399,11 +399,13 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	preferredDeviceIDsSet := extractPreferredAcceleratorIDsFromPod(pod, devs)
 	remainingSize := allocationSize
 
-	// For sliced, each selected card must still have this container's per-card ".sliced.units"
-	// (the memory budget the Pod webhook folded in) free, so slices spread across cards instead of
-	// stacking on one and over-committing its VRAM. The ledger records sliced allocations in real
-	// units, so a card carrying a slice reports Remaining below a fresh card. Zero → no per-card
-	// bin-fit (a Pod the webhook did not shape); the loop then behaves as before.
+	// For sliced, every card this HINT offers must still have this container's per-card
+	// ".sliced.units" (the memory budget the Pod webhook folded in) free. That constrains the hint,
+	// not the outcome: GetPreferredAllocation is advisory, and Allocate refuses a card another mode
+	// holds but never one merely short of room, so a kubelet that declines the hint can still
+	// over-commit a card. The ledger records sliced allocations in real units, so a card carrying a
+	// slice reports Remaining below a fresh card — which is also what orders the candidates below.
+	// Zero → no per-card bin-fit (a Pod the webhook did not shape); the loop then behaves as before.
 	slicedUnits := int32(0)
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced && ctr != nil {
 		if q, ok := ctr.Resources.Limits[nodefeature.GetAcceleratableSlicedUnitsResourceName(s.Manufacturer)]; ok {
@@ -418,7 +420,7 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 		if devsGroup.Manufacturer != s.Manufacturer {
 			continue
 		}
-		for j := range devsGroup.Accelerators {
+		for _, j := range slicedPackingOrder(devs, devsGroup, mustIncludedResUnitsMap, slicedUnits) {
 			devsAccelerator := &devsGroup.Accelerators[j]
 			res := Resource{
 				Group:  devsGroup.ID,
@@ -439,29 +441,34 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 				continue
 			}
 
-			// Sliced spreads across cards: defer a card that cannot fit this slice's per-card
-			// units without over-committing it (its ledger Remaining is below the request) to
-			// unselectedResUnits, so it is used only as a last resort when no card fits. Stacking
-			// slices on one card is what drove runtime per-card VRAM overcommit.
-			if slicedUnits > 0 {
-				remaining := int32(nodefeature.ResourceMaxUnits)
-				if len(devs.Status.Groups) > i && len(devs.Status.Groups[i].Accelerators) > j {
-					remaining = devs.Status.Groups[i].Accelerators[j].Remaining
-				}
-				if remaining < slicedUnits {
-					unselectedResUnits = append(unselectedResUnits, resUnits[0])
-					continue
-				}
-			}
-
 			// Exclusive, shared and sliced all select one device unit (token) per
 			// card; the per-card concurrency/units accounting lives elsewhere (Kueue
 			// credits and the ".sliced.units" capacity), not in the device plugin.
 			if miResUnits, existed := mustIncludedResUnitsMap[res]; existed {
-				// Only the first must-include unit per card is consumed (one token).
+				// Only the first must-include unit per card is consumed (one token). The
+				// must-include set is what kubelet has already allocated to this container, and it
+				// intersects the hint with the still-available set, so echoing such a token cannot
+				// win the card back. Echoing it still matters: it spends one of the claim's slots,
+				// which is what leaves that intersection holding exactly the devices kubelet still
+				// needs rather than a wider set it would then pick from arbitrarily. This is why
+				// slicedPackingOrder visits these cards first.
+				//
+				// It is echoed whatever the ledger reports free — the fit check below deliberately
+				// sits on the other branch. This token's units are ALREADY counted in that card's
+				// Remaining, so measuring it against Remaining charges the container for its own
+				// claim a second time and would drop a token the response has to carry.
 				preferredDeviceIDsSet.Delete(res.Device)
 				selectedResUnits = append(selectedResUnits, miResUnits[0])
 			} else {
+				// Defer a card that cannot fit this slice's per-card units without over-committing
+				// it (its ledger Remaining is below the request) to unselectedResUnits. That list is
+				// consumed only on the preferred-accelerator path below, when the annotation's cards
+				// could not all be selected; with no annotation a claim no card fits yields an empty
+				// hint and these cards are never used.
+				if slicedUnits > 0 && statusRemainingOf(devs, res) < slicedUnits {
+					unselectedResUnits = append(unselectedResUnits, resUnits[0])
+					continue
+				}
 				if preferredDeviceIDsSet.Len() != 0 && !preferredDeviceIDsSet.Has(res.Device) {
 					unselectedResUnits = append(unselectedResUnits, resUnits[0])
 					continue
@@ -503,6 +510,57 @@ outside:
 		DeviceIDs: deviceIDs,
 	}
 	return resp, nil
+}
+
+// slicedPackingOrder returns the positions of devsGroup's accelerators in the order a claim of
+// slicedUnits should try them. A non-positive slicedUnits leaves the cards in their natural order.
+//
+// A card kubelet already allocated to this container (mustInclude) comes first whatever its
+// occupancy — see the must-include branch in the caller for why echoing it matters.
+//
+// The rest pack rather than spread: among the cards whose ledger can still take the request, the
+// fullest one goes first, so a card already carrying a slice is filled before an untouched sibling
+// is broken into. That keeps whole cards whole, so a later large claim still has somewhere to go —
+// spreading instead strands a node with plenty of free memory unable to host one big slice. It is
+// the rule device.SelectPartitionPlacements already applies to hardware partitions, for the same
+// reason. Cards that cannot take the request sort last, emptiest first, so that if the caller's
+// preferred-accelerator path has to fall back to one of them it over-commits the least. Ties break
+// on the lower position, so two identical requests against identical state place identically.
+func slicedPackingOrder(
+	devs *workercore.Devices,
+	devsGroup *workercore.DevicesGroup,
+	mustInclude map[Resource][]ResourceUnit,
+	slicedUnits int32,
+) []int {
+	order := make([]int, len(devsGroup.Accelerators))
+	for j := range order {
+		order[j] = j
+	}
+	if slicedUnits <= 0 {
+		return order
+	}
+
+	resourceAt := func(j int) Resource {
+		return Resource{Group: devsGroup.ID, Device: devsGroup.Accelerators[j].ID}
+	}
+	sort.SliceStable(order, func(a, b int) bool {
+		resA, resB := resourceAt(order[a]), resourceAt(order[b])
+		_, mustA := mustInclude[resA]
+		_, mustB := mustInclude[resB]
+		if mustA != mustB {
+			return mustA
+		}
+		remainingA, remainingB := statusRemainingOf(devs, resA), statusRemainingOf(devs, resB)
+		fitsA, fitsB := remainingA >= slicedUnits, remainingB >= slicedUnits
+		if fitsA != fitsB {
+			return fitsA
+		}
+		if fitsA {
+			return remainingA < remainingB
+		}
+		return remainingA > remainingB
+	})
+	return order
 }
 
 // statusModeOf returns the allocation mode the Devices ledger currently records for a physical
