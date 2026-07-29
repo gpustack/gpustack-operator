@@ -27,6 +27,19 @@ if [ ! -d "$DIR" ]; then
   exit 1
 fi
 
+# The module's destroy provisioner strips its context/cluster/user from the kubeconfig
+# kubectl resolves, which has to be the user's real one — that is where the apply put
+# them. A run pinned to an isolated copy (kube-context.sh) would otherwise have the
+# entries deleted from the copy and left behind in ~/.kube/config. Matched as a
+# substring, so a colon-separated KUBECONFIG that merely includes such a copy is
+# caught too, not only a lone one.
+case "${KUBECONFIG:-}" in
+*e2e-kubeconfig-*)
+  echo "[destroy] unsetting KUBECONFIG=${KUBECONFIG} so the kubeconfig cleanup reaches the real one"
+  unset KUBECONFIG
+  ;;
+esac
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "== credential precheck (an expired token here strands the cluster) =="
 if ! bash "${HERE}/cluster-auth.sh" "$MOD"; then

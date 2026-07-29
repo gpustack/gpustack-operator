@@ -94,3 +94,13 @@ variable "gpu_instance_types" {
     h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }
   }
 }
+
+variable "switch_kube_context" {
+  # The cluster is merged into ~/.kube/config either way; this only decides whether a
+  # bare kubectl points at it afterwards. Set it to false while another cluster is
+  # mid-verification. Nothing is restored when there was no current context to begin
+  # with (a kubeconfig that did not exist yet), so the merged one stays current there.
+  description = "Whether `nebius mk8s cluster get-credentials` may leave this cluster as the current context. When false, the context that was current before it ran is restored."
+  type        = bool
+  default     = true
+}

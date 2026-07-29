@@ -156,9 +156,14 @@ bash .claude/skills/_e2e-lib/scripts/destroy.sh <modality>
 ```
 
 - `provision.sh` runs `init` → `plan` → `apply` and prints the resulting context. Each module merges
-  its cluster into `~/.kube/config` as a new context (k3s also makes it current). **That is the one
+  its cluster into `~/.kube/config` as a new context and leaves it current. **That is the one
   legitimate context change in a run** — the "never switch context" rule forbids moving among the
   *user's* contexts, not adopting the one this run just created.
+  - Every module takes `-var='switch_kube_context=false'`, which merges the cluster in **without**
+    making it current — the right choice when the user has something running on their active context.
+    `provision.sh` then prints an `active context:` line that is legitimately still theirs; target the
+    new one with an isolated kubeconfig (`kube-context.sh`, see the context hard rule in
+    [`orchestration.md`](orchestration.md)) rather than by switching.
 - `destroy.sh` needs no `-var` (each module reuses the last successful apply's inputs from an
   auto-loaded snapshot) and **verifies the state is empty afterwards**; a non-empty state exits
   non-zero and means the cluster may still be running and billing. Re-run it until state is empty —

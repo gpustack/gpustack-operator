@@ -1,7 +1,7 @@
 ---
 name: gpustack-operator-chart-e2e
 description: "Verify the GPUStack Operator **Helm chart** end to end on a reachable local cluster (k3s / docker-desktop): build & load the dev image, `helm install` the chart, assert the worker/device-manager roll out, the versions are consistent (image tag ↔ bundled chart tgz ↔ `gpustack-operator --version`), then `helm uninstall` and assert zero leftovers. SCOPE: this validates the **chart contract** — chart changes, install/startup, image build, and version consistency — and is **NOT a feature/behavioral e2e**; for deep scheduling-chain behavior use `gpustack-operator-e2e` instead. Proactively offer this when a branch ahead of main changes the chart, the in-cluster app-installation code, or the image build. Examples: \"verify the chart installs and uninstalls cleanly\", \"does helm install of the operator work\", \"check the chart version is right\", \"test my chart change end to end\", \"did my kuberess change break the runtime install\"."
-allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/gpustack-operator-chart-e2e/cases/case-1.sh*), Bash(kubectl get*), Bash(kubectl describe*), Bash(kubectl logs*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(helm status*), Bash(helm list*), Bash(helm template*), Bash(helm lint*), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*)"
+allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/kube-context.sh*), Bash(bash .claude/skills/gpustack-operator-chart-e2e/cases/case-1.sh*), Bash(kubectl get*), Bash(kubectl describe*), Bash(kubectl logs*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(helm status*), Bash(helm list*), Bash(helm template*), Bash(helm lint*), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*)"
 model: sonnet
 ---
 
@@ -18,14 +18,14 @@ Install the operator **from its Helm chart** onto a **local** cluster and verify
 Run as a **test-orchestration lead** (main agent) coordinating read-only **domain specialists** (`Agent` tool). **Read [`orchestration.md`](../_e2e-lib/references/orchestration.md) before Phase 0** — it owns roles, phases, parallelism/rendezvous rules, report layout, and the fix-and-retest loop. Below are the chart-e2e specifics.
 
 **Hard rules** (full list in `orchestration.md`; chart-e2e specifics):
-- **Pin the run to a user-confirmed context** — `preflight.sh` shows the active one; proceed only after the user confirms the intended local cluster. Never switch on your own judgement; on the user's explicit say-so, switch, record the context to return to as an outstanding environment mutation, and restore it in Phase 8.
+- **Pin the run to a user-confirmed context** — `preflight.sh` shows the active one; proceed only after the user confirms the intended local cluster. Never switch on your own judgement. When the confirmed cluster is **not** the active context, do not switch: take its isolated kubeconfig with `bash ../_e2e-lib/scripts/kube-context.sh <ctx>` and prefix every command of the run with the `KUBECONFIG=<path>` it prints (details in `../_e2e-lib/references/orchestration.md`). On the user's explicit say-so you may switch instead — then record the context to return to as an outstanding environment mutation and restore it in Phase 8.
 - **Build locally, never push** — `build-load.sh` keeps `PACKAGE_PUSH=false`.
 - **Touch only what this run creates** — the Helm release + its cleanup. Never modify or delete the user's pre-existing resources.
 - **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, CASE 2, CASE 3); read-only steps (`preflight.sh`, CASE 1) run unprompted.
 - **Specialists are read-only** — the lead is the sole writer.
 
 **Layout:**
-- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG> [--set …]`, `assert-core.sh <NS>`, `teardown.sh <NS>` (self-contained cleanup; mirrors the chart's `cleanup.sh`).
+- `../_e2e-lib/scripts/` — `preflight.sh`, `build-load.sh <TAG>`, `deploy.sh <NS> <TAG> [--set …]`, `assert-core.sh <NS>`, `teardown.sh <NS>` (self-contained cleanup; mirrors the chart's `cleanup.sh`), `kube-context.sh <ctx>` (read-only; targets a context that is not the current one).
 - `cases/case-N.sh` — one scenario each; ends in a `STATUS | CHECK | OBJECT` table, exits non-zero on any FAIL.
 - `references/version-contract.md`; shared `../_e2e-lib/references/{orchestration,troubleshooting}.md`.
 

@@ -80,3 +80,13 @@ variable "node_boot_disk_size_gb" {
     error_message = "node_boot_disk_size_gb must be a positive whole number."
   }
 }
+
+variable "switch_kube_context" {
+  # The cluster is merged into ~/.kube/config either way; this only decides whether a
+  # bare kubectl points at it afterwards. Set it to false while another cluster is
+  # mid-verification. Nothing is restored when there was no current context to begin
+  # with (a kubeconfig that did not exist yet), so the merged one stays current there.
+  description = "Whether `aws eks update-kubeconfig` may leave this cluster as the current context. When false, the context that was current before the update is restored."
+  type        = bool
+  default     = true
+}

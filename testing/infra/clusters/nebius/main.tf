@@ -286,10 +286,25 @@ resource "null_resource" "kubeconfig" {
     # "mk8scluster-" resource-type prefix stripped. Precompute the full entry name here so
     # the destroy provisioner (which may reference only self) deletes the real names.
     kubeconfig_entry = "nebius-mk8s-${local.context_name}-${trimprefix(nebius_mk8s_v1_cluster.this.id, "mk8scluster-")}"
+    # Tracked so flipping the flag re-runs get-credentials, instead of taking effect
+    # only the next time the cluster itself changes.
+    switch_kube_context = var.switch_kube_context
   }
 
   provisioner "local-exec" {
-    command = "nebius mk8s cluster get-credentials --id ${self.triggers.id} --external --force --context-name ${self.triggers.context}"
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      # Read before the write: get-credentials has no flag to keep the current context
+      # (only --context-name, which names the one it adds), so keeping it means putting
+      # this one back afterwards. Empty when there is no kubeconfig yet.
+      previous="$(kubectl config current-context 2>/dev/null || true)"
+      nebius mk8s cluster get-credentials --id ${self.triggers.id} --external --force --context-name ${self.triggers.context}
+      if [ '${var.switch_kube_context}' = 'false' ] && [ -n "$previous" ]; then
+        kubectl config use-context "$previous" >/dev/null
+        echo "current context left at $previous"
+      fi
+    EOT
   }
 
   # Delete the context AND its cluster/user entries by their real names, so destroy leaves

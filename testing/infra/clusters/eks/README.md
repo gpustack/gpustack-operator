@@ -15,7 +15,8 @@ local kubeconfig at it.
 - Installs common addons (`coredns`, `kube-proxy`, `vpc-cni`, `metrics-server`,
   `cert-manager`, `external-dns`, ...).
 - After apply, runs `aws eks update-kubeconfig` to merge the cluster into
-  `~/.kube/config` as a new context; on destroy it removes that
+  `~/.kube/config` as a new context, which becomes the current one (unless
+  `switch_kube_context=false`); on destroy it removes that
   context/cluster/user.
 
 ## Prerequisites
@@ -54,6 +55,10 @@ kubectl get nodes
 aws eks --region "$(terraform output -raw region)" update-kubeconfig --name "$(terraform output -raw cluster_name)"
 ```
 
+Add `-var='switch_kube_context=false'` to keep the context you are already on:
+the cluster is still merged in, and reached with
+`kubectl --context "$(terraform output -raw cluster_name)" get nodes`.
+
 Tear down:
 
 ```bash
@@ -73,6 +78,7 @@ terraform destroy
 | `gpu_instance_types` | GPU node groups as a `map(list(string))` keyed by group name | `{ g4dn = ["g4dn.xlarge","g4dn.12xlarge"] }` |
 | `node_boot_disk_type` | Node root volume EBS type/performance (`volume_type`, optional `iops`/`throughput`) | `{ volume_type = "gp3", iops = 3000, throughput = 125 }` |
 | `node_boot_disk_size_gb` | Node root (boot) volume size, in GiB | `100` |
+| `switch_kube_context` | Let `update-kubeconfig` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs
 

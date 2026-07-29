@@ -17,10 +17,15 @@
 #   provision.sh eks    -var='region=<region>'
 # Pass secrets/ids/addresses inline at run time; never write them into a file.
 #
-# Each module merges its cluster into ~/.kube/config as a new context (k3s also
-# makes it current). That is the one legitimate context change in a run — the
-# "never switch context" rule is about never moving among the USER's own
-# contexts, not about the context this run just created.
+# Each module merges its cluster into ~/.kube/config as a new context and leaves
+# it current. That is the one legitimate context change in a run — the "never
+# switch context" rule is about never moving among the USER's own contexts, not
+# about the context this run just created.
+#
+# Pass -var='switch_kube_context=false' (every modality takes it) to merge the
+# cluster in WITHOUT making it current, when the user has something running on
+# their active context. The "active context" line printed below is then still
+# theirs, by design; reach the new cluster with kube-context.sh instead.
 set -uo pipefail
 
 MOD="${1:?usage: provision.sh <eks|k3s|nebius> [terraform args...]}"
@@ -30,6 +35,18 @@ if [ ! -d "$DIR" ]; then
   echo "unknown modality '${MOD}' — no ${DIR} (run from the repo root)"
   exit 1
 fi
+
+# A cluster is merged into the kubeconfig kubectl/aws/nebius resolve, and an isolated copy
+# (kube-context.sh) is a throwaway snapshot of ONE context — the last place a brand-new
+# cluster should be recorded, since nothing would ever read it back. Drop such a pin so the
+# new context lands where the user can reach it, mirroring destroy.sh's cleanup. Any OTHER
+# KUBECONFIG is the caller's deliberate choice of target and is left alone.
+case "${KUBECONFIG:-}" in
+*e2e-kubeconfig-*)
+  echo "[provision] unsetting KUBECONFIG=${KUBECONFIG} so the new context is merged into the real kubeconfig"
+  unset KUBECONFIG
+  ;;
+esac
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "== credential precheck =="
