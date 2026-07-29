@@ -30,7 +30,8 @@ node groups, and point your local kubeconfig at it.
   node group. See [MIG readiness](#mig-readiness) — without this, a partitioning
   test shuts down the node it runs on.
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
-  into `~/.kube/config` as a new context; on destroy it removes that
+  into `~/.kube/config` as a new context, which becomes the current one (unless
+  `switch_kube_context=false`); on destroy it removes that
   context/cluster/user.
 
 ## MIG readiness
@@ -130,6 +131,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os}` | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
 | `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; set them to override. | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
+| `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs
 

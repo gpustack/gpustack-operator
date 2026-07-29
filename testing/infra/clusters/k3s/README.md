@@ -13,7 +13,8 @@ Terraform, and merge the cluster's kubeconfig into your local `~/.kube/config`.
   node.
 - Fetches the cluster kubeconfig, renames its context/cluster/user to
   `k3s-<first-server>`, merges it into `~/.kube/config`, and makes it the
-  current context; on destroy it removes that context/cluster/user.
+  current context (unless `switch_kube_context=false`); on destroy it removes
+  that context/cluster/user.
 - For every node, fetches `/etc/docker/daemon.json` to the local machine and
   parses it locally with `jq` (the remote host is never required to have
   `jq`). Any custom runtime found there (e.g. `ascend`) gets a matching k3s
@@ -64,12 +65,19 @@ terraform apply \
 - `server_https_listen_port`: Kubernetes apiserver port (default `6443`).
 - `service_node_port_range`: NodePort Service port range (default
   `30000-32767`).
+- `switch_kube_context`: defaults to `true`, which leaves the merged context
+  current. Pass `-var='switch_kube_context=false'` to keep the context you are
+  already on -- the cluster is still merged in, it just is not what a bare
+  `kubectl` talks to.
 
 After apply:
 
 ```bash
 kubectl config use-context "$(terraform output -raw context_name)"
 kubectl get nodes
+
+# Or, without switching what a bare kubectl points at:
+kubectl --context "$(terraform output -raw context_name)" get nodes
 ```
 
 Tear down (no `-var` needed -- `server` is carried across from the last apply):
@@ -93,6 +101,7 @@ terraform destroy
 | `service_cidr` | Service network (`--service-cidr`, comma-separated for dual-stack) | `10.43.0.0/16` |
 | `server_https_listen_port` | Kubernetes apiserver port (`--https-listen-port`) | `6443` |
 | `service_node_port_range` | NodePort Service port range (`--service-node-port-range`) | `30000-32767` |
+| `switch_kube_context` | Let the merged context become the current one; `false` restores the previous one | `true` |
 
 ## Outputs
 

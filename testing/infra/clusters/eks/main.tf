@@ -262,10 +262,25 @@ resource "null_resource" "update_kubeconfig" {
     name    = module.eks.cluster_name
     arn     = module.eks.cluster_arn
     context = module.eks.cluster_name
+    # Tracked so flipping the flag re-runs the update, instead of taking effect only
+    # the next time the cluster itself changes.
+    switch_kube_context = var.switch_kube_context
   }
 
   provisioner "local-exec" {
-    command = "aws eks --region ${self.triggers.region} update-kubeconfig --name ${self.triggers.name} --alias ${self.triggers.context} --user-alias ${self.triggers.context}"
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      set -euo pipefail
+      # Read before the update: update-kubeconfig always makes the cluster it writes the
+      # current context, so keeping the current context means putting this one back
+      # afterwards. Empty when there is no kubeconfig yet.
+      previous="$(kubectl config current-context 2>/dev/null || true)"
+      aws eks --region ${self.triggers.region} update-kubeconfig --name ${self.triggers.name} --alias ${self.triggers.context} --user-alias ${self.triggers.context}
+      if [ '${var.switch_kube_context}' = 'false' ] && [ -n "$previous" ]; then
+        kubectl config use-context "$previous" >/dev/null
+        echo "current context left at $previous"
+      fi
+    EOT
   }
 
   # On destroy, remove the context (named by --alias), the cluster entry (named

@@ -329,6 +329,9 @@ resource "null_resource" "kubeconfig" {
     # Re-fetch when the first server is reinstalled (new certificates), so
     # ~/.kube/config never keeps stale credentials.
     server_init = null_resource.server_init.id
+    # Tracked so flipping the flag re-runs the merge, instead of taking effect only
+    # the next time the server happens to be reinstalled.
+    switch_kube_context = var.switch_kube_context
   }
 
   provisioner "local-exec" {
@@ -338,6 +341,10 @@ resource "null_resource" "kubeconfig" {
       raw="$(mktemp)"
       merged=""
       trap 'rm -f "$raw" "$merged"' EXIT
+      # Read before the merge: the merged view takes its current-context from the new
+      # file (first in KUBECONFIG below), so keeping the current context means putting
+      # this one back afterwards. Empty when there is no ~/.kube/config yet.
+      previous="$(KUBECONFIG="$HOME/.kube/config" kubectl config current-context 2>/dev/null || true)"
       for i in $(seq 1 30); do
         if ssh -i '${pathexpand(var.ssh_private_key)}' -p ${var.server_ssh_port} \
              -o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10 \
@@ -358,12 +365,18 @@ resource "null_resource" "kubeconfig" {
           # a shared file, and the mv stays an atomic same-filesystem rename.
           merged="$(mktemp "$HOME/.kube/config.XXXXXX")"
           # New file first: its entries win on conflict, so a re-apply refreshes
-          # this cluster and makes it the current context (as aws update-kubeconfig does).
+          # this cluster and makes it the current context (as aws update-kubeconfig
+          # does) unless var.switch_kube_context puts the previous one back below.
           KUBECONFIG='${local.kubeconfig_path}':"$HOME/.kube/config" \
             kubectl config view --flatten > "$merged"
           mv "$merged" "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
-          echo "merged context ${local.context_name} into ~/.kube/config"
+          if [ '${var.switch_kube_context}' = 'false' ] && [ -n "$previous" ]; then
+            KUBECONFIG="$HOME/.kube/config" kubectl config use-context "$previous" >/dev/null
+            echo "merged context ${local.context_name} into ~/.kube/config; current context left at $previous"
+          else
+            echo "merged context ${local.context_name} into ~/.kube/config; it is now the current context"
+          fi
           exit 0
         fi
         echo "waiting for k3s.yaml on ${local.first_server.host} ($i/30)"
@@ -377,11 +390,16 @@ resource "null_resource" "kubeconfig" {
   # Remove this cluster's context, cluster, and user from ~/.kube/config on
   # destroy. Only self is referenceable here; on_failure=continue keeps
   # re-destroys idempotent when the entries are already gone.
+  #
+  # Anchored to the same file the merge above writes, rather than to whatever
+  # kubectl would resolve: with a KUBECONFIG set, cleanup would otherwise strip
+  # the entries from that file and leave these behind in ~/.kube/config forever.
   provisioner "local-exec" {
     when        = destroy
     on_failure  = continue
     interpreter = ["/bin/bash", "-c"]
     command     = <<-EOT
+      export KUBECONFIG="$HOME/.kube/config"
       kubectl config delete-context '${self.triggers.context}' || true
       kubectl config delete-cluster '${self.triggers.context}' || true
       kubectl config unset 'users.${self.triggers.context}' || true
