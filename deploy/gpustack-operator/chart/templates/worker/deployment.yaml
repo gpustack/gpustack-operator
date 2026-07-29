@@ -1,5 +1,5 @@
 {{- if .Values.worker.enabled }}
-{{- $certmanager := eq (include "gpustack-operator.worker.certmanager.enabled" .) "true" }}
+{{- $certmanager := eq (include "gpustack-operator.certmanager.enabled" .) "true" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -37,6 +37,24 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.worker.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- range . }}
+        - {{- toYaml . | nindent 10 }}
+          {{- if not .labelSelector }}
+          labelSelector:
+            matchLabels:
+              {{- include "gpustack-operator.worker.selectorLabels" $ | nindent 14 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- else }}
+      # Deliberately `preferred`: spreading replicas across nodes must never leave one
+      # unschedulable on a cluster with fewer nodes than replicas. Node spread that has to hold
+      # belongs in `worker.topologySpreadConstraints`.
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
@@ -46,6 +64,7 @@ spec:
                 labelSelector:
                   matchLabels:
                     {{- include "gpustack-operator.worker.selectorLabels" . | nindent 20 }}
+      {{- end }}
       containers:
         - name: main
           image: {{ include "gpustack-operator.image" (dict "root" . "overrides" .Values.worker.image) | quote }}
@@ -58,13 +77,13 @@ spec:
             {{- if $certmanager }}
             - --cert-dir=/var/run/gpustack/certs
             {{- end }}
-            {{- if .Values.manufacturers }}
-            - --manufacturer={{ keys .Values.manufacturers | sortAlpha | join "," }}
+            {{- if .Values.global.manufacturers }}
+            - --manufacturer={{ keys .Values.global.manufacturers | sortAlpha | join "," }}
             {{- end }}
-            {{- if .Values.deviceManager.enabled }}
-            # The chart renders the device-manager DaemonSets directly, so the worker must
-            # not also install them at runtime.
-            - --disable-applications=device-manager
+            {{- with .Values.worker.disableApplications }}
+            # One flag carrying the whole list: the flag accumulates across occurrences, so a
+            # second one could only ever disable more.
+            - --disable-applications={{ join "," . }}
             {{- end }}
             {{- with .Values.worker.extraArgs }}
             {{- toYaml . | nindent 12 }}
@@ -107,21 +126,30 @@ spec:
               value: "{{ range $i, $s := .Values.global.imagePullSecrets }}{{ if $i }},{{ end }}{{ if kindIs "string" $s }}{{ $s }}{{ else }}{{ $s.name }}{{ end }}{{ end }}"
             - name: GPUSTACK_IMAGE_PULL_POLICY
               value: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.worker.image) | quote }}
-            # Propagate each manufacturer's PCI vendor ID so the worker renders the NFD and
-            # Kueue manifests with the same values configured here.
-            {{- range $manu, $vendorID := .Values.manufacturers }}
-            - name: GPUSTACK_{{ upper $manu }}_PCI_VENDOR_ID
-              value: {{ $vendorID | quote }}
+            # Propagate each manufacturer's identity, so the worker reads the same facts the
+            # chart states: its NodeFeatureRule, its resource accounting and the RuntimeClass
+            # it attaches to a workload all come from these.
+            {{- range $manu := (keys .Values.global.manufacturers | sortAlpha) }}
+            {{- include "gpustack-operator.manufacturer.env"
+                  (dict "name" $manu "identity" (index $.Values.global.manufacturers $manu))
+                  | trim | nindent 12 }}
             {{- end }}
           ports:
             - name: https
               containerPort: {{ .Values.worker.securePort }}
-          # The worker installs NFD/Kueue/CSI on boot and can self-heal a stranded Kueue
-          # (reap orphaned finalizers, then a Kueue upgrade that recreates its controller);
-          # give startup generous headroom so a long first boot is not killed mid-repair,
-          # which would strand the Kueue release pending-rollback and never converge.
+          # The startup budget has to cover everything Prepare() does before the server serves,
+          # because none of it answers this probe. That is, in the worst case: an image-mode
+          # install of the bundled chart, which can also self-heal a stranded Kueue (reap
+          # orphaned finalizers, then a Kueue upgrade that recreates its controller), plus the
+          # two custom resources it then installs — each of which polls for a CRD another
+          # component owns, for up to cpuInfoNodeFeatureRuleTimeout and
+          # nodeDevicesAdmissionCheckTimeout respectively (5 minutes each, sequential, in
+          # pkg/worker/kuberess). 180 x 5s = 900s leaves 300s for the install on top of those
+          # 600s. Raising either timeout means raising this too: a budget below their sum turns
+          # "the worker waits for whatever provides the CRD" into a CrashLoopBackOff whose
+          # cause never prints, since the poll's own error only surfaces when it gives up.
           startupProbe:
-            failureThreshold: 60
+            failureThreshold: 180
             periodSeconds: 5
             httpGet:
               scheme: HTTPS

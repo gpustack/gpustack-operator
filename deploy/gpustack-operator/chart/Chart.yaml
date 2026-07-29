@@ -27,6 +27,24 @@ icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.
 annotations:
   artifacthub.io/license: Apache-2.0
   artifacthub.io/operator: "true"
-# NB(thxCode): Kueue, Node Feature Discovery and the CSI drivers are bundled into the
-# operator image (see pack/gpustack-operator/Dockerfile) and installed at runtime by the
-# worker, so they are intentionally not declared as chart dependencies.
+# NB(thxCode): the dependencies are vendored unpacked and patched under "charts/" by
+# `make deps`, so they carry an empty repository, the Helm convention for "already
+# present in charts/". Declaring them is mandatory: a "condition" only applies to a
+# declared dependency, while an undeclared tree under "charts/" always renders.
+dependencies:
+  - name: kueue
+    version: 0.18.4
+    repository: ""
+    condition: kueue.enabled
+  - name: node-feature-discovery
+    version: 0.19.0
+    repository: ""
+    condition: node-feature-discovery.enabled
+  - name: csi-driver-nfs
+    version: 4.13.4
+    repository: ""
+    condition: csi-driver-nfs.enabled
+  - name: csi-driver-s3
+    version: 0.43.7
+    repository: ""
+    condition: csi-driver-s3.enabled

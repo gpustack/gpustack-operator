@@ -1,0 +1,22 @@
+{{- /*
+  Carries the two migration scripts for the hook Jobs below, so both run the same files the
+  repository keeps under chart/files/. Annotated for every phase those Jobs run in and weighted
+  below them, so it always exists first; `before-hook-creation` is what recreates it for the
+  post-upgrade phase after the pre-upgrade phase deleted it on success.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-migrate
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade,post-upgrade
+    "helm.sh/hook-weight": "-11"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+data:
+  migrate-pre.sh: |-
+{{ .Files.Get "files/migrate-pre.sh" | indent 4 }}
+  migrate-post.sh: |-
+{{ .Files.Get "files/migrate-post.sh" | indent 4 }}

@@ -56,6 +56,20 @@ type (
 		// keeps the controller alive to clear the finalizers and recreates any missing
 		// resources, so the release converges without stranding.
 		RepairViaUpgradeOnly bool
+		// TakeOwnership adopts pre-existing live objects that this release does not own
+		// yet, instead of failing the action on them.
+		//
+		// Helm refuses to install or upgrade over an object whose ownership metadata does
+		// not name this release, aborting with "invalid ownership metadata". That check runs
+		// before any pre-install/pre-upgrade hook, so a hook can never repair it. With this
+		// set, Helm skips the check and rewrites the ownership metadata of every matching
+		// live object as part of the apply, transferring an object that another release
+		// created into this one.
+		//
+		// Adoption matches on name, namespace and kind only, so it cannot tell a former
+		// release's object from one a user created by hand. Set it only for a migration
+		// whose previous owner has been positively identified, never unconditionally.
+		TakeOwnership bool
 	}
 
 	ChartValues interface {
@@ -112,6 +126,30 @@ func (ch Chart) GetValues(ctx context.Context) (map[string]any, error) {
 		return nil, nil
 	}
 	return ch.Values.GetValues(ctx)
+}
+
+// configureInstall applies the chart-declared options to the given install action.
+//
+// Only the options the Chart declares are set; the caller still owns the action's
+// release name, namespace, timeout and atomicity.
+func (ch Chart) configureInstall(i *helmaction.Install) {
+	// SkipCRDs is the flag that gates installing a chart's crds/ directory; IncludeCRDs only
+	// renders those files into the manifest as well, which is a different thing entirely. Setting
+	// the latter makes Helm install every crds/ CRD twice over: once in its CRD phase, which
+	// creates them with no ownership metadata, and once as a release resource, whose ownership
+	// check then rejects the very objects that phase just created. Leaving IncludeCRDs false keeps
+	// the CRD phase the only installer, and it already tolerates a CRD that exists — which is what
+	// lets a cluster keep the copy its own operator installed.
+	i.SkipCRDs = ch.SkippedCRDsInstallation
+	i.TakeOwnership = ch.TakeOwnership
+}
+
+// configureUpgrade applies the chart-declared options to the given upgrade action.
+//
+// Only the options the Chart declares are set; the caller still owns the action's
+// timeout, atomicity and force/recreate policy.
+func (ch Chart) configureUpgrade(u *helmaction.Upgrade) {
+	u.TakeOwnership = ch.TakeOwnership
 }
 
 type StaticValues map[string]any

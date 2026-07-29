@@ -270,6 +270,7 @@ func (c *Client) InstallWith(
 			u.Atomic = true
 			u.Recreate = true
 			u.Force = true
+			chart.configureUpgrade(u)
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm upgrade: load chart: %w", err)
@@ -306,7 +307,7 @@ func (c *Client) InstallWith(
 			i.ReleaseName = chart.Release
 			i.Namespace = namespace
 			i.Atomic = true
-			i.IncludeCRDs = !chart.SkippedCRDsInstallation
+			chart.configureInstall(i)
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm install: load chart: %w", err)

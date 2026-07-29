@@ -1,0 +1,61 @@
+{{- /*
+  Pre-install / pre-upgrade hook Job: reap a stranded Kueue, and on an upgrade apply the vendored
+  subcharts' crds/ (Helm applies those on install only). It runs the operator image, which bundles
+  kubectl, helm and the packaged chart itself.
+
+  It runs on install too, not just on upgrade. A first install onto a cluster whose previous Kueue
+  was torn down mid-flight fails on its Terminating CRDs, forever and with no way forward, and
+  that reap is the only thing that clears it — the same rescue the worker used to carry in Go.
+  The script reports having had nothing to do, which is the normal case.
+
+  Weight -10: after the RBAC and the script ConfigMap at -11, before the release's own objects.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-migrate-pre
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.commonLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "gpustack-operator.fullname" . }}-migrate
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "gpustack-operator.image" (dict "root" . "overrides" .Values.migrate.image) | quote }}
+          imagePullPolicy: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.migrate.image) }}
+          command: ["/usr/bin/env", "bash", "/scripts/migrate-pre.sh"]
+          env:
+            - name: GPUSTACK_NAMESPACE
+              value: {{ include "gpustack-operator.namespace" . | quote }}
+            - name: GPUSTACK_RELEASE
+              value: {{ .Release.Name | quote }}
+            - name: GPUSTACK_PHASE
+              value: {{ if .Release.IsUpgrade }}upgrade{{ else }}install{{ end }}
+            - name: GPUSTACK_CHART_VERSION
+              value: {{ .Chart.Version | quote }}
+          volumeMounts:
+            - name: migrate-scripts
+              mountPath: /scripts
+      volumes:
+        - name: migrate-scripts
+          configMap:
+            name: {{ include "gpustack-operator.fullname" . }}-migrate
+            defaultMode: 0755

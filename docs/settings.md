@@ -72,16 +72,18 @@ on the Worker Deployment propagates to the DMs automatically.
 |----------|---------|-----------|--------|
 | `GPUSTACK_DATA_DIR` | `/var/lib/gpustack` | all | Root directory for data storage. |
 | `GPUSTACK_CONF_DIR` | `/etc/gpustack` | all | Root directory for configuration and metadata, e.g. bundled Helm charts. |
-| `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | WK + DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Read in two places with identical parsing: the WK injects it into the NFD chart's `deviceClassWhitelist` and the acceleratable-detection NodeFeatureRule, and the DM applies it to its local sysfs PCI scan. |
+| `GPUSTACK_PCI_CLASS_PREFIXES` | `02,03,0b,12` | DM | Comma-separated PCI class prefixes treated as display/accelerator devices (see the [PCI class registry](https://admin.pci-ids.ucw.cz/read/PD)). Applied to the DM's local sysfs PCI scan, and to nothing else. The same list appears twice more, and neither reads this variable: the chart value `node-feature-discovery.worker.config.sources.pci.deviceClassWhitelist` decides which classes NFD labels, and `pkg/nodefeature` is what the `gpustack-cpu-info` NodeFeatureRule matches (a Go test holds those two equal). Change one and change all three. |
 | `GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY` | `false` | DM | When `true`, the devices group ID gains a memory-size suffix (e.g. `nvidia-tesla-t4-16g` instead of `nvidia-tesla-t4`), so same-model devices with different VRAM sizes form distinct groups. |
 
 ### Per-Manufacturer Overrides
 
 Three override patterns are expanded for every known manufacturer (`amd`, `ascend`, `cambricon`, `hygon`, `iluvatar`, `metax`, `mthreads`, `nvidia`, `thead`). They are read by both the WK and the DM, so the WK-to-DM propagation described above keeps the two sides consistent.
 
+**When installed by the chart, set the `global.manufacturers` row instead of any of these variables.** Each of the four overrides in this section is a field of that row (`pciVendorID`, `resourceName`, `runtimeName`, `partitionKind`), and the chart fans every stated field out as the matching variable to the worker *and* to the device-managers. It also derives things a variable cannot reach: the DaemonSet node selectors, the RuntimeClasses it creates, and Kueue's credits mapping. Setting the variable alone therefore leaves those on the old value, and the chart's next render overwrites the variable itself.
+
 - `GPUSTACK_${MANUFACTURER}_PCI_VENDOR_ID` — overrides the PCI vendor ID used for NFD node selection and device scanning. Accepts either `${vendor}` or `${class}_${vendor}`.
 - `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RESOURCE_NAME` — overrides the extended resource name the scheduling chain allocates against.
-- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — overrides the container runtime class name used for accelerated workloads.
+- `GPUSTACK_${MANUFACTURER}_ACCELERATABLE_RUNTIME_NAME` — overrides the container runtime class name used for accelerated workloads. A RuntimeClass of that name is attached to a workload only when one exists in the cluster; the chart creates it for the six manufacturers whose container runtime registers a handler by that name (see `global.manufacturers`), and never for `hygon` or `metax`, whose defaults below are honored only if something else created the class.
 
 Defaults:
 

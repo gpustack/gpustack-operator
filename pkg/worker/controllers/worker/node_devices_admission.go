@@ -32,7 +32,7 @@ import (
 
 const (
 	// _NodeDevicesControllerName is the AdmissionCheck controllerName this operator
-	// claims; installKueue applies an AdmissionCheck object carrying it.
+	// claims; the worker's Prepare() applies an AdmissionCheck object carrying it.
 	_NodeDevicesControllerName = "worker.gpustack.ai/node-devices"
 	// _NodeDevicesAdmissionCheckName is the name of that AdmissionCheck object, the
 	// reference InstanceTypeReconciler adds to accelerated ClusterQueues.

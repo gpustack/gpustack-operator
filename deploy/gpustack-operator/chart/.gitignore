@@ -1,5 +1,6 @@
-# Transient dependency artifacts fetched by `helm dependency update`.
-# Exact versions are pinned in Chart.yaml, so these are rebuilt in CI and at
-# package time rather than committed.
+# The dependencies themselves are vendored unpacked and patched into "charts/" by
+# `make deps` and are committed, so that a bare clone renders offline. Only their
+# transient byproducts are ignored: the archives and the lock file a
+# `helm dependency build` writes, whose versions are pinned in Chart.yaml anyway.
 charts/*.tgz
 Chart.lock

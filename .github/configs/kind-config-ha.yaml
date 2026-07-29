@@ -1,0 +1,32 @@
+# Static 3-node config for the F7 HA acceptance criteria (control-plane HA e2e). Unlike
+# kind-config.yaml.tmpl, this file needs no substitution — hand it straight to kind:
+#
+#   kind create cluster --name gpustack-ha --config .github/configs/kind-config-ha.yaml
+#
+# Three schedulable nodes are required: a `DoNotSchedule` topology spread over three
+# worker/Kueue replicas needs one node per replica, and the control-plane's default
+# NoSchedule taint is removed so it counts as the third spread target instead of leaving
+# only two schedulable workers.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.35.5
+    kubeadmConfigPatches:
+      - |
+        kind: ClusterConfiguration
+        apiServer:
+          extraArgs:
+            enable-aggregator-routing: "true"
+          certSANs:
+            - "127.0.0.1"
+            - "internal.docker.host"
+            - "host.docker.internal"
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          taints: []
+  - role: worker
+    image: kindest/node:v1.35.5
+  - role: worker
+    image: kindest/node:v1.35.5

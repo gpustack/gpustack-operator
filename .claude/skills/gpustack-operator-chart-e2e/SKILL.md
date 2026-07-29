@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-chart-e2e
-description: "Verify the GPUStack Operator **Helm chart** end to end on a reachable local cluster (k3s / docker-desktop): build & load the dev image, `helm install` the chart, assert the worker/device-manager roll out, the versions are consistent (image tag ↔ bundled chart tgz ↔ `gpustack-operator --version`), then `helm uninstall` and assert zero leftovers. SCOPE: this validates the **chart contract** — chart changes, install/startup, image build, and version consistency — and is **NOT a feature/behavioral e2e**; for deep scheduling-chain behavior use `gpustack-operator-e2e` instead. Proactively offer this when a branch ahead of main changes the chart, the in-cluster app-installation code, or the image build. Examples: \"verify the chart installs and uninstalls cleanly\", \"does helm install of the operator work\", \"check the chart version is right\", \"test my chart change end to end\", \"did my kuberess change break the runtime install\"."
+description: "Verify the GPUStack Operator **Helm chart** end to end on a reachable local cluster (k3s / docker-desktop): build & load the dev image, `helm install` the chart, assert the worker/device-manager roll out, the versions are consistent (image tag ↔ bundled chart tgz ↔ `gpustack-operator --version`), then `helm uninstall` and assert zero leftovers. Also covers control-plane HA failover, the one-time `--take-ownership` adoption upgrade an older install needs, and image mode (the worker installing the chart bundled in its own image). SCOPE: this validates the **chart contract** — chart changes, install/startup, image build, and version consistency — and is **NOT a feature/behavioral e2e**; for deep scheduling-chain behavior use `gpustack-operator-e2e` instead. Proactively offer this when a branch ahead of main changes the chart, the in-cluster app-installation code, or the image build. Examples: \"verify the chart installs and uninstalls cleanly\", \"does helm install of the operator work\", \"check the chart version is right\", \"test my chart change end to end\", \"did my kuberess change break the runtime install\"."
 allowed-tools: "Read, Agent, Bash(bash .claude/skills/_e2e-lib/scripts/preflight.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/assert-core.sh*), Bash(bash .claude/skills/_e2e-lib/scripts/kube-context.sh*), Bash(bash .claude/skills/gpustack-operator-chart-e2e/cases/case-1.sh*), Bash(kubectl get*), Bash(kubectl describe*), Bash(kubectl logs*), Bash(kubectl cluster-info*), Bash(kubectl version*), Bash(kubectl config current-context), Bash(helm status*), Bash(helm list*), Bash(helm template*), Bash(helm lint*), Bash(git diff*), Bash(git rev-parse*), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*)"
 model: sonnet
 ---
@@ -21,7 +21,7 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 - **Pin the run to a user-confirmed context** — `preflight.sh` shows the active one; proceed only after the user confirms the intended local cluster. Never switch on your own judgement. When the confirmed cluster is **not** the active context, do not switch: take its isolated kubeconfig with `bash ../_e2e-lib/scripts/kube-context.sh <ctx>` and prefix every command of the run with the `KUBECONFIG=<path>` it prints (details in `../_e2e-lib/references/orchestration.md`). On the user's explicit say-so you may switch instead — then record the context to return to as an outstanding environment mutation and restore it in Phase 8.
 - **Build locally, never push** — `build-load.sh` keeps `PACKAGE_PUSH=false`.
 - **Touch only what this run creates** — the Helm release + its cleanup. Never modify or delete the user's pre-existing resources.
-- **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, CASE 2, CASE 3); read-only steps (`preflight.sh`, CASE 1) run unprompted.
+- **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, CASE 2, CASE 3, CASE 4, CASE 5, CASE 6); read-only steps (`preflight.sh`, CASE 1) run unprompted.
 - **Specialists are read-only** — the lead is the sole writer.
 
 **Layout:**
@@ -36,6 +36,15 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 | 1 | Install + version consistency | always (mandatory) | `cases/case-1.sh` | no |
 | 2 | Uninstall leaves zero leftovers | `deploy/gpustack-operator/chart/**`, `pkg/worker/kuberess/**` | `cases/case-2.sh` | yes (confirm) |
 | 3 | Release version survives a warm build cache | `pack/gpustack-operator/Dockerfile`, `hack/package.sh` (optional) | `cases/case-3.sh` | yes (confirm) |
+| 4 | The control plane survives losing its leader | `deploy/gpustack-operator/chart/values.yaml`, `deploy/gpustack-operator/chart/templates/worker/**`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-4.sh` | yes (confirm) |
+| 5 | Adopting another release's objects needs `--take-ownership` | `deploy/gpustack-operator/chart/templates/migrate/**`, `deploy/gpustack-operator/chart/files/migrate-*.sh`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-5.sh` | yes (confirm) |
+| 6 | Image mode: the worker installs the bundled chart itself | `pkg/worker/kuberess/**`, `pack/gpustack-operator/Dockerfile` | `cases/case-6.sh` | yes (confirm) |
+
+**CASE 6 needs a cluster with no chart release** — the two install modes are exclusive, because both
+renders carry the cluster-scoped `gpustack-cpu-info` NodeFeatureRule and Helm refuses the second
+render on ownership metadata. Run it in Phase 4 **before** the Phase 3 install, or after CASE 2's
+teardown in Phase 8. CASE 4 and CASE 5 both upgrade the release and restore the captured values on
+exit, so they run against the Phase 3 install, one at a time.
 
 ## Case header contract
 
@@ -84,7 +93,7 @@ bash .claude/skills/_e2e-lib/scripts/build-load.sh "$TAG"   2>&1 | tee "$RPT"/ra
 bash .claude/skills/_e2e-lib/scripts/deploy.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/raw/02-deploy.txt
 ```
 
-- To exercise the **device-manager runtime install** (the version-critical path — see `references/version-contract.md`), add `--set deviceManager.enabled=false`.
+- The chart deploys everything in **one release** — the worker, the device-managers, and Kueue / NFD / the two CSI drivers as subcharts. `--set deviceManager.enabled=false` now only means "render no device-manager DaemonSets"; the worker installs nothing at runtime. The **version-critical path** (see `references/version-contract.md`) is CASE 6's image mode, not a flag on this install.
 - To exercise the gated post-delete hook in-cluster, add `--set cleanupOnUninstall=true`.
 
 **Phase 4 — Execute + analyze.** CASE 1 read-only (no prompt); pass the built `$TAG` so it also checks the deployed image tag. Optional CASE 3 (confirm) reproduces the version/warm-cache path — run it after the Phase 3 build so the cache is warm. Per the rendezvous rule, fan out specialists on each case's snapshot before the next mutating step.
@@ -93,6 +102,16 @@ bash .claude/skills/_e2e-lib/scripts/deploy.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/ra
 bash .claude/skills/gpustack-operator-chart-e2e/cases/case-1.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/raw/10-case1.txt   # mandatory, read-only
 # optional, warm-cache (confirm):
 bash .claude/skills/gpustack-operator-chart-e2e/cases/case-3.sh              2>&1 | tee "$RPT"/raw/11-case3.txt
+# HA and adoption, one at a time (confirm each) — both upgrade the release and restore it on exit:
+bash .claude/skills/gpustack-operator-chart-e2e/cases/case-4.sh "$NS" 2      2>&1 | tee "$RPT"/raw/12-case4.txt
+bash .claude/skills/gpustack-operator-chart-e2e/cases/case-5.sh "$NS"        2>&1 | tee "$RPT"/raw/13-case5.txt
+```
+
+CASE 6 (image mode) is the one case that cannot share the cluster with the Phase 3 install — run it
+either before Phase 3 or after Phase 8's teardown (confirm), and it cleans up after itself:
+
+```bash
+bash .claude/skills/gpustack-operator-chart-e2e/cases/case-6.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/raw/14-case6.txt
 ```
 
 Read the PASS/FAIL table; do not re-derive from raw output.
@@ -109,7 +128,7 @@ Read the PASS/FAIL table; do not re-derive from raw output.
 bash .claude/skills/gpustack-operator-chart-e2e/cases/case-2.sh gpustack-system 2>&1 | tee "$RPT"/raw/90-case2-teardown.txt
 ```
 
-`teardown.sh` removes the operator release + worker-installed Kueue/NFD/CSI sub-releases, their CRDs/finalizers, and the runtime APIServices/webhooks. The `gpustack-system` namespace is kept on purpose. Never delete the user's pre-existing resources.
+`teardown.sh` removes the operator release — which now takes Kueue / NFD / the CSI drivers with it, since they are subcharts of it — plus the releases it does not own (the worker's own image-mode release, and the pre-subchart per-application ones), their CRDs/finalizers, the APIServices/webhooks, and anything a failed migration hook left behind. The `gpustack-system` namespace is kept on purpose. Never delete the user's pre-existing resources.
 
 ## References
 

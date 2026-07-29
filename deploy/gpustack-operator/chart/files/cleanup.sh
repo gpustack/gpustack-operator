@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 #
-# Remove the cluster-scoped, runtime-installed leftovers that `helm uninstall
-# gpustack-operator` does NOT clean up by itself:
-#   - the Helm releases the worker installs at runtime (Kueue, Node Feature
-#     Discovery, the CSI drivers) — each a separate release;
+# Remove the leftovers that `helm uninstall gpustack-operator` does NOT clean up by
+# itself:
+#   - the releases installed outside the operator chart — the one the worker installs
+#     from inside its own image, and the per-application releases earlier versions
+#     installed before Kueue / Node Feature Discovery / the CSI drivers became
+#     subcharts of the operator chart (a compatibility pass: a chart-mode uninstall
+#     has already taken those workloads down with the release);
 #   - the CRDs those releases and the worker install (kueue / nfd / gpustack);
 #   - the finalizers that pin objects once their controllers are gone
 #     (Kueue's `kueue.x-k8s.io/resource-in-use`, the operator's
 #     `gpustack.ai/controlled` on Instances AND InstanceTypes);
-#   - the aggregated APIServices and admission webhooks the worker registers.
+#   - the aggregated APIServices and admission webhooks the worker registers;
+#   - the objects a failed migration hook leaves behind, including a cluster-admin
+#     ClusterRoleBinding.
 #
 # Used in two places, both reusing this one file as the single source of truth:
 #   - the gpustack-operator-e2e / gpustack-operator-chart-e2e skills run it on the
@@ -23,10 +28,11 @@ set -uo pipefail
 NS="${1:-${GPUSTACK_NAMESPACE:-gpustack-system}}"
 echo "[cleanup] namespace=${NS}"
 
-# 1. Uninstall the Helm releases the worker installed at runtime. This includes the device-manager,
-#    which the worker installs as its own release (gpustack-operator-device-manager) from the bundled
-#    operator chart when deviceManager.enabled=false; it is absent when the chart rendered the
-#    device-manager directly, and the helm status guard simply skips it then.
+# 1. Uninstall the releases the operator chart does not own. gpustack-operator-device-manager is
+#    the release the worker installs from the chart bundled into its own image (image mode, and the
+#    device-manager-only install earlier versions did); the four gpustack-<application> names are
+#    the pre-subchart per-application releases. Any of them may be absent — the helm status guard
+#    skips those — and after a chart-mode uninstall all of them usually are.
 if command -v helm >/dev/null 2>&1; then
   for r in gpustack-operator-device-manager gpustack-csi-driver-nfs gpustack-csi-driver-s3 gpustack-node-feature-discovery gpustack-kueue; do
     if helm status "${r}" -n "${NS}" >/dev/null 2>&1; then
@@ -37,18 +43,23 @@ if command -v helm >/dev/null 2>&1; then
   done
 fi
 
-# 2. Delete the aggregated APIServices and admission webhooks the worker registered at runtime,
-#    BEFORE stripping finalizers or deleting CRDs. Once the worker is gone their backing Service
-#    is unreachable, so a finalizer-clearing patch (an update) would be rejected by the still-
-#    registered validating webhook (failurePolicy: Fail) and hang; and leaving the aggregated
+# 2. Delete the aggregated APIServices and admission webhooks these releases registered, BEFORE
+#    stripping finalizers or deleting CRDs. Once the workloads are gone their backing Services are
+#    unreachable, so a finalizer-clearing patch (an update) would be rejected by a still-registered
+#    validating webhook (failurePolicy: Fail) and hang; and leaving the aggregated
 #    worker.gpustack.ai/v1 proxy registered makes an unversioned `kubectl get instancetypes`
 #    resolve to it and fail, silently skipping the strip below.
-for a in v1.gpustack.ai v1.worker.gpustack.ai; do
-  kubectl delete apiservice "${a}" --ignore-not-found 2>/dev/null || true
+#
+#    Matched by name pattern rather than an explicit list, which is what reaches Kueue's
+#    *.visibility.kueue.x-k8s.io APIService and its kueue-* webhook configurations whatever
+#    version they carry. Kueue's and NFD's objects are in scope for the same reason their CRDs are
+#    below: this script assumes the release it follows exclusively owned them.
+gpustack_pattern='gpustack|kueue|nfd'
+for r in apiservice mutatingwebhookconfigurations validatingwebhookconfigurations; do
+  kubectl get "${r}" -o name 2>/dev/null \
+    | grep -Ei "${gpustack_pattern}" \
+    | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 done
-kubectl get mutatingwebhookconfigurations,validatingwebhookconfigurations -o name 2>/dev/null \
-  | grep -i gpustack \
-  | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 
 # 3. Strip the finalizers that pin objects once their controllers are gone. Kueue pins
 #    workloads/flavors/queues/checks with kueue.x-k8s.io/resource-in-use and the operator pins
@@ -89,11 +100,28 @@ done
 #    Secret is named "<worker-fullname>-cert", release-dependent via the chart fullname; the post-delete
 #    hook passes the resolved name as $2, falling back to the conventional gpustack-operator-worker-cert.
 #    Neither Secret is helm-owned (cert-manager and the worker create them), so `helm uninstall` leaves
-#    them behind. Delete by exact name, never a label sweep, so a co-located standalone GPUStack app's
+#    them behind. Kueue's three are on the list for the same reason and carry fixed names, the subchart
+#    being pinned to a "kueue" prefix; they exist only where cert-manager issued them, since a
+#    self-managing Kueue has Helm own the one Secret and `helm uninstall` already took it.
+#    Delete by exact name, never a label sweep, so a co-located standalone GPUStack app's
 #    own Secrets are untouched.
 worker_cert_secret="${2:-gpustack-operator-worker-cert}"
-for s in "${worker_cert_secret}" gpustack-settings; do
+for s in "${worker_cert_secret}" gpustack-settings \
+  kueue-webhook-server-cert kueue-metrics-server-cert kueue-visibility-server-cert; do
   kubectl -n "${NS}" delete secret "${s}" --ignore-not-found 2>/dev/null || true
 done
+
+# 6. Delete what a FAILED migration hook leaves behind. Helm removes its hook objects once they
+#    succeed, but not when they fail — deliberately, so the logs survive — and among them is a
+#    ClusterRoleBinding to cluster-admin. Selected by our own label and then by name, so this
+#    never touches the cleanup hook's own ServiceAccount and binding, which it is running as.
+for r in jobs configmaps serviceaccounts; do
+  kubectl -n "${NS}" get "${r}" -l app.kubernetes.io/part-of=gpustack-operator -o name 2>/dev/null \
+    | grep -E 'migrate' \
+    | xargs -r -I{} kubectl -n "${NS}" delete {} --ignore-not-found 2>/dev/null || true
+done
+kubectl get clusterrolebindings -l app.kubernetes.io/part-of=gpustack-operator -o name 2>/dev/null \
+  | grep -E 'migrate' \
+  | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 
 echo "[cleanup] done"

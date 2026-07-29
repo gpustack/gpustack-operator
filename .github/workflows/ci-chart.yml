@@ -22,7 +22,8 @@ on:
     paths:
       - "deploy/gpustack-operator/chart/**"
       - ".github/workflows/ci-chart.yml"
-      - ".github/configs/kind-config.yaml.tmpl"
+      - ".github/configs/**"
+      - "hack/**"
   pull_request:
     branches:
       - "main"
@@ -30,7 +31,8 @@ on:
     paths:
       - "deploy/gpustack-operator/chart/**"
       - ".github/workflows/ci-chart.yml"
-      - ".github/configs/kind-config.yaml.tmpl"
+      - ".github/configs/**"
+      - "hack/**"
 
 jobs:
   lint-test:
@@ -75,8 +77,7 @@ jobs:
         env:
           NODE_IMAGE: ${{ matrix.node-image }}
         run: |
-          sed "s#__NODE_IMAGE__#${NODE_IMAGE}#g" \
-            .github/configs/kind-config.yaml.tmpl > "${RUNNER_TEMP}/kind-config.yaml"
+          .github/configs/render-kind-config.sh "${NODE_IMAGE}" "${RUNNER_TEMP}/kind-config.yaml"
           echo "::group::generated kind-config.yaml (${NODE_IMAGE})"
           cat "${RUNNER_TEMP}/kind-config.yaml"
           echo "::endgroup::"
@@ -103,12 +104,40 @@ jobs:
           fi
       - name: Lint
         run: make lint chart
-      # NB(thxCode): the worker installs Node Feature Discovery, Kueue and the CSI
-      # drivers at runtime in this phase, so the test needs network egress and the
-      # released operator image; the device-manager DaemonSets stay at 0 desired
-      # on the GPU-less kind nodes.
+      # NB(thxCode): the chart deploys Node Feature Discovery, Kueue and the CSI drivers
+      # itself, and ci/smoke-values.yaml pins the operator to the published ":dev" image, so
+      # this phase needs network egress for all of those; the device-manager DaemonSets stay
+      # at 0 desired on the GPU-less kind nodes. chart-testing installs into a namespace it
+      # generates, which is also what proves the chart names no namespace of its own.
       - name: Test
         run: make test chart
+      # Vendoring lives in "make deps" only — "make generate chart" / "make lint chart" /
+      # "make test chart" no longer re-vendor, and the trees are already committed, so
+      # nothing else in this job would ever materialize a stale pin. Run it here so the
+      # assertion below actually re-derives "charts/" instead of just re-reading whatever
+      # was checked out — without this step a version bump committed without its
+      # re-vendored tree would read as clean.
+      - name: Vendor Charts
+        run: make deps
+      - name: Verify Vendored Charts
+        run: |
+          # Assert the re-vendor above didn't drift from the committed, patched trees,
+          # and that "make lint chart" / "make test chart" didn't write their own
+          # dependency archives back into "charts/" (which "helm dependency update"
+          # would, but the vendored trees must not).
+          changed="$(git status --porcelain -- deploy/gpustack-operator/chart/charts)"
+          if [[ -n "${changed}" ]]; then
+            echo "::error::vendored charts drifted from the committed tree; run 'make deps' and commit the result"
+            git --no-pager diff -- deploy/gpustack-operator/chart/charts
+            git --no-pager status --porcelain -- deploy/gpustack-operator/chart/charts
+            exit 1
+          fi
+          tgz="$(find deploy/gpustack-operator/chart/charts -name '*.tgz')"
+          if [[ -n "${tgz}" ]]; then
+            echo "::error::unexpected chart archive(s) left under charts/:"
+            echo "${tgz}"
+            exit 1
+          fi
 
   pack:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}

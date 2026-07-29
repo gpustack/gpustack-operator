@@ -19,11 +19,499 @@
       "title": "commonLabels",
       "type": "object"
     },
+    "csi-driver-nfs": {
+      "description": "[csi-driver-nfs](https://github.com/kubernetes-csi/csi-driver-nfs) subchart (chart\n4.13.4).",
+      "properties": {
+        "controller": {
+          "properties": {
+            "affinity": {
+              "description": "Affinity of the NFS controller pods. Honoured only when it carries `nodeSelectorTerms`\n(see `replicas` above), which makes it a node-placement knob and nothing else.",
+              "required": [],
+              "title": "affinity",
+              "type": "object"
+            },
+            "dnsPolicy": {
+              "default": "ClusterFirstWithHostNet",
+              "description": "DNS policy of the NFS controller pods.",
+              "enum": [
+                "Default",
+                "ClusterFirst",
+                "ClusterFirstWithHostNet"
+              ],
+              "required": [],
+              "title": "dnsPolicy"
+            },
+            "name": {
+              "default": "csi-nfs-controller",
+              "description": "Name of the NFS controller Deployment and of the pods it owns.",
+              "title": "name",
+              "type": "string"
+            },
+            "nodeSelector": {
+              "description": "Node selector of the NFS controller pods.",
+              "required": [],
+              "title": "nodeSelector",
+              "type": "object"
+            },
+            "priorityClassName": {
+              "default": "system-cluster-critical",
+              "description": "Priority class of the NFS controller pods. `system-cluster-critical` keeps provisioning\nworking while a node is under pressure.",
+              "title": "priorityClassName",
+              "type": "string"
+            },
+            "replicas": {
+              "default": 1,
+              "description": "Number of NFS controller (provisioner) replicas. Every sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning, resizing and snapshotting; volumes already mounted keep working, because the\nmounting side is the node DaemonSet. This chart renders neither a PodDisruptionBudget nor\ntopology spread constraints for the controller, and it honours `controller.affinity` only\nwhen that affinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped —\nso replicas may share a node.",
+              "title": "replicas",
+              "type": "integer"
+            },
+            "strategyType": {
+              "default": "Recreate",
+              "description": "Deployment strategy of the NFS controller. The chart's `Recreate` takes every replica down\nbefore starting the new one, which gives up the failover `replicas` above just bought; set\n`RollingUpdate` alongside it.",
+              "enum": [
+                "Recreate",
+                "RollingUpdate"
+              ],
+              "required": [],
+              "title": "strategyType"
+            },
+            "tolerations": {
+              "description": "Tolerations of the NFS controller pods. The defaults let the provisioner run on\ncontrol-plane nodes.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "controller",
+          "type": "object"
+        },
+        "driver": {
+          "properties": {
+            "name": {
+              "default": "nfs.csi.gpustack.ai",
+              "description": "CSI driver name. Namespaced to gpustack so this driver coexists with a cluster's own\ncsi-driver-nfs, and matched by `kuberess.CSIProvisionerNFS`, which the worker writes into\nthe StorageClasses it provisions.",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "driver",
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Deploy the bundled NFS CSI driver.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "image": {
+          "description": "Mirrored images. `baseRepo` is joined with each leading-slash `repository`. Every tag is\nstated rather than inherited from the chart, so what this release pulls is readable here and a\nsubchart bump cannot move an image without the diff showing it. These are the tags chart\n4.13.4 ships, the driver's included, and each one is mirrored — an unmirrored tag would put\nevery install in ImagePullBackOff. The three sidecars this driver shares with `csi-driver-s3`\n(`csiProvisioner`, `livenessProbe`, `nodeDriverRegistrar`) carry the same tag on both, so a\nrelease ships one image per component rather than two versions of each. The\n`externalSnapshotter` image is absent because that component is off, and turning it on would\nneed a mirror first.",
+          "properties": {
+            "baseRepo": {
+              "default": "docker.io",
+              "title": "baseRepo",
+              "type": "string"
+            },
+            "csiProvisioner": {
+              "properties": {
+                "repository": {
+                  "default": "/gpustack/mirrored-csi-provisioner",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v6.3.0",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "csiProvisioner",
+              "type": "object"
+            },
+            "csiResizer": {
+              "properties": {
+                "repository": {
+                  "default": "/gpustack/mirrored-csi-resizer",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v2.2.0",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "csiResizer",
+              "type": "object"
+            },
+            "csiSnapshotter": {
+              "properties": {
+                "repository": {
+                  "default": "/gpustack/mirrored-csi-snapshotter",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v8.6.0",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "csiSnapshotter",
+              "type": "object"
+            },
+            "livenessProbe": {
+              "properties": {
+                "repository": {
+                  "default": "/gpustack/mirrored-csi-livenessprobe",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v2.19.0",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "livenessProbe",
+              "type": "object"
+            },
+            "nfs": {
+              "properties": {
+                "repository": {
+                  "default": "/gpustack/mirrored-csi-nfs-driver",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v4.13.4",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "nfs",
+              "type": "object"
+            },
+            "nodeDriverRegistrar": {
+              "properties": {
+                "repository": {
+                  "default": "/gpustack/mirrored-csi-node-driver-registrar",
+                  "title": "repository",
+                  "type": "string"
+                },
+                "tag": {
+                  "default": "v2.17.0",
+                  "title": "tag",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "nodeDriverRegistrar",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "image",
+          "type": "object"
+        },
+        "node": {
+          "properties": {
+            "affinity": {
+              "description": "Affinity of the NFS node pods. Rendered as given, unlike the controller's.",
+              "required": [],
+              "title": "affinity",
+              "type": "object"
+            },
+            "dnsPolicy": {
+              "default": "ClusterFirstWithHostNet",
+              "description": "DNS policy of the NFS node pods. `ClusterFirstWithHostNet` is what lets an NFS server\nnamed in the cluster's DNS resolve from a host-networked mount.",
+              "enum": [
+                "Default",
+                "ClusterFirst",
+                "ClusterFirstWithHostNet"
+              ],
+              "required": [],
+              "title": "dnsPolicy"
+            },
+            "name": {
+              "default": "csi-nfs-node",
+              "description": "Name of the NFS node DaemonSet and of the pods it owns. This is the mounting side: one\npod per node, so it has no replica count or disruption budget to configure.",
+              "title": "name",
+              "type": "string"
+            },
+            "nodeSelector": {
+              "description": "Node selector of the NFS node pods, narrowing which nodes can mount NFS volumes. The\nchart adds `kubernetes.io/os: linux` on top of whatever is set here.",
+              "required": [],
+              "title": "nodeSelector",
+              "type": "object"
+            },
+            "priorityClassName": {
+              "default": "system-cluster-critical",
+              "description": "Priority class of the NFS node pods.",
+              "title": "priorityClassName",
+              "type": "string"
+            },
+            "tolerations": {
+              "description": "Tolerations of the NFS node pods. The defaults tolerate every taint, so a volume can be\nmounted on any node the scheduler picks.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "node",
+          "type": "object"
+        },
+        "nodeDriverRegistrar": {
+          "properties": {
+            "livenessProbe": {
+              "properties": {
+                "enabled": {
+                  "default": false,
+                  "description": "Leave the node-driver-registrar's own liveness probe off; the node plugin already\nruns one on its health port.",
+                  "title": "enabled",
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "title": "livenessProbe",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "nodeDriverRegistrar",
+          "type": "object"
+        },
+        "rbac": {
+          "properties": {
+            "name": {
+              "default": "csi-nfs",
+              "description": "Prefix of the driver's ClusterRole and ClusterRoleBinding names.",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "rbac",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "csi-driver-nfs",
+      "type": "object"
+    },
+    "csi-driver-s3": {
+      "description": "[csi-driver-s3](https://github.com/thxcode/k8s-csi-s3) subchart (chart 0.43.7).",
+      "properties": {
+        "controller": {
+          "properties": {
+            "affinity": {
+              "description": "Affinity of the S3 controller pods. Honoured only when it carries `nodeSelectorTerms`\n(see `replicas` above), which makes it a node-placement knob and nothing else. This chart\nrenders no `dnsPolicy` for the controller, so there is no key for it.",
+              "required": [],
+              "title": "affinity",
+              "type": "object"
+            },
+            "name": {
+              "default": "csi-s3-controller",
+              "description": "Name of the S3 controller Deployment and of the pods it owns.",
+              "title": "name",
+              "type": "string"
+            },
+            "nodeSelector": {
+              "description": "Node selector of the S3 controller pods.",
+              "required": [],
+              "title": "nodeSelector",
+              "type": "object"
+            },
+            "priorityClassName": {
+              "default": "system-cluster-critical",
+              "description": "Priority class of the S3 controller pods. `system-cluster-critical` keeps provisioning\nworking while a node is under pressure.",
+              "title": "priorityClassName",
+              "type": "string"
+            },
+            "replicas": {
+              "default": 1,
+              "description": "Number of S3 controller (provisioner) replicas. The provisioner sidecar runs with\n`--leader-election`, so extra replicas stand by. Losing the controller delays volume\nprovisioning; volumes already mounted keep working, because the mounting side is the node\nDaemonSet. Like the NFS chart, this one renders neither a PodDisruptionBudget nor topology\nspread constraints for the controller, and it honours `controller.affinity` only when that\naffinity carries `nodeSelectorTerms` — a pod anti-affinity is silently dropped — so replicas\nmay share a node.",
+              "title": "replicas",
+              "type": "integer"
+            },
+            "strategyType": {
+              "default": "Recreate",
+              "description": "Deployment strategy of the S3 controller. The chart's `Recreate` takes every replica down\nbefore starting the new one, which gives up the failover `replicas` above just bought; set\n`RollingUpdate` alongside it.",
+              "enum": [
+                "Recreate",
+                "RollingUpdate"
+              ],
+              "required": [],
+              "title": "strategyType"
+            },
+            "tolerations": {
+              "description": "Tolerations of the S3 controller pods. The defaults let the provisioner run on\ncontrol-plane nodes.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "controller",
+          "type": "object"
+        },
+        "driver": {
+          "properties": {
+            "name": {
+              "default": "s3.csi.gpustack.ai",
+              "description": "CSI driver name. Namespaced to gpustack so this driver coexists with a cluster's own\nS3 CSI driver, and matched by `kuberess.CSIProvisionerS3`, which the worker writes into\nthe StorageClasses it provisions.",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "driver",
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Deploy the bundled S3 CSI driver.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "images": {
+          "description": "Mirrored images. This chart stores whole `registry/namespace/name:tag` references with\nno separate tag key. The three sidecars are the same images, at the same tags, that\n`csi-driver-nfs` pulls: they are shared components, and shipping one tag per component keeps\na release from carrying two versions of each. Upstream pins all three lower than the NFS\nchart does, so they follow the NFS chart rather than this one — which is what the\n`feature-gates.patch` is for: provisioner v6.3.0 has no `HonorPVReclaimPolicy` gate left to\nset, and this chart's controller still passed it.",
+          "properties": {
+            "csiProvisioner": {
+              "default": "docker.io/gpustack/mirrored-csi-provisioner:v6.3.0",
+              "title": "csiProvisioner",
+              "type": "string"
+            },
+            "livenessProbe": {
+              "default": "docker.io/gpustack/mirrored-csi-livenessprobe:v2.19.0",
+              "title": "livenessProbe",
+              "type": "string"
+            },
+            "nodeDriverRegistrar": {
+              "default": "docker.io/gpustack/mirrored-csi-node-driver-registrar:v2.17.0",
+              "title": "nodeDriverRegistrar",
+              "type": "string"
+            },
+            "s3": {
+              "default": "docker.io/gpustack/mirrored-csi-s3-driver:v0.43.7",
+              "title": "s3",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "images",
+          "type": "object"
+        },
+        "node": {
+          "properties": {
+            "affinity": {
+              "description": "Affinity of the S3 node pods. Rendered as given, unlike the controller's.",
+              "required": [],
+              "title": "affinity",
+              "type": "object"
+            },
+            "dnsPolicy": {
+              "default": "ClusterFirstWithHostNet",
+              "description": "DNS policy of the S3 node pods. `ClusterFirstWithHostNet` is what lets an in-cluster\nobject store endpoint resolve from a host-networked mount.",
+              "enum": [
+                "Default",
+                "ClusterFirst",
+                "ClusterFirstWithHostNet"
+              ],
+              "required": [],
+              "title": "dnsPolicy"
+            },
+            "name": {
+              "default": "csi-s3-node",
+              "description": "Name of the S3 node DaemonSet and of the pods it owns. This is the mounting side: one pod\nper node, so it has no replica count or disruption budget to configure.",
+              "title": "name",
+              "type": "string"
+            },
+            "nodeSelector": {
+              "description": "Node selector of the S3 node pods, narrowing which nodes can mount S3 volumes. The chart\nadds `kubernetes.io/os: linux` on top of whatever is set here.",
+              "required": [],
+              "title": "nodeSelector",
+              "type": "object"
+            },
+            "priorityClassName": {
+              "default": "system-cluster-critical",
+              "description": "Priority class of the S3 node pods.",
+              "title": "priorityClassName",
+              "type": "string"
+            },
+            "tolerations": {
+              "description": "Tolerations of the S3 node pods. The defaults tolerate every taint, so a volume can be\nmounted on any node the scheduler picks.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "node",
+          "type": "object"
+        },
+        "nodeDriverRegistrar": {
+          "properties": {
+            "livenessProbe": {
+              "properties": {
+                "enabled": {
+                  "default": false,
+                  "description": "Leave the node-driver-registrar's own liveness probe off; the node plugin already\nruns one on its health port.",
+                  "title": "enabled",
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "title": "livenessProbe",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "nodeDriverRegistrar",
+          "type": "object"
+        },
+        "rbac": {
+          "properties": {
+            "name": {
+              "default": "csi-s3",
+              "description": "Prefix of the driver's ClusterRole and ClusterRoleBinding names.",
+              "title": "name",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "rbac",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "csi-driver-s3",
+      "type": "object"
+    },
     "deviceManager": {
       "properties": {
         "createRuntimeClasses": {
           "default": true,
-          "description": "Create the nvidia/mthreads RuntimeClass objects. Disable when the cluster\nalready provides them (e.g. via the NVIDIA GPU operator).",
+          "description": "Create a RuntimeClass for every manufacturer whose `global.manufacturers` row sets\n`runtimeInjectsDriver`, where the cluster does not already have one. That is the only set\nwhose container runtime is certain to be installed — see the note on `global.manufacturers`.\nDisable when something else provides them (e.g. a vendor GPU operator).",
           "title": "createRuntimeClasses",
           "type": "boolean"
         },
@@ -69,10 +557,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "limits",
               "type": "object"
             },
@@ -89,18 +574,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "requests",
               "type": "object"
             }
           },
-          "required": [
-            "limits",
-            "requests"
-          ],
+          "required": [],
           "title": "resources",
           "type": "object"
         },
@@ -120,15 +599,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "enabled",
-        "securePort",
-        "image",
-        "createRuntimeClasses",
-        "resources",
-        "extraArgs",
-        "env"
-      ],
+      "required": [],
       "title": "deviceManager",
       "type": "object"
     },
@@ -141,11 +612,67 @@
     "global": {
       "description": "Global values shared across the chart and its subcharts.",
       "properties": {
+        "certmanager": {
+          "description": "Configure cert-manager integration for every serving certificate this release needs: the\nworker's webhook certificate and Kueue's. It lives under `global` because Kueue is a vendored\nsubchart and `global` is the only channel Helm gives a subchart to this chart's values. Each\ncomponent used to be switched on its own, so a cluster with cert-manager installed issued the\nworker's certificate through it while Kueue went on self-signing — two answers to one question,\nand the detection behind `auto` could never reach Kueue at all.",
+          "properties": {
+            "enabled": {
+              "default": "auto",
+              "description": "Whether to issue the serving certificates with cert-manager. Accepts a string (or the\nequivalent boolean): \"auto\" creates the cert-manager resources only when the cert-manager\nCRDs are detected in the cluster; \"true\" always creates them (cert-manager must be\ninstalled); \"false\" never creates them and each component generates and manages its own\ncertificate.\n\nTurning it ON later is a plain `helm upgrade`. Turning it OFF again is not: cert-manager\nowns the Secret Kueue's chart wants to template and writes CA bundles Helm never recorded,\nso `helm upgrade` refuses the Secret before it starts, and forcing past that fails\nmid-apply on the visibility APIServices. docs/migration/to-subcharts.md carries the\nsequence that does work. The same applies when cert-manager is uninstalled from a cluster\nwhile this is \"auto\", which flips the answer without anyone editing a value.",
+              "enum": [
+                "auto",
+                "true",
+                "false",
+                true,
+                false
+              ],
+              "required": [],
+              "title": "enabled",
+              "type": [
+                "string",
+                "boolean"
+              ]
+            },
+            "issuer": {
+              "properties": {
+                "kind": {
+                  "default": "Issuer",
+                  "description": "Issuer kind (\"Issuer\" or \"ClusterIssuer\"); only used when `issuer.name` is set.",
+                  "title": "kind",
+                  "type": "string"
+                },
+                "name": {
+                  "default": "",
+                  "description": "Existing issuer name to use; when empty a self-signed Issuer is created per component.",
+                  "title": "name",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "issuer",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "certmanager",
+          "type": "object"
+        },
         "imageNamespace": {
           "default": "",
-          "description": "Image namespace override applied to the operator image. When non-empty it\nreplaces the namespace segment of `image.repository` (e.g. \"gpustack\").",
+          "description": "Image namespace override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included. When non-empty it replaces the namespace\nsegment of each image reference (e.g. \"gpustack\").",
           "title": "imageNamespace",
           "type": "string"
+        },
+        "imagePullPolicy": {
+          "default": "",
+          "description": "Image pull policy applied to every workload, the subcharts' included. It outranks a\ncomponent's own pull policy; when empty, each component's own is used.",
+          "enum": [
+            "",
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "required": [],
+          "title": "imagePullPolicy"
         },
         "imagePullSecrets": {
           "description": "Image pull secrets applied to all workloads.",
@@ -157,9 +684,215 @@
         },
         "imageRegistry": {
           "default": "",
-          "description": "Image registry override applied to the operator image (e.g. \"docker.io\").\nWhen empty, the registry encoded in `image.repository` is used as-is.",
+          "description": "Image registry override applied to every image this chart renders, the subcharts'\nworkloads, sidecars and hook Jobs included (e.g. \"docker.io\"). When empty, the registry\neach image reference already encodes is used as-is.",
           "title": "imageRegistry",
           "type": "string"
+        },
+        "manufacturers": {
+          "description": "Accelerator manufacturers to manage, one row per manufacturer holding everything the\nrelease needs to know about it. `pciVendorID` is what NFD labels its devices with,\n`resourceName` what its device-plugin advertises to the kubelet, `runtimeName` the\nRuntimeClass its workloads run under, and `partitionKind` its own name for hardware\npartitioning (\"mig\" is NVIDIA's name for the concept, not the concept's). Each of those\nfour is also a `pkg/nodefeature` default overridable by a `GPUSTACK_\u003cMANUFACTURER\u003e_*`\nvariable, and this chart fans every stated one out as that variable to the worker and to\nthe device-managers — so a row here decides them rather than restating them, and a field\nleft out keeps the operator's own default. `runtimeInjectsDriver` is the exception, a\ndeployment fact no Go code holds: it marks a manufacturer whose user-space driver reaches\na container only through its container runtime, so that manufacturer's device-manager runs\nunder the RuntimeClass too. Every other vendor's device-manager reads its management\nlibrary from a hostPath mount the DaemonSet already makes.\n\n`runtimeInjectsDriver` — not `runtimeName` — is also what decides which RuntimeClasses this\nchart creates (`deviceManager.createRuntimeClasses`). The two differ on purpose:\n`runtimeName` is the class the operator will USE for a vendor, while\n`runtimeInjectsDriver` is the only case where the runtime's presence can be inferred, since\nsuch a vendor's accelerators cannot work at all unless its container toolkit registered the\nhandler. Every other vendor's device plugin needs no RuntimeClass, so the handler may well\nbe absent while its accelerators work — and creating one there would break them: the\noperator attaches a RuntimeClass to a workload whenever one exists, so the kubelet would\nreject every Pod of that vendor for a runtime nothing configured. A class the vendor's own\noperator created is still used; this chart just never conjures one.\n\nThe keys are the manufacturer list: they become the worker's `--manufacturer` flag (which\nis where the `gpustack-cpu-info` NodeFeatureRule's vendor IDs come from, since the worker\nrenders that rule itself), one device-manager DaemonSet each, and Kueue's credits mapping.\nEach DaemonSet only schedules on nodes NFD labelled with the matching PCI vendor, so\nadding a row is all it takes for a new vendor's devices to be labelled, detected and given\na device-manager, and a row no node in the cluster carries simply runs nothing.\n\nIt lives under `global` because the vendored Kueue subchart reads it too, and `global` is\nthe only channel Helm gives a subchart to this chart's values. The defaults are every\nmanufacturer `pkg/nodefeature` knows, which a Go test asserts. Narrow the list by setting a\nrow to `null` — an unwanted row is otherwise harmless (its DaemonSet schedules on no node),\nso this is about how much a release renders, not about what works.",
+          "properties": {
+            "amd": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1002",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "amd.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "amd",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "amd",
+              "type": "object"
+            },
+            "ascend": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "19e5",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "huawei.com/npu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "ascend",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "ascend",
+              "type": "object"
+            },
+            "cambricon": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "cabc",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "cambricon.com/mlu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "cambricon",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "cambricon",
+              "type": "object"
+            },
+            "hygon": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1d94",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "hygon.com/dcu",
+                  "title": "resourceName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "hygon",
+              "type": "object"
+            },
+            "iluvatar": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1e3e",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "iluvatar.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeName": {
+                  "default": "iluvatar",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "iluvatar",
+              "type": "object"
+            },
+            "metax": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "9999",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "metax-tech.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "metax",
+              "type": "object"
+            },
+            "mthreads": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1ed5",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "mthreads.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeInjectsDriver": {
+                  "default": true,
+                  "title": "runtimeInjectsDriver",
+                  "type": "boolean"
+                },
+                "runtimeName": {
+                  "default": "mthreads",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "mthreads",
+              "type": "object"
+            },
+            "nvidia": {
+              "properties": {
+                "partitionKind": {
+                  "default": "mig",
+                  "title": "partitionKind",
+                  "type": "string"
+                },
+                "pciVendorID": {
+                  "default": "10de",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "nvidia.com/gpu",
+                  "title": "resourceName",
+                  "type": "string"
+                },
+                "runtimeInjectsDriver": {
+                  "default": true,
+                  "title": "runtimeInjectsDriver",
+                  "type": "boolean"
+                },
+                "runtimeName": {
+                  "default": "nvidia",
+                  "title": "runtimeName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "nvidia",
+              "type": "object"
+            },
+            "thead": {
+              "properties": {
+                "pciVendorID": {
+                  "default": "1ded",
+                  "title": "pciVendorID",
+                  "type": "string"
+                },
+                "resourceName": {
+                  "default": "alibabacloud.com/ppu",
+                  "title": "resourceName",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "thead",
+              "type": "object"
+            }
+          },
+          "required": [],
+          "title": "manufacturers",
+          "type": "object"
         },
         "nodeSelector": {
           "description": "Node selector applied to all workloads when a component does not set its own.",
@@ -168,12 +901,7 @@
           "type": "object"
         }
       },
-      "required": [
-        "imageRegistry",
-        "imageNamespace",
-        "imagePullSecrets",
-        "nodeSelector"
-      ],
+      "required": [],
       "title": "global",
       "type": "object"
     },
@@ -204,73 +932,201 @@
           "type": "string"
         }
       },
-      "required": [
-        "repository"
-      ],
+      "required": [],
       "title": "image",
       "type": "object"
     },
-    "manufacturers": {
-      "description": "Accelerator manufacturers to manage, mapped to their PCI vendor ID. This is the\nsingle source for the worker `--manufacturer` list, the per-manufacturer device-manager\nDaemonSets, and the GPUSTACK_\u003cMANUFACTURER\u003e_PCI_VENDOR_ID environment variable propagated\nto both the worker and the device-managers. The manufacturer list is derived from these\nkeys (sorted for stable rendering); each device-manager DaemonSet only schedules on nodes\nlabelled by NFD with the matching PCI vendor.",
+    "kueue": {
+      "description": "[Kueue](https://kueue.sigs.k8s.io) subchart (chart 0.18.4).",
       "properties": {
-        "amd": {
-          "default": "1002",
-          "title": "amd",
+        "controllerManager": {
+          "properties": {
+            "manager": {
+              "properties": {
+                "image": {
+                  "properties": {
+                    "pullPolicy": {
+                      "default": "IfNotPresent",
+                      "description": "Kueue controller manager image pull policy.",
+                      "enum": [
+                        "Always",
+                        "IfNotPresent",
+                        "Never"
+                      ],
+                      "required": [],
+                      "title": "pullPolicy"
+                    },
+                    "repository": {
+                      "default": "docker.io/gpustack/mirrored-kueue",
+                      "description": "Kueue controller manager image repository.",
+                      "title": "repository",
+                      "type": "string"
+                    },
+                    "tag": {
+                      "default": "v0.18.4",
+                      "description": "Kueue controller manager image tag, stated rather than inherited so a subchart\nbump cannot move the image without the diff showing it.",
+                      "title": "tag",
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "title": "image",
+                  "type": "object"
+                },
+                "podAnnotations": {
+                  "description": "Annotations of the Kueue controller manager pods, marking them as managed by\nthe operator.",
+                  "properties": {
+                    "gpustack.ai/managed": {
+                      "default": "true",
+                      "title": "gpustack.ai/managed",
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "title": "podAnnotations",
+                  "type": "object"
+                },
+                "resources": {
+                  "description": "Resource requests and limits for the Kueue controller manager container.",
+                  "properties": {
+                    "limits": {
+                      "properties": {
+                        "cpu": {
+                          "default": "2",
+                          "title": "cpu",
+                          "type": "string"
+                        },
+                        "memory": {
+                          "default": "4Gi",
+                          "title": "memory",
+                          "type": "string"
+                        }
+                      },
+                      "required": [],
+                      "title": "limits",
+                      "type": "object"
+                    },
+                    "requests": {
+                      "properties": {
+                        "cpu": {
+                          "default": "100m",
+                          "title": "cpu",
+                          "type": "string"
+                        },
+                        "memory": {
+                          "default": "128Mi",
+                          "title": "memory",
+                          "type": "string"
+                        }
+                      },
+                      "required": [],
+                      "title": "requests",
+                      "type": "object"
+                    }
+                  },
+                  "required": [],
+                  "title": "resources",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "manager",
+              "type": "object"
+            },
+            "podDisruptionBudget": {
+              "properties": {
+                "enabled": {
+                  "default": false,
+                  "description": "Create a PodDisruptionBudget for the Kueue controller manager. Enable it together with\n`replicas` above; on a single replica it would only block node drains.",
+                  "title": "enabled",
+                  "type": "boolean"
+                },
+                "minAvailable": {
+                  "default": 1,
+                  "description": "Minimum number of Kueue controller manager pods that must stay available, as a count or\na percentage. Keep it below `replicas`, or no node can ever be drained.",
+                  "required": [],
+                  "title": "minAvailable",
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                }
+              },
+              "required": [],
+              "title": "podDisruptionBudget",
+              "type": "object"
+            },
+            "replicas": {
+              "default": 1,
+              "description": "Number of Kueue controller manager replicas. `managerConfig` below elects a leader, so\nextra replicas stand by — but every one of them serves the admission webhook, and that is\nwhat a highly available install buys: with a single replica, losing its node blocks Pod\ncreation in every namespace Kueue manages until it is rescheduled.",
+              "title": "replicas",
+              "type": "integer"
+            },
+            "tolerations": {
+              "description": "Tolerations for the Kueue controller manager. Defaults tolerate every taint, so\nthe manager keeps admitting workloads wherever the control plane runs.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            },
+            "topologySpreadConstraints": {
+              "description": "Topology spread constraints for the Kueue controller manager, rendered as given. Unlike\nthe worker's, these carry no selector of their own, so a `DoNotSchedule` spread across nodes\nneeds `labelSelector: {matchLabels: {app.kubernetes.io/name: kueue, control-plane:\ncontroller-manager}}` spelled out.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "topologySpreadConstraints",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "controllerManager",
+          "type": "object"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Deploy the bundled Kueue.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "fullnameOverride": {
+          "default": "kueue",
+          "description": "Name the Kueue resources after a fixed \"kueue\" prefix instead of the release, so\nthat this subchart and the runtime install render identical resource names.",
+          "title": "fullnameOverride",
           "type": "string"
         },
-        "ascend": {
-          "default": "19e5",
-          "title": "ascend",
-          "type": "string"
-        },
-        "cambricon": {
-          "default": "cabc",
-          "title": "cambricon",
-          "type": "string"
-        },
-        "hygon": {
-          "default": "1d94",
-          "title": "hygon",
-          "type": "string"
-        },
-        "iluvatar": {
-          "default": "1e3e",
-          "title": "iluvatar",
-          "type": "string"
-        },
-        "metax": {
-          "default": "9999",
-          "title": "metax",
-          "type": "string"
-        },
-        "mthreads": {
-          "default": "1ed5",
-          "title": "mthreads",
-          "type": "string"
-        },
-        "nvidia": {
-          "default": "10de",
-          "title": "nvidia",
-          "type": "string"
-        },
-        "thead": {
-          "default": "1ded",
-          "title": "thead",
-          "type": "string"
+        "managerConfig": {
+          "properties": {
+            "controllerManagerConfigYaml": {
+              "default": "apiVersion: config.kueue.x-k8s.io/v1beta2\nkind: Configuration\nfeatureGates:\n  AssignQueueLabelsForPods: false\n  TASBalancedPlacement: true\n  # Enables resources.quotaCheckStrategy below (alpha in Kueue 0.18). The bundled\n  # controller image is always 0.18, so the gate is always available.\n  QuotaCheckStrategy: true\nhealth:\n  healthProbeBindAddress: :8081\nmetrics:\n  bindAddress: :8443\n# enableClusterQueueResources: true\nwebhook:\n  port: 9443\nleaderElection:\n  leaderElect: true\n  resourceName: c1f6bfd2.kueue.x-k8s.io\ncontroller:\n  groupKindConcurrency:\n    Job.batch: 5\n    Pod: 5\n    Workload.kueue.x-k8s.io: 5\n    LocalQueue.kueue.x-k8s.io: 1\n    ClusterQueue.kueue.x-k8s.io: 1\n    ResourceFlavor.kueue.x-k8s.io: 1\nclientConnection:\n  qps: 50\n  burst: 100\n#pprofBindAddress: :8083\n#waitForPodsReady:\n#  timeout: 5m\n#  recoveryTimeout: 3m\n#  blockAdmission: false\n#  requeuingStrategy:\n#    timestamp: Eviction\n#    backoffLimitCount: null # null indicates infinite requeuing\n#    backoffBaseSeconds: 60\n#    backoffMaxSeconds: 3600\n#manageJobsWithoutQueueName: true\n# The namespaces Kueue manages jobs in. Deliberately unset: the chart renders the\n# default as every namespace but kube-system and this release's own, which is what\n# lets the release install into any namespace — Kueue refuses to start when this\n# selector matches the namespace it runs in, and a subchart value cannot be\n# templated. State it to take the default over, and own that rule.\n#managedJobsNamespaceSelector:\n#  matchExpressions:\n#    - key: kubernetes.io/metadata.name\n#      operator: NotIn\n#      values: [ kube-system, gpustack-system ]\nintegrations:\n  frameworks:\n  - \"batch/job\"\n  - \"kubeflow.org/mpijob\"\n  - \"ray.io/rayjob\"\n  - \"ray.io/raycluster\"\n  - \"jobset.x-k8s.io/jobset\"\n  - \"trainer.kubeflow.org/trainjob\"\n  - \"kubeflow.org/paddlejob\"\n  - \"kubeflow.org/pytorchjob\"\n  - \"kubeflow.org/tfjob\"\n  - \"kubeflow.org/xgboostjob\"\n  - \"kubeflow.org/jaxjob\"\n  - \"workload.codeflare.dev/appwrapper\"\n  - \"pod\"\n  - \"deployment\"\n  - \"statefulset\"\n  - \"leaderworkerset.x-k8s.io/leaderworkerset\"\n#  externalFrameworks:\n#  - \"Foo.v1.example.com\"\n#fairSharing:\n#  preemptionStrategies: [LessThanOrEqualToFinalShare, LessThanInitialShare]\n#admissionFairSharing:\n#  usageHalfLifeTime: \"168h\" # 7 days\n#  usageSamplingInterval: \"5m\"\n#  resourceWeights: # optional, defaults to 1 for all resources if not specified\n#    cpu: 0    # if you want to completely ignore cpu usage\n#    memory: 0 # ignore completely memory usage\n#    example.com/gpu: 100 # and you care only about GPUs usage\nresources:\n  # Kueue is not the authoritative ledger in this operator — the Devices CR\n  # is. A ClusterQueue advertises exactly one coarse admission dimension (cpu\n  # for general pools, the manufacturer credits for accelerated pools), while a\n  # Workload still carries the Pod resources the queue does not cover: memory\n  # and ephemeral-storage on every pool, cpu on accelerated pools, and the\n  # node-level .sliced.* counters the scheduler/kubelet read. Check only the\n  # covered dimension and ignore the rest, instead of refusing to assign a\n  # flavor for an uncovered resource (which would mark the Workload inadmissible).\n  quotaCheckStrategy: IgnoreUndeclared\n  # `resources.transformations` is absent here on purpose: the chart renders it from\n  # `global.manufacturers`, mapping every accelerator resource key onto that\n  # manufacturer's single credits resource so a queue can carry one credit budget. It\n  # is not stated in this string because a user copying the string to change one\n  # feature gate would silently drop the mapping the whole scheduling chain rests on.\n  # The `.sliced` multiplyBy leaks through unconsumed and the node-level `.sliced.*`\n  # counters pass straight through; `quotaCheckStrategy` above is what lets Kueue\n  # ignore them.\n#objectRetentionPolicies:\n#  workloads:\n#    afterFinished: null # null indicates infinite retention, 0s means no retention at all\n#    afterDeactivatedByKueue: null # null indicates infinite retention, 0s means no retention at all",
+              "description": "Kueue's controller_manager_config.yaml, delivered through the manager-config\nConfigMap. Two keys are absent on purpose and rendered by this chart instead, because\nHelm merges a subchart's values rather than templating them: `resources.transformations`,\nthe credits mapping derived from `global.manufacturers`, which a user copying this string\nmust not be able to drop silently; and `managedJobsNamespaceSelector`, whose default\nfollows the release namespace. Everything else is maintained here, and a selector stated\nhere still wins.",
+              "title": "controllerManagerConfigYaml",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "managerConfig",
+          "type": "object"
         }
       },
-      "required": [
-        "amd",
-        "ascend",
-        "cambricon",
-        "hygon",
-        "iluvatar",
-        "metax",
-        "mthreads",
-        "nvidia",
-        "thead"
-      ],
-      "title": "manufacturers",
+      "required": [],
+      "title": "kueue",
+      "type": "object"
+    },
+    "migrate": {
+      "description": "Migration hook Jobs. A pre-install/pre-upgrade Job reaps a Kueue left stranded by an\ninterrupted teardown, and on an upgrade applies the vendored subcharts' CRDs, which Helm\nitself applies on install only. A post-upgrade Job retires the release records of the\nper-application releases these subcharts replaced and prunes what they left behind. Both run\nthe operator image, which bundles kubectl, helm and this chart; `helm upgrade --no-hooks`\nskips them.",
+      "properties": {
+        "image": {
+          "description": "Per-hook image overrides (`repository`/`tag`/`pullPolicy`); unset keys fall back to the\nchart-level `image`. Overridable so an upgrade is never blocked by an operator tag that is\nnot mirrored yet — at the cost that the CRDs the hook applies are then the ones vendored by\nthe image it does run.",
+          "required": [],
+          "title": "image",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "migrate",
       "type": "object"
     },
     "nameOverride": {
@@ -285,55 +1141,461 @@
       "title": "namespaceOverride",
       "type": "string"
     },
-    "worker": {
+    "node-feature-discovery": {
+      "description": "[Node Feature Discovery](https://kubernetes-sigs.github.io/node-feature-discovery)\nsubchart (chart 0.19.0).",
       "properties": {
-        "certmanager": {
-          "description": "Configure cert-manager integration for the worker webhook serving certificate.",
+        "enabled": {
+          "default": true,
+          "description": "Deploy the bundled Node Feature Discovery.",
+          "title": "enabled",
+          "type": "boolean"
+        },
+        "fullnameOverride": {
+          "default": "node-feature-discovery",
+          "description": "Name the NFD resources after a fixed \"node-feature-discovery\" prefix instead of the\nrelease, so that this subchart and an NFD installed by anything else render identical\nresource names. Without it the two run side by side, each labelling the same nodes.",
+          "title": "fullnameOverride",
+          "type": "string"
+        },
+        "gc": {
           "properties": {
-            "enabled": {
-              "default": "auto",
-              "description": "Whether to issue the worker webhook serving certificate with cert-manager.\nAccepts a string (or the equivalent boolean): \"auto\" creates the cert-manager\nresources only when the cert-manager CRDs are detected in the cluster; \"true\"\nalways creates them (cert-manager must be installed); \"false\" never creates\nthem and the worker generates and manages its own certificate.",
-              "enum": [
-                "auto",
-                "true",
-                "false",
-                true,
-                false
-              ],
-              "required": [],
-              "title": "enabled",
-              "type": [
-                "string",
-                "boolean"
-              ]
-            },
-            "issuer": {
+            "annotations": {
+              "description": "Annotations added to the NFD gc pods.",
               "properties": {
-                "kind": {
-                  "default": "Issuer",
-                  "description": "Issuer kind (\"Issuer\" or \"ClusterIssuer\"); only used when `issuer.name` is set.",
-                  "title": "kind",
-                  "type": "string"
-                },
-                "name": {
-                  "default": "",
-                  "description": "Existing issuer name to use; when empty a self-signed Issuer is created.",
-                  "title": "name",
+                "gpustack.ai/managed": {
+                  "default": "true",
+                  "title": "gpustack.ai/managed",
                   "type": "string"
                 }
               },
-              "required": [
-                "name",
-                "kind"
-              ],
-              "title": "issuer",
+              "required": [],
+              "title": "annotations",
               "type": "object"
+            },
+            "deploymentAnnotations": {
+              "description": "Annotations added to the NFD gc Deployment.",
+              "properties": {
+                "gpustack.ai/managed": {
+                  "default": "true",
+                  "title": "gpustack.ai/managed",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "deploymentAnnotations",
+              "type": "object"
+            },
+            "serviceAccount": {
+              "properties": {
+                "annotations": {
+                  "description": "Annotations added to the NFD gc ServiceAccount.",
+                  "properties": {
+                    "gpustack.ai/managed": {
+                      "default": "true",
+                      "title": "gpustack.ai/managed",
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "title": "annotations",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "serviceAccount",
+              "type": "object"
+            },
+            "tolerations": {
+              "description": "Tolerations for the NFD gc. Defaults tolerate every taint, so stale NodeFeature and\nNodeResourceTopology objects are collected wherever the control plane runs.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
             }
           },
-          "required": [
-            "issuer"
-          ],
-          "title": "certmanager",
+          "required": [],
+          "title": "gc",
+          "type": "object"
+        },
+        "image": {
+          "properties": {
+            "repository": {
+              "default": "docker.io/gpustack/mirrored-node-feature-discovery",
+              "description": "NFD image repository; the master, the worker and the gc all run it.",
+              "title": "repository",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "title": "image",
+          "type": "object"
+        },
+        "master": {
+          "properties": {
+            "affinity": {
+              "description": "Affinity for the NFD master, and the only way to spread its replicas across nodes: NFD\nrenders no topology spread constraints. Stated here because a spread knob a user cannot find\nin this file is a knob that does not exist, and because replacing it wholesale is what\nsetting it does.\n\nIt is NFD's own default — a preference for control-plane nodes — with one deliberate change:\nthe role label is matched with `Exists` rather than `In [\"\"]`. That label's value is a\nconvention, not an API: kubeadm and kind set it empty, k3s and RKE2 set it to \"true\", so a\nvalue test silently matches nothing on those and the preference quietly stops existing.\n`Exists` is also what every other control-plane matcher in this file uses, tolerations and\nboth CSI drivers included. Being stated pins the rest of the block: re-read NFD's default\nwhen bumping the subchart, as with every image tag here.",
+              "properties": {
+                "nodeAffinity": {
+                  "properties": {
+                    "preferredDuringSchedulingIgnoredDuringExecution": {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "preference": {
+                                "properties": {
+                                  "matchExpressions": {
+                                    "items": {
+                                      "anyOf": [
+                                        {
+                                          "properties": {
+                                            "key": {
+                                              "default": "node-role.kubernetes.io/control-plane",
+                                              "title": "key",
+                                              "type": "string"
+                                            },
+                                            "operator": {
+                                              "default": "Exists",
+                                              "title": "operator",
+                                              "type": "string"
+                                            }
+                                          },
+                                          "required": [],
+                                          "type": "object"
+                                        }
+                                      ],
+                                      "required": []
+                                    },
+                                    "title": "matchExpressions",
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [],
+                                "title": "preference",
+                                "type": "object"
+                              },
+                              "weight": {
+                                "default": 1,
+                                "title": "weight",
+                                "type": "integer"
+                              }
+                            },
+                            "required": [],
+                            "type": "object"
+                          }
+                        ],
+                        "required": []
+                      },
+                      "title": "preferredDuringSchedulingIgnoredDuringExecution",
+                      "type": "array"
+                    }
+                  },
+                  "required": [],
+                  "title": "nodeAffinity",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "affinity",
+              "type": "object"
+            },
+            "annotations": {
+              "description": "Annotations added to the NFD master pods.",
+              "properties": {
+                "gpustack.ai/managed": {
+                  "default": "true",
+                  "title": "gpustack.ai/managed",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "annotations",
+              "type": "object"
+            },
+            "config": {
+              "properties": {
+                "restrictions": {
+                  "description": "What the NFD master is allowed to write. Every value here restates an NFD default,\nstated because the whole chain depends on it: labels, taints, annotations and extended\nresources all stay enabled, an existing label may be overwritten, and the labels a\nNodeFeature asks for are honoured — that last one is how a device-manager's detections\nreach its node.\n\n`nodeFeatureNamespaceSelector` is deliberately absent. Pinned to one namespace it makes\nthe master ignore every NodeFeature created anywhere else, which is exactly what taking\nover a cluster's existing NFD must not do: a vendor GPU operator keeps its NodeFeatures\nin its own namespace, and they are the features being adopted. Unset means every\nnamespace, so — together with the two permissive keys above — a NodeFeature anywhere can\ninfluence node labels; `denyNodeFeatureLabels` is the lever that tightens it.",
+                  "properties": {
+                    "allowOverwrite": {
+                      "default": true,
+                      "title": "allowOverwrite",
+                      "type": "boolean"
+                    },
+                    "denyNodeFeatureLabels": {
+                      "default": false,
+                      "title": "denyNodeFeatureLabels",
+                      "type": "boolean"
+                    },
+                    "disableAnnotations": {
+                      "default": false,
+                      "title": "disableAnnotations",
+                      "type": "boolean"
+                    },
+                    "disableExtendedResources": {
+                      "default": false,
+                      "title": "disableExtendedResources",
+                      "type": "boolean"
+                    },
+                    "disableLabels": {
+                      "default": false,
+                      "title": "disableLabels",
+                      "type": "boolean"
+                    },
+                    "disableTaints": {
+                      "default": false,
+                      "title": "disableTaints",
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [],
+                  "title": "restrictions",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "config",
+              "type": "object"
+            },
+            "deploymentAnnotations": {
+              "description": "Annotations added to the NFD master Deployment.",
+              "properties": {
+                "gpustack.ai/managed": {
+                  "default": "true",
+                  "title": "gpustack.ai/managed",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "deploymentAnnotations",
+              "type": "object"
+            },
+            "podDisruptionBudget": {
+              "properties": {
+                "enable": {
+                  "default": false,
+                  "description": "Create a PodDisruptionBudget for the NFD master. Enable it together with `replicaCount`\nabove; on a single replica it would only block node drains. NFD spells this key `enable`,\nnot `enabled`.",
+                  "title": "enable",
+                  "type": "boolean"
+                },
+                "minAvailable": {
+                  "default": 1,
+                  "description": "Minimum number of NFD master pods that must stay available, as a count or a percentage.\nKeep it below `replicaCount`, or no node can ever be drained.",
+                  "required": [],
+                  "title": "minAvailable",
+                  "type": [
+                    "integer",
+                    "string"
+                  ]
+                }
+              },
+              "required": [],
+              "title": "podDisruptionBudget",
+              "type": "object"
+            },
+            "replicaCount": {
+              "default": 1,
+              "description": "Number of NFD master replicas. The master is what turns a device-manager's detections into\nnode labels, so while it is down no node is ever (re)classified and the scheduling chain\nstalls for new or changed nodes. Above one, NFD's own chart adds `-enable-leader-election`\nfor you; the standbys watch without writing. NFD's templates render no topology spread\nconstraints, so spreading these replicas across nodes means setting `master.affinity` below —\nwhich replaces NFD's own preference for control-plane nodes rather than adding to it.",
+              "title": "replicaCount",
+              "type": "integer"
+            },
+            "serviceAccount": {
+              "properties": {
+                "annotations": {
+                  "description": "Annotations added to the NFD master ServiceAccount.",
+                  "properties": {
+                    "gpustack.ai/managed": {
+                      "default": "true",
+                      "title": "gpustack.ai/managed",
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "title": "annotations",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "serviceAccount",
+              "type": "object"
+            },
+            "tolerations": {
+              "description": "Tolerations for the NFD master. Defaults tolerate every taint, so labelling keeps\nworking wherever the control plane runs.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "master",
+          "type": "object"
+        },
+        "worker": {
+          "properties": {
+            "annotations": {
+              "description": "Annotations added to the NFD worker pods.",
+              "properties": {
+                "gpustack.ai/managed": {
+                  "default": "true",
+                  "title": "gpustack.ai/managed",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "annotations",
+              "type": "object"
+            },
+            "config": {
+              "properties": {
+                "core": {
+                  "properties": {
+                    "labelSources": {
+                      "description": "Feature sources the worker collects. `custom` is what makes the\n`gpustack-cpu-info` NodeFeatureRule the operator applies evaluate.",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ],
+                        "required": []
+                      },
+                      "title": "labelSources",
+                      "type": "array"
+                    },
+                    "labelWhiteList": {
+                      "default": "^(pci-|cpu-model\\.|acceleratable)",
+                      "description": "Only the labels this chart consumes are published, so NFD does not cover the nodes\nin features nothing reads.",
+                      "title": "labelWhiteList",
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "title": "core",
+                  "type": "object"
+                },
+                "sources": {
+                  "properties": {
+                    "pci": {
+                      "properties": {
+                        "deviceClassWhitelist": {
+                          "description": "PCI device classes to label, as class-code prefixes: display controllers,\nprocessing accelerators and the co-processors accelerators present as (see\nhttps://admin.pci-ids.ucw.cz/read/PD). The `gpustack-cpu-info` NodeFeatureRule\nmatches the same classes, so it sees exactly the devices NFD was told to label; the\noperator renders that rule from `pkg/nodefeature`, and a Go test holds the two lists\nequal. Narrowing this list without narrowing that one labels fewer devices than the\nrule expects.",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "required": []
+                          },
+                          "title": "deviceClassWhitelist",
+                          "type": "array"
+                        },
+                        "deviceLabelFields": {
+                          "description": "Device fields to label. `vendor` is what the NodeFeatureRule matches the managed\n`global.manufacturers`' PCI vendor IDs against.",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              }
+                            ],
+                            "required": []
+                          },
+                          "title": "deviceLabelFields",
+                          "type": "array"
+                        }
+                      },
+                      "required": [],
+                      "title": "pci",
+                      "type": "object"
+                    }
+                  },
+                  "required": [],
+                  "title": "sources",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "config",
+              "type": "object"
+            },
+            "daemonsetAnnotations": {
+              "description": "Annotations added to the NFD worker DaemonSet.",
+              "properties": {
+                "gpustack.ai/managed": {
+                  "default": "true",
+                  "title": "gpustack.ai/managed",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "title": "daemonsetAnnotations",
+              "type": "object"
+            },
+            "serviceAccount": {
+              "properties": {
+                "annotations": {
+                  "description": "Annotations added to the NFD worker ServiceAccount.",
+                  "properties": {
+                    "gpustack.ai/managed": {
+                      "default": "true",
+                      "title": "gpustack.ai/managed",
+                      "type": "string"
+                    }
+                  },
+                  "required": [],
+                  "title": "annotations",
+                  "type": "object"
+                }
+              },
+              "required": [],
+              "title": "serviceAccount",
+              "type": "object"
+            },
+            "tolerations": {
+              "description": "Tolerations for the NFD worker. Defaults tolerate every taint, so a node is discovered\nwhatever it is tainted for.",
+              "items": {
+                "required": [],
+                "type": "object"
+              },
+              "title": "tolerations",
+              "type": "array"
+            }
+          },
+          "required": [],
+          "title": "worker",
+          "type": "object"
+        }
+      },
+      "required": [],
+      "title": "node-feature-discovery",
+      "type": "object"
+    },
+    "worker": {
+      "description": "High availability. Every control-plane component this chart deploys elects a leader, so extra\nreplicas stand by instead of sharing the work: they buy failover, not throughput. A highly\navailable install raises the replica count of each one and enables the disruption budget that\ngoes with it — `worker`, `kueue.controllerManager`, `node-feature-discovery.master`, and the\n`controller` of both CSI drivers. Spreading those replicas across nodes is per-component and\neach key below says what its component supports; the cluster needs as many schedulable nodes as\nthe largest replica count for a hard spread to be satisfiable. Everything else here is a\nDaemonSet, one pod per node already. docs/operation/high-availability.md walks through it.",
+      "properties": {
+        "affinity": {
+          "description": "Affinity for the worker, replacing the default `preferred` pod anti-affinity that keeps\nreplicas off one node without ever making one unschedulable.",
+          "required": [],
+          "title": "affinity",
           "type": "object"
         },
         "dataDir": {
@@ -341,6 +1603,19 @@
           "description": "Host path mounted at /var/lib/gpustack for persistent operator data.",
           "title": "dataDir",
           "type": "string"
+        },
+        "disableApplications": {
+          "description": "Applications the worker must not install at runtime, or `*` for all of them. This chart\ndeploys every one of them itself, so the default takes the worker out of that business\nentirely. Keep the wildcard: whenever this chart deploys the worker, anything left off the\nlist makes the worker install a SECOND release of this same chart, whose render overlaps this\none's. Helm refuses an object another release owns, so that install fails and the worker's\nstartup with it. Handing a component back would mean disabling it here and in this chart's\nown switch for it, in step, through every upgrade — nothing checks that, which is why the\nsupported split is all or nothing. The worker installs applications only where no chart\ndeploys it (see docs/architecture.md, \"Two install modes\"). The value is\ntemplated rather than appended through `extraArgs` because the flag accumulates across\noccurrences, so a second one could only ever disable more. Accepted names: `*`, `kueue`,\n`node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`, `device-manager`.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              }
+            ],
+            "required": []
+          },
+          "title": "disableApplications",
+          "type": "array"
         },
         "enabled": {
           "default": true,
@@ -374,9 +1649,32 @@
           "title": "nodeSelector",
           "type": "object"
         },
+        "podDisruptionBudget": {
+          "properties": {
+            "enabled": {
+              "default": false,
+              "description": "Create a PodDisruptionBudget for the worker. Leave it off on a single-replica install,\nwhere it would only block node drains.",
+              "title": "enabled",
+              "type": "boolean"
+            },
+            "minAvailable": {
+              "default": 1,
+              "description": "Minimum number of worker pods that must stay available, as a count or a percentage.\nKeep it below `replicas`, or no node can ever be drained.",
+              "required": [],
+              "title": "minAvailable",
+              "type": [
+                "integer",
+                "string"
+              ]
+            }
+          },
+          "required": [],
+          "title": "podDisruptionBudget",
+          "type": "object"
+        },
         "replicas": {
           "default": 1,
-          "description": "Number of operator (control plane) replicas.",
+          "description": "Number of operator (control plane) replicas. Leader election is always on, so extra\nreplicas stand by; the reconcilers only ever run in one of them.",
           "title": "replicas",
           "type": "integer"
         },
@@ -396,10 +1694,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "limits",
               "type": "object"
             },
@@ -416,18 +1711,12 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "cpu",
-                "memory"
-              ],
+              "required": [],
               "title": "requests",
               "type": "object"
             }
           },
-          "required": [
-            "limits",
-            "requests"
-          ],
+          "required": [],
           "title": "resources",
           "type": "object"
         },
@@ -445,36 +1734,22 @@
           },
           "title": "tolerations",
           "type": "array"
+        },
+        "topologySpreadConstraints": {
+          "description": "Topology spread constraints for the worker. This is where node spread belongs: the\ndefault anti-affinity is only `preferred`, on purpose, so three replicas still schedule on a\ntwo-node cluster. An entry that omits `labelSelector` gets the worker's own.",
+          "items": {
+            "required": [],
+            "type": "object"
+          },
+          "title": "topologySpreadConstraints",
+          "type": "array"
         }
       },
-      "required": [
-        "enabled",
-        "certmanager",
-        "replicas",
-        "securePort",
-        "image",
-        "dataDir",
-        "resources",
-        "nodeSelector",
-        "extraArgs",
-        "env"
-      ],
+      "required": [],
       "title": "worker",
       "type": "object"
     }
   },
-  "required": [
-    "cleanupOnUninstall",
-    "global",
-    "nameOverride",
-    "fullnameOverride",
-    "namespaceOverride",
-    "commonLabels",
-    "commonAnnotations",
-    "image",
-    "manufacturers",
-    "worker",
-    "deviceManager"
-  ],
+  "required": [],
   "type": "object"
 }

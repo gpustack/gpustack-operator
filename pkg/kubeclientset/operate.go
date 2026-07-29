@@ -100,12 +100,10 @@ func Create[T MetaObject](ctx context.Context, cli CreateClient[T], expected T, 
 	if name != "" {
 		if getter, ok := cli.(GetClient[T]); ok {
 			actual, err = getter.Get(ctx, name,
-				meta.GetOptions{
-					ResourceVersion: "0",
-				})
+				readOptions(ctx))
 			if err != nil && !kerrors.IsNotFound(err) {
-				if isRetryError(err) {
-					return Create(ctx, cli, expected, opts...)
+				if rctx, ok := retryTransient(ctx, err); ok {
+					return Create(rctx, cli, expected, opts...)
 				}
 				return actual, err
 			}
@@ -125,16 +123,21 @@ func Create[T MetaObject](ctx context.Context, cli CreateClient[T], expected T, 
 		if err != nil {
 			switch {
 			case isRetryError(err):
-				return Create(ctx, cli, expected, opts...)
+				if rctx, ok := retryTransient(ctx, err); ok {
+					return Create(rctx, cli, expected, opts...)
+				}
 			case kerrors.IsAlreadyExists(err):
 				// Retry on already existed if:
 				// - configure align function.
 				// - configure compare function.
 				// - the resource is deleting without finalizers.
 				if co.UpdateAlignFunc != nil || co.RecreateCompareFunc != nil || deleting {
-					return Create(ctx, cli, expected, opts...)
+					if rctx, ok := nextAttempt(ctx, err); ok {
+						return Create(rctx, cli, expected, opts...)
+					}
+				} else {
+					err = nil
 				}
-				err = nil
 			}
 		}
 		return actual, err
@@ -181,12 +184,21 @@ func Create[T MetaObject](ctx context.Context, cli CreateClient[T], expected T, 
 		updated, err := updater.Update(ctx, copied, meta.UpdateOptions{
 			DryRun: co.DryRun,
 		})
-		if err == nil || !kerrors.IsConflict(err) || !kerrors.IsNotAcceptable(err) || !isRetryError(err) {
-			return updated, err
+		if err == nil {
+			return updated, nil
 		}
 
-		// Retry if conflicted.
-		return Create(ctx, cli, expected, opts...)
+		// Retry if the server asked to back off, or if another writer got there first:
+		// the next pass reads the actual resource again and aligns on top of it, so a
+		// writer that lost a concurrent update converges instead of failing.
+		//
+		// Any one of these reasons is enough to retry, hence the disjunction: they are
+		// mutually exclusive, so requiring them together could never hold.
+		if rctx, ok := retryToConverge(ctx, err); ok {
+			return Create(rctx, cli, expected, opts...)
+		}
+
+		return updated, err
 	case co.RecreateCompareFunc != nil:
 		skip := co.RecreateCompareFunc(actual.DeepCopyObject().(T))
 		if skip {
@@ -206,8 +218,14 @@ func Create[T MetaObject](ctx context.Context, cli CreateClient[T], expected T, 
 			return actual, err
 		}
 
-		// Recreate.
-		return Create(ctx, cli, expected, opts...)
+		// Recreate, bounded like every other re-entry here: a delete that keeps being
+		// followed by a live object would otherwise recurse forever. No server error was
+		// returned on this path, so a spent budget has to be its own.
+		if rctx, ok := nextAttempt(ctx, nil); ok {
+			return Create(rctx, cli, expected, opts...)
+		}
+
+		return actual, errTooManyAttempts
 	}
 
 	return actual, nil
@@ -233,8 +251,8 @@ func CreateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 	if name != "" {
 		err = cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual)
 		if err != nil && !kerrors.IsNotFound(err) {
-			if isRetryError(err) {
-				return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+			if rctx, ok := retryTransient(ctx, err); ok {
+				return CreateWithCtrlClient[T](rctx, cli, expected, opts...)
 			}
 			return actual, err
 		}
@@ -257,16 +275,21 @@ func CreateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 		}
 		switch {
 		case isRetryError(err):
-			return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+			if rctx, ok := retryTransient(ctx, err); ok {
+				return CreateWithCtrlClient[T](rctx, cli, expected, opts...)
+			}
 		case kerrors.IsAlreadyExists(err):
 			// Retry on already existed if:
 			// - configure align function.
 			// - configure compare function.
 			// - the resource is deleting without finalizers.
 			if co.UpdateAlignFunc != nil || co.RecreateCompareFunc != nil || deleting {
-				return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+				if rctx, ok := nextAttempt(ctx, err); ok {
+					return CreateWithCtrlClient[T](rctx, cli, expected, opts...)
+				}
+			} else {
+				err = nil
 			}
-			err = nil
 		}
 		return actual, err
 	}
@@ -308,12 +331,17 @@ func CreateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 			DryRun: co.DryRun,
 			Raw:    &meta.UpdateOptions{DryRun: co.DryRun},
 		})
-		if err == nil || !kerrors.IsConflict(err) || !kerrors.IsNotAcceptable(err) || !isRetryError(err) {
-			return copied, err
+		if err == nil {
+			return copied, nil
 		}
 
-		// Retry if conflicted.
-		return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+		// Retry if the server asked to back off, or if another writer got there first,
+		// as in Create.
+		if rctx, ok := retryToConverge(ctx, err); ok {
+			return CreateWithCtrlClient[T](rctx, cli, expected, opts...)
+		}
+
+		return copied, err
 	case co.RecreateCompareFunc != nil:
 		skip := co.RecreateCompareFunc(actual.DeepCopyObject().(T))
 		if skip {
@@ -328,8 +356,14 @@ func CreateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 			return actual, err
 		}
 
-		// Recreate.
-		return CreateWithCtrlClient[T](ctx, cli, expected, opts...)
+		// Recreate, bounded like every other re-entry here: a delete that keeps being
+		// followed by a live object would otherwise recurse forever. No server error was
+		// returned on this path, so a spent budget has to be its own.
+		if rctx, ok := nextAttempt(ctx, nil); ok {
+			return CreateWithCtrlClient[T](rctx, cli, expected, opts...)
+		}
+
+		return actual, errTooManyAttempts
 	}
 
 	return actual, nil
@@ -393,9 +427,7 @@ func Update[T MetaObject](ctx context.Context, cli UpdateClient[T], expected T, 
 	}
 
 	actual, err := cli.Get(ctx, name,
-		meta.GetOptions{
-			ResourceVersion: "0",
-		})
+		readOptions(ctx))
 	if err != nil {
 		if kerrors.IsNotFound(err) && uo.CreateIfNotExisted {
 			creator, ok := cli.(CreateClient[T])
@@ -407,11 +439,13 @@ func Update[T MetaObject](ctx context.Context, cli UpdateClient[T], expected T, 
 			})
 			if err != nil && kerrors.IsAlreadyExists(err) {
 				// Retry if already existed.
-				return Update(ctx, cli, expected, opts...)
+				if rctx, ok := nextAttempt(ctx, err); ok {
+					return Update(rctx, cli, expected, opts...)
+				}
 			}
 		}
-		if isRetryError(err) {
-			return Update(ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return Update(rctx, cli, expected, opts...)
 		}
 		return actual, err
 	}
@@ -452,8 +486,8 @@ func Update[T MetaObject](ctx context.Context, cli UpdateClient[T], expected T, 
 		DryRun: uo.DryRun,
 	})
 	if err != nil {
-		if isRetryError(err) {
-			return Update(ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return Update(rctx, cli, expected, opts...)
 		}
 
 		if !kerrors.IsConflict(err) && !kerrors.IsNotAcceptable(err) {
@@ -462,7 +496,9 @@ func Update[T MetaObject](ctx context.Context, cli UpdateClient[T], expected T, 
 
 		// Retry if conflicted when align function is provided.
 		if uo.AlignFunc != nil {
-			return Update(ctx, cli, expected, opts...)
+			if rctx, ok := nextAttempt(ctx, err); ok {
+				return Update(rctx, cli, expected, opts...)
+			}
 		}
 	}
 
@@ -496,11 +532,13 @@ func UpdateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 			})
 			if err != nil && kerrors.IsAlreadyExists(err) {
 				// Retry if already existed.
-				return UpdateWithCtrlClient[T](ctx, cli, expected, opts...)
+				if rctx, ok := nextAttempt(ctx, err); ok {
+					return UpdateWithCtrlClient[T](rctx, cli, expected, opts...)
+				}
 			}
 		}
-		if isRetryError(err) {
-			return UpdateWithCtrlClient[T](ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return UpdateWithCtrlClient[T](rctx, cli, expected, opts...)
 		}
 		return actual, err
 	}
@@ -544,8 +582,8 @@ func UpdateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 		Raw:          ptr.To(uo.UpdateOptions),
 	})
 	if err != nil {
-		if isRetryError(err) {
-			return UpdateWithCtrlClient[T](ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return UpdateWithCtrlClient[T](rctx, cli, expected, opts...)
 		}
 
 		if !kerrors.IsConflict(err) && !kerrors.IsNotAcceptable(err) {
@@ -554,7 +592,9 @@ func UpdateWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.Client,
 
 		// Retry if conflicted when align function is provided.
 		if uo.AlignFunc != nil {
-			return UpdateWithCtrlClient[T](ctx, cli, expected, opts...)
+			if rctx, ok := nextAttempt(ctx, err); ok {
+				return UpdateWithCtrlClient[T](rctx, cli, expected, opts...)
+			}
 		}
 	}
 
@@ -611,12 +651,10 @@ func UpdateStatus[T MetaObject](ctx context.Context, cli UpdateStatusClient[T], 
 	}
 
 	actual, err := cli.Get(ctx, name,
-		meta.GetOptions{
-			ResourceVersion: "0",
-		})
+		readOptions(ctx))
 	if err != nil {
-		if isRetryError(err) {
-			return UpdateStatus(ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return UpdateStatus(rctx, cli, expected, opts...)
 		}
 		return actual, err
 	}
@@ -641,8 +679,8 @@ func UpdateStatus[T MetaObject](ctx context.Context, cli UpdateStatusClient[T], 
 		FieldValidation: uo.FieldValidation,
 	})
 	if err != nil {
-		if isRetryError(err) {
-			return UpdateStatus(ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return UpdateStatus(rctx, cli, expected, opts...)
 		}
 
 		if !kerrors.IsConflict(err) && !kerrors.IsNotAcceptable(err) {
@@ -651,7 +689,9 @@ func UpdateStatus[T MetaObject](ctx context.Context, cli UpdateStatusClient[T], 
 
 		// Retry if conflicted when align function is provided.
 		if uo.AlignFunc != nil {
-			return UpdateStatus(ctx, cli, expected, opts...)
+			if rctx, ok := nextAttempt(ctx, err); ok {
+				return UpdateStatus(rctx, cli, expected, opts...)
+			}
 		}
 	}
 
@@ -677,13 +717,11 @@ func UpdateStatusWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.C
 	actual := expected.DeepCopyObject().(T)
 	err := cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual,
 		&ctrlcli.GetOptions{
-			Raw: &meta.GetOptions{
-				ResourceVersion: "0",
-			},
+			Raw: ptr.To(readOptions(ctx)),
 		})
 	if err != nil {
-		if isRetryError(err) {
-			return UpdateStatusWithCtrlClient[T](ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return UpdateStatusWithCtrlClient[T](rctx, cli, expected, opts...)
 		}
 		return actual, err
 	}
@@ -712,8 +750,8 @@ func UpdateStatusWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.C
 		},
 	})
 	if err != nil {
-		if isRetryError(err) {
-			return UpdateStatusWithCtrlClient[T](ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return UpdateStatusWithCtrlClient[T](rctx, cli, expected, opts...)
 		}
 
 		if !kerrors.IsConflict(err) && !kerrors.IsNotAcceptable(err) {
@@ -722,7 +760,9 @@ func UpdateStatusWithCtrlClient[T MetaObject](ctx context.Context, cli ctrlcli.C
 
 		// Retry if conflicted when align function is provided.
 		if uo.AlignFunc != nil {
-			return UpdateStatusWithCtrlClient[T](ctx, cli, expected, opts...)
+			if rctx, ok := nextAttempt(ctx, err); ok {
+				return UpdateStatusWithCtrlClient[T](rctx, cli, expected, opts...)
+			}
 		}
 	}
 
@@ -780,17 +820,15 @@ func Patch[T MetaObject](ctx context.Context, cli PatchClient[T], expected T, pt
 
 	patched, err := cli.Patch(ctx, name, pt, data, po.PatchOptions)
 	if err != nil {
-		if isRetryError(err) {
-			return Patch(ctx, cli, expected, pt, data, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return Patch(rctx, cli, expected, pt, data, opts...)
 		}
 		if kerrors.IsConflict(err) && po.AlignFunc != nil {
 			actual, err := cli.Get(ctx, name,
-				meta.GetOptions{
-					ResourceVersion: "0",
-				})
+				readOptions(ctx))
 			if err != nil {
-				if isRetryError(err) {
-					return Patch(ctx, cli, expected, pt, data, opts...)
+				if rctx, ok := retryTransient(ctx, err); ok {
+					return Patch(rctx, cli, expected, pt, data, opts...)
 				}
 				return actual, err
 			}
@@ -802,7 +840,9 @@ func Patch[T MetaObject](ctx context.Context, cli PatchClient[T], expected T, pt
 			if skip {
 				return actual, nil
 			}
-			return Patch(ctx, cli, expected, pt, data, opts...)
+			if rctx, ok := nextAttempt(ctx, err); ok {
+				return Patch(rctx, cli, expected, pt, data, opts...)
+			}
 		}
 	}
 	return patched, err
@@ -838,20 +878,18 @@ func PatchWithCtrlClient[T MetaObject](
 		Raw:          ptr.To(po.PatchOptions),
 	})
 	if err != nil {
-		if isRetryError(err) {
-			return PatchWithCtrlClient[T](ctx, cli, expected, pt, data, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return PatchWithCtrlClient[T](rctx, cli, expected, pt, data, opts...)
 		}
 		if kerrors.IsConflict(err) && po.AlignFunc != nil {
 			actual := expected.DeepCopyObject().(T)
 			err = cli.Get(ctx, ctrlcli.ObjectKeyFromObject(expected), actual,
 				&ctrlcli.GetOptions{
-					Raw: &meta.GetOptions{
-						ResourceVersion: "0",
-					},
+					Raw: ptr.To(readOptions(ctx)),
 				})
 			if err != nil {
-				if isRetryError(err) {
-					return PatchWithCtrlClient[T](ctx, cli, expected, pt, data, opts...)
+				if rctx, ok := retryTransient(ctx, err); ok {
+					return PatchWithCtrlClient[T](rctx, cli, expected, pt, data, opts...)
 				}
 				return actual, err
 			}
@@ -863,7 +901,9 @@ func PatchWithCtrlClient[T MetaObject](
 			if skip {
 				return actual, nil
 			}
-			return PatchWithCtrlClient[T](ctx, cli, expected, pt, data, opts...)
+			if rctx, ok := nextAttempt(ctx, err); ok {
+				return PatchWithCtrlClient[T](rctx, cli, expected, pt, data, opts...)
+			}
 		}
 	}
 	return patched, err
@@ -908,8 +948,8 @@ func Delete(ctx context.Context, cli DeleteClient, expected MetaObject, opts ...
 
 	err := cli.Delete(ctx, name, do.DeleteOptions)
 	if err != nil && !kerrors.IsNotFound(err) {
-		if isRetryError(err) {
-			return Delete(ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return Delete(rctx, cli, expected, opts...)
 		}
 		return err
 	}
@@ -941,8 +981,8 @@ func DeleteWithCtrlClient(ctx context.Context, cli ctrlcli.Client, expected Meta
 		Raw:                ptr.To(do.DeleteOptions),
 	})
 	if err != nil && !kerrors.IsNotFound(err) {
-		if isRetryError(err) {
-			return DeleteWithCtrlClient(ctx, cli, expected, opts...)
+		if rctx, ok := retryTransient(ctx, err); ok {
+			return DeleteWithCtrlClient(rctx, cli, expected, opts...)
 		}
 		return err
 	}
@@ -950,14 +990,96 @@ func DeleteWithCtrlClient(ctx context.Context, cli ctrlcli.Client, expected Meta
 	return nil
 }
 
+// isRetryError reports whether the server itself asked for another attempt. It is a pure
+// predicate: waiting belongs to nextAttempt, which is also reached from the paths that retry for
+// reasons the server never states.
 func isRetryError(err error) bool {
 	if kerrors.IsTooManyRequests(err) || kerrors.IsGone(err) || kerrors.IsTimeout(err) || kerrors.IsServerTimeout(err) {
-		time.Sleep(10 * time.Millisecond)
 		return true
 	}
+	_, ok := kerrors.SuggestsClientDelay(err)
+
+	return ok
+}
+
+// errTooManyAttempts is returned where re-entering is the operation's only way forward, so a
+// spent budget cannot be reported as the last server error — that path produced none.
+var errTooManyAttempts = errors.New("too many attempts")
+
+// retryAttemptKey carries an operation's re-entry count in its context.
+type retryAttemptKey struct{}
+
+const (
+	// maxAttempts bounds how many times one operation may re-enter itself. Every operation
+	// here converges by reading the live resource again and aligning on top of it, which is a
+	// retry loop written as recursion. Unbounded, a peer writer that keeps winning makes it
+	// recurse forever: the stack grows until the process aborts, and the caller never receives
+	// an error it could report or set a condition from.
+	maxAttempts = 8
+	// attemptBackoff is the wait before the first re-entry, doubled for each one after. A
+	// Conflict carries no server-suggested delay, so without this the next attempt is
+	// immediate and a contended object becomes a hot loop against the API server.
+	attemptBackoff = 10 * time.Millisecond
+)
+
+// nextAttempt returns the context to re-enter an operation with, after waiting out this attempt's
+// backoff, and reports whether the budget allowed one at all. A server-suggested delay wins over
+// the backoff, since the server named a figure and this only guesses one.
+//
+// The count rides the context because that is the only channel every operation here already
+// threads through its own recursion; the options are typed per operation, so no shared option
+// could carry it without changing all of their signatures.
+func nextAttempt(ctx context.Context, err error) (context.Context, bool) {
+	attempt, _ := ctx.Value(retryAttemptKey{}).(int)
+	if attempt >= maxAttempts {
+		return ctx, false
+	}
+
+	wait := attemptBackoff << attempt
 	if s, ok := kerrors.SuggestsClientDelay(err); ok {
-		time.Sleep(time.Duration(s) * time.Second)
-		return true
+		wait = time.Duration(s) * time.Second
 	}
-	return false
+
+	select {
+	case <-ctx.Done():
+		return ctx, false
+	case <-time.After(wait):
+	}
+
+	return context.WithValue(ctx, retryAttemptKey{}, attempt+1), true
+}
+
+// retryTransient answers the sites that retry only because the server asked them to.
+func retryTransient(ctx context.Context, err error) (context.Context, bool) {
+	if !isRetryError(err) {
+		return ctx, false
+	}
+
+	return nextAttempt(ctx, err)
+}
+
+// retryToConverge answers the sites that also retry a lost write: the next pass reads the actual
+// resource again and aligns on top of it, so a writer that lost a concurrent update converges
+// instead of failing.
+//
+// Any one of these reasons is enough, hence the disjunction: they are mutually exclusive, so
+// requiring them together could never hold.
+func retryToConverge(ctx context.Context, err error) (context.Context, bool) {
+	if !isRetryError(err) && !kerrors.IsConflict(err) && !kerrors.IsNotAcceptable(err) {
+		return ctx, false
+	}
+
+	return nextAttempt(ctx, err)
+}
+
+// readOptions are the options for the read an operation does before it writes. The first read may
+// be served from the API server's watch cache, which is only an optimization; a re-entry may not,
+// because aligning onto the same stale object that just lost a conflict would lose again, and the
+// cache is exactly what would serve it.
+func readOptions(ctx context.Context) meta.GetOptions {
+	if attempt, _ := ctx.Value(retryAttemptKey{}).(int); attempt > 0 {
+		return meta.GetOptions{}
+	}
+
+	return meta.GetOptions{ResourceVersion: "0"}
 }

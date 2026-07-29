@@ -15,6 +15,7 @@ import (
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes"
 	"gpustack.ai/gpustack/pkg/kubeclientset"
 	"gpustack.ai/gpustack/pkg/kubeclientset/review"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
 
@@ -72,11 +73,25 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRD
 
 	crds := MergeCRDs(crdGetters)
 	for i := range crds {
-		_, err = kubeclientset.Update(ctx, crdCli, crds[i],
-			kubeclientset.WithCreateIfNotExisted[*apiext.CustomResourceDefinition]())
+		eCRD := crds[i]
+		// The align function is what makes a losing writer retry instead of returning the
+		// conflict: every replica installs the definitions before leader election, so
+		// without it a concurrent boot fails one of them.
+		crdAlignFn := func(aCRD *apiext.CustomResourceDefinition) (_ *apiext.CustomResourceDefinition, skip bool, err error) {
+			skip = true
+			// Align spec.
+			if !kubemeta.DeepEqual(aCRD.Spec, eCRD.Spec) {
+				aCRD.Spec = *eCRD.Spec.DeepCopy()
+				skip = false
+			}
+			return aCRD, skip, err
+		}
+		_, err = kubeclientset.Update(ctx, crdCli, eCRD,
+			kubeclientset.WithCreateIfNotExisted[*apiext.CustomResourceDefinition](),
+			kubeclientset.WithUpdateAlign(crdAlignFn))
 		if err != nil {
 			return fmt.Errorf("install custom resource definition %q: %w",
-				crds[i].GetName(), err)
+				eCRD.GetName(), err)
 		}
 	}
 

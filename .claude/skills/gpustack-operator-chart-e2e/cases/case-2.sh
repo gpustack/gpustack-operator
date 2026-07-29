@@ -4,13 +4,14 @@
 #
 #   case-2.sh <NS>
 #
-# Goal:        The shared teardown (helm uninstall + the runtime leftovers helm does not manage)
-#              leaves the cluster clean — no leftover releases, CRDs, apiservices, or
-#              clusterrolebindings — while the gpustack-system namespace is intentionally kept.
-# Environment: Any reachable cluster with the chart installed. No GPU. DELETES the operator
-#              deployment + worker-installed sub-releases — run ONLY as the final step.
-# Inputs:      All real, nothing mocked — runs teardown.sh (helm uninstall; worker-installed
-#              sub-releases, their CRDs, finalizers, and runtime APIServices/webhooks).
+# Goal:        The shared teardown (helm uninstall + the leftovers helm does not manage) leaves the
+#              cluster clean — no leftover releases, CRDs, apiservices, or clusterrolebindings —
+#              while the gpustack-system namespace is intentionally kept.
+# Environment: Any reachable cluster with the chart installed. No GPU. DELETES the whole release,
+#              which now includes Kueue / NFD / the CSI drivers and Kueue's CRDs, and with them
+#              every ClusterQueue and Workload in the cluster — run ONLY as the final step.
+# Inputs:      All real, nothing mocked — runs teardown.sh (helm uninstall; the releases the chart
+#              does not own; CRDs, finalizers, APIServices/webhooks, migration-hook leftovers).
 # Expected:    After teardown, zero leftover: helm releases (gpustack/kueue/nfd/csi), CRDs
 #              (gpustack.ai / kueue.x-k8s.io / nfd.k8s-sigs.io), gpustack apiservices, and gpustack
 #              clusterrolebindings.

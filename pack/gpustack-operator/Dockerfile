@@ -410,30 +410,14 @@ EOT
 EOF
 
 # Prepare Charts and Images for Airgap Installation
-## NB(thxCode): Update the following files if changed.
-## - pkg/worker/kuberess/apps_*.go.
 
 ARG GPUSTACK_CHARTS_DIR
 
-## CSI Driver S3
-ADD https://thxcode.github.io/k8s-csi-s3/charts/csi-s3-0.43.7.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-s3-0.43.7.tgz"
-
-## CSI Driver NFS
-ADD https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/refs/heads/master/charts/v4.13.2/csi-driver-nfs-4.13.2.tgz "${GPUSTACK_CHARTS_DIR}/csi-driver-nfs-4.13.2.tgz"
-
-## Kueue
-### Both charts run the 0.18 controller image; only the CRDs differ. The 0.18 chart's
-### Workload CRD needs Kubernetes 1.31+ (selectableFields), so install the 0.17 chart
-### on older clusters — see installKueue in pkg/worker/kuberess/apps_kueue.go.
-### For Kubernetes version < 1.31.
-ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.17.6/kueue-0.17.6.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.17.6.tgz"
-### For Kubernetes version >= 1.31.
-ADD https://github.com/kubernetes-sigs/kueue/releases/download/v0.18.2/kueue-0.18.2.tgz "${GPUSTACK_CHARTS_DIR}/kueue-0.18.2.tgz"
-
-## Node Features Discovery
-ADD https://thxcode.github.io/node-feature-discovery/charts/node-feature-discovery-0.18.3.tgz "${GPUSTACK_CHARTS_DIR}/node-feature-discovery-0.18.3.tgz"
-
 ## GPUStack Operator
+## The chart carries its four upstream dependencies (Kueue, Node Feature
+## Discovery, CSI Driver NFS, CSI Driver S3) vendored, patched and committed under its own
+## "charts/" directory, so packaging it below is what makes image mode self-contained —
+## no separate upstream chart ADDs are needed.
 RUN --mount=type=bind,src=deploy/gpustack-operator/chart,target=/tmp/gpustack-operator-chart <<EOF
     set -exo pipefail
 

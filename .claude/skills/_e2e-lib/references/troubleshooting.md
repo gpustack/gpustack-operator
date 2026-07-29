@@ -97,17 +97,28 @@ accelerator schedulable on this node" signal, with one caveat about timing:
   scheduling chain materializes (a level-based reconcile races ahead of object creation and retries).
   Not an install error; confirm the chain settles (`resourceflavors`/`clusterqueues` appear).
 
+- **Worker exits with `install applications: ... invalid ownership metadata`** — something asked the
+  worker to install applications while a chart release already deploys it. Both installs render the
+  same chart, so their objects overlap and Helm refuses the worker's install; the object it names is
+  whichever shared one it maps first (a ServiceAccount, typically). Even handing back only
+  `device-manager` overlaps, because the cluster-scoped `gpustack-cpu-info` NodeFeatureRule has no
+  switch and is in both renders. The two install modes are exclusive: keep
+  `worker.disableApplications: ["*"]` wherever this chart deploys the worker, and stand image mode up
+  on a cluster with no chart release (chart-e2e CASE 6).
+
 ## Teardown
 
-- **Teardown hangs deleting kueue CRDs** — `helm uninstall gpustack-kueue` removes the controller, but
-  its ResourceFlavor/ClusterQueue CRs keep the `kueue.x-k8s.io/resource-in-use` finalizer (and
-  Instances keep `gpustack.ai/controlled`), so `kubectl delete crd` waits forever. `teardown.sh` strips
-  those finalizers first; if a run predates that, patch by hand:
+- **Teardown hangs deleting kueue CRDs** — the uninstall removes Kueue's controller (it is a subchart
+  of the operator release now, so one uninstall takes both), but its ResourceFlavor/ClusterQueue CRs
+  keep the `kueue.x-k8s.io/resource-in-use` finalizer (and Instances keep `gpustack.ai/controlled`),
+  so `kubectl delete crd` waits forever. `teardown.sh` strips those finalizers first; if a run
+  predates that, patch by hand:
   `kubectl patch <resourceflavor|clusterqueue|instance>/<name> --type=merge -p '{"metadata":{"finalizers":[]}}'`.
 
-- **Leftover sub-releases after `helm uninstall`** — `helm uninstall gpustack-operator` only removes the
-  operator release; the worker-installed Kueue/NFD/CSI are separate releases. That is exactly what
-  `teardown.sh` removes next.
+- **Leftovers after `helm uninstall`** — the release takes Kueue / NFD / the CSI drivers with it, but
+  not: a release the worker installed from inside its own image, the pre-subchart per-application
+  releases, the Secrets nothing owns (the worker's cert cache, `gpustack-settings`), or the objects a
+  *failed* migration hook keeps on purpose. That is exactly what `teardown.sh` removes next.
 
 - The `gpustack-system` namespace is intentionally **kept** — deleting it can hang in `Terminating` on
   the orphaned aggregated APIServices. Never delete the user's pre-existing namespaces or resources.

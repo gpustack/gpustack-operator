@@ -46,8 +46,8 @@ variables — see [Settings & Environment Variables](./docs/settings.md#per-manu
 ## Quick Start
 
 **Prerequisites:** Kubernetes `>= 1.23` (required by the bundled Kueue), Helm `3.8+`, and cluster-admin.
-cert-manager is optional — with the default `worker.certmanager.enabled=auto`, its resources are created only
-when cert-manager is detected; otherwise the worker self-signs.
+cert-manager is optional — with the default `global.certmanager.enabled=auto`, its resources are created only
+when cert-manager is detected; otherwise every component self-signs.
 
 Install the chart:
 
@@ -63,21 +63,27 @@ kubectl -n gpustack-system rollout status deployment/gpustack-operator-worker
 ```
 
 Uninstall (add `--set cleanupOnUninstall=true` at install time, or see the
-[migration guide](./docs/migration/from-v0.5.md), to also remove runtime-installed leftovers):
+[migration guide](./docs/migration/from-v0.5.md), to also remove the leftovers the worker creates at
+runtime):
 
 ```bash
 helm uninstall gpustack-operator --namespace gpustack-system
 ```
 
-> Node Feature Discovery, Kueue, and the CSI drivers are bundled into the operator image and installed by
-> the worker at runtime — there is nothing else to deploy.
+> Node Feature Discovery, Kueue, and the NFS/S3 CSI drivers are **vendored subcharts** of this chart,
+> each behind an `enabled` switch — there is nothing else to deploy, and one `values.yaml` configures
+> all of it. Because they belong to this release, `helm uninstall` also deletes Kueue's CRDs and
+> therefore every ClusterQueue, ResourceFlavor and Workload in the cluster; install with
+> `--set kueue.enabled=false` to bring your own instead. Upgrading an install from v0.7.x or earlier
+> is a one-time ownership transfer — see
+> [Migrating to the bundled subcharts](./docs/migration/to-subcharts.md).
 
 ## How It Works
 
 A single `gpustack-operator` binary exposes three subcommands — `worker` (control plane), `worker-gateway`
 (cross-cluster aggregation), and `device-manager` (per-node DaemonSet) — that drive a four-stage chain:
 
-1. **Bootstrap** — the Worker installs the NFD and Device Manager DaemonSets.
+1. **Bootstrap** — the chart deploys Node Feature Discovery, Kueue, the two CSI drivers and the per-manufacturer Device Manager DaemonSets as vendored subcharts of one release; the Worker installs them itself only where no chart deploys the Worker. Either way the Worker applies the two custom resources no chart can carry — the `gpustack-cpu-info` `NodeFeatureRule` and the `gpustack-node-devices` `AdmissionCheck`.
 2. **Device discovery** — Node Feature Discovery labels nodes by PCI vendor and CPU identity; the Device Manager then detects accelerators, reports per-device feature labels, and maintains a per-card `Devices` ledger.
 3. **Capacity profiling** — the Worker normalizes each node's CPU/RAM/storage and per-accelerator capacity into profile labels, keyed by the node's CPU identity.
 4. **Queue construction & admission** — five Worker controllers (`NodeFlavorReconciler`, `InstanceTypeReconciler`, `NodeQueueReconciler`, `NodeQueueEntranceReconciler`, `NodeDevicesAdmissionReconciler`) materialize the labels into a Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, **no Cohort**) → `LocalQueue`, a materialized `InstanceType` CRD, and a per-card `gpustack-node-devices` `AdmissionCheck`. `InstanceTypeReconciler` owns the queue's existence + labels + status; `NodeQueueReconciler` owns its quota, `StopPolicy`, and admission-check reference.
@@ -91,7 +97,9 @@ worked example cluster.
 - [Accelerator Requests](./docs/accelerator-requests.md) — the resource keys for every accelerator family, the normative request rules enforced at admission, and a worked example per family.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
 - [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
+- [High Availability](./docs/operation/high-availability.md) — which knob to raise per control-plane component, what each bundled subchart can and cannot spread, and the one topology that must stay single-replica.
 - [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) — the administrator runbook for enabling/disabling NVIDIA MIG on a node, reboot recovery, and the no-automatic-descheduling policy, plus a recorded walkthrough of the three configurations a node can be in: all-logical, all-physical, and **mixed** (some cards partitioned, the rest whole).
+- [Migrating to the bundled subcharts](./docs/migration/to-subcharts.md) — the one-time ownership transfer that folds the runtime-installed Kueue / NFD / CSI releases into the operator release, and what changes permanently.
 - [Migrating from v0.5.x](./docs/migration/from-v0.5.md) — upgrading an existing install to a higher version across the scheduling-chain refactor.
 
 ## License

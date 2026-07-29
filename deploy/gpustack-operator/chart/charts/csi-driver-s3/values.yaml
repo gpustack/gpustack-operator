@@ -1,0 +1,145 @@
+customLabels: { }
+images:
+  s3: docker.io/thxcode/csi-s3-driver:0.43.7
+  csiProvisioner: registry.k8s.io/sig-storage/csi-provisioner:v6.1.0
+  livenessProbe: registry.k8s.io/sig-storage/livenessprobe:v2.17.0
+  nodeDriverRegistrar: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
+imagePullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true # When true, service accounts will be created for you. Set to false if you want to use your own.
+  controller: csi-s3-controller-sa # Name of Service Account to be created or used
+  node: csi-s3-node-sa # Name of Service Account to be created or used
+
+rbac:
+  create: true
+  name: s3
+
+driver:
+  name: ru.yandex.s3.csi
+
+kubeletDir: /var/lib/kubelet
+
+controller:
+  name: csi-s3-controller
+  replicas: 1
+  strategyType: Recreate
+  runOnMaster: false
+  runOnControlPlane: false
+  logLevel: 5
+  affinity: {}
+  nodeSelector: {}
+  priorityClassName: system-cluster-critical
+  tolerations:
+    - key: "node-role.kubernetes.io/master"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/controlplane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "CriticalAddonsOnly"
+      operator: "Exists"
+      effect: "NoSchedule"
+  resources:
+    csiProvisioner:
+      limits:
+        memory: 400Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    s3:
+      limits:
+        memory: 200Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+
+nodeDriverRegistrar:
+  healthPort: 19819
+  livenessProbe:
+    enabled: true
+    initialDelaySeconds: 20
+    timeoutSeconds: 10
+    periodSeconds: 5
+    failureThreshold: 2
+
+node:
+  name: csi-s3-node
+  dnsPolicy: ClusterFirstWithHostNet  # available values: Default, ClusterFirstWithHostNet, ClusterFirst
+  maxUnavailable: 1
+  logLevel: 5
+  livenessProbe:
+    healthPort: 29663
+  affinity: {}
+  nodeSelector: {}
+  priorityClassName: system-cluster-critical
+  tolerations:
+    - operator: "Exists"
+  resources:
+    nodeDriverRegistrar:
+      limits:
+        memory: 100Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    livenessProbe:
+      limits:
+        memory: 100Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+    s3:
+      limits:
+        memory: 300Mi
+      requests:
+        cpu: 10m
+        memory: 20Mi
+
+## Reference to one or more secrets to be used when pulling images
+## ref: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
+##
+imagePullSecrets: [ ]
+# - name: "image-pull-secret"
+
+secret:
+  create: false
+#  name: s3-credentials
+#  endpoint: https://storage.yandexcloud.net
+#  region: ""
+#  accessKey: ""
+#  secretKey: ""
+
+## StorageClass resource example:
+storageClass:
+  create: false
+#  name: s3-csi
+#  annotations:
+#    storageclass.kubernetes.io/is-default-class: "true"
+#  parameters:
+#    mounter: geesefs
+#    options: "--memory-limit 1000 --dir-mode 0777 --file-mode 0666"
+#    bucket: ""  # Use a single bucket for all dynamically provisioned persistent volumes
+#    prefix: ""  # Use a prefix for all dynamically provisioned persistent volumes in the bucket
+#  reclaimPolicy: Delete
+#  volumeBindingMode: Immediate
+
+## StorageClass resources for creating multiple storage classes:
+## If you want multiple storage classes with different configurations, use this instead of storageClass above
+# storageClasses:
+#   - name: s3-csi-delete
+#     annotations:
+#       storageclass.kubernetes.io/is-default-class: "true"
+#     parameters:
+#       mounter: geesefs
+#       options: "--memory-limit 1000 --dir-mode 0777 --file-mode 0666"
+#     reclaimPolicy: Delete
+#     volumeBindingMode: Immediate
+#   - name: s3-csi-retain
+#     parameters:
+#       mounter: geesefs
+#       options: "--memory-limit 1000 --dir-mode 0777 --file-mode 0666"
+#     reclaimPolicy: Retain
+#     volumeBindingMode: Immediate

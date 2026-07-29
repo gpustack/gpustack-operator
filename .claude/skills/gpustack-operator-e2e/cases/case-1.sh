@@ -12,7 +12,7 @@
 # Inputs:      None injected — reads live cluster state only (operator-core health delegated
 #              to assert-core.sh). Nothing mocked.
 # Expected:    - assert-core.sh passes (rollout / running revision == HEAD / apiservices /
-#                CRDs / sub-releases);
+#                CRDs / the four bundled applications in the operator's own release);
 #              - NFD stamps feature.gpustack.ai/cpu-* + acceleratable labels;
 #              - the Worker derives general.feature.gpustack.ai/* capacity labels;
 #              - the general ResourceFlavor (name ...-<count>c), its ClusterQueue, its
@@ -27,7 +27,7 @@ set -uo pipefail
 NS="${1:?usage: case-1.sh <NS>}"
 LIB="$(cd "$(dirname "$0")/../../_e2e-lib/scripts" && pwd)"
 
-# Operator core first (rollout / revision==HEAD / apiservices / CRDs / sub-releases).
+# Operator core first (rollout / revision==HEAD / apiservices / CRDs / bundled applications).
 bash "$LIB/assert-core.sh" "$NS" || exit 1
 
 FAILS=0

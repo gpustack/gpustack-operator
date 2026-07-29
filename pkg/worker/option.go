@@ -117,7 +117,9 @@ func (o *Options) AddFlags(fs *pflag.FlagSet) {
 	fs.BoolVar(&o.DisableAuths, "disable-auths", o.DisableAuths,
 		"disable checking authentication and authorization.")
 	fs.StringSliceVar(&o.DisableApplications, "disable-applications", o.DisableApplications,
-		"disable installing applications.")
+		"comma separated list of applications to skip installing, "+
+			"or \"*\" for all of them. "+
+			"valid applications: "+strings.Join(kuberess.ApplicationNames(), ","))
 	fs.StringSliceVar(&o.CorsAllowedOrigins, "cors-allowed-origins", o.CorsAllowedOrigins,
 		"the list of origins a cross-domain request can be executed from, comma separated. "+
 			"an allowed origin can be a regular expression to support subdomain matching. "+
@@ -176,6 +178,15 @@ func (o *Options) Validate(ctx context.Context) error {
 	// Manager.
 	if err := o.ManagerOptions.Validate(ctx); err != nil {
 		return err
+	}
+
+	// Control.
+	if len(o.DisableApplications) != 0 {
+		applicationNames := kuberess.ApplicationNames()
+		if !sets.New[string](applicationNames...).HasAll(o.DisableApplications...) {
+			return errors.New("--disable-applications: should be a comma separated list of valid applications, " +
+				"valid applications: " + strings.Join(applicationNames, ","))
+		}
 	}
 
 	// Authentication and Authorization.

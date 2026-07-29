@@ -1,0 +1,55 @@
+{{- if .Release.IsUpgrade }}
+{{- /*
+  Post-upgrade hook Job: retire the release records of the per-application releases these
+  subcharts replaced, and prune what those releases created that the new render does not contain.
+  Both are only meaningful once the upgrade — and with it Helm's ownership transfer — succeeded,
+  which is exactly when a post-upgrade hook runs; on a fresh install there is nothing to retire,
+  so it is not rendered at all.
+
+  Weight -10, matching the pre-upgrade Job: the post-upgrade phase runs its own hooks, so the two
+  weights never compete.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "gpustack-operator.fullname" . }}-migrate-post
+  namespace: {{ include "gpustack-operator.namespace" . }}
+  labels:
+    {{- include "gpustack-operator.commonLabels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "gpustack-operator.commonLabels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: {{ include "gpustack-operator.fullname" . }}-migrate
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ if kindIs "string" . }}{{ . }}{{ else }}{{ .name }}{{ end }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: migrate
+          image: {{ include "gpustack-operator.image" (dict "root" . "overrides" .Values.migrate.image) | quote }}
+          imagePullPolicy: {{ include "gpustack-operator.imagePullPolicy" (dict "root" . "overrides" .Values.migrate.image) }}
+          command: ["/usr/bin/env", "bash", "/scripts/migrate-post.sh"]
+          env:
+            - name: GPUSTACK_NAMESPACE
+              value: {{ include "gpustack-operator.namespace" . | quote }}
+          volumeMounts:
+            - name: migrate-scripts
+              mountPath: /scripts
+      volumes:
+        - name: migrate-scripts
+          configMap:
+            name: {{ include "gpustack-operator.fullname" . }}-migrate
+            defaultMode: 0755
+{{- end }}

@@ -23,4 +23,6 @@
 # Vendored patches must stay byte-exact: some of the upstream files they carry context
 # for use CRLF (vcann-rt's CMakeLists.txt does), and the eol=lf normalisation above
 # would strip those CRs, leaving a patch whose context no longer matches the source.
+# The same holds for the patches applied to the vendored upstream Helm charts.
 pack/gpustack-operator/external/*/*/*.patch -text
+hack/deploy/**/*.patch -text

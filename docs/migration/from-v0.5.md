@@ -29,8 +29,10 @@ per-card allocation ledger), so they update in place — no orphaning there.
 
 The upgraded v0.6.x operator indexes objects by their **new** names, so it never sees — and never
 reconciles or garbage-collects — the v0.5.x-named ResourceFlavors, ClusterQueues, Cohorts and
-LocalQueues. And `helm upgrade` runs **no cleanup hook** (the chart's post-delete `cleanup.sh`
-fires only on `helm uninstall`). The result of an in-place upgrade is **both object sets coexisting**:
+LocalQueues. And no upgrade hook cleans them: the chart's post-delete `cleanup.sh` fires only on
+`helm uninstall`, and the migration hooks that do run on an upgrade address the pre-subchart release
+layout (see [Migrating to the bundled subcharts](./to-subcharts.md)), not v0.5.x object names. The
+result of an in-place upgrade is **both object sets coexisting**:
 the working v0.6.x set plus a leaked v0.5.x set (dead ResourceFlavors, ClusterQueues, Cohorts, and a
 LocalQueue in every namespace). The v0.5.x Cohorts in particular are never cleaned by anything.
 
@@ -49,13 +51,16 @@ start. The finalizer cannot even be force-stripped by hand: Kueue's validating w
 (`failurePolicy: Fail`) is still registered but its Service has no endpoints, so any update to a
 ClusterQueue is rejected.
 
-Higher-version operators self-heal this on the Kueue install path, so the upgrade completes without
+Higher-version operators self-heal this before Kueue is deployed, so the upgrade completes without
 manual intervention:
 
-- Before (re)installing Kueue, the worker reaps an orphaned Kueue when it detects a Kueue CRD stuck
+- A `pre-install`/`pre-upgrade` hook Job reaps an orphaned Kueue when it detects a Kueue CRD stuck
   `Terminating`: it deletes the Kueue admission-webhook configurations **first** (so the finalizer
   strip is no longer rejected), then strips the orphaned `resource-in-use` finalizers, then lets the
-  Terminating CRDs drain so the install can recreate them. It is a no-op on a healthy cluster.
+  Terminating CRDs drain so the install can recreate them. It is a no-op on a healthy cluster, and it
+  runs on a fresh install too — a first install onto a cluster left in this state has no other way
+  forward. (Versions before the subchart layout did the same thing inside the worker's Kueue
+  installer.)
 - Kueue is then repaired with a `helm upgrade` rather than a destructive `helm uninstall`+install, so
   the controller stays alive to clear finalizers and no CRD is stranded.
 

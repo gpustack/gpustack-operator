@@ -1,0 +1,76 @@
+{{- if .Values.storageClass.create }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.storageClass.name }}
+{{ include "s3.labels" . | indent 2 }}
+  {{- with .Values.storageClass.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+provisioner: {{ .Values.driver.name }}
+{{- with .Values.storageClass.parameters }}
+parameters:
+{{ toYaml . | indent 2 }}
+{{- end }}
+{{- if .Values.secret.create }}
+  csi.storage.k8s.io/provisioner-secret-name: {{ .Values.secret.name }}
+  csi.storage.k8s.io/provisioner-secret-namespace: {{ .Release.Namespace }}
+  csi.storage.k8s.io/controller-publish-secret-name: {{ .Values.secret.name }}
+  csi.storage.k8s.io/controller-publish-secret-namespace: {{ .Release.Namespace }}
+  csi.storage.k8s.io/node-stage-secret-name: {{ .Values.secret.name }}
+  csi.storage.k8s.io/node-stage-secret-namespace: {{ .Release.Namespace }}
+  csi.storage.k8s.io/node-publish-secret-name: {{ .Values.secret.name }}
+  csi.storage.k8s.io/node-publish-secret-namespace: {{ .Release.Namespace }}
+{{- end }}
+reclaimPolicy: {{ .Values.storageClass.reclaimPolicy }}
+volumeBindingMode: {{ .Values.storageClass.volumeBindingMode }}
+allowVolumeExpansion: true
+{{- with .Values.storageClass.mountOptions }}
+mountOptions:
+{{ toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- if .Values.storageClasses }}
+{{- $secret := .Values.secret }}
+{{- $secretNamespace := .Release.Namespace }}
+{{- range .Values.storageClasses }}
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .name }}
+{{ include "s3.labels" $ | indent 2 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+provisioner: {{ $.Values.driver.name }}
+{{- with .parameters }}
+parameters:
+{{ toYaml . | indent 2 }}
+{{- end }}
+{{- if $secret.create }}
+  csi.storage.k8s.io/provisioner-secret-name: {{ $secret.name }}
+  csi.storage.k8s.io/provisioner-secret-namespace: {{ $secretNamespace }}
+  csi.storage.k8s.io/controller-publish-secret-name: {{ $secret.name }}
+  csi.storage.k8s.io/controller-publish-secret-namespace: {{ $secretNamespace }}
+  csi.storage.k8s.io/node-stage-secret-name: {{ $secret.name }}
+  csi.storage.k8s.io/node-stage-secret-namespace: {{ $secretNamespace }}
+  csi.storage.k8s.io/node-publish-secret-name: {{ $secret.name }}
+  csi.storage.k8s.io/node-publish-secret-namespace: {{ $secretNamespace }}
+{{- end }}
+reclaimPolicy: {{ .reclaimPolicy | default "Delete" }}
+volumeBindingMode: {{ .volumeBindingMode | default "Immediate" }}
+{{- if hasKey . "allowVolumeExpansion" }}
+allowVolumeExpansion: {{ .allowVolumeExpansion }}
+{{- else }}
+allowVolumeExpansion: true
+{{- end }}
+{{- with .mountOptions }}
+mountOptions:
+{{ toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

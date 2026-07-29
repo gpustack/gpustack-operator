@@ -1,0 +1,119 @@
+diff --git a/templates/_helpers.tpl b/templates/_helpers.tpl
+index b540e3b..11b3f61 100644
+--- a/templates/_helpers.tpl
++++ b/templates/_helpers.tpl
+@@ -124,3 +124,39 @@ imagePullSecrets helper - uses local values or falls back to global values
+ {{- $imagePullSecrets | toJson }}
+ {{- end -}}
+ {{- end -}}
++
++{{/*
++Image reference "{registry/}{namespace/}repository:tag" resolved against the parent chart's
++global image overrides: a non-empty global.imageNamespace replaces the namespace segment of
++`image.repository`, and a non-empty global.imageRegistry replaces its registry segment, which
++is the first path segment carrying a "." or a ":". Each falls back to what `image.repository`
++already encodes.
++*/}}
++{{- define "node-feature-discovery.image" -}}
++{{- $global := .Values.global | default dict -}}
++{{- $repository := .Values.image.repository -}}
++{{- $registry := "" -}}
++{{- $segments := splitList "/" $repository -}}
++{{- if and (gt (len $segments) 1) (or (contains "." (first $segments)) (contains ":" (first $segments))) -}}
++{{- $registry = first $segments -}}
++{{- $repository = join "/" (rest $segments) -}}
++{{- end -}}
++{{- with $global.imageNamespace -}}
++{{- $repository = printf "%s/%s" . (last (splitList "/" $repository)) -}}
++{{- end -}}
++{{- with $global.imageRegistry -}}
++{{- $registry = trimSuffix "/" . -}}
++{{- end -}}
++{{- with $registry -}}
++{{- $repository = printf "%s/%s" . $repository -}}
++{{- end -}}
++{{- printf "%s:%s" $repository (default .Chart.AppVersion .Values.image.tag) -}}
++{{- end -}}
++
++{{/*
++Image pull policy, replaced by the parent chart's global.imagePullPolicy when non-empty.
++*/}}
++{{- define "node-feature-discovery.imagePullPolicy" -}}
++{{- $global := .Values.global | default dict -}}
++{{- default .Values.image.pullPolicy $global.imagePullPolicy -}}
++{{- end -}}
+diff --git a/templates/master.yaml b/templates/master.yaml
+index 8fa8e2f..56ad86b 100644
+--- a/templates/master.yaml
++++ b/templates/master.yaml
+@@ -57,8 +57,8 @@ spec:
+         - name: master
+           securityContext:
+             {{- toYaml .Values.master.securityContext | nindent 12 }}
+-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+-          imagePullPolicy: {{ .Values.image.pullPolicy }}
++          image: "{{ include "node-feature-discovery.image" $ }}"
++          imagePullPolicy: {{ include "node-feature-discovery.imagePullPolicy" $ }}
+           startupProbe:
+             httpGet:
+               path: /healthz
+diff --git a/templates/nfd-gc.yaml b/templates/nfd-gc.yaml
+index 8b0b7ca..231e628 100644
+--- a/templates/nfd-gc.yaml
++++ b/templates/nfd-gc.yaml
+@@ -49,8 +49,8 @@ spec:
+       {{- end }}
+       containers:
+       - name: gc
+-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+-        imagePullPolicy: "{{ .Values.image.pullPolicy }}"
++        image: "{{ include "node-feature-discovery.image" $ }}"
++        imagePullPolicy: "{{ include "node-feature-discovery.imagePullPolicy" $ }}"
+         livenessProbe:
+           httpGet:
+             path: /healthz
+diff --git a/templates/post-delete-job.yaml b/templates/post-delete-job.yaml
+index fb5518b..d39b42e 100644
+--- a/templates/post-delete-job.yaml
++++ b/templates/post-delete-job.yaml
+@@ -73,8 +73,8 @@ spec:
+         - name: nfd-master
+           securityContext:
+             {{- toYaml .Values.master.securityContext | nindent 12 }}
+-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+-          imagePullPolicy: {{ .Values.image.pullPolicy }}
++          image: "{{ include "node-feature-discovery.image" $ }}"
++          imagePullPolicy: {{ include "node-feature-discovery.imagePullPolicy" $ }}
+           command:
+             - "nfd-master"
+           args:
+diff --git a/templates/topologyupdater.yaml b/templates/topologyupdater.yaml
+index 0d25a50..4a798e7 100644
+--- a/templates/topologyupdater.yaml
++++ b/templates/topologyupdater.yaml
+@@ -53,8 +53,8 @@ spec:
+       {{- end }}
+       containers:
+       - name: topology-updater
+-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+-        imagePullPolicy: "{{ .Values.image.pullPolicy }}"
++        image: "{{ include "node-feature-discovery.image" $ }}"
++        imagePullPolicy: "{{ include "node-feature-discovery.imagePullPolicy" $ }}"
+         livenessProbe:
+           httpGet:
+             path: /healthz
+diff --git a/templates/worker.yaml b/templates/worker.yaml
+index ab32129..f0bb75c 100644
+--- a/templates/worker.yaml
++++ b/templates/worker.yaml
+@@ -59,8 +59,8 @@ spec:
+       - name: worker
+         securityContext:
+           {{- toYaml .Values.worker.securityContext | nindent 12 }}
+-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+-        imagePullPolicy: {{ .Values.image.pullPolicy }}
++        image: "{{ include "node-feature-discovery.image" $ }}"
++        imagePullPolicy: {{ include "node-feature-discovery.imagePullPolicy" $ }}
+         livenessProbe:
+           httpGet:
+             path: /healthz
