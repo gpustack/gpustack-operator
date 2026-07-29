@@ -1,6 +1,6 @@
 # Spec: Ship Kueue / NFD / CSI as Helm Subcharts and Make the Control Plane HA
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -54,16 +54,23 @@ cluster has to tear down its Kueue CRDs to upgrade.
   vendored tree serves every supported cluster; NFD 0.19.0 straight from
   `kubernetes-sigs/node-feature-discovery`. The only chart capability the fork added — rendering a
   `NodeFeatureRule` — becomes the operator's own, so the fork stops being a dependency.
-- **Keep the airgap/mirror story intact.** `global.imageRegistry` / `global.imageNamespace` /
-  `global.imagePullSecrets` still fan out to every workload, including subchart workloads and
-  subchart hook Jobs.
+- **Keep the airgap/mirror story intact.** `global.imageRegistry` / `global.imagePullSecrets` /
+  `global.imagePullPolicy` fan out to every workload, including subchart workloads and subchart
+  hook Jobs, in both install modes. `global.imageNamespace` does too in chart mode, but image
+  mode withholds it whenever the worker's own image resolves — T34 establishes why: it replaces
+  the namespace segment of every reference, including the operator image the overlay has just
+  pinned to the running worker, and a packaged build need not put the two in the same namespace.
+  The registry is the axis an airgap turns on and it is never withheld.
 - **Preserve upgrade continuity.** An existing v0.7.x install upgrades in place with no loss of
   ClusterQueues, Workloads or node labels.
 
 Success is measurable as: `pkg/worker/kuberess` no longer contains a Kueue/NFD/CSI values
 template; both install modes render the same objects from the same chart defaults; `--set
 worker.replicas=3 --set kueue.controllerManager.replicas=3` yields a working, leader-elected,
-node-spread control plane; and the v0.7.x → new-chart upgrade e2e case passes.
+node-spread control plane. The last criterion — the v0.7.x → new-chart upgrade e2e case passing —
+is **not met as written**: what ships adopts one stand-in subchart release rather than installing
+the last released chart, and none of F8's four survival assertions exist. Open Questions records
+it, with what closing it takes.
 
 ### Non-Goals
 
@@ -78,8 +85,13 @@ node-spread control plane; and the v0.7.x → new-chart upgrade e2e case passes.
   bump. Nothing else is re-pinned.
 - Patching Kueue's visibility server out of the chart — see the caveat under
   "Notes / Constraints / Caveats".
-- Maintaining upstream chart forks for anything beyond the `global.*` image plumbing, the
-  `csi-driver-s3` rename and the Kueue `selectableFields` version guard.
+- Maintaining upstream chart forks beyond what a task authorized. This began as the `global.*`
+  image plumbing, the `csi-driver-s3` rename and the Kueue `selectableFields` version guard;
+  three more were added with their reasons — Kueue's `manager-config` (T20) and `cert-manager`
+  (T21), both making a subchart read a parent helper it otherwise cannot, and `csi-driver-s3`'s
+  `feature-gates` (T24), dropping a gate its provisioner removed. Kueue therefore carries four
+  patches, against F5's argument that NFD's single patch is what limits bump cost; Open Questions
+  carries that tension rather than pretending it away.
 - A non-Helm (pure `kubectl apply`) install path.
 - Multi-cluster / MultiKueue, and any change to the device-manager DaemonSets (already per-node).
 

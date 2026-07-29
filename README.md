@@ -83,7 +83,7 @@ helm uninstall gpustack-operator --namespace gpustack-system
 A single `gpustack-operator` binary exposes three subcommands — `worker` (control plane), `worker-gateway`
 (cross-cluster aggregation), and `device-manager` (per-node DaemonSet) — that drive a four-stage chain:
 
-1. **Bootstrap** — the Worker installs the NFD and Device Manager DaemonSets.
+1. **Bootstrap** — the chart deploys Node Feature Discovery, Kueue, the two CSI drivers and the per-manufacturer Device Manager DaemonSets as vendored subcharts of one release; the Worker installs them itself only where no chart deploys the Worker. Either way the Worker applies the two custom resources no chart can carry — the `gpustack-cpu-info` `NodeFeatureRule` and the `gpustack-node-devices` `AdmissionCheck`.
 2. **Device discovery** — Node Feature Discovery labels nodes by PCI vendor and CPU identity; the Device Manager then detects accelerators, reports per-device feature labels, and maintains a per-card `Devices` ledger.
 3. **Capacity profiling** — the Worker normalizes each node's CPU/RAM/storage and per-accelerator capacity into profile labels, keyed by the node's CPU identity.
 4. **Queue construction & admission** — five Worker controllers (`NodeFlavorReconciler`, `InstanceTypeReconciler`, `NodeQueueReconciler`, `NodeQueueEntranceReconciler`, `NodeDevicesAdmissionReconciler`) materialize the labels into a Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, **no Cohort**) → `LocalQueue`, a materialized `InstanceType` CRD, and a per-card `gpustack-node-devices` `AdmissionCheck`. `InstanceTypeReconciler` owns the queue's existence + labels + status; `NodeQueueReconciler` owns its quota, `StopPolicy`, and admission-check reference.

@@ -13,7 +13,7 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 
 One `gpustack-operator` binary, three subcommands; the scheduling chain builds in four stages:
 
-1. **Bootstrap** — the `worker` installs NFD and per-manufacturer Device Manager DaemonSets.
+1. **Bootstrap** — the Helm chart deploys NFD, Kueue, the two CSI drivers and the per-manufacturer Device Manager DaemonSets as vendored subcharts of one release; the `worker` installs them itself only where no chart deploys the worker (image mode). Either way the worker applies the two custom resources no chart can carry — the `gpustack-cpu-info` NodeFeatureRule and the `gpustack-node-devices` AdmissionCheck.
 2. **Device discovery** — the Device Manager detects accelerators and writes `acceleratable.feature.gpustack.ai/*` labels.
 3. **Capacity profiling** — the worker's `NodeFeatureReconciler` stamps the `gpustack.ai/managed` marker and `NodeCapacityReconciler` derives `general.`/`acceleratable.` per-card capacity labels (CPU cores plus the two accelerator families' capacities — `.sliced.*` for logically sliceable cards, `.partitioned.*` for cards in a hardware partitioning mode; a card serves exactly one family). The general(CPU) key defaults to `generic` and does not encode os/arch.
 4. **Queue construction & admission** — worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no Cohort) plus a materialized `InstanceType` CRD, fronted by a per-namespace `LocalQueue` and gated per-card by a `gpustack-node-devices` AdmissionCheck.
@@ -32,7 +32,7 @@ pkg/
     controllers/worker/           the scheduling-chain reconcilers
     extensionapis/                aggregated extension-API handlers (Instance, Devices, InstanceType, …)
     webhooks/worker/              admission webhooks (generated + hand-written)
-    kuberess/                     installs NFD / Kueue / Device-Manager / CSI apps
+    kuberess/                     installs the bundled operator chart (image mode) + the two CRs
   workergateway/                  worker-gateway subcommand (upstream aggregation)
   devicemanager/                  device-manager subcommand (per-node DaemonSet)
     detector/<mfr>/               per-manufacturer accelerator detection
