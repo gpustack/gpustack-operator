@@ -12,10 +12,14 @@
 #              regression guard: a pre-fix reconciler could count a Workload's own already-admitted
 #              allocation against itself and evict a stable slice). Exercises the sliced credits quota +
 #              the node-devices AdmissionCheck end to end.
-# Environment: Needs REAL accelerator hardware advertising a *.sliced resource. AUTO-SKIPS (exit 0) otherwise.
+# Environment: Needs REAL NVIDIA accelerator hardware advertising nvidia.com/gpu.sliced. AUTO-SKIPS
+#              (exit 0) otherwise. NVIDIA-only because the same-card assertion reads the visible-devices
+#              env the runtime injected, and each vendor injects its own variable name — deriving that
+#              here would duplicate a mapping the allocators already own, and drift from it.
 # Inputs:      All real, nothing mocked — INST_A + INST_B (each a 40% memory slice, cores%=100), then
 #              INST_C (a third 40% slice = 120% over one card), on the sliceable pool.
-# Expected:    - both 40% slices reach Running (combined 80% <= 100%);
+# Expected:    - both 40% slices reach Running on the SAME physical card (combined 80% <= 100%),
+#                compared on the card the runtime confined each to, not on the node;
 #              - the over-budget third is held (not Running);
 #              - A and B stay Running after C's rejected admission (no self-eviction on sibling re-evaluation).
 # Cleanup:     Trap deletes the three test Instances.
@@ -32,12 +36,13 @@ import json,sys
 for n in json.load(sys.stdin).get('items',[]):
     a=n.get('status',{}).get('allocatable',{})
     for k,v in a.items():
-        if k.endswith('/gpu.sliced') and int(v)>0:
+        if k == 'nvidia.com/gpu.sliced' and int(v)>0:
             print(n['metadata']['name']); sys.exit(0)
 " 2>/dev/null)
 if [ -z "$sliced_node" ]; then
   echo "== CASE 14 — SKIPPED =="
-  echo "No node advertises a *.sliced accelerator resource — this case needs real accelerator hardware."
+  echo "No node advertises nvidia.com/gpu.sliced — this case needs real NVIDIA accelerator hardware (see the"
+  echo "Environment note above for why it is NVIDIA-only)."
   exit 0
 fi
 echo "[case-14] real sliced accelerator found on ${sliced_node}"
@@ -49,6 +54,9 @@ IT=$(kubectl get instancetypes.worker.gpustack.ai -o json 2>/dev/null | python3 
 import json,sys
 for it in json.load(sys.stdin).get('items',[]):
     if not it.get('spec',{}).get('acceleratable'):
+        continue
+    # NVIDIA only, to match the visible-devices variable the same-card assertion reads.
+    if (it.get('status',{}).get('detail',{}) or {}).get('manufacturer') != 'nvidia':
         continue
     sl=(it.get('status',{}).get('acceleratorSliced') or {})
     if int(sl.get('capacity') or 0) > 0:
@@ -112,6 +120,22 @@ EOF
 running() { [ "$(kubectl -n default get pod "$1" -o jsonpath='{.status.phase}' 2>/dev/null)" = "Running" ]; }
 wait_running() { for _ in $(seq 1 40); do running "$1" && return 0; sleep 3; done; return 1; }
 
+# visible_card <pod> — the card the runtime confined the container to, retried.
+#
+# A Pod reports Running slightly before its container is attachable, so an exec issued the instant
+# wait_running returns can come back empty (or fail with `container not found`) on a placement that is
+# perfectly correct. Here that matters twice over: the check below reads an empty value as "the two
+# slices are on different cards" and records a FAIL, turning a timing artifact into a reported defect.
+visible_card() {
+  local out
+  for _ in $(seq 1 8); do
+    out=$(kubectl -n default exec "$1" -c main -- printenv NVIDIA_VISIBLE_DEVICES 2>/dev/null)
+    [ -n "$out" ] && { echo "$out"; return 0; }
+    sleep 3
+  done
+  return 1
+}
+
 # 1. Two 40% slices (combined 80% <= 100%): both must run on the same card.
 echo "[case-14] creating two 40% slices (${INST_A}, ${INST_B})"
 mkslice "$INST_A" 40
@@ -119,11 +143,18 @@ mkslice "$INST_B" 40
 a_ok=1; wait_running "$INST_A" || a_ok=0
 b_ok=1; wait_running "$INST_B" || b_ok=0
 if [ "$a_ok" = 1 ] && [ "$b_ok" = 1 ]; then
-  na=$(kubectl -n default get pod "$INST_A" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
-  nb=$(kubectl -n default get pod "$INST_B" -o jsonpath='{.spec.nodeName}' 2>/dev/null)
-  record PASS "two 40% slices coexist" "${INST_A}@${na} + ${INST_B}@${nb} both Running (combined 80% <= 100%)"
+  # Compare the CARD, not the node. This case's claim is that two in-budget slices coexist on one
+  # PHYSICAL card, and a node name cannot tell that apart from two slices on two cards of one node —
+  # it was recorded without being compared at all, which made the check vacuous.
+  ca=$(visible_card "$INST_A")
+  cb=$(visible_card "$INST_B")
+  if [ -n "$ca" ] && [ "$ca" = "$cb" ]; then
+    record PASS "two 40% slices coexist on one card" "${INST_A} + ${INST_B} both Running on ${ca} (combined 80% <= 100%)"
+  else
+    record FAIL "two 40% slices coexist on one card" "A@'${ca:-<unreadable>}' B@'${cb:-<unreadable>}' — two slices within one card's budget must share that card"
+  fi
 else
-  record FAIL "two 40% slices coexist" "A running=${a_ok} B running=${b_ok} — both should admit within one card"
+  record FAIL "two 40% slices coexist on one card" "A running=${a_ok} B running=${b_ok} — both should admit within one card"
 fi
 
 # 2. A third slice that would exceed the card (80% + 40% > 100%) must be held, not over-admitted.
