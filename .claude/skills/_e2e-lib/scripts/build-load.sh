@@ -17,7 +17,9 @@
 # machine AND want this machine's architecture:
 #
 #   LOCAL (default)  — build here, import into the local node runtime, never
-#                      push. For k3s / docker-desktop.
+#                      push. For kind / k3s / docker-desktop. Which one it is
+#                      comes from the nodes' providerID, not from the context
+#                      name, which anyone may have renamed.
 #   REMOTE           — E2E_BUILDER_SSH set. The nodes are elsewhere, or need a
 #                      different architecture, so the image is built on a
 #                      builder host and PUSHED to a registry the nodes pull
@@ -47,7 +49,7 @@ if [ -n "${E2E_BUILDER_SSH:-}" ]; then
   # which silently produces an image of the wrong revision and only surfaces
   # later as assert-core.sh's stale-image guard. A bundle carries the objects
   # without needing the builder to have a remote or credentials.
-  BUNDLE="$(mktemp -t e2e-XXXXXX).bundle"
+  BUNDLE="$(mktemp "${TMPDIR:-/tmp}/e2e-XXXXXX").bundle"
   git bundle create "$BUNDLE" HEAD >/dev/null 2>&1 || { echo "git bundle failed"; exit 1; }
   scp -q -o StrictHostKeyChecking=no "$BUNDLE" "${E2E_BUILDER_SSH}:/tmp/e2e-head.bundle" || exit 1
   rm -f "$BUNDLE"
@@ -105,16 +107,34 @@ echo "== load into cluster runtime =="
 ctx=$(kubectl config current-context)
 echo "active context: ${ctx}"
 
+# Which runtime the nodes actually are is asked of the NODES, not of the context name. A
+# context is named by whoever wrote the kubeconfig: a kind cluster reached through a context
+# called "docker-desktop" is a real shape, and taking the name at face value there skips the
+# import while reporting success — the whole run then verifies a stale image and looks fine.
+# kind stamps every node with providerID "kind://docker/<cluster>/<node>", which settles both
+# questions at once: that it is kind, and what the cluster is called.
+kind_cluster=""
+provider=$(kubectl get nodes -o jsonpath='{.items[0].spec.providerID}' 2>/dev/null)
+case "$provider" in
+  kind://docker/*)
+    kind_cluster=$(echo "$provider" | cut -d/ -f4)
+    ;;
+esac
+
 # docker-desktop shares the docker image store with the node — no import needed.
 # k3s (containerd, separate store) needs an explicit import.
-case "$ctx" in
-  kind-*)
+# What the branch below keys on: the nodes' answer when they gave one, the context name only
+# as a fallback for a runtime that stamps no providerID.
+runtime="$ctx"
+[ -n "$kind_cluster" ] && runtime="kind"
+
+case "$runtime" in
+  kind|kind-*)
     # Every kind node is a container with its OWN containerd store, so sharing this
     # machine's docker store is not enough — the image has to be loaded into each of
-    # them, which is what `kind load` does. The cluster name is the context minus the
-    # "kind-" prefix, which is how kind writes it.
-    cluster="${ctx#kind-}"
-    echo "kind detected — loading into every node of cluster '${cluster}'"
+    # them, which is what `kind load` does.
+    cluster="${kind_cluster:-${ctx#kind-}}"
+    echo "kind detected (node providerID) — loading into every node of cluster '${cluster}'"
     if ! command -v kind >/dev/null 2>&1; then
       echo "kind is not on PATH; load by hand: kind load docker-image '${IMAGE}' --name '${cluster}'"
       exit 1

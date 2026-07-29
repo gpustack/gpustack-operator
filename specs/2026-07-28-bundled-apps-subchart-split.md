@@ -2044,6 +2044,32 @@ source, and the two findings deliberately left are recorded under Open Questions
       commit nor `HEAD` — it was the experiment T27 records as impossible, since Helm validates
       ownership before it runs any hook. F8's two steps are the two that ship.
 
+- [x] **T35 · Ask the nodes what runtime they are, not the kubeconfig**
+      Blocked by: T34
+      Owns: `.claude/skills/_e2e-lib/scripts/build-load.sh`
+      Acceptance: `build-load.sh` decided how to get the built image onto the cluster from the
+      **context name**: `kind-*` meant `kind load`, `*docker-desktop*` meant the node shares this
+      machine's docker store and no import is needed. A context is named by whoever wrote the
+      kubeconfig, and this branch was verified against a kind cluster reached through a context
+      called `docker-desktop` — so the script printed `docker-desktop detected — node shares the
+      docker store, no import needed`, then `built & loaded`, while not one of the four kind nodes
+      had the image. That is the worst shape a verification bug can take: everything downstream
+      runs the previously-loaded image and reports success. It was caught only by checking
+      `crictl images` inside a node before trusting the line.
+      The runtime now comes from the nodes: kind stamps every node with a providerID of
+      `kind://docker/<cluster>/<node>`, which settles both whether it is kind and what the cluster
+      is called, whatever the context is named. The context-name switch stays as the fallback for
+      a runtime that stamps no providerID, so k3s and a genuine docker-desktop behave as before.
+      Verify: a truth table over {providerID present, absent} × {docker-desktop, kind-*, k3s,
+      unknown} context names; then run the script against this cluster.
+      Measured: with a providerID the kind branch wins under all four context names and derives
+      the cluster from the providerID, not the context; with none, the old mapping is unchanged
+      (`kind-foo` → cluster `foo`, `k3s-local` → k3s import, `docker-desktop` → no import,
+      anything else → the explicit "unknown runtime" warning). The first attempt at the branch key
+      used a nested `${x:+}${x:-}` expansion that silently produced `kinddesktop` and fell through
+      to "unknown" for every case — the table is what caught it, which is why it is the acceptance
+      rather than a reading of the diff.
+
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
 those paths. `helm.Chart.Install` falls back to `DownloadURL`, so image-mode application installs
