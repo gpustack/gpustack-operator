@@ -227,6 +227,10 @@ kubectl -n "$NS" describe deploy/gpustack-operator-worker
 kubectl -n "$NS" logs deploy/gpustack-operator-worker --tail=400 | grep -iE 'error|reconcile.*fail'
 ```
 
+A log that says nothing is not evidence the code did not run: device-plugin `Allocate` /
+`GetPreferredAllocation` decisions log above the deployed `-v`. Raise verbosity on the pod **before**
+re-triggering the case — see `../_e2e-lib/references/troubleshooting.md` (*Component log verbosity*).
+
 **Phase 6 — Summary.** Write the summary (confirmed problems + repro + conclusion; classify each as real bug / test-design issue / awaiting-owner) + the **suite gaps & upgrade backlog** accrued during the run.
 
 **Phase 7 — Fix & retest / Suite upgrade (optional).** Per `orchestration.md`, two user-gated branches: (a) real bugs → confirm, choose local vs remote (SSH/RSYNC) packaging (record connection info), fix → `make lint` → signoff commit → package → `helm upgrade` → retest → append; (b) sink the self-upgrade backlog into the suite (new/adjusted `cases`, tightened assertions, case-table/`references` updates) or this protocol — confirm each, signoff commit, retest any changed case.

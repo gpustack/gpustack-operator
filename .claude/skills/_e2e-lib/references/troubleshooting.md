@@ -106,6 +106,44 @@ accelerator schedulable on this node" signal, with one caveat about timing:
   `worker.disableApplications: ["*"]` wherever this chart deploys the worker, and stand image mode up
   on a cluster with no chart release (chart-e2e CASE 6).
 
+## Component log verbosity
+
+- **The log says nothing about the decision you are chasing** — an empty log is not evidence the code
+  did not run. Several paths log above the verbosity the deployment runs, and the device plugin is the
+  sharpest case: its `ResourceServer`s are built with `Logger: logger.V(3)`
+  (`pkg/devicemanager/allocator/allocator.go`) while the DaemonSet runs `-v=2`, so **every** `Allocate`
+  and `GetPreferredAllocation` decision — which card a slice landed on, and why — is discarded at the
+  default verbosity. That is exactly what hid a per-card placement bug from a whole e2e run.
+
+  Every component registers `PUT /debug/flags/v` on its own secure port, so verbosity can be raised
+  and dropped again without restarting the pod. The device-manager's port is 32443, and its
+  DaemonSets are per-manufacturer:
+
+  ```bash
+  DM=$(kubectl -n "$NS" get pod -o name | grep device-manager-nvidia | head -1)
+  # raise
+  kubectl -n "$NS" exec "$DM" -- curl -sk -X PUT -H "Host: 127.0.0.1" -d '4' https://127.0.0.1:32443/debug/flags/v
+  # → successfully set klog.logging.verbosity to 4
+  #
+  # ... now create the workload you want to trace, then read the log ...
+  #
+  # revert to the DaemonSet's own -v
+  kubectl -n "$NS" exec "$DM" -- curl -sk -X PUT -H "Host: 127.0.0.1" -d '2' https://127.0.0.1:32443/debug/flags/v
+  ```
+
+  **`-H "Host: 127.0.0.1"` is mandatory.** `httpx.LoopbackAccessHandlerFunc` compares `r.Host` against
+  the bare strings `127.0.0.1` / `localhost` / `::1`, and an ordinary request carries the port
+  (`127.0.0.1:32443`), so without the override the guard rejects it with a plain **404** that reads
+  like a missing route. With the header but a `GET`, the handler answers `406 unsupported http method`
+  — that is the guard passing, i.e. proof the route is there.
+
+  **Raise it before creating the workload**, and revert when done. These lines fire only on an
+  allocation, so a quiet window after the fact proves nothing, and leaving `v=4` on floods the log for
+  every later case.
+
+  `docs/development.md` (*Runtime log verbosity*) is the developer-facing version, with the code
+  references for each component's registration and port.
+
 ## Teardown
 
 - **Teardown hangs deleting kueue CRDs** — the uninstall removes Kueue's controller (it is a subchart
