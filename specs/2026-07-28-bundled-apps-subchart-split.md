@@ -1861,6 +1861,25 @@ the baseline.
       `deployed`, four Certificates `Ready`, `internalCertManagement.enable: false`, both
       APIServices `True`, both pods 1/1.
 
+- [x] **T28 · The turn-end hook checks what CI checks**
+      Blocked by: T26
+      Owns: `.claude/hooks/gpustack-operator-lint.sh`
+      Acceptance: the Stop hook already dispatched `make lint` and `make lint chart` by the kinds
+      of file dirty in the tree. It gains the two checks this branch kept paying for by hand.
+      `make generate chart` runs when `values.yaml`, `README.md.gotmpl` or `Chart.yaml` is dirty,
+      and says so when that moved a generated file: CI's *Verify Generated* compares exactly those
+      three outputs, and a stale `values.schema.json` is not a lint error — it makes `helm
+      template` reject the values outright, which reads as a template bug until you remember the
+      schema. And a warning fires when a vendoring edit is dirty beside a **clean** vendored tree,
+      because `make deps` skips a tree whose `_VERSION_` matches, so such an edit ships as nothing
+      (T24 and T21 both hit this). Report-only, exit 0 throughout, as before.
+      Verify: exercise all three branches against the real tree.
+      Measured: a dirty `hack/deps.sh` beside a clean vendored tree warns; the same edit with the
+      tree also dirty stays silent, so the check does not fire on the normal path — the path test
+      has to be anchored past `git status --porcelain`'s status prefix, since the patch directory's
+      own path ends in the tree path being matched. A one-line `# --` edit in `values.yaml`
+      regenerated `README.md` and reported it.
+
 **A transitional state to expect, not to fix.** Between T14 and T12, the Dockerfile has stopped
 pre-baking the four upstream chart archives while `pkg/worker/kuberess/apps_*.go` still points at
 those paths. `helm.Chart.Install` falls back to `DownloadURL`, so image-mode application installs
