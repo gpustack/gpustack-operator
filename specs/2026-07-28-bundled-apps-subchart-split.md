@@ -269,21 +269,41 @@ that the scheduling chain starts against my existing NFD instead of requiring a 
 - AC: `make generate chart` regenerates `README.md` and `values.schema.json`; the CI
   "Verify Generated" step passes.
 
-**F3 — Go-derived values generated, one source of truth**
-- The Kueue `managerConfig` `resources.transformations` block is emitted into `values.yaml` by a
-  generator reading `pkg/nodefeature` (`CreditsPerCard`, `SharedResourceMaxSize`,
-  `ResourceMaxUnits`, `GetAcceleratable*ResourceName`), between explicit begin/end markers.
-- The `NodeFeatureRule`'s matchers are **not** generated values: the worker reads them from
+**F3 — Nothing in the chart's values is generated**
+- Kueue's `managerConfig` `resources.transformations` — the mapping that turns every
+  accelerator resource key into its manufacturer's credits resource — is **rendered**, not
+  generated: a named template in the parent's `_helpers.tpl` walks `global.manufacturers` and
+  emits one rule set per row from that row's `resourceName` and `partitionKind`, on the integer
+  credit basis `pkg/nodefeature` defines (`CreditsPerCard`, `SharedResourceMaxSize`,
+  `ResourceMaxUnits`). A patch has Kueue's `manager/manager-config.yaml` `include` it. That
+  template already parses `controllerManagerConfigYaml` with `fromYaml`, mutates the resulting
+  dict and re-serialises it, so the patch is one `set` on a dict Kueue builds anyway — the
+  smallest possible surface to carry across a Kueue bump.
+- Two things the generated shape could not survive. The text sat **inside** the user-editable
+  `managerConfig.controllerManagerConfigYaml` string, so a user who copied that string to change
+  one feature gate silently dropped the credits mapping the whole scheduling chain rests on, with
+  no error anywhere. And 123 lines of generated YAML in the values surface told a reader nothing
+  they could act on. Rendering from the manufacturers map removes both, and gains a property
+  generation never had: a manufacturer a **user** adds to that map gets its rules too.
+- The same patch makes `managedJobsNamespaceSelector` follow `.Release.Namespace`. Kueue refuses
+  to start when that selector matches its own namespace, and a subchart value cannot be
+  templated, so before this the chart was installable into `gpustack-system` alone.
+- With that block gone, **no chart value is generated from Go at all**: `gen/chartvalues`, its
+  begin/end markers and its `hack/generate.sh` step are deleted, and `make generate chart` is
+  helm-docs plus helm-schema. The guarantee the generator bought moves to a Go test that renders
+  the chart in-process and asserts the Kueue ConfigMap's transformations equal what
+  `pkg/nodefeature` computes — a check over the whole rendering path rather than over a text
+  block, and the reason the values it derives from can safely live in a template.
+- The `NodeFeatureRule`'s matchers are not chart values either: the worker reads them from
   `pkg/nodefeature` when it applies the rule (F5). The two lists the chart still states for its
-  own reasons — the `manufacturers` map and the NFD subchart's `deviceClassWhitelist` — are held
+  own reasons — `global.manufacturers` and the NFD subchart's `deviceClassWhitelist` — are held
   equal to that package by Go tests, which is the same guarantee without a generation step.
-- The generator runs from `generate_chart` in `hack/generate.sh`, ahead of helm-docs and
-  helm-schema, so `make generate chart` is the single regeneration entry point.
-- AC: changing `nodefeature.CreditsPerCard` and running `make generate chart` updates
-  `values.yaml`; CI fails when the result is uncommitted.
-- AC: a unit test asserts the committed block equals what `pkg/nodefeature` computes.
-- AC: the generated transformations cover the chart's full `manufacturers` map; removing a
-  manufacturer from values leaves inert transformations, which is documented as harmless.
+- AC: changing `nodefeature.CreditsPerCard` fails the render test until the helper's factors
+  follow it.
+- AC: the rendered `kueue-manager-config` ConfigMap is byte-identical to the generated one apart
+  from that selector — the point is where the text lives, not what it says.
+- AC: `helm install` into a namespace other than `gpustack-system` brings Kueue up, and
+  `ct install`, which picks a random namespace, passes with no namespace pin.
 
 **F4 — Two install modes, one set of chart defaults**
 
@@ -678,6 +698,50 @@ pre-install/pre-upgrade hooks execute.
 - AC: `make lint chart`, `make test chart`, `gpustack-operator-chart-e2e` and
   `gpustack-operator-e2e` all pass.
 
+**F11 — One manufacturer, one row**
+- `manufacturers` becomes `global.manufacturers`, a map of objects. `global` because Helm gives a
+  subchart no other channel to the parent's values, and Kueue's patched config has to read this
+  map (F3); the same hoist gives the release one answer where two could disagree, which is what
+  `global.certmanager` (T21) does for cert-manager.
+- Each row carries what a manufacturer *is*, in one place instead of four: `pciVendorID`,
+  `resourceName`, `runtimeName` and `partitionKind` — every one of them a fact `pkg/nodefeature`
+  already states and accepts a `GPUSTACK_<MFR>_*` override for — plus `runtimeInjectsDriver`, a
+  deployment fact no Go code holds. A Go test holds the four against `pkg/nodefeature`; the fifth
+  is asserted only to be consistent with `runtimeName`.
+- **The chart fans all four Go-backed fields out as environment variables**, to the worker and to
+  every device-manager, through one helper. Before this only `GPUSTACK_<MFR>_PCI_VENDOR_ID` was
+  propagated, so a `resourceName` set in values changed nothing — the map named identities it
+  could not actually decide. A field is emitted only when the row states it, which is what leaves
+  `pkg/nodefeature`'s default in force for a row that says nothing.
+- **The vendor lists leave the templates.** `runtimeName` decides which manufacturers get a
+  RuntimeClass, replacing `has $manu (list "nvidia" "mthreads")` in `runtimeclass.yaml`; the
+  chart states one for the six vendors whose container runtime registers a handler by that name
+  (nvidia, mthreads, ascend, amd, cambricon, iluvatar). `pkg/nodefeature` knows two more (hygon,
+  metax) and keeps them: `InstanceReconciler` attaches a RuntimeClass **whenever one exists**, so
+  creating a class no container runtime backs would fail every Instance Pod of that vendor, while
+  leaving Go's name in place still uses a class the vendor's own operator created. Emptying a
+  row's `runtimeName` therefore stops the chart creating the class; it does not stop the operator
+  using one that is already there. `deviceManager.createRuntimeClasses` (unchanged) remains the
+  switch for all of them, and the `lookup` guard remains what keeps a foreign class un-adopted.
+- `runtimeInjectsDriver` replaces the same literal in `daemonset.yaml`'s `runtimeClassName`, and
+  says why the two lists differ: nvidia and mthreads are the only manufacturers whose user-space
+  driver reaches a container **only** through the container runtime. Every other vendor's
+  device-manager reads its management library from a hostPath mount the DaemonSet already makes
+  (`/opt/rocm`, `/usr/local/dcmi`, …), so it needs no RuntimeClass of its own even where one is
+  created for workloads.
+- **The device-manager runs in the host's PID and IPC namespaces.** A vendor management library
+  reports the host PIDs holding a device, and reaches the driver over host IPC; a device-manager
+  in its own namespaces sees neither. The pod is already `privileged` with `/dev` and `/sys`
+  mounted, so these are stated in the template rather than exposed as switches — a knob here
+  could only be turned off into silently losing process attribution.
+- AC: the default render is byte-identical to the render before the shape change, apart from the
+  four added RuntimeClasses, the fanned-out environment variables and the two host namespaces —
+  the migration is a values-surface change and nothing else.
+- AC: a Go test holds every row's `pciVendorID`, `resourceName`, `partitionKind` equal to
+  `pkg/nodefeature`, every stated `runtimeName` equal to it, and every `runtimeInjectsDriver` row
+  in possession of a `runtimeName`.
+- AC: the image-mode overlay emits the whole map, proven by the two renders staying equal.
+
 ### Notes / Constraints / Caveats
 
 - **Helm cannot template subchart values.** This is the constraint that shapes the whole
@@ -1002,8 +1066,6 @@ hack/
 │                                  # also carries the helm-docs/helm-schema subchart-ignore flags
 ├── deps.sh                        # calls it from mod()
 └── deploy/gpustack-operator/chart/charts/<name>/*.patch   # mirrors hack/staging/<dest>/
-
-gen/chartvalues/                   # emits the nodefeature-derived values blocks
 
 pkg/worker/kuberess/
 ├── apps.go                        # installs = [operator chart]; the disable-name table
@@ -1557,58 +1619,89 @@ the baseline.
       chart is installable into `gpustack-system` alone, which `docs/migration/to-subcharts.md`
       states, and T20's Kueue patch is what can make the selector follow `.Release.Namespace`.
 
+- [ ] **T23 · The device-manager sees the host's processes and IPC**
+      Blocked by: None
+      Owns: `deploy/gpustack-operator/chart/templates/device-manager/daemonset.yaml`
+      Acceptance: every device-manager pod runs with `hostPID: true` and `hostIPC: true`. A vendor
+      management library reports the host PIDs holding a device and reaches its driver over host
+      IPC, so a device-manager confined to its own namespaces can resolve neither — and this pod
+      is already `privileged` with `/dev` and `/sys` mounted, so the two namespaces add no reach
+      it does not already have. Stated in the template, not exposed as switches: turning one off
+      would silently cost process attribution rather than harden anything.
+      Verify: `go test ./pkg/worker/kuberess/...` (the overlay render must still agree with the
+      default one); the render diff against `HEAD` is exactly those two lines per DaemonSet.
+
 - [ ] **T19 · `manufacturers` carries a manufacturer's whole identity**
-      Blocked by: T22
+      Blocked by: T22, T23 (both rewrite `device-manager/daemonset.yaml`)
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/**`, `pkg/worker/kuberess/chart_test.go`,
-      `docs/settings.md`, `docs/architecture.md`
+      `pkg/worker/kuberess/apps_gpustack_operator.go`, `docs/settings.md`, `docs/architecture.md`,
+      `docs/migration/to-subcharts.md`
       Gate: review
-      Acceptance: `manufacturers` stops being a name→PCI-vendor-ID map and becomes a map of objects
-      carrying `pciVendorID` plus the three identities that are hardcoded somewhere today —
-      `resourceName`, `runtimeName`, `partitionKind`. The payoff is in the templates: the
-      RuntimeClass template currently decides which vendors get one with a literal
-      `has $manu (list "nvidia" "mthreads")`, and after this it renders one for whichever
-      manufacturers declare a `runtimeName` — the vendor list stops living inside a template. All
-      five readers move with it: `nodefeaturerule.yaml`'s `values .Values.manufacturers` becomes a
-      pluck of `pciVendorID`, `device-manager/daemonset.yaml`'s `index $root.Values.manufacturers
-      $manu`, `worker/deployment.yaml`'s `--manufacturer` (keys, unchanged) and its
-      `GPUSTACK_<MFR>_PCI_VENDOR_ID` env loop, and `NOTES.txt` (keys, unchanged).
-      `TestChartManufacturersMatchNodeFeature` widens from the vendor ID to all four fields against
-      `pkg/nodefeature`, which is what stops a chart value drifting from the code that consumes it.
-      Also rewrites the sentences T17 wrote about this map in `docs/settings.md` (the
-      `GPUSTACK_<MFR>_PCI_VENDOR_ID` row's "set the `manufacturers` value instead") and
-      `docs/architecture.md`.
+      Acceptance: F11's map. `manufacturers` stops being a name→PCI-vendor-ID map and becomes
+      `global.manufacturers`, a map of objects carrying `pciVendorID`, `resourceName`,
+      `runtimeName`, `partitionKind` and `runtimeInjectsDriver`. `global` is not cosmetic: T20's
+      Kueue patch has to read this map, and `global` is the only channel Helm gives a subchart to
+      the parent's values, so doing it here is what stops T20 rewriting every reader a second
+      time. The payoff is in the templates: `runtimeclass.yaml`'s
+      `has $manu (list "nvidia" "mthreads")` becomes "the row states a `runtimeName`" (six
+      vendors), `daemonset.yaml`'s identical literal becomes `runtimeInjectsDriver` (two), and
+      neither vendor list lives in a template any more. Every reader moves with it:
+      `daemonset.yaml`'s `index $root.Values.manufacturers $manu`, `worker/deployment.yaml`'s
+      `--manufacturer` (keys, unchanged) and its `GPUSTACK_<MFR>_PCI_VENDOR_ID` env loop —
+      which becomes one helper fanning out all four Go-backed fields to the worker **and** the
+      device-managers, since a value nothing propagates decides nothing — `NOTES.txt` (keys,
+      unchanged), and the image-mode overlay in `apps_gpustack_operator.go`, which emits the whole
+      map instead of a vendor-ID pair.
+      `TestChartManufacturersMatchNodeFeature` widens from the vendor ID to the four Go-backed
+      fields, with `runtimeName` asserted as a subset (equal wherever stated) so the chart can
+      deliberately withhold hygon and metax, and `runtimeInjectsDriver` asserted to imply a
+      `runtimeName`. Also rewrites the sentences T17 wrote about this map in `docs/settings.md`
+      (the `GPUSTACK_<MFR>_PCI_VENDOR_ID` row's "set the `manufacturers` value instead", now true
+      of four variables) and `docs/architecture.md`, and records the values rename in
+      `docs/migration/to-subcharts.md`.
       Verify: `make generate chart` idempotent; `go test ./pkg/worker/kuberess/...`; and the check
-      that matters — the **default map renders byte-identically** to before the shape change
-      (`helm template` diff empty), so the migration is a values-surface change and nothing else.
+      that matters — the default render differs from before the shape change **only** by the four
+      added RuntimeClasses and the fanned-out environment variables, so the migration is a
+      values-surface change and nothing else.
 
-- [ ] **T20 · The generated Kueue transformations leave the values surface**
-      Blocked by: T19 (both rewrite `values.yaml`; disjoint in intent, not in file)
+- [ ] **T20 · Kueue's config is rendered from the manufacturers map**
+      Blocked by: T19 (the helper reads the map T19 shapes and hoists)
       Owns: `deploy/gpustack-operator/chart/values.yaml`,
       `deploy/gpustack-operator/chart/templates/_helpers.tpl`,
-      `hack/deploy/gpustack-operator/chart/charts/kueue/**`, `gen/chartvalues/**`
-      Acceptance: the 28 generated `transformations` entries — 123 lines of `values.yaml`, sitting
-      **inside** the user-editable `kueue.managerConfig.controllerManagerConfigYaml` string —
-      move into a named template in the parent's `_helpers.tpl`, which a new patch has
-      `charts/kueue/templates/manager/manager-config.yaml` `include`. The reason is the one thing
-      the current shape cannot survive: a user who copies `controllerManagerConfigYaml` to change
-      one feature gate silently drops the credits mapping the whole scheduling chain is built on,
-      with no error anywhere. `make generate chart` writes the helper between its markers instead
-      of writing values, so the marker pair moves file too.
+      `hack/deploy/gpustack-operator/chart/charts/kueue/**`, `gen/chartvalues/**`,
+      `hack/generate.sh`, `hack/lib/helm.sh`, `.github/workflows/ci-chart.yml`
+      Acceptance: F3. The 28 generated `transformations` entries — 123 lines of `values.yaml`,
+      sitting **inside** the user-editable `kueue.managerConfig.controllerManagerConfigYaml`
+      string — stop being text: a named template in the parent's `_helpers.tpl` walks
+      `global.manufacturers` and derives them, and a new patch has
+      `charts/kueue/templates/manager/manager-config.yaml` `include` it. That upstream template
+      already does `fromYaml` on the string, `set`s keys on the resulting dict and re-serialises,
+      so the patch is one more `set` on a dict Kueue builds anyway — the smallest surface that
+      survives a bump. The reason is the one thing the current shape cannot: a user who copies
+      `controllerManagerConfigYaml` to change one feature gate silently drops the credits mapping
+      the whole scheduling chain is built on, with no error anywhere.
+      With that block gone `gen/chartvalues` has nothing left to emit, so the generator, its
+      golden test, its markers and its `hack/generate.sh` step are **deleted** — and the guarantee
+      it bought becomes a Go test that renders the chart in-process (`renderChart` already exists
+      in `chart_test.go`) and asserts the Kueue ConfigMap's transformations equal what
+      `pkg/nodefeature` computes. That is a stronger check than the golden file: it covers the
+      helper, the patch and the values it reads, not a text block in isolation.
       The same patch answers a defect T22's `make test chart` run exposed: Kueue **refuses to start**
       in any namespace its own `managedJobsNamespaceSelector` does not exclude, and ours hard-codes
       `gpustack-system` because Helm cannot template a subchart value — so installing this chart
       anywhere else crash-loops the controller (`managedJobsNamespaceSelector: Invalid value ...:
       should not match the "<ns>" namespace`), and `ct install`, which picks a random namespace,
-      cannot pass at all. Once the config is rendered through the parent's helper, that selector
-      follows `.Release.Namespace` and the limitation `docs/migration/to-subcharts.md` documents
-      goes away. The CI half already landed with T22 (`ct install --namespace gpustack-system`), so
-      what is left here is the product half — and once it lands, that pin can go back to
-      chart-testing's own random namespace, which is what would prove it.
-      Verify: `make generate chart` idempotent; the rendered `kueue-manager-config` ConfigMap is
-      **byte-identical** to today's apart from that selector (the point is where the text lives, not
-      what it says); `make test chart` green — the check that proves the namespace fix;
-      `make lint chart`; `gen/chartvalues`'s golden test updated to the new target.
+      cannot pass at all. Rendered through the parent's helper, that selector follows
+      `.Release.Namespace` and the limitation `docs/migration/to-subcharts.md` documents goes away.
+      The CI half landed with T22 (`ct install --namespace gpustack-system`); this task removes
+      that pin again, and `ct install` passing on its own random namespace is what proves the fix.
+      Verify: `make generate chart` idempotent (and no longer running a generator);
+      `go test ./pkg/worker/kuberess/...` — the render test is the drift guard; the rendered
+      `kueue-manager-config` ConfigMap **byte-identical** to today's apart from that selector (the
+      point is where the text lives, not what it says); `make test chart` green with no namespace
+      pin; `make lint chart`; `hack/deps.sh` re-applies the new patch cleanly from a clean vendor
+      tree.
 
 - [ ] **T21 · One cert-manager answer for the whole release**
       Blocked by: T20
@@ -1617,8 +1710,8 @@ the baseline.
       `hack/deploy/gpustack-operator/chart/charts/kueue/**`,
       `deploy/gpustack-operator/chart/README.md.gotmpl`, `docs/**`
       Gate: review
-      Acceptance: `worker.certmanager` hoists to a top-level `certmanager` and reaches the
-      subcharts as `global.certmanager`, so the release has one answer instead of two that can
+      Acceptance: `worker.certmanager` hoists to `global.certmanager`, the same channel T19 put
+      the manufacturers map on, so the release has one answer instead of two that can
       disagree — today Kueue's `enableCertManager` and the worker's `certmanager.enabled: auto` are
       set independently, and the `auto` detection cannot reach Kueue at all because Helm merges
       subchart values rather than rendering them. Kueue reads it in **28 places across 23 files**
@@ -1641,11 +1734,13 @@ because no commit on this branch is independently releasable; the branch ships a
 renders with its conditional patch applied, `global.*` reaches every image. **CP-B** after T10 — the full stack renders at parity with the
 baseline, subcharts still disabled, nothing in the cluster has changed. **CP-C** after T13 — the
 cut-over; both modes install cleanly on kind. **CP-D** after T18 — docs and e2e green. **CP-E**
-after T22/T19/T20/T21 — one owner per custom resource, and a values surface a user should have to
-read: every manufacturer identity in one map, no generated text inside an editable string, one
-cert-manager answer. T22 leads because taking the NodeFeatureRule out of the chart shrinks T19; the
-rest land after CP-D on purpose, since each rewrites text or tests that T17 and T18 have just
-written, and doing them earlier would mean writing that text twice.
+after T22/T23/T19/T20/T21 — one owner per custom resource, and a values surface a user should have
+to read: every manufacturer identity in one row, nothing generated into the values at all, one
+cert-manager answer. T22 leads because taking the NodeFeatureRule out of the chart shrinks T19, and
+T23 goes early because it is four lines nothing else depends on; T19 then precedes T20 because
+T20's Kueue patch reads the map T19 shapes. The group lands after CP-D on purpose, since each task
+rewrites text or tests that T17 and T18 have just written, and doing them earlier would mean
+writing that text twice.
 
 ### Test Plan
 
@@ -1665,8 +1760,11 @@ code solid enough prior to committing the changes necessary to implement this en
 
 #### Unit tests
 
-- `gen/chartvalues`: new — target ≥80%. Golden test over the emitted Kueue transformations and
-  NFD matcher blocks; a test that a change to `nodefeature.CreditsPerCard` changes the output.
+- `gen/chartvalues`: created by T5 with a golden test over the emitted Kueue transformations, then
+  deleted by T20 along with the last generated block. What replaces its guarantee is a render test
+  in `pkg/worker/kuberess`: the chart is rendered in-process and the Kueue ConfigMap's
+  transformations are asserted equal to what `pkg/nodefeature` computes, so a change to
+  `nodefeature.CreditsPerCard` still fails a test.
 - `pkg/worker/kuberess`: 2026-07-28 - 37.6% → target ≥45% after the collapse. Overlay
   computation per `--disable-applications` set;
   `TakeOwnership` set only when a legacy release is present; `--disable-applications` name
