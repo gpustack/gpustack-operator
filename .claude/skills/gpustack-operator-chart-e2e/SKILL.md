@@ -38,7 +38,7 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 | 3 | Release version survives a warm build cache | `pack/gpustack-operator/Dockerfile`, `hack/package.sh` (optional) | `cases/case-3.sh` | yes (confirm) |
 | 4 | The control plane survives losing its leader | `deploy/gpustack-operator/chart/values.yaml`, `deploy/gpustack-operator/chart/templates/worker/**`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-4.sh` | yes (confirm) |
 | 5 | Adopting another release's objects needs `--take-ownership` | `deploy/gpustack-operator/chart/templates/migrate/**`, `deploy/gpustack-operator/chart/files/migrate-*.sh`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-5.sh` | yes (confirm) |
-| 6 | Image mode: the worker installs the bundled chart itself | `pkg/worker/kuberess/**`, `pack/gpustack-operator/Dockerfile` | `cases/case-6.sh` | yes (confirm) |
+| 6 | Image mode: the worker installs the bundled chart itself | `pkg/worker/kuberess/**`, `pkg/kubeapp/**`, `pack/gpustack-operator/Dockerfile` | `cases/case-6.sh` | yes (confirm) |
 
 **CASE 6 needs a cluster with no chart release** — the two install modes are exclusive, because both
 renders carry the cluster-scoped `gpustack-cpu-info` NodeFeatureRule and Helm refuses the second

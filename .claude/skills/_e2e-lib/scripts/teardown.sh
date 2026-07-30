@@ -117,7 +117,15 @@ for s in "$worker_cert_secret" gpustack-settings \
   kubectl -n "$NS" delete secret "$s" --ignore-not-found 2>/dev/null || true
 done
 
-# 7. Delete what a FAILED migration hook leaves behind. Helm removes its hook objects once they
+# 7. Delete the Leases the worker holds at runtime — the lock that serializes the application
+#    install across replicas, and the control-plane leader election. Both are created by the worker
+#    rather than by the chart, so `helm uninstall` leaves them, and a released lock is an object
+#    that outlives the release it guarded. Mirrors the same step in the chart's cleanup.sh.
+for l in applications.worker.gpustack.ai worker.gpustack.ai; do
+  kubectl -n "$NS" delete lease "$l" --ignore-not-found 2>/dev/null || true
+done
+
+# 8. Delete what a FAILED migration hook leaves behind. Helm removes its hook objects once they
 #    succeed, but not when they fail — deliberately, so the logs survive — and among them is a
 #    ClusterRoleBinding to cluster-admin. Selected by our own label and then by name.
 for r in jobs configmaps serviceaccounts; do
@@ -129,7 +137,7 @@ kubectl get clusterrolebindings -l app.kubernetes.io/part-of=gpustack-operator -
   | grep -E 'migrate' \
   | xargs -r -I{} kubectl delete {} --ignore-not-found 2>/dev/null || true
 
-# 8. E2E-ONLY (NOT part of the cleanup.sh mirror): reverse-patch the Node extended resources GPUStack
+# 9. E2E-ONLY (NOT part of the cleanup.sh mirror): reverse-patch the Node extended resources GPUStack
 #    advertised, so the NEXT case sees a pristine node. Node extended resources do not self-remove when
 #    their advertiser is gone, and the two families clear differently — the removal below is genuinely
 #    needed for one and only cosmetic for the other:
