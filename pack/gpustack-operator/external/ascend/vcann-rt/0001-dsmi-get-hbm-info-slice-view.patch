@@ -1,11 +1,13 @@
-Make the logical slice visible in `npu-smi info`.
+Make the logical slice visible in `npu-smi info`, and keep that output clean.
 
 WHAT: adds src/dsmi/dsmi_hook.c, a strong `dsmi_get_hbm_info` definition, and compiles
 it into libvruntime.so only (not into enpu-monitor). The hook passes every call through
 to the driver and then rewrites two fields for the sliced device: the HBM total becomes
 the container's `memory-quota` (clamped to the card's real total) and the HBM usage
 becomes the slice's own usage — the number `enpu-monitor` prints. `ENPU_DSMI_HOOK`
-gates it; absent means off.
+gates it; absent means off. On its non-CANN path the hook also drops
+`g_log_config.min_log_level` to FATAL for the span of its vcann-rt helper calls, then puts it
+back.
 
 WHY: vcann-rt hooks the CANN runtime (rt*) layer, and `npu-smi` never enters it — it
 links libdrvdsmi_host.so + libascend_hal.so and imports zero rt symbols, so a sliced
@@ -14,9 +16,48 @@ container's `npu-smi info` reports the whole physical card. Measured on a 910B2 
 and libvruntime.so is already an entry of the sliced container's /etc/ld.so.preload, so
 no extra library, mount or preload entry is needed.
 
-AGAINST: ubs-virt 476bb968d477a4eab7719197af212c6c3470ff0b (the pin in
+WHY THE LOG THRESHOLD: `log_print()` returns early when `level > min_log_level`, and only
+after that gate does it check `g_log_initialized` — printing "[eNPU] Log module not
+initialized, cannot print log." to stderr in place of the message. The pre-init default is
+INFO, and `log_init()` runs only from the `rtSetDevice*` hooks, which a non-CANN process
+never reaches; so every INFO/WARN the helpers emit lands on that fprintf, seven lines deep
+into a plain `npu-smi info`. A threshold of FATAL makes each `LOG_` macro fail its own
+`min_log_level >= level` gate, so `log_print` is never even entered, and `LOG_FATAL` has no
+call site anywhere in the tree. Nothing is lost either way: an uninitialized log module
+cannot print its message at any level.
+
+The threshold is FATAL and not one below it. `EnpuLogLevel` declares no negative
+enumerator, so the compiler gives it an unsigned type and `ENPU_LOG_FATAL - 1` converts to
+UINT_MAX — which passes every gate and would print MORE than changing nothing at all,
+including the DEBUG lines the default INFO threshold suppresses. Measured with the real
+header: 7 noise lines before, 10 with UINT_MAX, 0 with FATAL.
+
+The threshold is RESTORED rather than left lowered, because neither of the two things that
+might otherwise restore it does. `log_init()` begins with `if (g_log_initialized) return`,
+so once the module is up it never revisits `parse_level_env()`. And `check_init_success()`
+reports npu-manager's own flag, not the log module's, so it is false in a CANN process
+whose log module is running but whose global init failed — the process that most needs its
+diagnostics. Bounding the change to the helper calls keeps that process's configured level.
+The suppression deliberately does not extend to `dsmi_get_hbm_info`'s own per-call helper:
+flipping a shared global on every call would risk swallowing another thread's log line,
+which is worse than the noise it would remove. The same trade-off applies in miniature to
+the one-time window here, which is entered under `pthread_once` — a thread logging inside
+it loses that line, and the store to `g_log_config.min_log_level` is unsynchronized, as
+upstream's own writes to it are.
+
+This hook's own fprintf diagnostics are direct rather than routed through log_print, so
+they are unaffected and still reach the operator.
+
+AGAINST: ubs-virt 9f8c779685edeb0939a681922bb56f09128f3445 (the pin in
 pack/gpustack-operator/Dockerfile), subdir ubs-virt-enpu/vcann-rt. Applied by
 external/ascend/build-libvnpu.sh with `patch -p1` in its work copy of that subdir.
+
+REFRESHED from 476bb968d477a4eab7719197af212c6c3470ff0b for that pin, whose 310P dcmi
+adapter replaced `soc_version`'s `SOC_VERSION_NOT_ASCEND_950` with `SOC_VERSION_ASCEND_910`
+plus `SOC_VERSION_ASCEND_310`. This hook takes the 910 name and does not discriminate,
+because `register_callback()` gives 910 and 310 the same
+`get_device_resource_info_callback` and that is the only callback used here. Compiling the
+old patch against the new pin produced that one error and no other.
 
 LINE ENDINGS: upstream's CMakeLists.txt is CRLF, so this file's CMakeLists hunk carries
 CRLF context and must stay byte-exact - .gitattributes pins `-text` on it, because the
@@ -45,10 +86,10 @@ index 8b3886e..7aa4150 100644
      COMMAND chmod 400 $<TARGET_FILE:vruntime>
 diff --git a/src/dsmi/dsmi_hook.c b/src/dsmi/dsmi_hook.c
 new file mode 100644
-index 0000000..c88c97c
+index 0000000..7521bd4
 --- /dev/null
 +++ b/src/dsmi/dsmi_hook.c
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,213 @@
 +/*
 + * Copyright (c) GPUStack contributors. 2026.
 + * A vendored addition to ubs-virt-enpu/vcann-rt, licensed under Mulan PSL v2 like the
@@ -172,24 +213,47 @@ index 0000000..c88c97c
 +    }
 +
 +    /* npu-smi and every other non-CANN process: enpu_global_init() cannot get past
-+     * enpu_soc_init() without libruntime.so, so do its rt-free half here. */
++     * enpu_soc_init() without libruntime.so, so do its rt-free half here.
++     *
++     * Nothing on this path initializes the log module, so any log_print() a vcann-rt helper
++     * below reaches prints "[eNPU] Log module not initialized" to stderr in place of its
++     * message -- one line per call, straight into the output of a tool like npu-smi. A
++     * threshold of FATAL has each LOG_ macro fail its own gate, so log_print() is never even
++     * reached; FATAL itself has no call site upstream. The value is FATAL rather than one
++     * below it because EnpuLogLevel has no negative enumerator and so is unsigned: FATAL - 1
++     * converts to UINT_MAX, which passes every gate and prints MORE than leaving it alone.
++     * It is put back rather than left lowered because log_init() early-returns once the
++     * module is up and would never restore it, and check_init_success() above reports
++     * npu-manager rather than the log module: a process whose log module IS running while
++     * npu-manager init merely failed must keep its configured level, being the one that most
++     * needs it. */
++    EnpuLogLevel level = g_log_config.min_log_level;
++    uint8_t soc;
++
++    g_log_config.min_log_level = ENPU_LOG_FATAL;
++
 +    if (enpu_load_config() != ENPU_SUCCESS) {
 +        fprintf(stderr, "[eNPU] %s is on but %s is unusable, so the physical card is reported.\n", DSMI_HOOK_ENV,
 +                NPU_CONFIG_PATH);
-+        return;
++        goto restore;
 +    }
 +    g_quota_known = true;
 +
-+    uint8_t soc = (dcmi_get_card_id_device_id_from_phyid != NULL) ? SOC_VERSION_NOT_ASCEND_950 : SOC_VERSION_ASCEND_950;
++    /* Only the 950 branch matters here: register_callback() routes 910 and 310 to one
++     * get_device_resource_info_callback, and that is the sole callback this hook uses. */
++    soc = (dcmi_get_card_id_device_id_from_phyid != NULL) ? SOC_VERSION_ASCEND_910 : SOC_VERSION_ASCEND_950;
 +    if (register_callback(soc) != ENPU_SUCCESS) {
-+        return;
++        goto restore;
 +    }
 +    /* Out-params only: this leaves the npu manager's own state alone. */
 +    if (enpu_dcmi_get_card_info((uint32_t)config.phy_npu_id, &g_card_id, &g_device_id, &g_logic_id, soc) !=
 +        ENPU_SUCCESS) {
-+        return; /* the quota is still reported; only the slice's own usage is lost */
++        goto restore; /* the quota is still reported; only the slice's own usage is lost */
 +    }
 +    g_usage_known = true;
++
++restore:
++    g_log_config.min_log_level = level;
 +}
 +
 +__attribute__((visibility("default"))) int dsmi_get_hbm_info(int device_id, struct dsmi_hbm_info_stru *info)
