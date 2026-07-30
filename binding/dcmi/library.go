@@ -47,6 +47,15 @@ func (l *DCMI) Init(logger klog.Logger) Return {
 	return ret
 }
 
+// Unlike every other binding here, DCMI exposes no Shutdown. Unloading the library blanks the
+// function pointers of whatever else in the process still holds it, and in the device-manager the
+// detector and the allocator's container-share driver initialize this same process-wide library
+// independently, neither knowing of the other.
+//
+// TODO: expose Shutdown once the wrapper counts the library's holders (see the TODO on
+// w_dcmi_shutdown in dcmi_wrapper.c). The method then mirrors the other bindings:
+// return Return(dcmiShutdown()).
+
 // GetDriverVersion retrieves the version of the DCMI driver.
 func (l *DCMI) GetDriverVersion() (string, Return) {
 	version := make([]byte, MAX_VER_LEN)
