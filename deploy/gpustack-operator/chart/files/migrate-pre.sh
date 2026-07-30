@@ -16,6 +16,11 @@
 #      enabled by an upgrade runs with no CRDs at all, and NFD's CRD schema changes
 #      never land. Skipped on install, where Helm has just applied them itself.
 #
+#   3. Delete the workloads a legacy per-application release owns whose spec.selector
+#      still names that release. Adoption rewrites app.kubernetes.io/instance, and on a
+#      Deployment, DaemonSet or StatefulSet that label sits inside spec.selector, which
+#      the API server refuses to change. Skipped on install, where nothing is adopted.
+#
 # Every input arrives as an environment variable, all set by the hook Job:
 #   GPUSTACK_NAMESPACE      release namespace
 #   GPUSTACK_RELEASE        release name, which is how this operator's Kueue is told
@@ -38,6 +43,26 @@ CHARTS_DIR="${GPUSTACK_CONF_DIR:-/etc/gpustack}/charts"
 # release earlier versions installed. A Kueue belonging to any other release is a user's own
 # and is never touched.
 KUEUE_RELEASES="${RELEASE},gpustack-operator-device-manager,gpustack-kueue"
+
+# The releases the worker installed per application before the subchart layout, which are the
+# only ones this chart ever adopts from. Kept in step with migrate-post.sh, which retires their
+# records once the upgrade has succeeded.
+LEGACY_RELEASES=(
+  gpustack-kueue
+  gpustack-node-feature-discovery
+  gpustack-csi-driver-nfs
+  gpustack-csi-driver-s3
+)
+
+# One set-based selector covers all four at once. `managed-by=Helm` is required as well, so an
+# object a user labelled by hand is never deleted.
+LEGACY_SELECTOR="app.kubernetes.io/instance in ($(
+  IFS=,
+  echo "${LEGACY_RELEASES[*]}"
+)),app.kubernetes.io/managed-by=Helm"
+
+# The kinds whose spec.selector is immutable, and therefore the only ones that can collide.
+SELECTOR_KINDS=(deployments daemonsets statefulsets)
 
 # How long to wait for the freed CRDs to finish deleting.
 DRAIN_TIMEOUT=90
@@ -183,10 +208,49 @@ apply_subchart_crds() {
     die "apply the subchart CRDs"
 }
 
+# --- 3. Free the workloads whose selector adoption cannot rewrite -------------------------
+
+# free_immutable_selectors deletes the workloads a legacy release owns whose spec.selector still
+# names that release.
+#
+# Adoption rewrites app.kubernetes.io/instance to the adopting release, and Kueue's and NFD's
+# charts put that label inside spec.selector, which the API server refuses to change. Helm reports
+# it as `field is immutable`; the upgrade fails, and because it is atomic the rollback then
+# deletes every object the previous revision did not carry — the applications themselves, their
+# webhook configurations, their APIServices. Deleting these few here instead lets the SAME upgrade
+# create them, in one action, and leaves everything else to be adopted in place.
+#
+# Only the workloads whose selector actually names a legacy release are touched: the CSI drivers
+# select on a release-independent label, so theirs are adopted untouched. No custom resource and
+# no CRD is touched either, so Kueue's finalizers stay on their objects and the controller this
+# upgrade recreates is what clears them. These workloads are down from here until the upgrade
+# reports them Ready, which is a shorter gap than the failed-upgrade-and-restart it replaces.
+free_immutable_selectors() {
+  local kind names
+
+  for kind in "${SELECTOR_KINDS[@]}"; do
+    names="$(
+      kubectl get "${kind}" -n "${NS}" -l "${LEGACY_SELECTOR}" -o json |
+        jq -r --arg adopting "${RELEASE}" '
+          .items[]
+          | select((.spec.selector.matchLabels["app.kubernetes.io/instance"] // "")
+                   | . != "" and . != $adopting)
+          | .metadata.name'
+    )" || die "list the ${kind} of the legacy releases"
+    [[ -n "${names}" ]] || continue
+
+    log "deleting ${kind} whose selector adoption cannot rewrite: ${names//$'\n'/ }"
+    # shellcheck disable=SC2086 # deliberate word splitting: one name per line, none can contain spaces
+    kubectl delete "${kind}" -n "${NS}" ${names} --ignore-not-found ||
+      die "delete the ${kind} a legacy release still selects"
+  done
+}
+
 if [[ "${PHASE}" == "upgrade" ]]; then
   apply_subchart_crds
+  free_immutable_selectors
 else
-  log "install: Helm applies the subchart CRDs itself, skipping"
+  log "install: Helm applies the subchart CRDs itself and nothing is adopted, skipping"
 fi
 
 log "done"
