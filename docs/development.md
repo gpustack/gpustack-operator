@@ -88,6 +88,38 @@ GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race ./pkg/nodefeature/...
 GODEBUG=gotypesalias=0 CGO_ENABLED=1 go test -race -run TestExtractGeneralNodeKey ./pkg/nodefeature/
 ```
 
+## Runtime log verbosity
+
+Every component registers `PUT /debug/flags/v` on its own secure port, so klog verbosity can be
+raised on a running pod and dropped again without restarting it (`pkg/manager/manager.go`,
+`pkg/worker/worker.go`, `pkg/workergateway/gateway.go`; the device-manager's port is 32443, from
+`pkg/devicemanager/option.go`).
+
+```bash
+kubectl -n gpustack-system exec <pod> -- \
+  curl -sk -X PUT -H "Host: 127.0.0.1" -d '4' https://127.0.0.1:32443/debug/flags/v
+# → successfully set klog.logging.verbosity to 4
+kubectl -n gpustack-system exec <pod> -- \
+  curl -sk -X PUT -H "Host: 127.0.0.1" -d '2' https://127.0.0.1:32443/debug/flags/v
+```
+
+`-H "Host: 127.0.0.1"` is **mandatory**. `httpx.LoopbackAccessHandlerFunc` compares `r.Host` against
+the bare strings `127.0.0.1` / `localhost` / `::1`, and an ordinary request carries the port
+(`127.0.0.1:32443`), so without the override the guard rejects it with a plain `404` that reads like
+a missing route. A `GET` with the header answers `406 unsupported http method` — that is the guard
+passing, which is how to confirm the route is there.
+
+This is the way to see a decision logged above the verbosity the deployment runs. The device plugin
+is the sharpest case: its `ResourceServer`s are built with `Logger: logger.V(3)`
+(`pkg/devicemanager/allocator/allocator.go`) while the DaemonSet runs `-v=2`, so every `Allocate`
+and `GetPreferredAllocation` decision — including which card a slice was placed on — is discarded by
+default. Raise `v` **before** creating the workload you want to trace: those lines fire only on an
+allocation, so a quiet window after the fact proves nothing.
+
+The `gpustack-operator-e2e` skill carries the same recipe as a triage step, in its in-cluster
+`kubectl exec` form and with the operational caveats — see its shared troubleshooting reference,
+*Component log verbosity*.
+
 ## API groups & code generation
 
 | Path | Group / Version | Kind |

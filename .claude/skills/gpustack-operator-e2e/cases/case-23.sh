@@ -276,10 +276,28 @@ wait_card_idle() {
   return 1
 }
 
+# exec_out <pod> <cmd>... — run a command in the Pod and echo its output, retried.
+#
+# A Pod reports Running slightly before its container is attachable, so an exec issued the instant
+# wait_running returns can come back empty — or fail outright with `container not found` — on a Pod
+# whose allocation is perfectly correct. That matters most in pod_mig_devices below: `grep -c` prints
+# 0 even when the exec failed, so an attach race reads as "no MIG device inside the Pod" and fails a
+# correct allocation.
+exec_out() {
+  local pod="$1"; shift
+  local out
+  for _ in $(seq 1 8); do
+    out=$(kubectl -n default exec "$pod" -- "$@" 2>/dev/null)
+    [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
+    sleep 3
+  done
+  return 1
+}
+
 # pod_mig_devices <pod> — count of MIG devices nvidia-smi -L reports inside the Pod (want exactly 1).
 pod_mig_devices() {
   local out
-  out="$(kubectl -n default exec "$1" -- nvidia-smi -L 2>/dev/null | grep -c 'MIG')"
+  out="$(exec_out "$1" nvidia-smi -L | grep -c 'MIG')"
   echo "${out:-0}"
 }
 
@@ -423,8 +441,8 @@ if [ "$INITIAL_MODE" = Disabled ]; then
   l20=1; wait_running "$P20" || l20=0
   l40=1; wait_running "$P40" || l40=0
   if [ "$l20" = 1 ] && [ "$l40" = 1 ]; then
-    sm20="$(kubectl -n default exec "$P20" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)"
-    sm40="$(kubectl -n default exec "$P40" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)"
+    sm20="$(exec_out "$P20" printenv CUDA_DEVICE_SM_LIMIT)"
+    sm40="$(exec_out "$P40" printenv CUDA_DEVICE_SM_LIMIT)"
     record PASS "logical 20% + 40% coexist and are capped" "${P20}(SM=${sm20:-?}) + ${P40}(SM=${sm40:-?}) both Running on the logical-sliced card"
   else
     record FAIL "logical 20% + 40% coexist and are capped" "20% running=${l20} 40% running=${l40} — logical slicing broken on the MIG-off card"
@@ -580,12 +598,12 @@ if [ -n "$MIGKEY_MID" ]; then
   mkpod "$R1" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
   if wait_running "$R1"; then
-    uuid1="$(kubectl -n default exec "$R1" -- bash -c 'echo $NVIDIA_VISIBLE_DEVICES' 2>/dev/null)"
+    uuid1="$(exec_out "$R1" bash -c 'echo $NVIDIA_VISIBLE_DEVICES')"
     delpod "$R1"
     mkpod "$R2" "          ${PARTITIONED}: \"1\"
           ${MIGKEY_MID}: \"1\""
     if wait_running "$R2"; then
-      uuid2="$(kubectl -n default exec "$R2" -- bash -c 'echo $NVIDIA_VISIBLE_DEVICES' 2>/dev/null)"
+      uuid2="$(exec_out "$R2" bash -c 'echo $NVIDIA_VISIBLE_DEVICES')"
       record PASS "freed instance reused by a fresh request" "${R2} Running on the freed slot (MIG dev before=${uuid1:-?} after=${uuid2:-?})"
     else
       record FAIL "freed instance reused by a fresh request" "${R2} not Running after ${R1} freed the slot"

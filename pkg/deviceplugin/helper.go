@@ -162,6 +162,14 @@ type ResourceUnit struct {
 	Index uint64
 }
 
+// String returns the device ID naming this unit, "<group>:<device>:<index>" with the index
+// zero-padded exactly as GetDeviceIds advertises it. A unit names one token of one card, so it must
+// carry the index: without it the result is a bare card, which ConvertResourceUnitFromDeviceIds
+// rejects and kubelet cannot match against the tokens it offered.
+func (in ResourceUnit) String() string {
+	return in.Resource.String() + ":" + padIndex(in.Index)
+}
+
 type ResourceRange struct {
 	Resource
 
