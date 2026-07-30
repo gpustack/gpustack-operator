@@ -47,11 +47,37 @@ func (l *DCMI) Init(logger klog.Logger) Return {
 	return ret
 }
 
+// Unlike every other binding here, DCMI exposes no Shutdown. Unloading the library blanks the
+// function pointers of whatever else in the process still holds it, and in the device-manager the
+// detector and the allocator's container-share driver initialize this same process-wide library
+// independently, neither knowing of the other.
+//
+// TODO: expose Shutdown once the wrapper counts the library's holders (see the TODO on
+// w_dcmi_shutdown in dcmi_wrapper.c). The method then mirrors the other bindings:
+// return Return(dcmiShutdown()).
+
 // GetDriverVersion retrieves the version of the DCMI driver.
 func (l *DCMI) GetDriverVersion() (string, Return) {
 	version := make([]byte, MAX_VER_LEN)
 	ret := Return(dcmiGetDriverVersion(&version[0], uint32(len(version))))
 	return string(version[:clen(version)]), ret
+}
+
+// GetMultiDiePolicy retrieves the policy deciding whether the dies of a multi-die device
+// are injected into a container together or one at a time. The policy belongs to the
+// driver as a whole rather than to any one card, which is why it hangs off the library.
+// A driver that does not implement the query returns ERROR_FUNCTION_NOT_FOUND.
+func (l *DCMI) GetMultiDiePolicy() (MultiDiePolicy, Return) {
+	var policy MultiDiePolicy
+	ret := Return(dcmiGetMultiDiePolicy(&policy))
+	return policy, ret
+}
+
+// SetMultiDiePolicy sets the multi-die container-injection policy. It applies to every
+// multi-die device the driver manages, so it is a node-wide change and not a per-workload
+// one.
+func (l *DCMI) SetMultiDiePolicy(policy MultiDiePolicy) Return {
+	return Return(dcmiSetMultiDiePolicy(policy))
 }
 
 type Return int

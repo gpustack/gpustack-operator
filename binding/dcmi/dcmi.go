@@ -320,6 +320,19 @@ func dcmiGetDevicePowerInfo(CardId int32, DeviceId int32, Power *int32) int32 {
 	return __v
 }
 
+// dcmiGetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:42
+func dcmiGetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag *int32) int32 {
+	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
+	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
+	cEnableFlag, cEnableFlagAllocMap := (*C.int)(unsafe.Pointer(EnableFlag)), cgoAllocsUnknown
+	__ret := C.w_dcmi_get_device_share_enable(cCardId, cDeviceId, cEnableFlag)
+	runtime.KeepAlive(cEnableFlagAllocMap)
+	runtime.KeepAlive(cDeviceIdAllocMap)
+	runtime.KeepAlive(cCardIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
 // dcmiGetDeviceTemperature function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetDeviceTemperature(CardId int32, DeviceId int32, Temperature *int32) int32 {
 	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
@@ -385,6 +398,15 @@ func dcmiGetDriverVersion(DriverVer *byte, Len uint32) int32 {
 	return __v
 }
 
+// dcmiGetMultiDiePolicy function as declared in dcmi/dcmi_wrapper.h:42
+func dcmiGetMultiDiePolicy(Policy *MultiDiePolicy) int32 {
+	cPolicy, cPolicyAllocMap := (*C.enum_dcmi_multi_die_policy)(unsafe.Pointer(Policy)), cgoAllocsUnknown
+	__ret := C.w_dcmi_get_multi_die_policy(cPolicy)
+	runtime.KeepAlive(cPolicyAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
 // dcmiGetTopoInfoByDeviceId function as declared in dcmi/dcmi_wrapper.h:42
 func dcmiGetTopoInfoByDeviceId(CardId1 int32, DeviceId1 int32, CardId2 int32, DeviceId2 int32, TopoType *int32) int32 {
 	cCardId1, cCardId1AllocMap := (C.int)(CardId1), cgoAllocsUnknown
@@ -398,6 +420,28 @@ func dcmiGetTopoInfoByDeviceId(CardId1 int32, DeviceId1 int32, CardId2 int32, De
 	runtime.KeepAlive(cCardId2AllocMap)
 	runtime.KeepAlive(cDeviceId1AllocMap)
 	runtime.KeepAlive(cCardId1AllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiSetDeviceShareEnable function as declared in dcmi/dcmi_wrapper.h:42
+func dcmiSetDeviceShareEnable(CardId int32, DeviceId int32, EnableFlag int32) int32 {
+	cCardId, cCardIdAllocMap := (C.int)(CardId), cgoAllocsUnknown
+	cDeviceId, cDeviceIdAllocMap := (C.int)(DeviceId), cgoAllocsUnknown
+	cEnableFlag, cEnableFlagAllocMap := (C.int)(EnableFlag), cgoAllocsUnknown
+	__ret := C.w_dcmi_set_device_share_enable(cCardId, cDeviceId, cEnableFlag)
+	runtime.KeepAlive(cEnableFlagAllocMap)
+	runtime.KeepAlive(cDeviceIdAllocMap)
+	runtime.KeepAlive(cCardIdAllocMap)
+	__v := (int32)(__ret)
+	return __v
+}
+
+// dcmiSetMultiDiePolicy function as declared in dcmi/dcmi_wrapper.h:42
+func dcmiSetMultiDiePolicy(Policy MultiDiePolicy) int32 {
+	cPolicy, cPolicyAllocMap := (C.enum_dcmi_multi_die_policy)(Policy), cgoAllocsUnknown
+	__ret := C.w_dcmi_set_multi_die_policy(cPolicy)
+	runtime.KeepAlive(cPolicyAllocMap)
 	__v := (int32)(__ret)
 	return __v
 }

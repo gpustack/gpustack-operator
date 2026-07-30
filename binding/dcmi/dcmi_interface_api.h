@@ -714,6 +714,10 @@ DCMIDLLEXPORT int dcmi_get_spod_node_status(int card_id, int device_id, unsigned
 
 DCMIDLLEXPORT int dcmi_set_spod_node_status(int card_id, int device_id, unsigned int sdid, unsigned int status);
 
+DCMIDLLEXPORT int dcmi_get_device_share_enable(int card_id, int device_id, int *enable_flag);
+
+DCMIDLLEXPORT int dcmi_set_device_share_enable(int card_id, int device_id, int enable_flag);
+
 DCMIDLLEXPORT int dcmi_get_multi_die_policy(enum dcmi_multi_die_policy *policy);
 
 DCMIDLLEXPORT int dcmi_set_multi_die_policy(enum dcmi_multi_die_policy policy);

@@ -27,17 +27,22 @@ const Manufacturer = nodefeature.ManufacturerAscend
 
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
+	// Every mode that can put a second container on one card drives the same container-share
+	// seam, so it is built once and shared by them. Exclusive gets nil: it owns whole cards and
+	// must not touch the flag.
+	share := newShareDriver(logger)
+
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared),
+			newServer(logger, workercore.DeviceAllocationModeShared, share),
 		)
 	}
 	if !opts.NoSliced {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced),
+			newServer(logger, workercore.DeviceAllocationModeSliced, share),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -46,7 +51,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, share),
 	)
 
 	return aggregated{
@@ -90,9 +95,17 @@ func (in aggregated) Stop() {
 
 type server struct {
 	deviceplugin.ResourceServer
+
+	// share is the dcmi container-share seam the responder turns on for the cards it hands out.
+	// It is nil for exclusive alone, which owns whole cards and must not touch the flag.
+	share shareDriver
 }
 
-func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) deviceplugin.Server {
+func newServer(
+	logger klog.Logger,
+	mode workercore.DeviceAllocationMode,
+	share shareDriver,
+) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
 	s := &server{
@@ -102,6 +115,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
+		share: share,
 	}
 	s.Responder = s
 
@@ -146,10 +160,25 @@ func (s *server) GetContainerAllocateResponse(
 		// TODO: mount HCCL topo file for 950.
 	}
 
-	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota);
-	// exclusive/shared keep the plain device-visibility response below.
+	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota); every
+	// other mode returns the plain device-visibility response below, with only the
+	// container-share preflight in between.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, indexes, accelerators)
+	}
+
+	// Shared and visibility put a second container on a card, which the driver refuses unless
+	// container-share mode is on, so they need the same preflight a slice does. Unlike a slice
+	// they may hold several cards, hence the loop. Exclusive is named out on purpose: one
+	// container owns the whole card, so there is nothing to permit and no reason to drop the
+	// driver's own single-container guard.
+	switch s.AllocationMode {
+	case workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeVisibility:
+		for i := range accelerators {
+			if err := s.ensureShareEnabled(accelerators[i].accel); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Delegate to container runtime for device injection,
@@ -212,6 +241,11 @@ func (s *server) getSlicedContainerAllocateResponse(
 		int64(group.Memory))
 	if err != nil {
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
+	}
+
+	// Only once the request itself is known good, since this writes host driver state.
+	if err = s.ensureShareEnabled(accel); err != nil {
+		return nil, err
 	}
 
 	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), ctr.Name)
