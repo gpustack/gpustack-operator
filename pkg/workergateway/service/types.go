@@ -46,6 +46,10 @@ type (
 	// AggregatedInstanceTypeResource represents the resource of an AggregatedInstanceType.
 	AggregatedInstanceTypeResource = workercore.InstanceTypeResource
 
+	// AggregatedInstanceTypePartitionedResource represents the hardware-partitionable resource of an
+	// AggregatedInstanceType: the scalar view plus the member's per-profile partition ledger.
+	AggregatedInstanceTypePartitionedResource = workercore.InstanceTypePartitionedResource
+
 	// AggregatedInstanceTypeStatus represents the status of an AggregatedInstanceType,
 	// including resource availability and tier information.
 	AggregatedInstanceTypeStatus struct {
@@ -98,12 +102,23 @@ type (
 		AcceleratorSliced resource.Quantity `json:"acceleratorSliced"`
 
 		// AcceleratorPartitioned is the hardware-partitionable accelerator resource of the
-		// AggregatedInstanceType — the partition instances its partitioned cards can still host, e.g. "7", "14".
+		// AggregatedInstanceType, expressed per partition profile: in OnceMaxRequest the winning
+		// member's obtainable profiles, each capped at one — a partition request is a single instance
+		// on a single card; in Remaining the Σ of every Active member's obtainable profiles, summed by
+		// profile name and ordered by it.
+		//
+		// This dimension has no honest scalar, which is why it alone is a list: the profiles of one
+		// card compete for the same physical slices, so a total over them is not a capacity and a best
+		// case over them is not a total. A profile the fleet offers but cannot currently build stays
+		// listed at zero, so "offered but full" stays distinguishable from "not offered" — which
+		// Detail.SlicedDetail cannot answer either, as it records only which profiles are offered at
+		// all. A member publishing no per-profile ledger therefore contributes nothing here, even when
+		// its own partitioned view counts instances.
 		//
 		// It is disjoint from the three dimensions above: a card in a partitioning mode serves no other
-		// kind of claim, so a fleet with no partitioned card reports zero here while a fully partitioned
-		// one reports zero on the others.
-		AcceleratorPartitioned resource.Quantity `json:"acceleratorPartitioned"`
+		// kind of claim, so a fleet with no partitioned card reports nothing here while a fully
+		// partitioned one reports zero on the others.
+		AcceleratorPartitioned []workercore.AcceleratorProfileCount `json:"acceleratorPartitioned,omitempty"`
 
 		// CPU is the CPU remaining resource of the AggregatedInstanceType, e.g. "4", "8".
 		CPU resource.Quantity `json:"cpu"`
@@ -159,8 +174,9 @@ type (
 		// AcceleratorSliced is the sliceable accelerator resource of the candidate, e.g. "100", "400".
 		AcceleratorSliced AggregatedInstanceTypeResource `json:"acceleratorSliced"`
 
-		// AcceleratorPartitioned is the hardware-partitionable accelerator resource of the candidate, e.g. "7", "14".
-		AcceleratorPartitioned AggregatedInstanceTypeResource `json:"acceleratorPartitioned"`
+		// AcceleratorPartitioned is the hardware-partitionable accelerator resource of the candidate,
+		// e.g. "7", "14", plus the per-profile partition ledger the tier and item sum by profile name.
+		AcceleratorPartitioned AggregatedInstanceTypePartitionedResource `json:"acceleratorPartitioned"`
 
 		// CPU is the CPU once max request resource of the candidate, e.g. "4", "8".
 		CPU AggregatedInstanceTypeResource `json:"cpu"`

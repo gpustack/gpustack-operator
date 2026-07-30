@@ -246,6 +246,24 @@ func a100PartitionedInst(name, acc, partitioned string) *worker.InstanceType {
 	})
 }
 
+// profileCount is shorthand for one entry of a per-profile partition ledger.
+func profileCount(name string, count int32) workercore.AcceleratorProfileCount {
+	return workercore.AcceleratorProfileCount{Name: name, Count: count}
+}
+
+// a100PartitionLedgerInst is a100PartitionedInst carrying the pool's per-profile partition ledger:
+// the instances it holds and the ones it can still build, per profile.
+func a100PartitionLedgerInst(
+	name, partitioned, phase string,
+	allocated, remaining []workercore.AcceleratorProfileCount,
+) *worker.InstanceType {
+	inst := a100PartitionedInst(name, "0", partitioned)
+	inst.Status.Phase = phase
+	inst.Status.AcceleratorPartitioned.AllocatedProfiles = allocated
+	inst.Status.AcceleratorPartitioned.RemainingProfiles = remaining
+	return inst
+}
+
 func instStatusCPU() workercore.InstanceTypeStatus {
 	return workercore.InstanceTypeStatus{
 		Phase:             "Active",
@@ -767,12 +785,13 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 		// logically sliced views are all zero and only AcceleratorPartitioned is left. The
 		// bundle must not read as empty, or the tier is skipped as a seed and the fleet reports
 		// no partition capacity at all.
+		partitioned := []workercore.AcceleratorProfileCount{profileCount("1g.5gb", 1)}
 		item := AggregatedInstanceType{
 			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
 			Status: AggregatedInstanceTypeStatus{
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
 					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
-						AcceleratorPartitioned: resource.MustParse("7"),
+						AcceleratorPartitioned: partitioned,
 					}},
 				},
 			},
@@ -782,8 +801,35 @@ func TestAggregatedInstanceType_Recompute_BundleSemantics(t *testing.T) {
 
 		o := item.Status.OnceMaxRequest
 		assert.True(t, o.Accelerator.IsZero())
-		assert.True(t, o.AcceleratorPartitioned.Equal(resource.MustParse("7")),
+		assert.Equal(t, partitioned, o.AcceleratorPartitioned,
 			"AcceleratorPartitioned must survive as the only non-zero dimension")
+	})
+
+	t.Run("acceleratable: tier whose partition ledger is all zeros does not seed the bundle", func(t *testing.T) {
+		// A pool that offers a profile it currently cannot build lists it at zero, so the ledger is
+		// non-empty while the tier offers nothing. Such a bundle must read as zero, or it seeds the
+		// item overview and masks the real bundle of a tier that ties it on the primary dimension.
+		item := AggregatedInstanceType{
+			Spec: AggregatedInstanceTypeSpec{Acceleratable: true},
+			Status: AggregatedInstanceTypeStatus{
+				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
+					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+						AcceleratorPartitioned: []workercore.AcceleratorProfileCount{profileCount("1g.5gb", 0)},
+					}},
+					{OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
+						AcceleratorSliced: resource.MustParse("50"),
+					}},
+				},
+			},
+		}
+
+		item.Recompute()
+
+		o := item.Status.OnceMaxRequest
+		assert.True(t, o.AcceleratorSliced.Equal(resource.MustParse("50")),
+			"the tier with real capacity must win the bundle")
+		assert.Empty(t, o.AcceleratorPartitioned,
+			"the all-zero ledger must not have seeded the bundle")
 	})
 
 	t.Run("empty tiers leaves overview zeroed", func(t *testing.T) {
@@ -1119,6 +1165,64 @@ func TestListAggregateInstanceTypes_Result_BundleAggregation(t *testing.T) {
 	})
 }
 
+// TestListAggregateInstanceTypes_Result_PartitionLedgerAggregation drives the full Next/Result path
+// and asserts the fleet's per-profile partition ledger on both overview bundles: Remaining sums it by
+// profile name across clusters, ordered by name, with a profile one cluster cannot currently build
+// kept at zero instead of dropped; OnceMaxRequest carries the winning member's ledger capped at one
+// per profile, since a partition request is a single instance on a single card.
+//
+// Unlike the capability Detail.SlicedDetail, which counts every candidate regardless of Phase, the
+// ledger is an availability view: a non-Active candidate contributes nothing, exactly as it
+// contributes nothing to Remaining.
+func TestListAggregateInstanceTypes_Result_PartitionLedgerAggregation(t *testing.T) {
+	// Two clusters share the tier (identical Accelerator OnceMaxRequest of 0): cluster-a holds one
+	// 1g.5gb, which leaves 3g.20gb unbuildable there; cluster-b is untouched. The Inactive cluster-c
+	// pool would double every number if it counted.
+	op := OpListAggregateInstanceTypes()
+	require.NoError(t, op.Next("cluster-a", a100PartitionLedgerInst("a100-a", "6", "Active",
+		[]workercore.AcceleratorProfileCount{profileCount("1g.5gb", 1)},
+		[]workercore.AcceleratorProfileCount{
+			profileCount("1g.5gb", 6), profileCount("2g.10gb", 2), profileCount("3g.20gb", 0),
+		})))
+	require.NoError(t, op.Next("cluster-b", a100PartitionLedgerInst("a100-b", "6", "Active",
+		nil,
+		[]workercore.AcceleratorProfileCount{
+			profileCount("1g.5gb", 7), profileCount("2g.10gb", 3), profileCount("3g.20gb", 2),
+		})))
+	require.NoError(t, op.Next("cluster-c", a100PartitionLedgerInst("a100-c", "6", "Inactive",
+		[]workercore.AcceleratorProfileCount{profileCount("1g.5gb", 5)},
+		[]workercore.AcceleratorProfileCount{profileCount("1g.5gb", 2)})))
+
+	result := op.Result(false)
+
+	require.Len(t, result.Items, 1)
+	item := result.Items[0]
+	require.Len(t, item.Status.Tiers, 1, "identical accelerator OnceMaxRequest must collapse into one tier")
+
+	wantRemaining := []workercore.AcceleratorProfileCount{
+		profileCount("1g.5gb", 13), profileCount("2g.10gb", 5), profileCount("3g.20gb", 2),
+	}
+	// cluster-a seeds the bundle (both Active candidates tie on the primary dimension), so the once
+	// max request is its ledger capped at one — 3g.20gb, which it cannot build, stays at zero.
+	wantOnceMax := []workercore.AcceleratorProfileCount{
+		profileCount("1g.5gb", 1), profileCount("2g.10gb", 1), profileCount("3g.20gb", 0),
+	}
+
+	assert.Equal(t, wantRemaining, item.Status.Tiers[0].Remaining.AcceleratorPartitioned,
+		"tier remaining profiles")
+	assert.Equal(t, wantRemaining, item.Status.Remaining.AcceleratorPartitioned,
+		"item remaining profiles")
+	assert.Equal(t, wantOnceMax, item.Status.Tiers[0].OnceMaxRequest.AcceleratorPartitioned,
+		"tier once max request profiles")
+	assert.Equal(t, wantOnceMax, item.Status.OnceMaxRequest.AcceleratorPartitioned,
+		"item once max request profiles")
+
+	require.Len(t, item.Status.Tiers[0].Candidates, 3)
+	assert.Equal(t, []workercore.AcceleratorProfileCount{profileCount("1g.5gb", 1)},
+		item.Status.Tiers[0].Candidates[0].AcceleratorPartitioned.AllocatedProfiles,
+		"the member's own allocated ledger stays readable on the candidate")
+}
+
 // TestListAggregateInstanceTypes_Result_RemainingAggregation drives the full Next/Result
 // path and asserts that tier-level and item-level Remaining are per-dimension sums across
 // all candidates — independent of the bundle-from-winner OnceMaxRequest.
@@ -1182,9 +1286,13 @@ func TestListAggregateInstanceTypes_Result_RemainingAggregation(t *testing.T) {
 }
 
 // TestListAggregateInstanceTypes_PartitionedAggregation drives the full Next/Result path for the
-// hardware-partition view. It is disjoint from the other accelerator views, so nothing else in the
-// pipeline carries it: it must survive ingestion into the candidate, seed the tier bundle from the
-// winning candidate, and sum into both the tier and item Remaining like every other dimension.
+// hardware-partition view of a member that reports the scalar counts but no per-profile ledger — a
+// version-skewed cluster, since the reconciler publishes a ledger for every partitioned pool.
+//
+// The candidate keeps the whole partitioned resource through ingestion, so the scalar stays readable
+// per member. The fleet overview, however, expresses this dimension only per profile, so a
+// ledger-less member contributes nothing to it: profiles of one card compete for the same physical
+// slices, and there is no honest way to spread a scalar back over the profiles that produced it.
 func TestListAggregateInstanceTypes_PartitionedAggregation(t *testing.T) {
 	op := OpListAggregateInstanceTypes()
 	require.NoError(t, op.Next("cluster-a", a100PartitionedInst("a100-a", "1", "7")))
@@ -1200,10 +1308,12 @@ func TestListAggregateInstanceTypes_PartitionedAggregation(t *testing.T) {
 
 	assert.True(t, tier.Candidates[0].AcceleratorPartitioned.Remaining.Equal(resource.MustParse("7")),
 		"the candidate must carry the partition view through ingestion")
-	assert.True(t, tier.Remaining.AcceleratorPartitioned.Equal(resource.MustParse("21")), "7+14")
-	assert.True(t, item.Status.Remaining.AcceleratorPartitioned.Equal(resource.MustParse("21")), "7+14")
-	assert.True(t, item.Status.OnceMaxRequest.AcceleratorPartitioned.Equal(resource.MustParse("7")),
-		"the bundle must come from the winning candidate, not the per-dimension max (14)")
+	assert.Empty(t, tier.Remaining.AcceleratorPartitioned,
+		"a member reporting no per-profile ledger contributes no profile to the tier")
+	assert.Empty(t, item.Status.Remaining.AcceleratorPartitioned,
+		"nor to the item")
+	assert.Empty(t, item.Status.OnceMaxRequest.AcceleratorPartitioned,
+		"nor to the bundle of the winning candidate")
 }
 
 // TestListAggregateInstanceTypes_PhaseFiltering covers the batch (Next/Result) path: only
@@ -1280,6 +1390,40 @@ func TestListAggregateInstanceTypes_PhaseFiltering(t *testing.T) {
 		assert.True(t, item.Status.Remaining.AcceleratorSliced.Equal(resource.MustParse("50")))
 		assert.True(t, item.Status.Remaining.CPU.IsZero(), "the inactive whole-card CPU must not count")
 	})
+}
+
+// TestHandleAggregatedInstanceType_NewItemCarriesPartitionLedger covers the streaming path's
+// brand-new-item branch, which builds the item status by hand instead of recomputing it. A newly
+// onboarded MIG pool emits exactly one event and then, while idle, no more — so an item-level ledger
+// left empty there does not self-heal, and the single Added payload contradicts itself: populated
+// under tiers[0], empty at the item.
+func TestHandleAggregatedInstanceType_NewItemCarriesPartitionLedger(t *testing.T) {
+	h := OpHandleAggregatedInstanceType(buildState(t))
+
+	evts := h.Handle(&manager.WorkerEvent{
+		Type:    manager.WorkerEventAdded,
+		Cluster: "cluster-a",
+		Object: a100PartitionLedgerInst("a100-a", "6", "Active",
+			[]workercore.AcceleratorProfileCount{profileCount("1g.5gb", 1)},
+			[]workercore.AcceleratorProfileCount{profileCount("1g.5gb", 6), profileCount("3g.20gb", 0)}),
+	})
+
+	require.Len(t, evts, 1)
+	item, ok := evts[0].Object.(*AggregatedInstanceType)
+	require.True(t, ok)
+
+	wantRemaining := []workercore.AcceleratorProfileCount{profileCount("1g.5gb", 6), profileCount("3g.20gb", 0)}
+	wantOnceMax := []workercore.AcceleratorProfileCount{profileCount("1g.5gb", 1), profileCount("3g.20gb", 0)}
+
+	require.Len(t, item.Status.Tiers, 1)
+	assert.Equal(t, wantRemaining, item.Status.Tiers[0].Remaining.AcceleratorPartitioned,
+		"tier remaining profiles")
+	assert.Equal(t, wantRemaining, item.Status.Remaining.AcceleratorPartitioned,
+		"item remaining profiles must match the tier, not stay empty")
+	assert.Equal(t, wantOnceMax, item.Status.Tiers[0].OnceMaxRequest.AcceleratorPartitioned,
+		"tier once max request profiles")
+	assert.Equal(t, wantOnceMax, item.Status.OnceMaxRequest.AcceleratorPartitioned,
+		"item once max request profiles must match the tier, not stay empty")
 }
 
 // TestHandleAggregatedInstanceType_PhaseAwareTierIdentity covers the streaming path: a tier whose
@@ -1531,6 +1675,10 @@ func TestListAggregateInstanceTypes_GroupingIgnoresDescription(t *testing.T) {
 // TestListAggregateInstanceTypes_StatusJSONShape is the consumer-visible fixture for the F8 shape:
 // Detail (identity + folded SlicedDetail) rides only the item status, while each tier and candidate
 // carries a standalone AcceleratorSlicedDetail. It pins the JSON a REST consumer observes.
+//
+// The overview bundles carry four scalar dimensions and omit acceleratorPartitioned entirely: that
+// dimension is a per-profile list, and no card of this pool is in a partitioning mode. A candidate
+// still reports its own scalar partitioned view, which is per member rather than per profile.
 func TestListAggregateInstanceTypes_StatusJSONShape(t *testing.T) {
 	it := newInstType("gpustack-nvidia-a10g-", "inst-a", instSpecA10G(), workercore.InstanceTypeStatus{
 		Phase:             "Active",
@@ -1551,12 +1699,12 @@ func TestListAggregateInstanceTypes_StatusJSONShape(t *testing.T) {
         "cache": {}, "cpu": {"cache": {}},
         "slicedDetail": {"logical": {"coresPercentageOvercommit": true, "count": 8}, "physical": {}}
       },
-      "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
-      "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
+      "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+      "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
       "tiers": [
         {
-          "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
-          "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "acceleratorPartitioned": "0", "cpu": "4"},
+          "onceMaxRequest": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
+          "remaining": {"accelerator": "1", "acceleratorShared": "0", "acceleratorSliced": "8", "cpu": "4"},
           "candidates": [
             {
               "cluster": "cluster-a", "name": "inst-a", "phase": "Active",

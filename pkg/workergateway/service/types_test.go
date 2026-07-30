@@ -26,38 +26,48 @@ func TestAggregatedInstanceTypeMirrorsEveryStatusView(t *testing.T) {
 	cases := []struct {
 		name   string
 		mirror reflect.Type
-		field  reflect.Type
+		fields []reflect.Type
 	}{
 		{
-			name:   "overview bundle carries one quantity per view",
+			name:   "overview bundle carries one dimension per view",
 			mirror: reflect.TypeFor[AggregatedInstanceTypeOverviewResource](),
-			field:  reflect.TypeFor[resource.Quantity](),
+			fields: []reflect.Type{
+				reflect.TypeFor[resource.Quantity](),
+				reflect.TypeFor[[]workercore.AcceleratorProfileCount](),
+			},
 		},
 		{
 			name:   "candidate carries one resource per view",
 			mirror: reflect.TypeFor[AggregatedInstanceTypeOnceMaxRequestCandidate](),
-			field:  reflect.TypeFor[AggregatedInstanceTypeResource](),
+			fields: []reflect.Type{reflect.TypeFor[AggregatedInstanceTypeResource]()},
 		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			assert.ElementsMatch(t, views, fieldNamesOfType(c.mirror, c.field),
+			assert.ElementsMatch(t, views, fieldNamesOfType(c.mirror, c.fields...),
 				"%s must mirror exactly the InstanceTypeStatus views", c.mirror.Name())
 		})
 	}
 }
 
-// fieldNamesOfType returns the names of in's direct fields declared with the given type — either as
-// that type, or as a type embedding it, which is how a view that carries extra data alongside the
-// shared resource shape is declared. Recognizing the embedding form is what keeps such a view inside
-// the comparison: matching the type exactly would drop it from both sides at once, and the two sides
-// would then agree while the extra data goes unmirrored.
-func fieldNamesOfType(in, field reflect.Type) []string {
+// fieldNamesOfType returns the names of in's direct fields declared with any of the given types —
+// either as that type, or as a type embedding it, which is how a view that carries extra data
+// alongside the shared resource shape is declared. Recognizing the embedding form is what keeps such
+// a view inside the comparison: matching the type exactly would drop it from both sides at once, and
+// the two sides would then agree while the extra data goes unmirrored.
+//
+// Accepting several types is what lets a dimension be mirrored in the shape it needs — a scalar
+// quantity for most, a per-profile ledger for the hardware-partitioned one — without loosening the
+// guard: a view mirrored in none of the accepted shapes still drops out and fails the comparison.
+func fieldNamesOfType(in reflect.Type, fields ...reflect.Type) []string {
 	names := make([]string, 0, in.NumField())
 	for i := range in.NumField() {
-		if declaresType(in.Field(i).Type, field) {
-			names = append(names, in.Field(i).Name)
+		for _, field := range fields {
+			if declaresType(in.Field(i).Type, field) {
+				names = append(names, in.Field(i).Name)
+				break
+			}
 		}
 	}
 	return names
