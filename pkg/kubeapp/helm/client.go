@@ -265,12 +265,7 @@ func (c *Client) InstallWith(
 		case NextStepUpgrade:
 			// Upgrade.
 			logger.Info("upgrading")
-			u := helmaction.NewUpgrade(config)
-			u.Timeout = c.timeout
-			u.Atomic = true
-			u.Recreate = true
-			u.Force = true
-			chart.configureUpgrade(u)
+			u := c.newUpgrade(config, chart)
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm upgrade: load chart: %w", err)
@@ -302,12 +297,7 @@ func (c *Client) InstallWith(
 		case _NextStepInstall:
 			// Install.
 			logger.Info("installing")
-			i := helmaction.NewInstall(config)
-			i.Timeout = c.timeout
-			i.ReleaseName = chart.Release
-			i.Namespace = namespace
-			i.Atomic = true
-			chart.configureInstall(i)
+			i := c.newInstall(config, chart, namespace, r)
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm install: load chart: %w", err)
@@ -325,6 +315,47 @@ func (c *Client) InstallWith(
 			return helmchartutil.MergeValues(r.Chart, r.Config)
 		}
 	}
+}
+
+// newInstall builds the install action for a release, given whatever release record was
+// found for it — nil when there is none.
+//
+// A first install is not atomic. Atomic implies Wait, so an atomic install blocks until
+// every workload the chart deploys is Ready; a process killed inside that wait — the
+// container's startup probe gives up long before the Helm timeout — strands a
+// pending-install record that no later attempt can get past. Nothing is serving yet on a
+// first install, so there is no revision for a rollback to return to and no reason to
+// block: it applies and returns, and a release left failed is repaired by the upgrade path
+// on the next pass. Installing over a release that does exist stays atomic.
+func (c *Client) newInstall(
+	config *helmaction.Configuration,
+	chart *Chart,
+	namespace string,
+	existing *helmrelease.Release,
+) *helmaction.Install {
+	i := helmaction.NewInstall(config)
+	i.Timeout = c.timeout
+	i.ReleaseName = chart.Release
+	i.Namespace = namespace
+	i.Atomic = existing != nil
+	chart.configureInstall(i)
+
+	return i
+}
+
+// newUpgrade builds the upgrade action for a release.
+//
+// It is always atomic: an upgrade acts on a live release, so a failed one must be rolled
+// back to the revision that was serving before it.
+func (c *Client) newUpgrade(config *helmaction.Configuration, chart *Chart) *helmaction.Upgrade {
+	u := helmaction.NewUpgrade(config)
+	u.Timeout = c.timeout
+	u.Atomic = true
+	u.Recreate = true
+	u.Force = true
+	chart.configureUpgrade(u)
+
+	return u
 }
 
 // createConfig creates a new Helm action configuration.
