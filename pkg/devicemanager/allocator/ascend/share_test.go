@@ -125,6 +125,62 @@ func TestEnsureShareEnabled_MissingPhysicalIndexes(t *testing.T) {
 	assert.Empty(t, share.getCalls)
 }
 
+// Shared and visibility put a second container on a card, so both must turn the flag on the same
+// way a slice does -- and across every card they were granted, not just the first.
+func TestSharedAndVisibilityEnableShare(t *testing.T) {
+	for _, mode := range []workercore.DeviceAllocationMode{
+		workercore.DeviceAllocationModeShared,
+		workercore.DeviceAllocationModeVisibility,
+	} {
+		t.Run(mode.String(), func(t *testing.T) {
+			share := &fakeShareDriver{enabled: map[[2]int32]bool{{0, 0}: false, {1, 0}: true}}
+			s := &server{
+				ResourceServer: deviceplugin.ResourceServer{
+					Manufacturer:   Manufacturer,
+					AllocationMode: mode,
+				},
+				share: share,
+			}
+
+			pod, ctr := slicedPod("uid-"+mode.String(), "train", 10, 25)
+			resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr,
+				ascendDevicesFixture(), map[deviceplugin.Resource]int32{
+					{Group: "910b2", Device: testAccelID0}: 1,
+					{Group: "910b2", Device: testAccelID1}: 1,
+				})
+			require.NoError(t, err)
+
+			assert.Equal(t, "0,1", resp.Envs["ASCEND_VISIBLE_DEVICES"])
+			assert.Empty(t, resp.Mounts, "no vcann-rt artifacts outside the sliced path")
+			assert.ElementsMatch(t, [][2]int32{{0, 0}, {1, 0}}, share.getCalls,
+				"reads the flag of every granted card")
+			assert.Equal(t, [][2]int32{{0, 0}}, share.setCalls,
+				"writes only the card whose flag was off")
+		})
+	}
+}
+
+// A shared allocation whose flag cannot be set is refused, rather than admitting a pod whose
+// workload would then fail on the device open.
+func TestSharedShareEnableFailureIsFatal(t *testing.T) {
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeShared,
+		},
+		share: &fakeShareDriver{
+			enabled: map[[2]int32]bool{{0, 0}: false},
+			setErr:  errors.New("dcmi set device share enable: OPER_NOT_PERMITTED"),
+		},
+	}
+
+	pod, ctr := slicedPod("uid-shared-setfail", "train", 10, 25)
+	_, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, ascendDevicesFixture(),
+		map[deviceplugin.Resource]int32{{Group: "910b2", Device: testAccelID0}: 1})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "npu-smi set -t device-share -i 0 -c 0 -d 1")
+}
+
 // Exclusive allocation must never reach the container-share write. What keeps it out is the
 // mode check in GetContainerAllocateResponse, not the absence of a driver — so hand the
 // exclusive responder a driver that errors on every call and require the allocation to

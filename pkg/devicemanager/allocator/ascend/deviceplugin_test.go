@@ -297,6 +297,9 @@ func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeVisibility,
 		},
+		// Visibility co-allocates a second container onto its owner's card, so it drives the
+		// container-share seam too; here the flag is already on and only read.
+		share: &fakeShareDriver{enabled: map[[2]int32]bool{{0, 0}: true}},
 	}
 	devs := ascendDevicesFixture()
 	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "sshd-pod", UID: types.UID("uid-vis")}}

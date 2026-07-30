@@ -27,19 +27,22 @@ const Manufacturer = nodefeature.ManufacturerAscend
 
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
+	// Every mode that can put a second container on one card drives the same container-share
+	// seam, so it is built once and shared by them. Exclusive gets nil: it owns whole cards and
+	// must not touch the flag.
+	share := newShareDriver(logger)
+
 	servers := []deviceplugin.Server{
 		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared, nil),
+			newServer(logger, workercore.DeviceAllocationModeShared, share),
 		)
 	}
 	if !opts.NoSliced {
-		// Only a logical slice needs the driver's container-share flag, so the seam is built
-		// where it is used and left nil everywhere else — no other mode can reach it.
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced, newShareDriver(logger)),
+			newServer(logger, workercore.DeviceAllocationModeSliced, share),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -48,7 +51,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility, nil),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, share),
 	)
 
 	return aggregated{
@@ -93,9 +96,8 @@ func (in aggregated) Stop() {
 type server struct {
 	deviceplugin.ResourceServer
 
-	// share is the dcmi container-share seam the sliced responder turns on for the card it
-	// injects a slice onto. It is nil for every other mode, which is what keeps exclusive and
-	// shared allocation clear of host driver writes.
+	// share is the dcmi container-share seam the responder turns on for the cards it hands out.
+	// It is nil for exclusive alone, which owns whole cards and must not touch the flag.
 	share shareDriver
 }
 
@@ -158,10 +160,25 @@ func (s *server) GetContainerAllocateResponse(
 		// TODO: mount HCCL topo file for 950.
 	}
 
-	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota);
-	// exclusive/shared keep the plain device-visibility response below.
+	// Sliced containers get real logical-slicing isolation (vcann-rt preload + quota); every
+	// other mode returns the plain device-visibility response below, with only the
+	// container-share preflight in between.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, indexes, accelerators)
+	}
+
+	// Shared and visibility put a second container on a card, which the driver refuses unless
+	// container-share mode is on, so they need the same preflight a slice does. Unlike a slice
+	// they may hold several cards, hence the loop. Exclusive is named out on purpose: one
+	// container owns the whole card, so there is nothing to permit and no reason to drop the
+	// driver's own single-container guard.
+	switch s.AllocationMode {
+	case workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeVisibility:
+		for i := range accelerators {
+			if err := s.ensureShareEnabled(accelerators[i].accel); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Delegate to container runtime for device injection,
