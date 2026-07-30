@@ -21,8 +21,12 @@ const (
 	// waiter leaves a vanished holder's claim standing before taking it over.
 	defaultLockDuration = time.Minute
 	// defaultLockTimeout bounds the wait for a claim. Giving up is a failure the caller
-	// reports: for a process whose restart is its own retry loop, that is the retry.
-	defaultLockTimeout = 5 * time.Minute
+	// reports: for a process whose restart is its own retry loop, that is the retry. It is
+	// set long enough to outlast a holder doing real work — a Helm action waiting on an
+	// image pull runs for many minutes — and short enough to leave room under the startup
+	// probe of the container this usually runs in, which is the bound that really decides
+	// how long a boot may wait.
+	defaultLockTimeout = 12 * time.Minute
 	// maxLockRetryInterval caps how long a waiter leaves between reads of the Lease, so
 	// that a released claim is picked up promptly however long the claim itself lasts.
 	maxLockRetryInterval = 5 * time.Second
@@ -59,9 +63,16 @@ type Lock struct {
 // stopped renewing — or until the timeout, which it reports as an error without running
 // fn. While fn runs, the claim is renewed in the background; it is released once fn
 // returns, whether or not fn or the context failed.
-func (l Lock) Do(ctx context.Context, fn func(context.Context) error) error {
-	if l.Name == "" || l.Holder == "" {
-		return fmt.Errorf("lock name and holder are required")
+//
+// fn is told which holder the claim was taken over from, or "" when it was found free.
+// That is the strongest thing this lock can say about a predecessor: a claim found free
+// was released, and a claim is released only where the guarded call ended of its own
+// accord, so nothing of that predecessor is still running. A claim taken over says the
+// opposite — its holder went quiet, which is no evidence that it stopped working. Whether
+// the named holder is nonetheless known to be gone is the caller's question to answer.
+func (l Lock) Do(ctx context.Context, fn func(ctx context.Context, predecessor string) error) error {
+	if l.Leases == nil || l.Name == "" || l.Holder == "" {
+		return fmt.Errorf("lock client, name and holder are required")
 	}
 
 	duration, timeout := l.Duration, l.Timeout
@@ -72,10 +83,11 @@ func (l Lock) Do(ctx context.Context, fn func(context.Context) error) error {
 		timeout = defaultLockTimeout
 	}
 
-	if err := l.acquire(ctx, duration, timeout); err != nil {
+	predecessor, err := l.acquire(ctx, duration, timeout)
+	if err != nil {
 		return err
 	}
-	klog.InfoS("acquired lock", "lease", l.Name, "holder", l.Holder)
+	klog.InfoS("acquired lock", "lease", l.Name, "holder", l.Holder, "tookOverFrom", predecessor)
 
 	// The renewal and the release outlive the caller's context on purpose: a canceled
 	// context does not stop the work this lock guards, so it must not drop the claim
@@ -99,58 +111,97 @@ func (l Lock) Do(ctx context.Context, fn func(context.Context) error) error {
 		// the Lease while it is freed.
 		close(stop)
 		<-renewed
-		l.release(held)
+
+		// Release only where the guarded call ended of its own accord. One cut short has
+		// not necessarily stopped — Helm returns on cancellation while its apply goes on —
+		// and a claim released here would tell the next holder that its predecessor had
+		// finished. Left standing, it expires instead, which is what is actually known.
+		//
+		// The guarded context, not the caller's: it is cut short by a canceled caller AND
+		// by this process losing the claim, which the caller knows nothing about. Losing it
+		// to a stalled renewal rather than to a peer is what makes the difference matter —
+		// no peer has written the Lease, so it still names this holder and a release would
+		// genuinely free it. The wait above means the renewal has already returned, so this
+		// reads its verdict rather than racing it.
+		if guarded.Err() != nil {
+			klog.InfoS("leaving the claim to expire", "lease", l.Name, "holder", l.Holder)
+			return
+		}
+
+		l.release(held, duration)
 	}()
 
-	return fn(guarded)
+	return fn(guarded, predecessor)
 }
 
-// acquire claims the Lease, waiting out a live holder until the timeout. It reports why
-// the last attempt failed, not that the wait ran out: which peer holds the lock is the
-// answer whoever reads the failure needs.
-func (l Lock) acquire(ctx context.Context, duration, timeout time.Duration) error {
+// acquire claims the Lease, waiting out a live holder until the timeout, and names the
+// holder it took the claim over from — empty where the claim was found free.
+//
+// A failure names why the last attempt failed, not that the wait ran out: which peer holds
+// the lock is the answer whoever reads it needs.
+func (l Lock) acquire(ctx context.Context, duration, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var seen observation
 	for {
-		err := l.claim(ctx, duration, &seen)
+		predecessor, err := l.claim(ctx, duration, &seen)
 		if err == nil {
-			return nil
+			return predecessor, nil
+		}
+
+		// Contention is the one failure worth waiting out. A request refused on
+		// authorization, or on its own content, is refused the same way every time, and
+		// retrying it only buries the cause for the whole timeout.
+		if kerrors.IsForbidden(err) || kerrors.IsUnauthorized(err) || kerrors.IsInvalid(err) {
+			return "", fmt.Errorf("acquire lock %s as %s: %w", l.Name, l.Holder, err)
 		}
 
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("acquire lock %s as %s: %w", l.Name, l.Holder, err)
+			return "", fmt.Errorf("acquire lock %s as %s: %w", l.Name, l.Holder, err)
 		case <-time.After(retryInterval(duration)):
 		}
 	}
 }
 
 // claim makes one attempt at claiming the Lease, recording what it saw of a peer's claim
-// so that a later attempt can tell a standing claim from a renewed one.
-func (l Lock) claim(ctx context.Context, duration time.Duration, seen *observation) error {
+// so that a later attempt can tell a standing claim from a renewed one. It names the peer
+// it took the claim over from, if any.
+//
+// The attempt is bounded by the claim's own duration: a request left hanging for longer
+// than that outlives the claim it is competing for, and the client's own timeout is free to
+// be far longer.
+func (l Lock) claim(ctx context.Context, duration time.Duration, seen *observation) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
 	lease, err := l.Leases.Get(ctx, l.Name, meta.GetOptions{})
 	if kerrors.IsNotFound(err) {
 		_, err = l.Leases.Create(ctx, l.claimed(nil, duration), meta.CreateOptions{})
-		return err
+		return "", err
 	}
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	// A claim of this process's own is reclaimed rather than waited out: it is what a
-	// previous incarnation under the same identity left behind.
+	// A claim of this process's own is reclaimed rather than waited out, and counts as
+	// found free: it is what a previous incarnation under the same identity left behind,
+	// and that incarnation is gone.
 	holder := ptr.Deref(lease.Spec.HolderIdentity, "")
-	if holder != "" && holder != l.Holder && !seen.standingFor(lease, duration) {
-		return fmt.Errorf("held by %s", holder)
+	predecessor := holder
+	if holder == l.Holder {
+		predecessor = ""
+	}
+	if predecessor != "" && !seen.standingFor(lease, duration) {
+		return "", fmt.Errorf("held by %s", holder)
 	}
 
 	// The update carries the resource version just read, so of two processes finding the
 	// same free Lease exactly one succeeds and the other retries.
 	_, err = l.Leases.Update(ctx, l.claimed(lease, duration), meta.UpdateOptions{})
 
-	return err
+	return predecessor, err
 }
 
 // renew keeps the claim alive until stop is closed, which the holder does once the guarded
@@ -168,7 +219,12 @@ func (l Lock) renew(ctx context.Context, duration time.Duration, stop <-chan str
 		case <-ticker.C:
 		}
 
-		err := l.renewOnce(ctx, duration)
+		// Bound the attempt by the renewal interval, so a request left hanging cannot
+		// outlast the claim it is renewing and leave the loss undetected.
+		attempt, cancel := context.WithTimeout(ctx, duration/3)
+		err := l.renewOnce(attempt, duration)
+		cancel()
+
 		if err == nil {
 			held = time.Now()
 			continue
@@ -203,7 +259,10 @@ func (l Lock) renewOnce(ctx context.Context, duration time.Duration) error {
 }
 
 // release frees the Lease, leaving a claim another process has since taken alone.
-func (l Lock) release(ctx context.Context) {
+func (l Lock) release(ctx context.Context, duration time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, duration)
+	defer cancel()
+
 	lease, err := l.Leases.Get(ctx, l.Name, meta.GetOptions{})
 	if err != nil {
 		klog.InfoS("releasing lock", "lease", l.Name, "err", err)

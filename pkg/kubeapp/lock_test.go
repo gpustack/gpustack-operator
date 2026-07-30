@@ -3,13 +3,20 @@ package kubeapp
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	coordination "k8s.io/api/coordination/v1"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
 
 	kubefake "gpustack.ai/gpustack/pkg/kubeclients/kubernetes/fake"
@@ -24,6 +31,46 @@ const (
 // testLockDuration is short enough to watch a claim stand still within a test, and long
 // enough that the reads which do the watching are not the thing being timed.
 const testLockDuration = 300 * time.Millisecond
+
+// newTestClientset returns a fake client that enforces optimistic concurrency on Leases.
+//
+// The lock's mutual exclusion is a compare-and-swap: it writes back the object it read,
+// resource version and all, so that of two processes finding the same free Lease exactly
+// one update lands. The stock object tracker ignores resource versions entirely, which
+// would let an update built from nothing overwrite a live claim and every test still pass.
+func newTestClientset(t *testing.T) *kubefake.Clientset {
+	t.Helper()
+
+	cli := kubefake.NewSimpleClientset()
+
+	cli.PrependReactor("create", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		lease := action.(k8stesting.CreateAction).GetObject().(*coordination.Lease).DeepCopy()
+		lease.ResourceVersion = "1"
+
+		return true, lease, cli.Tracker().Create(action.GetResource(), lease, action.GetNamespace())
+	})
+
+	cli.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		lease := action.(k8stesting.UpdateAction).GetObject().(*coordination.Lease).DeepCopy()
+
+		stored, err := cli.Tracker().Get(action.GetResource(), action.GetNamespace(), lease.Name)
+		if err != nil {
+			return true, nil, err
+		}
+		current := stored.(*coordination.Lease).ResourceVersion
+		if lease.ResourceVersion != current {
+			return true, nil, kerrors.NewConflict(action.GetResource().GroupResource(), lease.Name,
+				fmt.Errorf("the object has been modified: %q != %q", lease.ResourceVersion, current))
+		}
+
+		version, _ := strconv.Atoi(current)
+		lease.ResourceVersion = strconv.Itoa(version + 1)
+
+		return true, lease, cli.Tracker().Update(action.GetResource(), lease, action.GetNamespace())
+	})
+
+	return cli
+}
 
 // newTestLease builds a Lease as the given holder just claimed it.
 func newTestLease(holder string) *coordination.Lease {
@@ -61,7 +108,11 @@ func Test_Lock_Do(t *testing.T) {
 		// timeout overrides the lock's own, for a case that means to outlast a claim.
 		timeout time.Duration
 		wantRun bool
-		wantErr string
+		// wantPredecessor is the holder the guarded function must be told the claim was
+		// taken from — empty where it was found free, which is a caller's evidence that
+		// nothing of its predecessor is still running.
+		wantPredecessor string
+		wantErr         string
 	}{
 		{
 			name:    "no lease yet is claimed",
@@ -73,10 +124,11 @@ func Test_Lock_Do(t *testing.T) {
 			wantRun:  true,
 		},
 		{
-			name:     "a claim left standing is taken over",
-			existing: newTestLease("peer-0"),
-			timeout:  10 * testLockDuration,
-			wantRun:  true,
+			name:            "a claim left standing is taken over",
+			existing:        newTestLease("peer-0"),
+			timeout:         10 * testLockDuration,
+			wantRun:         true,
+			wantPredecessor: "peer-0",
 		},
 		{
 			name:     "this process's own claim is reclaimed",
@@ -93,7 +145,7 @@ func Test_Lock_Do(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cli := kubefake.NewSimpleClientset()
+			cli := newTestClientset(t)
 			leases := cli.CoordinationV1().Leases(testLockNamespace)
 			if c.existing != nil {
 				_, err := leases.Create(t.Context(), c.existing, meta.CreateOptions{})
@@ -106,8 +158,9 @@ func Test_Lock_Do(t *testing.T) {
 			}
 
 			var ran bool
-			err := lock.Do(t.Context(), func(context.Context) error {
+			err := lock.Do(t.Context(), func(_ context.Context, predecessor string) error {
 				ran = true
+				assert.Equal(t, c.wantPredecessor, predecessor, "the holder the claim was taken from")
 
 				// The claim is held for as long as the guarded function runs, so that a peer
 				// polling right now still sees it taken.
@@ -133,30 +186,34 @@ func Test_Lock_Do(t *testing.T) {
 	}
 }
 
-// Test_Lock_DoReleasesAfterFailure holds the release to the guarded function returning,
-// not to it succeeding: a claim kept after a failed install would lock every peer out
-// until it expired.
-func Test_Lock_DoReleasesAfterFailure(t *testing.T) {
+// Test_Lock_DoReleasesWhatItFinished separates the two ways a guarded call can end, because
+// releasing is what tells the next holder its predecessor is done.
+//
+// A call that failed is still a call that ended, and a claim kept after it would lock every
+// peer out until it expired. A call cut short by a canceled context is not: Helm returns on
+// cancellation while its apply goes on, so the claim is left standing — the next holder then
+// sees a takeover, which is the truth.
+func Test_Lock_DoReleasesWhatItFinished(t *testing.T) {
 	cases := []struct {
 		name string
-		// canceled runs the guarded function under an already-canceled context, the case
-		// the lock is built for: Helm keeps applying past a canceled context, so the claim
-		// must outlive the cancellation and be dropped only once the call returns.
+		// canceled cancels the caller's context from inside the guarded function.
 		cancelled bool
+		// wantHolder is what the Lease must name once Do has returned.
+		wantHolder string
 	}{
 		{name: "the guarded function fails"},
-		{name: "the context is cancelled", cancelled: true},
+		{name: "the context is cancelled", cancelled: true, wantHolder: "worker-0"},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cli := kubefake.NewSimpleClientset()
+			cli := newTestClientset(t)
 			leases := cli.CoordinationV1().Leases(testLockNamespace)
 
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 
-			err := newTestLock(leases, "worker-0").Do(ctx, func(ctx context.Context) error {
+			err := newTestLock(leases, "worker-0").Do(ctx, func(ctx context.Context, _ string) error {
 				if c.cancelled {
 					cancel()
 				}
@@ -170,8 +227,8 @@ func Test_Lock_DoReleasesAfterFailure(t *testing.T) {
 			assert.ErrorIs(t, err, assert.AnError, "the guarded function's error is reported")
 
 			lease, err := leases.Get(t.Context(), testLockName, meta.GetOptions{})
-			require.NoError(t, err, "read the released lease")
-			assert.Empty(t, ptr.Deref(lease.Spec.HolderIdentity, ""), "the claim is released")
+			require.NoError(t, err, "read the lease Do left behind")
+			assert.Equal(t, c.wantHolder, ptr.Deref(lease.Spec.HolderIdentity, ""))
 		})
 	}
 }
@@ -180,11 +237,11 @@ func Test_Lock_DoReleasesAfterFailure(t *testing.T) {
 // far longer than any duration short enough for a waiter to take over a dead holder's
 // claim, so without renewal a peer would join it halfway through.
 func Test_Lock_DoRenewsWhileHeld(t *testing.T) {
-	cli := kubefake.NewSimpleClientset()
+	cli := newTestClientset(t)
 	leases := cli.CoordinationV1().Leases(testLockNamespace)
 
 	var claimedAt, renewedAt time.Time
-	err := newTestLock(leases, "worker-0").Do(t.Context(), func(context.Context) error {
+	err := newTestLock(leases, "worker-0").Do(t.Context(), func(context.Context, string) error {
 		lease, err := leases.Get(t.Context(), testLockName, meta.GetOptions{})
 		require.NoError(t, err, "read the claimed lease")
 		claimedAt = lease.Spec.RenewTime.Time
@@ -207,7 +264,7 @@ func Test_Lock_DoRenewsWhileHeld(t *testing.T) {
 // by this process's own clock: the peer here renews constantly, so nothing but a clock
 // comparison could make its claim look expired.
 func Test_Lock_DoWaitsOutAPeerThatKeepsRenewing(t *testing.T) {
-	cli := kubefake.NewSimpleClientset()
+	cli := newTestClientset(t)
 	leases := cli.CoordinationV1().Leases(testLockNamespace)
 
 	_, err := leases.Create(t.Context(), newTestLease("peer-0"), meta.CreateOptions{})
@@ -237,7 +294,7 @@ func Test_Lock_DoWaitsOutAPeerThatKeepsRenewing(t *testing.T) {
 	lock := newTestLock(leases, "worker-0")
 	lock.Timeout = 3 * testLockDuration
 
-	err = lock.Do(t.Context(), func(context.Context) error {
+	err = lock.Do(t.Context(), func(context.Context, string) error {
 		t.Error("the guarded function must not run while a peer keeps renewing its claim")
 		return nil
 	})
@@ -248,10 +305,10 @@ func Test_Lock_DoWaitsOutAPeerThatKeepsRenewing(t *testing.T) {
 // holds the claim, the work this process was doing under it has to stop rather than run
 // beside the peer's.
 func Test_Lock_DoCancelsTheGuardedWorkWhenTheClaimIsLost(t *testing.T) {
-	cli := kubefake.NewSimpleClientset()
+	cli := newTestClientset(t)
 	leases := cli.CoordinationV1().Leases(testLockNamespace)
 
-	err := newTestLock(leases, "worker-0").Do(t.Context(), func(ctx context.Context) error {
+	err := newTestLock(leases, "worker-0").Do(t.Context(), func(ctx context.Context, _ string) error {
 		lease, err := leases.Get(t.Context(), testLockName, meta.GetOptions{})
 		require.NoError(t, err, "read the claimed lease")
 
@@ -275,17 +332,128 @@ func Test_Lock_DoCancelsTheGuardedWorkWhenTheClaimIsLost(t *testing.T) {
 	assert.Equal(t, "peer-0", ptr.Deref(lease.Spec.HolderIdentity, ""), "the peer keeps the claim")
 }
 
-// Test_Lock_DoRejectsAnUnidentifiedHolder guards the one way this lock fails open: peers
-// sharing an identity all read the claim as their own.
-func Test_Lock_DoRejectsAnUnidentifiedHolder(t *testing.T) {
-	cli := kubefake.NewSimpleClientset()
+// Test_Lock_DoLeavesAClaimItLostToExpire covers the other way the guarded work is cut
+// short: not a peer taking the claim, but this process's own renewal giving up on it.
+//
+// It is the case where releasing does damage. No peer has written the Lease, so it still
+// names this holder and a release genuinely frees it — telling whoever comes next that its
+// predecessor finished, while Helm may still be applying past the canceled context.
+func Test_Lock_DoLeavesAClaimItLostToExpire(t *testing.T) {
+	cli := newTestClientset(t)
+	leases := cli.CoordinationV1().Leases(testLockNamespace)
 
-	err := Lock{
-		Leases: cli.CoordinationV1().Leases(testLockNamespace),
-		Name:   testLockName,
-	}.Do(t.Context(), func(context.Context) error {
-		t.Error("the guarded function must not run without a holder identity")
+	// Renewals fail while this is set, which is what makes the claim go unrenewed for its
+	// whole duration without anyone else touching it.
+	var stalled atomic.Bool
+	cli.PrependReactor("update", "leases", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+		if !stalled.Load() {
+			return false, nil, nil
+		}
+
+		return true, nil, errors.New("the api server is unreachable")
+	})
+
+	err := newTestLock(leases, "worker-0").Do(t.Context(), func(ctx context.Context, _ string) error {
+		stalled.Store(true)
+		select {
+		case <-ctx.Done():
+		case <-time.After(10 * testLockDuration):
+			return errors.New("the guarded context outlived the claim")
+		}
+		// Whatever broke the renewal is over before the claim would be released, so a
+		// release attempted here would succeed. Only the gate stops it.
+		stalled.Store(false)
+
 		return nil
 	})
-	assert.EqualError(t, err, "lock name and holder are required")
+	require.NoError(t, err)
+
+	lease, err := leases.Get(t.Context(), testLockName, meta.GetOptions{})
+	require.NoError(t, err, "read the lease")
+	assert.Equal(t, "worker-0", ptr.Deref(lease.Spec.HolderIdentity, ""),
+		"a claim lost mid-work is left to expire, not released")
+}
+
+// Test_Lock_DoLetsOneReplicaInAtATime is the property the whole lock exists for, run
+// against a client that enforces the compare-and-swap it rests on: replicas starting
+// together take their turns instead of overlapping.
+func Test_Lock_DoLetsOneReplicaInAtATime(t *testing.T) {
+	const replicas = 3
+
+	cli := newTestClientset(t)
+	leases := cli.CoordinationV1().Leases(testLockNamespace)
+
+	var (
+		mu        sync.Mutex
+		inside    int
+		overlaps  int
+		admitted  int
+		waitGroup sync.WaitGroup
+	)
+
+	for i := range replicas {
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+
+			lock := newTestLock(leases, fmt.Sprintf("worker-%d", i))
+			// Long enough for every replica to take its turn behind the others.
+			lock.Timeout = 20 * testLockDuration
+
+			err := lock.Do(t.Context(), func(context.Context, string) error {
+				mu.Lock()
+				inside++
+				if inside > 1 {
+					overlaps++
+				}
+				admitted++
+				mu.Unlock()
+
+				time.Sleep(testLockDuration / 10)
+
+				mu.Lock()
+				inside--
+				mu.Unlock()
+
+				return nil
+			})
+			assert.NoError(t, err, "every replica gets its turn")
+		}()
+	}
+	waitGroup.Wait()
+
+	assert.Equal(t, 0, overlaps, "no two replicas were inside the guarded function at once")
+	assert.Equal(t, replicas, admitted, "every replica ran once")
+}
+
+// Test_Lock_DoRejectsAnIncompleteLock covers what a lock refuses to do rather than attempt.
+// A missing holder is the one way this lock could fail open — peers sharing an identity all
+// read the claim as their own — and a missing client would fail on a nil dereference deep
+// inside instead of saying what is wrong.
+func Test_Lock_DoRejectsAnIncompleteLock(t *testing.T) {
+	cli := newTestClientset(t)
+
+	cases := []struct {
+		name string
+		lock Lock
+	}{
+		{
+			name: "without a holder identity",
+			lock: Lock{Leases: cli.CoordinationV1().Leases(testLockNamespace), Name: testLockName},
+		},
+		{
+			name: "without a lease client",
+			lock: Lock{Name: testLockName, Holder: "worker-0"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.lock.Do(t.Context(), func(context.Context, string) error {
+				t.Error("the guarded function must not run under an incomplete lock")
+				return nil
+			})
+			assert.EqualError(t, err, "lock client, name and holder are required")
+		})
+	}
 }

@@ -29,7 +29,16 @@ reaches them before they are served, so it waits instead of failing. They are in
 the chart because of the boundary below.
 
 Every step of `Prepare` runs in **all** replicas, before leader election, so each one is either
-conflict-tolerant or idempotent by construction. Keep it that way when adding a step.
+conflict-tolerant or idempotent by construction. Keep it that way when adding a step — and note
+that a rolling update overlaps two replicas even where `worker.replicas` is 1.
+
+Installing the applications is the one step for which neither was available. Helm's release
+storage is a single compare-and-create, not a mutex, and two Helm actions on one release can
+leave it in a pending state that no later attempt gets past. That step therefore holds a
+`coordination.k8s.io` Lease — `applications.worker.gpustack.ai` in the system namespace, via
+`pkg/kubeapp`'s `Lock` — for its whole duration, so exactly one replica installs at a time. The
+lock is a last resort, not a pattern to copy: reach for it only where idempotence really is out
+of reach, and read `pkg/kubeapp/lock.go` first for what it does and does not guarantee.
 
 ### The chart deploys workloads; the worker applies the custom resources
 

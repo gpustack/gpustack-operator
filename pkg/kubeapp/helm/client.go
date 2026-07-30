@@ -251,9 +251,15 @@ func (c *Client) InstallWith(
 
 		switch n {
 		case NextStepRequeue:
-			// Requeue.
+			// Requeue. Waiting on the context rather than sleeping through it: this arm is
+			// the one that waits out a peer, and a caller that has been told to stop must
+			// not go on waiting under a lock it may no longer hold.
 			logger.Info("requeueing")
-			time.Sleep(10 * time.Second)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
 			r, err = g.Run(chart.Release)
 			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
 				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
@@ -312,11 +318,19 @@ func (c *Client) InstallWith(
 			ui.KeepHistory = false
 			ui.Wait = true
 			ui.DeletionPropagation = string(meta.DeletePropagationForeground)
-			r, err := ui.Run(chart.Release)
-			if err != nil && errors.Is(err, helmdriver.ErrReleaseNotFound) {
+			ur, err := ui.Run(chart.Release)
+			if err != nil {
 				return nil, fmt.Errorf("helm uninstall: release %s: %w", chart.Release, err)
 			}
-			logger.Infof("uninstalled: %s", r.Info)
+			// IgnoreNotFound reports a release that was not there as no response and no error,
+			// which is the one case there is nothing to say about.
+			if ur != nil {
+				logger.Infof("uninstalled: %s", ur.Info)
+			}
+			// Nothing of this release is left, so what follows is a first install. Each case
+			// of a switch is its own block, so the install below would otherwise still be
+			// handed the release read before the uninstall.
+			r = nil
 			fallthrough
 		case _NextStepInstall:
 			// Install.

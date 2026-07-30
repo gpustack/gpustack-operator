@@ -70,16 +70,19 @@ type (
 		// release's object from one a user created by hand. Set it only for a migration
 		// whose previous owner has been positively identified, never unconditionally.
 		TakeOwnership bool
-		// ExclusiveAccess declares that the caller has excluded every other process from
-		// acting on this release for the whole call.
+		// ExclusiveAccess declares that whatever last acted on this release has stopped, and
+		// that nothing else can act on it while this call runs.
 		//
 		// It is what makes a pending release record actionable. A record left
 		// pending-install, pending-upgrade or pending-rollback is either an operation still
 		// in flight or the wreckage of a process that died mid-flight, and nothing in the
 		// record itself tells the two apart — so without this the record is waited out by
-		// age, which is why one left behind survives every later attempt. Set it only
-		// where a lock or a leader election really does keep peers out; repairing a live
-		// operation corrupts it.
+		// age, which is why one left behind survives every later attempt.
+		//
+		// Holding a lock is not on its own enough to set it: a lock says peers cannot start,
+		// not that the one before them finished. Set it only on evidence that the previous
+		// actor is gone — it released the lock after its own call returned, or its process
+		// is observably no longer running. Repairing a live operation corrupts it.
 		ExclusiveAccess bool
 	}
 

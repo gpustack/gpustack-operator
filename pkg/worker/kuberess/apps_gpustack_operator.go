@@ -51,7 +51,13 @@ var legacyApplicationReleases = []string{
 // installs the chart packaged into its own image (see pack/gpustack-operator/Dockerfile)
 // with an overlay computed from its settings and flags. When a chart already deploys the
 // worker, --disable-applications carries the wildcard and this never runs.
-func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
+func installGPUStackOperator(
+	ctx context.Context,
+	helmCli *helm.Client,
+	globalValuesContext map[string]any,
+	disable sets.Set[string],
+	exclusive bool,
+) error {
 	chartVersion := gpustackOperatorChartVersion()
 	path, err := gpustackOperatorChartPath(chartVersion)
 	if err != nil {
@@ -106,10 +112,11 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 		// while the finalizers still pin the CRs and strands the CRDs.
 		RepairViaUpgradeOnly: true,
 		TakeOwnership:        takeOwnership,
-		// InstallApplications holds a Lease across this whole call, so a pending release
-		// record found here belongs to a replica that died rather than to one still
-		// working, and repairing it is what clears a wedge no later attempt could.
-		ExclusiveAccess: true,
+		// Set only where InstallApplications took a Lease its predecessor had released, so
+		// a pending release record found here belongs to a replica that finished or died
+		// rather than to one still working. Repairing such a record is what clears a wedge
+		// no later attempt could.
+		ExclusiveAccess: exclusive,
 	}
 
 	return installConvergedChart(ctx, helmCli, chart)
