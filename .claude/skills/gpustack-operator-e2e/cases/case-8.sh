@@ -96,6 +96,23 @@ wait_running() {
   return 1
 }
 
+# exec_out <pod> <cmd>... — run a command in the Pod and echo its output, retried.
+#
+# A Pod reports Running slightly before its container is attachable, so an exec issued the instant
+# wait_running returns can come back empty — or fail outright with `container not found` — while the
+# slice is applied perfectly correctly. Every read below feeds a PASS/FAIL verdict, so without this
+# the case records a product defect for what is only a timing artifact.
+exec_out() {
+  local pod="$1"; shift
+  local out
+  for _ in $(seq 1 8); do
+    out=$(kubectl -n default exec "$pod" -- "$@" 2>/dev/null)
+    [ -n "$out" ] && { printf '%s\n' "$out"; return 0; }
+    sleep 3
+  done
+  return 1
+}
+
 # 1. Percentage slice: 50% memory + 50% compute. Expect the HAMI cap SM_LIMIT=50 and a memory limit
 #    below the physical card.
 echo "[case-8] creating ${POD_PCT}: ${SLICED}=1 memory-%=50 cores-%=50 on ${LQ}"
@@ -117,11 +134,11 @@ spec:
 EOF
 if wait_running "$POD_PCT"; then
   record PASS "percentage slice admitted+running" "${POD_PCT} Running (webhook fold → Kueue → AdmissionCheck → schedule)"
-  sm=$(kubectl -n default exec "$POD_PCT" -- printenv CUDA_DEVICE_SM_LIMIT 2>/dev/null)
-  mem=$(kubectl -n default exec "$POD_PCT" -- printenv CUDA_DEVICE_MEMORY_LIMIT_0 2>/dev/null)
+  sm=$(exec_out "$POD_PCT" printenv CUDA_DEVICE_SM_LIMIT)
+  mem=$(exec_out "$POD_PCT" printenv CUDA_DEVICE_MEMORY_LIMIT_0)
   [ "$sm" = "50" ] && record PASS "compute (SM) capped to 50%" "CUDA_DEVICE_SM_LIMIT=${sm}" \
     || record FAIL "compute (SM) capped to 50%" "CUDA_DEVICE_SM_LIMIT='${sm:-<unset>}', want 50"
-  smi_total=$(kubectl -n default exec "$POD_PCT" -- nvidia-smi 2>/dev/null | grep -oE '/[[:space:]]*[0-9]+MiB' | head -1 | grep -oE '[0-9]+')
+  smi_total=$(exec_out "$POD_PCT" nvidia-smi | grep -oE '/[[:space:]]*[0-9]+MiB' | head -1 | grep -oE '[0-9]+')
   if [ -n "$mem" ] && [ -n "$smi_total" ] && [ "${PHYS_MIB:-0}" -gt 0 ] && [ "$smi_total" -lt "$PHYS_MIB" ]; then
     record PASS "memory capped below physical" "nvidia-smi total=${smi_total}MiB < physical ${PHYS_MIB}MiB (CUDA_DEVICE_MEMORY_LIMIT_0=${mem})"
   else
@@ -150,8 +167,8 @@ spec:
         requests: { ${SLICED}: "1", ${MEMMIB}: "${MIB_REQ}" }
 EOF
 if wait_running "$POD_MIB"; then
-  mem=$(kubectl -n default exec "$POD_MIB" -- printenv CUDA_DEVICE_MEMORY_LIMIT_0 2>/dev/null)
-  smi_total=$(kubectl -n default exec "$POD_MIB" -- nvidia-smi 2>/dev/null | grep -oE '/[[:space:]]*[0-9]+MiB' | head -1 | grep -oE '[0-9]+')
+  mem=$(exec_out "$POD_MIB" printenv CUDA_DEVICE_MEMORY_LIMIT_0)
+  smi_total=$(exec_out "$POD_MIB" nvidia-smi | grep -oE '/[[:space:]]*[0-9]+MiB' | head -1 | grep -oE '[0-9]+')
   { [ "$mem" = "${MIB_REQ}m" ] || [ "$smi_total" = "$MIB_REQ" ]; } \
     && record PASS "memory-mib slice capped to ${MIB_REQ}MiB" "CUDA_DEVICE_MEMORY_LIMIT_0=${mem}, nvidia-smi total=${smi_total}MiB" \
     || record FAIL "memory-mib slice capped to ${MIB_REQ}MiB" "CUDA_DEVICE_MEMORY_LIMIT_0='${mem:-?}', nvidia-smi total='${smi_total:-?}', want ${MIB_REQ}"
