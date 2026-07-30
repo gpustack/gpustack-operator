@@ -2,6 +2,7 @@ package kuberess
 
 import (
 	"context"
+	"os"
 	"slices"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 
 	"gpustack.ai/gpustack/pkg/kubeapp"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 	"gpustack.ai/gpustack/pkg/worker/settings"
 )
 
@@ -59,7 +61,17 @@ var installs = []kubeapp.Install{
 	installGPUStackOperator,
 }
 
-// InstallApplications installs applications.
+// applicationInstallLockName is the Lease every worker replica serializes its application
+// install on.
+//
+// The install runs in Prepare, before leader election gates anything, so every replica
+// reaches it — and a rolling update overlaps two of them even at one replica. Helm's own
+// release storage is a single compare-and-create, not a mutex: the loser lands on whichever
+// of several errors matches where it got to, and two Helm actions applying the same objects
+// at once can leave the release wedged in a state no later attempt can get past.
+const applicationInstallLockName = "applications.worker.gpustack.ai"
+
+// InstallApplications installs applications, one replica at a time.
 func InstallApplications(ctx context.Context, manufacturers []string) error {
 	gvc := map[string]any{
 		"ContainerRegistry":  settings.ContainerRegistry.ShouldValueFromRemote(ctx),
@@ -75,12 +87,42 @@ func InstallApplications(ctx context.Context, manufacturers []string) error {
 		"Manufacturers":   manufacturers,
 	}
 
-	return kubeapp.ExecuteInstall(
-		ctx,
-		system.LoopbackKubeRestConfig.Get(),
-		system.DisableApplications.Get(),
-		SystemNamespaceName,
-		installs,
-		gvc,
-	)
+	disable := system.DisableApplications.Get()
+	install := func(ctx context.Context) error {
+		return kubeapp.ExecuteInstall(
+			ctx,
+			system.LoopbackKubeRestConfig.Get(),
+			disable,
+			SystemNamespaceName,
+			installs,
+			gvc,
+		)
+	}
+
+	// There is nothing to serialize where a chart deploys the worker: the install returns
+	// on the wildcard without touching anything, and taking the lock would leave a Lease
+	// behind for it.
+	if disable.Has(applicationWildcard) {
+		return install(ctx)
+	}
+
+	lock := kubeapp.Lock{
+		Leases: system.LoopbackKubeClient.Get().CoordinationV1().Leases(SystemNamespaceName),
+		Name:   applicationInstallLockName,
+		Holder: applicationInstallLockHolder(),
+	}
+
+	return lock.Do(ctx, install)
+}
+
+// applicationInstallLockHolder identifies this replica to its peers, preferring the pod
+// name the chart injects. A Pod's hostname is that same name, so it stands in wherever the
+// variable was dropped.
+func applicationInstallLockHolder() string {
+	if name := osx.Getenv("KUBERNETES_POD_NAME"); name != "" {
+		return name
+	}
+	name, _ := os.Hostname()
+
+	return name
 }
