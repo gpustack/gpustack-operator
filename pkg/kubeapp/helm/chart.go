@@ -70,6 +70,17 @@ type (
 		// release's object from one a user created by hand. Set it only for a migration
 		// whose previous owner has been positively identified, never unconditionally.
 		TakeOwnership bool
+		// ExclusiveAccess declares that the caller has excluded every other process from
+		// acting on this release for the whole call.
+		//
+		// It is what makes a pending release record actionable. A record left
+		// pending-install, pending-upgrade or pending-rollback is either an operation still
+		// in flight or the wreckage of a process that died mid-flight, and nothing in the
+		// record itself tells the two apart — so without this the record is waited out by
+		// age, which is why one left behind survives every later attempt. Set it only
+		// where a lock or a leader election really does keep peers out; repairing a live
+		// operation corrupts it.
+		ExclusiveAccess bool
 	}
 
 	ChartValues interface {

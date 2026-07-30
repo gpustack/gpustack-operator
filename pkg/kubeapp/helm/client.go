@@ -136,21 +136,30 @@ func (c *Client) nextStep(ctx context.Context, r *helmrelease.Release, chart *Ch
 			}
 		}
 		return NextStepDone
-	case helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
-		// An upgrade/rollback interrupted mid-flight (e.g. the process was killed while
-		// waiting on it) wedges the release: Helm refuses the next upgrade ("another
-		// operation in progress") and the pinned CRs never converge. The prior operation
-		// is not running, so its last deployed revision is intact — roll back to it to clear
-		// the lock, then the loop upgrades. Others keep the wait-then-reinstall behavior.
+	case helmrelease.StatusPendingInstall, helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
+		// A pending record is either an operation still in flight or what a process killed
+		// mid-flight left behind, and repairing the first would corrupt what it is doing.
+		// ExclusiveAccess is what tells the two apart; without it the only evidence is age,
+		// and a record younger than the action's own timeout may still belong to a peer.
+		if !chart.ExclusiveAccess && time.Since(r.Info.LastDeployed.Time) <= c.timeout {
+			return NextStepRequeue
+		}
+
+		// An abandoned pending-install is the one pending state Helm cannot act on at all:
+		// its own name check refuses every later install while the record stands, and no
+		// action removes it. So the record goes, and the release installs afresh.
+		if r.Info.Status == helmrelease.StatusPendingInstall {
+			return _NextStepDiscard
+		}
+
+		// An abandoned upgrade/rollback still has its last deployed revision intact — roll
+		// back to it to clear the pending lock, then the loop upgrades. Others keep the
+		// reinstall behavior.
 		if chart.RepairViaUpgradeOnly {
 			return NextStepRollback
 		}
-		fallthrough
-	case helmrelease.StatusPendingInstall:
-		if time.Since(r.Info.LastDeployed.Time) > c.timeout {
-			return _NextStepInstall
-		}
-		return NextStepRequeue
+
+		return _NextStepInstall
 	default:
 		// A bad-status release (e.g. failed) is normally reinstalled, but that
 		// uninstall can deadlock charts whose finalized CRs pin Helm-managed CRDs.
@@ -172,6 +181,7 @@ const (
 	NextStepRollback
 	NextStepReinstall
 	_NextStepInstall
+	_NextStepDiscard
 )
 
 // NextStepConditionFunc is a function to determine what to do next by the given release.
@@ -244,6 +254,20 @@ func (c *Client) InstallWith(
 			// Requeue.
 			logger.Info("requeueing")
 			time.Sleep(10 * time.Second)
+			r, err = g.Run(chart.Release)
+			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
+				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
+			}
+		case _NextStepDiscard:
+			// Drop the abandoned revision record and re-evaluate. Helm has no action for
+			// this: an install refuses the name while the record stands, a rollback has no
+			// deployed revision to return to, and an uninstall would tear down whatever the
+			// dead process did manage to create. Only this revision goes, so a release that
+			// carries earlier ones converges on the newest of those instead of installing.
+			logger.Info("discarding the abandoned release revision")
+			if _, err := config.Releases.Delete(chart.Release, r.Version); err != nil {
+				return nil, fmt.Errorf("helm delete revision: release %s: %w", chart.Release, err)
+			}
 			r, err = g.Run(chart.Release)
 			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
 				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)

@@ -106,6 +106,10 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 		// while the finalizers still pin the CRs and strands the CRDs.
 		RepairViaUpgradeOnly: true,
 		TakeOwnership:        takeOwnership,
+		// InstallApplications holds a Lease across this whole call, so a pending release
+		// record found here belongs to a replica that died rather than to one still
+		// working, and repairing it is what clears a wedge no later attempt could.
+		ExclusiveAccess: true,
 	}
 
 	return installConvergedChart(ctx, helmCli, chart)
