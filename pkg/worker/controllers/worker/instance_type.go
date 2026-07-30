@@ -360,7 +360,7 @@ func (r *InstanceTypeReconciler) computeStatus(
 	}
 	if !draining {
 		if acceleratable {
-			st.Accelerator, st.AcceleratorShared, st.AcceleratorSliced, st.AcceleratorPartitioned = getAcceleratorResources(devices)
+			st.Accelerator, st.AcceleratorShared, st.AcceleratorSliced, st.AcceleratorPartitioned = getAcceleratorResources(devices, it.Spec.AcceleratorGroup)
 		} else {
 			st.CPU = getCPUResource(cq, withOvercommit)
 		}
@@ -468,7 +468,7 @@ func poolAcceleratorSlicedDetail(
 	for i := range devices {
 		for j := range devices[i].Spec.Groups {
 			g := &devices[i].Spec.Groups[j]
-			if g.Manufacturer+"-"+g.ID == acceleratorKey {
+			if acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) {
 				cards = append(cards, g.Accelerators...)
 			}
 		}
@@ -548,12 +548,27 @@ func poolDevicesSelector(cqLabels map[string]string) map[string]string {
 //   - sliced:      over unpartitioned free and Sliced cards, Remaining/(D/100) VRAM-percent units;
 //   - partitioned: over partitioned cards, the instances each can still host.
 //
+// Only the pool's own accelerator group counts, matched exactly as poolAcceleratorSlicedDetail
+// matches it: one node can carry several accelerator models, so a node with an H100 group and an
+// A100 group backs both pools, and folding every group would let one pool report the other's cards
+// — and, for the partition views, the other's profile NAMES, which the Instance webhook then rejects
+// because they are absent from this pool's capability catalog.
+//
+// The three unpartitioned views are enumerated from the status ledger, which is the only source of
+// what a card currently holds. The partition views are enumerated from the capability side and join
+// the ledger in, mirroring how the node's per-profile capacity keys are built
+// (partitionInstancesByProfile): a card the detector has reported but whose status row the device
+// plugin has not rebuilt yet is invisible to a status-side enumeration, and one whose row exists but
+// carries no ledger yet would read as a full card, so either way it falls back to its capability
+// ceilings.
+//
 // Capacity is each group's whole pool seen as that mode (cards, cards×10, cards×100, and the
 // partitioned cards' instance ceilings), Remaining sums each node's availability.
 // OnceMaxRequest is the largest single allocation: the largest single node's availability for
-// exclusive/shared (one allocation can span a node's cards), but the freest single card for
-// sliced and partitioned (both target one card — VRAM and the partition geometry are per-card).
-func getAcceleratorResources(devices []workercore.Devices) (
+// exclusive/shared (one allocation can span a node's cards), the freest single card for sliced
+// (VRAM is per-card), and — for partitioned — 1 while any card can still host an instance, since
+// a partition request is capped at one instance on one card.
+func getAcceleratorResources(devices []workercore.Devices, acceleratorKey string) (
 	exclusive, shared, sliced workercore.InstanceTypeResource,
 	partitioned workercore.InstanceTypePartitionedResource,
 ) {
@@ -568,25 +583,25 @@ func getAcceleratorResources(devices []workercore.Devices) (
 		capExcl, remExcl, ormExcl       int64
 		capShared, remShared, ormShared int64
 		capSliced, remSliced, ormSliced int64
-		capPart, remPart, ormPart       int64
 	)
+	part := newPoolPartitionView()
 	for i := range devices {
 		dev := &devices[i]
 		caps := acceleratorCapabilities(dev)
+		part.addNode(dev, acceleratorKey)
+
 		var nodeCards, nodeLogicalCards, nodeExcl, nodeShared, nodeSliced int64
 		for j := range dev.Status.Groups {
 			g := &dev.Status.Groups[j]
+			if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) {
+				continue
+			}
 			for k := range g.Accelerators {
 				a := &g.Accelerators[k]
 				st := caps[acceleratorCapabilityKey(g.Manufacturer, g.ID, a.ID)]
 
+				// Counted by the capability-driven partition pass above.
 				if device.IsPartitioned(st) {
-					capPart += int64(st.PhysicalSliced.Count)
-					cardPart := remainingPartitionInstances(a)
-					remPart += cardPart
-					// A partition request creates one instance on one card, so the largest
-					// single request is the freest card's remaining instances, not a card-sum.
-					ormPart = max(ormPart, cardPart)
 					continue
 				}
 
@@ -627,8 +642,8 @@ func getAcceleratorResources(devices []workercore.Devices) (
 		remSliced += nodeSliced
 		ormExcl = max(ormExcl, nodeExcl)
 		ormShared = max(ormShared, nodeShared)
-		// ormSliced and ormPart are tracked per-card in the loop above (both requests are
-		// single-card), not per-node.
+		// ormSliced is tracked per-card in the loop above (a slice request is single-card), not
+		// per-node; the partition view's own once-max-request is owned by poolPartitionView.
 	}
 
 	mk := func(orm, rem, total int64) workercore.InstanceTypeResource {
@@ -642,8 +657,101 @@ func getAcceleratorResources(devices []workercore.Devices) (
 		mk(ormShared, remShared, capShared),
 		mk(ormSliced, remSliced, capSliced),
 		workercore.InstanceTypePartitionedResource{
-			InstanceTypeResource: mk(ormPart, remPart, capPart),
+			InstanceTypeResource: mk(part.onceMaxRequest, part.remaining, part.capacity),
+			AllocatedProfiles:    device.ProfileCountSlice(part.allocatedProfiles),
+			RemainingProfiles:    device.ProfileCountSlice(part.remainingProfiles),
 		}
+}
+
+// poolPartitionView accumulates the pool's hardware-partition view card by card: the three scalar
+// terms plus the per-profile ledger. It keeps the capability-driven pass in one place, so that pass
+// reads as the one-level-up mirror of the node's partitionInstancesByProfile that it is.
+type poolPartitionView struct {
+	capacity       int64
+	remaining      int64
+	onceMaxRequest int64
+
+	allocatedProfiles map[string]int32
+	remainingProfiles map[string]int32
+}
+
+func newPoolPartitionView() *poolPartitionView {
+	return &poolPartitionView{
+		allocatedProfiles: make(map[string]int32),
+		remainingProfiles: make(map[string]int32),
+	}
+}
+
+// addNode folds every partitioned card of the pool's accelerator group on one node, enumerated from
+// the capability side with each card's ledger row joined in. The ledger index is built only once a
+// partitioned card is actually found, so an all-logical pool — the common case — allocates nothing.
+func (in *poolPartitionView) addNode(dev *workercore.Devices, acceleratorKey string) {
+	var ledger map[string]*workercore.AcceleratorAllocation
+	for i := range dev.Spec.Groups {
+		g := &dev.Spec.Groups[i]
+		if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) {
+			continue
+		}
+		for j := range g.Accelerators {
+			st := g.Accelerators[j].Status
+			if !device.IsPartitioned(st) {
+				continue
+			}
+			if ledger == nil {
+				ledger = acceleratorLedger(dev, acceleratorKey)
+			}
+			in.addCard(st, ledger[g.Accelerators[j].ID])
+		}
+	}
+}
+
+// addCard folds one partitioned card: its capability st joined with its ledger row a, which is nil
+// when the node's status carries no row for it yet.
+func (in *poolPartitionView) addCard(st workercore.AcceleratorStatus, a *workercore.AcceleratorAllocation) {
+	in.capacity += int64(st.PhysicalSliced.Count)
+	cardRemaining := remainingPartitionInstances(st, a)
+	in.remaining += cardRemaining
+	// A partition request is validated to be exactly one instance on exactly one card, on both
+	// ingress paths, so the only value that can ever be requested at once is 1: report 1 while any
+	// card can still host an instance, and 0 when none can. Reporting the freest card's count
+	// instead would advertise a request every ingress path rejects.
+	if cardRemaining > 0 {
+		in.onceMaxRequest = 1
+	}
+	in.addProfiles(st, a)
+}
+
+// addProfiles folds one card's per-profile ledger into the pool's allocated and remaining sums,
+// mirroring what the node's per-profile capacity keys publish (partitionInstancesByProfile).
+//
+// Every profile the card offers gets a remaining entry, even at zero, so a profile whose room
+// another profile's instance consumed reads zero instead of vanishing: a reader can tell "offered
+// but currently full" from "not offered at all", and the key set stops changing on every carve and
+// release. Allocated needs no such padding — an absent profile holds nothing.
+//
+// A card with no usable ledger falls back to the capability's static per-profile ceiling. That
+// over-states a card that is in fact occupied, which converges as soon as the ledger reports,
+// whereas reporting zero would read as a full card on a working node.
+func (in *poolPartitionView) addProfiles(st workercore.AcceleratorStatus, a *workercore.AcceleratorAllocation) {
+	ready := device.PartitionLedgerReady(a)
+	for i := range st.PhysicalSliced.Profiles {
+		p := &st.PhysicalSliced.Profiles[i]
+		if _, seen := in.remainingProfiles[p.Name]; !seen {
+			in.remainingProfiles[p.Name] = 0
+		}
+		if !ready {
+			in.remainingProfiles[p.Name] += p.Count
+		}
+	}
+	if !ready {
+		return
+	}
+	for i := range a.AllocatedProfiles {
+		in.allocatedProfiles[a.AllocatedProfiles[i].Name] += a.AllocatedProfiles[i].Count
+	}
+	for i := range a.RemainingProfiles {
+		in.remainingProfiles[a.RemainingProfiles[i].Name] += a.RemainingProfiles[i].Count
+	}
 }
 
 // acceleratorCapabilities indexes a node's per-card reported capability by group and card ID.
@@ -662,6 +770,31 @@ func acceleratorCapabilities(dev *workercore.Devices) map[string]workercore.Acce
 	return caps
 }
 
+// acceleratorLedger indexes one accelerator group's per-card allocation ledger by card ID, which is
+// unique within a group. It is the reverse of acceleratorCapabilities, for the views enumerated from
+// the capability side: those must be able to observe that a card has no ledger row at all.
+func acceleratorLedger(dev *workercore.Devices, acceleratorKey string) map[string]*workercore.AcceleratorAllocation {
+	ledger := make(map[string]*workercore.AcceleratorAllocation)
+	for i := range dev.Status.Groups {
+		g := &dev.Status.Groups[i]
+		if !acceleratorGroupMatches(g.Manufacturer, g.ID, acceleratorKey) {
+			continue
+		}
+		for j := range g.Accelerators {
+			a := &g.Accelerators[j]
+			ledger[a.ID] = a
+		}
+	}
+	return ledger
+}
+
+// acceleratorGroupMatches reports whether a Devices group is the given accelerator pool's group. The
+// match is on the full "${manufacturer}-${group ID}" key because ConstructGroupID strips the vendor
+// prefix, so a bare group ID can collide across manufacturers on one node.
+func acceleratorGroupMatches(manufacturer, groupID, acceleratorKey string) bool {
+	return manufacturer+"-"+groupID == acceleratorKey
+}
+
 // acceleratorCapabilityKey keys a card by its group identity plus its own ID: a group ID is
 // unique only within a manufacturer, and a card ID only within its group.
 func acceleratorCapabilityKey(manufacturer, groupID, cardID string) string {
@@ -674,7 +807,16 @@ func acceleratorCapabilityKey(manufacturer, groupID, cardID string) string {
 // summing them would multiply-count the same hardware; the maximum is the largest number of
 // further instances the card can actually host, and it is the quantity the card's capability
 // ceiling (its largest per-profile instance count) sizes the capacity from.
-func remainingPartitionInstances(a *workercore.AcceleratorAllocation) int64 {
+//
+// A card with no usable ledger — no row at all, or a row reporting neither allocated nor remaining
+// instances — falls back to that capability ceiling, the same fallback the per-profile ledger and
+// the node's capacity keys take: reporting zero would read as a full card on a working node.
+func remainingPartitionInstances(
+	st workercore.AcceleratorStatus, a *workercore.AcceleratorAllocation,
+) int64 {
+	if !device.PartitionLedgerReady(a) {
+		return int64(st.PhysicalSliced.Count)
+	}
 	var most int64
 	for i := range a.RemainingProfiles {
 		most = max(most, int64(a.RemainingProfiles[i].Count))

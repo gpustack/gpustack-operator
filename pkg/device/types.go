@@ -37,6 +37,9 @@ type (
 	AcceleratorProfileCount = workercore.AcceleratorProfileCount
 	// AcceleratorPhysicalPlacement is one memory-slice interval a hardware GPU partition occupies on a card.
 	AcceleratorPhysicalPlacement = workercore.AcceleratorPhysicalPlacement
+	// AcceleratorAllocation is a card's runtime allocation row — its mode, credit budget and,
+	// for a hardware-partitioned card, its per-profile partition ledger.
+	AcceleratorAllocation = workercore.AcceleratorAllocation
 	// AcceleratorStatus represents the status of the accelerator device,
 	// including its health status and other status information.
 	AcceleratorStatus = workercore.AcceleratorStatus

@@ -297,7 +297,7 @@ func partitionInstancesByProfile(g *workercore.DevicesGroup, ledger map[string]*
 			continue
 		}
 		alloc := ledger[acc.ID]
-		ready := alloc != nil && (len(alloc.AllocatedProfiles) > 0 || len(alloc.RemainingProfiles) > 0)
+		ready := device.PartitionLedgerReady(alloc)
 		// Every profile the card offers gets an entry, even at zero. A profile whose room another
 		// profile's instance consumed then reads zero instead of vanishing, so the key's value
 		// moves as the card fills rather than the key itself appearing and disappearing — one

@@ -301,7 +301,7 @@ func partitionRoomOf(devs *workercore.Devices, res Resource, ceiling int32) int 
 			if acc.ID != res.Device {
 				continue
 			}
-			if len(acc.AllocatedProfiles) == 0 && len(acc.RemainingProfiles) == 0 {
+			if !device.PartitionLedgerReady(acc) {
 				return int(ceiling)
 			}
 			var allocated, remaining int32
