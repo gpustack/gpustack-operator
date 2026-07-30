@@ -88,6 +88,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.InstanceTypeCPUCache{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_InstanceTypeCPUCache(ref),
 		v1alpha1.InstanceTypeDetail{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_InstanceTypeDetail(ref),
 		v1alpha1.InstanceTypeList{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref),
+		v1alpha1.InstanceTypePartitionedResource{}.OpenAPIModelName():        schema_gpustack_api_worker_v1alpha1_InstanceTypePartitionedResource(ref),
 		v1alpha1.InstanceTypeResource{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_InstanceTypeResource(ref),
 		v1alpha1.InstanceTypeSpec{}.OpenAPIModelName():                       schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref),
 		v1alpha1.InstanceTypeStatus{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref),
@@ -4101,6 +4102,83 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeList(ref common.ReferenceCa
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_InstanceTypePartitionedResource(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceTypePartitionedResource describes the hardware-partitionable resource of the InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.\n\nThe per-profile lists are what answers \"which partition profiles can I still get\". Neither of the alternatives does: the scalar Remaining is the best case over a card's profiles rather than a total (the profiles on one card compete for the same physical slices, so summing them would multiply-count the same hardware), and Detail.SlicedDetail is the static capability catalog, which by design does not move as instances are carved and released.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"onceMaxRequest": {
+						SchemaProps: spec.SchemaProps{
+							Description: "OnceMaxRequest is the maximum value of the resource that can be requested once.\n\nThis is a soft limitation. Requesting this value may result in scheduling failure.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"remaining": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Remaining is the remaining requestable value of the resource.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"capacity": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Capacity is the total value of the resource.",
+							Ref:         ref(resource.Quantity{}.OpenAPIModelName()),
+						},
+					},
+					"allocatedProfiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's partitioned cards currently hold, summed over those cards. A profile holding nothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.\n\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide aggregate it serves, so changing its zero-handling or its presence changes that aggregate too. Its readers are the consumers of this status — the UI and the GPUStack app — which show what a pool is running beside what it can still take, and which cannot derive it: RemainingProfiles alone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"remainingProfiles": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"name",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool can still host, summed over its partitioned cards.\n\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a sibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but currently full\" from \"not offered at all\", and the wholesale status write does not churn the key set on every carve and release.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		Dependencies: []string{
+			v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName(), resource.Quantity{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_InstanceTypeResource(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -4287,7 +4365,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 						SchemaProps: spec.SchemaProps{
 							Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the pool's partitioned cards can still host, summed over those cards. It is disjoint from the three views above — a card in a partitioning mode can serve no other kind of claim — so a pool with no partitioned card reports zero here.",
 							Default:     map[string]interface{}{},
-							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
+							Ref:         ref(v1alpha1.InstanceTypePartitionedResource{}.OpenAPIModelName()),
 						},
 					},
 					"cpu": {
@@ -4302,7 +4380,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceTypeDetail{}.OpenAPIModelName(), v1alpha1.InstanceTypeResource{}.OpenAPIModelName()},
+			v1alpha1.InstanceTypeDetail{}.OpenAPIModelName(), v1alpha1.InstanceTypePartitionedResource{}.OpenAPIModelName(), v1alpha1.InstanceTypeResource{}.OpenAPIModelName()},
 	}
 }
 

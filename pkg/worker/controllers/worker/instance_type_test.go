@@ -232,7 +232,7 @@ func TestAcceleratorFourViews(t *testing.T) {
 			wantView(t, shared, c.shared, c.shared, 80, "shared")
 			// Every step above leaves at least one free card, so the freest-card sliced OnceMaxRequest is 100.
 			wantView(t, sliced, 100, c.sliced, 800, "sliced")
-			wantView(t, partitioned, 0, 0, 0, "partitioned")
+			wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
 		})
 	}
 }
@@ -279,7 +279,7 @@ func TestAcceleratorFourViews_NeitherFamilyCard(t *testing.T) {
 	wantView(t, shared, 30, 30, 30, "shared")
 	// Only the one logically sliceable card backs the sliced view — capacity included.
 	wantView(t, sliced, 100, 100, 100, "sliced")
-	wantView(t, partitioned, 0, 0, 0, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
 }
 
 // TestAcceleratorFourViews_Empty pins that a pool with no Devices yields zeroed views
@@ -289,7 +289,7 @@ func TestAcceleratorFourViews_Empty(t *testing.T) {
 	wantView(t, excl, 0, 0, 0, "exclusive")
 	wantView(t, shared, 0, 0, 0, "shared")
 	wantView(t, sliced, 0, 0, 0, "sliced")
-	wantView(t, partitioned, 0, 0, 0, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
 }
 
 // TestAcceleratorViews_LogicalOnlyPool pins that a pool of unpartitioned cards keeps the
@@ -305,7 +305,7 @@ func TestAcceleratorViews_LogicalOnlyPool(t *testing.T) {
 	wantView(t, excl, 1, 1, 2, "exclusive")
 	wantView(t, shared, 10, 10, 20, "shared")
 	wantView(t, sliced, 100, 180, 200, "sliced")
-	wantView(t, partitioned, 0, 0, 0, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 0, 0, 0, "partitioned")
 }
 
 // TestAcceleratorViews_PartitionOnlyPool pins that a pool whose cards are all in a hardware
@@ -323,7 +323,7 @@ func TestAcceleratorViews_PartitionOnlyPool(t *testing.T) {
 	wantView(t, excl, 0, 0, 0, "exclusive")
 	wantView(t, shared, 0, 0, 0, "shared")
 	wantView(t, sliced, 0, 0, 0, "sliced")
-	wantView(t, partitioned, 7, 14, 14, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 7, 14, 14, "partitioned")
 }
 
 // TestAcceleratorViews_MixedPool pins that every card contributes to exactly one side: the
@@ -340,7 +340,7 @@ func TestAcceleratorViews_MixedPool(t *testing.T) {
 	wantView(t, excl, 1, 1, 1, "exclusive")
 	wantView(t, shared, 10, 10, 10, "shared")
 	wantView(t, sliced, 100, 100, 100, "sliced")
-	wantView(t, partitioned, 7, 7, 7, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 7, 7, 7, "partitioned")
 }
 
 // TestAcceleratorViews_PartitionSurvivesFirstAllocation pins that a card holding one small
@@ -353,7 +353,7 @@ func TestAcceleratorViews_PartitionSurvivesFirstAllocation(t *testing.T) {
 		),
 	}
 	_, _, _, partitioned := getAcceleratorResources(devices)
-	wantView(t, partitioned, 6, 6, 7, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 6, 6, 7, "partitioned")
 }
 
 // TestAcceleratorViews_PartitionOnceMaxIsPerCard pins that the partition OnceMaxRequest is the
@@ -369,7 +369,7 @@ func TestAcceleratorViews_PartitionOnceMaxIsPerCard(t *testing.T) {
 		),
 	}
 	_, _, _, partitioned := getAcceleratorResources(devices)
-	wantView(t, partitioned, 5, 11, 21, "partitioned")
+	wantView(t, partitioned.InstanceTypeResource, 5, 11, 21, "partitioned")
 }
 
 // TestClusterQueueCPUResource pins the non-accelerated CPU view: capacity is the

@@ -553,7 +553,10 @@ func poolDevicesSelector(cqLabels map[string]string) map[string]string {
 // OnceMaxRequest is the largest single allocation: the largest single node's availability for
 // exclusive/shared (one allocation can span a node's cards), but the freest single card for
 // sliced and partitioned (both target one card — VRAM and the partition geometry are per-card).
-func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, sliced, partitioned workercore.InstanceTypeResource) {
+func getAcceleratorResources(devices []workercore.Devices) (
+	exclusive, shared, sliced workercore.InstanceTypeResource,
+	partitioned workercore.InstanceTypePartitionedResource,
+) {
 	const (
 		d         = int64(nodefeature.ResourceMaxUnits)
 		sharedMax = int64(nodefeature.SharedResourceMaxSize) // ownership shares per card
@@ -638,7 +641,9 @@ func getAcceleratorResources(devices []workercore.Devices) (exclusive, shared, s
 	return mk(ormExcl, remExcl, capExcl),
 		mk(ormShared, remShared, capShared),
 		mk(ormSliced, remSliced, capSliced),
-		mk(ormPart, remPart, capPart)
+		workercore.InstanceTypePartitionedResource{
+			InstanceTypeResource: mk(ormPart, remPart, capPart),
+		}
 }
 
 // acceleratorCapabilities indexes a node's per-card reported capability by group and card ID.

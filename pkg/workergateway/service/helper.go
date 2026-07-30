@@ -540,7 +540,7 @@ func newAggregatedCandidate(cluster, name string, instType *worker.InstanceType)
 		CPU:                     instType.Status.CPU,
 		AcceleratorShared:       instType.Status.AcceleratorShared,
 		AcceleratorSliced:       instType.Status.AcceleratorSliced,
-		AcceleratorPartitioned:  instType.Status.AcceleratorPartitioned,
+		AcceleratorPartitioned:  instType.Status.AcceleratorPartitioned.InstanceTypeResource,
 		AcceleratorSlicedDetail: instType.Status.Detail.SlicedDetail,
 	}
 }

@@ -33,7 +33,7 @@ type InstanceTypeStatusApplyConfiguration struct {
 	// the pool's partitioned cards can still host, summed over those cards. It is disjoint
 	// from the three views above — a card in a partitioning mode can serve no other kind of
 	// claim — so a pool with no partitioned card reports zero here.
-	AcceleratorPartitioned *InstanceTypeResourceApplyConfiguration `json:"acceleratorPartitioned,omitempty"`
+	AcceleratorPartitioned *InstanceTypePartitionedResourceApplyConfiguration `json:"acceleratorPartitioned,omitempty"`
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
 	CPU *InstanceTypeResourceApplyConfiguration `json:"cpu,omitempty"`
 }
@@ -103,7 +103,7 @@ func (b *InstanceTypeStatusApplyConfiguration) WithAcceleratorSliced(value *Inst
 // WithAcceleratorPartitioned sets the AcceleratorPartitioned field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the AcceleratorPartitioned field is set to the value of the last call.
-func (b *InstanceTypeStatusApplyConfiguration) WithAcceleratorPartitioned(value *InstanceTypeResourceApplyConfiguration) *InstanceTypeStatusApplyConfiguration {
+func (b *InstanceTypeStatusApplyConfiguration) WithAcceleratorPartitioned(value *InstanceTypePartitionedResourceApplyConfiguration) *InstanceTypeStatusApplyConfiguration {
 	b.AcceleratorPartitioned = value
 	return b
 }

@@ -196,6 +196,11 @@ func (in InstanceTypeList) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceTypePartitionedResource) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceTypePartitionedResource"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceTypeResource) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.InstanceTypeResource"
 }

@@ -86,6 +86,8 @@ func (*InstanceTypeDetail) ProtoMessage() {}
 
 func (*InstanceTypeList) ProtoMessage() {}
 
+func (*InstanceTypePartitionedResource) ProtoMessage() {}
+
 func (*InstanceTypeResource) ProtoMessage() {}
 
 func (*InstanceTypeSpec) ProtoMessage() {}

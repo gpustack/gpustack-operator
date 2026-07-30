@@ -1350,6 +1350,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.InstanceTypeCPUCacheApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeDetail"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeDetailApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypePartitionedResource"):
+		return &applyconfigurationworkerv1alpha1.InstanceTypePartitionedResourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeResource"):
 		return &applyconfigurationworkerv1alpha1.InstanceTypeResourceApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceTypeSpec"):

@@ -260,7 +260,7 @@ type InstanceTypeStatus struct {
 	// the pool's partitioned cards can still host, summed over those cards. It is disjoint
 	// from the three views above — a card in a partitioning mode can serve no other kind of
 	// claim — so a pool with no partitioned card reports zero here.
-	AcceleratorPartitioned InstanceTypeResource `json:"acceleratorPartitioned" protobuf:"bytes,9,name=acceleratorPartitioned"`
+	AcceleratorPartitioned InstanceTypePartitionedResource `json:"acceleratorPartitioned" protobuf:"bytes,9,name=acceleratorPartitioned"`
 
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
 	CPU InstanceTypeResource `json:"cpu" protobuf:"bytes,8,name=cpu"`
@@ -278,6 +278,44 @@ type InstanceTypeResource struct {
 
 	// Capacity is the total value of the resource.
 	Capacity resource.Quantity `json:"capacity,omitempty" protobuf:"bytes,3,opt,name=capacity"`
+}
+
+// InstanceTypePartitionedResource describes the hardware-partitionable resource of the
+// InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.
+//
+// The per-profile lists are what answers "which partition profiles can I still get". Neither of
+// the alternatives does: the scalar Remaining is the best case over a card's profiles rather
+// than a total (the profiles on one card compete for the same physical slices, so summing them
+// would multiply-count the same hardware), and Detail.SlicedDetail is the static capability
+// catalog, which by design does not move as instances are carved and released.
+type InstanceTypePartitionedResource struct {
+	InstanceTypeResource `json:",inline" protobuf:"bytes,1,opt,name=resource"`
+
+	// AllocatedProfiles lists, by profile name, how many instances of each profile the pool's
+	// partitioned cards currently hold, summed over those cards. A profile holding nothing is
+	// absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.
+	//
+	// The worker gateway ingests it per candidate and sums it by profile name into the fleet-wide
+	// aggregate it serves, so changing its zero-handling or its presence changes that aggregate too.
+	// Its readers are the consumers of this status — the UI and the GPUStack app — which show what a
+	// pool is running beside what it can still take, and which cannot derive it: RemainingProfiles
+	// alone cannot say whether a zero is "occupied" or merely "squeezed out by a sibling profile".
+	//
+	// +listType=map
+	// +listMapKey=name
+	AllocatedProfiles []AcceleratorProfileCount `json:"allocatedProfiles,omitempty" protobuf:"bytes,2,rep,name=allocatedProfiles"` // nolint: lll
+
+	// RemainingProfiles lists, by profile name, how many more instances of each profile the pool
+	// can still host, summed over its partitioned cards.
+	//
+	// Every profile the pool offers gets an entry, even at zero, so a profile whose room a
+	// sibling's instance consumed reads 0 instead of vanishing — a reader can tell "offered but
+	// currently full" from "not offered at all", and the wholesale status write does not churn the
+	// key set on every carve and release.
+	//
+	// +listType=map
+	// +listMapKey=name
+	RemainingProfiles []AcceleratorProfileCount `json:"remainingProfiles,omitempty" protobuf:"bytes,3,rep,name=remainingProfiles"` // nolint: lll
 }
 
 // InstanceTypeUnitResources describes the unit resources of the InstanceType.

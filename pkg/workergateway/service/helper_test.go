@@ -235,12 +235,14 @@ func instSpecA100() workercore.InstanceTypeSpec {
 // whole-card, shared or logically sliced claim — so the shared and sliced views stay zero.
 func a100PartitionedInst(name, acc, partitioned string) *worker.InstanceType {
 	return newInstType("gpustack-nvidia-a100-40g-", name, instSpecA100(), workercore.InstanceTypeStatus{
-		Phase:                  "Active",
-		Accelerator:            instTypeRes(acc, acc, acc),
-		CPU:                    instTypeRes("4", "4", "4"),
-		AcceleratorShared:      instTypeRes("0", "0", "0"),
-		AcceleratorSliced:      instTypeRes("0", "0", "0"),
-		AcceleratorPartitioned: instTypeRes(partitioned, partitioned, partitioned),
+		Phase:             "Active",
+		Accelerator:       instTypeRes(acc, acc, acc),
+		CPU:               instTypeRes("4", "4", "4"),
+		AcceleratorShared: instTypeRes("0", "0", "0"),
+		AcceleratorSliced: instTypeRes("0", "0", "0"),
+		AcceleratorPartitioned: workercore.InstanceTypePartitionedResource{
+			InstanceTypeResource: instTypeRes(partitioned, partitioned, partitioned),
+		},
 	})
 }
 
