@@ -3,10 +3,12 @@ package kuberess
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	helmdriver "helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -245,7 +247,7 @@ func Test_ApplicationNames(t *testing.T) {
 	}, ApplicationNames())
 }
 
-func Test_isReleaseNameTaken(t *testing.T) {
+func Test_isReleaseHeldByPeer(t *testing.T) {
 	testCases := []struct {
 		name string
 		err  error
@@ -262,6 +264,16 @@ func Test_isReleaseNameTaken(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "the peer won the race to create the release record",
+			err:  fmt.Errorf("helm install: release gpustack-operator-device-manager: %w", helmdriver.ErrReleaseExists),
+			want: true,
+		},
+		{
+			name: "the peer's own operation is still running",
+			err:  errors.New("helm upgrade: release gpustack-operator-device-manager: another operation (install/upgrade/rollback) is in progress"),
+			want: true,
+		},
+		{
 			name: "any other failure is the caller's to report",
 			err:  errors.New("helm install: release gpustack-operator-device-manager: timed out waiting for the condition"),
 			want: false,
@@ -270,7 +282,7 @@ func Test_isReleaseNameTaken(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, isReleaseNameTaken(tc.err))
+			assert.Equal(t, tc.want, isReleaseHeldByPeer(tc.err))
 		})
 	}
 }
