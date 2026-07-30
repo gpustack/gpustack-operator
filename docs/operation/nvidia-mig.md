@@ -407,11 +407,13 @@ actually servable.
 $ kubectl get instancetypes
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
 gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 7/56           0/0       Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 1/56           0/0       Active
 ```
 
-`PT 7/56` reads: **7** instances is the most a *single* card can host (`onceMaxRequest` is per card),
-**56** is what the whole node can host (`8 × 7`). The node's keys flip families wholesale — every
+`PT 1/56` reads: **1** is the most a single request can ask for — a partition request is validated to
+be exactly one instance on exactly one card, so any larger `onceMaxRequest` would advertise a value
+every ingress path rejects — and **56** is what the whole node can still host (`8 × 7`). Read `1` as
+"there is room", `0` as "there is none". The node's keys flip families wholesale — every
 `.sliced.*` key is gone, and one `partitioned.mig-<profile>` key appears per profile alongside
 `.partitioned.units`, which values a partitioned card at a whole card's credits exactly as
 `.sliced.units` valued a logically sliceable one:
@@ -572,10 +574,11 @@ carved one:
 | `…partitioned.mig-<profile>` | the table above | that profile's `allocated + remaining` | the scheduler subtracts the node's existing requests, so the key must include them |
 | `nvidia.com/gpu.partitioned` | `53` | `allocated +` the card's **largest** per-profile free count | one pool key for the family, same scheduler-fit reason |
 | `InstanceType` `PT` remaining | `52` | that largest free count alone, **no allocated term** | a user-facing "how many more can I start" |
-| `InstanceType` `PT` onceMaxRequest | `7` | **max** over cards, not a sum | one request builds one instance on one card, so the freest card bounds it |
+| `InstanceType` `PT` onceMaxRequest | `1` | not a sum at all: `1` while any card can still host an instance, else `0` | one request builds exactly one instance on exactly one card, and both ingress paths reject any other count |
 
 `53` and `52` differ by exactly the one live instance — the pool key carries it, the user-facing view
-does not. And `7` is not `52` because no single request could ever consume the node's whole remainder.
+does not. And `onceMaxRequest` is `1`, not `52`, because no single request could ever consume the
+node's remainder — nor even two instances of it.
 
 **A card's contribution is a maximum, never a sum.** To those last three numbers the carved card
 contributes `3` — not `3 + 2 + 1 + 1 = 7`. Its profiles compete for the same physical slices, so
