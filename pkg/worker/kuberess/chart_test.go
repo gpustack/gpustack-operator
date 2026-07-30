@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,8 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 	yaml "gopkg.in/yaml.v3"
 	helmaction "helm.sh/helm/v3/pkg/action"
+	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
+	helmrelease "helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/releaseutil"
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -383,6 +386,75 @@ func TestChartDefaultsMatchImageModeOverlay(t *testing.T) {
 	}
 }
 
+// TestChartImageTagDefaultsToAppVersion holds the chart's default image tag to exactly one "v",
+// whichever spelling of the version the packaged chart carries.
+//
+// The image build packages this chart with the version the binary reports
+// (pack/gpustack-operator/Dockerfile), and that string carries a leading "v" — a chart whose
+// appVersion kept it then asked for "...:vv0.7.2", which no registry serves. Nothing else catches
+// it: the e2e version checks compare the packaged chart's version, never its appVersion, and every
+// e2e install passes an explicit image, so the default tag is never rendered.
+func TestChartImageTagDefaultsToAppVersion(t *testing.T) {
+	var values struct {
+		Image struct {
+			Repository string `yaml:"repository"`
+		} `yaml:"image"`
+	}
+	raw, err := os.ReadFile(filepath.Join(chartDir, "values.yaml"))
+	require.NoError(t, err, "read the chart values")
+	require.NoError(t, yaml.Unmarshal(raw, &values))
+
+	testCases := []struct {
+		name       string
+		appVersion string
+	}{
+		{name: "prefixed", appVersion: "v9.9.9"},
+		{name: "bare", appVersion: "9.9.9"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			chart, err := helmloader.Load(chartDir)
+			require.NoError(t, err, "load the operator chart")
+			chart.Metadata.AppVersion = tc.appVersion
+
+			images := renderedOperatorImages(t, renderRelease(t, chart, nil), values.Image.Repository)
+			require.NotEmpty(t, images, "the chart renders operator images")
+			for _, image := range images {
+				assert.Equal(t, values.Image.Repository+":v9.9.9", image)
+			}
+		})
+	}
+}
+
+// renderedImageRE captures the reference of a rendered container image.
+var renderedImageRE = regexp.MustCompile(`(?m)^\s*image:\s*"?([^"\s]+)"?\s*$`)
+
+// renderedOperatorImages returns every rendered image that references the operator's own
+// repository, taking the release's hooks as well as its manifest: half the images this chart
+// emits belong to hook Jobs (the two migrate Jobs and the cleanup Job).
+func renderedOperatorImages(t *testing.T, release *helmrelease.Release, repository string) []string {
+	t.Helper()
+
+	require.NotEmpty(t, release.Hooks, "the chart renders hooks")
+	manifests := make([]string, 0, len(release.Hooks)+1)
+	manifests = append(manifests, release.Manifest)
+	for _, hook := range release.Hooks {
+		manifests = append(manifests, hook.Manifest)
+	}
+
+	var images []string
+	for _, manifest := range manifests {
+		for _, match := range renderedImageRE.FindAllStringSubmatch(manifest, -1) {
+			if strings.HasPrefix(match[1], repository+":") {
+				images = append(images, match[1])
+			}
+		}
+	}
+
+	return images
+}
+
 // renderedObject is one object of a rendered chart.
 type renderedObject struct {
 	// component is the app.kubernetes.io/component label, which is how the worker's own
@@ -398,21 +470,8 @@ func renderChart(t *testing.T, values map[string]any) map[string]renderedObject 
 	chart, err := helmloader.Load(chartDir)
 	require.NoError(t, err, "load the operator chart")
 
-	install := helmaction.NewInstall(&helmaction.Configuration{})
-	install.ClientOnly = true
-	install.DryRun = true
-	install.ReleaseName = "gpustack-operator"
-	install.Namespace = SystemNamespaceName
-	install.IncludeCRDs = false
-	// Helm's built-in capabilities claim Kubernetes 1.20, which the chart's own floor refuses.
-	// Both renders get the same version, so nothing version-gated diverges between them.
-	install.KubeVersion = &helmchartutil.KubeVersion{Version: "v1.33.0", Major: "1", Minor: "33"}
-
-	release, err := install.RunWithContext(t.Context(), chart, values)
-	require.NoError(t, err, "render the operator chart")
-
 	objects := make(map[string]renderedObject)
-	for _, manifest := range releaseutil.SplitManifests(release.Manifest) {
+	for _, manifest := range releaseutil.SplitManifests(renderRelease(t, chart, values).Manifest) {
 		var object struct {
 			Kind     string `yaml:"kind"`
 			Metadata struct {
@@ -436,6 +495,27 @@ func renderChart(t *testing.T, values map[string]any) map[string]renderedObject 
 	}
 
 	return objects
+}
+
+// renderRelease renders a loaded chart offline, the way `helm template` does, returning the
+// whole release so that a caller can reach the hooks as well as the manifest.
+func renderRelease(t *testing.T, chart *helmchart.Chart, values map[string]any) *helmrelease.Release {
+	t.Helper()
+
+	install := helmaction.NewInstall(&helmaction.Configuration{})
+	install.ClientOnly = true
+	install.DryRun = true
+	install.ReleaseName = "gpustack-operator"
+	install.Namespace = SystemNamespaceName
+	install.IncludeCRDs = false
+	// Helm's built-in capabilities claim Kubernetes 1.20, which the chart's own floor refuses.
+	// Every render gets the same version, so nothing version-gated diverges between them.
+	install.KubeVersion = &helmchartutil.KubeVersion{Version: "v1.33.0", Major: "1", Minor: "33"}
+
+	release, err := install.RunWithContext(t.Context(), chart, values)
+	require.NoError(t, err, "render the operator chart")
+
+	return release
 }
 
 func sorted(s sets.Set[string]) []string {

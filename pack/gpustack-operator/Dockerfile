@@ -442,9 +442,11 @@ RUN --mount=type=bind,src=deploy/gpustack-operator/chart,target=/tmp/gpustack-op
         CHART_VERSION="0.0.0"
     fi
 
-    # Package the chart with the resolved version.
+    # Package the chart with the resolved version. version == appVersion, as the chart released to
+    # the Helm repository also states (.github/workflows/ci-chart.yml): the chart's default image
+    # tag is "v<appVersion>", so an appVersion keeping the binary version's "v" would name it twice.
     helm package /tmp/gpustack-operator-chart \
-        --version "${CHART_VERSION}" --app-version "${VERSION}" \
+        --version "${CHART_VERSION}" --app-version "${CHART_VERSION}" \
         --destination "${GPUSTACK_CHARTS_DIR}"
 EOF
 

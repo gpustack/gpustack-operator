@@ -59,7 +59,9 @@ When global.imageNamespace is non-empty it replaces the namespace segment of
 segment, which is the first path segment carrying a "." or a ":". Each falls back to
 what `image.repository` already encodes.
 Pass a dict: (dict "root" $ "overrides" .Values.worker.image).
-Tag defaults to "v<.Chart.AppVersion>" when unset.
+Tag defaults to "v<.Chart.AppVersion>" when unset, with any "v" the appVersion already carries
+trimmed first: whoever packages this chart decides that spelling, and a doubled "v" names an
+image tag no registry serves.
 */}}
 {{- define "gpustack-operator.image" -}}
 {{- $root := .root -}}
@@ -80,7 +82,7 @@ Tag defaults to "v<.Chart.AppVersion>" when unset.
 {{- with $registry -}}
 {{- $repository = printf "%s/%s" . $repository -}}
 {{- end -}}
-{{- $tag := default (printf "v%s" $root.Chart.AppVersion) $image.tag -}}
+{{- $tag := default (printf "v%s" (trimPrefix "v" $root.Chart.AppVersion)) $image.tag -}}
 {{- printf "%s:%s" $repository $tag -}}
 {{- end -}}
 
