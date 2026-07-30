@@ -17,6 +17,7 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/loggerx"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 )
 
 const Manufacturer = nodefeature.ManufacturerAscend
@@ -235,16 +236,10 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			var status device.AcceleratorStatus
 			{
 				status.Unhealthy = memoryUnhealthy
-				// 910B/910C/950 support logical (software) slicing: temporal compute sharing plus
-				// software VRAM partitioning via vCANN-RT ld.preload; the per-card slice count is
-				// capped at the max user processes a device serves (63).
-				switch grpList[grpIndex].Family {
-				case "910B", "910C", "950":
-					status.LogicalSliced = device.AcceleratorLogicalSliced{
-						Count:                     63,
-						CoresPercentageOvercommit: true,
-					}
-				}
+				status.LogicalSliced = getLogicalSliced(
+					grpList[grpIndex].Family,
+					grpList[grpIndex].RuntimeVersion,
+				)
 			}
 
 			grpList[grpIndex].Accelerators = append(
@@ -491,6 +486,43 @@ func guessSocNameFromDeviceName(devName string) string {
 		return "Ascend910A"
 	}
 	return ""
+}
+
+// slicedRuntimeMajors lists, per family, the CANN runtime majors the operator image actually
+// builds a vcann-rt for -- one entry per xbuild-ascend-cann-<major>-<family> stage. Nothing
+// downstream re-checks the pairing: the allocator composes the library path as
+// "cann-<major>-<family>" and mounts it, so a family/major this map does not cover would be
+// offered slicing and then fail to start the container on a directory that was never built.
+// Adding a build stage means adding its major here.
+var slicedRuntimeMajors = map[string][]int{
+	"910B": {8, 9},
+	"910C": {8, 9},
+	"950":  {9},
+	"310P": {9}, // upstream added the 310P dcmi adapter in CANN 9.1.0.
+}
+
+// getLogicalSliced reports the logical (software) slicing a family supports on a host running
+// the given CANN runtime version: temporal compute sharing plus software VRAM partitioning
+// through vcann-rt's preloaded runtime, with the per-card slice count capped at the maximum
+// user processes a device serves (63). A family/major pair the image ships no runtime for yields
+// the zero value, so slicing is simply not offered rather than offered and then unstartable.
+//
+// The major is compared as a number because it arrives as a string, in which "10" sorts below
+// "9".
+func getLogicalSliced(family, runtimeVersion string) device.AcceleratorLogicalSliced {
+	majors, supported := slicedRuntimeMajors[family]
+	if !supported {
+		return device.AcceleratorLogicalSliced{}
+	}
+	major, err := strconvx.Atoi[int](device.RuntimeMajor(runtimeVersion, "8"))
+	if err != nil || !slices.Contains(majors, major) {
+		return device.AcceleratorLogicalSliced{}
+	}
+
+	return device.AcceleratorLogicalSliced{
+		Count:                     63,
+		CoresPercentageOvercommit: true,
+	}
 }
 
 func getFamilyFromSocName(socName string) string {
