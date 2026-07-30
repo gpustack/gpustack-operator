@@ -23,5 +23,9 @@
     X(int, dcmi_get_topo_info_by_device_id, (int card_id1, int device_id1, int card_id2, int device_id2, int *topo_type), (card_id1, device_id1, card_id2, device_id2, topo_type)) \
     X(int, dcmi_get_device_ip, (int card_id, int device_id, enum dcmi_port_type input_type, int port_id, struct dcmi_ip_addr *ip, struct dcmi_ip_addr *mask), (card_id, device_id, input_type, port_id, ip, mask)) \
     X(int, dcmi_get_device_gateway, (int card_id, int device_id, enum dcmi_port_type input_type, int port_id, struct dcmi_ip_addr *gateway), (card_id, device_id, input_type, port_id, gateway)) \
-    X(int, dcmi_get_device_info, (int card_id, int device_id, enum dcmi_main_cmd main_cmd, unsigned int sub_cmd, void *buf, unsigned int *size), (card_id, device_id, main_cmd, sub_cmd, buf, size))
+    X(int, dcmi_get_device_info, (int card_id, int device_id, enum dcmi_main_cmd main_cmd, unsigned int sub_cmd, void *buf, unsigned int *size), (card_id, device_id, main_cmd, sub_cmd, buf, size)) \
+    X(int, dcmi_get_device_share_enable, (int card_id, int device_id, int *enable_flag), (card_id, device_id, enable_flag)) \
+    X(int, dcmi_set_device_share_enable, (int card_id, int device_id, int enable_flag), (card_id, device_id, enable_flag)) \
+    X(int, dcmi_get_multi_die_policy, (enum dcmi_multi_die_policy *policy), (policy)) \
+    X(int, dcmi_set_multi_die_policy, (enum dcmi_multi_die_policy policy), (policy))
 

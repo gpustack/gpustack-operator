@@ -54,6 +54,23 @@ func (l *DCMI) GetDriverVersion() (string, Return) {
 	return string(version[:clen(version)]), ret
 }
 
+// GetMultiDiePolicy retrieves the policy deciding whether the dies of a multi-die device
+// are injected into a container together or one at a time. The policy belongs to the
+// driver as a whole rather than to any one card, which is why it hangs off the library.
+// A driver that does not implement the query returns ERROR_FUNCTION_NOT_FOUND.
+func (l *DCMI) GetMultiDiePolicy() (MultiDiePolicy, Return) {
+	var policy MultiDiePolicy
+	ret := Return(dcmiGetMultiDiePolicy(&policy))
+	return policy, ret
+}
+
+// SetMultiDiePolicy sets the multi-die container-injection policy. It applies to every
+// multi-die device the driver manages, so it is a node-wide change and not a per-workload
+// one.
+func (l *DCMI) SetMultiDiePolicy(policy MultiDiePolicy) Return {
+	return Return(dcmiSetMultiDiePolicy(policy))
+}
+
 type Return int
 
 // IsSuccess returns true if the Return value indicates success.

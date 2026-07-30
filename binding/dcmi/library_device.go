@@ -348,3 +348,26 @@ func (l Device) GetVDeviceInfo() (VDeviceInfo, Return) {
 
 	return info, ret
 }
+
+// GetShareEnabled reports whether container-share mode is enabled for the device.
+// Measured on a 910B2 at driver 25.5.1: with the mode disabled, a second container that opens
+// the same device fails, while the first one and any whole-card user are unaffected. Whether
+// every co-tenancy arrangement depends on the mode has not been established, so treat this as
+// the driver's own single-container guard rather than as a complete rule.
+// A driver that does not implement the query returns ERROR_FUNCTION_NOT_FOUND.
+func (l Device) GetShareEnabled() (bool, Return) {
+	var enableFlag int32
+	ret := Return(dcmiGetDeviceShareEnable(l.cardId, l.deviceId, &enableFlag))
+	return enableFlag != 0, ret
+}
+
+// SetShareEnabled enables or disables container-share mode for the device.
+// The flag lives in the driver rather than in this process, so it outlives the caller,
+// and it is reset by a reboot unless the driver's share-config recover mode is also on.
+func (l Device) SetShareEnabled(enabled bool) Return {
+	var enableFlag int32
+	if enabled {
+		enableFlag = 1
+	}
+	return Return(dcmiSetDeviceShareEnable(l.cardId, l.deviceId, enableFlag))
+}
