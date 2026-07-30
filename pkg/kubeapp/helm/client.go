@@ -136,21 +136,30 @@ func (c *Client) nextStep(ctx context.Context, r *helmrelease.Release, chart *Ch
 			}
 		}
 		return NextStepDone
-	case helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
-		// An upgrade/rollback interrupted mid-flight (e.g. the process was killed while
-		// waiting on it) wedges the release: Helm refuses the next upgrade ("another
-		// operation in progress") and the pinned CRs never converge. The prior operation
-		// is not running, so its last deployed revision is intact — roll back to it to clear
-		// the lock, then the loop upgrades. Others keep the wait-then-reinstall behavior.
+	case helmrelease.StatusPendingInstall, helmrelease.StatusPendingUpgrade, helmrelease.StatusPendingRollback:
+		// A pending record is either an operation still in flight or what a process killed
+		// mid-flight left behind, and repairing the first would corrupt what it is doing.
+		// ExclusiveAccess is what tells the two apart; without it the only evidence is age,
+		// and a record younger than the action's own timeout may still belong to a peer.
+		if !chart.ExclusiveAccess && time.Since(r.Info.LastDeployed.Time) <= c.timeout {
+			return NextStepRequeue
+		}
+
+		// An abandoned pending-install is the one pending state Helm cannot act on at all:
+		// its own name check refuses every later install while the record stands, and no
+		// action removes it. So the record goes, and the release installs afresh.
+		if r.Info.Status == helmrelease.StatusPendingInstall {
+			return _NextStepDiscard
+		}
+
+		// An abandoned upgrade/rollback still has its last deployed revision intact — roll
+		// back to it to clear the pending lock, then the loop upgrades. Others keep the
+		// reinstall behavior.
 		if chart.RepairViaUpgradeOnly {
 			return NextStepRollback
 		}
-		fallthrough
-	case helmrelease.StatusPendingInstall:
-		if time.Since(r.Info.LastDeployed.Time) > c.timeout {
-			return _NextStepInstall
-		}
-		return NextStepRequeue
+
+		return _NextStepInstall
 	default:
 		// A bad-status release (e.g. failed) is normally reinstalled, but that
 		// uninstall can deadlock charts whose finalized CRs pin Helm-managed CRDs.
@@ -172,6 +181,7 @@ const (
 	NextStepRollback
 	NextStepReinstall
 	_NextStepInstall
+	_NextStepDiscard
 )
 
 // NextStepConditionFunc is a function to determine what to do next by the given release.
@@ -241,9 +251,29 @@ func (c *Client) InstallWith(
 
 		switch n {
 		case NextStepRequeue:
-			// Requeue.
+			// Requeue. Waiting on the context rather than sleeping through it: this arm is
+			// the one that waits out a peer, and a caller that has been told to stop must
+			// not go on waiting under a lock it may no longer hold.
 			logger.Info("requeueing")
-			time.Sleep(10 * time.Second)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+			r, err = g.Run(chart.Release)
+			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
+				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
+			}
+		case _NextStepDiscard:
+			// Drop the abandoned revision record and re-evaluate. Helm has no action for
+			// this: an install refuses the name while the record stands, a rollback has no
+			// deployed revision to return to, and an uninstall would tear down whatever the
+			// dead process did manage to create. Only this revision goes, so a release that
+			// carries earlier ones converges on the newest of those instead of installing.
+			logger.Info("discarding the abandoned release revision")
+			if _, err := config.Releases.Delete(chart.Release, r.Version); err != nil {
+				return nil, fmt.Errorf("helm delete revision: release %s: %w", chart.Release, err)
+			}
 			r, err = g.Run(chart.Release)
 			if err != nil && !errors.Is(err, helmdriver.ErrReleaseNotFound) {
 				return nil, fmt.Errorf("helm get: release %s: %w", chart.Release, err)
@@ -265,12 +295,7 @@ func (c *Client) InstallWith(
 		case NextStepUpgrade:
 			// Upgrade.
 			logger.Info("upgrading")
-			u := helmaction.NewUpgrade(config)
-			u.Timeout = c.timeout
-			u.Atomic = true
-			u.Recreate = true
-			u.Force = true
-			chart.configureUpgrade(u)
+			u := c.newUpgrade(config, chart)
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm upgrade: load chart: %w", err)
@@ -293,21 +318,24 @@ func (c *Client) InstallWith(
 			ui.KeepHistory = false
 			ui.Wait = true
 			ui.DeletionPropagation = string(meta.DeletePropagationForeground)
-			r, err := ui.Run(chart.Release)
-			if err != nil && errors.Is(err, helmdriver.ErrReleaseNotFound) {
+			ur, err := ui.Run(chart.Release)
+			if err != nil {
 				return nil, fmt.Errorf("helm uninstall: release %s: %w", chart.Release, err)
 			}
-			logger.Infof("uninstalled: %s", r.Info)
+			// IgnoreNotFound reports a release that was not there as no response and no error,
+			// which is the one case there is nothing to say about.
+			if ur != nil {
+				logger.Infof("uninstalled: %s", ur.Info)
+			}
+			// Nothing of this release is left, so what follows is a first install. Each case
+			// of a switch is its own block, so the install below would otherwise still be
+			// handed the release read before the uninstall.
+			r = nil
 			fallthrough
 		case _NextStepInstall:
 			// Install.
 			logger.Info("installing")
-			i := helmaction.NewInstall(config)
-			i.Timeout = c.timeout
-			i.ReleaseName = chart.Release
-			i.Namespace = namespace
-			i.Atomic = true
-			chart.configureInstall(i)
+			i := c.newInstall(config, chart, namespace, r)
 			ch, err := chart.Load(ctx, config)
 			if err != nil {
 				return nil, fmt.Errorf("helm install: load chart: %w", err)
@@ -325,6 +353,47 @@ func (c *Client) InstallWith(
 			return helmchartutil.MergeValues(r.Chart, r.Config)
 		}
 	}
+}
+
+// newInstall builds the install action for a release, given whatever release record was
+// found for it — nil when there is none.
+//
+// A first install is not atomic. Atomic implies Wait, so an atomic install blocks until
+// every workload the chart deploys is Ready; a process killed inside that wait — the
+// container's startup probe gives up long before the Helm timeout — strands a
+// pending-install record that no later attempt can get past. Nothing is serving yet on a
+// first install, so there is no revision for a rollback to return to and no reason to
+// block: it applies and returns, and a release left failed is repaired by the upgrade path
+// on the next pass. Installing over a release that does exist stays atomic.
+func (c *Client) newInstall(
+	config *helmaction.Configuration,
+	chart *Chart,
+	namespace string,
+	existing *helmrelease.Release,
+) *helmaction.Install {
+	i := helmaction.NewInstall(config)
+	i.Timeout = c.timeout
+	i.ReleaseName = chart.Release
+	i.Namespace = namespace
+	i.Atomic = existing != nil
+	chart.configureInstall(i)
+
+	return i
+}
+
+// newUpgrade builds the upgrade action for a release.
+//
+// It is always atomic: an upgrade acts on a live release, so a failed one must be rolled
+// back to the revision that was serving before it.
+func (c *Client) newUpgrade(config *helmaction.Configuration, chart *Chart) *helmaction.Upgrade {
+	u := helmaction.NewUpgrade(config)
+	u.Timeout = c.timeout
+	u.Atomic = true
+	u.Recreate = true
+	u.Force = true
+	chart.configureUpgrade(u)
+
+	return u
 }
 
 // createConfig creates a new Helm action configuration.

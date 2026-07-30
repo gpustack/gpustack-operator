@@ -2,12 +2,15 @@ package kuberess
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	conregname "github.com/google/go-containerregistry/pkg/name"
+	helmdriver "helm.sh/helm/v3/pkg/storage/driver"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
@@ -48,7 +51,13 @@ var legacyApplicationReleases = []string{
 // installs the chart packaged into its own image (see pack/gpustack-operator/Dockerfile)
 // with an overlay computed from its settings and flags. When a chart already deploys the
 // worker, --disable-applications carries the wildcard and this never runs.
-func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalValuesContext map[string]any, disable sets.Set[string]) error {
+func installGPUStackOperator(
+	ctx context.Context,
+	helmCli *helm.Client,
+	globalValuesContext map[string]any,
+	disable sets.Set[string],
+	exclusive bool,
+) error {
 	chartVersion := gpustackOperatorChartVersion()
 	path, err := gpustackOperatorChartPath(chartVersion)
 	if err != nil {
@@ -103,6 +112,11 @@ func installGPUStackOperator(ctx context.Context, helmCli *helm.Client, globalVa
 		// while the finalizers still pin the CRs and strands the CRDs.
 		RepairViaUpgradeOnly: true,
 		TakeOwnership:        takeOwnership,
+		// Set only where InstallApplications took a Lease its predecessor had released, so
+		// a pending release record found here belongs to a replica that finished or died
+		// rather than to one still working. Repairing such a record is what clears a wedge
+		// no later attempt could.
+		ExclusiveAccess: exclusive,
 	}
 
 	return installConvergedChart(ctx, helmCli, chart)
@@ -129,29 +143,64 @@ func manufacturerIdentity(manufacturer string) map[string]string {
 	return identity
 }
 
+const (
+	// heldReleaseRetries bounds how often an install losing to a concurrently booting
+	// replica is retried before the boot fails on it.
+	heldReleaseRetries = 5
+	// heldReleaseRetryInterval is the wait between those retries. It is deliberately flat:
+	// what is being waited out is the peer's own install, whose duration has nothing to do
+	// with how many times this process has looked.
+	heldReleaseRetryInterval = 10 * time.Second
+)
+
 // installConvergedChart installs the chart, tolerating the release a concurrently booting
 // replica created in the window between this process's release lookup and its own install:
 // only one of them can create it, and the loser must not fail the boot.
 //
-// The retry re-runs the lookup, which now finds the winner's release and either accepts it
+// Each retry re-runs the lookup, which now finds the winner's release and either accepts it
 // as converged at these values or waits out its pending install.
 func installConvergedChart(ctx context.Context, helmCli *helm.Client, chart *helm.Chart) error {
-	_, err := helmCli.Install(ctx, chart)
-	if err == nil || !isReleaseNameTaken(err) {
-		return err
+	for attempt := 0; ; attempt++ {
+		_, err := helmCli.Install(ctx, chart)
+		if err == nil || !isReleaseHeldByPeer(err) || attempt == heldReleaseRetries {
+			return err
+		}
+
+		klog.InfoS("release is held by a peer, converging on it",
+			"release", chart.Release, "attempt", attempt+1, "err", err)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(heldReleaseRetryInterval):
+		}
 	}
-
-	klog.InfoS("release was created concurrently, converging on it", "release", chart.Release)
-	_, err = helmCli.Install(ctx, chart)
-
-	return err
 }
 
-// isReleaseNameTaken reports whether the error is Helm refusing to install because a
-// release of that name already exists. Helm returns a bare error for it, so the message is
-// the only signal (helm.sh/helm/v3/pkg/action.(*Install).availableName).
-func isReleaseNameTaken(err error) bool {
-	return err != nil && strings.Contains(err.Error(), "cannot re-use a name that is still in use")
+// isReleaseHeldByPeer reports whether the error is Helm refusing to act because another
+// process is already operating on the same release. Helm signals it three ways, one per
+// point a loser can land on:
+//
+//   - the name lookup, before anything is written
+//     (helm.sh/helm/v3/pkg/action.(*Install).availableName);
+//   - the create of the revision record, which is the only true compare-and-create in the
+//     sequence (helm.sh/helm/v3/pkg/storage/driver.ErrReleaseExists);
+//   - an upgrade finding the release already pending (helm.sh/helm/v3/pkg/action.errPending).
+//
+// Only the second carries a sentinel; the other two are bare errors, so their message is
+// the sole signal.
+func isReleaseHeldByPeer(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, helmdriver.ErrReleaseExists) {
+		return true
+	}
+
+	msg := err.Error()
+
+	return strings.Contains(msg, "cannot re-use a name that is still in use") ||
+		strings.Contains(msg, "another operation (install/upgrade/rollback) is in progress")
 }
 
 // hasLegacyApplicationRelease reports whether any per-application Helm release from before

@@ -15,12 +15,15 @@
 #              a chart release already owns, and never starts.
 #              Needs the TAG image loaded on the cluster's nodes (build-load.sh). No GPU.
 # Inputs:      A deliberately minimal worker: ServiceAccount + cluster-admin binding + Service +
-#              Deployment, standing in for whatever deploys the worker when this chart does not.
-#              cluster-admin is an E2E shortcut, not the chart's fine-grained role. The worker gets
-#              NO --disable-applications, which is what puts it in charge of installing. One
-#              manufacturer keeps the DaemonSet set small. Nothing else mocked — the chart it
-#              installs is the real tgz inside the real image.
+#              Deployment at THREE replicas, standing in for whatever deploys the worker when this
+#              chart does not. cluster-admin is an E2E shortcut, not the chart's fine-grained role.
+#              The worker gets NO --disable-applications, which is what puts it in charge of
+#              installing — and the install runs before leader election, so all three drive Helm at
+#              once. One manufacturer keeps the DaemonSet set small. Nothing else mocked — the chart
+#              it installs is the real tgz inside the real image.
 # Expected:    - a Helm release gpustack-operator-device-manager reaches "deployed";
+#              - exactly one such release, at revision 1, with no replica having restarted:
+#                three concurrent installers converge on one instead of racing;
 #              - its chart version equals the running binary's version (the tgz resolved);
 #              - Kueue, NFD, the CSI drivers and the device-manager DaemonSet all belong to THAT
 #                release (Helm's ownership annotation), not to a chart release and not to four
@@ -118,7 +121,11 @@ metadata:
   name: ${WORKER}
   namespace: ${NS}
 spec:
-  replicas: 1
+  # Three at once, because the install runs in the worker's startup — before leader election
+  # gates anything — so every replica drives Helm. One release at one revision, with no
+  # replica crash-looping, is the whole assertion. One replica would prove none of it, and a
+  # rolling update overlaps two even where the count is one.
+  replicas: 3
   selector:
     matchLabels:
       app: ${WORKER}
@@ -255,6 +262,30 @@ if [ -z "$legacy" ]; then
   record PASS "no per-application releases" "none"
 else
   record FAIL "no per-application releases" "$legacy"
+fi
+
+# Three replicas installed concurrently and left ONE revision. A second revision means a replica
+# upgraded what another had just installed; more than one release row means two of them each
+# created their own.
+rows=$("$HELM" list -n "$NS" -f "^${RELEASE}\$" -o json 2>/dev/null \
+         | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d), d[0]["revision"] if d else "-")' 2>/dev/null)
+case "$rows" in
+  "1 1") record PASS "one release at one revision" "${RELEASE} revision 1" ;;
+  "")    record FAIL "one release at one revision" "${RELEASE} unreadable" ;;
+  *)     record FAIL "one release at one revision" "${rows% *} release(s), revision ${rows#* } — replicas raced" ;;
+esac
+
+# No replica crash-looped on the way there. A losing replica must converge on the winner's
+# release, not fail its startup: a worker whose Prepare fails restarts, and two of them taking
+# turns failing is what leaves the applications never installed.
+pods=$(kubectl -n "$NS" get pods -l "app=${WORKER}" \
+         -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{" "}{.status.containerStatuses[*].restartCount}{"\n"}{end}' 2>/dev/null)
+running=$(printf '%s\n' "$pods" | grep -c ' Running ' || true)
+restarted=$(printf '%s\n' "$pods" | awk '$3 > 0 {printf "%s(%s restarts) ", $1, $3}')
+if [ "$running" -eq 3 ] && [ -z "$restarted" ]; then
+  record PASS "every replica converged" "3 Running, no restarts"
+else
+  record FAIL "every replica converged" "${running} Running; ${restarted:-no restarts}"
 fi
 
 report

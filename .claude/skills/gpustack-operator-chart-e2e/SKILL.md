@@ -21,7 +21,7 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 - **Pin the run to a user-confirmed context** — `preflight.sh` shows the active one; proceed only after the user confirms the intended local cluster. Never switch on your own judgement. When the confirmed cluster is **not** the active context, do not switch: take its isolated kubeconfig with `bash ../_e2e-lib/scripts/kube-context.sh <ctx>` and prefix every command of the run with the `KUBECONFIG=<path>` it prints (details in `../_e2e-lib/references/orchestration.md`). On the user's explicit say-so you may switch instead — then record the context to return to as an outstanding environment mutation and restore it in Phase 8.
 - **Build locally, never push** — `build-load.sh` keeps `PACKAGE_PUSH=false`.
 - **Touch only what this run creates** — the Helm release + its cleanup. Never modify or delete the user's pre-existing resources.
-- **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, CASE 2, CASE 3, CASE 4, CASE 5, CASE 6); read-only steps (`preflight.sh`, CASE 1) run unprompted.
+- **Confirm every mutating step** (`build-load.sh`, `deploy.sh`, CASE 2, CASE 3, CASE 4, CASE 5, CASE 6, CASE 7); read-only steps (`preflight.sh`, CASE 1) run unprompted.
 - **Specialists are read-only** — the lead is the sole writer.
 
 **Layout:**
@@ -38,13 +38,23 @@ Run as a **test-orchestration lead** (main agent) coordinating read-only **domai
 | 3 | Release version survives a warm build cache | `pack/gpustack-operator/Dockerfile`, `hack/package.sh` (optional) | `cases/case-3.sh` | yes (confirm) |
 | 4 | The control plane survives losing its leader | `deploy/gpustack-operator/chart/values.yaml`, `deploy/gpustack-operator/chart/templates/worker/**`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-4.sh` | yes (confirm) |
 | 5 | Adopting another release's objects needs `--take-ownership` | `deploy/gpustack-operator/chart/templates/migrate/**`, `deploy/gpustack-operator/chart/files/migrate-*.sh`, `deploy/gpustack-operator/chart/charts/**` | `cases/case-5.sh` | yes (confirm) |
-| 6 | Image mode: the worker installs the bundled chart itself | `pkg/worker/kuberess/**`, `pack/gpustack-operator/Dockerfile` | `cases/case-6.sh` | yes (confirm) |
+| 6 | Image mode: the worker installs the bundled chart itself | `pkg/worker/kuberess/**`, `pkg/kubeapp/**`, `pack/gpustack-operator/Dockerfile` | `cases/case-6.sh` | yes (confirm) |
+| 7 | A live older install rolls forward onto this build | `pkg/worker/kuberess/**`, `pkg/kubeapp/**`, `deploy/gpustack-operator/chart/templates/migrate/**`, `deploy/gpustack-operator/chart/files/migrate-*.sh` | `cases/case-7.sh` | yes (confirm) |
 
-**CASE 6 needs a cluster with no chart release** — the two install modes are exclusive, because both
-renders carry the cluster-scoped `gpustack-cpu-info` NodeFeatureRule and Helm refuses the second
-render on ownership metadata. Run it in Phase 4 **before** the Phase 3 install, or after CASE 2's
-teardown in Phase 8. CASE 4 and CASE 5 both upgrade the release and restore the captured values on
-exit, so they run against the Phase 3 install, one at a time.
+**CASES 6 and 7 need a cluster with no chart release** — the two install modes are exclusive, because
+both renders carry the cluster-scoped `gpustack-cpu-info` NodeFeatureRule and Helm refuses the second
+render on ownership metadata. Run them in Phase 4 **before** the Phase 3 install, or after CASE 2's
+teardown in Phase 8. They are also exclusive with **each other**: both drive the same image-mode
+release, so each needs the other torn down first (each one's trap does that). CASE 4 and CASE 5 both
+upgrade the release and restore the captured values on exit, so they run against the Phase 3 install,
+one at a time.
+
+**CASE 7 is the upgrade counterpart to CASE 6's fresh install.** CASE 6 proves several replicas
+converge on one release from nothing; CASE 7 starts from a *published* older build — one that
+predates the subchart layout and therefore installs one release per application — and proves the
+rollout onto this build adopts all of it into the single release without a human uninstalling
+anything. It is the only case that runs a release-to-release migration end to end, and the only one
+whose inputs come from a registry rather than the local build, so it needs outbound network.
 
 ## Case header contract
 
@@ -107,11 +117,14 @@ bash .claude/skills/gpustack-operator-chart-e2e/cases/case-4.sh "$NS" 2      2>&
 bash .claude/skills/gpustack-operator-chart-e2e/cases/case-5.sh "$NS"        2>&1 | tee "$RPT"/raw/13-case5.txt
 ```
 
-CASE 6 (image mode) is the one case that cannot share the cluster with the Phase 3 install — run it
-either before Phase 3 or after Phase 8's teardown (confirm), and it cleans up after itself:
+CASE 6 (image mode) and CASE 7 (the upgrade onto it) are the cases that cannot share the cluster with
+the Phase 3 install — run them either before Phase 3 or after Phase 8's teardown (confirm each), one
+at a time, and each cleans up after itself:
 
 ```bash
 bash .claude/skills/gpustack-operator-chart-e2e/cases/case-6.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/raw/14-case6.txt
+# from the published older build (default v0.5.4) up to this one; needs outbound network:
+bash .claude/skills/gpustack-operator-chart-e2e/cases/case-7.sh "$NS" "$TAG" 2>&1 | tee "$RPT"/raw/15-case7.txt
 ```
 
 Read the PASS/FAIL table; do not re-derive from raw output.

@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	helmaction "helm.sh/helm/v3/pkg/action"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmrelease "helm.sh/helm/v3/pkg/release"
 	helmtime "helm.sh/helm/v3/pkg/time"
@@ -80,25 +81,53 @@ func Test_Client_nextStep(t *testing.T) {
 			want:    _NextStepInstall,
 		},
 		{
-			name:    "pending upgrade with RepairViaUpgradeOnly rolls back",
+			name:    "a peer's pending upgrade is left alone, not rolled back",
 			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true},
+			release: release(helmrelease.StatusPendingUpgrade, "0.18.2", nil, time.Now()),
+			timeout: time.Hour,
+			want:    NextStepRequeue,
+		},
+		{
+			name:    "an abandoned pending upgrade with RepairViaUpgradeOnly rolls back",
+			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true, ExclusiveAccess: true},
 			release: release(helmrelease.StatusPendingUpgrade, "0.18.2", nil, time.Now()),
 			timeout: time.Hour,
 			want:    NextStepRollback,
 		},
 		{
-			name:    "pending rollback with RepairViaUpgradeOnly rolls back",
+			name:    "a pending upgrade past the timeout rolls back without exclusive access",
 			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true},
+			release: release(helmrelease.StatusPendingUpgrade, "0.18.2", nil, time.Now().Add(-2*time.Hour)),
+			timeout: time.Hour,
+			want:    NextStepRollback,
+		},
+		{
+			name:    "an abandoned pending rollback with RepairViaUpgradeOnly rolls back",
+			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true, ExclusiveAccess: true},
 			release: release(helmrelease.StatusPendingRollback, "0.18.2", nil, time.Now()),
 			timeout: time.Hour,
 			want:    NextStepRollback,
 		},
 		{
-			name:    "pending install with RepairViaUpgradeOnly still requeues",
+			name:    "a peer's pending install is left alone",
 			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true},
 			release: release(helmrelease.StatusPendingInstall, "0.18.2", nil, time.Now()),
 			timeout: time.Hour,
 			want:    NextStepRequeue,
+		},
+		{
+			name:    "an abandoned pending install has its record discarded",
+			chart:   &Chart{Version: "0.18.2", RepairViaUpgradeOnly: true, ExclusiveAccess: true},
+			release: release(helmrelease.StatusPendingInstall, "0.18.2", nil, time.Now()),
+			timeout: time.Hour,
+			want:    _NextStepDiscard,
+		},
+		{
+			name:    "a pending install past the timeout has its record discarded",
+			chart:   &Chart{Version: "0.18.2"},
+			release: release(helmrelease.StatusPendingInstall, "0.18.2", nil, time.Now().Add(-2*time.Hour)),
+			timeout: time.Hour,
+			want:    _NextStepDiscard,
 		},
 	}
 
@@ -109,6 +138,57 @@ func Test_Client_nextStep(t *testing.T) {
 			assert.Equal(t, c.want, cli.nextStep(t.Context(), c.release, c.chart))
 		})
 	}
+}
+
+// Test_Client_newInstall pins the atomicity of an install to whether a release record was
+// found for it, which is what keeps a first install from wedging.
+//
+// Atomic implies Wait (helm.sh/helm/v3/pkg/action.(*Install).RunWithContext), so an atomic
+// install of this chart blocks until every workload it deploys is Ready. A process killed
+// inside that wait — the container's startup probe gives up long before the Helm timeout —
+// strands a pending-install record that no later attempt can get past. There is nothing
+// live to protect on a first install, so it applies and returns instead, and a release left
+// failed is repaired by the upgrade path on the next boot.
+func Test_Client_newInstall(t *testing.T) {
+	cases := []struct {
+		name       string
+		existing   *helmrelease.Release
+		wantAtomic bool
+	}{
+		{
+			name:       "no release record is a permissive first install",
+			existing:   nil,
+			wantAtomic: false,
+		},
+		{
+			name:       "an existing release is rolled back on failure",
+			existing:   &helmrelease.Release{Info: &helmrelease.Info{Status: helmrelease.StatusFailed}},
+			wantAtomic: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			cli := &Client{timeout: time.Hour}
+			chart := &Chart{Name: "kueue", Release: "gpustack-kueue", Path: "kueue.tgz"}
+
+			i := cli.newInstall(&helmaction.Configuration{}, chart, "gpustack-system", c.existing)
+			assert.Equal(t, c.wantAtomic, i.Atomic)
+			assert.Equal(t, chart.Release, i.ReleaseName)
+			assert.Equal(t, "gpustack-system", i.Namespace)
+			assert.Equal(t, time.Hour, i.Timeout)
+		})
+	}
+}
+
+// Test_Client_newUpgrade holds the upgrade atomic: it acts on a live release, so a failure
+// must roll back to the revision that was serving before it.
+func Test_Client_newUpgrade(t *testing.T) {
+	cli := &Client{timeout: time.Hour}
+
+	u := cli.newUpgrade(&helmaction.Configuration{}, &Chart{Name: "kueue", Release: "gpustack-kueue"})
+	assert.True(t, u.Atomic)
+	assert.Equal(t, time.Hour, u.Timeout)
 }
 
 // Test_Client_InstallWith pins the argument guards, which reject before the first

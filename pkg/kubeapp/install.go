@@ -20,10 +20,15 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/stringx"
 )
 
-// Install is the function type for installing a application.
-type Install func(context.Context, *helm.Client, map[string]any, sets.Set[string]) error
+// Install is the function type for installing an application. Its last argument reports
+// whether the caller has excluded every other process from the release for the whole call.
+type Install func(context.Context, *helm.Client, map[string]any, sets.Set[string], bool) error
 
 // ExecuteInstall executes the given installers concurrently, and waits for all of them to complete.
+//
+// exclusive declares that no other process can be acting on these releases meanwhile. It
+// travels to each installer, which is where it decides whether a release left mid-operation
+// is repairable or has to be waited out.
 func ExecuteInstall(
 	ctx context.Context,
 	restCfg rest.Config,
@@ -31,6 +36,7 @@ func ExecuteInstall(
 	namespace string,
 	installs []Install,
 	globalValuesContext map[string]any,
+	exclusive bool,
 ) error {
 	if disable.Has("*") {
 		klog.Warningf("!!! all system applications are disabled !!!")
@@ -57,7 +63,7 @@ func ExecuteInstall(
 		gvc := maps.Clone(globalValuesContext)
 		install := installs[i]
 		gp.Go(func() error {
-			err = install(ctx, hc, gvc, disable)
+			err := install(ctx, hc, gvc, disable, exclusive)
 			if err != nil {
 				return fmt.Errorf("%s: %w", loadInstallerName(install), err)
 			}

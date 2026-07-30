@@ -111,7 +111,15 @@ for s in "${worker_cert_secret}" gpustack-settings \
   kubectl -n "${NS}" delete secret "${s}" --ignore-not-found 2>/dev/null || true
 done
 
-# 6. Delete what a FAILED migration hook leaves behind. Helm removes its hook objects once they
+# 6. Delete the Leases the worker holds at runtime — the lock that serializes the application
+#    install across replicas, and the control-plane leader election. Both are created by the
+#    worker rather than by the chart, so `helm uninstall` leaves them, and this script never
+#    deletes the namespace that would take them with it.
+for l in applications.worker.gpustack.ai worker.gpustack.ai; do
+  kubectl -n "${NS}" delete lease "${l}" --ignore-not-found 2>/dev/null || true
+done
+
+# 7. Delete what a FAILED migration hook leaves behind. Helm removes its hook objects once they
 #    succeed, but not when they fail — deliberately, so the logs survive — and among them is a
 #    ClusterRoleBinding to cluster-admin. Selected by our own label and then by name, so this
 #    never touches the cleanup hook's own ServiceAccount and binding, which it is running as.
