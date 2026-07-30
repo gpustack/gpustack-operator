@@ -28,16 +28,18 @@ const Manufacturer = nodefeature.ManufacturerAscend
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
 	servers := []deviceplugin.Server{
-		newServer(logger, workercore.DeviceAllocationModeExclusive),
+		newServer(logger, workercore.DeviceAllocationModeExclusive, nil),
 	}
 	if !opts.NoShared {
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeShared),
+			newServer(logger, workercore.DeviceAllocationModeShared, nil),
 		)
 	}
 	if !opts.NoSliced {
+		// Only a logical slice needs the driver's container-share flag, so the seam is built
+		// where it is used and left nil everywhere else — no other mode can reach it.
 		servers = append(servers,
-			newServer(logger, workercore.DeviceAllocationModeSliced),
+			newServer(logger, workercore.DeviceAllocationModeSliced, newShareDriver(logger)),
 		)
 	}
 	// The visibility server co-allocates a container to the same physical NPU(s) its owner
@@ -46,7 +48,7 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	// wildcard — which is exactly what a device-cgroup grant needs (no vcann-rt
 	// logical-slicing artifacts).
 	servers = append(servers,
-		newServer(logger, workercore.DeviceAllocationModeVisibility),
+		newServer(logger, workercore.DeviceAllocationModeVisibility, nil),
 	)
 
 	return aggregated{
@@ -90,9 +92,18 @@ func (in aggregated) Stop() {
 
 type server struct {
 	deviceplugin.ResourceServer
+
+	// share is the dcmi container-share seam the sliced responder turns on for the card it
+	// injects a slice onto. It is nil for every other mode, which is what keeps exclusive and
+	// shared allocation clear of host driver writes.
+	share shareDriver
 }
 
-func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) deviceplugin.Server {
+func newServer(
+	logger klog.Logger,
+	mode workercore.DeviceAllocationMode,
+	share shareDriver,
+) deviceplugin.Server {
 	logger = logger.WithName(strings.ToLower(mode.String()))
 
 	s := &server{
@@ -102,6 +113,7 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode) devicep
 			AllocationMode: mode,
 			Reconciler:     controllers.Get[*deviceplugin.DevicesReconciler](),
 		},
+		share: share,
 	}
 	s.Responder = s
 
@@ -212,6 +224,11 @@ func (s *server) getSlicedContainerAllocateResponse(
 		int64(group.Memory))
 	if err != nil {
 		return nil, fmt.Errorf("derive sliced memory limit: %w", err)
+	}
+
+	// Only once the request itself is known good, since this writes host driver state.
+	if err = s.ensureShareEnabled(accel); err != nil {
+		return nil, err
 	}
 
 	podWorkDir := deviceplugin.PodWorkDir(string(pod.UID), ctr.Name)

@@ -45,9 +45,12 @@ func ascendDevicesFixture() *workercore.Devices {
 				Memory:         65536, // MiB
 				RuntimeVersion: "8.5",
 				Family:         "910B",
+				// PhysicalIndexes is the detector's {physical id, card id, device id in card},
+				// which is where the sliced path reads the dcmi pair it addresses the
+				// container-share flag by.
 				Accelerators: []workercore.Accelerator{
-					{ID: testAccelID0, Index: 0},
-					{ID: testAccelID1, Index: 1},
+					{ID: testAccelID0, Index: 0, PhysicalIndexes: []uint32{0, 0, 0}},
+					{ID: testAccelID1, Index: 1, PhysicalIndexes: []uint32{1, 1, 0}},
 				},
 			}},
 		},
@@ -78,11 +81,18 @@ func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, 
 }
 
 func newSlicedServer() *server {
+	return newSlicedServerWithShare(&fakeShareDriver{enabled: map[[2]int32]bool{{0, 0}: true, {1, 0}: true}})
+}
+
+// newSlicedServerWithShare builds the sliced responder over a caller-supplied container-share
+// driver, which the caller keeps a reference to in order to assert what the responder did to it.
+func newSlicedServerWithShare(share shareDriver) *server {
 	return &server{
 		ResourceServer: deviceplugin.ResourceServer{
 			Manufacturer:   Manufacturer,
 			AllocationMode: workercore.DeviceAllocationModeSliced,
 		},
+		share: share,
 	}
 }
 
