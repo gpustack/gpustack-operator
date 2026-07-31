@@ -7,7 +7,9 @@
 # entry, and a manufacturer absent from "families", both resolve to the "fallback" tier.
 #
 # This file carries matching facts only. Why each family sits on the tier it does is recorded in
-# docs/instance-type-unit-resources.md.
+# docs/reference/instance-type-unit-resources.md. Coverage is not exhaustive by design: an
+# accelerator with no entry resolves to the fallback, which is what every accelerator got before
+# presets existed.
 #
 # Editing rules, all enforced when the table loads (see unit_resources_preset.go):
 #   - the tier set is exactly the five below, "fallback" is exactly 4 CPU / 16Gi, the ladder is
@@ -20,6 +22,12 @@
 #   - a "by" token may not repeat inside its entry, nor equal a token of the entry's own prefix;
 #   - a prefix may not start with a strip sequence or with its own manufacturer name, since both
 #     are already gone by the time matching runs.
+#
+# Two token facts drive how prefixes must be written. Tokens split on "-", "_" and ".", and a
+# prefix matches whole tokens only — so "910b2" does not match a "910b" prefix, and every chip
+# suffix a vendor ships needs its own entry. And device.NormalizeName trims the manufacturer name
+# only when the product starts with it as one word, so a multi-word brand ("Meta X", "Moore
+# Threads") survives and is handled by a strip sequence instead.
 
 tiers:
   fallback: {cpu: "4", ram: 16Gi}
@@ -30,25 +38,134 @@ tiers:
 
 strip:
   - tesla
+  - geforce
+  - quadro
+  - radeon
+  - instinct
 
 families:
   nvidia:
-    - prefix: h100
-      family: h100
-      tier: xlarge
+    # Blackwell and Hopper data-center parts. Every published host gives these 200GB or more per
+    # card, so they sit at the top of the ladder regardless of their own VRAM band.
+    - {prefix: b200, family: nvidia-b200, tier: xlarge}
+    - {prefix: b300, family: nvidia-b300, tier: xlarge}
+    - {prefix: gb200, family: nvidia-gb200, tier: xlarge}
+    - {prefix: gb300, family: nvidia-gb300, tier: xlarge}
+    - {prefix: h100, family: nvidia-h100, tier: xlarge}
+    - {prefix: h200, family: nvidia-h200, tier: xlarge}
+    - {prefix: h800, family: nvidia-h800, tier: xlarge}
+    - {prefix: gh200, family: nvidia-gh200, tier: xlarge}
+    # DGX Spark: 128GB of unified CPU/GPU memory on a 20-core Grace, so the "VRAM" is the host
+    # RAM and the whole machine is smaller than the flagship tier would demand.
+    - {prefix: gb10, family: nvidia-gb10, tier: small}
+    # Ampere. The catch-all is the 40GB tier, so a bare "A100" is never oversized.
     - prefix: a100
-      family: a100
+      family: nvidia-a100
       tier: medium
       by:
-        - {token: 80gb, family: a100-80gb, tier: large}
-        - {token: 40gb, family: a100-40gb, tier: medium}
-    - prefix: gb10
-      family: gb10
+        - {token: 80gb, family: nvidia-a100-80gb, tier: large}
+        - {token: 40gb, family: nvidia-a100-40gb, tier: medium}
+    - prefix: a800
+      family: nvidia-a800
+      tier: medium
+      by:
+        - {token: 80gb, family: nvidia-a800-80gb, tier: large}
+        - {token: 40gb, family: nvidia-a800-40gb, tier: medium}
+    - {prefix: a30, family: nvidia-a30, tier: small}
+    - {prefix: a10, family: nvidia-a10, tier: medium}
+    - {prefix: a10g, family: nvidia-a10g, tier: medium}
+    # Ada and Turing inference parts.
+    - {prefix: l4, family: nvidia-l4, tier: small}
+    - {prefix: l40, family: nvidia-l40, tier: medium}
+    - {prefix: l40s, family: nvidia-l40s, tier: large}
+    - {prefix: t4, family: nvidia-t4, tier: small}
+    # Volta. The 32GB SKU carries roughly twice the host RAM per card of the 16GB one.
+    - prefix: v100
+      family: nvidia-v100
       tier: small
-    - prefix: t4
-      family: t4
-      tier: small
+      by:
+        - {token: 32gb, family: nvidia-v100-32gb, tier: medium}
+    - {prefix: v100s, family: nvidia-v100s, tier: small}
+    # Workstation and desktop parts, sized from GPU rental platforms' fixed per-card packages.
+    - {prefix: rtx-pro-4500, family: nvidia-rtx-pro-4500, tier: small}
+    - {prefix: rtx-6000, family: nvidia-rtx-6000, tier: small}
+    - {prefix: rtx-4000, family: nvidia-rtx-4000, tier: small}
+    - {prefix: rtx-a6000, family: nvidia-rtx-a6000, tier: small}
+    - {prefix: rtx-a5000, family: nvidia-rtx-a5000, tier: small}
+    - {prefix: rtx-a4000, family: nvidia-rtx-a4000, tier: small}
+    - {prefix: rtx-3090, family: nvidia-rtx-3090, tier: small}
+    - {prefix: rtx-4090, family: nvidia-rtx-4090, tier: medium}
+    - {prefix: rtx-5090, family: nvidia-rtx-5090, tier: medium}
+
   ascend:
-    - prefix: "910b2"
-      family: "910b2"
-      tier: large
+    # The detector reports the raw DCMI chip name, which is bare: "910B2", not "Ascend910B2".
+    # Each chip suffix is its own token, so each needs its own entry.
+    - {prefix: "310p", family: ascend-310p, tier: medium}
+    - {prefix: "310p1", family: ascend-310p1, tier: medium}
+    - {prefix: "310p2", family: ascend-310p2, tier: medium}
+    - {prefix: "310p3", family: ascend-310p3, tier: medium}
+    - {prefix: "310p4", family: ascend-310p4, tier: medium}
+    - {prefix: "310p5", family: ascend-310p5, tier: medium}
+    - {prefix: "310p7", family: ascend-310p7, tier: medium}
+    # 910B / Atlas A2. Held at medium rather than its 64GB band, because the KunLun G5680 V2
+    # variant ships 8 cards against 512GB, i.e. 64GB per card.
+    - {prefix: "910b", family: ascend-910b, tier: medium}
+    - {prefix: "910b1", family: ascend-910b1, tier: medium}
+    - {prefix: "910b2", family: ascend-910b2, tier: medium}
+    - {prefix: "910b2c", family: ascend-910b2c, tier: medium}
+    - {prefix: "910b3", family: ascend-910b3, tier: medium}
+    # Also covers "910B4-1", which tokenizes as [910b4, 1].
+    - {prefix: "910b4", family: ascend-910b4, tier: medium}
+    # 910C / Atlas A3. These names tokenize as [910, 93xx], not as one token.
+    - {prefix: "910_9362", family: ascend-910-9362, tier: xlarge}
+    - {prefix: "910_9372", family: ascend-910-9372, tier: xlarge}
+    - {prefix: "910_9381", family: ascend-910-9381, tier: xlarge}
+    - {prefix: "910_9382", family: ascend-910-9382, tier: xlarge}
+    - {prefix: "910_9391", family: ascend-910-9391, tier: xlarge}
+    - {prefix: "910_9392", family: ascend-910-9392, tier: xlarge}
+
+  amd:
+    - {prefix: mi300x, family: amd-mi300x, tier: xlarge}
+    - {prefix: mi308x, family: amd-mi308x, tier: xlarge}
+    - {prefix: mi325x, family: amd-mi325x, tier: xlarge}
+    - {prefix: mi350x, family: amd-mi350x, tier: xlarge}
+    - {prefix: mi355x, family: amd-mi355x, tier: xlarge}
+    # MI250X's own supercomputer nodes give 4 cards against 256GB on the standard configuration.
+    - {prefix: mi250, family: amd-mi250, tier: medium}
+    - {prefix: mi250x, family: amd-mi250x, tier: medium}
+    - {prefix: mi210, family: amd-mi210, tier: large}
+
+  cambricon:
+    # No bare "mlu" entry: that string is the driver's unknown-card sentinel, so an entry for it
+    # would size every future Cambricon part off one unrecognized card.
+    - {prefix: mlu370, family: cambricon-mlu370, tier: medium}
+    - {prefix: mlu590, family: cambricon-mlu590, tier: medium}
+
+  hygon:
+    - {prefix: z100, family: hygon-z100, tier: small}
+    - {prefix: z100l, family: hygon-z100l, tier: small}
+    # Covers "K100_AI", which tokenizes as [k100, ai].
+    - {prefix: k100, family: hygon-k100, tier: large}
+    - {prefix: bw100, family: hygon-bw100, tier: large}
+    - {prefix: bw1000, family: hygon-bw1000, tier: xlarge}
+
+  metax:
+    # The detector emits the "MX"-prefixed name, e.g. "MXC500" rather than the marketing "C500".
+    - {prefix: mxc500, family: metax-mxc500, tier: medium}
+    - {prefix: mxc550, family: metax-mxc550, tier: large}
+    - {prefix: mxc588, family: metax-mxc588, tier: large}
+    - {prefix: mxc600, family: metax-mxc600, tier: large}
+
+  mthreads:
+    - {prefix: mtt-s4000, family: mthreads-mtt-s4000, tier: medium}
+    - {prefix: mtt-s5000, family: mthreads-mtt-s5000, tier: medium}
+
+  iluvatar:
+    - {prefix: bi-v100, family: iluvatar-bi-v100, tier: medium}
+    - {prefix: bi-v150, family: iluvatar-bi-v150, tier: medium}
+    - {prefix: mr-v50, family: iluvatar-mr-v50, tier: medium}
+    - {prefix: mr-v100, family: iluvatar-mr-v100, tier: medium}
+
+  thead:
+    - {prefix: ppu-zw810e, family: thead-ppu-zw810e, tier: medium}
+    - {prefix: ppu-zwm890, family: thead-ppu-zwm890, tier: medium}

@@ -30,8 +30,10 @@ exact value, so the change is purely additive.
 - **One product, one tier — structurally.** It must be impossible for a given accelerator product to
   resolve to more than one preset, and impossible for the outcome to depend on the order entries
   happen to appear in the table.
-- **Stay auditable.** Every preset row traces to a named public source, documented under `docs/`, so
-  an administrator can see why their pool got the number it got.
+- **Stay auditable.** Every preset row is documented under `docs/` alongside the public configuration
+  its tier was anchored on, so an administrator can see why their pool got the number it got. A row
+  sized from product-class knowledge rather than a published machine carries no anchor, and that
+  emptiness is itself the signal.
 - **Zero regression.** A product with no entry, or a manufacturer outside the nine the operator can
   detect, is stamped with exactly today's value (4 CPU / 16Gi / 100Gi).
 
@@ -42,13 +44,18 @@ Success criteria (all testable):
 
 1. `nodefeature.PresetUnitResources("nvidia", "NVIDIA H100 80GB HBM3")` and its label-sanitized twin
    `"NVIDIA-H100-80GB-HBM3"` both resolve to the flagship tier.
-2. Every one of the nine detectable manufacturers has at least its mainstream products covered, and
-   the table refuses to load if one is missing entirely.
+2. Every product family worth sizing is covered, and an accelerator with no entry resolves to the
+   fallback — which the docs state once rather than enumerating. Coverage is therefore not a
+   load-time rule: the table validates that a manufacturer *key* is one of the nine, not that all
+   nine appear. A coverage rule cannot tell "forgotten" from "no public data exists", and would
+   force either an invented ratio or a dead entry with a guessed prefix.
 3. An unrecognised product resolves to `4` / `16Gi`, byte-identical to today.
 4. Every emitted preset satisfies the existing `validateInstanceTypeUnitSpec` rules **using the same
    validators**, so no table can produce an `InstanceType` the admission webhook would reject.
 5. Shuffling the entries of the embedded table changes no lookup result.
-6. `docs/` carries a per-product table whose every row names its source.
+6. `docs/` carries a per-product table naming, for every row that has one, the public configuration
+   its tier was anchored on; a row with none leaves the anchor empty rather than citing a source that
+   does not support it.
 
 ### Non-Goals
 
@@ -73,8 +80,11 @@ Success criteria (all testable):
 - **Harvesting live per-vendor product-string fixtures.** Coverage for Iluvatar, MThreads and THead
   is written from vendor documentation because this repository pins no representative string for
   them; capturing real fixtures needs hardware access and is tracked as an Open Question.
-- Manufacturers the operator cannot detect (Intel Gaudi/Max, Kunlun, Enflame, BiRen). They have no
-  manufacturer key, so they cannot be table keys.
+- **Making undetectable manufacturers reachable.** Intel (Gaudi/Max), Kunlun and Biren have no
+  manufacturer key in `pkg/nodefeature/knowns.go`, so they cannot be table keys: adding one pulls in
+  a PCI vendor ID, a resource name, a runtime name, an NFD rule and a device-plugin, which is its own
+  change. Their presets are settled in the reference page so that adding detection is the only work
+  left, but nothing in this spec stamps them on anything.
 
 ## Proposal
 
@@ -144,13 +154,30 @@ deviation recorded in the docs table.
 
 | Tier | VRAM band (heuristic) | unit CPU | unit RAM | Anchoring evidence |
 |---|---|---|---|---|
-| *(fallback)* | unmatched / unknown manufacturer | `4` | `16Gi` | today's value, unchanged |
-| `small` | ≤ 16 GiB | `8` | `32Gi` | T4 on Tencent GN7 / Huawei pi2 = 8c/32g |
-| `medium` | > 16, ≤ 48 GiB | `8` | `64Gi` | RTX 4090 8-card boxes 16c/64g; A30 8c/32g; L4 12c/48g |
-| `large` | > 48, ≤ 96 GiB | `12` | `128Gi` | A100-80 GCP a2-ultragpu 12c/170g; MI210 / K100_AI / MTT S4000 / MetaX C500 all 8–16c/128g |
+| *(fallback)* | unmatched / uncovered manufacturer | `4` | `16Gi` | today's value, unchanged |
+| `small` | ≤ 16 GiB | `8` | `32Gi` | T4 on Tencent GN7 / Huawei pi2 = 8c/32g; A30 8c/32g |
+| `medium` | > 16, ≤ 48 GiB | `8` | `64Gi` | RTX 4090 8-card boxes 16c/64g; A10G on AWS g5 24c/96g; Ascend 910B on KunLun G5680 V2 24c/64g |
+| `large` | > 48, ≤ 96 GiB | `12` | `128Gi` | A100-80 GCP a2-ultragpu 12c/170g; MI210 Dell R750xa 16c/128g; Hygon K100_AI 8c/128g |
 | `xlarge` | > 96 GiB | `12` | `192Gi` | H100 Azure ND96isr 12c/231g, DGX H100 14c/256g; MI300X 12c/231g; Ascend 910C 32c/256g |
 
 Acceptance criteria:
+- **AC1.0** — The assignment rule, applied per family and recorded in the docs:
+  1. start from the family's VRAM band;
+  2. compute the family's **lowest published per-card CPU and RAM** across its public multi-card /
+     whole-machine configurations, excluding single-card cloud tiers (those track the instance size
+     the buyer picked, not the card);
+  3. the tier is the **smaller** of the band and the largest tier that exceeds neither of those two
+     lows;
+  4. a deviation from the band in either direction needs more than one source, and is recorded in
+     the docs table.
+
+  A family whose public data yields nothing above the fallback, or which has no public multi-card
+  configuration at all, gets **no entry** by default — inventing a ratio is forbidden and the
+  fallback is safe. The exception is a family an operator maintainer sizes from vendor knowledge of
+  its product class: that is a judgement, not an invented citation, and it is recorded by leaving the
+  reference page's `Anchor` cell **empty** so the weaker basis is visible at a glance. Two further
+  entries inherit from a sibling or predecessor (AMD MI308X from MI300X, MThreads MTT S5000 from
+  MTT S4000, THead ZWM890 from ZW810E) and say so in that cell.
 - **AC1.1** — Exactly these five tiers exist; each tier's RAM is a positive integer with a
   case-sensitive `Gi` suffix and each tier's CPU is a unitless positive integer **within int32**, so
   every preset passes `validateInstanceTypeUnitSpec` unchanged.
@@ -217,8 +244,11 @@ Acceptance criteria:
     parses as a 64-bit integer but overflows int32 must fail here — see the Risk on the reconcile
     loop.
   - **V2** — a manufacturer key is not one of the nine in `pkg/nodefeature/knowns.go:20-30` (a typo
-    such as `nvdiia:` must fail, not silently orphan its entries), **or** one of the nine has no
-    entries at all (coverage is `=`, not `⊆`).
+    such as `nvdiia:` must fail, not silently orphan its entries). Coverage is `⊆`, not `=`: a
+    manufacturer with no entries resolves to the fallback, which is exactly the pre-change
+    behaviour, so requiring an entry per manufacturer would buy nothing the fallback does not
+    already give. The rule is checked against a set built from the nine `Manufacturer*` constants,
+    not from the registry `knowns.go` builds — see the load-order note under Notes.
   - **V3** — within one manufacturer, two entries share a `prefix`, **or** one entry's `prefix` is
     a **token**-prefix of another entry's `prefix`. This is the guarantee's structural support: it
     makes "at most one entry matches" a property of the table, not of the resolver. The rule is
@@ -261,9 +291,12 @@ Acceptance criteria:
 - **AC3.3** — The manufacturer strip inside `NormalizeName` fires only when the buffer length equals
   the prefix length at that exact instant (`pkg/device/helper.go:124-129`). A multi-word brand
   therefore never strips: `("metax", "Meta X C500")` reaches length 5 holding `"meta-"`, fails the
-  compare once, and can never fire again, yielding `meta-x-c500`. `moore-threads` behaves the same
-  way. Such brands must be covered by `strip` sequences, and the constraint is recorded as a code
-  comment.
+  compare once, and can never fire again, yielding `meta-x-c500`. "Moore Threads" and "T-Head"
+  behave the same way. The resolver must support covering such a brand with a `strip` sequence, and
+  the constraint is recorded as a code comment. Whether the shipped table *uses* one is a per-vendor
+  data question: it does so only where a detector actually emits the branded form. MetaX, MThreads
+  and THead emit the bare model name (`MXC500`, `MTT S4000`, `PPU-ZW810E`), so no strip sequence is
+  spent on them, and a test pins that their branded forms fall back rather than silently matching.
 - **AC3.4** — Tokens are the key split on `-`, `_` **and** `.`. `NormalizeName` preserves `_` and
   `.` (`pkg/device/helper.go:107-116`), so Hygon's `K100_AI` normalizes to `k100_ai` and must
   tokenize as `[k100, ai]` for a `k100` prefix to match. `K100_AI` and `K100-AI` must resolve
@@ -281,10 +314,15 @@ Acceptance criteria:
 - **AC3.7** — Matching tolerates real-world product suffixes and variants: `"NVIDIA H100 80GB
   HBM3"`, `"NVIDIA H100 PCIe"`, `"NVIDIA H100 NVL"` and bare `"H100"` all resolve to the same tier.
 - **AC3.8** — Coverage: every product family named in the source ratio survey that belongs to one of
-  the nine detectable manufacturers has an entry — NVIDIA data-center (Blackwell / Hopper / Ampere /
-  Ada / Turing / Volta), NVIDIA RTX PRO + workstation + GeForce, NVIDIA Grace parts (GH200, GB200,
-  GB300, GB10), AMD Instinct (MI2xx / MI3xx), Ascend (310P, 910B, 910C), Cambricon (MLU370 family),
-  Hygon (Z100, K100), MThreads (MTT S4000), MetaX (C500, C550), Iluvatar (BI-V150, MR-V100), THead.
+  the nine detectable manufacturers **and has a usable published multi-card configuration** has an
+  entry — NVIDIA data-center (Blackwell / Hopper / Ampere / Ada / Turing / Volta), NVIDIA Grace parts
+  (GH200, GB200, GB300, GB10), NVIDIA RTX PRO / workstation / GeForce parts with a consistent rental
+  ratio, AMD Instinct (MI2xx / MI3xx), Ascend (310P, 910B, 910C), Cambricon (MLU370), Hygon (Z100,
+  Z100L, K100), MThreads (MTT S4000), MetaX (C500, C550), Iluvatar (BI-V150, MR-V100), THead (810E).
+  Coverage is not exhaustive and the docs say so once — "an accelerator not listed gets `fallback`" —
+  rather than enumerating what is missing, since such a roster goes stale on its own. NVIDIA A40 /
+  A16 / A2 / RTX PRO 6000 and the consumer parts with no consistent published ratio are the notable
+  omissions.
 - **AC3.9** — Coverage accounts for what the detectors actually emit, not for marketing names:
   - **Ascend** — the product is the raw DCMI chip name. The repository's only real fixture is the
     **bare** `910B2` (`testing/sample/devices/ascend-910b.yaml:3`), while the SoC table also carries
@@ -306,12 +344,15 @@ Acceptance criteria:
     (`binding/cndev/library_device.go:68-112`). A bare `mlu` catch-all entry is therefore
     **forbidden**: it would capture the unknown-card sentinel and break the zero-regression contract
     for every future Cambricon part.
-  - **MetaX** — emits `MXC500` (`pkg/device/helper_test.go:23`); a `c500`-only entry silently misses.
+  - **MetaX** — emits `MXC500` (`pkg/device/helper_test.go:23`), so entries are written on the
+    `mx`-prefixed form; a `c500`-only entry would silently miss.
+  - **MThreads / THead** — emit the bare model name, `MTT S4000` / `MTT S5000` and
+    `PPU-ZW810E` / `PPU-ZWM890` ("ZW" for Zhenwu), not the branded form.
   - **Hygon** — emits `K100_AI` → `k100_ai`.
   - **Iluvatar / MThreads / THead** — this repository pins no representative product string
-    (`iluvatar/device.go:115`, `mthreads/device.go:127`, `thead/device.go:119`). Their entries are
-    written from vendor documentation and the docs page marks them **unverified against this
-    codebase**.
+    (`iluvatar/device.go:115`, `mthreads/device.go:127`, `thead/device.go:119`). Their entries come
+    from vendor knowledge rather than a fixture in this tree, and the docs page marks them
+    **unverified against this codebase**.
 - **AC3.10** — Negative matching is asserted: an entry for a large card must not swallow a small one
   that shares a substring (`"RTX 4000 Ada"` must not match an `a100`/`rtx-4090` entry; `"310P3"` must
   not match a `910`-family entry). The `NormalizeName` prefix trim is **not** token-boundary aware —
@@ -470,16 +511,16 @@ Acceptance criteria:
 
 - **Always:** keep the unmatched path byte-identical to today (`4` / `16Gi` / `100Gi`) and pin it in
   the table's own validation; keep the lookup pure and entry-order-independent; validate tier values
-  with the admission webhook's own validators; cite a public source for every row in the docs table;
-  run `make lint` after Go edits.
+  with the admission webhook's own validators; record each row's anchor in the docs table, leaving it
+  empty where no public configuration backs the tier; run `make lint` after Go edits.
 - **Ask first:** changing the fallback value; adding or removing a tier; adding an editable setting or
   env var to override presets; presetting `localStorage`; touching the create-only or immutability
   rules; widening scope into admission validation.
 - **Never:** read node capacity, the Devices ledger, or any live cluster state inside the lookup; add
-  a field to `InstanceTypeSpec`; mutate an existing `InstanceType`; invent a ratio with no public
-  source; key the table on the memory-suffixable group slug; let a lookup result depend on entry
-  order; use non-strict YAML decoding; add a catch-all entry whose prefix is a vendor's unknown-card
-  sentinel (`mlu`).
+  a field to `InstanceTypeSpec`; mutate an existing `InstanceType`; dress a ratio in a public source
+  that does not support it; key the table on the memory-suffixable group slug; let a lookup result
+  depend on entry order; use non-strict YAML decoding; add a catch-all entry whose prefix is a
+  vendor's unknown-card sentinel (`mlu`).
 
 ### Risks and Mitigations
 
@@ -638,17 +679,20 @@ returned, never panics in control flow; comments end in a period (`godot`); line
   strip ×2  → instinct-mi300x-oam → mi300x-oam     (repeated stripping, AC3.2)
   entry prefix mi300x            → xlarge → 12 CPU / 192Gi
 
-("metax", "Meta X C500")
+("metax", "MXC500")             # the detector emits the "MX"-prefixed name
+  normalize → mxc500             (the trim fires only on an exact "metax", so nothing is removed)
+  entry prefix mxc500            → medium → 8 CPU / 64Gi
+
+("metax", "Meta X C500")         # the marketing name, deliberately uncovered
   normalize → meta-x-c500        (the multi-word brand defeats the manufacturer trim, AC3.3)
-  strip     → c500               ("meta-x" is a strip SEQUENCE)
-  entry prefix c500              → large → 12 CPU / 128Gi
+  no strip sequence, no prefix match             → fallback → 4 CPU / 16Gi
 
 ("hygon", "K100_AI")
   normalize → k100_ai            tokens [k100, ai]
   entry prefix k100              → large → 12 CPU / 128Gi
 
 ("ascend", "910B2")              # the repo's real fixture shape: bare, no "Ascend"
-  normalize → 910b2              entry prefix 910b2 → large → 12 CPU / 128Gi
+  normalize → 910b2              entry prefix 910b2 → medium → 8 CPU / 64Gi
 
 ("cambricon", "MLU")             # the driver's unknown-card sentinel
   normalize → mlu                no entry (a bare `mlu` catch-all is forbidden)
@@ -694,22 +738,30 @@ T4 needs T2's final family set. T1 and T3 both touch `pkg/nodefeature`, but disj
       AC6.8. The stale "fixed default" sentence on `authorDerivedInstanceType` is rewritten.
       Verify: `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/... && make lint`
 
-- [ ] **T2 · Fill the table for all nine manufacturers**
+- [x] **T2 · Fill the table for all nine manufacturers**
       Blocked by: T1
       Owns: `pkg/nodefeature/unit_resources_preset.yaml`,
             `pkg/nodefeature/unit_resources_preset_test.go`,
             `pkg/worker/controllers/worker/node_flavor_test.go`
       Gate: review
-      Acceptance: entries for all nine manufacturers per AC3.8, each tier assigned by the F1 method
-      (low position of the published range; band as heuristic, entry as authority), including the
-      AC3.11 SKU splits, the AC3.13 GB10 override, and every detector reality of AC3.9 — Ascend bare
-      and prefixed forms plus the `a2g`/`i2` aliases and the `910_9391` token split, MetaX `mxc500`
-      alongside `c500` and the `meta-x` strip sequence, Hygon `k100_ai`, MThreads `moore-threads`
-      strip sequence, AMD's two-token marketing and its fused pci.ids composites left to fallback, and
-      **no** bare `mlu` catch-all for Cambricon. V2's all-nine rule is enabled. AC6.3's pipeline-level
-      corpus test and AC6.6's vendor-shape cases are added and pass in both raw and label-sanitized
-      form; AC3.10 negative cases pass. Open Question 1 (the Ascend 910B outlier) is resolved and the
-      choice recorded for the docs.
+      Acceptance: entries per AC3.8, each tier assigned by the AC1.0 rule, including the AC3.11 SKU
+      splits, the AC3.13 GB10 override, and every detector reality of AC3.9 — Ascend bare and
+      prefixed forms plus the `910_93xx` token split, MetaX's `mx`-prefixed names, MThreads' and
+      THead's bare model names, Hygon `k100_ai`, AMD's two-token marketing and its fused pci.ids
+      composites left to fallback, and **no** bare `mlu` catch-all for Cambricon. A test pins that
+      the branded multi-word forms no detector emits fall back rather than matching.
+      AC6.3's pipeline-level corpus test and AC6.6's
+      vendor-shape cases are added and pass in both raw and label-sanitized form; AC3.10 negative
+      cases pass. Open Question 1 (the Ascend 910B outlier) is resolved and the choice recorded for
+      the docs.
+      Deliberately not done, decided during the build: V2 keeps `⊆` rather than gaining an
+      all-nine coverage rule (see AC2.3/V2), so `unit_resources_preset.go` is untouched. The Ascend
+      `A2G\d` / `I2\d` alias shapes get no entries — they are the detector's fallback for an
+      *unrecognized* name, so their real form is unknown and an entry would be a guess; a test pins
+      that they land on the fallback.
+      Sized from vendor knowledge rather than a published configuration, per AC1.0's exception:
+      Cambricon MLU590, MetaX MXC588 / MXC600, Iluvatar BI-V100 / MR-V50, AMD MI250, Hygon BW100 /
+      BW1000. Their `Anchor` cell on the reference page is left empty.
       Verify: `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/... && make lint`
 
 - [ ] **T3 · Retire the stale "fixed default" API contract**
@@ -836,10 +888,10 @@ GPU cluster on its own.
 
 ## Open Questions
 
-1. Ascend 910B tiering has one known outlier: the mainstream Atlas 800T A2 is 8 cards / 1536GB
-   (24c/192g) but the Huawei KunLun G5680 V2 variant is 8 cards / 512GB (24c/64g). `large` (128Gi)
-   fits the former and not the latter. Resolve in T2: either accept `large` and record the outlier in
-   the docs table, or pull the whole 910B family down to `medium`.
+1. ~~Ascend 910B tiering outlier.~~ **Resolved in T2**: the whole 910B family sits at `medium`.
+   The mainstream Atlas 800T A2 is 8 cards / 1536GB (24c/192g), but the Huawei KunLun G5680 V2
+   variant is 8 cards / 512GB (24c/64g), and AC1.0 takes the lowest published configuration — so
+   `large` (128Gi) is out. The deviation from the 64GB card's `large` band is recorded in the docs.
 2. Whether the docs page should recommend anything at all for an administrator stuck on an existing
    pool's `4`/`16Gi`. Deleting the derived type does not re-author it on its own, and no migration is
    offered, so the honest answer may be "pre-create the type on a fresh pool, otherwise live with it".

@@ -18,34 +18,84 @@ var presetLookupCases = []struct {
 	cpu          string
 	ram          string
 }{
-	// Tiers reachable from the shipped table.
-	{"flagship", "nvidia", "NVIDIA H100 80GB HBM3", "12", "192Gi"},
-	{"flagship, label-sanitized twin", "nvidia", "NVIDIA-H100-80GB-HBM3", "12", "192Gi"},
-	{"flagship, pcie variant", "nvidia", "NVIDIA H100 PCIe", "12", "192Gi"},
-	{"flagship, nvl variant", "nvidia", "NVIDIA H100 NVL", "12", "192Gi"},
-	{"flagship, bare chip name", "nvidia", "H100", "12", "192Gi"},
-	{"entry-level", "nvidia", "Tesla T4", "8", "32Gi"},
-	{"entry-level, label-sanitized twin", "nvidia", "Tesla-T4", "8", "32Gi"},
+	// Every rung of the ladder is reachable. The flagship parts sit above their VRAM band
+	// because every published host gives them 200GB or more per card.
+	{"xlarge", "nvidia", "NVIDIA H100 80GB HBM3", "12", "192Gi"},
+	{"xlarge, label-sanitized twin", "nvidia", "NVIDIA-H100-80GB-HBM3", "12", "192Gi"},
+	{"large", "nvidia", "NVIDIA L40S", "12", "128Gi"},
+	{"medium", "nvidia", "NVIDIA A10G", "8", "64Gi"},
+	{"small", "nvidia", "Tesla T4", "8", "32Gi"},
+	{"small, label-sanitized twin", "nvidia", "Tesla-T4", "8", "32Gi"},
 	{"unified memory overrides the vram band", "nvidia", "NVIDIA GB10", "8", "32Gi"},
+
+	// Real-world suffixes of one family all reach the same tier.
+	{"pcie variant", "nvidia", "NVIDIA H100 PCIe", "12", "192Gi"},
+	{"nvl variant", "nvidia", "NVIDIA H100 NVL", "12", "192Gi"},
+	{"bare chip name", "nvidia", "H100", "12", "192Gi"},
 
 	// The ordered `by` walk and its whole-token matching.
 	{"sku split, 80gb wins", "nvidia", "NVIDIA A100 80GB PCIe", "12", "128Gi"},
 	{"sku split, 40gb", "nvidia", "NVIDIA A100-SXM4-40GB", "8", "64Gi"},
-	{"sku split, entry catch-all", "nvidia", "NVIDIA A100", "8", "64Gi"},
+	{"sku split, catch-all is the smaller sku", "nvidia", "NVIDIA A100", "8", "64Gi"},
 	{"a whole token, not a substring", "nvidia", "NVIDIA A100 140GB", "8", "64Gi"},
+	{"volta sku split, 16gb", "nvidia", "Tesla V100-SXM2-16GB", "8", "32Gi"},
+	{"volta sku split, 32gb", "nvidia", "Tesla V100-SXM2-32GB", "8", "64Gi"},
 
-	// Negative matching: a prefix must not swallow a sibling that shares a substring.
-	{"a10 is not a100", "nvidia", "NVIDIA A10", "4", "16Gi"},
-	{"310p is not 910b", "ascend", "310P3", "4", "16Gi"},
+	// Siblings whose names share a string prefix must never collapse into one entry.
+	{"a10 is not a100", "nvidia", "NVIDIA A10", "8", "64Gi"},
+	{"l4 is not l40", "nvidia", "NVIDIA L4", "8", "32Gi"},
+	{"l40 is not l40s", "nvidia", "NVIDIA L40", "8", "64Gi"},
+	{"a small ada part is not a100 or rtx-4090", "nvidia", "NVIDIA RTX 4000 Ada", "8", "32Gi"},
+	{"v100s is not v100", "nvidia", "Tesla V100S-PCIE-32GB", "8", "32Gi"},
+	{"z100l is not z100", "hygon", "Z100L", "8", "32Gi"},
+	{"bw100 is not bw1000", "hygon", "BW100", "12", "128Gi"},
+	{"bw1000 is not bw100", "hygon", "BW1000", "12", "192Gi"},
+	{"310p is not a 910 part", "ascend", "310P3", "8", "64Gi"},
 
-	// Ascend's detector emits the chip name bare as often as prefixed.
-	{"bare chip name", "ascend", "910B2", "12", "128Gi"},
-	{"prefixed chip name", "ascend", "Ascend910B2", "12", "128Gi"},
+	// Leading marketing tokens are stripped, repeatedly where a name carries two.
+	{"one marketing token", "nvidia", "NVIDIA GeForce RTX 4090", "8", "64Gi"},
+	{"another marketing token", "nvidia", "Quadro RTX 6000", "8", "32Gi"},
+	{"two marketing tokens", "amd", "AMD Radeon Instinct MI300X OAM", "12", "192Gi"},
+
+	// Ascend reports the raw DCMI chip name, bare as often as prefixed, and never with a memory
+	// token — so every chip suffix carries its own entry.
+	{"ascend bare chip name", "ascend", "910B2", "8", "64Gi"},
+	{"ascend prefixed chip name", "ascend", "Ascend910B2", "8", "64Gi"},
+	{"ascend variant shares its parent's tier", "ascend", "910B4-1", "8", "64Gi"},
+	{"ascend a3 name tokenizes in two", "ascend", "910_9391", "12", "192Gi"},
+	// The detector maps these alias shapes onto a SoC only when it cannot recognize the name, so
+	// their real form is unknown and no entry claims them. They must land on the fallback rather
+	// than on the tier of the family the detector would have guessed.
+	{"ascend 910b alias shape", "ascend", "A2G1", "4", "16Gi"},
+	{"ascend 310p alias shape", "ascend", "I21", "4", "16Gi"},
+
+	// Vendor-specific product shapes.
+	{"underscore separates tokens", "hygon", "K100_AI", "12", "128Gi"},
+	{"the hyphenated twin resolves alike", "hygon", "K100-AI", "12", "128Gi"},
+	{"metax carries its own prefix", "metax", "MXC500", "8", "64Gi"},
+	{"metax flagship", "metax", "MXC550", "12", "128Gi"},
+	{"mthreads", "mthreads", "MTT S4000", "8", "64Gi"},
+	{"mthreads successor", "mthreads", "MTT S5000", "8", "64Gi"},
+	{"cambricon rich name", "cambricon", "MLU370-X4", "8", "64Gi"},
+	{"cambricon enum name", "cambricon", "MLU370", "8", "64Gi"},
+	{"cambricon later generation", "cambricon", "MLU590-M9", "8", "64Gi"},
+	{"metax siblings do not share a tier", "metax", "MXC588", "12", "128Gi"},
+	{"iluvatar", "iluvatar", "Iluvatar BI-V150", "8", "64Gi"},
+	{"thead", "thead", "PPU-ZW810E", "8", "64Gi"},
+	{"thead supernode part", "thead", "PPU-ZWM890", "8", "64Gi"},
+	{"amd export sku", "amd", "AMD Instinct MI308X", "12", "192Gi"},
 
 	// Everything the table does not positively recognize keeps today's value.
 	{"unknown product", "nvidia", "NVIDIA RTX 5070", "4", "16Gi"},
-	{"uncovered manufacturer", "amd", "MI300X", "4", "16Gi"},
-	{"undetectable manufacturer", "kunlun", "P800", "4", "16Gi"},
+	{"the unknown-card sentinel", "cambricon", "MLU", "4", "16Gi"},
+	// A brand written as two words defeats the manufacturer trim, and the entries are written
+	// against what the detectors emit rather than against marketing names — so the branded forms
+	// are deliberately uncovered. If one ever shows up on a real node, these are the cases that
+	// say why, and adding a strip sequence is the fix.
+	{"a multi-word brand is not the emitted name", "metax", "Meta X C500", "4", "16Gi"},
+	{"another multi-word brand", "mthreads", "Moore Threads MTT S4000", "4", "16Gi"},
+	{"a pci.ids composite name", "amd", "Navi 32 [Radeon RX 7700 XT / 7800 XT]", "4", "16Gi"},
+	{"an undetectable manufacturer", "kunlun", "P800", "4", "16Gi"},
 	{"empty product", "nvidia", "", "4", "16Gi"},
 	{"product is the manufacturer alone", "nvidia", "NVIDIA", "4", "16Gi"},
 	{"product is a lone stripped token", "nvidia", "Tesla", "4", "16Gi"},
