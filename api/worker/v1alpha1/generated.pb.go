@@ -1387,6 +1387,11 @@ func (m *InstanceSpec) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	i -= len(m.NodeName)
+	copy(dAtA[i:], m.NodeName)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.NodeName)))
+	i--
+	dAtA[i] = 0x42
 	i--
 	if m.Stop {
 		dAtA[i] = 1
@@ -2828,6 +2833,8 @@ func (m *InstanceSpec) Size() (n int) {
 		n += 1 + l + sovGenerated(uint64(l))
 	}
 	n += 2
+	l = len(m.NodeName)
+	n += 1 + l + sovGenerated(uint64(l))
 	return n
 }
 
@@ -3557,6 +3564,7 @@ func (this *InstanceSpec) String() string {
 		`Volume:` + strings.Replace(strings.Replace(this.Volume.String(), "InstanceVolume", "InstanceVolume", 1), `&`, ``, 1) + `,`,
 		`SSHPublicKey:` + strings.Replace(fmt.Sprintf("%v", this.SSHPublicKey), "LocalObjectReference", "v11.LocalObjectReference", 1) + `,`,
 		`Stop:` + fmt.Sprintf("%v", this.Stop) + `,`,
+		`NodeName:` + fmt.Sprintf("%v", this.NodeName) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -8029,6 +8037,38 @@ func (m *InstanceSpec) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.Stop = bool(v != 0)
+		case 8:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NodeName", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NodeName = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

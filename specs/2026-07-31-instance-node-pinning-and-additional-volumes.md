@@ -26,8 +26,10 @@ is required.
   CRs) and cluster administrators governing what those Instances may request.
 - Let a user pin an Instance to a named node while keeping the Kueue scheduling chain intact
   (`ResourceFlavor` → `ClusterQueue` → `LocalQueue`, quota admission, device-plugin allocation).
-- Reject a node pin that can never schedule (unknown node, or a node outside the InstanceType's pool)
-  at admission with an actionable field error, instead of leaving the Instance Pending forever.
+- Catch a mistyped node at creation with an actionable field error, instead of leaving the Instance
+  Pending forever — but validate nothing beyond the node's existence, so the pin stays an entrance
+  rather than a policy: pinning a card-less Instance (a model download, say) onto a specific
+  accelerated node must keep working whatever the pool's shape or the mixing setting.
 - Let an Instance mount volumes beyond its workspace, from four source kinds, at arbitrary mount
   paths, read-only and/or by sub-path.
 - Keep the workspace contract (`spec.volume` + `spec.volumeMount`, default `/workspace`) byte-identical
@@ -95,17 +97,20 @@ A new optional string field naming a Kubernetes Node object.
   `kubernetes.io/hostname` and valued from that **Node's own `kubernetes.io/hostname` label** (not
   assumed equal to the object name). `pod.spec.nodeName` is never written.
 - **AC1.3** CREATE naming a node that does not exist → rejected with `field.NotFound("spec.nodeName")`.
-- **AC1.4** CREATE naming a node that exists but does not carry every label of its InstanceType's pool
-  (`instanceTypeScheduleLabels` — `feature.gpustack.ai/acceleratable`, the accelerator/general feature
-  key, `kubernetes.io/os|arch` — plus `gpustack.ai/managed=true`) → rejected with
-  `field.Invalid("spec.nodeName")` naming the node and the InstanceType.
-- **AC1.5** The same two checks re-run on the start (resume) transition (`stop: true → false`), exactly
-  as resource validation already does, so a node unlabelled or unmanaged while the Instance was stopped
-  cannot silently start into permanent Pending.
+  A read failure that is not a plain "not found" is returned as a retryable error instead, so a
+  transient API problem never becomes a permanent rejection.
+- **AC1.4** Existence is the **only** thing validated. A node outside the referenced InstanceType's
+  pool — unmanaged, of another accelerator, of another arch, or accelerated while
+  `instance-type-mixed-on-node` is disabled — is **accepted**. Forbidding it would block the card-less
+  scenario in Goals, and a pin the pool cannot serve simply does not schedule (AC1.8) rather than
+  doing harm.
+- **AC1.5** No UPDATE path re-checks the node — not the start (resume) transition either. A pin whose
+  node has since gone away still starts; its Pod stays Pending with the scheduler's own reason.
 - **AC1.6** `spec.nodeName` is immutable while the Instance is not stopped (`field.Forbidden`, like
   `image` / `command` / `env`) and editable while stopped.
-- **AC1.7** A CREATE with `stop: true` skips the node checks, mirroring how a stopped Instance already
-  skips the InstanceType lookup.
+- **AC1.7** The existence check is unconditional on CREATE: unlike the InstanceType lookup, a
+  `stop: true` Instance does not skip it, since the check needs no pool and a mistyped node is worth
+  catching whenever it is written.
 - **AC1.8** A pinned Instance still carries the Kueue queue label and is admitted through Kueue like an
   unpinned one; when Kueue admits it but the scheduler cannot place it, the reason surfaces through the
   existing `apistatus.GetSummaryOfPod` phase message — no new mechanism.
@@ -191,8 +196,12 @@ an administrator opening node-path mounts to also open privileged to every CR au
 - Fully additive by design: the downstream Python `GPUInstanceSpec` mirrors this spec 1:1 and dumps it
   straight into the CR, so keeping `volume` / `volumeMount` intact means only optional new fields there
   and no data migration.
-- The membership check reuses `instanceTypeScheduleLabels` + `systemname.ManagedLabelKey`; it does not
-  duplicate the label algebra.
+- The pin is validated for existence only, and only on create, so the webhook needs neither the
+  InstanceType nor the pool-label algebra: no schedule-label comparison, no
+  `instance-type-mixed-on-node` read, and no new exported symbol in
+  `pkg/worker/controllers/worker`. An earlier draft validated pool membership; it was dropped because
+  it rejected the card-less scenario in Goals, and because reproducing Kueue's flavor eligibility at
+  admission means restating the label algebra for a verdict the scheduler already delivers.
 - `spec.privileged` is not exposed by the downstream product's Instance spec today, so defaulting its
   gate to off affects only direct CR authors. That asymmetry — the product will surface
   `additionalVolumes` but not `privileged` — is also why the two gates are separate settings: a combined
@@ -231,11 +240,26 @@ an administrator opening node-path mounts to also open privileged to every CR au
   an already-deployed Instance.
 - A pinned Instance can pass pool-level Kueue quota and then sit Pending because the pinned node is
   full → surfaced through the existing Pod-summary phase message; no per-node quota is introduced.
+- Kueue does not consider `kubernetes.io/hostname` when choosing a ResourceFlavor: the deployed Kueue
+  (0.18.4, vendored by `hack/deps.sh`) filters the Pod's nodeSelector to the candidate flavor's own
+  label keys (`flavorassigner.go` `flavorSelector`), and no flavor carries a hostname label. The pin
+  itself survives — `podset.Merge` merges the flavor's `nodeLabels` into the Pod's selector rather
+  than overwriting it — but in a pool whose nodes differ in count the chosen flavor's
+  `<featureKey>.count` label may not describe the pinned node (`node_queue.go` deliberately orders
+  flavors smallest-count-first), leaving the Workload admitted against one flavor's quota while the
+  Pod cannot schedule → **accepted as-is by decision**: the feature's purpose is to offer a pinning
+  entrance, and a pin the pool cannot honor degrades to "does not schedule", visible through AC1.8.
+- Two narrower residual holes are likewise accepted rather than guarded: a Node carrying no
+  `kubernetes.io/hostname` label passes admission and renders the object name instead (which another
+  node could in principle carry as its hostname), and a stale or failing node read at Pod-render time
+  falls back to the object name for that Pod's whole life, since the Pod is rendered once at creation
+  and never re-diffed. Both degrade to "does not schedule" or, in the first case, land on a node whose
+  hostname label equals the requested object name; kubelet always sets the label, so the first shape
+  is not reachable through any supported provider.
 - On some providers a Node's `kubernetes.io/hostname` label differs from its object name → the selector
   value is read from the Node's label, not assumed.
-- A transient node-label gap (e.g. an `nfd-master` restart dropping custom labels) could make the
-  membership check reject a legitimate pin → the check runs only at admission, so running Instances are
-  unaffected, and the operator's existing recovery procedure applies.
+- A transient node-label gap (e.g. an `nfd-master` restart dropping custom labels) cannot reject a
+  legitimate pin, because admission reads no node label at all — only the Node object's existence.
 - User-derived additional-volume names could collide with `workspace` / `sshd-authorized-keys` and
   silently shadow the workspace → names are derived by the controller (index- or hash-based), with a
   collision unit test.
@@ -292,9 +316,6 @@ api/worker/v1/{generated.*,zz_generated.*}      # regenerated; v1.Instance is a 
 pkg/kubeclients/**                              # regenerated applyconfigurations for the new struct
 pkg/worker/controllers/worker/instance.go       # convertPodFromInstance: one main-container builder (T1),
                                                 # nodeSelector (T3), additional volumes + mounts (T4)
-pkg/worker/controllers/worker/instance_type.go  # instanceTypeScheduleLabels → exported
-                                                # InstanceTypeScheduleLabels, so the webhook shares the
-                                                # pool-label algebra instead of restating it
 pkg/worker/webhooks/worker/instance.go          # node-pin validation (T3), volume validation (T4),
                                                 # the CREATE-only host-access gate (T5)
 pkg/worker/settings/value.go                    # the instance-privileged-allowed and
@@ -310,7 +331,7 @@ The new API surface, with the declarative validation the CRD schema can carry on
 ```go
 // NodeName pins the Instance to one Kubernetes Node. The reconciler renders it as the backing Pod's
 // nodeSelector on kubernetes.io/hostname — never as pod.spec.nodeName — so the scheduler and Kueue
-// admission still mediate placement. The node must exist and belong to the InstanceType's pool.
+// admission still mediate placement. The node must exist when the Instance is created.
 //
 // Immutable while the Instance is running; editable while stopped.
 //
@@ -414,23 +435,21 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         table, each stating that enforcement is CREATE-only.
       Verify: `go test -race -count=1 ./pkg/worker/settings/...`
 
-- [ ] **T3 · Node pinning tracer bullet**
+- [x] **T3 · Node pinning tracer bullet**
       Blocked by: T1
       Owns: `api/worker/v1alpha1/instance.go`, `api/worker/v1alpha1/generated.*`,
         `api/worker/v1alpha1/zz_generated.*`, `api/worker/v1/generated.*`,
         `api/worker/v1/zz_generated.*`, `pkg/kubeclients/**`,
         `pkg/worker/controllers/worker/instance.go`, `pkg/worker/controllers/worker/instance_test.go`,
-        `pkg/worker/controllers/worker/instance_type.go`,
         `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/webhooks/worker/instance_test.go`
       Gate: review
-      Acceptance: AC1.1-AC1.8. `spec.nodeName` added as `InstanceSpec` field 8 and regenerated;
-        `instanceTypeScheduleLabels` exported as `InstanceTypeScheduleLabels` so the webhook shares it;
-        the webhook rejects an unknown node with `NotFound` and an out-of-pool node with `Invalid` on
-        CREATE and on the stop→start transition, and skips both when `stop: true`; the field is
-        forbidden to change while running and free to change while stopped; the reconciler renders
-        exactly one `kubernetes.io/hostname` selector entry from the Node's own hostname label
-        (falling back to the object name when the label is absent) and never writes
-        `pod.spec.nodeName`.
+      Acceptance: AC1.1-AC1.8. `spec.nodeName` added as `InstanceSpec` field 8 and regenerated; on
+        CREATE the webhook rejects a node that does not exist with `NotFound` and a non-"not found"
+        read failure as a retryable error, and validates nothing else about the node — an out-of-pool
+        node is accepted; no UPDATE path re-checks the node; the field is forbidden to change while
+        running and free to change while stopped; the reconciler renders exactly one
+        `kubernetes.io/hostname` selector entry from the Node's own hostname label (falling back to
+        the object name when the label is absent) and never writes `pod.spec.nodeName`.
       Verify: the regeneration recipe above → `go test -race -count=1 ./pkg/worker/... -run Instance` → `make lint`
 
 - [ ] **T4 · Additional volumes tracer bullet**
@@ -490,9 +509,11 @@ regression guard.
   catalog assertions in `value_test.go` rather than by a coverage number.
 
 Cases to cover: `nodeName` unset vs set rendering; a Node whose `kubernetes.io/hostname` label differs
-from its object name; a Node missing the label entirely; an unknown node; an out-of-pool node with each
-missing pool label as its own case; the `stop: true` create skip; the stop→start re-check; immutability
-while running and editability while stopped — for both new fields; zero, one and many volume sources;
+from its object name; a Node missing the label entirely; a Node that cannot be read; an unknown node
+rejected on create, including under `stop: true`; an unmanaged and an out-of-pool node **accepted** on
+create — the cases that pin the deliberate non-check; a start whose pinned node is gone accepted;
+immutability while running and editability while stopped — for both new fields; zero, one and many
+volume sources;
 each of the four sources rendering its Pod volume; `mountPath` non-absolute, duplicated, and equal to
 `spec.volumeMount`; `subPath` absolute and `..`-bearing; an empty source name and an empty host path;
 a volume name that would collide with `workspace` or `sshd-authorized-keys`; an unchanged Instance
@@ -515,7 +536,8 @@ Run through the `gpustack-operator-e2e` skill against a reachable cluster:
    selector entry, no `pod.spec.nodeName`, and is still admitted through Kueue.
 2. An Instance with a persistent mount and a hostPath mount shows both inside `main` and over SSH, with
    `readOnly` actually refusing a write and `subPath` exposing only the subdirectory.
-3. Pinning to a node outside the InstanceType's pool is rejected at creation, naming the node and type.
+3. Pinning to a node that does not exist is rejected at creation; pinning a card-less Instance to an
+   accelerated node is accepted and runs there.
 4. With both settings off, creating a privileged or hostPath Instance is rejected; allowing only
    `instance-host-path-volume-allowed` admits the hostPath one and still rejects the privileged one; an
    Instance created while they were on can still be stopped, edited and restarted.
@@ -528,9 +550,13 @@ Run through the `gpustack-operator-e2e` skill against a reachable cluster:
   and the workspace's distinct lifecycle would come straight back as an `isWorkspace` flag.
 - **Assign `pod.spec.nodeName` directly.** Rejected: it bypasses the scheduler, so Kueue's gating and
   the node's predicate checks never run.
-- **A `spec.nodeSelector` label map instead of one node name.** Rejected: not asked for, and arbitrary
-  label pinning cannot be validated against pool membership the way a node name can. A plausible later
-  extension.
+- **A `spec.nodeSelector` label map instead of one node name.** Rejected: not asked for, and a node
+  name is the one thing that can be checked for existence at admission. A plausible later extension.
+- **Validate the pinned node against the InstanceType's pool.** Planned, implemented, then removed
+  during the build on the user's call: it forbids a legitimate placement — a card-less Instance (a
+  model download) pinned onto a specific accelerated node, which an
+  `instance-type-mixed-on-node: false` cluster would otherwise refuse — for a verdict the scheduler
+  already delivers as "Pending". The pin is an entrance, not a policy.
 - **Restrict additional sources to persistent volumes only.** Considered and explicitly rejected by the
   user: ConfigMap, Secret and hostPath are all wanted, with hostPath gated.
 - **Offer an ephemeral (`emptyDir`) additional source, capped by a `sum(capacity) ≤ localStorage`
@@ -558,7 +584,15 @@ Run through the `gpustack-operator-e2e` skill against a reachable cluster:
 2. Does the downstream Python `GPUInstanceSpec` expose `nodeName` / `additionalVolumes` in the same
    release (separate repo), or is this operator-side only for now?
 3. Any cap on the number of additional volumes? Proposal: none (atomic list).
-4. A design cross-check (read-only Kimi red-team) was started while planning and stalled without a
-   verdict, so the design has not had an independent second reading — chiefly on the Kueue/nodeSelector
-   interaction and on paths that reach a running privileged/hostPath Pod without a fresh CREATE. Worth
-   re-running before T5 lands.
+4. The planning-time Kimi red-team stalled without a verdict, so a Codex review was run over T3's diff
+   instead; it surfaced the Kueue flavor-selection interaction and the residual node-read holes now
+   recorded under Risks. Still unreviewed independently: the paths that reach a running
+   privileged/hostPath Pod without a fresh CREATE (T5).
+5. Pre-existing bug found while building T3, now unrelated to this spec's code: `Setting.ValueBool`
+   returns `false` when the delegated-Secret read fails, dropping the default value that
+   `Setting.Value` already returned alongside the error — unlike its sibling `ValueBoolFromRemote`,
+   which documents and handles exactly that. `Settings.Initialize` seeds every key so the normal path
+   is unaffected, but a transient read failure flips every `true`-default boolean setting
+   (`instance-general-resources-overcommit`, `instance-type-mixed-on-node`,
+   `instance-type-derived-from-node`, `instance-type-drain-when-no-flavors`) to `false` for that call.
+   Worth a separate fix in `pkg/setting`.

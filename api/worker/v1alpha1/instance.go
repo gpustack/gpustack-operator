@@ -60,6 +60,17 @@ type InstanceSpec struct {
 
 	// Stop indicates whether to stop the Instance after it is created.
 	Stop bool `json:"stop,omitempty" protobuf:"varint,7,opt,name=stop"`
+
+	// NodeName pins the Instance to one Kubernetes Node, which must exist when the Instance is
+	// created. It is rendered as the backing Pod's nodeSelector on kubernetes.io/hostname, never
+	// as the Pod's own nodeName, so the scheduler and Kueue admission still mediate placement.
+	// Nothing beyond the node's existence is validated, so a node that cannot serve the referenced
+	// InstanceType leaves the Pod Pending rather than being refused. Empty means no pinning.
+	//
+	// Immutable unless the Instance is stopped.
+	//
+	// +k8s:validation:maxLength=253
+	NodeName string `json:"nodeName,omitempty" protobuf:"bytes,8,opt,name=nodeName"`
 }
 
 // InstanceTemplate defines the template for the Instance to run.

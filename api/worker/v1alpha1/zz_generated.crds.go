@@ -717,6 +717,11 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 											},
 											Nullable: true,
 										},
+										"nodeName": {
+											Description: "NodeName pins the Instance to one Kubernetes Node, which must exist when the Instance is\ncreated. It is rendered as the backing Pod's nodeSelector on kubernetes.io/hostname, never\nas the Pod's own nodeName, so the scheduler and Kueue admission still mediate placement.\nNothing beyond the node's existence is validated, so a node that cannot serve the referenced\nInstanceType leaves the Pod Pending rather than being refused. Empty means no pinning.\nImmutable unless the Instance is stopped.",
+											Type:        "string",
+											MaxLength:   ptr.To[int64](253),
+										},
 										"ports": {
 											Description: "Ports is the list of ports to expose from the Instance.",
 											Type:        "array",

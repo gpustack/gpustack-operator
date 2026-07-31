@@ -97,6 +97,13 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		}
 		errs = append(errs, validateResourceRequests(instType, instRess)...)
 	}
+	nodeErr, err := r.validateNodePin(ctx, inst.Spec.NodeName)
+	if err != nil {
+		return nil, err
+	}
+	if nodeErr != nil {
+		errs = append(errs, nodeErr)
+	}
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
 		errs = append(errs, field.Forbidden(
@@ -191,6 +198,11 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 				field.NewPath("spec.sshPublicKey"), "sshPublicKey is immutable"),
 			)
 		}
+		if inst.Spec.NodeName != instOld.Spec.NodeName {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.nodeName"), "nodeName is immutable"),
+			)
+		}
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Volume, instOld.Spec.Volume) {
 		errs = append(errs, field.Forbidden(
@@ -225,6 +237,10 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 					field.NewPath("spec.type"), inst.Spec.Type))
 			}
 		}
+		// The node pin is deliberately NOT re-validated here: it is checked once, on create, and a
+		// node that has since gone away makes the Pod stay Pending with the scheduler's own reason
+		// rather than block the start.
+		//
 		// Re-validate the resources that will take effect on start with the SAME checks
 		// ValidateCreate applies (sign, accelerator/CPU caps, slice-percentage ranges, and
 		// per-unit RAM / local storage), not just the upper caps — a stopped Instance may have
@@ -248,6 +264,48 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 
 	if len(errs) > 0 {
 		return nil, kerrors.NewInvalid(worker.Kind("Instance"), inst.Name, errs)
+	}
+
+	return nil, nil
+}
+
+// validateNodePin checks that the pinned Node exists, catching a typo at creation rather than
+// leaving the Instance Pending forever. An unpinned Instance passes.
+//
+// Existence is the only thing checked, and only on create. Whether the node can actually serve the
+// Instance's InstanceType is left to the scheduler: a node outside the pool's flavors simply does
+// not schedule, whereas rejecting the pin here would forbid legitimate placements — pinning a
+// card-less Instance (a model download, say) to a specific accelerated node among them.
+//
+// A rejection is returned as the *field.Error; a read failure that is not a plain "not found" is
+// returned as the error instead, so a transient API problem never becomes a permanent rejection.
+func (r *InstanceWebhook) validateNodePin(ctx context.Context, nodeName string) (*field.Error, error) {
+	if nodeName == "" {
+		return nil, nil
+	}
+
+	path := field.NewPath("spec.nodeName")
+	nd := &core.Node{
+		ObjectMeta: meta.ObjectMeta{
+			Name: nodeName,
+		},
+	}
+	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(nd), nd)
+	if err != nil {
+		if !kerrors.IsNotFound(err) {
+			return nil, field.InternalError(path, fmt.Errorf("get node: %w", err))
+		}
+		// A cache miss can be an unsynced informer, so confirm against the live reader — where
+		// only a real "not found" is a permanent rejection. A timeout or an authorization
+		// failure must stay retryable rather than read as a node that does not exist.
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(nd), nd,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			if !kerrors.IsNotFound(err) {
+				return nil, field.InternalError(path, fmt.Errorf("get node: %w", err))
+			}
+			return field.NotFound(path, nodeName), nil
+		}
 	}
 
 	return nil, nil

@@ -602,6 +602,17 @@ func (r *InstanceReconciler) convertPodFromInstance(
 					*inst.Spec.ImagePullSecret,
 				}
 			}(),
+			// Pin a node-pinned Instance through a nodeSelector, never through the Pod's own
+			// nodeName: nodeName skips the scheduler entirely, so Kueue's admission gating and
+			// the node's predicate checks would never run.
+			NodeSelector: func() map[string]string {
+				if inst.Spec.NodeName == "" {
+					return nil
+				}
+				return map[string]string{
+					core.LabelHostname: r.getNodeHostname(ctx, inst.Spec.NodeName),
+				}
+			}(),
 			Volumes: func() (vols []core.Volume) {
 				if inst.Spec.SSHPublicKey != nil {
 					vols = append(vols, core.Volume{
@@ -656,6 +667,32 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	kubemeta.ControlOnWithoutBlock(pod, inst, workercore.SchemeGroupVersionKind("Instance"))
 
 	return pod
+}
+
+// getNodeHostname returns the node's own kubernetes.io/hostname label value, which some providers
+// set to something other than the Node object's name, so the rendered selector must be read from the
+// node rather than assumed. The Pod is rendered once, at creation, and never re-diffed, so a stale
+// cache read here would pin the Pod to a wrong hostname for its whole life: fall back to a live read
+// before giving up.
+//
+// It returns the given name when the node cannot be read at all or carries no hostname label. Both
+// are visible states rather than silent ones — the Pod then selects a hostname nothing matches and
+// stays Pending with the scheduler's own reason, which the Instance phase message surfaces.
+func (r *InstanceReconciler) getNodeHostname(ctx context.Context, nodeName string) string {
+	nd := new(core.Node)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, nd,
+		ctrlclix.WithoutQuorum)
+	if err != nil {
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, nd,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			return nodeName
+		}
+	}
+	if hostname := nd.Labels[core.LabelHostname]; hostname != "" {
+		return hostname
+	}
+	return nodeName
 }
 
 func (r *InstanceReconciler) convertServiceFromPod(

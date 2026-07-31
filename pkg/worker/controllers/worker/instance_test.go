@@ -539,6 +539,90 @@ func TestInstanceReconciler_Reconcile(t *testing.T) {
 	}
 }
 
+// TestConvertPodFromInstance_NodePin asserts how spec.nodeName reaches the backing Pod: as a
+// single kubernetes.io/hostname nodeSelector entry valued from the Node's OWN hostname label —
+// which some providers set to something other than the Node object's name — and never as
+// pod.spec.nodeName, which would bypass the scheduler and Kueue's admission gating. An unset pin
+// renders no selector at all, so an unpinned Instance's Pod is unchanged.
+func TestConvertPodFromInstance_NodePin(t *testing.T) {
+	cases := []struct {
+		name string
+
+		nodeName   string
+		nodeLabels map[string]string
+		nodeAbsent bool
+
+		wantSelector map[string]string
+	}{
+		{
+			name: "unset pin renders no selector",
+		},
+		{
+			name:         "hostname label equal to the object name",
+			nodeName:     "node-1",
+			nodeLabels:   map[string]string{core.LabelHostname: "node-1"},
+			wantSelector: map[string]string{core.LabelHostname: "node-1"},
+		},
+		{
+			name:         "hostname label differing from the object name",
+			nodeName:     "node-1",
+			nodeLabels:   map[string]string{core.LabelHostname: "node-1.internal"},
+			wantSelector: map[string]string{core.LabelHostname: "node-1.internal"},
+		},
+		{
+			name:         "node without a hostname label falls back to the object name",
+			nodeName:     "node-1",
+			nodeLabels:   map[string]string{},
+			wantSelector: map[string]string{core.LabelHostname: "node-1"},
+		},
+		{
+			name:         "unreadable node falls back to the object name",
+			nodeName:     "node-1",
+			nodeAbsent:   true,
+			wantSelector: map[string]string{core.LabelHostname: "node-1"},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			var objs []ctrlcli.Object
+			if c.nodeName != "" && !c.nodeAbsent {
+				objs = append(objs, &core.Node{
+					ObjectMeta: meta.ObjectMeta{Name: c.nodeName, Labels: c.nodeLabels},
+				})
+			}
+			cli := buildInstanceClient(objs...)
+			r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+			inst := &workercore.Instance{
+				ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+				Spec: workercore.InstanceSpec{
+					Type:     "generic-type",
+					NodeName: c.nodeName,
+					InstanceTemplate: workercore.InstanceTemplate{
+						Image: "img",
+						Resources: &workercore.InstanceResources{
+							CPU:          qty("1"),
+							RAM:          qty("2Gi"),
+							LocalStorage: qty("10Gi"),
+						},
+					},
+					Volume: workercore.InstanceVolume{
+						Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+					},
+				},
+			}
+			instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}
+
+			pod := r.convertPodFromInstance(context.Background(), inst, instType)
+
+			assert.Equal(t, c.wantSelector, pod.Spec.NodeSelector, "pod node selector")
+			assert.Empty(t, pod.Spec.NodeName, "pod.spec.nodeName must never be written")
+		})
+	}
+}
+
 // TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain asserts that an
 // SSH-enabled sliced Instance renders the accelerator resource on the workload
 // container (main), not the sshd sidecar, so the device-plugin injects the slicing

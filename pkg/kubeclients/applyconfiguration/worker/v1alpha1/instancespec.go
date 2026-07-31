@@ -34,6 +34,14 @@ type InstanceSpecApplyConfiguration struct {
 	SSHPublicKey *v1.LocalObjectReferenceApplyConfiguration `json:"sshPublicKey,omitempty"`
 	// Stop indicates whether to stop the Instance after it is created.
 	Stop *bool `json:"stop,omitempty"`
+	// NodeName pins the Instance to one Kubernetes Node, which must exist when the Instance is
+	// created. It is rendered as the backing Pod's nodeSelector on kubernetes.io/hostname, never
+	// as the Pod's own nodeName, so the scheduler and Kueue admission still mediate placement.
+	// Nothing beyond the node's existence is validated, so a node that cannot serve the referenced
+	// InstanceType leaves the Pod Pending rather than being refused. Empty means no pinning.
+	//
+	// Immutable unless the Instance is stopped.
+	NodeName *string `json:"nodeName,omitempty"`
 }
 
 // InstanceSpecApplyConfiguration constructs a declarative configuration of the InstanceSpec type for use with
@@ -171,5 +179,13 @@ func (b *InstanceSpecApplyConfiguration) WithSSHPublicKey(value *v1.LocalObjectR
 // If called multiple times, the Stop field is set to the value of the last call.
 func (b *InstanceSpecApplyConfiguration) WithStop(value bool) *InstanceSpecApplyConfiguration {
 	b.Stop = &value
+	return b
+}
+
+// WithNodeName sets the NodeName field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the NodeName field is set to the value of the last call.
+func (b *InstanceSpecApplyConfiguration) WithNodeName(value string) *InstanceSpecApplyConfiguration {
+	b.NodeName = &value
 	return b
 }

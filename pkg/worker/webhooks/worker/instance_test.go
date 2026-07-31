@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +17,7 @@ import (
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/systemname"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
@@ -124,6 +126,179 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 			}
 
 			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// pinnedType builds the InstanceType a pinned Instance references. The pin is not validated against
+// it — only the node's existence is checked — but a running Instance still requires the type to
+// exist.
+func pinnedType(name string) *worker.InstanceType {
+	return &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.InstanceTypeSpec{
+			OS:   "linux",
+			Arch: "amd64",
+		},
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_NodePin pins the whole of the node pin's admission contract:
+// creation rejects a node that does not exist, so a typo is caught rather than leaving the Instance
+// Pending forever, and nothing else about the node is checked. In particular a node outside the
+// referenced InstanceType's pool is accepted by design — forbidding it would block pinning a
+// card-less Instance (a model download, say) onto a specific accelerated node.
+func TestInstanceWebhook_ValidateCreate_NodePin(t *testing.T) {
+	const typeName = "generic-type"
+
+	cases := []struct {
+		name string
+
+		nodeName   string
+		nodeLabels map[string]string
+		nodeAbsent bool
+		stop       bool
+
+		wantErr bool
+	}{
+		{
+			name: "no pin",
+		},
+		{
+			name:     "pin to an existing node",
+			nodeName: "node-1",
+		},
+		{
+			name:       "pin to a node that does not exist",
+			nodeName:   "node-1",
+			nodeAbsent: true,
+			wantErr:    true,
+		},
+		{
+			name:       "pin to an unmanaged node is accepted",
+			nodeName:   "node-1",
+			nodeLabels: map[string]string{},
+		},
+		{
+			name:     "pin to a node outside the pool is accepted",
+			nodeName: "node-1",
+			nodeLabels: map[string]string{
+				systemname.ManagedLabelKey: "true",
+				core.LabelArchStable:       "arm64",
+			},
+		},
+		{
+			name:       "stopped instance still rejects a node that does not exist",
+			nodeName:   "node-1",
+			nodeAbsent: true,
+			stop:       true,
+			wantErr:    true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{pinnedType(typeName)}
+			if c.nodeName != "" && !c.nodeAbsent {
+				objs = append(objs, &core.Node{
+					ObjectMeta: meta.ObjectMeta{Name: c.nodeName, Labels: c.nodeLabels},
+				})
+			}
+			w := newInstanceWebhook(objs...)
+
+			inst := webhookInstance("a", typeName)
+			inst.Spec.NodeName = c.nodeName
+			inst.Spec.Stop = c.stop
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateUpdate_NodePin pins the node pin's mutability contract — frozen while
+// the Instance runs, free while it is stopped — and that no update path re-checks the node. A pin
+// whose node has since gone away still starts: the Pod then stays Pending with the scheduler's own
+// reason instead of the start being blocked.
+func TestInstanceWebhook_ValidateUpdate_NodePin(t *testing.T) {
+	const typeName = "generic-type"
+
+	cases := []struct {
+		name string
+
+		oldNodeName string
+		newNodeName string
+		oldStop     bool
+		newStop     bool
+		nodeAbsent  bool
+
+		wantErr bool
+	}{
+		{
+			name:        "running instance cannot change the pin",
+			oldNodeName: "node-1",
+			newNodeName: "node-2",
+			wantErr:     true,
+		},
+		{
+			name:        "running instance may keep the pin",
+			oldNodeName: "node-1",
+			newNodeName: "node-1",
+		},
+		{
+			name:        "stopped instance may change the pin",
+			oldNodeName: "node-1",
+			newNodeName: "node-2",
+			oldStop:     true,
+			newStop:     true,
+		},
+		{
+			name:        "start accepts a pin",
+			oldNodeName: "node-2",
+			newNodeName: "node-2",
+			oldStop:     true,
+		},
+		{
+			name:        "start accepts a pin whose node is gone",
+			oldNodeName: "node-2",
+			newNodeName: "node-2",
+			oldStop:     true,
+			nodeAbsent:  true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{pinnedType(typeName)}
+			if !c.nodeAbsent {
+				objs = append(objs, &core.Node{
+					ObjectMeta: meta.ObjectMeta{Name: c.newNodeName},
+				})
+			}
+			w := newInstanceWebhook(objs...)
+
+			instOld := webhookInstance("a", typeName)
+			instOld.Spec.NodeName = c.oldNodeName
+			instOld.Spec.Stop = c.oldStop
+			if c.oldStop {
+				instOld.Status.Phase = workerctrl.InstancePhaseStopped
+			}
+			inst := instOld.DeepCopy()
+			inst.Spec.NodeName = c.newNodeName
+			inst.Spec.Stop = c.newStop
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
 			if c.wantErr {
 				assert.Error(t, err)
 			} else {
