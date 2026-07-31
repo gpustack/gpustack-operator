@@ -1,6 +1,6 @@
 # Spec: Instance Node Pinning and Additional Volume Mounts
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -492,9 +492,15 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         both pass with both settings off.
       Verify: `go test -race -count=1 ./pkg/worker/webhooks/worker/...`
 
-- [ ] **T6 · Checkpoint: docs + live e2e**
+- [x] **T6 · Checkpoint: docs + live e2e**
       Blocked by: T3, T4, T5
-      Owns: `docs/walkthrough.md`
+      Owns: `docs/walkthrough.md`,
+        `.claude/skills/gpustack-operator-e2e/cases/case-36.sh` and its row + notes bullet in
+        `.claude/skills/gpustack-operator-e2e/SKILL.md` (added while building: the e2e half of this task
+        is only reproducible as a case in the suite, not as a one-off run),
+        `.claude/skills/gpustack-operator-e2e/cases/case-9.sh` (a pre-existing case whose premise the
+        InstanceType immutability rule made unreachable — it silently measured an unchanged unit spec;
+        now auto-skips with the API's own message instead of failing)
       Acceptance: the walkthrough gains one Instance example carrying `nodeName` and two additional
         mounts. On a live cluster: the Pod lands on the pinned node carrying the expected single
         selector while still being Kueue-admitted (AC1.2, AC1.8); both mounts exist with `readOnly`

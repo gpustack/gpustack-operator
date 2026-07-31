@@ -14,7 +14,10 @@
 #                  and the start-time cap rejects them. (Whether resize-on-start is the desired
 #                  semantics is a separate product question; this case pins the behavior as it stands.)
 # Environment: Any cluster with a materialized general pool. No GPU. Reads the overcommit setting from
-#              the settings Secret and asserts the matching branch.
+#              the settings Secret and asserts the matching branch. AUTO-SKIPS when the unit spec
+#              cannot be shrunk at all — an InstanceType's spec is immutable apart from
+#              displayName/description/inactive, and both questions rest on the shrink taking effect,
+#              so a refused shrink makes them unreachable rather than failed.
 # Inputs:      All real, nothing mocked — the general InstanceType unit spec set to ram=2Gi then shrunk
 #              to 1Gi; INST_A (running) and INST_B (running → stopped), both alpine on the general pool.
 # Expected:    - Q1a — INST_A stops after the shrink; Q1b — INST_A deletes after the shrink;
@@ -34,16 +37,19 @@ INST_B=gpustack-e2e-lifecycle-start   # Q2: stopped → (re)start after shrink
 OVERCOMMIT=$(kubectl -n "$NS" get secret gpustack-settings -o jsonpath='{.data.instance-general-resources-overcommit}' 2>/dev/null | base64 -d 2>/dev/null)
 [ -n "$OVERCOMMIT" ] || OVERCOMMIT=true
 
+# set_unit prints the API's own reply, so a REFUSED patch is visible instead of silently leaving the
+# unit spec at whatever it already was — the whole case turns on the shrink actually taking effect.
 set_unit() { # ram
   kubectl patch instancetypes.worker.gpustack.ai "$IT" --type=merge \
-    -p "{\"spec\":{\"unitResources\":{\"cpu\":\"1\",\"ram\":\"$1\"},\"localStorage\":\"10Gi\"}}" >/dev/null 2>&1
+    -p "{\"spec\":{\"unitResources\":{\"cpu\":\"1\",\"ram\":\"$1\"},\"localStorage\":\"10Gi\"}}" 2>&1
 }
+unit_ram_now() { kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null; }
 
 restore() {
   echo
   echo "[case-9] cleanup: deleting test Instances, restoring unit spec"
   kubectl -n default delete instance "$INST_A" "$INST_B" --ignore-not-found 2>/dev/null || true
-  set_unit "2Gi"
+  set_unit "2Gi" >/dev/null 2>&1
 }
 trap restore EXIT
 
@@ -72,16 +78,17 @@ spec:
 EOF
 }
 
-# Baseline unit spec RAM=2Gi; confirm it stuck (the validating webhook may be briefly unready after
-# a fresh deploy). Instances created now are sized at unitRAM=2Gi.
+# Baseline unit spec RAM=2Gi. What matters is the OBSERVED value, not whether the patch was applied:
+# on a pool whose derived unit spec is already 2Gi the patch is a no-op (and may be refused outright,
+# see the shrink below) while the baseline still holds.
 unit_ram=""
 for _ in $(seq 1 15); do
-  set_unit "2Gi"
-  unit_ram=$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}' 2>/dev/null)
+  base_reply=$(set_unit "2Gi")
+  unit_ram=$(unit_ram_now)
   [ "$unit_ram" = "2Gi" ] && break
   sleep 3
 done
-[ "$unit_ram" = "2Gi" ] || { echo "could not set unit spec on ${IT} (validating webhook not ready?)"; exit 1; }
+[ "$unit_ram" = "2Gi" ] || { echo "unit spec on ${IT} is ram=${unit_ram:-<none>}, not the 2Gi baseline; last reply: ${base_reply}"; exit 1; }
 
 # A running (for Q1) and B running→stopped (for Q2), both sized at unitRAM=2Gi.
 mk_instance "$INST_A"
@@ -93,12 +100,27 @@ wait_phase "$INST_B" Stopped || { echo "instance ${INST_B} did not reach Stopped
 ramB=$(kubectl -n default get instance "$INST_B" -o jsonpath='{.spec.resources.ram}' 2>/dev/null)
 echo "[case-9] ${INST_A} Ready, ${INST_B} Stopped (ram=${ramB}); shrinking ${IT} unitRAM 2Gi → 1Gi"
 
-# Shrink the unit spec below the instances' RAM.
-set_unit "1Gi"
+# Shrink the unit spec below the instances' RAM — the premise BOTH questions rest on.
+shrink_reply=$(set_unit "1Gi")
 for _ in $(seq 1 10); do
-  [ "$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.spec.unitResources.ram}')" = "1Gi" ] && break
+  [ "$(unit_ram_now)" = "1Gi" ] && break
   sleep 2
 done
+# A refused shrink leaves the unit spec at 2Gi, and every reading below would then be measured against
+# a spec that never changed — the start would "fail to re-derive" purely because there is nothing new
+# to re-derive from. Report that as not-applicable rather than as a product verdict.
+if [ "$(unit_ram_now)" != "1Gi" ]; then
+  echo
+  echo "== CASE 9 — SKIPPED =="
+  echo "The unit spec could not be shrunk, so neither question is reachable on this cluster."
+  echo "unitResources.ram is still $(unit_ram_now); the API replied:"
+  echo "  ${shrink_reply}"
+  echo
+  echo "An InstanceType's spec is immutable apart from displayName/description/inactive, so a unit"
+  echo "spec cannot be edited in place at all: reaching these two states needs a cluster/version where"
+  echo "it can, or a different mechanism for changing what a pool charges per unit."
+  exit 0
+fi
 
 # Q1a — a running Instance can still be STOPPED after the unit-spec shrink.
 if kubectl -n default patch instance "$INST_A" --type=merge -p '{"spec":{"stop":true}}' >/dev/null 2>&1 && wait_phase "$INST_A" Stopped; then
