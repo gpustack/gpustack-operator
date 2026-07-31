@@ -491,43 +491,43 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
 	// Construct containers.
-	var containers []core.Container
-	if needSSHD {
-		// Main container.
-		mainC := core.Container{
-			Name:            "main",
-			Image:           inst.Spec.Image,
-			ImagePullPolicy: inst.Spec.ImagePullPolicy,
-			Command:         inst.Spec.Command,
-			SecurityContext: func() *core.SecurityContext {
-				sc := &core.SecurityContext{
-					RunAsUser: ptr.To[int64](0),
-				}
-				if inst.Spec.Privileged {
-					sc.Privileged = ptr.To(true)
-				}
-				return sc
-			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
-			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
-				return core.ContainerPort{
-					Name:          getPortName(p),
-					Protocol:      p.Protocol,
-					ContainerPort: p.Port,
-				}
-			}),
-			Env: slicex.Transform(inst.Spec.Env, func(e workercore.InstanceEnvVar) core.EnvVar {
-				return core.EnvVar{
-					Name:  e.Name,
-					Value: e.Value,
-				}
-			}),
-			VolumeMounts: []core.VolumeMount{{
-				Name:      "workspace",
-				MountPath: inst.Spec.VolumeMount,
-			}},
-		}
+	// Main container.
+	mainC := core.Container{
+		Name:            "main",
+		Image:           inst.Spec.Image,
+		ImagePullPolicy: inst.Spec.ImagePullPolicy,
+		Command:         inst.Spec.Command,
+		SecurityContext: func() *core.SecurityContext {
+			sc := &core.SecurityContext{
+				RunAsUser: ptr.To[int64](0),
+			}
+			if inst.Spec.Privileged {
+				sc.Privileged = ptr.To(true)
+			}
+			return sc
+		}(),
+		Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
+		Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
+			return core.ContainerPort{
+				Name:          getPortName(p),
+				Protocol:      p.Protocol,
+				ContainerPort: p.Port,
+			}
+		}),
+		Env: slicex.Transform(inst.Spec.Env, func(e workercore.InstanceEnvVar) core.EnvVar {
+			return core.EnvVar{
+				Name:  e.Name,
+				Value: e.Value,
+			}
+		}),
+		VolumeMounts: []core.VolumeMount{{
+			Name:      "workspace",
+			MountPath: inst.Spec.VolumeMount,
+		}},
+	}
+	containers := []core.Container{mainC}
 
+	if needSSHD {
 		// SSHD container.
 		sshdC := core.Container{
 			Name: "sshd",
@@ -574,44 +574,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 			}(),
 		}
 
-		containers = []core.Container{mainC, sshdC}
-	} else {
-		// Main container.
-		mainC := core.Container{
-			Name:            "main",
-			Image:           inst.Spec.Image,
-			ImagePullPolicy: inst.Spec.ImagePullPolicy,
-			Command:         inst.Spec.Command,
-			SecurityContext: func() *core.SecurityContext {
-				sc := &core.SecurityContext{
-					RunAsUser: ptr.To[int64](0),
-				}
-				if inst.Spec.Privileged {
-					sc.Privileged = ptr.To(true)
-				}
-				return sc
-			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
-			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
-				return core.ContainerPort{
-					Name:          getPortName(p),
-					Protocol:      p.Protocol,
-					ContainerPort: p.Port,
-				}
-			}),
-			Env: slicex.Transform(inst.Spec.Env, func(e workercore.InstanceEnvVar) core.EnvVar {
-				return core.EnvVar{
-					Name:  e.Name,
-					Value: e.Value,
-				}
-			}),
-			VolumeMounts: []core.VolumeMount{{
-				Name:      "workspace",
-				MountPath: inst.Spec.VolumeMount,
-			}},
-		}
-
-		containers = []core.Container{mainC}
+		containers = append(containers, sshdC)
 	}
 
 	// Construct pod.
