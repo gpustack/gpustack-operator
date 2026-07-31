@@ -11,9 +11,9 @@ Kubernetes Node: the reconciler renders it as the backing Pod's `nodeSelector`
 scheduler and Kueue admission. Second, a new `spec.additionalVolumes[]` lifts the "one volume, always
 the workspace" limit: an Instance can mount any number of extra volumes — an InstancePersistentVolume
 reference, a ConfigMap, a Secret, or a host path — at arbitrary paths, with `readOnly` and `subPath`.
-Because a host path (like `spec.privileged`) lets an Instance cross the node
-boundary, both are gated at CREATE time behind a new default-off administrator setting
-`instance-privileged-host-access`; UPDATE is deliberately never gated, so flipping the setting off can
+Because a host path (like `spec.privileged`) lets an Instance cross the node boundary, each is gated at
+CREATE time behind its own default-off administrator setting — `instance-privileged-allowed` and
+`instance-host-path-volume-allowed`; UPDATE is deliberately never gated, so flipping a setting off can
 never block an already-deployed Instance from being edited or restarted. The existing `spec.volume` /
 `spec.volumeMount` workspace contract is unchanged, so no downstream schema rename or data migration
 is required.
@@ -33,8 +33,9 @@ is required.
 - Keep the workspace contract (`spec.volume` + `spec.volumeMount`, default `/workspace`) byte-identical
   when the new fields are unset, so existing Instances, the downstream Python `GPUInstanceSpec`, and its
   persisted rows need no migration.
-- Make the two host-boundary escapes (`spec.privileged`, a `hostPath` additional volume) an explicit,
-  auditable cluster decision rather than something any Instance author can take.
+- Make each of the two host-boundary escapes (`spec.privileged`, a `hostPath` additional volume) an
+  explicit, auditable and **independent** cluster decision rather than something any Instance author can
+  take — `privileged` grants strictly more than `hostPath`, so allowing one must not imply the other.
 
 ### Non-Goals
 
@@ -55,7 +56,7 @@ is required.
 
 ## Proposal
 
-An Instance gains two optional spec fields and the cluster gains one setting. Everything else about the
+An Instance gains two optional spec fields and the cluster gains two settings. Everything else about the
 Instance lifecycle — stop/start, phases, the InstanceType and ClusterQueue watches, resource sizing —
 is untouched.
 
@@ -76,10 +77,11 @@ expose one subdirectory of a shared volume, and inject configuration or credenti
 or Secret.
 
 #### Story 4
-As a cluster administrator, I want host-path mounts and privileged mode to require an explicit
-cluster-level opt-in, so that no Instance author can reach the node's filesystem or escape the
-container boundary unless I have allowed it — while Instances already deployed keep working and stay
-editable if I later turn the switch off.
+As a cluster administrator, I want host-path mounts and privileged mode to each require their own
+explicit cluster-level opt-in, so that no Instance author can reach the node's filesystem or escape the
+container boundary unless I have allowed that specific thing — I can hand out node-path mounts without
+handing out privileged — while Instances already deployed keep working and stay editable if I later turn
+a switch off.
 
 ### Core Features & Acceptance Criteria
 
@@ -141,19 +143,25 @@ An atomic list; each entry carries a mount target plus exactly one source.
   existence at admission (consistent with `spec.volume.persistent`); a missing reference surfaces as
   the Pod's own event and Pending reason.
 
-#### F3 — Administrator gate: `instance-privileged-host-access` (CREATE only)
+#### F3 — Administrator gates: `instance-privileged-allowed` and `instance-host-path-volume-allowed` (CREATE only)
 
-A new editable boolean Setting, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_HOST_ACCESS`, default
-`false`.
+Two new editable boolean Settings, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED` and
+`GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED`, both default `false`. They are independent: `privileged`
+grants strictly more than `hostPath` (devices and the kernel surface on top of the filesystem), and the
+downstream product exposes `additionalVolumes` but not `privileged`, so one combined switch would force
+an administrator opening node-path mounts to also open privileged to every CR author.
 
-- **AC3.1** Setting `false` + CREATE with `spec.privileged: true` → `field.Forbidden("spec.privileged")`
-  naming the setting.
-- **AC3.2** Setting `false` + CREATE with any `additionalVolumes[i].hostPath` →
-  `field.Forbidden("spec.additionalVolumes[i].hostPath")` naming the setting.
-- **AC3.3** Setting `true` → both are accepted; rendering is unchanged from an ungated build.
-- **AC3.4** UPDATE never enforces the gate — with the setting `false`, an existing Instance can still be
-  updated, edited while stopped, and restarted without the gate rejecting it.
-- **AC3.5** The setting appears in the `docs/settings.md` online-adjustable table and in the settings
+- **AC3.1** `instance-privileged-allowed` `false` + CREATE with `spec.privileged: true` →
+  `field.Forbidden("spec.privileged")` naming that setting.
+- **AC3.2** `instance-host-path-volume-allowed` `false` + CREATE with any
+  `additionalVolumes[i].hostPath` → `field.Forbidden("spec.additionalVolumes[i].hostPath")` naming that
+  setting.
+- **AC3.3** Each setting gates only its own field: `privileged` allowed + `hostPath` denied rejects only
+  the hostPath entry, and the reverse rejects only `spec.privileged`. With both `true` neither is
+  rejected and rendering is unchanged from an ungated build.
+- **AC3.4** UPDATE never enforces either gate — with both `false`, an existing Instance can still be
+  updated, edited while stopped, and restarted without a gate rejecting it.
+- **AC3.5** Both settings appear in the `docs/settings.md` online-adjustable table and in the settings
   catalog test.
 
 ### Notes / Constraints / Caveats
@@ -175,8 +183,8 @@ A new editable boolean Setting, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_HOST_A
   API surface. A missing ConfigMap/Secret surfaces as the Pod's own event, per AC2.8.
 - `pkg/setting` caches a resolved value for 30s in a package-level cache with **no exported flush**
   (`pkg/setting/types.go:112`), and the default path never populates it. So the F3 rule is written as a
-  pure helper over the resolved boolean: seeding the setting to `true` in one test would otherwise leak
-  into every later test in the package.
+  pure helper over the two already-resolved booleans: seeding a setting to `true` in one test would
+  otherwise leak into every later test in the package.
 - The webhook and reconciler both read Nodes through the manager's cached client, and the worker's
   ServiceAccount binds `cluster-admin`, so the node lookups need no RBAC change.
 - `InstanceSpec` is not used as a map key (unlike `InstanceTypeSpec`), so a slice field is admissible.
@@ -185,8 +193,14 @@ A new editable boolean Setting, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_HOST_A
   and no data migration.
 - The membership check reuses `instanceTypeScheduleLabels` + `systemname.ManagedLabelKey`; it does not
   duplicate the label algebra.
-- `spec.privileged` is not exposed by the downstream product's Instance spec today, so defaulting the
-  gate to off affects only direct CR authors.
+- `spec.privileged` is not exposed by the downstream product's Instance spec today, so defaulting its
+  gate to off affects only direct CR authors. That asymmetry — the product will surface
+  `additionalVolumes` but not `privileged` — is also why the two gates are separate settings: a combined
+  switch would make "let product users mount a node path" imply "let any CR author run privileged".
+- A Setting's persisted value is keyed by its name in the `gpustack-settings` Secret and the catalog is
+  fixed, so a name that leaves the catalog leaves an orphaned key and its `true` value does not carry
+  over to a replacement name. Splitting the gate later would therefore have silently tightened policy on
+  upgrade; splitting up front avoids that migration entirely.
 - Pool-level quota is unchanged: pinning narrows placement, it does not reserve.
 
 ### Boundaries
@@ -195,19 +209,24 @@ A new editable boolean Setting, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_HOST_A
   admission (fail fast with typed `field` errors) rather than in the reconciler; keep the reconcile
   level-based and idempotent; run `make generate` and `make lint` after API edits; mount additional
   volumes into `main` only.
-- **Ask first:** extending the gate to the UPDATE path; splitting the gate into two settings; exposing
-  any further Pod scheduling knob (affinity/tolerations/nodeSelector map); mounting additional volumes
-  into the `sshd` sidecar; validating referenced volume objects' existence.
+- **Ask first:** extending either gate to the UPDATE path; restricting `hostPath` to an allowlist of node
+  paths; exposing any further Pod scheduling knob (affinity/tolerations/nodeSelector map); mounting
+  additional volumes into the `sshd` sidecar; validating referenced volume objects' existence.
 - **Never:** write `pod.spec.nodeName` (it bypasses the scheduler and Kueue gating); introduce a
   cross-namespace volume reference; change `spec.volume`'s full immutability or `spec.volumeMount`'s
   default; reuse or renumber an existing protobuf field number; touch the InstanceType / Kueue chain.
 
 ### Risks and Mitigations
 
-- A `hostPath` mount plus `privileged` lets an Instance read the node's filesystem and other tenants'
-  data → default-off administrator setting, CREATE-time rejection, documented in `docs/settings.md`.
-- The CREATE-only gate leaves a bypass: an existing Instance can be stopped, patched to
-  `privileged: true` or given a `hostPath` mount, and restarted while the setting is off → recorded as
+- A `hostPath` mount, or `privileged`, lets an Instance read the node's filesystem and other tenants'
+  data → one default-off administrator setting each, CREATE-time rejection, documented in
+  `docs/settings.md`.
+- The `main` container runs as root (`RunAsUser: 0`), so an allowed `hostPath` mount of `/` is already
+  total over the node's filesystem — the second gate buys separation of *kind* (filesystem vs. devices
+  and kernel), not a weaker grant → recorded as an Ask-first follow-up (a `hostPath` path allowlist),
+  deliberately out of scope here.
+- The CREATE-only gates leave a bypass: an existing Instance can be stopped, patched to
+  `privileged: true` or given a `hostPath` mount, and restarted while its gate is off → recorded as
   Open Question 1; the narrow fix (reject only `false → true` transitions on UPDATE) still never blocks
   an already-deployed Instance.
 - A pinned Instance can pass pool-level Kueue quota and then sit Pending because the pinned node is
@@ -278,8 +297,9 @@ pkg/worker/controllers/worker/instance_type.go  # instanceTypeScheduleLabels →
                                                 # pool-label algebra instead of restating it
 pkg/worker/webhooks/worker/instance.go          # node-pin validation (T3), volume validation (T4),
                                                 # the CREATE-only host-access gate (T5)
-pkg/worker/settings/value.go                    # the instance-privileged-host-access Setting
-docs/settings.md                                # the new Setting row
+pkg/worker/settings/value.go                    # the instance-privileged-allowed and
+                                                # instance-host-path-volume-allowed Settings
+docs/settings.md                                # the two new Setting rows
 docs/walkthrough.md                             # a worked pinned + extra-mount Instance example
 ```
 
@@ -326,21 +346,36 @@ type InstanceAdditionalVolume struct {
 	Secret *core.LocalObjectReference `json:"secret,omitempty" protobuf:"bytes,6,opt,name=secret"`
 
 	// HostPath mounts a path from the node. It crosses the node boundary, so creating an Instance
-	// that uses it requires the instance-privileged-host-access Setting.
+	// that uses it requires the instance-host-path-volume-allowed Setting.
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,7,opt,name=hostPath"`
 }
 ```
 
-The new Setting follows the existing catalog declaration verbatim:
+The new Settings follow the existing catalog declaration verbatim:
 
 ```go
-// InstancePrivilegedHostAccess allows an Instance to request privileged mode or a hostPath
-// additional volume. Both cross the node boundary, so the gate is enforced on CREATE only:
-// an already-created Instance stays editable and restartable after an administrator turns it off.
-InstancePrivilegedHostAccess = settings.NewEditable(
-	"instance-privileged-host-access",
-	"Indicates to allow Instances to request privileged mode or hostPath volume mounts. "+
-		"Enforced when creating an Instance only, so disabling it never blocks an existing Instance.",
+// InstancePrivilegedAllowed indicates to allow Instances to request privileged mode,
+// which escapes the container boundary and exposes the node's devices and kernel surface.
+// Enforced when creating an Instance only: turning it off never blocks an existing
+// Instance from being updated, edited while stopped, or restarted.
+InstancePrivilegedAllowed = settings.NewEditable(
+	"instance-privileged-allowed",
+	"Indicates to allow Instances to request privileged mode. "+
+		"Enforced when creating an Instance only, "+
+		"so disabling it never blocks an existing Instance from being updated or restarted.",
+	setting.InitializeFromEnv("false"),
+	setting.AllowBool(),
+)
+
+// InstanceHostPathVolumeAllowed indicates to allow Instances to mount hostPath volumes,
+// which reaches the node's filesystem. It is separate from InstancePrivilegedAllowed
+// because it grants strictly less: the filesystem, but not the node's devices or kernel.
+// Enforced when creating an Instance only, like InstancePrivilegedAllowed.
+InstanceHostPathVolumeAllowed = settings.NewEditable(
+	"instance-host-path-volume-allowed",
+	"Indicates to allow Instances to mount hostPath volumes. "+
+		"Enforced when creating an Instance only, "+
+		"so disabling it never blocks an existing Instance from being updated or restarted.",
 	setting.InitializeFromEnv("false"),
 	setting.AllowBool(),
 )
@@ -368,13 +403,15 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         This is what makes T3 and T4 one-place edits instead of two.
       Verify: `go test -race -count=1 ./pkg/worker/controllers/worker/... -run 'TestConvertPodFromInstance|TestInstanceReconciler|TestGetResourceRequirements'`
 
-- [ ] **T2 · Setting `instance-privileged-host-access`**
+- [x] **T2 · Settings `instance-privileged-allowed` and `instance-host-path-volume-allowed`**
       Blocked by: None
       Owns: `pkg/worker/settings/value.go`, `pkg/worker/settings/value_test.go`, `docs/settings.md`
-      Acceptance: AC3.5. An editable boolean Setting named `instance-privileged-host-access`,
-        default `"false"`, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_HOST_ACCESS`; the catalog test
-        pins its name, default, editability and env mapping the way the existing switches are pinned;
-        `docs/settings.md` gains its row in the online-adjustable table.
+      Acceptance: AC3.5. Two editable boolean Settings, `instance-privileged-allowed` and
+        `instance-host-path-volume-allowed`, both default `"false"`, seeded from
+        `GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED` / `GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED`; one
+        table-driven catalog test pins both names, defaults, editability and env mapping the way the
+        existing switches are pinned; `docs/settings.md` gains a row for each in the online-adjustable
+        table, each stating that enforcement is CREATE-only.
       Verify: `go test -race -count=1 ./pkg/worker/settings/...`
 
 - [ ] **T3 · Node pinning tracer bullet**
@@ -409,14 +446,15 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         field is immutable while running and editable while stopped.
       Verify: the regeneration recipe above → `go test -race -count=1 ./pkg/worker/... -run Instance` → `make lint`
 
-- [ ] **T5 · CREATE-only host-access gate**
+- [ ] **T5 · CREATE-only host-access gates**
       Blocked by: T2, T4
       Owns: `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/webhooks/worker/instance_test.go`
       Gate: review
-      Acceptance: AC3.1-AC3.4. The rule is a pure helper over the already-resolved boolean, so it can
-        be table-tested exhaustively without touching the un-flushable 30s setting cache; the wiring
-        is covered by one test on the default-`false` path, which never populates that cache. UPDATE
-        is never gated — a stopped edit and a restart both pass with the setting off.
+      Acceptance: AC3.1-AC3.4. The rule is a pure helper over the two already-resolved booleans, so it
+        can be table-tested exhaustively without touching the un-flushable 30s setting cache; each
+        setting gates only its own field, and the wiring is covered by one test on the default-`false`
+        path, which never populates that cache. UPDATE is never gated — a stopped edit and a restart
+        both pass with both settings off.
       Verify: `go test -race -count=1 ./pkg/worker/webhooks/worker/...`
 
 - [ ] **T6 · Checkpoint: docs + live e2e**
@@ -426,9 +464,10 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         mounts. On a live cluster: the Pod lands on the pinned node carrying the expected single
         selector while still being Kueue-admitted (AC1.2, AC1.8); both mounts exist with `readOnly`
         and `subPath` honored (AC2.2, AC2.3); a mount is visible over SSH with no sidecar change
-        (AC2.7); with the setting off a privileged / hostPath CREATE is rejected (AC3.1, AC3.2) while
-        an Instance created while it was on still updates and restarts (AC3.4); teardown leaves no
-        orphan Pod or Service.
+        (AC2.7); with both settings off a privileged / hostPath CREATE is rejected (AC3.1, AC3.2),
+        allowing only `instance-host-path-volume-allowed` lets a hostPath Instance through while a
+        privileged one is still rejected (AC3.3), and an Instance created while they were on still
+        updates and restarts (AC3.4); teardown leaves no orphan Pod or Service.
       Verify: `gpustack-operator-e2e` skill run, plus `kubectl get pod <instance> -o yaml` assertions
 
 ### Test Plan
@@ -457,8 +496,9 @@ while running and editability while stopped — for both new fields; zero, one a
 each of the four sources rendering its Pod volume; `mountPath` non-absolute, duplicated, and equal to
 `spec.volumeMount`; `subPath` absolute and `..`-bearing; an empty source name and an empty host path;
 a volume name that would collide with `workspace` or `sshd-authorized-keys`; an unchanged Instance
-re-rendering identically; the gate helper across `{allowed, denied} × {privileged, hostPath, both,
-neither}`; and UPDATE passing while the gate is off.
+re-rendering identically; the gate helper across the full cross-product of `{privileged allowed?} ×
+{hostPath allowed?} × {requests privileged?} × {requests hostPath?}` — which is what proves each setting
+gates only its own field; and UPDATE passing while both gates are off.
 
 #### Integration tests
 
@@ -476,8 +516,9 @@ Run through the `gpustack-operator-e2e` skill against a reachable cluster:
 2. An Instance with a persistent mount and a hostPath mount shows both inside `main` and over SSH, with
    `readOnly` actually refusing a write and `subPath` exposing only the subdirectory.
 3. Pinning to a node outside the InstanceType's pool is rejected at creation, naming the node and type.
-4. With the setting off, creating a privileged or hostPath Instance is rejected; an Instance created
-   while it was on can still be stopped, edited and restarted.
+4. With both settings off, creating a privileged or hostPath Instance is rejected; allowing only
+   `instance-host-path-volume-allowed` admits the hostPath one and still rejects the privileged one; an
+   Instance created while they were on can still be stopped, edited and restarted.
 5. Teardown leaves no orphan Pod or Service.
 
 ## Alternatives
@@ -498,16 +539,20 @@ Run through the `gpustack-operator-e2e` skill against a reachable cluster:
   workspace. Dropping the source removes both the trap and the check.
 - **No administrator gate at all.** Rejected: hostPath in a multi-tenant GPU-instance product is a node
   escape, and tightening it later would be a breaking change.
-- **Two independent settings, one for `privileged` and one for `hostPath`.** Rejected: both grant the
-  same class of access — crossing the container/node boundary — so one switch is the auditable unit an
-  administrator actually reasons about, and a second knob would double the catalog for a distinction
-  nobody has asked to make. Splitting later is additive and non-breaking if the need appears.
+- **One combined setting `instance-privileged-host-access` for both escapes.** Initially planned, then
+  rejected during the build: `privileged` grants strictly more than `hostPath` (devices and the kernel
+  surface on top of the filesystem), and the downstream product exposes `additionalVolumes` but not
+  `privileged` — so one switch would force an administrator opening node-path mounts to also open
+  privileged to every CR author. Deferring the split was not free either: a Setting's value is persisted
+  under its name in the `gpustack-settings` Secret, so a later rename would silently reset a
+  previously-allowed cluster to denied on upgrade. Two switches cost one extra catalog row, one extra
+  docs row and one extra table case.
 - **Validate referenced volume objects' existence at admission.** Rejected: inconsistent with today's
   `spec.volume.persistent`, and it would reject a legitimate concurrent create.
 
 ## Open Questions
 
-1. The CREATE-only gate leaves a stop → patch → start bypass. Keep it exactly as decided, or tighten
+1. The CREATE-only gates leave a stop → patch → start bypass. Keep them exactly as decided, or tighten
    UPDATE to reject only a `false → true` transition (which still never blocks an already-deployed
    Instance)?
 2. Does the downstream Python `GPUInstanceSpec` expose `nodeName` / `additionalVolumes` in the same

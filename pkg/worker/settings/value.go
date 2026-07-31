@@ -94,6 +94,32 @@ var (
 		setting.AllowBlank(),
 	)
 
+	// InstancePrivilegedAllowed indicates to allow Instances to request privileged mode,
+	// which escapes the container boundary and exposes the node's devices and kernel surface.
+	// Enforced when creating an Instance only: turning it off never blocks an existing
+	// Instance from being updated, edited while stopped, or restarted.
+	InstancePrivilegedAllowed = settings.NewEditable(
+		"instance-privileged-allowed",
+		"Indicates to allow Instances to request privileged mode. "+
+			"Enforced when creating an Instance only, "+
+			"so disabling it never blocks an existing Instance from being updated or restarted.",
+		setting.InitializeFromEnv("false"),
+		setting.AllowBool(),
+	)
+
+	// InstanceHostPathVolumeAllowed indicates to allow Instances to mount hostPath volumes,
+	// which reaches the node's filesystem. It is separate from InstancePrivilegedAllowed
+	// because it grants strictly less: the filesystem, but not the node's devices or kernel.
+	// Enforced when creating an Instance only, like InstancePrivilegedAllowed.
+	InstanceHostPathVolumeAllowed = settings.NewEditable(
+		"instance-host-path-volume-allowed",
+		"Indicates to allow Instances to mount hostPath volumes. "+
+			"Enforced when creating an Instance only, "+
+			"so disabling it never blocks an existing Instance from being updated or restarted.",
+		setting.InitializeFromEnv("false"),
+		setting.AllowBool(),
+	)
+
 	// InstanceType.
 
 	// NodeManagementManual indicates to skip auto-managing nodes.
