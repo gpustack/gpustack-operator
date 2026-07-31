@@ -3,7 +3,7 @@ package nvidia
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"sync"
 	"testing"
 
@@ -394,7 +394,7 @@ func TestReserveMigInstance_ConcurrentSameCard(t *testing.T) {
 
 	assert.Equal(t, n+1, drv.createCalls, "one create per distinct pod (n on the card + 1 sibling), no double-create")
 	got := append([]int32(nil), starts...)
-	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
+	slices.Sort(got)
 	assert.Equal(t, []int32{0, 2, 4, 6}, got, "distinct non-overlapping slots")
 
 	select {

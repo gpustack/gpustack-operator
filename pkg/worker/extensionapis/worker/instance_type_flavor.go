@@ -1,9 +1,10 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -137,25 +138,41 @@ func (h *InstanceTypeFlavorHandler) OnList(ctx context.Context, opts ctrlcli.Lis
 		})
 	}
 
-	sort.Slice(list.Items, func(i, j int) bool {
-		a, b := &list.Items[i].Spec, &list.Items[j].Spec
-		if a.Manufacturer != b.Manufacturer {
-			return a.Manufacturer < b.Manufacturer
-		}
-		if a.Product != b.Product {
-			return a.Product < b.Product
-		}
-		if a.Memory != b.Memory {
-			return lessInstanceTypeFlavorMemory(a.Memory, b.Memory)
-		}
-		// Stable tiebreak by group identity, so per-CPU rows (aware) order deterministically.
-		if a.GeneralGroup != b.GeneralGroup {
-			return a.GeneralGroup < b.GeneralGroup
-		}
-		return a.AcceleratorGroup < b.AcceleratorGroup
-	})
+	slices.SortFunc(list.Items, compareInstanceTypeFlavor)
 
 	return list, nil
+}
+
+// compareInstanceTypeFlavor orders the catalog by manufacturer, product, then memory, with group
+// identity as the tiebreak so per-CPU rows (awareness on) order deterministically.
+//
+// It is antisymmetric on every key, which is what slices.SortFunc requires: compare(x, y) is always
+// the negation of compare(y, x). Memory is the key where that takes care — it is ordered by a custom
+// two-way less over quantity strings, and two different strings can parse to the same quantity
+// ("16Gi" vs "16384Mi"), so neither is less. Both directions are therefore asked before falling back
+// to the strings themselves, which the inequality guard proves differ; returning a fixed sign
+// instead would make both directions agree and leave the sort order undefined.
+func compareInstanceTypeFlavor(x, y worker.InstanceTypeFlavor) int {
+	a, b := &x.Spec, &y.Spec
+	if a.Manufacturer != b.Manufacturer {
+		return cmp.Compare(a.Manufacturer, b.Manufacturer)
+	}
+	if a.Product != b.Product {
+		return cmp.Compare(a.Product, b.Product)
+	}
+	if a.Memory != b.Memory {
+		if lessInstanceTypeFlavorMemory(a.Memory, b.Memory) {
+			return -1
+		}
+		if lessInstanceTypeFlavorMemory(b.Memory, a.Memory) {
+			return 1
+		}
+		return cmp.Compare(a.Memory, b.Memory)
+	}
+	if a.GeneralGroup != b.GeneralGroup {
+		return cmp.Compare(a.GeneralGroup, b.GeneralGroup)
+	}
+	return cmp.Compare(a.AcceleratorGroup, b.AcceleratorGroup)
 }
 
 // OnGet resolves a single flavor by name against the same aggregated catalog OnList produces. The

@@ -1,6 +1,9 @@
 package device
 
-import "sort"
+import (
+	"cmp"
+	"slices"
+)
 
 // ComputeRemainingProfiles counts, per profile name, how many more hardware GPU
 // partitions can still be created on a card given its occupied placement intervals: for
@@ -150,7 +153,7 @@ func ProfileCountSlice(counts map[string]int32) []AcceleratorProfileCount {
 	for name, count := range counts {
 		out = append(out, AcceleratorProfileCount{Name: name, Count: count})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b AcceleratorProfileCount) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 

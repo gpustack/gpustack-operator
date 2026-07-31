@@ -288,6 +288,92 @@ func TestInstanceTypeFlavorWatchState_Apply(t *testing.T) {
 
 // TestResourceFlavorToSpec pins the ok=false gates the watch and list share: a draining flavor and a
 // flavor without operator pool identity contribute nothing to the catalog.
+// TestCompareInstanceTypeFlavor pins the ordering contract slices.SortFunc requires: the comparator
+// must be antisymmetric, i.e. compare(x, y) == -compare(y, x) for every pair. Memory is the key that
+// can break it — it is ordered by a custom two-way less over quantity strings, so two different
+// strings parsing to the same quantity leave neither one "less", and widening that to a fixed sign
+// would make both directions agree and leave the sort order undefined.
+func TestCompareInstanceTypeFlavor(t *testing.T) {
+	flavor := func(manufacturer, product, memory, generalGroup, acceleratorGroup string) worker.InstanceTypeFlavor {
+		return worker.InstanceTypeFlavor{Spec: worker.InstanceTypeFlavorSpec{
+			Manufacturer:     manufacturer,
+			Product:          product,
+			Memory:           memory,
+			GeneralGroup:     generalGroup,
+			AcceleratorGroup: acceleratorGroup,
+		}}
+	}
+
+	cases := []struct {
+		name string
+		x, y worker.InstanceTypeFlavor
+		want int // sign of compare(x, y): -1 x first, 0 equal, +1 y first
+	}{
+		{
+			name: "identical flavors compare equal",
+			x:    flavor("nvidia", "H100", "81920Mi", "generic", "nvidia-h100"),
+			y:    flavor("nvidia", "H100", "81920Mi", "generic", "nvidia-h100"),
+			want: 0,
+		},
+		{
+			name: "manufacturer wins over everything else",
+			x:    flavor("amd", "MI300", "999999Mi", "generic", "amd-mi300"),
+			y:    flavor("nvidia", "A10G", "1Mi", "generic", "nvidia-a10g"),
+			want: -1,
+		},
+		{
+			name: "memory ordered by parsed quantity, not by string",
+			// "9Gi" sorts before "10Gi" numerically while sorting after it as a string.
+			x:    flavor("nvidia", "A10G", "9Gi", "generic", "nvidia-a10g"),
+			y:    flavor("nvidia", "A10G", "10Gi", "generic", "nvidia-a10g"),
+			want: -1,
+		},
+		{
+			// The regression case: different strings, same quantity. Neither is less, so the
+			// comparator must fall through to the strings to stay antisymmetric.
+			name: "equal quantity written differently falls back to the strings",
+			x:    flavor("nvidia", "A10G", "16384Mi", "generic", "nvidia-a10g"),
+			y:    flavor("nvidia", "A10G", "16Gi", "generic", "nvidia-a10g"),
+			want: -1, // "16384Mi" < "16Gi"
+		},
+		{
+			name: "unparseable memory falls back to the strings",
+			x:    flavor("nvidia", "A10G", "not-a-quantity", "generic", "nvidia-a10g"),
+			y:    flavor("nvidia", "A10G", "16Gi", "generic", "nvidia-a10g"),
+			want: 1, // "not-a-quantity" > "16Gi"
+		},
+		{
+			name: "group identity is the last tiebreak",
+			x:    flavor("nvidia", "A10G", "16Gi", "generic", "nvidia-a10g"),
+			y:    flavor("nvidia", "A10G", "16Gi", "generic", "nvidia-a10g-2"),
+			want: -1,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got := compareInstanceTypeFlavor(c.x, c.y)
+			assert.Equal(t, c.want, sign(got), "compare(x, y)")
+			// The contract itself: reversing the arguments must reverse the sign.
+			assert.Equal(t, -sign(got), sign(compareInstanceTypeFlavor(c.y, c.x)),
+				"compare(y, x) must be the negation of compare(x, y)")
+		})
+	}
+}
+
+// sign normalizes a comparator result to -1, 0 or 1.
+func sign(v int) int {
+	switch {
+	case v < 0:
+		return -1
+	case v > 0:
+		return 1
+	default:
+		return 0
+	}
+}
+
 func TestResourceFlavorToSpec(t *testing.T) {
 	t.Run("a draining flavor contributes nothing", func(t *testing.T) {
 		_, ok := resourceFlavorToSpec(draining(a10gFlavor("rf-a", "amd-epyc-7763")), false)

@@ -123,3 +123,17 @@ func Any[T any, S ~[]T](s S, f func(int) bool) bool {
 	}
 	return false
 }
+
+// CompareTrueFirst orders a boolean key so that true sorts before false, returning the
+// three-way result slices.SortFunc expects: negative when a is true and b is not, positive
+// when b is true and a is not, zero when they agree.
+func CompareTrueFirst(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return -1
+	default:
+		return 1
+	}
+}

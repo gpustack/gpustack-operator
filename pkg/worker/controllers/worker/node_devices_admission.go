@@ -1,10 +1,11 @@
 package worker
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -28,6 +29,7 @@ import (
 	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
+	"gpustack.ai/gpustack/pkg/utils/slicex"
 )
 
 const (
@@ -205,15 +207,16 @@ func mergeDemand(demands []familyDemand, d familyDemand) []familyDemand {
 // one, then by descending per-card units — so the greedy fit in nodeDevicesFeasibility
 // never spends a card a tighter demand needed, and so the verdict is deterministic.
 func sortDemands(demands []familyDemand) {
-	sort.SliceStable(demands, func(i, j int) bool {
-		a, b := &demands[i], &demands[j]
-		if (a.family == nodefeature.ResourceFamilyPartitioned) != (b.family == nodefeature.ResourceFamilyPartitioned) {
-			return a.family == nodefeature.ResourceFamilyPartitioned
+	slices.SortStableFunc(demands, func(a, b familyDemand) int {
+		partitionedA := a.family == nodefeature.ResourceFamilyPartitioned
+		partitionedB := b.family == nodefeature.ResourceFamilyPartitioned
+		if c := slicex.CompareTrueFirst(partitionedA, partitionedB); c != 0 {
+			return c
 		}
 		if a.unitsPerCard != b.unitsPerCard {
-			return a.unitsPerCard > b.unitsPerCard
+			return cmp.Compare(b.unitsPerCard, a.unitsPerCard)
 		}
-		return a.family < b.family
+		return cmp.Compare(a.family, b.family)
 	})
 }
 

@@ -159,6 +159,30 @@ func TestListAggregateInstanceTypes_Result(t *testing.T) {
 			sorted:   true,
 			expected: []string{"gpustack-nvidia-a10g", "gpustack-nvidia-tesla-t4", "gpustack-cpu-only"},
 		},
+		{
+			// Seeded in reverse name order. Neither sort is stable, so a comparator that
+			// called two non-acceleratable items equal would serve them in arrival order and
+			// a client would see the CPU-only rows move between calls.
+			name: "list with several cpu-only + sorted",
+			list: AggregatedInstanceTypeList{
+				Items: []AggregatedInstanceType{
+					{
+						Name: "generic-linux-arm64-2g-100g",
+						Spec: AggregatedInstanceTypeSpec{
+							Acceleratable: false,
+						},
+					},
+					{
+						Name: "generic-linux-amd64-2g-100g",
+						Spec: AggregatedInstanceTypeSpec{
+							Acceleratable: false,
+						},
+					},
+				},
+			},
+			sorted:   true,
+			expected: []string{"generic-linux-amd64-2g-100g", "generic-linux-arm64-2g-100g"},
+		},
 	}
 
 	for _, c := range cases {
@@ -1056,11 +1080,11 @@ func TestAggregatedInstanceTypeOnceMaxRequestTier_Recompute_RemainingSum(t *test
 	})
 }
 
-// TestAggregatedInstanceType_LessTierByPrimary verifies the sort comparator picks
+// TestAggregatedInstanceType_CompareTierByPrimary verifies the sort comparator picks
 // the right dimension: Accelerator when acceleratable, otherwise CPU. All three
 // sort sites (Result, Handle's cross-tier move, Handle's new-tier append) share
 // this comparator, so locking its behavior here protects every site at once.
-func TestAggregatedInstanceType_LessTierByPrimary(t *testing.T) {
+func TestAggregatedInstanceType_CompareTierByPrimary(t *testing.T) {
 	t.Run("acceleratable: compares Accelerator, ignores CPU", func(t *testing.T) {
 		// Tier 0 has higher CPU but lower Accelerator; the helper must still
 		// place it before tier 1 because Accelerator is the primary dimension.
@@ -1080,8 +1104,9 @@ func TestAggregatedInstanceType_LessTierByPrimary(t *testing.T) {
 			},
 		}
 
-		assert.True(t, item.lessTierByPrimary(0, 1), "Acc=1 must come before Acc=4")
-		assert.False(t, item.lessTierByPrimary(1, 0))
+		tiers := item.Status.Tiers
+		assert.Negative(t, item.compareTierByPrimary(tiers[0], tiers[1]), "Acc=1 must come before Acc=4")
+		assert.Positive(t, item.compareTierByPrimary(tiers[1], tiers[0]))
 	})
 
 	t.Run("cpu-only: compares CPU", func(t *testing.T) {
@@ -1099,8 +1124,9 @@ func TestAggregatedInstanceType_LessTierByPrimary(t *testing.T) {
 			},
 		}
 
-		assert.True(t, item.lessTierByPrimary(0, 1), "CPU=8 must come before CPU=32")
-		assert.False(t, item.lessTierByPrimary(1, 0))
+		tiers := item.Status.Tiers
+		assert.Negative(t, item.compareTierByPrimary(tiers[0], tiers[1]), "CPU=8 must come before CPU=32")
+		assert.Positive(t, item.compareTierByPrimary(tiers[1], tiers[0]))
 	})
 }
 

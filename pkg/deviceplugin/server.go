@@ -1,12 +1,14 @@
 package deviceplugin
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -543,22 +545,22 @@ func slicedPackingOrder(
 	resourceAt := func(j int) Resource {
 		return Resource{Group: devsGroup.ID, Device: devsGroup.Accelerators[j].ID}
 	}
-	sort.SliceStable(order, func(a, b int) bool {
-		resA, resB := resourceAt(order[a]), resourceAt(order[b])
+	slices.SortStableFunc(order, func(a, b int) int {
+		resA, resB := resourceAt(a), resourceAt(b)
 		_, mustA := mustInclude[resA]
 		_, mustB := mustInclude[resB]
-		if mustA != mustB {
-			return mustA
+		if c := slicex.CompareTrueFirst(mustA, mustB); c != 0 {
+			return c
 		}
 		remainingA, remainingB := statusRemainingOf(devs, resA), statusRemainingOf(devs, resB)
 		fitsA, fitsB := remainingA >= slicedUnits, remainingB >= slicedUnits
-		if fitsA != fitsB {
-			return fitsA
+		if c := slicex.CompareTrueFirst(fitsA, fitsB); c != 0 {
+			return c
 		}
 		if fitsA {
-			return remainingA < remainingB
+			return cmp.Compare(remainingA, remainingB)
 		}
-		return remainingA > remainingB
+		return cmp.Compare(remainingB, remainingA)
 	})
 	return order
 }

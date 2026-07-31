@@ -1,7 +1,9 @@
 package service
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -10,6 +12,7 @@ import (
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
@@ -128,12 +131,11 @@ func (in *ListAggregateInstanceTypeFlavors) Next(cluster string, obj runtime.Obj
 // cluster iteration order.
 func (in *ListAggregateInstanceTypeFlavors) Result(sorted bool) AggregatedInstanceTypeFlavorList {
 	if sorted {
-		sort.Slice(in.list.Items, func(i, j int) bool {
-			a, b := in.list.Items[i], in.list.Items[j]
-			if a.Spec.Acceleratable != b.Spec.Acceleratable {
-				return a.Spec.Acceleratable
+		slices.SortFunc(in.list.Items, func(a, b AggregatedInstanceTypeFlavor) int {
+			if c := slicex.CompareTrueFirst(a.Spec.Acceleratable, b.Spec.Acceleratable); c != 0 {
+				return c
 			}
-			return a.Name < b.Name
+			return cmp.Compare(a.Name, b.Name)
 		})
 	}
 
@@ -340,14 +342,14 @@ func dropCluster(clusters []string, cluster string) []string {
 	return kept
 }
 
-// lessTierByPrimary returns whether tier i should come before tier j when sorting
-// ascending by the primary dimension: Accelerator if Spec.Acceleratable, otherwise CPU.
-// Bind as item.lessTierByPrimary and pass to sort.Slice for consistent ordering.
-func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
+// compareTierByPrimary orders two tiers ascending by the primary dimension: Accelerator if
+// Spec.Acceleratable, otherwise CPU. Bind as item.compareTierByPrimary and pass to
+// slices.SortFunc for consistent ordering.
+func (in *AggregatedInstanceType) compareTierByPrimary(a, b AggregatedInstanceTypeOnceMaxRequestTier) int {
 	if in.Spec.Acceleratable {
-		return in.Status.Tiers[i].OnceMaxRequest.Accelerator.Cmp(in.Status.Tiers[j].OnceMaxRequest.Accelerator) < 0
+		return a.OnceMaxRequest.Accelerator.Cmp(b.OnceMaxRequest.Accelerator)
 	}
-	return in.Status.Tiers[i].OnceMaxRequest.CPU.Cmp(in.Status.Tiers[j].OnceMaxRequest.CPU) < 0
+	return a.OnceMaxRequest.CPU.Cmp(b.OnceMaxRequest.CPU)
 }
 
 // Recompute rebuilds the item-level OnceMaxRequest and Remaining overviews from the tiers.
@@ -615,7 +617,7 @@ func sumProfileCounts(dst, src []workercore.AcceleratorProfileCount) []workercor
 	out := mapx.Slice(sums, func(name string, count int32) workercore.AcceleratorProfileCount {
 		return workercore.AcceleratorProfileCount{Name: name, Count: count}
 	})
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b workercore.AcceleratorProfileCount) int { return cmp.Compare(a.Name, b.Name) })
 	return out
 }
 
@@ -697,11 +699,11 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceTypeList {
 	if sorted {
 		// Sorted by acceleratable and name for better readability.
-		sort.Slice(in.list.Items, func(i, j int) bool {
-			if in.list.Items[i].Spec.Acceleratable == in.list.Items[j].Spec.Acceleratable && in.list.Items[i].Spec.Acceleratable {
-				return in.list.Items[i].Name < in.list.Items[j].Name
+		slices.SortFunc(in.list.Items, func(a, b AggregatedInstanceType) int {
+			if c := slicex.CompareTrueFirst(a.Spec.Acceleratable, b.Spec.Acceleratable); c != 0 {
+				return c
 			}
-			return in.list.Items[i].Spec.Acceleratable
+			return cmp.Compare(a.Name, b.Name)
 		})
 	}
 
@@ -716,7 +718,7 @@ func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceType
 		}
 
 		// Sorted ascending by the primary dimension for better readability.
-		sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
+		slices.SortFunc(item.Status.Tiers, item.compareTierByPrimary)
 
 		// Calculate the once max request of the item.
 		item.Recompute()
@@ -933,7 +935,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers[len(item.Status.Tiers)-1].Recompute(item.Spec.Acceleratable)
 
 					// Sorted ascending by the primary dimension.
-					sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
+					slices.SortFunc(item.Status.Tiers, item.compareTierByPrimary)
 				}
 			}
 
@@ -994,7 +996,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			item.Status.Tiers[len(item.Status.Tiers)-1].Recompute(item.Spec.Acceleratable)
 
 			// Sorted ascending by the primary dimension.
-			sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
+			slices.SortFunc(item.Status.Tiers, item.compareTierByPrimary)
 
 			// Recompute the item.
 			item.Recompute()

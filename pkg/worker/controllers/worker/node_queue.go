@@ -1,8 +1,9 @@
 package worker
 
 import (
+	"cmp"
 	"context"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
@@ -149,8 +150,8 @@ func (r *NodeQueueReconciler) fillClusterQueue(
 	logger := ctrllog.FromContext(ctx)
 
 	// Smallest per-node count first, so Kueue's flavor fungibility fills small nodes first.
-	sort.SliceStable(rfList.Items, func(i, j int) bool {
-		return parseNodeFlavorCount(rfList.Items[i].Name) < parseNodeFlavorCount(rfList.Items[j].Name)
+	slices.SortStableFunc(rfList.Items, func(a, b kueue.ResourceFlavor) int {
+		return cmp.Compare(parseNodeFlavorCount(a.Name), parseNodeFlavorCount(b.Name))
 	})
 
 	_, firstNotes := systemmeta.DescribeResource(&rfList.Items[0])

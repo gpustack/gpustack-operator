@@ -1,6 +1,7 @@
 package nvidia
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 
@@ -277,7 +278,7 @@ func reuseUnboundInstance(state migCardState, owned map[uint32]bool, computeSlic
 func pickPlacement(possible, occupied []migPlacement) (migPlacement, bool) {
 	sorted := make([]migPlacement, len(possible))
 	copy(sorted, possible)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Start < sorted[j].Start })
+	slices.SortFunc(sorted, func(a, b migPlacement) int { return cmp.Compare(a.Start, b.Start) })
 	for _, slot := range sorted {
 		if !placementOverlapsAny(slot, occupied) {
 			return slot, true
