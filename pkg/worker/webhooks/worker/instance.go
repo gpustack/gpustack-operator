@@ -108,6 +108,12 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		errs = append(errs, nodeErr)
 	}
 	errs = append(errs, validateAdditionalVolumes(inst)...)
+	// Gate the host-boundary escapes on create only, so turning a gate off never blocks an existing
+	// Instance from being updated, edited while stopped, or restarted. Both settings default to off,
+	// so a failed settings read denies rather than allows.
+	errs = append(errs, validateHostAccess(inst,
+		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
+		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
 		errs = append(errs, field.Forbidden(
@@ -376,6 +382,37 @@ func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fld
 	default:
 		errs = append(errs, field.Forbidden(fldPath,
 			fmt.Sprintf("cannot specify more than one source: %s", strings.Join(set, ", "))))
+	}
+
+	return errs
+}
+
+// validateHostAccess rejects the two ways an Instance crosses the node boundary — privileged mode and
+// a hostPath additional volume — unless an administrator has allowed that specific one. The two are
+// gated independently because privileged grants strictly more: the node's devices and kernel surface
+// on top of its filesystem.
+//
+// The rule takes the resolved settings rather than reading them, so every combination can be tested
+// without seeding a value that would cache for 30s with no flush and leak into later tests.
+func validateHostAccess(inst *workercore.Instance, privilegedAllowed, hostPathAllowed bool) field.ErrorList {
+	var errs field.ErrorList
+
+	if inst.Spec.Privileged && !privilegedAllowed {
+		errs = append(errs, field.Forbidden(field.NewPath("spec.privileged"),
+			fmt.Sprintf("privileged mode is not allowed: enable the %q setting to allow it",
+				settings.InstancePrivilegedAllowed.Name())))
+	}
+
+	if !hostPathAllowed {
+		for i := range inst.Spec.AdditionalVolumes {
+			if inst.Spec.AdditionalVolumes[i].HostPath == nil {
+				continue
+			}
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.additionalVolumes").Index(i).Child("hostPath"),
+				fmt.Sprintf("mounting a host path is not allowed: enable the %q setting to allow it",
+					settings.InstanceHostPathVolumeAllowed.Name())))
+		}
 	}
 
 	return errs

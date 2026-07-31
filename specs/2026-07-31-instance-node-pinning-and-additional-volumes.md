@@ -479,9 +479,11 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         field is immutable while running and editable while stopped.
       Verify: the regeneration recipe above → `go test -race -count=1 ./pkg/worker/... -run Instance` → `make lint`
 
-- [ ] **T5 · CREATE-only host-access gates**
+- [x] **T5 · CREATE-only host-access gates**
       Blocked by: T2, T4
-      Owns: `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/webhooks/worker/instance_test.go`
+      Owns: `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/webhooks/worker/instance_test.go`,
+        `pkg/worker/webhooks/worker/testmain_test.go` (added while building: wiring the gate makes every
+        `ValidateCreate` test resolve a setting, which nil-panics without a configured loopback client)
       Gate: review
       Acceptance: AC3.1-AC3.4. The rule is a pure helper over the two already-resolved booleans, so it
         can be table-tested exhaustively without touching the un-flushable 30s setting cache; each

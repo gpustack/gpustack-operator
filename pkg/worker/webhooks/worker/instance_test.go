@@ -10,6 +10,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -486,20 +487,34 @@ func TestInstanceWebhook_ValidateCreate_AdditionalVolumes(t *testing.T) {
 	for _, c := range cases {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
-			w := newInstanceWebhook(pinnedType(typeName))
-
 			inst := webhookInstance("a", typeName)
 			inst.Spec.VolumeMount = "/workspace"
 			inst.Spec.AdditionalVolumes = c.volumes
 
-			_, err := w.ValidateCreate(context.Background(), inst)
+			// The shape rules are asserted on their own, so a host path entry is judged by its
+			// path and type here rather than by the administrator gate that governs it separately.
+			errs := validateAdditionalVolumes(inst)
 			if c.wantErr {
-				assert.Error(t, err)
+				assert.NotEmpty(t, errs)
 			} else {
-				assert.NoError(t, err)
+				assert.Empty(t, errs)
 			}
 		})
 	}
+
+	t.Run("wired into create", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+
+		inst := webhookInstance("a", typeName)
+		inst.Spec.VolumeMount = "/workspace"
+		inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{
+			{MountPath: "/data", Persistent: ref("dataset")},
+			{MountPath: "/data", Persistent: ref("models")},
+		}
+
+		_, err := w.ValidateCreate(context.Background(), inst)
+		assert.Error(t, err, "create runs the shape rules")
+	})
 }
 
 // TestInstanceWebhook_ValidateUpdate_AdditionalVolumes pins that the list is frozen while the
@@ -581,6 +596,204 @@ func TestInstanceWebhook_ValidateUpdate_AdditionalVolumes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidateHostAccess pins the administrator gates over the full cross-product of what is allowed
+// and what is requested, which is what proves each setting gates only its own field: allowing host
+// paths must not allow privileged mode, and the reverse. The rule is exercised directly over resolved
+// booleans, so no setting is seeded into the un-flushable 30s value cache.
+func TestValidateHostAccess(t *testing.T) {
+	hostPathVolume := workercore.InstanceAdditionalVolume{
+		MountPath: "/host/models",
+		HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+	}
+	plainVolume := workercore.InstanceAdditionalVolume{
+		MountPath:  "/data",
+		Persistent: &core.LocalObjectReference{Name: "dataset"},
+	}
+
+	cases := []struct {
+		name string
+
+		privilegedAllowed bool
+		hostPathAllowed   bool
+		privileged        bool
+		hostPath          bool
+
+		wantFields []string
+	}{
+		{name: "nothing requested, nothing allowed"},
+		{name: "nothing requested, both allowed", privilegedAllowed: true, hostPathAllowed: true},
+		{
+			name:       "privileged requested, nothing allowed",
+			privileged: true,
+			wantFields: []string{"spec.privileged"},
+		},
+		{
+			name:              "privileged requested and allowed",
+			privilegedAllowed: true,
+			privileged:        true,
+		},
+		{
+			name:            "privileged requested, only host paths allowed",
+			hostPathAllowed: true,
+			privileged:      true,
+			wantFields:      []string{"spec.privileged"},
+		},
+		{
+			name:       "host path requested, nothing allowed",
+			hostPath:   true,
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:            "host path requested and allowed",
+			hostPathAllowed: true,
+			hostPath:        true,
+		},
+		{
+			name:              "host path requested, only privileged allowed",
+			privilegedAllowed: true,
+			hostPath:          true,
+			wantFields:        []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:       "both requested, nothing allowed",
+			privileged: true,
+			hostPath:   true,
+			wantFields: []string{"spec.privileged", "spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:              "both requested, only privileged allowed",
+			privilegedAllowed: true,
+			privileged:        true,
+			hostPath:          true,
+			wantFields:        []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:            "both requested, only host paths allowed",
+			hostPathAllowed: true,
+			privileged:      true,
+			hostPath:        true,
+			wantFields:      []string{"spec.privileged"},
+		},
+		{
+			name:              "both requested and allowed",
+			privilegedAllowed: true,
+			hostPathAllowed:   true,
+			privileged:        true,
+			hostPath:          true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst := webhookInstance("a", "generic-type")
+			inst.Spec.Privileged = c.privileged
+			// The plain volume goes first so a rejection has to carry the offending index.
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{plainVolume}
+			if c.hostPath {
+				inst.Spec.AdditionalVolumes = append(inst.Spec.AdditionalVolumes, hostPathVolume)
+			}
+
+			errs := validateHostAccess(inst, c.privilegedAllowed, c.hostPathAllowed)
+
+			got := make([]string, 0, len(errs))
+			for _, e := range errs {
+				assert.Equal(t, field.ErrorTypeForbidden, e.Type, "a gate rejects as forbidden")
+				got = append(got, e.Field)
+			}
+			assert.Equal(t, c.wantFields, nonEmpty(got), "rejected fields")
+		})
+	}
+}
+
+// nonEmpty normalizes an empty slice to nil so a table case can leave its expectation unset.
+func nonEmpty(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}
+
+// TestInstanceWebhook_HostAccessGates pins the gates' wiring: they are read on create, where both
+// settings resolve to their default (off) so a privileged or hostPath Instance is rejected, and they
+// are never read on update — an existing Instance stays editable while stopped and restartable with
+// both gates off, which is what keeps an administrator's later change from stranding it.
+func TestInstanceWebhook_HostAccessGates(t *testing.T) {
+	const typeName = "generic-type"
+
+	hostPathVolume := workercore.InstanceAdditionalVolume{
+		MountPath: "/host/models",
+		HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+	}
+
+	t.Run("create rejects privileged while the gate is off", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+		inst := webhookInstance("a", typeName)
+		inst.Spec.Privileged = true
+
+		_, err := w.ValidateCreate(context.Background(), inst)
+		assert.Error(t, err)
+	})
+
+	t.Run("create rejects a host path while the gate is off", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+		inst := webhookInstance("a", typeName)
+		inst.Spec.VolumeMount = "/workspace"
+		inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+		_, err := w.ValidateCreate(context.Background(), inst)
+		assert.Error(t, err)
+	})
+
+	t.Run("create accepts an instance requesting neither", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+
+		_, err := w.ValidateCreate(context.Background(), webhookInstance("a", typeName))
+		assert.NoError(t, err)
+	})
+
+	t.Run("update never enforces the gates", func(t *testing.T) {
+		// An Instance created while the gates were on: privileged, with a host path mount.
+		instOld := webhookInstance("a", typeName)
+		instOld.Spec.VolumeMount = "/workspace"
+		instOld.Spec.Privileged = true
+		instOld.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+		t.Run("while running", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			inst := instOld.DeepCopy()
+			inst.Spec.DisplayName = "renamed"
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.NoError(t, err)
+		})
+
+		t.Run("while stopped", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			stopped := instOld.DeepCopy()
+			stopped.Spec.Stop = true
+			stopped.Status.Phase = workerctrl.InstancePhaseStopped
+			inst := stopped.DeepCopy()
+			inst.Spec.Image = "other"
+
+			_, err := w.ValidateUpdate(context.Background(), stopped, inst)
+			assert.NoError(t, err)
+		})
+
+		t.Run("on restart", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			stopped := instOld.DeepCopy()
+			stopped.Spec.Stop = true
+			stopped.Status.Phase = workerctrl.InstancePhaseStopped
+			inst := stopped.DeepCopy()
+			inst.Spec.Stop = false
+
+			_, err := w.ValidateUpdate(context.Background(), stopped, inst)
+			assert.NoError(t, err)
+		})
+	})
 }
 
 // TestInstanceWebhook_ValidateCreate_SlicedPercentages pins the sliced request
