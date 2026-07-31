@@ -53,6 +53,15 @@ type Worker struct {
 	APIServer       *genericapiserver.GenericAPIServer
 }
 
+// routingServiceReference is the system routing service the extension api services are fronted by.
+func (w *Worker) routingServiceReference() apireg.ServiceReference {
+	return apireg.ServiceReference{
+		Namespace: kuberess.SystemNamespaceName,
+		Name:      kuberess.SystemRoutingServiceName,
+		Port:      ptr.To(w.RoutingPort),
+	}
+}
+
 func (w *Worker) Prepare(ctx context.Context) error {
 	err := w.Manager.Prepare(ctx)
 	if err != nil {
@@ -83,16 +92,9 @@ func (w *Worker) Prepare(ctx context.Context) error {
 	}
 
 	// Install extension API services.
-	{
-		svcRef := apireg.ServiceReference{
-			Namespace: kuberess.SystemNamespaceName,
-			Name:      kuberess.SystemRoutingServiceName,
-			Port:      ptr.To(w.RoutingPort),
-		}
-		err = apis.InstallServices(ctx, lpCli, svcRef, w.RoutingCaBundle)
-		if err != nil {
-			return fmt.Errorf("install extension API services: %w", err)
-		}
+	err = apis.InstallServices(ctx, lpCli, w.routingServiceReference(), w.RoutingCaBundle)
+	if err != nil {
+		return fmt.Errorf("install extension API services: %w", err)
 	}
 
 	// Install webhook configurations.
@@ -229,6 +231,29 @@ func (w *Worker) Start(ctx context.Context) error {
 	gp.Go(func(ctx context.Context) error {
 		klog.Info("starting api server")
 		return w.APIServer.PrepareRun().RunWithContext(ctx)
+	})
+	gp.Go(func(ctx context.Context) error {
+		// The installation in Prepare cannot outlive the boot, so the definitions are kept
+		// here instead: a definition deleted at runtime leaves every controller watching it
+		// failing forever, and only a restart brings it back.
+		klog.Info("starting custom resource definitions ensurer")
+		// The ensurer returns only once the context is done, and what it returns then can be a
+		// failure it recorded on the way rather than the cancellation, so the context decides
+		// whether this is a shutdown or something to fail on.
+		err := apis.EnsureCRDs(ctx, system.LoopbackKubeClient.Get())
+		if err != nil && ctx.Err() == nil {
+			return fmt.Errorf("ensure CRDs: %w", err)
+		}
+		return nil
+	})
+	gp.Go(func(ctx context.Context) error {
+		klog.Info("starting extension API services ensurer")
+		err := apis.EnsureServices(ctx, system.LoopbackKubeClient.Get(),
+			w.routingServiceReference(), w.RoutingCaBundle)
+		if err != nil && ctx.Err() == nil {
+			return fmt.Errorf("ensure extension API services: %w", err)
+		}
+		return nil
 	})
 	return gp.Wait()
 }

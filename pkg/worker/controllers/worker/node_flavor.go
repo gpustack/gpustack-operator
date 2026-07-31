@@ -543,7 +543,76 @@ func (r *NodeFlavorReconciler) SetupController(ctx context.Context, opts control
 				},
 			),
 		).
+		Watches(
+			// Watch the InstanceTypes this reconciler authors, and enqueue the flavors when one
+			// is deleted. Without it the reconciler hears about its inputs only, so an
+			// InstanceType destroyed on its own is invisible: a definition lost at runtime takes
+			// every one of them at once, and the flavors that derived them never change, so
+			// nothing would ever author them again. The periodic informer resync is no fallback
+			// either — it re-delivers the flavor unchanged, which the update filter above drops.
+			&workercore.InstanceType{},
+			ctrlhandlerx.DedupEnqueueRequestsFromMapFunc(
+				5*time.Second,
+				r.enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted,
+			),
+			ctrlbuilder.WithPredicates(
+				// Interested in the derived InstanceTypes only; an admin-owned one is nothing
+				// this reconciler authors.
+				ctrlpredicate.NewPredicateFuncs(func(obj ctrlcli.Object) bool {
+					return obj.GetLabels()[_InstanceTypeDerivedFromNodeLabel] == "true"
+				}),
+				// Trigger reconciliation when a derived InstanceType is:
+				// - deleted.
+				// Nothing else says anything the inputs do not: authoring is create-only, so a
+				// creation is this reconciler's own write, and the status churn an InstanceType
+				// carries never changes whether it exists.
+				ctrlpredicate.Not(ctrlpredicate.Funcs{
+					DeleteFunc: func(e ctrlevent.DeleteEvent) bool {
+						return false
+					},
+				}),
+			),
+		).
 		Complete(r)
+}
+
+// enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted enqueues every managed ResourceFlavor when
+// a derived InstanceType is deleted, so the one that derived it authors it again.
+//
+// Which flavor derived which type cannot be read back from the type, and a cluster carries a
+// handful of flavors, so all of them are enqueued; a reconcile with nothing to author is a no-op
+// and authoring is create-only, so the ones that still have their type are untouched.
+func (r *NodeFlavorReconciler) enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted(
+	ctx context.Context,
+	obj ctrlcli.Object,
+) []ctrlreconcile.Request {
+	logger := ctrllog.FromContext(ctx).
+		WithValues("instance type", ctrlcli.ObjectKeyFromObject(obj))
+
+	rfList := new(kueue.ResourceFlavorList)
+	err := r.Client.List(ctx, rfList,
+		systemmeta.GetResourcesLabelSetOfType[ctrlcli.MatchingLabels](_ResourceFlavorResType),
+		ctrlcli.UnsafeDisableDeepCopy)
+	if err != nil {
+		logger.Error(err, "list resource flavors for deleted derived instance type")
+		return nil
+	}
+	if len(rfList.Items) == 0 {
+		return nil
+	}
+
+	reqs := make([]ctrlreconcile.Request, 0, len(rfList.Items))
+	for i := range rfList.Items {
+		reqs = append(reqs, ctrlreconcile.Request{
+			NamespacedName: ctrlcli.ObjectKey{
+				Name: rfList.Items[i].Name,
+			},
+		})
+	}
+
+	logger.V(2).Info("enqueue resource flavors from deleted derived instance type",
+		"requests", reqs)
+	return reqs
 }
 
 func (r *NodeFlavorReconciler) enqueueResourceFlavorWhenNodeChanged(

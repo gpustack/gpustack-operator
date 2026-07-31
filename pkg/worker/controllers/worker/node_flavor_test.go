@@ -380,6 +380,41 @@ func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 	})
 }
 
+// TestNodeFlavorReconciler_EnqueueResourceFlavorsWhenDerivedInstanceTypeDeleted covers the only
+// signal the reconciler has that an InstanceType it authored is gone: the flavors that derive
+// them never change on their own, so without this mapping a deleted type is never authored again.
+func TestNodeFlavorReconciler_EnqueueResourceFlavorsWhenDerivedInstanceTypeDeleted(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	deleted := &workercore.InstanceType{
+		ObjectMeta: meta.ObjectMeta{
+			Name:   nodeQueueName("generic"),
+			Labels: map[string]string{_InstanceTypeDerivedFromNodeLabel: "true"},
+		},
+	}
+
+	t.Run("enqueues the managed flavors", func(t *testing.T) {
+		nd := newManagedCPUNode("node-0", 4, 16, 32)
+		cli := buildNodeFlavorClient(nd)
+		// Reconcile once so the managed ResourceFlavor exists to be enqueued.
+		reconcileNodeFlavor(t, cli, cpuFlavorName(nd))
+
+		r := &NodeFlavorReconciler{Client: cli}
+		reqs := r.enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted(context.Background(), deleted)
+
+		assert.Equal(t, []ctrlreconcile.Request{
+			{NamespacedName: ctrlcli.ObjectKey{Name: cpuFlavorName(nd)}},
+		}, reqs)
+	})
+
+	t.Run("enqueues nothing without a managed flavor", func(t *testing.T) {
+		r := &NodeFlavorReconciler{Client: buildNodeFlavorClient()}
+		reqs := r.enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted(context.Background(), deleted)
+
+		assert.Empty(t, reqs)
+	})
+}
+
 func TestIndexNodeByScheduleFlavor(t *testing.T) {
 	cases := []struct {
 		name    string

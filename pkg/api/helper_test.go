@@ -54,6 +54,15 @@ func newTestCRD(shortName string) *apiext.CustomResourceDefinition {
 	}
 }
 
+// newTerminatingTestCRD builds a custom resource definition the api server is deleting: it keeps
+// serving reads until its custom resources drain, and the cleanup finalizer is what holds it.
+func newTerminatingTestCRD(shortName string) *apiext.CustomResourceDefinition {
+	crd := newTestCRD(shortName)
+	crd.DeletionTimestamp = ptr.To(meta.Now())
+	crd.Finalizers = []string{"customresourcecleanup.apiextensions.k8s.io"}
+	return crd
+}
+
 // newTestAPIService builds an api service carrying the given service reference and CA bundle.
 func newTestAPIService(svc apireg.ServiceReference, ca []byte) *apireg.APIService {
 	return &apireg.APIService{
@@ -150,21 +159,33 @@ func Test_InstallCRDs(t *testing.T) {
 		seed            *apiext.CustomResourceDefinition
 		conflicts       int
 		wantUpdateCalls int
+		wantShortNames  []string
 	}{
 		{
 			name:            "creates an absent definition",
 			wantUpdateCalls: 0,
+			wantShortNames:  []string{"expected"},
 		},
 		{
 			name:            "retries a conflicting update",
 			seed:            newTestCRD("stale"),
 			conflicts:       1,
 			wantUpdateCalls: 2,
+			wantShortNames:  []string{"expected"},
 		},
 		{
 			name:            "skips an aligned definition",
 			seed:            newTestCRD("expected"),
 			wantUpdateCalls: 0,
+			wantShortNames:  []string{"expected"},
+		},
+		{
+			// A terminating definition is on its way out whatever we write to it, so the
+			// installer must leave it alone instead of aligning it as if it were installed.
+			name:            "skips a terminating definition",
+			seed:            newTerminatingTestCRD("stale"),
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"stale"},
 		},
 	}
 
@@ -188,7 +209,109 @@ func Test_InstallCRDs(t *testing.T) {
 			actual, err := cli.ApiextensionsV1().CustomResourceDefinitions().
 				Get(t.Context(), testCRDName, meta.GetOptions{})
 			require.NoError(t, err)
-			assert.Equal(t, expected.Spec.Names.ShortNames, actual.Spec.Names.ShortNames)
+			assert.Equal(t, tc.wantShortNames, actual.Spec.Names.ShortNames)
+		})
+	}
+}
+
+// Test_restoreCRDs drives the pass the ensure loop runs on every tick: it brings a definition
+// that went missing back, and touches nothing else — a rolling update overlaps two replicas, and
+// the outgoing one runs this pass too. It reviews no permission of its own either, which the fake
+// client, denying reviews unless told otherwise, is what pins here.
+func Test_restoreCRDs(t *testing.T) {
+	crds := []*apiext.CustomResourceDefinition{newTestCRD("expected")}
+
+	testCases := []struct {
+		name            string
+		seed            *apiext.CustomResourceDefinition
+		wantUpdateCalls int
+		wantShortNames  []string
+	}{
+		{
+			name:            "creates a missing definition",
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"expected"},
+		},
+		{
+			name:            "leaves another version of the definition alone",
+			seed:            newTestCRD("other"),
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"other"},
+		},
+		{
+			name:            "leaves a terminating definition alone",
+			seed:            newTerminatingTestCRD("other"),
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"other"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tc.seed != nil {
+				objs = append(objs, tc.seed)
+			}
+			cli := kubefake.NewSimpleClientset(objs...)
+
+			updates := &flakyUpdates{resource: testCRDResource}
+			cli.PrependReactor("update", testCRDResource, updates.react)
+
+			require.NoError(t, restoreCRDs(t.Context(), cli, crds))
+
+			assert.Equal(t, tc.wantUpdateCalls, updates.count(), "update calls")
+
+			actual, err := cli.ApiextensionsV1().CustomResourceDefinitions().
+				Get(t.Context(), testCRDName, meta.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantShortNames, actual.Spec.Names.ShortNames)
+		})
+	}
+}
+
+// Test_restoreServices is Test_restoreCRDs for the extension api services, which go missing the
+// same way and are restored under the same constraints.
+func Test_restoreServices(t *testing.T) {
+	svcs := []*apireg.APIService{newTestAPIService(testServiceReference, []byte("expected-ca"))}
+
+	testCases := []struct {
+		name            string
+		seed            *apireg.APIService
+		wantUpdateCalls int
+		wantCA          []byte
+	}{
+		{
+			name:            "creates a missing service",
+			wantUpdateCalls: 0,
+			wantCA:          []byte("expected-ca"),
+		},
+		{
+			name:            "leaves another version of the service alone",
+			seed:            newTestAPIService(testServiceReference, []byte("other-ca")),
+			wantUpdateCalls: 0,
+			wantCA:          []byte("other-ca"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tc.seed != nil {
+				objs = append(objs, tc.seed)
+			}
+			cli := kubefake.NewSimpleClientset(objs...)
+
+			updates := &flakyUpdates{resource: testAPIResource}
+			cli.PrependReactor("update", testAPIResource, updates.react)
+
+			require.NoError(t, restoreServices(t.Context(), cli, svcs))
+
+			assert.Equal(t, tc.wantUpdateCalls, updates.count(), "update calls")
+
+			actual, err := cli.ApiregistrationV1().APIServices().
+				Get(t.Context(), testAPIServiceName, meta.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCA, actual.Spec.CABundle)
 		})
 	}
 }
