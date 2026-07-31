@@ -214,6 +214,61 @@ func Test_InstallCRDs(t *testing.T) {
 	}
 }
 
+// Test_restoreCRDs drives the pass the ensure loop runs on every tick: it brings a definition
+// that went missing back, and touches nothing else — a rolling update overlaps two replicas, and
+// the outgoing one runs this pass too. It reviews no permission of its own either, which the fake
+// client, denying reviews unless told otherwise, is what pins here.
+func Test_restoreCRDs(t *testing.T) {
+	crds := []*apiext.CustomResourceDefinition{newTestCRD("expected")}
+
+	testCases := []struct {
+		name            string
+		seed            *apiext.CustomResourceDefinition
+		wantUpdateCalls int
+		wantShortNames  []string
+	}{
+		{
+			name:            "creates a missing definition",
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"expected"},
+		},
+		{
+			name:            "leaves another version of the definition alone",
+			seed:            newTestCRD("other"),
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"other"},
+		},
+		{
+			name:            "leaves a terminating definition alone",
+			seed:            newTerminatingTestCRD("other"),
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"other"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tc.seed != nil {
+				objs = append(objs, tc.seed)
+			}
+			cli := kubefake.NewSimpleClientset(objs...)
+
+			updates := &flakyUpdates{resource: testCRDResource}
+			cli.PrependReactor("update", testCRDResource, updates.react)
+
+			require.NoError(t, restoreCRDs(t.Context(), cli, crds))
+
+			assert.Equal(t, tc.wantUpdateCalls, updates.count(), "update calls")
+
+			actual, err := cli.ApiextensionsV1().CustomResourceDefinitions().
+				Get(t.Context(), testCRDName, meta.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantShortNames, actual.Spec.Names.ShortNames)
+		})
+	}
+}
+
 // Test_InstallServices drives the same concurrent-boot path for the extension api services,
 // which the installer applies with an align function of its own.
 func Test_InstallServices(t *testing.T) {

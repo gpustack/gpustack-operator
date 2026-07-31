@@ -27,6 +27,11 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface) error {
 	return api.InstallCRDs(ctx, cli, apiCrdGetters)
 }
 
+// EnsureCRDs keeps the custom resource definitions installed until the given context is done.
+func EnsureCRDs(ctx context.Context, cli kubernetes.Interface) error {
+	return api.EnsureCRDs(ctx, cli, apiCrdGetters)
+}
+
 // InstallServices installs the api services.
 func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.ServiceReference, ca []byte) error {
 	return api.InstallServices(ctx, cli, svc, ca, apiSvcGetters)

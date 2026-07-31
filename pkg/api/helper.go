@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/multierr"
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -19,6 +20,9 @@ import (
 	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
+
+// crdEnsureInterval is how often EnsureCRDs looks for a missing custom resource definition.
+const crdEnsureInterval = 30 * time.Second
 
 type (
 	// CRDGetter is the function type for getting custom resource definitions.
@@ -112,6 +116,65 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRD
 	}
 
 	return nil
+}
+
+// EnsureCRDs restores the custom resource definitions that go missing, until the given context is
+// done. Every failed attempt is logged, and what it returns once the context is done is that
+// cancellation or, where an attempt raced it, the last failure recorded — so a caller reads the
+// context before it reads the error as a failure.
+//
+// Installing once at boot is not enough. A definition deleted afterwards, or one that was already
+// terminating at boot and drained right after, stays gone for the life of the process, and every
+// controller watching it fails forever. Run this next to the controllers rather than before them:
+// the finalizers holding a terminating definition are released by those same controllers.
+//
+// EnsureCRDs reviews no permission of its own, and must be able to return for no reason other than
+// the context being done: the caller runs it beside the tasks that keep the process alive, so a
+// task returning early is a repair loop silently gone. InstallCRDs is what reviews the permission,
+// and the boot fails without it.
+func EnsureCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRDGetter) error {
+	crds := MergeCRDs(crdGetters)
+
+	return waitx.UntilContextCancel(ctx, crdEnsureInterval, false,
+		func(ctx context.Context) error {
+			err := restoreCRDs(ctx, cli, crds)
+			if err != nil {
+				// Report every attempt. The poll keeps the failure to itself until the context is
+				// done, which for a loop living as long as the process is at shutdown.
+				klog.InfoS("retrying to restore the custom resource definitions", "err", err)
+			}
+			return err
+		})
+}
+
+// restoreCRDs creates the given definitions where they are absent, and leaves the ones already
+// there exactly as they are, terminating or not.
+//
+// Absence is all it repairs. A rolling update overlaps two replicas even at one replica, so a
+// restore that aligned the spec would let the outgoing replica push its own version of every
+// definition back over the incoming one, once per interval, for as long as it lives. Aligning the
+// spec is what InstallCRDs does, on the boot of the replica that carries that version.
+func restoreCRDs(ctx context.Context, cli kubernetes.Interface, crds []*apiext.CustomResourceDefinition) error {
+	crdCli := cli.ApiextensionsV1().CustomResourceDefinitions()
+
+	keepFn := func(aCRD *apiext.CustomResourceDefinition) (*apiext.CustomResourceDefinition, bool, error) {
+		return aCRD, true, nil
+	}
+	// Every definition is attempted even after one fails: they are restored in name order, so
+	// giving up on the first failure would let one that fails persistently starve every
+	// definition behind it.
+	var errs []error
+	for i := range crds {
+		_, err := kubeclientset.Update(ctx, crdCli, crds[i],
+			kubeclientset.WithCreateIfNotExisted[*apiext.CustomResourceDefinition](),
+			kubeclientset.WithUpdateAlign(keepFn))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("restore custom resource definition %q: %w",
+				crds[i].GetName(), err))
+		}
+	}
+
+	return multierr.Combine(errs...)
 }
 
 // MergeServices merges the API services from the getters and returns in one list.
