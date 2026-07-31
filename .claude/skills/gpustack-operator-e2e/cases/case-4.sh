@@ -28,6 +28,10 @@ set -uo pipefail
 NS="${1:?usage: case-4.sh <NS>}"
 NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
 AKEY=nvidia-e2emock   # 'nvidia' is a known manufacturer (gates derivation); 'e2emock' never collides with a real product
+# The mocked Devices group id, derived from AKEY so the two can never drift apart. A pool reads only
+# the Devices groups whose "<manufacturer>-<id>" equals its own spec.acceleratorGroup (== AKEY), so a
+# group id picked independently of AKEY makes every accelerator view read zero.
+AGID="${AKEY#*-}"
 COUNT=8
 MEM_MIB=24576
 D=1600000
@@ -131,7 +135,7 @@ metadata:
     app.kubernetes.io/part-of: gpustack-operator-e2e
 spec:
   groups:
-    - id: g0
+    - id: ${AGID}
       manufacturer: nvidia
       name: E2E-Mock
       memory: ${MEM_MIB}
@@ -139,7 +143,7 @@ EOF
 # Target the v1alpha1 CRD explicitly: the aggregated v1 proxy's /status subresource write
 # returns ServiceUnavailable — only the real v1alpha1 CRD serves the status subresource.
 kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge \
-  -p "{\"status\":{\"groups\":[{\"id\":\"g0\",\"manufacturer\":\"nvidia\",\"accelerators\":${accs}}]}}" >/dev/null
+  -p "{\"status\":{\"groups\":[{\"id\":\"${AGID}\",\"manufacturer\":\"nvidia\",\"accelerators\":${accs}}]}}" >/dev/null
 
 # 5. Submit a raw Pod requesting 5 EXCLUSIVE cards, routed to the accelerated pool's entrance
 #    LocalQueue. Credits (5×M ≤ 8×M) reserve quota at gate 1; gate 3 must hold it because no

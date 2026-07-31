@@ -37,9 +37,14 @@ NODE=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')
 AKEY=nvidia-e2emock                                # non-colliding fake key (never a real product) so the mocked pool
                                                    # stays isolated on a real-accelerator cluster — mirrors case-4;
                                                    # manufacturer 'nvidia' still makes it acceleratable + sliceable.
-COUNT=8                                             # 8× A10G-like card (the canonical Story-6 node)
+# The mocked Devices group id, derived from AKEY so the two can never drift apart. A pool reads only
+# the Devices groups whose "<manufacturer>-<id>" equals its own spec.acceleratorGroup (== AKEY), so a
+# group id picked independently of AKEY makes every accelerator view read zero.
+AGID="${AKEY#*-}"
+COUNT=8                                            # 8× A10G-like card (the canonical Story-6 node)
 MEM_MIB=24576                                       # 24Gi per card
 D=1600000                                           # ResourceMaxUnits (credit base M)
+SLICES_PER_CARD=128                                 # declared logical-slice capability per card
 ACCEL_NF="${NODE}-gpustack-e2e-accel"               # fake accelerator NodeFeature (case-4/5 style)
 WORKER_NF="${NODE}-gpustack-worker"                 # the worker NodeFeature the unit-spec write must NOT touch
 LABELPFX="acceleratable.feature.gpustack.ai/${AKEY}"
@@ -67,7 +72,7 @@ record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0
 set_ledger() {
   local tokens="$1"
   local groups
-  groups=$(D="$D" TOKENS="$tokens" python3 - <<'PY'
+  groups=$(D="$D" TOKENS="$tokens" AGID="$AGID" python3 - <<'PY'
 import json, os
 D = int(os.environ["D"])
 tok = {
@@ -82,14 +87,24 @@ for i, t in enumerate(os.environ["TOKENS"].split()):
     mode, rem = tok[t]
     accs.append({"id": "c%d" % i, "index": i, "mode": mode, "remaining": rem})
 print(json.dumps({"status": {"groups": [
-    {"id": "g0", "manufacturer": "nvidia", "accelerators": accs},
+    {"id": os.environ["AGID"], "manufacturer": "nvidia", "accelerators": accs},
 ]}}))
 PY
 )
   # Target the v1alpha1 CRD explicitly: the unversioned/v1 resource is the aggregated
   # proxy, whose /status subresource write returns ServiceUnavailable — only the real
   # v1alpha1 CRD serves the status subresource.
-  kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" --subresource=status --type=merge -p "$groups" >/dev/null
+  #
+  # Fail loudly. Discarding this write's outcome makes a lost patch indistinguishable from a view
+  # that never converged: the next assertion polls to its timeout and reports a four-view mismatch,
+  # which reads as a product defect while the ledger it was supposed to compare against was never
+  # written. On a remote cluster that is a live risk, not a hypothetical — the API endpoint drops a
+  # request often enough to have already sent one run down that path.
+  if ! kubectl patch devices.v1alpha1.worker.gpustack.ai "$MOCK_DEV" \
+    --subresource=status --type=merge -p "$groups" >/dev/null; then
+    echo "[case-6] FATAL: ledger patch failed for tokens '${tokens}' — the next assertion would blame the four-view for a write that never landed"
+    exit 1
+  fi
 }
 
 # assert_view <label> <excl> <shared> <sliced> <partitioned> polls the InstanceType four-view
@@ -98,11 +113,13 @@ PY
 # so none of them belongs to the partition population.
 assert_view() {
   local label="$1" wE="$2" wS="$3" wL="$4" wP="$5" e s l p
+  # One read per poll, not four. Against a remote API each call costs a round trip plus an exec
+  # credential, so four of them turn a poll loop that is supposed to bound the wait at ~2 minutes
+  # into one that takes several, and a failing assertion pays it in full. The partition view is
+  # absent rather than zero on a pool with no partitioned card, hence the trailing default.
   for _ in $(seq 1 40); do
-    e=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.accelerator.remaining}' 2>/dev/null)
-    s=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.acceleratorShared.remaining}' 2>/dev/null)
-    l=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.acceleratorSliced.remaining}' 2>/dev/null)
-    p=$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" -o jsonpath='{.status.acceleratorPartitioned.remaining}' 2>/dev/null)
+    read -r e s l p <<<"$(kubectl get instancetypes.worker.gpustack.ai "$ITNAME" \
+      -o jsonpath='{.status.accelerator.remaining}{" "}{.status.acceleratorShared.remaining}{" "}{.status.acceleratorSliced.remaining}{" "}{.status.acceleratorPartitioned.remaining}' 2>/dev/null)"
     p="${p:-0}"
     [ "$e" = "$wE" ] && [ "$s" = "$wS" ] && [ "$l" = "$wL" ] && [ "$p" = "$wP" ] && break
     sleep 3
@@ -174,6 +191,23 @@ read -r SPEC_OS SPEC_ARCH <<<"$(kubectl get instancetypes.worker.gpustack.ai "$I
   || record FAIL "InstanceType materializes spec.os/arch" "spec os='${SPEC_OS:-}' arch='${SPEC_ARCH:-}' vs labels ${OS}/${ARCH} — must read from the CQ kubernetes.io/os|arch labels, not the notes"
 
 # 3. Create the phantom-node Devices CR carrying the mocked per-card ledger.
+#
+# The ledger alone is not enough. A card's occupancy lives in status, but whether the card may be
+# logically sliced at all is a CAPABILITY, declared on the spec side and indexed per card id — the
+# logical-slice pass skips any card whose declared capability is empty, because a card reporting
+# neither capability is a whole card and nothing else, and every layer below (device plugin, node
+# capacity, AdmissionCheck) gates on the same predicate. So each mocked card declares a logical
+# slice capability here, or the SL view stays 0 whatever the ledger says. The capability's count
+# only has to be positive: the SL view is denominated in per-card VRAM percent (100 per card), not
+# in this count.
+# physicalIndexes/topology/status.unhealthy are required by the CRD; only the capability inside
+# status is what this case is after, the rest is the minimum a card must carry to be accepted.
+CARDS_YAML=$(for i in $(seq 0 $((COUNT - 1))); do
+  printf '        - id: c%d\n          index: %d\n          physicalIndexes: [%d]\n' "$i" "$i" "$i"
+  printf '          topology:\n            pciBusId: "0000:%02x:00.0"\n            pciRootId: "0000:%02x:00.0"\n' "$i" "$i"
+  printf '            pciClass: "030200"\n            numaAffinity: "0"\n            cpuAffinity: "0-15"\n'
+  printf '          status:\n            unhealthy: false\n            logicalSliced:\n              count: %d\n' "$SLICES_PER_CARD"
+done)
 echo "[case-6] creating mocked Devices ${MOCK_DEV} (os=${OS} arch=${ARCH})"
 cat <<EOF | kubectl apply -f -
 apiVersion: worker.gpustack.ai/v1alpha1
@@ -188,10 +222,15 @@ metadata:
     app.kubernetes.io/part-of: gpustack-operator-e2e
 spec:
   groups:
-    - id: g0
+    - id: ${AGID}
       manufacturer: nvidia
       name: A10G
       memory: ${MEM_MIB}
+      acceleratorSlicedDetail:
+        logical:
+          count: ${SLICES_PER_CARD}
+      accelerators:
+${CARDS_YAML}
 EOF
 
 # 4. Walk the five-step pooling sequence; the four-view must match the oracle at each step.

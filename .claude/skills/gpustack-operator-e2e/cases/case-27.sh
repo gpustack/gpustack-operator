@@ -108,16 +108,24 @@ else
 fi
 
 # The pool's own views must agree — they are the data source the Instance webhook rejects against.
+#
+# The pool is asserted as a DELTA, not against the node's absolute counts: a pool sums every member
+# node's cards, so on a pool with more than one GPU node its capacity is larger than this node's key
+# and comparing the two makes a correct reading look wrong. What must hold at any pool size is that
+# partitioning one card removes exactly that card from the whole-card and shared families and puts it
+# in the partition one. On a single-GPU-node pool this reduces to the node's own numbers.
+WANT_POOL_EX=$((${BEF_EX_CAP:-0} - 1))
+WANT_POOL_SH=$((${BEF_SH_CAP:-0} - SHARES_PER_CARD))
 aft_ex_cap=""; aft_sh_cap=""; aft_pt_cap=""
 for _ in $(seq 1 20); do
   read -r aft_ex_cap aft_sh_cap aft_pt_cap <<<"$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o jsonpath='{.status.accelerator.capacity} {.status.acceleratorShared.capacity} {.status.acceleratorPartitioned.capacity}' 2>/dev/null)"
-  [ "${aft_ex_cap:-x}" = "$WANT_EXCL" ] && [ "${aft_pt_cap:-0}" != 0 ] && break
+  [ "${aft_ex_cap:-x}" = "$WANT_POOL_EX" ] && [ "${aft_pt_cap:-0}" != 0 ] && break
   sleep 4
 done
-if [ "${aft_ex_cap:-x}" = "$WANT_EXCL" ] && [ "${aft_sh_cap:-x}" = "$WANT_SHARED" ] && [ -n "${aft_pt_cap:-}" ] && [ "${aft_pt_cap}" != 0 ]; then
-  record PASS "the pool's EX/SH views exclude the partitioned card" "EX ${BEF_EX_CAP:-?} → ${aft_ex_cap}, SH ${BEF_SH_CAP:-?} → ${aft_sh_cap}, PT ${BEF_PT_CAP:-?} → ${aft_pt_cap}"
+if [ "${aft_ex_cap:-x}" = "$WANT_POOL_EX" ] && [ "${aft_sh_cap:-x}" = "$WANT_POOL_SH" ] && [ -n "${aft_pt_cap:-}" ] && [ "${aft_pt_cap}" != 0 ]; then
+  record PASS "the pool's EX/SH views exclude the partitioned card" "EX ${BEF_EX_CAP:-?} → ${aft_ex_cap} (−1 card), SH ${BEF_SH_CAP:-?} → ${aft_sh_cap} (−${SHARES_PER_CARD} shares), PT ${BEF_PT_CAP:-?} → ${aft_pt_cap}"
 else
-  record FAIL "the pool's EX/SH views exclude the partitioned card" "EX='${aft_ex_cap:-?}' (want ${WANT_EXCL}), SH='${aft_sh_cap:-?}' (want ${WANT_SHARED}), PT='${aft_pt_cap:-?}' (want > 0) — an EX/SH view that still counts the partitioned card admits a Pod that can never run"
+  record FAIL "the pool's EX/SH views exclude the partitioned card" "EX='${aft_ex_cap:-?}' (want ${WANT_POOL_EX} = ${BEF_EX_CAP:-?}−1), SH='${aft_sh_cap:-?}' (want ${WANT_POOL_SH} = ${BEF_SH_CAP:-?}−${SHARES_PER_CARD}), PT='${aft_pt_cap:-?}' (want > 0) — an EX/SH view that still counts the partitioned card admits a Pod that can never run"
 fi
 
 # ---------------------------------------------------------------------------------------------------
