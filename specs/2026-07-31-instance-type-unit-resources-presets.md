@@ -1,6 +1,6 @@
 # Spec: InstanceType Unit-Resources Presets
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -404,26 +404,29 @@ A new `docs/` page, linked from the README doc index.
 
 Acceptance criteria:
 - **AC5.1** — It states what `unitResources` means operationally: per whole card, scaled by card
-  count for a whole-card request and by the memory percentage for a slice/partition, and that it is
-  read both as the defaulted request and — outside this change's scope — as an admission ceiling. It
-  states explicitly that **the Kueue quota does not change**: an accelerated `ClusterQueue` covers
-  only the manufacturer credits resource (`pkg/worker/controllers/worker/node_queue.go:260-277`), so
-  a bigger unit spec buys no extra admission headroom.
+  count for a whole-card request and by the memory percentage for a slice/partition, read both as the
+  defaulted request and as an admission ceiling, and scaled by overcommit before the scheduler sees
+  it. It deliberately says nothing about Kueue quota: the unit spec does not feed it, so raising the
+  subject in a preset reference only invites the reader to think it might.
 - **AC5.2** — It carries the tier ladder with the reasoning for each value, including the flat-CPU
   rationale and its overcommit dependence (AC1.2).
-- **AC5.3** — It carries a per-manufacturer table: family → tier → **the public configuration the
-  assignment was anchored on**, marking rows that deviate from their VRAM band, rows written from
-  vendor documentation rather than a verified product string (AC3.9), and each entry's `by` order.
-  This is the only place provenance is recorded; the YAML carries none.
+- **AC5.3** — It carries a per-manufacturer table: family → tier → the tier's own unit CPU and RAM →
+  **the public configuration the assignment was anchored on**, the anchor left empty where the tier
+  rests on product-class knowledge rather than a published machine. What a row cannot carry — why a
+  family sits off its VRAM band, what a vendor's naming does to the lookup key — goes in the prose
+  under that vendor's table. This is the only place provenance is recorded; the YAML carries none.
 - **AC5.4** — It states the fallback, and the caveats an administrator will hit: presets apply only
   to InstanceTypes authored after the upgrade (immutable + create-only); deleting a derived
-  `InstanceType` does **not** by itself re-author it, because `NodeFlavorReconciler` watches
-  ResourceFlavors and Nodes only (`pkg/worker/controllers/worker/node_flavor.go:467-546`) — a
-  subsequent flavor/node event or a restart is needed, and when it does re-author it uses the **new**
-  values; a cluster running with `instance-general-resources-overcommit=false` should check that its
-  nodes have the per-card CPU the tier assumes, or pre-create its own `InstanceType`; and the same
-  GPU can appear twice in the aggregated cross-cluster view during the transition (see Risks).
-- **AC5.5** — It names the manufacturers deliberately out of scope and why (not detectable).
+  `InstanceType` has the operator author it again at the **current** presets, because
+  `NodeFlavorReconciler` watches the derived types it authored and re-enqueues its flavors when one
+  disappears (`enqueueResourceFlavorsWhenDerivedInstanceTypeDeleted`), which makes delete-and-wait
+  the supported way to re-size an operator-owned pool; and a cluster running with
+  `instance-general-resources-overcommit=false` should check that its nodes have the per-card CPU the
+  tier assumes, or pre-create its own `InstanceType`.
+- **AC5.5** — Intel, Kunlun and Biren get their own vendor sections with their presets settled, each
+  closing with one line saying the operator has no manufacturer key for them yet, so nothing reaches
+  them today. Having a preset and being detectable are two separate things and the page keeps them
+  separate; it does not use the second as a reason to omit the first.
 - **AC5.6** — A test asserts every `family` in the YAML appears in the docs page, so a new entry
   cannot ship undocumented.
 
@@ -545,8 +548,9 @@ Acceptance criteria:
   `buildAggregatedInstanceTypeName` embeds the unit CPU and RAM in the aggregated identity
   (`pkg/workergateway/service/helper.go:40-48`), so after the upgrade a pre-existing pool (`4`/`16Gi`)
   and a new pool of the *same* accelerator group appear as two separate aggregated flavors with
-  separate totals. → Unavoidable while old types stay immutable; documented in AC5.4 and pinned by an
-  AC6.8-adjacent case so the split is tested behaviour rather than a surprise.
+  separate totals. → Unavoidable while old types stay immutable, and a property of
+  `buildAggregatedInstanceTypeName`'s existing inputs rather than of anything this change touches, so
+  it is recorded here and neither documented in the preset reference nor pinned by a test.
 - **The admission ceiling widens as a side effect.** `capResourcesToInstanceType`
   (`pkg/worker/webhooks/worker/instance.go:739-760`) computes the cap from the accelerator *count*,
   which is 1 for a logical slice or a hardware partition — it is not percentage-scaled. Raising the
@@ -569,11 +573,12 @@ Acceptance criteria:
   impossible, and AC3.10 negative cases plus the AC6.4 property test pin it.
 - **A future data edit re-sizes an unrelated pool.** → V1–V8 reject the table at load and AC6.4 proves
   order-independence, so a bad edit fails the test suite rather than silently shifting a lookup.
-- **Existing pools keep 16Gi indefinitely, and delete-to-re-author is not a clean procedure.** →
-  Create-only plus immutability means an upgraded cluster carries mixed old/new sizing, and deleting
-  the derived type does not enqueue the reconciler (it watches ResourceFlavors and Nodes only), so a
-  flavor/node event or a restart is needed and the recreate silently jumps to the new values.
-  Documented as a named caveat in AC5.4; no migration is offered.
+- **Existing pools keep 16Gi indefinitely.** → Create-only plus immutability means an upgraded
+  cluster carries mixed old/new sizing until an administrator acts. Deleting the derived type is that
+  action: `NodeFlavorReconciler` watches its derived types and re-enqueues its flavors when one is
+  deleted, so the pool is authored again at the current presets. Documented as a named caveat in
+  AC5.4; no automatic migration is offered, because a silent re-size of a live pool is the more
+  surprising behaviour.
 - **A rolling upgrade races on a previously unseen pool.** Whichever binary first authors a new type
   permanently fixes its sizing, so a pool first seen by the old binary keeps `4`/`16Gi` forever. →
   Accepted; the window is one rollout and the outcome is the zero-regression value.
@@ -627,7 +632,8 @@ pkg/worker/controllers/worker/
 api/worker/v1alpha1/
   instance_type.go                    # retire the "fixed default" doc comment (+ three generated files)
 docs/
-  instance-type-unit-resources.md     # ladder, per-product table with sources, caveats
+  reference/
+    instance-type-unit-resources.md   # ladder, per-product table with sources, caveats
 README.md                             # doc-index entry
 ```
 
@@ -788,13 +794,24 @@ T4 needs T2's final family set. T1 and T3 both touch `pkg/nodefeature`, but disj
       Verify: from a checkout whose path ends in `gpustack.ai/gpustack`,
       `make generate && git diff --exit-code`, then `make lint`
 
-- [ ] **T4 · Preset reference doc**
+- [x] **T4 · Preset reference doc**
       Blocked by: T2
-      Owns: `docs/instance-type-unit-resources.md`, `README.md`,
-            `pkg/nodefeature/unit_resources_preset_docs_test.go`
+      Owns: `docs/reference/instance-type-unit-resources.md`, `README.md`,
+            `pkg/nodefeature/unit_resources_preset_docs_test.go`, and — found at ship time, not
+            planned — `docs/architecture.md`, `docs/walkthrough.md`,
+            `docs/operation/nvidia-mig.md`, each of which asserted the retired fixed default
       Gate: —
       Acceptance: the page satisfies AC5.1–AC5.5, the README doc index links it, and the sync test of
       AC5.6 asserts every `family` in the YAML appears in the page.
+      Shaped during review into a reference rather than a rationale essay: one section per vendor,
+      each a table of family → tier → the actual unit CPU/RAM → anchor, with no per-row prose and no
+      detector-mechanics narration. The sync test matches a whole table row, not the family name
+      alone — a bare substring search silently exempts every family name that another one contains
+      (`ascend-910b` sits inside `ascend-910b2`), and matching the row pins the resolved values too.
+      Three older pages described the derived unit spec as a fixed default and printed it in recorded
+      `kubectl` output; they were rewritten to the presets the same clusters resolve today (A10G
+      `8/64Gi`, Tesla-T4 `8/32Gi`, H100-80GB-HBM3 `12/192Gi`), and the walkthrough's custom-type
+      example was re-sized so it still sits above its pool's preset rather than below it.
       Verify: `go test ./pkg/nodefeature/... && make lint`
 
 Checkpoints: after T1 the system is working and behaviour changes only for the seeded families; after
@@ -836,11 +853,20 @@ AC6.5, AC6.6) and `unit_resources_preset_docs_test.go` (AC5.6), with the derived
   leaves an existing derived `InstanceType`'s unit spec untouched even when the table would now
   resolve a different tier; then delete it, drive a flavor event, and assert it re-authors at the new
   values.
-- **Aggregated-identity split** — assert that two pools of the same accelerator group with different
-  unit specs produce two distinct aggregated names via `buildAggregatedInstanceTypeName`
-  (`pkg/workergateway/service/helper.go:40-48`), so the upgrade-transition split is tested behaviour
-  rather than a field surprise.
-- Concrete test names to be recorded after the implementation PR merges.
+
+Test names as built:
+
+- `pkg/nodefeature`: `TestPresetUnitResources` (the 46-case corpus),
+  `TestPresetUnitResourcesIgnoresEntryOrder`, `TestPresetUnitResourcesByOrderIsSemantic`,
+  `TestPresetUnitResourcesMatchesAtMostOneEntry`, `TestPresetUnitResourcesNormalization`,
+  `TestShippedUnitResourcesPresetTable`, `TestLoadUnitResourcesPresetsRejects` (one case per V1–V8
+  plus strict decode), `TestLoadUnitResourcesPresetsAccepts`, `TestUnitResourcesPresetDocs`.
+- `pkg/worker/controllers/worker`: `TestNodeFlavorReconciler_PresetPipeline` (the corpus and the
+  63-character label-cap boundary) and the extended
+  `TestNodeFlavorReconciler_AuthorsDerivedInstanceType`.
+
+The aggregated-identity split is left to Risks rather than pinned by a test: it is a property of
+`buildAggregatedInstanceTypeName`'s existing inputs, which this change does not touch.
 
 #### e2e tests
 
@@ -900,13 +926,15 @@ GPU cluster on its own.
    The mainstream Atlas 800T A2 is 8 cards / 1536GB (24c/192g), but the Huawei KunLun G5680 V2
    variant is 8 cards / 512GB (24c/64g), and AC1.0 takes the lowest published configuration — so
    `large` (128Gi) is out. The deviation from the 64GB card's `large` band is recorded in the docs.
-2. Whether the docs page should recommend anything at all for an administrator stuck on an existing
-   pool's `4`/`16Gi`. Deleting the derived type does not re-author it on its own, and no migration is
-   offered, so the honest answer may be "pre-create the type on a fresh pool, otherwise live with it".
-3. Iluvatar, MThreads and THead have no product string pinned anywhere in this repository, so their
-   coverage is written from vendor documentation and cannot be verified here. Worth a follow-up that
-   captures one `testing/sample/devices/` fixture per detector from live hardware, which would also
-   let the AC6.3 corpus test cover them for real.
+2. ~~What to recommend for an administrator stuck on an existing pool's `4`/`16Gi`.~~ **Resolved in
+   T4**: the docs page states it plainly — pre-create the `InstanceType` yourself, because an
+   administrator-created type is never touched by the operator. No migration is offered, and the
+   delete-to-re-author path is documented as a caveat rather than a procedure.
+3. Iluvatar, MThreads and THead still have no product string pinned anywhere in this repository. The
+   MThreads (`MTT S4000` / `MTT S5000`) and THead (`PPU-ZW810E` / `PPU-ZWM890`) shapes now come from
+   vendor knowledge supplied during the build, and the docs page marks every such row **unverified**.
+   Worth a follow-up that captures one `testing/sample/devices/` fixture per detector from live
+   hardware, which would also let the AC6.3 corpus test cover them for real.
 4. Out of scope but noticed while grounding this spec, and worth its own issue: the accelerator
    feature-label **key** is built as a group ID budgeted to 63 characters
    (`pkg/device/helper.go:51`) plus a `.product` / `.memory` / `.cores` / `.count` suffix

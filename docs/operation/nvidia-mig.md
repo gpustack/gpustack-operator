@@ -324,7 +324,7 @@ populated and an empty partition view:
 $ kubectl get instancetypes
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
 gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   4/16Gi/100Gi            8/8 80/80 100/800 0/0      0/0       Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0      0/0       Active
 ```
 
 Read the accelerated row as: **8** whole cards, **80** shares (10 per card), **800 %** of logical slice
@@ -407,7 +407,7 @@ actually servable.
 $ kubectl get instancetypes
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU       PHASE
 gpustack--generic-linux-amd64                 gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            128/132   Active
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   4/16Gi/100Gi            0/0 0/0 0/0 7/56           0/0       Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 7/56           0/0       Active
 ```
 
 `PT 7/56` reads: **7** instances is the most a *single* card can host (`onceMaxRequest` is per card),
@@ -493,7 +493,7 @@ changes per profile according to the [placement rules](#supported-profiles):
 ```console
 $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   4/16Gi/100Gi            0/0 0/0 0/0 7/52   0/0   Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          0/0 0/0 0/0 7/52   0/0   Active
 
 $ kubectl get node node-h100 -o json | jq '.status.allocatable | with_entries(select(.key|test("gpu\\.partitioned")))'
 {
@@ -616,7 +616,7 @@ index, mig.mode.current
 ```console
 $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   4/16Gi/100Gi            5/5 50/50 100/500 7/21   0/0   Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          5/5 50/50 100/500 7/21   0/0   Active
 ```
 
 `5/5 50/50 100/500` covers the **five** whole cards; `7/21` covers the **three** partitioned ones
@@ -692,7 +692,7 @@ Both views move, independently, in their own family:
 ```console
 $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   4/16Gi/100Gi            4/4 40/40 100/450 7/17   0/0   Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          4/4 40/40 100/450 7/17   0/0   Active
 ```
 
 - `EX 5→4` and `SH 50→40`: the logical slice put card 5 in use, so one fewer whole card can be claimed.
@@ -740,7 +740,7 @@ daemonset.apps/gpustack-operator-device-manager-nvidia restarted
 
 $ kubectl get instancetypes gpustack--nvidia-h100-80gb-hbm3-linux-amd64
 NAME                                          ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
-gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   4/16Gi/100Gi            8/8 80/80 100/800 0/0   0/0   Active
+gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   12/192Gi/100Gi          8/8 80/80 100/800 0/0   0/0   Active
 ```
 
 ---

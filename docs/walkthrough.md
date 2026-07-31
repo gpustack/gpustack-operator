@@ -60,8 +60,8 @@ gpustack--nvidia-tesla-t4-linux-amd64            0
 $ kubectl get instancetype
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 
 $ kubectl get instancetypeflavor
 NAME                        GENERALGROUP   ACCELERATORGROUP   ACCELERATABLE   MANUFACTURER   PRODUCT       MEMORY   CORES   SLICEABLE
@@ -259,9 +259,9 @@ spec:
       memoryPercentageStep: 1
     physicalSliced:
       maxSize: 0
-  unitResources:
-    cpu: "4"
-    ram: 16Gi
+  unitResources:            # the nvidia-a10g preset, not a fixed default
+    cpu: "8"
+    ram: 64Gi
   localStorage: 100Gi
 status:
   phase: Active
@@ -316,8 +316,8 @@ flavor's `spec.nodeLabels`). That label is stamped through the node's worker Nod
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
 Take `node-a10g` out of management by flipping the label on its worker NodeFeature:
@@ -334,8 +334,8 @@ nodefeature.nfd.k8s-sigs.io/node-a10g-gpustack-worker patched
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/68   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
 The comparison:
@@ -352,8 +352,8 @@ $ kubectl -n gpustack-system patch nodefeature node-a10g-gpustack-worker \
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
 ---
@@ -390,8 +390,8 @@ $ kubectl apply -f sliced-demo.yaml
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            0/0 0/0 80/80 0/0          0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 80/80 0/0          0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
 The comparison — the A10G row moves `1/1 10/10 100/100 0/0` → `0/0 0/0 80/80 0/0`:
@@ -425,20 +425,23 @@ Deleting the Instance releases the slice (the A10G row returns to `1/1 10/10 100
 ## 4. Managing a custom InstanceType
 
 Beyond the auto-derived pools, an admin can author an InstanceType that references a catalog flavor (by
-its `acceleratorGroup`) with a **non-default** unit spec — the default is 4 CPU / 16 GiB / 100 GiB:
+its `acceleratorGroup`) with a unit spec of its own. A derived pool is sized from a **per-product
+preset** — this A10G pool got 8 CPU / 64 GiB, an unrecognised accelerator would get 4 CPU / 16 GiB (see
+[Instance Type Unit Resources Preset Reference](./reference/instance-type-unit-resources.md)) — and an
+admin who wants a different size authors their own type:
 
 ```yaml
 kind: InstanceType
 metadata:
-  name: a10g-8c32g
+  name: a10g-12c128g
 spec:
   acceleratable: true
   acceleratorGroup: nvidia-a10g          # references the gpustack--nvidia-a10g catalog flavor
   os: linux
   arch: amd64
   unitResources:
-    cpu: "8"
-    ram: 32Gi
+    cpu: "12"
+    ram: 128Gi
   localStorage: 200Gi
 ```
 
@@ -446,16 +449,16 @@ Apply it — the defaulting webhook enriches the descriptors from the matching f
 a **sibling** of the auto-derived A10G pool (both feed off the one physical card):
 
 ```console
-$ kubectl apply -f a10g-8c32g.yaml
+$ kubectl apply -f a10g-12c128g.yaml
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
-a10g-8c32g                              gpustack-fnv64-8cf5b3114035c84a   8/32Gi/200Gi            1/1 10/10 100/100 0/0      0/0     Active
+a10g-12c128g                            gpustack-fnv64-8cf5b3114035c84a   12/128Gi/200Gi          1/1 10/10 100/100 0/0      0/0     Active
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-- The new row carries the admin's unit spec `8/32Gi/200Gi` (vs the derived `4/16Gi/100Gi`).
+- The new row carries the admin's unit spec `12/128Gi/200Gi` (vs the derived preset `8/64Gi/100Gi`).
 - Both A10G siblings show `1/1` — they share the same single card.
 
 Deploy an Instance onto the custom type (whole card):
@@ -466,7 +469,7 @@ metadata:
   name: custom-demo
   namespace: default
 spec:
-  type: a10g-8c32g
+  type: a10g-12c128g
   image: ubuntu:24.04
   command:
     - sleep
@@ -484,20 +487,20 @@ Once `custom-demo` is `Ready`, the consumption shows up **consistently on both s
 $ kubectl apply -f custom-demo.yaml
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
-a10g-8c32g                              gpustack-fnv64-8cf5b3114035c84a   8/32Gi/200Gi            0/0 0/0 0/0 0/0            0/0     Active
+a10g-12c128g                            gpustack-fnv64-8cf5b3114035c84a   12/128Gi/200Gi          0/0 0/0 0/0 0/0            0/0     Active
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-Both `a10g-8c32g` and `gpustack--nvidia-a10g-linux-amd64` drop to `0/0 0/0 0/0`.
+Both `a10g-12c128g` and `gpustack--nvidia-a10g-linux-amd64` drop to `0/0 0/0 0/0`.
 
 Delete the custom InstanceType — it retires gracefully: the operator drains its Instance
 (`HoldAndDrain`), the Instance stops, and the type plus its ClusterQueue are removed:
 
 ```console
-$ kubectl delete instancetype a10g-8c32g
-instancetype.worker.gpustack.ai "a10g-8c32g" deleted
+$ kubectl delete instancetype a10g-12c128g
+instancetype.worker.gpustack.ai "a10g-12c128g" deleted
 
 $ kubectl -n default get instance custom-demo -o jsonpath='{.status.phase}'
 Stopped
@@ -505,11 +508,11 @@ Stopped
 $ kubectl get instancetypes
 NAME                                    ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--generic-linux-amd64           gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64       gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
-- `a10g-8c32g` is gone; the `custom-demo` Instance is `Stopped` (kept for section 5).
+- `a10g-12c128g` is gone; the `custom-demo` Instance is `Stopped` (kept for section 5).
 - The shared card is released — `gpustack--nvidia-a10g-linux-amd64` returns to `1/1 10/10 100/100`.
 
 ---
@@ -532,13 +535,13 @@ $ kubectl -n gpustack-system rollout restart deploy/gpustack-operator-worker
 $ kubectl get instancetypes
 NAME                                                                ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU     PHASE
 gpustack--amd-epyc-7r13-linux-amd64                                 gpustack-fnv64-8dde992f64a17a2f   1/2Gi/100Gi             0/0 0/0 0/0 0/0            16/16   Active
-gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64                    gpustack-fnv64-029fd9550e0c70bd   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64                    gpustack-fnv64-029fd9550e0c70bd   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
 gpustack--amd-epyc-7r32-linux-amd64                                 gpustack-fnv64-d3390f10cd57a632   1/2Gi/100Gi             0/0 0/0 0/0 0/0            4/4     Active
 gpustack--generic-linux-amd64                                       gpustack-fnv64-3b93966fd73eb9ec   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/72   Active
-gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-5b59e508edc027b7   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--intel-xeon-platinum-8259cl--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-5b59e508edc027b7   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 gpustack--intel-xeon-platinum-8259cl-linux-amd64                    gpustack-fnv64-c6aee2b7b5c4dc6b   1/2Gi/100Gi             0/0 0/0 0/0 0/0            48/52   Active
-gpustack--nvidia-a10g-linux-amd64                                   gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
-gpustack--nvidia-tesla-t4-linux-amd64                               gpustack-fnv64-6b371caa2da0b799   4/16Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
+gpustack--nvidia-a10g-linux-amd64                                   gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            1/1 10/10 100/100 0/0      0/0     Active
+gpustack--nvidia-tesla-t4-linux-amd64                               gpustack-fnv64-6b371caa2da0b799   8/32Gi/100Gi            4/5 40/50 100/500 0/0      0/0     Active
 ```
 
 - New per-CPU pools split the generic 72 cores by manufacturer: `amd-epyc-7r13` = `16/16`,
@@ -560,8 +563,8 @@ $ kubectl -n default patch instance custom-demo --type=merge \
 
 $ kubectl get instancetypes
 NAME                                               ENTRANCE                          UNIT(CPU/RAM)/STORAGE   ACCELERATOR(EX/SH/SL/PT)   CPU   PHASE
-gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64   gpustack-fnv64-029fd9550e0c70bd   4/16Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
-gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f1c   4/16Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
+gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64   gpustack-fnv64-029fd9550e0c70bd   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
+gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f1c   8/64Gi/100Gi            0/0 0/0 0/0 0/0            0/0   Active
 ```
 
 - `custom-demo` becomes `Ready` on the aware pool `gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64`,
