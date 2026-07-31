@@ -73,14 +73,16 @@ type InstanceTypeSpec struct {
 	// UnitResources describes the unit resources of the InstanceType.
 	//
 	// It is a required admin-writable input, enforced by the validating webhook, and is
-	// immutable after creation; a derived InstanceType is stamped with the fixed default.
+	// immutable after creation. A derived InstanceType is stamped once at creation: an
+	// accelerated one from the per-product preset table, falling back to 4 CPU / 16Gi for a
+	// product the table does not recognize, and a CPU-only one with 1 CPU / 2Gi.
 	UnitResources InstanceTypeUnitResources `json:"unitResources" protobuf:"bytes,9,opt,name=unitResources"`
 
 	// LocalStorage is the ephemeral local storage of the InstanceType, e.g. "100Gi".
 	//
 	// It is a required admin-writable input carrying a case-sensitive "Gi" suffix, enforced
 	// by the validating webhook, and is immutable after creation; a derived InstanceType is
-	// stamped with the fixed default.
+	// stamped with a fixed 100Gi, which no preset varies.
 	LocalStorage string `json:"localStorage" protobuf:"bytes,10,opt,name=localStorage"`
 }
 

@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,6 +17,7 @@ import (
 	kueue "sigs.k8s.io/kueue/apis/kueue/v1beta2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/device"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemmeta"
@@ -60,16 +62,39 @@ func newManagedCPUNode(name string, cpu, memGi, stgGi int64) *core.Node {
 // (the CPU key is "generic" as the fixture reports no cpu-model) and a CPU flavor; the
 // umbrella acceleratable label marks the node accelerated.
 func newManagedAccelNode(name string, count int64) *core.Node {
+	return newManagedAccelNodeOf(name, count, "nvidia-a10g", "NVIDIA-A10G")
+}
+
+// newManagedAccelNodeOf is newManagedAccelNode over an arbitrary accelerator key and product.
+// The product must be written in the sanitized form the real label constructor emits — a space
+// becomes "-" (kubemeta.SanitizeLabelValue) — so the fixture drives the same string a live node
+// carries, which is what the preset lookup normalizes.
+func newManagedAccelNodeOf(name string, count int64, aKey, product string) *core.Node {
 	nd := newManagedCPUNode(name, 48, 192, 100)
-	aKey := "nvidia-a10g"
 	p := nodefeature.AcceleratableFeatureLabelPrefix + aKey
 	nd.Labels[nodefeature.NodeAcceleratableLabelKey] = "true"
 	nd.Labels[p] = "true"
 	nd.Labels[p+".count"] = itoa(count)
-	nd.Labels[p+".product"] = "NVIDIA A10G"
+	nd.Labels[p+".product"] = product
 	nd.Labels[p+".memory"] = "24Gi"
 	nd.Labels[p+".family"] = "ampere"
 	nd.Labels[p+".cores"] = "9216"
+	return nd
+}
+
+// newDetectedAccelNode builds a managed Node whose accelerator labels are produced by the real
+// label constructor from a detector-shaped DevicesGroup, rather than hand-written. That is what
+// makes it exercise the sanitize-and-length-cap step a live node's product label goes through.
+func newDetectedAccelNode(name, manufacturer, product string, memoryMib uint64, count int) *core.Node {
+	nd := newManagedCPUNode(name, 48, 192, 100)
+	nd.Labels[nodefeature.NodeAcceleratableLabelKey] = "true"
+	maps.Copy(nd.Labels, nodefeature.ConstructAcceleratableNodeLabels(device.DevicesGroupList{{
+		ID:           device.ConstructGroupID(manufacturer, product, memoryMib),
+		Manufacturer: manufacturer,
+		Name:         product,
+		Memory:       memoryMib,
+		Accelerators: make([]workercore.Accelerator, count),
+	}}))
 	return nd
 }
 
@@ -266,7 +291,7 @@ func TestNodeFlavorReconciler_ActiveShapeAccelerated(t *testing.T) {
 	assert.Equal(t, "nvidia", notes["manufacturer"], "manufacturer note")
 	assert.Equal(t, "generic", notes["generalGroup"], "generalGroup note (paired cpu key)")
 	assert.Equal(t, "nvidia-a10g", notes["acceleratorGroup"], "acceleratorGroup note")
-	assert.Equal(t, "NVIDIA A10G", notes["product"], "product note")
+	assert.Equal(t, "NVIDIA-A10G", notes["product"], "product note")
 	assert.Equal(t, "ampere", notes["family"], "family note")
 	assert.Equal(t, "24Gi", notes["memory"], "per-card VRAM note")
 	assert.Equal(t, "9216", notes["cores"], "per-card cores note")
@@ -303,13 +328,13 @@ func TestNodeFlavorReconciler_MixingDisabledExcludesAccelNode(t *testing.T) {
 // TestNodeFlavorReconciler_AuthorsDerivedInstanceType pins that, with
 // instance-type-derived-from-node enabled, syncing a pool's flavor authors the pool's
 // InstanceType: marked derived, stamped with the pool identity (group/acceleratable/os/arch) and
-// the fixed default unit spec chosen by acceleratable-ness — and only ever created, so an
-// existing (admin) type is left untouched. (The off branch is not asserted: the setting caches
-// once enabled in the shared test binary.)
+// the creation-time unit spec — a fixed 1c/2Gi for a CPU-only pool, the per-product preset for
+// an accelerated one — and only ever created, so an existing (admin) type is left untouched.
+// (The off branch is not asserted: the setting caches once enabled in the shared test binary.)
 func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 	enableInstanceTypeDerivedFromNode(t)
 
-	t.Run("accelerated pool: derived marker, spec identity, 4c/16Gi/100Gi default", func(t *testing.T) {
+	t.Run("accelerated pool: derived marker, spec identity, unit spec", func(t *testing.T) {
 		nd := newManagedAccelNode("node-g", 1)
 		cli := buildNodeFlavorClient(nd)
 
@@ -326,12 +351,39 @@ func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 		assert.True(t, it.Spec.Acceleratable, "spec marked acceleratable")
 		assert.Equal(t, "linux", it.Spec.OS, "spec os")
 		assert.Equal(t, "amd64", it.Spec.Arch, "spec arch")
-		assert.Equal(t, "NVIDIA A10G", it.Spec.DisplayName, "DisplayName stamped from the flavor product at derivation")
-		assert.Equal(t, "4", it.Spec.UnitResources.CPU, "accelerated unit CPU default")
-		assert.Equal(t, "16Gi", it.Spec.UnitResources.RAM, "accelerated unit RAM default")
+		assert.Equal(t, "NVIDIA-A10G", it.Spec.DisplayName, "DisplayName stamped from the flavor product at derivation")
+		assert.Equal(t, "8", it.Spec.UnitResources.CPU, "accelerated unit CPU, from the A10G preset")
+		assert.Equal(t, "64Gi", it.Spec.UnitResources.RAM, "accelerated unit RAM, from the A10G preset")
 		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "unit localStorage default")
 		// The feature-key metadata label is not stamped — it derives from the spec.
 		assert.NotContains(t, it.Labels, featureKeyLabel(true, "nvidia-a10g"))
+	})
+
+	t.Run("accelerated pool: a covered product is sized from its preset", func(t *testing.T) {
+		nd := newManagedAccelNodeOf("node-h", 8, "nvidia-h100", "NVIDIA-H100-80GB-HBM3")
+		cli := buildNodeFlavorClient(nd)
+
+		reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
+
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Name: nodeQueueName("nvidia-h100")}, it))
+		assert.Equal(t, "12", it.Spec.UnitResources.CPU, "accelerated unit CPU from the preset table")
+		assert.Equal(t, "192Gi", it.Spec.UnitResources.RAM, "accelerated unit RAM from the preset table")
+		assert.Equal(t, "100Gi", it.Spec.LocalStorage, "localStorage is never preset")
+	})
+
+	t.Run("accelerated pool: an unrecognized product keeps the historical value", func(t *testing.T) {
+		nd := newManagedAccelNodeOf("node-x", 1, "nvidia-contoso9000", "NVIDIA-Contoso-9000")
+		cli := buildNodeFlavorClient(nd)
+
+		reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
+
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Name: nodeQueueName("nvidia-contoso9000")}, it))
+		assert.Equal(t, "4", it.Spec.UnitResources.CPU, "unmatched products keep the pre-preset unit CPU")
+		assert.Equal(t, "16Gi", it.Spec.UnitResources.RAM, "unmatched products keep the pre-preset unit RAM")
 	})
 
 	t.Run("cpu-only pool: 1c/2Gi/100Gi default", func(t *testing.T) {
@@ -378,6 +430,37 @@ func TestNodeFlavorReconciler_AuthorsDerivedInstanceType(t *testing.T) {
 		assert.NotContains(t, it.Labels, _InstanceTypeDerivedFromNodeLabel,
 			"an existing type is not re-marked derived")
 	})
+
+	t.Run("create-only: a re-reconcile never re-sizes, a re-author picks up the current preset", func(t *testing.T) {
+		nd := newManagedAccelNodeOf("node-h2", 8, "nvidia-h100", "NVIDIA-H100-80GB-HBM3")
+		cli := buildNodeFlavorClient(nd)
+		flavor, name := deviceFlavorName(nd), nodeQueueName("nvidia-h100")
+
+		reconcileNodeFlavor(t, cli, flavor)
+
+		// Stand in for a pool authored before presets existed. In production the unit spec is
+		// immutable, so the only way a type can carry a stale one is to have been created with
+		// it — which is exactly what an operator upgrade leaves behind.
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, it))
+		it.Spec.UnitResources = workercore.InstanceTypeUnitResources{CPU: "4", RAM: "16Gi"}
+		require.NoError(t, cli.Update(context.Background(), it))
+
+		reconcileNodeFlavor(t, cli, flavor)
+
+		it = new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, it))
+		assert.Equal(t, "4", it.Spec.UnitResources.CPU, "an existing derived type is never re-sized")
+		assert.Equal(t, "16Gi", it.Spec.UnitResources.RAM, "an existing derived type is never re-sized")
+
+		require.NoError(t, cli.Delete(context.Background(), it))
+		reconcileNodeFlavor(t, cli, flavor)
+
+		it = new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKey{Name: name}, it))
+		assert.Equal(t, "12", it.Spec.UnitResources.CPU, "a re-authored type takes the current preset")
+		assert.Equal(t, "192Gi", it.Spec.UnitResources.RAM, "a re-authored type takes the current preset")
+	})
 }
 
 // TestNodeFlavorReconciler_EnqueueResourceFlavorsWhenDerivedInstanceTypeDeleted covers the only
@@ -413,6 +496,90 @@ func TestNodeFlavorReconciler_EnqueueResourceFlavorsWhenDerivedInstanceTypeDelet
 
 		assert.Empty(t, reqs)
 	})
+}
+
+// TestNodeFlavorReconciler_PresetPipeline drives detector-shaped product names through the whole
+// path a live cluster takes — DevicesGroup → ConstructAcceleratableNodeLabels → ExtractNodeFlavors
+// → authorDerivedInstanceType — and asserts the unit spec that lands on the InstanceType. It is
+// the only test exercising the label sanitize-and-length-cap step that happens before the preset
+// lookup normalizes, and the only one that would catch a table entry written against a marketing
+// name no detector actually emits.
+func TestNodeFlavorReconciler_PresetPipeline(t *testing.T) {
+	enableInstanceTypeDerivedFromNode(t)
+
+	cases := []struct {
+		name         string
+		manufacturer string
+		product      string
+		memoryMib    uint64
+		cpu          string
+		ram          string
+	}{
+		{"nvidia hopper", nodefeature.ManufacturerNVIDIA, "NVIDIA H100 80GB HBM3", 81559, "12", "192Gi"},
+		{"nvidia ampere sku split", nodefeature.ManufacturerNVIDIA, "NVIDIA A100-SXM4-40GB", 40960, "8", "64Gi"},
+		{"nvidia turing", nodefeature.ManufacturerNVIDIA, "Tesla T4", 15360, "8", "32Gi"},
+		{"nvidia geforce", nodefeature.ManufacturerNVIDIA, "NVIDIA GeForce RTX 4090", 24564, "8", "64Gi"},
+		{"ascend bare chip name", nodefeature.ManufacturerAscend, "910B2", 65536, "8", "64Gi"},
+		{"amd instinct", nodefeature.ManufacturerAMD, "AMD Instinct MI300X", 196608, "12", "192Gi"},
+		{"cambricon", nodefeature.ManufacturerCambricon, "MLU370-X8", 49152, "8", "64Gi"},
+		{"hygon", nodefeature.ManufacturerHygon, "K100_AI", 65536, "12", "128Gi"},
+		{"metax", nodefeature.ManufacturerMetaX, "MXC500", 65536, "8", "64Gi"},
+		{"mthreads", nodefeature.ManufacturerMThreads, "MTT S4000", 49152, "8", "64Gi"},
+		{"iluvatar", nodefeature.ManufacturerIluvatar, "Iluvatar BI-V150", 32768, "8", "64Gi"},
+		{"thead", nodefeature.ManufacturerTHead, "PPU-ZW810E", 98304, "8", "64Gi"},
+		{"an unrecognized product", nodefeature.ManufacturerNVIDIA, "NVIDIA Contoso 9000", 8192, "4", "16Gi"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			nd := newDetectedAccelNode("node-p", c.manufacturer, c.product, c.memoryMib, 8)
+			cli := buildNodeFlavorClient(nd)
+
+			reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
+
+			it := new(workercore.InstanceType)
+			require.NoError(t, cli.Get(context.Background(),
+				ctrlcli.ObjectKey{Name: derivedInstanceTypeName(nd)}, it))
+			assert.Equal(t, c.cpu, it.Spec.UnitResources.CPU, "unit CPU")
+			assert.Equal(t, c.ram, it.Spec.UnitResources.RAM, "unit RAM")
+		})
+	}
+
+	t.Run("a product whose tail the label cap cuts falls to its entry's base tier", func(t *testing.T) {
+		// The label value is capped at 63 characters before the preset lookup ever sees it, and
+		// the cap does not preserve token boundaries. A capacity discriminator cut in half must
+		// leave the family's base tier, never a wrong variant tier.
+		const product = "NVIDIA A100 SXM4 Some Very Long Marketing Qualifier Extended 80GB"
+		nd := newDetectedAccelNode("node-t", nodefeature.ManufacturerNVIDIA, product, 81559, 8)
+		cli := buildNodeFlavorClient(nd)
+
+		flavor := nodefeature.ExtractNodeFlavors(nd)
+		require.Len(t, flavor, 2)
+		for _, f := range flavor {
+			if f.Acceleratable {
+				require.Len(t, f.Product, 63, "the fixture must actually reach the label cap")
+			}
+		}
+
+		reconcileNodeFlavor(t, cli, deviceFlavorName(nd))
+
+		it := new(workercore.InstanceType)
+		require.NoError(t, cli.Get(context.Background(),
+			ctrlcli.ObjectKey{Name: derivedInstanceTypeName(nd)}, it))
+		assert.Equal(t, "8", it.Spec.UnitResources.CPU, "the base tier, not the 80GB variant")
+		assert.Equal(t, "64Gi", it.Spec.UnitResources.RAM, "the base tier, not the 80GB variant")
+	})
+}
+
+// derivedInstanceTypeName returns the name of the InstanceType a node's device flavor is
+// summarized into.
+func derivedInstanceTypeName(nd *core.Node) string {
+	for _, f := range nodefeature.ExtractNodeFlavors(nd) {
+		if f.Acceleratable {
+			return nodeQueueName(f.AcceleratorKey)
+		}
+	}
+	return ""
 }
 
 func TestIndexNodeByScheduleFlavor(t *testing.T) {

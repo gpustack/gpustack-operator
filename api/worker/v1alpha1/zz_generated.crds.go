@@ -1289,7 +1289,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "boolean",
 										},
 										"localStorage": {
-											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced\nby the validating webhook, and is immutable after creation; a derived InstanceType is\nstamped with the fixed default.",
+											Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced\nby the validating webhook, and is immutable after creation; a derived InstanceType is\nstamped with a fixed 100Gi, which no preset varies.",
 											Type:        "string",
 										},
 										"os": {
@@ -1297,7 +1297,7 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Type:        "string",
 										},
 										"unitResources": {
-											Description: "UnitResources describes the unit resources of the InstanceType.\nIt is a required admin-writable input, enforced by the validating webhook, and is\nimmutable after creation; a derived InstanceType is stamped with the fixed default.",
+											Description: "UnitResources describes the unit resources of the InstanceType.\nIt is a required admin-writable input, enforced by the validating webhook, and is\nimmutable after creation. A derived InstanceType is stamped once at creation: an\naccelerated one from the per-product preset table, falling back to 4 CPU / 16Gi for a\nproduct the table does not recognize, and a CPU-only one with 1 CPU / 2Gi.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
 												"cpu": {

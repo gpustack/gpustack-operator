@@ -95,6 +95,7 @@ worked example cluster.
 
 - [Architecture](./docs/architecture.md) — how device discovery, node capacity profiling, and the Kueue scheduling chain work, with a worked example cluster.
 - [Accelerator Requests](./docs/accelerator-requests.md) — the resource keys for every accelerator family, the normative request rules enforced at admission, and a worked example per family.
+- [Instance Type Unit Resources Preset Reference](./docs/reference/instance-type-unit-resources.md) — what the per-card CPU/RAM unit spec controls, the preset tier a node-derived `InstanceType` is sized with per accelerator product, and the public configuration each tier was taken from.
 - [Development](./docs/development.md) — build, lint, test, code generation, and dependency management commands.
 - [Settings & Environment Variables](./docs/settings.md) — online-adjustable settings (`kubectl`) plus every `GPUSTACK_*` env, per-manufacturer overrides, and vendor toolkit paths.
 - [High Availability](./docs/operation/high-availability.md) — which knob to raise per control-plane component, what each bundled subchart can and cannot spread, and the one topology that must stay single-replica.

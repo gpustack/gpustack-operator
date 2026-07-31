@@ -364,8 +364,9 @@ func ConstructNodeCapacityLabels(node *core.Node, opt ...ConstructNodeCapacityLa
 // acceleratable key it carries (sized by device count).
 //
 // The NodeFlavorReconciler pools the nodes that share a Name: the flavor's capacity
-// is the count of pooled nodes times Count. The unit spec is not derived here — it is
-// a fixed default on the InstanceType.
+// is the count of pooled nodes times Count. The unit spec is not derived here: the
+// reconciler resolves it from Manufacturer and Product via PresetUnitResources when it
+// authors the pool's InstanceType.
 type NodeFlavor struct {
 	// Name is the ResourceFlavor name, with the CPU key always encoded and full os/arch:
 	// "gpustack--${gKey}-${os}-${arch}-${count}c" for a CPU flavor or

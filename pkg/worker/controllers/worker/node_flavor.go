@@ -325,11 +325,16 @@ const (
 	// cpuOnlyDisplayName is the DisplayName a derived CPU-manufacturer-agnostic collapsed pool
 	// carries, since no single pooled node's product represents it.
 	cpuOnlyDisplayName = "CPU-only"
+
+	// derivedLocalStorage is the per-unit local storage every derived InstanceType is stamped
+	// with. Unlike the unit CPU/RAM it is not preset per product, because the storage a workload
+	// wants does not track the accelerator it runs on. Admins override it per InstanceType.
+	derivedLocalStorage = "100Gi"
 )
 
 // authorDerivedInstanceType creates the pool's operator-owned InstanceType from a synced flavor.
 // It stamps the setting-correct pool identity (general/accelerator group + acceleratable/os/arch)
-// + the fixed default unit spec + the derived marker + the human-friendly DisplayName (the
+// + the creation-time unit spec + the derived marker + the human-friendly DisplayName (the
 // flavor's product, or the "CPU-only" sentinel for the CPU-manufacturer-agnostic collapsed pool).
 // DisplayName is admin-editable, so this creation-time default never fights a later admin rename;
 // an admin-created type is not auto-named. It only ever creates — an existing type (admin- or
@@ -339,7 +344,7 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 
 	cpuAware := settings.InstanceTypeAwareCPUManufacturer.ShouldValueBool(ctx)
 	name, generalGroup, acceleratorGroup := flavor.DerivedInstanceTypeIdentity(cpuAware)
-	unitCpu, unitRam, stg := defaultResources(flavor.Acceleratable)
+	unitCpu, unitRam := derivedUnitResources(flavor)
 
 	// The collapsed generic pool folds many CPUs into one type, so no single node's product
 	// represents it (the flavor carries an empty product there anyway); label it "CPU-only".
@@ -364,7 +369,7 @@ func (r *NodeFlavorReconciler) authorDerivedInstanceType(ctx context.Context, fl
 			Arch:             flavor.Arch,
 			DisplayName:      displayName,
 			UnitResources:    workercore.InstanceTypeUnitResources{CPU: unitCpu, RAM: unitRam},
-			LocalStorage:     stg,
+			LocalStorage:     derivedLocalStorage,
 		},
 	}
 	err := r.Client.Create(ctx, it)
@@ -414,18 +419,17 @@ func cpuDetailNote(d nodefeature.CPUDetail, acceleratable bool) string {
 	return string(json.ShouldMarshal(cpu))
 }
 
-// defaultResources returns the fixed per-unit CPU/RAM and storage for a derived InstanceType, chosen by
-// acceleratable-ness: a non-accelerated unit is 1 CPU / 2Gi / 100Gi, an accelerated unit (one whole card)
-// is 4 CPU / 16Gi / 100Gi. Admins override these per InstanceType.
-func defaultResources(acceleratable bool) (unitCpu, unitRam, stg string) {
-	unitCpu = "1"
-	unitRam = "2Gi"
-	stg = "100Gi"
-	if acceleratable {
-		unitCpu = "4"
-		unitRam = "16Gi"
+// derivedUnitResources returns the per-unit CPU/RAM stamped on a derived InstanceType. A
+// non-accelerated unit is a fixed 1 CPU / 2Gi — the webhook pins a CPU-only type's unit CPU to
+// exactly 1 anyway. An accelerated unit is one whole card, sized from the per-product preset
+// table; a card the table does not recognize keeps the historical 4 CPU / 16Gi. Admins override
+// both per InstanceType, and the spec is immutable afterwards, so this only ever decides a
+// pool's first value.
+func derivedUnitResources(flavor *nodefeature.NodeFlavor) (unitCpu, unitRam string) {
+	if !flavor.Acceleratable {
+		return "1", "2Gi"
 	}
-	return unitCpu, unitRam, stg
+	return nodefeature.PresetUnitResources(flavor.Manufacturer, flavor.Product)
 }
 
 const (
