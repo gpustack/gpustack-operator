@@ -9,6 +9,7 @@ import (
 	apiext "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	klog "k8s.io/klog/v2"
 	apireg "k8s.io/kube-aggregator/pkg/apis/apiregistration/v1"
 	"k8s.io/utils/ptr"
 
@@ -77,8 +78,16 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRD
 		// The align function is what makes a losing writer retry instead of returning the
 		// conflict: every replica installs the definitions before leader election, so
 		// without it a concurrent boot fails one of them.
+		var terminating bool
 		crdAlignFn := func(aCRD *apiext.CustomResourceDefinition) (_ *apiext.CustomResourceDefinition, skip bool, err error) {
 			skip = true
+			// A terminating definition still serves reads, but the api server drops it as soon as
+			// its custom resources drain, so writing to it aligns something that is about to be
+			// gone. Leave it and report it as not installed.
+			if aCRD.GetDeletionTimestamp() != nil {
+				terminating = true
+				return aCRD, skip, err
+			}
 			// Align spec.
 			if !kubemeta.DeepEqual(aCRD.Spec, eCRD.Spec) {
 				aCRD.Spec = *eCRD.Spec.DeepCopy()
@@ -92,6 +101,13 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRD
 		if err != nil {
 			return fmt.Errorf("install custom resource definition %q: %w",
 				eCRD.GetName(), err)
+		}
+		if terminating {
+			// Not an error: the finalizers holding the deletion are released by controllers that
+			// only start once this returns, so failing here keeps the definition we are waiting
+			// for alive forever.
+			klog.InfoS("terminating custom resource definition, leaving it to drain",
+				"crd", eCRD.GetName())
 		}
 	}
 

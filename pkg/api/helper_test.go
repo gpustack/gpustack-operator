@@ -54,6 +54,15 @@ func newTestCRD(shortName string) *apiext.CustomResourceDefinition {
 	}
 }
 
+// newTerminatingTestCRD builds a custom resource definition the api server is deleting: it keeps
+// serving reads until its custom resources drain, and the cleanup finalizer is what holds it.
+func newTerminatingTestCRD(shortName string) *apiext.CustomResourceDefinition {
+	crd := newTestCRD(shortName)
+	crd.DeletionTimestamp = ptr.To(meta.Now())
+	crd.Finalizers = []string{"customresourcecleanup.apiextensions.k8s.io"}
+	return crd
+}
+
 // newTestAPIService builds an api service carrying the given service reference and CA bundle.
 func newTestAPIService(svc apireg.ServiceReference, ca []byte) *apireg.APIService {
 	return &apireg.APIService{
@@ -150,21 +159,33 @@ func Test_InstallCRDs(t *testing.T) {
 		seed            *apiext.CustomResourceDefinition
 		conflicts       int
 		wantUpdateCalls int
+		wantShortNames  []string
 	}{
 		{
 			name:            "creates an absent definition",
 			wantUpdateCalls: 0,
+			wantShortNames:  []string{"expected"},
 		},
 		{
 			name:            "retries a conflicting update",
 			seed:            newTestCRD("stale"),
 			conflicts:       1,
 			wantUpdateCalls: 2,
+			wantShortNames:  []string{"expected"},
 		},
 		{
 			name:            "skips an aligned definition",
 			seed:            newTestCRD("expected"),
 			wantUpdateCalls: 0,
+			wantShortNames:  []string{"expected"},
+		},
+		{
+			// A terminating definition is on its way out whatever we write to it, so the
+			// installer must leave it alone instead of aligning it as if it were installed.
+			name:            "skips a terminating definition",
+			seed:            newTerminatingTestCRD("stale"),
+			wantUpdateCalls: 0,
+			wantShortNames:  []string{"stale"},
 		},
 	}
 
@@ -188,7 +209,7 @@ func Test_InstallCRDs(t *testing.T) {
 			actual, err := cli.ApiextensionsV1().CustomResourceDefinitions().
 				Get(t.Context(), testCRDName, meta.GetOptions{})
 			require.NoError(t, err)
-			assert.Equal(t, expected.Spec.Names.ShortNames, actual.Spec.Names.ShortNames)
+			assert.Equal(t, tc.wantShortNames, actual.Spec.Names.ShortNames)
 		})
 	}
 }
