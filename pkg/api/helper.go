@@ -21,8 +21,8 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
 
-// crdEnsureInterval is how often EnsureCRDs looks for a missing custom resource definition.
-const crdEnsureInterval = 30 * time.Second
+// ensureInterval is how often EnsureCRDs and EnsureServices look for a missing object.
+const ensureInterval = 30 * time.Second
 
 type (
 	// CRDGetter is the function type for getting custom resource definitions.
@@ -135,7 +135,7 @@ func InstallCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRD
 func EnsureCRDs(ctx context.Context, cli kubernetes.Interface, crdGetters []CRDGetter) error {
 	crds := MergeCRDs(crdGetters)
 
-	return waitx.UntilContextCancel(ctx, crdEnsureInterval, false,
+	return waitx.UntilContextCancel(ctx, ensureInterval, false,
 		func(ctx context.Context) error {
 			err := restoreCRDs(ctx, cli, crds)
 			if err != nil {
@@ -248,6 +248,54 @@ func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.S
 	}
 
 	return nil
+}
+
+// EnsureServices restores the api services that go missing, until the given context is done. Every
+// failed attempt is logged, and what it returns once the context is done reads the same way as
+// EnsureCRDs': the cancellation, or the last failure recorded where an attempt raced it.
+//
+// An api service deleted after the boot leaves the aggregated api it fronts answering nothing for
+// the life of the process, which is what EnsureCRDs prevents for the definitions. The two carry
+// the same constraints: no permission review of its own, no returning for a reason other than the
+// context being done, and absence is all that is repaired.
+func EnsureServices(ctx context.Context, cli kubernetes.Interface, svc apireg.ServiceReference, ca []byte, getters []ServiceGetter) error {
+	svcs := MergeServices(svc, ca, getters)
+
+	return waitx.UntilContextCancel(ctx, ensureInterval, false,
+		func(ctx context.Context) error {
+			err := restoreServices(ctx, cli, svcs)
+			if err != nil {
+				klog.InfoS("retrying to restore the api services", "err", err)
+			}
+			return err
+		})
+}
+
+// restoreServices creates the given api services where they are absent, and leaves the ones
+// already there exactly as they are.
+//
+// As with restoreCRDs, absence is all it repairs: an outgoing replica of a rolling update runs
+// this too, and its service reference and CA bundle are its own. Aligning those is what
+// InstallServices does, on the boot of the replica they belong to.
+func restoreServices(ctx context.Context, cli kubernetes.Interface, svcs []*apireg.APIService) error {
+	svcCli := cli.ApiregistrationV1().APIServices()
+
+	keepFn := func(aSvc *apireg.APIService) (*apireg.APIService, bool, error) {
+		return aSvc, true, nil
+	}
+	// Every service is attempted even after one fails, for the reason restoreCRDs carries.
+	var errs []error
+	for i := range svcs {
+		_, err := kubeclientset.Update(ctx, svcCli, svcs[i],
+			kubeclientset.WithCreateIfNotExisted[*apireg.APIService](),
+			kubeclientset.WithUpdateAlign(keepFn))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("restore api service %q: %w",
+				svcs[i].GetName(), err))
+		}
+	}
+
+	return multierr.Combine(errs...)
 }
 
 // IsServicesReady reports whether the api services are ready, checking each of them once. The error

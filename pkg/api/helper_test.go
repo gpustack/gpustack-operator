@@ -269,6 +269,53 @@ func Test_restoreCRDs(t *testing.T) {
 	}
 }
 
+// Test_restoreServices is Test_restoreCRDs for the extension api services, which go missing the
+// same way and are restored under the same constraints.
+func Test_restoreServices(t *testing.T) {
+	svcs := []*apireg.APIService{newTestAPIService(testServiceReference, []byte("expected-ca"))}
+
+	testCases := []struct {
+		name            string
+		seed            *apireg.APIService
+		wantUpdateCalls int
+		wantCA          []byte
+	}{
+		{
+			name:            "creates a missing service",
+			wantUpdateCalls: 0,
+			wantCA:          []byte("expected-ca"),
+		},
+		{
+			name:            "leaves another version of the service alone",
+			seed:            newTestAPIService(testServiceReference, []byte("other-ca")),
+			wantUpdateCalls: 0,
+			wantCA:          []byte("other-ca"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var objs []runtime.Object
+			if tc.seed != nil {
+				objs = append(objs, tc.seed)
+			}
+			cli := kubefake.NewSimpleClientset(objs...)
+
+			updates := &flakyUpdates{resource: testAPIResource}
+			cli.PrependReactor("update", testAPIResource, updates.react)
+
+			require.NoError(t, restoreServices(t.Context(), cli, svcs))
+
+			assert.Equal(t, tc.wantUpdateCalls, updates.count(), "update calls")
+
+			actual, err := cli.ApiregistrationV1().APIServices().
+				Get(t.Context(), testAPIServiceName, meta.GetOptions{})
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantCA, actual.Spec.CABundle)
+		})
+	}
+}
+
 // Test_InstallServices drives the same concurrent-boot path for the extension api services,
 // which the installer applies with an align function of its own.
 func Test_InstallServices(t *testing.T) {

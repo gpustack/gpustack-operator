@@ -37,6 +37,11 @@ func InstallServices(ctx context.Context, cli kubernetes.Interface, svc apireg.S
 	return api.InstallServices(ctx, cli, svc, ca, apiSvcGetters)
 }
 
+// EnsureServices keeps the api services installed until the given context is done.
+func EnsureServices(ctx context.Context, cli kubernetes.Interface, svc apireg.ServiceReference, ca []byte) error {
+	return api.EnsureServices(ctx, cli, svc, ca, apiSvcGetters)
+}
+
 // IsServicesReady reports whether the api services are ready, checking each of them once.
 func IsServicesReady(ctx context.Context, cli kubernetes.Interface) error {
 	return api.IsServicesReady(ctx, cli, apiSvcGetters)
