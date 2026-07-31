@@ -5,6 +5,55 @@ entries:
       artifacthub.io/license: Apache-2.0
       artifacthub.io/operator: "true"
     apiVersion: v2
+    appVersion: 0.7.3
+    created: "2026-07-31T00:40:53.463437636Z"
+    dependencies:
+    - condition: kueue.enabled
+      name: kueue
+      repository: ""
+      version: 0.18.4
+    - condition: node-feature-discovery.enabled
+      name: node-feature-discovery
+      repository: ""
+      version: 0.19.0
+    - condition: csi-driver-nfs.enabled
+      name: csi-driver-nfs
+      repository: ""
+      version: 4.13.4
+    - condition: csi-driver-s3.enabled
+      name: csi-driver-s3
+      repository: ""
+      version: 0.43.7
+    description: A Kubernetes operator that turns raw node hardware into a Kueue-based
+      scheduling chain for accelerators (GPU/NPU/TPU), built on Node Feature Discovery
+      (NFD) and Kueue.
+    digest: 071207049edd1487f15f7525a84c0045ae6ef7ca4df569a43c841b26f8866da8
+    home: https://github.com/gpustack/gpustack-operator
+    icon: https://raw.githubusercontent.com/gpustack/gpustack/main/docs/assets/logo.png
+    keywords:
+    - gpustack-operator
+    - operator
+    - kueue
+    - node-feature-discovery
+    - gpu
+    - npu
+    - accelerator
+    kubeVersion: '>=1.23.0-0'
+    maintainers:
+    - name: GPUStack Authors
+      url: https://github.com/gpustack
+    name: gpustack-operator
+    sources:
+    - https://github.com/gpustack/gpustack
+    - https://github.com/gpustack/gpustack-operator
+    type: application
+    urls:
+    - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.7.3.tgz
+    version: 0.7.3
+  - annotations:
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+    apiVersion: v2
     appVersion: 0.7.2
     created: "2026-07-31T00:40:29.856838178Z"
     description: A Kubernetes operator that turns raw node hardware into a Kueue-based
@@ -480,4 +529,4 @@ entries:
     urls:
     - https://gpustack.github.io/gpustack-operator/charts/gpustack-operator-0.5.1.tgz
     version: 0.5.1
-generated: "2026-07-31T00:40:29.855532053Z"
+generated: "2026-07-31T00:40:53.448393027Z"
