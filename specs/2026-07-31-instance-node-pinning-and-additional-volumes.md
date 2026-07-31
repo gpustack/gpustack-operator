@@ -132,12 +132,26 @@ An atomic list; each entry carries a mount target plus exactly one source.
 - **AC2.1** Unset/empty → the rendered Pod is identical to today's (`workspace`, plus
   `sshd-authorized-keys` when an SSH key is set).
 - **AC2.2** N entries → the Pod gains N volumes and N `volumeMounts` **on the `main` container only**,
-  with deterministic names that can never collide with `workspace` or `sshd-authorized-keys`;
-  re-rendering an unchanged Instance produces an identical Pod spec (idempotent reconcile).
+  named `additional-<index>` — derived from the entry's position, never from user input, so the name
+  can collide with neither `workspace` nor `sshd-authorized-keys`; re-rendering an unchanged Instance
+  produces an identical Pod spec (idempotent reconcile). An entry carrying no source is skipped rather
+  than rendered as an empty volume the API server would refuse.
 - **AC2.3** `readOnly: true` renders a read-only mount; `subPath` renders `VolumeMount.SubPath`.
-- **AC2.4** CREATE is rejected, with the offending index in the field path, for: a non-absolute or
-  duplicated `mountPath`; a `mountPath` equal to `spec.volumeMount`; zero or more than one source; an
-  absolute `subPath` or one containing `..`; an empty source name or host path.
+- **AC2.4** CREATE is rejected, with the offending index in the field path, for: a missing,
+  non-absolute, **non-canonical** or duplicated `mountPath`; a `mountPath` equal to `spec.volumeMount`;
+  zero or more than one source; an absolute `subPath` or one containing `..`; an empty source name; and
+  a `hostPath` whose `path` is empty, relative or non-canonical, or whose `type` Kubernetes does not
+  support. The same checks re-run on the start (resume) transition, as resource validation already
+  does: unlike the node pin, the list is the Instance's own spec and editable while stopped, and a
+  malformed entry yields a Pod the API server refuses on every reconcile rather than one that merely
+  stays Pending.
+
+  Canonicality is load-bearing rather than pedantry: the CRD pattern `^(/[^/]+)+$` admits `.` and `..`
+  as segments, so `/workspace/.` would pass a textual comparison against `spec.volumeMount` and then
+  resolve onto the workspace, and `/data` alongside `/tmp/../data` would pass duplicate detection
+  (Kubernetes checks mount-path uniqueness textually too) and then mount twice at one place, silently
+  shadowing one volume. The same reasoning covers `hostPath`: Kubernetes refuses a node path with a
+  `..` element and an unsupported `type` at Pod creation, which the reconciler would retry forever.
 - **AC2.5** Every reference is same-namespace by construction — no cross-namespace field exists in the
   API.
 - **AC2.6** `spec.additionalVolumes` is immutable while the Instance is not stopped and editable while
@@ -452,7 +466,7 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         the object name when the label is absent) and never writes `pod.spec.nodeName`.
       Verify: the regeneration recipe above → `go test -race -count=1 ./pkg/worker/... -run Instance` → `make lint`
 
-- [ ] **T4 · Additional volumes tracer bullet**
+- [x] **T4 · Additional volumes tracer bullet**
       Blocked by: T3
       Owns: the same paths as T3
       Gate: review

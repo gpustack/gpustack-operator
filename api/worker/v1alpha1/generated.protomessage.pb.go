@@ -52,6 +52,8 @@ func (*DevicesStatus) ProtoMessage() {}
 
 func (*Instance) ProtoMessage() {}
 
+func (*InstanceAdditionalVolume) ProtoMessage() {}
+
 func (*InstanceEnvVar) ProtoMessage() {}
 
 func (*InstanceEphemeralVolume) ProtoMessage() {}

@@ -3,6 +3,9 @@ package worker
 import (
 	"context"
 	"fmt"
+	"path"
+	"slices"
+	"strings"
 
 	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -104,6 +107,7 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 	if nodeErr != nil {
 		errs = append(errs, nodeErr)
 	}
+	errs = append(errs, validateAdditionalVolumes(inst)...)
 	switch {
 	case inst.Spec.Volume.Ephemeral != nil && inst.Spec.Volume.Persistent != nil:
 		errs = append(errs, field.Forbidden(
@@ -203,6 +207,11 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 				field.NewPath("spec.nodeName"), "nodeName is immutable"),
 			)
 		}
+		if !kubemeta.DeepEqual(inst.Spec.AdditionalVolumes, instOld.Spec.AdditionalVolumes) {
+			errs = append(errs, field.Forbidden(
+				field.NewPath("spec.additionalVolumes"), "additionalVolumes is immutable"),
+			)
+		}
 	}
 	if !kubemeta.DeepEqual(inst.Spec.Volume, instOld.Spec.Volume) {
 		errs = append(errs, field.Forbidden(
@@ -241,6 +250,10 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 		// node that has since gone away makes the Pod stay Pending with the scheduler's own reason
 		// rather than block the start.
 		//
+		// The additional volumes are, though: unlike the node they are the Instance's own spec,
+		// editable while it is stopped, and a malformed entry yields a Pod the API server refuses on
+		// every reconcile rather than one that merely stays Pending.
+		errs = append(errs, validateAdditionalVolumes(inst)...)
 		// Re-validate the resources that will take effect on start with the SAME checks
 		// ValidateCreate applies (sign, accelerator/CPU caps, slice-percentage ranges, and
 		// per-unit RAM / local storage), not just the upper caps — a stopped Instance may have
@@ -267,6 +280,142 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 	}
 
 	return nil, nil
+}
+
+// validateAdditionalVolumes checks each additional volume entry, carrying the entry's index in the
+// field path so a rejection names the offending one: an absolute mount path that neither repeats
+// another entry's nor shadows the workspace, exactly one source, a relative sub path that cannot
+// escape the volume, and a non-empty reference.
+//
+// The referenced objects themselves are not looked up, matching spec.volume.persistent: a missing
+// one surfaces as the Pod's own event rather than as a rejection that would also refuse a legitimate
+// concurrent create. Shared by ValidateCreate and the start (resume) path of ValidateUpdate, so a
+// list edited while the Instance was stopped cannot start into a Pod the API server would refuse.
+func validateAdditionalVolumes(inst *workercore.Instance) field.ErrorList {
+	var errs field.ErrorList
+
+	seen := make(map[string]struct{}, len(inst.Spec.AdditionalVolumes))
+	for i := range inst.Spec.AdditionalVolumes {
+		av := &inst.Spec.AdditionalVolumes[i]
+		fldPath := field.NewPath("spec.additionalVolumes").Index(i)
+
+		mountPath := fldPath.Child("mountPath")
+		switch {
+		case av.MountPath == "":
+			errs = append(errs, field.Required(mountPath, "mount path must be specified"))
+		case !path.IsAbs(av.MountPath):
+			errs = append(errs, field.Invalid(mountPath, av.MountPath, "mount path must be absolute"))
+		case path.Clean(av.MountPath) != av.MountPath:
+			// A non-canonical path defeats both comparisons below, since they are textual while
+			// the kubelet resolves the path: "/workspace/." would silently overlay the workspace,
+			// and "/tmp/../data" would mount at the same place as "/data" without repeating it.
+			errs = append(errs, field.Invalid(mountPath, av.MountPath,
+				`mount path must be canonical, without a ".", ".." or trailing "/" element`))
+		case av.MountPath == path.Clean(inst.Spec.VolumeMount):
+			errs = append(errs, field.Invalid(mountPath, av.MountPath,
+				"mount path must differ from the workspace volume mount"))
+		default:
+			if _, dup := seen[av.MountPath]; dup {
+				errs = append(errs, field.Duplicate(mountPath, av.MountPath))
+			}
+			seen[av.MountPath] = struct{}{}
+		}
+
+		if av.SubPath != "" {
+			subPath := fldPath.Child("subPath")
+			switch {
+			case path.IsAbs(av.SubPath):
+				errs = append(errs, field.Invalid(subPath, av.SubPath, "sub path must be relative"))
+			case slices.Contains(strings.Split(av.SubPath, "/"), ".."):
+				errs = append(errs, field.Invalid(subPath, av.SubPath, "sub path must not contain \"..\""))
+			}
+		}
+
+		errs = append(errs, validateAdditionalVolumeSource(av, fldPath)...)
+	}
+
+	return errs
+}
+
+// validateAdditionalVolumeSource checks that exactly one source of an additional volume is set and
+// that it actually names something.
+func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fldPath *field.Path) field.ErrorList {
+	var (
+		errs field.ErrorList
+		set  []string
+	)
+
+	refs := []struct {
+		name string
+		ref  *core.LocalObjectReference
+	}{
+		{"persistent", av.Persistent},
+		{"configMap", av.ConfigMap},
+		{"secret", av.Secret},
+	}
+	for _, r := range refs {
+		if r.ref == nil {
+			continue
+		}
+		set = append(set, r.name)
+		if r.ref.Name == "" {
+			errs = append(errs, field.Required(fldPath.Child(r.name, "name"),
+				"name of the referenced object must be specified"))
+		}
+	}
+	if av.HostPath != nil {
+		set = append(set, "hostPath")
+		errs = append(errs, validateHostPathSource(av.HostPath, fldPath.Child("hostPath"))...)
+	}
+
+	switch len(set) {
+	case 1:
+	case 0:
+		errs = append(errs, field.Required(fldPath,
+			"exactly one of persistent, configMap, secret or hostPath must be specified"))
+	default:
+		errs = append(errs, field.Forbidden(fldPath,
+			fmt.Sprintf("cannot specify more than one source: %s", strings.Join(set, ", "))))
+	}
+
+	return errs
+}
+
+// _HostPathTypes is the set of node path kinds Kubernetes accepts on a hostPath volume.
+var _HostPathTypes = []core.HostPathType{
+	core.HostPathUnset,
+	core.HostPathDirectoryOrCreate,
+	core.HostPathDirectory,
+	core.HostPathFileOrCreate,
+	core.HostPathFile,
+	core.HostPathSocket,
+	core.HostPathCharDev,
+	core.HostPathBlockDev,
+}
+
+// validateHostPathSource checks a hostPath source the way Pod validation will: an absolute, canonical
+// node path — Kubernetes refuses one carrying a ".." element — of a supported kind. Admitting
+// anything else would only move the rejection to Pod creation, which the reconciler retries forever
+// because the backing Pod is rendered once and never re-diffed.
+func validateHostPathSource(hp *core.HostPathVolumeSource, fldPath *field.Path) field.ErrorList {
+	var errs field.ErrorList
+
+	nodePath := fldPath.Child("path")
+	switch {
+	case hp.Path == "":
+		errs = append(errs, field.Required(nodePath, "path on the node must be specified"))
+	case !path.IsAbs(hp.Path):
+		errs = append(errs, field.Invalid(nodePath, hp.Path, "path on the node must be absolute"))
+	case path.Clean(hp.Path) != hp.Path:
+		errs = append(errs, field.Invalid(nodePath, hp.Path,
+			`path on the node must be canonical, without a ".", ".." or trailing "/" element`))
+	}
+
+	if hp.Type != nil && !slices.Contains(_HostPathTypes, *hp.Type) {
+		errs = append(errs, field.NotSupported(fldPath.Child("type"), *hp.Type, _HostPathTypes))
+	}
+
+	return errs
 }
 
 // validateNodePin checks that the pinned Node exists, catching a typo at creation rather than

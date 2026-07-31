@@ -632,6 +632,98 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 										"type",
 									},
 									Properties: map[string]v1.JSONSchemaProps{
+										"additionalVolumes": {
+											Description: "AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace,\neach at a path of its own. They are mounted into the Instance's main container only, which\nthe SSH server also observes.\nImmutable unless the Instance is stopped.",
+											Type:        "array",
+											Items: &v1.JSONSchemaPropsOrArray{
+												Schema: &v1.JSONSchemaProps{
+													Type: "object",
+													Required: []string{
+														"mountPath",
+													},
+													Properties: map[string]v1.JSONSchemaProps{
+														"configMap": {
+															Description: "ConfigMap is the reference to the ConfigMap to mount, in the same namespace.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
+														"hostPath": {
+															Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so\ncreating an Instance that uses it requires the instance-host-path-volume-allowed Setting.",
+															Type:        "object",
+															Required: []string{
+																"path",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"path": {
+																	Description: "path of the directory on the host.\nIf the path is a symlink, it will follow the link to the real path.\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
+																	Type:        "string",
+																},
+																"type": {
+																	Description: "type for HostPath Volume\nDefaults to \"\"\nMore info: https://kubernetes.io/docs/concepts/storage/volumes#hostpath",
+																	Type:        "string",
+																	Nullable:    true,
+																},
+															},
+															Nullable: true,
+														},
+														"mountPath": {
+															Description: "MountPath is the absolute in-container path to mount the volume at. It must not duplicate\nanother entry's path, nor the workspace's VolumeMount.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+															Pattern:     `^(/[^/]+)+$`,
+														},
+														"persistent": {
+															Description: "Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
+														"readOnly": {
+															Description: "ReadOnly mounts the volume read-only.",
+															Type:        "boolean",
+														},
+														"secret": {
+															Description: "Secret is the reference to the Secret to mount, in the same namespace.",
+															Type:        "object",
+															Properties: map[string]v1.JSONSchemaProps{
+																"name": {
+																	Description: "Name of the referent.\nThis field is effectively required, but due to backwards compatibility is\nallowed to be empty. Instances of this type with an empty value here are\nalmost certainly wrong.\nMore info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names\nTODO: Drop `kubebuilder:default` when controller-gen doesn't need it https://github.com/kubernetes-sigs/kubebuilder/issues/3896.",
+																	Type:        "string",
+																	Default: &v1.JSON{
+																		Raw: []byte(`""`),
+																	},
+																},
+															},
+															Nullable: true,
+														},
+														"subPath": {
+															Description: "SubPath mounts a relative path inside the volume rather than its root.\nIt must not be absolute nor contain a \"..\" element.",
+															Type:        "string",
+															MaxLength:   ptr.To[int64](1024),
+														},
+													},
+												},
+											},
+											Nullable:  true,
+											XListType: ptr.To[string]("atomic"),
+										},
 										"command": {
 											Description: "Command is the command to run in the Instance,\nwhich should overwrite the default command in the container image CMD.",
 											Type:        "array",

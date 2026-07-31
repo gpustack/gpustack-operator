@@ -111,6 +111,11 @@ func (in Instance) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceAdditionalVolume) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1alpha1.InstanceAdditionalVolume"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceEnvVar) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1alpha1.InstanceEnvVar"
 }

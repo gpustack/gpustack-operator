@@ -158,6 +158,19 @@ func (b *InstanceSpecApplyConfiguration) WithImagePullSecret(value *v1.LocalObje
 	return b
 }
 
+// WithAdditionalVolumes adds the given value to the AdditionalVolumes field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AdditionalVolumes field.
+func (b *InstanceSpecApplyConfiguration) WithAdditionalVolumes(values ...*InstanceAdditionalVolumeApplyConfiguration) *InstanceSpecApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAdditionalVolumes")
+		}
+		b.InstanceTemplateApplyConfiguration.AdditionalVolumes = append(b.InstanceTemplateApplyConfiguration.AdditionalVolumes, *values[i])
+	}
+	return b
+}
+
 // WithVolume sets the Volume field in the declarative configuration to the given value
 // and returns the receiver, so that objects can be built by chaining "With" function invocations.
 // If called multiple times, the Volume field is set to the value of the last call.

@@ -31,6 +31,12 @@ type InstanceTemplateApplyConfiguration struct {
 	VolumeMount *string `json:"volumeMount,omitempty"`
 	// ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
 	ImagePullSecret *corev1.LocalObjectReferenceApplyConfiguration `json:"imagePullSecret,omitempty"`
+	// AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace,
+	// each at a path of its own. They are mounted into the Instance's main container only, which
+	// the SSH server also observes.
+	//
+	// Immutable unless the Instance is stopped.
+	AdditionalVolumes []InstanceAdditionalVolumeApplyConfiguration `json:"additionalVolumes,omitempty"`
 }
 
 // InstanceTemplateApplyConfiguration constructs a declarative configuration of the InstanceTemplate type for use with
@@ -120,5 +126,18 @@ func (b *InstanceTemplateApplyConfiguration) WithVolumeMount(value string) *Inst
 // If called multiple times, the ImagePullSecret field is set to the value of the last call.
 func (b *InstanceTemplateApplyConfiguration) WithImagePullSecret(value *corev1.LocalObjectReferenceApplyConfiguration) *InstanceTemplateApplyConfiguration {
 	b.ImagePullSecret = value
+	return b
+}
+
+// WithAdditionalVolumes adds the given value to the AdditionalVolumes field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AdditionalVolumes field.
+func (b *InstanceTemplateApplyConfiguration) WithAdditionalVolumes(values ...*InstanceAdditionalVolumeApplyConfiguration) *InstanceTemplateApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAdditionalVolumes")
+		}
+		b.AdditionalVolumes = append(b.AdditionalVolumes, *values[i])
+	}
 	return b
 }

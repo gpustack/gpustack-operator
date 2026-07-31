@@ -623,6 +623,112 @@ func TestConvertPodFromInstance_NodePin(t *testing.T) {
 	}
 }
 
+// TestConvertPodFromInstance_AdditionalVolumes asserts how spec.additionalVolumes reaches the
+// backing Pod: one Pod volume and one mount per entry, mounted into the workload container only
+// (the sshd sidecar sees them through the shared mount namespace), named from the entry's index so
+// the name can never collide with the workspace or the sshd key volume, and rendered identically on
+// a re-render so the reconcile stays idempotent. An empty list leaves the Pod as it is today.
+func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
+	cli := buildInstanceClient()
+	r := &InstanceReconciler{Client: cli, APIReader: cli}
+
+	newInstance := func(avs ...workercore.InstanceAdditionalVolume) *workercore.Instance {
+		return &workercore.Instance{
+			ObjectMeta: meta.ObjectMeta{Namespace: "default", Name: "inst"},
+			Spec: workercore.InstanceSpec{
+				Type: "generic-type",
+				InstanceTemplate: workercore.InstanceTemplate{
+					Image:       "img",
+					VolumeMount: "/workspace",
+					Resources: &workercore.InstanceResources{
+						CPU:          qty("1"),
+						RAM:          qty("2Gi"),
+						LocalStorage: qty("10Gi"),
+					},
+					AdditionalVolumes: avs,
+				},
+				SSHPublicKey: &core.LocalObjectReference{Name: "inst-ssh-key"},
+				Volume: workercore.InstanceVolume{
+					Ephemeral: &workercore.InstanceEphemeralVolume{Capacity: qty("10Gi")},
+				},
+			},
+		}
+	}
+	instType := &worker.InstanceType{ObjectMeta: meta.ObjectMeta{Name: "generic-type"}}
+
+	t.Run("empty list leaves the pod unchanged", func(t *testing.T) {
+		pod := r.convertPodFromInstance(context.Background(), newInstance(), instType)
+
+		require.Len(t, pod.Spec.Volumes, 2, "only the sshd key and the workspace")
+		assert.Equal(t, []core.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
+			pod.Spec.Containers[0].VolumeMounts, "main mounts only the workspace")
+	})
+
+	t.Run("every source renders one volume and one mount on main", func(t *testing.T) {
+		inst := newInstance(
+			workercore.InstanceAdditionalVolume{
+				MountPath:  "/data",
+				Persistent: &core.LocalObjectReference{Name: "dataset"},
+			},
+			workercore.InstanceAdditionalVolume{
+				MountPath: "/etc/app",
+				ReadOnly:  true,
+				SubPath:   "conf",
+				ConfigMap: &core.LocalObjectReference{Name: "app-config"},
+			},
+			workercore.InstanceAdditionalVolume{
+				MountPath: "/var/run/creds",
+				ReadOnly:  true,
+				Secret:    &core.LocalObjectReference{Name: "app-creds"},
+			},
+			workercore.InstanceAdditionalVolume{
+				MountPath: "/host/models",
+				HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+			},
+		)
+
+		pod := r.convertPodFromInstance(context.Background(), inst, instType)
+
+		require.Len(t, pod.Spec.Volumes, 6, "the sshd key, the workspace and the four additions")
+		added := pod.Spec.Volumes[2:]
+		assert.Equal(t, "dataset", added[0].PersistentVolumeClaim.ClaimName)
+		assert.Equal(t, "app-config", added[1].ConfigMap.Name)
+		assert.Equal(t, "app-creds", added[2].Secret.SecretName)
+		assert.Equal(t, "/mnt/models", added[3].HostPath.Path)
+
+		for i, vol := range added {
+			assert.Equal(t, additionalVolumeName(i), vol.Name, "volume name is derived from the index")
+			assert.NotEqual(t, "workspace", vol.Name)
+			assert.NotEqual(t, "sshd-authorized-keys", vol.Name)
+		}
+
+		main, sshd := &pod.Spec.Containers[0], &pod.Spec.Containers[1]
+		assert.Equal(t, []core.VolumeMount{
+			{Name: "workspace", MountPath: "/workspace"},
+			{Name: "additional-0", MountPath: "/data"},
+			{Name: "additional-1", MountPath: "/etc/app", ReadOnly: true, SubPath: "conf"},
+			{Name: "additional-2", MountPath: "/var/run/creds", ReadOnly: true},
+			{Name: "additional-3", MountPath: "/host/models"},
+		}, main.VolumeMounts, "main carries the workspace plus every addition")
+		assert.Equal(t, []core.VolumeMount{{
+			Name:      "sshd-authorized-keys",
+			MountPath: "/var/run/sshd-authorized-keys",
+			ReadOnly:  true,
+		}}, sshd.VolumeMounts, "the sidecar gains no additional mount")
+
+		again := r.convertPodFromInstance(context.Background(), inst, instType)
+		assert.Equal(t, pod.Spec, again.Spec, "re-rendering an unchanged instance is identical")
+	})
+
+	t.Run("an entry with no source is skipped", func(t *testing.T) {
+		pod := r.convertPodFromInstance(context.Background(),
+			newInstance(workercore.InstanceAdditionalVolume{MountPath: "/data"}), instType)
+
+		assert.Len(t, pod.Spec.Volumes, 2, "a sourceless entry renders no volume")
+		assert.Len(t, pod.Spec.Containers[0].VolumeMounts, 1, "and no mount")
+	})
+}
+
 // TestConvertPodFromInstance_SlicedSSHColocatesAcceleratorOnMain asserts that an
 // SSH-enabled sliced Instance renders the accelerator resource on the workload
 // container (main), not the sshd sidecar, so the device-plugin injects the slicing

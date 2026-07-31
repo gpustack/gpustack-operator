@@ -126,6 +126,49 @@ type InstanceTemplate struct {
 
 	// ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
 	ImagePullSecret *core.LocalObjectReference `json:"imagePullSecret,omitempty" protobuf:"bytes,9,opt,name=imagePullSecret"`
+
+	// AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace,
+	// each at a path of its own. They are mounted into the Instance's main container only, which
+	// the SSH server also observes.
+	//
+	// Immutable unless the Instance is stopped.
+	//
+	// +listType=atomic
+	AdditionalVolumes []InstanceAdditionalVolume `json:"additionalVolumes,omitempty" protobuf:"bytes,10,rep,name=additionalVolumes"` // nolint: lll
+}
+
+// InstanceAdditionalVolume defines one volume to mount in the Instance besides its workspace.
+// Exactly one source must be specified.
+type InstanceAdditionalVolume struct {
+	// MountPath is the absolute in-container path to mount the volume at. It must not duplicate
+	// another entry's path, nor the workspace's VolumeMount.
+	//
+	// +required
+	// +k8s:validation:pattern="^(/[^/]+)+$"
+	// +k8s:validation:maxLength=1024
+	MountPath string `json:"mountPath" protobuf:"bytes,1,name=mountPath"`
+
+	// ReadOnly mounts the volume read-only.
+	ReadOnly bool `json:"readOnly,omitempty" protobuf:"varint,2,opt,name=readOnly"`
+
+	// SubPath mounts a relative path inside the volume rather than its root.
+	// It must not be absolute nor contain a ".." element.
+	//
+	// +k8s:validation:maxLength=1024
+	SubPath string `json:"subPath,omitempty" protobuf:"bytes,3,opt,name=subPath"`
+
+	// Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.
+	Persistent *core.LocalObjectReference `json:"persistent,omitempty" protobuf:"bytes,4,opt,name=persistent"`
+
+	// ConfigMap is the reference to the ConfigMap to mount, in the same namespace.
+	ConfigMap *core.LocalObjectReference `json:"configMap,omitempty" protobuf:"bytes,5,opt,name=configMap"`
+
+	// Secret is the reference to the Secret to mount, in the same namespace.
+	Secret *core.LocalObjectReference `json:"secret,omitempty" protobuf:"bytes,6,opt,name=secret"`
+
+	// HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so
+	// creating an Instance that uses it requires the instance-host-path-volume-allowed Setting.
+	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,7,opt,name=hostPath"`
 }
 
 // InstancePort defines the port to expose from the Instance.

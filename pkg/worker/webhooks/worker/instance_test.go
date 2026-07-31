@@ -10,6 +10,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -296,6 +297,280 @@ func TestInstanceWebhook_ValidateUpdate_NodePin(t *testing.T) {
 			}
 			inst := instOld.DeepCopy()
 			inst.Spec.NodeName = c.newNodeName
+			inst.Spec.Stop = c.newStop
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_AdditionalVolumes pins what an additional volume entry must
+// look like for the backing Pod to be constructible: an absolute mount path that neither repeats
+// another entry's nor shadows the workspace, exactly one source, a relative sub path that cannot
+// escape the volume, and a reference that names something. The referenced object itself is not
+// looked up, matching spec.volume.persistent.
+func TestInstanceWebhook_ValidateCreate_AdditionalVolumes(t *testing.T) {
+	const typeName = "generic-type"
+
+	ref := func(name string) *core.LocalObjectReference {
+		return &core.LocalObjectReference{Name: name}
+	}
+
+	cases := []struct {
+		name string
+
+		volumes []workercore.InstanceAdditionalVolume
+
+		wantErr bool
+	}{
+		{
+			name: "no additional volumes",
+		},
+		{
+			name: "a persistent source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+			},
+		},
+		{
+			name: "a config map source, read-only by sub path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/etc/app", ReadOnly: true, SubPath: "conf", ConfigMap: ref("app-config")},
+			},
+		},
+		{
+			name: "a secret source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/var/run/creds", Secret: ref("app-creds")},
+			},
+		},
+		{
+			name: "a host path source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			},
+		},
+		{
+			name: "several entries at distinct paths",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+				{MountPath: "/models", Persistent: ref("models")},
+			},
+		},
+		{
+			name: "a missing mount path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a relative mount path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "data", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a duplicated mount path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+				{MountPath: "/data", Persistent: ref("models")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a mount path shadowing the workspace",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/workspace", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "no source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "two sources",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset"), ConfigMap: ref("app-config")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an absolute sub path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", SubPath: "/conf", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a sub path escaping the volume",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", SubPath: "conf/../../etc", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an unnamed reference",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an empty host path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a non-canonical mount path shadowing the workspace",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/workspace/.", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "mount paths that differ textually but resolve to one place",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+				{MountPath: "/tmp/../data", Persistent: ref("models")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a host path stepping back out of its parent",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/etc", HostPath: &core.HostPathVolumeSource{Path: "/tmp/../etc"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a relative host path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "models"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an unsupported host path type",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{
+					Path: "/mnt/models",
+					Type: ptr.To[core.HostPathType]("Bogus"),
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a supported host path type",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{
+					Path: "/mnt/models",
+					Type: ptr.To(core.HostPathDirectoryOrCreate),
+				}},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+
+			inst := webhookInstance("a", typeName)
+			inst.Spec.VolumeMount = "/workspace"
+			inst.Spec.AdditionalVolumes = c.volumes
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateUpdate_AdditionalVolumes pins that the list is frozen while the
+// Instance runs and free while it is stopped, and that starting re-checks it — an entry edited into
+// an unbuildable shape while stopped would otherwise yield a Pod the API server refuses on every
+// reconcile, unlike the node pin, whose worst case is merely staying Pending.
+func TestInstanceWebhook_ValidateUpdate_AdditionalVolumes(t *testing.T) {
+	const typeName = "generic-type"
+
+	valid := []workercore.InstanceAdditionalVolume{
+		{MountPath: "/data", Persistent: &core.LocalObjectReference{Name: "dataset"}},
+	}
+	invalid := []workercore.InstanceAdditionalVolume{
+		{MountPath: "/data"},
+	}
+
+	cases := []struct {
+		name string
+
+		oldVolumes []workercore.InstanceAdditionalVolume
+		newVolumes []workercore.InstanceAdditionalVolume
+		oldStop    bool
+		newStop    bool
+
+		wantErr bool
+	}{
+		{
+			name:       "running instance cannot change the list",
+			newVolumes: valid,
+			wantErr:    true,
+		},
+		{
+			name:       "running instance may keep the list",
+			oldVolumes: valid,
+			newVolumes: valid,
+		},
+		{
+			name:       "stopped instance may change the list",
+			newVolumes: valid,
+			oldStop:    true,
+			newStop:    true,
+		},
+		{
+			name:       "start accepts a valid list",
+			oldVolumes: valid,
+			newVolumes: valid,
+			oldStop:    true,
+		},
+		{
+			name:       "start rejects a list edited while stopped into an unbuildable shape",
+			oldVolumes: invalid,
+			newVolumes: invalid,
+			oldStop:    true,
+			wantErr:    true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+
+			instOld := webhookInstance("a", typeName)
+			instOld.Spec.VolumeMount = "/workspace"
+			instOld.Spec.AdditionalVolumes = c.oldVolumes
+			instOld.Spec.Stop = c.oldStop
+			if c.oldStop {
+				instOld.Status.Phase = workerctrl.InstancePhaseStopped
+			}
+			inst := instOld.DeepCopy()
+			inst.Spec.AdditionalVolumes = c.newVolumes
 			inst.Spec.Stop = c.newStop
 
 			_, err := w.ValidateUpdate(context.Background(), instOld, inst)

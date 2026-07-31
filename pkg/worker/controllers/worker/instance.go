@@ -33,6 +33,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -490,6 +491,8 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
+	additionalVols, additionalMounts := convertAdditionalVolumes(inst)
+
 	// Construct containers.
 	// Main container.
 	mainC := core.Container{
@@ -520,10 +523,12 @@ func (r *InstanceReconciler) convertPodFromInstance(
 				Value: e.Value,
 			}
 		}),
-		VolumeMounts: []core.VolumeMount{{
+		// Additional volumes are mounted into the workload container only; the sshd sidecar
+		// nsenters into this container's mount namespace, so they are reachable over SSH anyway.
+		VolumeMounts: append([]core.VolumeMount{{
 			Name:      "workspace",
 			MountPath: inst.Spec.VolumeMount,
-		}},
+		}}, additionalMounts...),
 	}
 	containers := []core.Container{mainC}
 
@@ -634,7 +639,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 							},
 						},
 					})
-					return vols
+					return append(vols, additionalVols...)
 				}
 				vols = append(vols, core.Volume{
 					Name: "workspace",
@@ -644,7 +649,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 						},
 					},
 				})
-				return vols
+				return append(vols, additionalVols...)
 			}(),
 			Containers: containers,
 		},
@@ -667,6 +672,65 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	kubemeta.ControlOnWithoutBlock(pod, inst, workercore.SchemeGroupVersionKind("Instance"))
 
 	return pod
+}
+
+// convertAdditionalVolumes renders the Instance's additional volumes as Pod volumes paired with the
+// mounts that place them in the workload container. Both are returned together so the volume name —
+// derived from the entry's index, never from user input, so it can collide with neither "workspace"
+// nor "sshd-authorized-keys" — is decided in one place.
+//
+// An entry with no source is skipped rather than rendered: admission rejects one, and a volume with
+// an empty source would make the API server refuse the whole Pod on every reconcile.
+func convertAdditionalVolumes(inst *workercore.Instance) (vols []core.Volume, mounts []core.VolumeMount) {
+	avs := inst.Spec.AdditionalVolumes
+	if len(avs) == 0 {
+		return nil, nil
+	}
+
+	vols = make([]core.Volume, 0, len(avs))
+	mounts = make([]core.VolumeMount, 0, len(avs))
+	for i := range avs {
+		av := &avs[i]
+
+		var vs core.VolumeSource
+		switch {
+		case av.Persistent != nil:
+			vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
+				ClaimName: av.Persistent.Name,
+			}
+		case av.ConfigMap != nil:
+			vs.ConfigMap = &core.ConfigMapVolumeSource{
+				LocalObjectReference: *av.ConfigMap,
+			}
+		case av.Secret != nil:
+			vs.Secret = &core.SecretVolumeSource{
+				SecretName: av.Secret.Name,
+			}
+		case av.HostPath != nil:
+			vs.HostPath = av.HostPath.DeepCopy()
+		default:
+			continue
+		}
+
+		name := additionalVolumeName(i)
+		vols = append(vols, core.Volume{
+			Name:         name,
+			VolumeSource: vs,
+		})
+		mounts = append(mounts, core.VolumeMount{
+			Name:      name,
+			MountPath: av.MountPath,
+			ReadOnly:  av.ReadOnly,
+			SubPath:   av.SubPath,
+		})
+	}
+
+	return vols, mounts
+}
+
+// additionalVolumeName is the Pod volume name of the additional volume at the given index.
+func additionalVolumeName(i int) string {
+	return "additional-" + strconvx.Itoa(i)
 }
 
 // getNodeHostname returns the node's own kubernetes.io/hostname label value, which some providers
