@@ -386,12 +386,13 @@ Acceptance criteria:
 - **AC4.1** — `authorDerivedInstanceType` sizes an acceleratable type from
   `nodefeature.PresetUnitResources`, passing the flavor's `Manufacturer` and `Product`.
 - **AC4.2** — A non-acceleratable flavor is unaffected: `1` CPU / `2Gi` / `100Gi`.
-- **AC4.3** — No change to `InstanceTypeSpec`'s shape, the CRD schema, or protobuf. The **doc
-  comments** on `api/worker/v1alpha1/instance_type.go:73-84` do change (they still promise "a derived
-  InstanceType is stamped with the fixed default"), and those comments flow into four generated files
-  — `api/worker/v1alpha1/zz_generated.crds.go:1292,1300`, `api/worker/zz_generated.openapi.go:4095,4102`
-  and `pkg/kubeclients/applyconfiguration/worker/v1alpha1/instancetypespec.go:44,50` — so
-  **`make generate` is required** and its diff must be committed.
+- **AC4.3** — No change to `InstanceTypeSpec`'s shape, the CRD schema, or the protobuf **wire
+  format** (no `.pb.go` changes). The **doc comments** on `api/worker/v1alpha1/instance_type.go:73-84`
+  do change (they still promise "a derived InstanceType is stamped with the fixed default"), and
+  those comments flow into four generated files — `api/worker/v1alpha1/generated.proto` (comments
+  only), `api/worker/v1alpha1/zz_generated.crds.go`, `api/worker/zz_generated.openapi.go` and
+  `pkg/kubeclients/applyconfiguration/worker/v1alpha1/instancetypespec.go` — so **`make generate` is
+  required** and its diff must be committed.
 - **AC4.4** — The same stale promise is retired from `pkg/worker/controllers/worker/node_flavor.go:330-333`
   and `pkg/nodefeature/helper.go:366-368`.
 - **AC4.5** — Behaviour is otherwise unchanged: still create-only, still `AlreadyExists`-tolerant,
@@ -499,9 +500,15 @@ Acceptance criteria:
   represented and are rounded down to the nearest tier.
 - The preset must **not** key on the accelerator group ID / slug, which gains a `-<mem>` suffix when
   `GPUSTACK_DEVICES_GROUP_ID_WITH_MEMORY=true`. Key on the product.
-- **`make generate` cannot run from this checkout.** It is a git worktree (`.git` is a file), and
-  `go-to-protobuf` requires a working directory whose path ends in `gpustack.ai/gpustack`. Run it from
-  the main checkout, or from a temporary worktree created at such a path.
+- **`make generate` cannot run from this checkout**, and a failed attempt is destructive. The
+  generator passes `strings.TrimSuffix(pwd, "gpustack.ai/gpustack")` as go-to-protobuf's output
+  base (`gen/api/builder/generate.go:164`), so unless the checkout's path *ends* in
+  `gpustack.ai/gpustack` the trim is a no-op and protoc is handed a path that does not exist. Run it
+  from the main checkout, or from a temporary worktree created at such a path — and `cd` to the
+  symlink-resolved path (`/private/tmp/...`, not `/tmp/...`), or `go run` rejects the generator
+  package as "outside main module". Note that a run which fails at the go-to-protobuf step has
+  already wiped and partially rewritten every `generated.pb.go` / `generated.proto` in the tree;
+  restore them with `git checkout HEAD --` before doing anything else.
 - Lint constraints that shape the code: `lll` line-length 150; `godot` requires every comment to end
   in a period; `decorder` enforces init-func-first (avoided by using a package-level `var` rather than
   `init()`); `gochecknoglobals` is not enabled, so the package-level table var is fine.
@@ -764,9 +771,10 @@ T4 needs T2's final family set. T1 and T3 both touch `pkg/nodefeature`, but disj
       BW1000. Their `Anchor` cell on the reference page is left empty.
       Verify: `go test ./pkg/nodefeature/... ./pkg/worker/controllers/worker/... && make lint`
 
-- [ ] **T3 · Retire the stale "fixed default" API contract**
+- [x] **T3 · Retire the stale "fixed default" API contract**
       Blocked by: T1
       Owns: `api/worker/v1alpha1/instance_type.go`,
+            `api/worker/v1alpha1/generated.proto`,
             `api/worker/v1alpha1/zz_generated.crds.go`,
             `api/worker/zz_generated.openapi.go`,
             `pkg/kubeclients/applyconfiguration/worker/v1alpha1/instancetypespec.go`,
@@ -775,8 +783,8 @@ T4 needs T2's final family set. T1 and T3 both touch `pkg/nodefeature`, but disj
       Acceptance: the `UnitResources` and `LocalStorage` field comments
       (`api/worker/v1alpha1/instance_type.go:73-84`) and the `NodeFlavor` comment
       (`pkg/nodefeature/helper.go:366-368`) describe the preset behaviour instead of a fixed default;
-      `make generate` has been run and its diff across the three generated files committed; the field
-      shapes, CRD schema and protobuf are otherwise unchanged.
+      `make generate` has been run and its diff across the four generated files committed; the field
+      shapes, CRD schema and protobuf wire format are otherwise unchanged.
       Verify: from a checkout whose path ends in `gpustack.ai/gpustack`,
       `make generate && git diff --exit-code`, then `make lint`
 

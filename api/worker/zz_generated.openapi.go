@@ -4092,14 +4092,14 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeSpec(ref common.ReferenceCa
 					},
 					"unitResources": {
 						SchemaProps: spec.SchemaProps{
-							Description: "UnitResources describes the unit resources of the InstanceType.\n\nIt is a required admin-writable input, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with the fixed default.",
+							Description: "UnitResources describes the unit resources of the InstanceType.\n\nIt is a required admin-writable input, enforced by the validating webhook, and is immutable after creation. A derived InstanceType is stamped once at creation: an accelerated one from the per-product preset table, falling back to 4 CPU / 16Gi for a product the table does not recognize, and a CPU-only one with 1 CPU / 2Gi.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypeUnitResources{}.OpenAPIModelName()),
 						},
 					},
 					"localStorage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with the fixed default.",
+							Description: "LocalStorage is the ephemeral local storage of the InstanceType, e.g. \"100Gi\".\n\nIt is a required admin-writable input carrying a case-sensitive \"Gi\" suffix, enforced by the validating webhook, and is immutable after creation; a derived InstanceType is stamped with a fixed 100Gi, which no preset varies.",
 							Default:     "",
 							Type:        []string{"string"},
 							Format:      "",
