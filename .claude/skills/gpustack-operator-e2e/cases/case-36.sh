@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# CASE 36 — Node-pinned Instance with additional volumes, and the CREATE-only host-access gates
+# CASE 36 — Node-pinned Instance with additional volumes, and the host-access gates
 #   (MUTATING, self-recovering; the SSH sub-check AUTO-SKIPS without the ssh client tools)
 #
 #   case-36.sh <NS>
@@ -44,6 +44,7 @@ set -uo pipefail
 NS="${1:?usage: case-36.sh <NS>}"
 INST=gpustack-e2e-pinned
 INST_GATED=gpustack-e2e-gated
+INST_PLAIN=gpustack-e2e-plain      # never holds an escape; the escalation-by-patch probe
 CM=gpustack-e2e-case36-cm
 SEC=gpustack-e2e-case36-secret
 IPV=gpustack-e2e-case36-data
@@ -75,7 +76,7 @@ restore() {
   echo
   echo "[case-36] cleanup: deleting test objects and restoring both gates"
   [ -n "$PF_PID" ] && kill "$PF_PID" 2>/dev/null
-  kubectl -n default delete instance "$INST" "$INST_GATED" --ignore-not-found --wait=false 2>/dev/null || true
+  kubectl -n default delete instance "$INST" "$INST_GATED" "$INST_PLAIN" --ignore-not-found --wait=false 2>/dev/null || true
   kubectl -n default delete instancepersistentvolume "$IPV" --ignore-not-found --wait=false 2>/dev/null || true
   kubectl -n default delete configmap "$CM" --ignore-not-found 2>/dev/null || true
   kubectl -n default delete secret "$SEC" "$SSH_SECRET" --ignore-not-found 2>/dev/null || true
@@ -90,7 +91,7 @@ ROWS=()
 record() { ROWS+=("$1|$2|$3"); [ "$1" = FAIL ] && FAILS=$((FAILS + 1)); return 0; }
 print_and_exit() {
   echo
-  echo "== CASE 36 — Node-pinned Instance with additional volumes, and the CREATE-only host-access gates =="
+  echo "== CASE 36 — Node-pinned Instance with additional volumes, and the host-access gates =="
   {
     echo "STATUS|CHECK|OBJECT"
     printf '%s\n' "${ROWS[@]}"
@@ -422,8 +423,9 @@ v=$(await_verdict gated true false)
 case "$v" in gated:*) record PASS "each gate covers only its own field" "${HOST_KEY}=true does not allow privileged" ;;
              *)       record FAIL "each gate covers only its own field" "verdict '${v}' with only ${HOST_KEY}=true" ;; esac
 
-# --- 12. UPDATE is never gated: an Instance created while a gate was on survives the gate going off.
-#     ${INST} was created with the hostPath gate on; turn it off and stop/restart it. ---
+# --- 12. A gate judges the escape a change TAKES, not the one it carries. An Instance that already
+#     holds an escape keeps it when the gate goes off; an Instance that never held one cannot acquire
+#     it by patch. ${INST} was created with the hostPath gate on; turn it off and stop/restart it. ---
 set_gate "$HOST_KEY" false
 sleep 35   # outlive the Setting cache, so the updates below are judged with the gate genuinely off
 
@@ -432,7 +434,7 @@ sleep 35   # outlive the Setting cache, so the updates below are judged with the
 gate_named() { case "$1" in *"$PRIV_KEY"*|*"$HOST_KEY"*|*privileged*not*allowed*|*host*path*not*allowed*) return 0 ;; esac; return 1; }
 judge_update() {  # judge_update <check> <output>
   if gate_named "$2"; then
-    record FAIL "$1" "rejected BY A GATE — UPDATE must never be gated: $2"
+    record FAIL "$1" "rejected BY A GATE — an escape already held must never be re-judged: $2"
   else
     record FAIL "$1" "rejected, but not by a gate: $2"
   fi
@@ -458,9 +460,72 @@ out=$(kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"volum
 case "$out" in *patched*) record PASS "stopped Instance still editable with the gate off" "spec.volumeMount edited while stopped" ;;
                *) judge_update "stopped Instance still editable with the gate off" "$out" ;; esac
 
+# What a gate compares is the whole grant, not just the node path. ${INST} holds this host path
+# READ-ONLY; the same path mounted writable is more than it had, so it faces the gate like any other
+# new escape. Done here, while the Instance is stopped: running, additionalVolumes is immutable, and
+# that refusal also names spec.additionalVolumes — it would read as the gate holding when it is not.
+# For the same reason the verdict is judged on the SETTING's name, which only the gate emits.
+out=$(kubectl -n default patch instance "$INST" --type=merge -p "{\"spec\":{\"additionalVolumes\":[
+  {\"mountPath\":\"/mnt/host\",\"readOnly\":true,\"hostPath\":{\"path\":\"${HOST_DIR}\",\"type\":\"DirectoryOrCreate\"}},
+  {\"mountPath\":\"/mnt/host-rw\",\"hostPath\":{\"path\":\"${HOST_DIR}\",\"type\":\"DirectoryOrCreate\"}}]}}" 2>&1)
+case "$out" in
+  *patched*|*configured*|*unchanged*)
+    record FAIL "widening a held host path faces the gate" \
+      "ACCEPTED — a read-only mount was widened to writable with the gate off"
+    # Put the list back, so the restart below is judged on the Instance this case built.
+    kubectl -n default patch instance "$INST" --type=merge -p "{\"spec\":{\"additionalVolumes\":[
+      {\"mountPath\":\"/mnt/host\",\"readOnly\":true,\"hostPath\":{\"path\":\"${HOST_DIR}\",\"type\":\"DirectoryOrCreate\"}}]}}" >/dev/null 2>&1 ;;
+  *"$HOST_KEY"*) record PASS "widening a held host path faces the gate" \
+      "the same node path, writable, rejected by ${HOST_KEY}" ;;
+  *) record FAIL "widening a held host path faces the gate" "rejected, but not by the gate: ${out}" ;;
+esac
+
 out=$(kubectl -n default patch instance "$INST" --type=merge -p '{"spec":{"stop":false}}' 2>&1)
 case "$out" in *patched*) record PASS "existing Instance restarts with the gate off" "spec.stop=false accepted (hostPath volume kept)" ;;
                *) judge_update "existing Instance restarts with the gate off" "$out" ;; esac
+
+# --- 12b. The other half of the same rule, and the one that decides whether the gates protect
+#     anything: an Instance that has NEVER held an escape must not acquire one by patch. A gate that
+#     fired only on create would stop nothing — an Instance created stopped and empty asks for
+#     nothing, so a single patch would hand it both escapes while both settings are off. ---
+cat <<EOF | kubectl apply -f - >/dev/null 2>&1
+apiVersion: worker.gpustack.ai/v1alpha1
+kind: Instance
+metadata: { name: ${INST_PLAIN}, namespace: default }
+spec:
+  type: ${IT}
+  stop: true
+  image: ubuntu:24.04
+  command: ["sleep", "infinity"]
+  resources: { cpu: "1", ram: "2Gi", localStorage: "10Gi" }
+  volume: { ephemeral: { capacity: 1Gi } }
+EOF
+if ! kubectl -n default get instance "$INST_PLAIN" >/dev/null 2>&1; then
+  record SKIP "escalation by patch is refused" "the plain stopped Instance could not be created"
+else
+  # Judge each escalation on the field it names, so an unrelated refusal is never read as the gate
+  # holding, and an acceptance is never excused.
+  judge_escalation() {  # judge_escalation <check> <field-marker> <output>
+    case "$3" in
+      *patched*|*configured*|*unchanged*)
+        record FAIL "$1" "ACCEPTED — an escape was acquired by patch with the gate off" ;;
+      *"$2"*) record PASS "$1" "rejected on $2" ;;
+      *) record FAIL "$1" "rejected, but not on $2: $3" ;;
+    esac
+  }
+
+  out=$(kubectl -n default patch instance "$INST_PLAIN" --type=merge \
+    -p '{"spec":{"privileged":true}}' 2>&1)
+  judge_escalation "privileged cannot be acquired by patch" "spec.privileged" "$out"
+
+  out=$(kubectl -n default patch instance "$INST_PLAIN" --type=merge \
+    -p '{"spec":{"additionalVolumes":[{"mountPath":"/mnt/escalate","hostPath":{"path":"/"}}]}}' 2>&1)
+  judge_escalation "a hostPath cannot be acquired by patch" "spec.additionalVolumes" "$out"
+
+  out=$(kubectl -n default patch instance "$INST_PLAIN" --type=merge \
+    -p '{"spec":{"stop":false,"privileged":true,"additionalVolumes":[{"mountPath":"/mnt/escalate","hostPath":{"path":"/"}}]}}' 2>&1)
+  judge_escalation "both cannot be acquired in the patch that restarts it" "spec.privileged" "$out"
+fi
 
 # --- 13. A pin to a node that does not exist is rejected at creation. ---
 out=$(cat <<EOF | kubectl apply -f - 2>&1

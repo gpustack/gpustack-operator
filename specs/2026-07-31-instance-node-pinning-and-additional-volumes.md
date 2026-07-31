@@ -1,6 +1,6 @@
 # Spec: Instance Node Pinning and Additional Volume Mounts
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -11,12 +11,13 @@ Kubernetes Node: the reconciler renders it as the backing Pod's `nodeSelector`
 scheduler and Kueue admission. Second, a new `spec.additionalVolumes[]` lifts the "one volume, always
 the workspace" limit: an Instance can mount any number of extra volumes — an InstancePersistentVolume
 reference, a ConfigMap, a Secret, or a host path — at arbitrary paths, with `readOnly` and `subPath`.
-Because a host path (like `spec.privileged`) lets an Instance cross the node boundary, each is gated at
-CREATE time behind its own default-off administrator setting — `instance-privileged-allowed` and
-`instance-host-path-volume-allowed`; UPDATE is deliberately never gated, so flipping a setting off can
-never block an already-deployed Instance from being edited or restarted. The existing `spec.volume` /
-`spec.volumeMount` workspace contract is unchanged, so no downstream schema rename or data migration
-is required.
+Because a host path (like `spec.privileged`) lets an Instance cross the node boundary, each is gated
+behind its own default-off administrator setting — `instance-privileged-allowed` and
+`instance-host-path-volume-allowed`. What a gate governs is the act of **taking** an escape, at
+creation or through any later change; an escape the Instance already holds is never re-judged, so
+flipping a setting off can never block an already-deployed Instance from being edited or restarted.
+The existing `spec.volume` / `spec.volumeMount` workspace contract is unchanged, so no downstream
+schema rename or data migration is required.
 
 ## Motivation
 
@@ -139,12 +140,20 @@ An atomic list; each entry carries a mount target plus exactly one source.
 - **AC2.3** `readOnly: true` renders a read-only mount; `subPath` renders `VolumeMount.SubPath`.
 - **AC2.4** CREATE is rejected, with the offending index in the field path, for: a missing,
   non-absolute, **non-canonical** or duplicated `mountPath`; a `mountPath` equal to `spec.volumeMount`;
-  zero or more than one source; an absolute `subPath` or one containing `..`; an empty source name; and
-  a `hostPath` whose `path` is empty, relative or non-canonical, or whose `type` Kubernetes does not
-  support. The same checks re-run on the start (resume) transition, as resource validation already
-  does: unlike the node pin, the list is the Instance's own spec and editable while stopped, and a
-  malformed entry yields a Pod the API server refuses on every reconcile rather than one that merely
-  stays Pending.
+  zero or more than one source; an absolute `subPath` or one containing `..`; a source name that is
+  empty **or that no Kubernetes object could carry** (not a DNS-1123 subdomain); and a `hostPath` whose
+  `path` is empty, relative or non-canonical, or whose `type` Kubernetes does not support. The same
+  checks re-run on the start (resume) transition, as resource validation already does: unlike the node
+  pin, the list is the Instance's own spec and editable while stopped, and a malformed entry yields a
+  Pod the API server refuses on every reconcile rather than one that merely stays Pending.
+
+  A source name's **format** is checked even though its **existence** is not (AC2.8), because the two
+  fail differently: a name that does not resolve today may resolve tomorrow, whereas a name no object
+  could carry — the upstream `LocalObjectReference` has no pattern, so the CRD schema admits
+  `App_Config` — can never resolve. Nothing downstream catches it either: Pod validation checks a
+  volume source's object reference only for emptiness, so the Pod is admitted and then wedges in
+  `ContainerCreating` on a mount that cannot succeed, for its whole life, since it is rendered once and
+  never re-diffed. Admission is the only place the author is told why.
 
   Canonicality is load-bearing rather than pedantry: the CRD pattern `^(/[^/]+)+$` admits `.` and `..`
   as segments, so `/workspace/.` would pass a textual comparison against `spec.volumeMount` and then
@@ -162,7 +171,7 @@ An atomic list; each entry carries a mount target plus exactly one source.
   existence at admission (consistent with `spec.volume.persistent`); a missing reference surfaces as
   the Pod's own event and Pending reason.
 
-#### F3 — Administrator gates: `instance-privileged-allowed` and `instance-host-path-volume-allowed` (CREATE only)
+#### F3 — Administrator gates: `instance-privileged-allowed` and `instance-host-path-volume-allowed`
 
 Two new editable boolean Settings, seeded from `GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED` and
 `GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED`, both default `false`. They are independent: `privileged`
@@ -178,8 +187,19 @@ an administrator opening node-path mounts to also open privileged to every CR au
 - **AC3.3** Each setting gates only its own field: `privileged` allowed + `hostPath` denied rejects only
   the hostPath entry, and the reverse rejects only `spec.privileged`. With both `true` neither is
   rejected and rendering is unchanged from an ungated build.
-- **AC3.4** UPDATE never enforces either gate — with both `false`, an existing Instance can still be
-  updated, edited while stopped, and restarted without a gate rejecting it.
+- **AC3.4** A gate rejects **taking** an escape, never **holding** one. With both `false`, an existing
+  Instance that already carries `privileged` or a `hostPath` mount can still be updated, edited while
+  stopped, and restarted without a gate rejecting it — the grandfathering the gates exist to preserve.
+  An UPDATE that *adds* an escape the Instance did not already hold is rejected exactly as a CREATE
+  requesting it would be, including one applied while the Instance is stopped, where the immutability
+  guard is skipped. A `hostPath` already held is matched by value rather than by list position, so
+  reordering the list or editing a sibling entry is not a new grant. What is compared is the whole
+  grant, not just the node path: repointing an entry elsewhere, dropping its `subPath`, or turning a
+  read-only mount writable each hand the Instance access it did not have, so each faces the gate;
+  narrowing in the other direction passes, since a mount exposing less than one already held adds
+  nothing — a held `subPath` covers itself and any path beneath it, and an absent one covers the
+  whole volume. An absent `type` and an explicit empty one are the same unset kind, so respelling it is not
+  a new grant either.
 - **AC3.5** Both settings appear in the `docs/settings.md` online-adjustable table and in the settings
   catalog test.
 
@@ -232,9 +252,13 @@ an administrator opening node-path mounts to also open privileged to every CR au
   admission (fail fast with typed `field` errors) rather than in the reconciler; keep the reconcile
   level-based and idempotent; run `make generate` and `make lint` after API edits; mount additional
   volumes into `main` only.
-- **Ask first:** extending either gate to the UPDATE path; restricting `hostPath` to an allowlist of node
-  paths; exposing any further Pod scheduling knob (affinity/tolerations/nodeSelector map); mounting
-  additional volumes into the `sshd` sidecar; validating referenced volume objects' existence.
+- **Ask first:** ~~extending either gate to the UPDATE path~~ — **done, during the end-of-build review**,
+  once it was shown by a failing test that a create-only gate stops nothing at all rather than merely
+  less (see Risks and Open Question 1); an escape already held is still never re-judged, so the
+  grandfathering this rule was written to protect is untouched. Still ask first for: restricting
+  `hostPath` to an allowlist of node paths; exposing any further Pod scheduling knob
+  (affinity/tolerations/nodeSelector map); mounting additional volumes into the `sshd` sidecar;
+  validating referenced volume objects' existence.
 - **Never:** write `pod.spec.nodeName` (it bypasses the scheduler and Kueue gating); introduce a
   cross-namespace volume reference; change `spec.volume`'s full immutability or `spec.volumeMount`'s
   default; reuse or renumber an existing protobuf field number; touch the InstanceType / Kueue chain.
@@ -248,10 +272,21 @@ an administrator opening node-path mounts to also open privileged to every CR au
   total over the node's filesystem — the second gate buys separation of *kind* (filesystem vs. devices
   and kernel), not a weaker grant → recorded as an Ask-first follow-up (a `hostPath` path allowlist),
   deliberately out of scope here.
-- The CREATE-only gates leave a bypass: an existing Instance can be stopped, patched to
-  `privileged: true` or given a `hostPath` mount, and restarted while its gate is off → recorded as
-  Open Question 1; the narrow fix (reject only `false → true` transitions on UPDATE) still never blocks
-  an already-deployed Instance.
+- A gate that fired only on CREATE would protect nothing at all, rather than protect a little less:
+  an Instance created `stop: true` and empty is accepted because it asks for nothing, and while it is
+  stopped the immutability guard is skipped, so one patch would hand it both escapes with both
+  settings off → gate the act of **taking** an escape instead, on every verb, comparing against what
+  the Instance already holds. Grandfathering is preserved exactly (an escape already held is never
+  re-judged), which was the whole point of the create-only reading; what is removed is the two-call
+  escalation. Confirmed by a failing test before the fix (Open Question 1, now resolved).
+- Turning a gate off is not instantaneous: `pkg/setting` caches a resolved value for 30s with no
+  exported flush, so for up to that long after an administrator disables a gate the webhook still
+  admits the escape, and an Instance that takes one inside the window keeps it (it is then held, and
+  a held escape is never re-judged) → **accepted, not fixed here**. The window is a property of the
+  settings layer that every setting shares rather than of this rule, closing it means giving
+  `pkg/setting` an invalidation path, and the gates are an administrative control over what may be
+  requested, not a barrier against an adversary racing a config change. Worth stating plainly in the
+  Settings doc, and worth fixing where the cache lives.
 - A pinned Instance can pass pool-level Kueue quota and then sit Pending because the pinned node is
   full → surfaced through the existing Pod-summary phase message; no per-node quota is introduced.
 - Kueue does not consider `kubernetes.io/hostname` when choosing a ResourceFlavor: the deployed Kueue
@@ -265,11 +300,13 @@ an administrator opening node-path mounts to also open privileged to every CR au
   entrance, and a pin the pool cannot honor degrades to "does not schedule", visible through AC1.8.
 - Two narrower residual holes are likewise accepted rather than guarded: a Node carrying no
   `kubernetes.io/hostname` label passes admission and renders the object name instead (which another
-  node could in principle carry as its hostname), and a stale or failing node read at Pod-render time
-  falls back to the object name for that Pod's whole life, since the Pod is rendered once at creation
-  and never re-diffed. Both degrade to "does not schedule" or, in the first case, land on a node whose
-  hostname label equals the requested object name; kubelet always sets the label, so the first shape
-  is not reachable through any supported provider.
+  node could in principle carry as its hostname), and the node read at Pod-render time is trusted as
+  it comes — a failing read falls back to the object name, and a cached read that has not converged
+  yet renders the label value it holds — for that Pod's whole life, since the Pod is rendered once at
+  creation and never re-diffed. Both degrade to "does not schedule" or, in the first case, land on a
+  node whose hostname label equals the requested object name; kubelet always sets the label at
+  registration and does not change it afterwards, so neither shape is reachable through any supported
+  provider.
 - On some providers a Node's `kubernetes.io/hostname` label differs from its object name → the selector
   value is read from the Node's label, not assumed.
 - A transient node-label gap (e.g. an `nfd-master` restart dropping custom labels) cannot reject a
@@ -325,13 +362,14 @@ api/worker/v1alpha1/instance.go                 # InstanceSpec.NodeName (pb 8);
                                                 # InstanceTemplate.AdditionalVolumes (pb 10);
                                                 # + InstanceAdditionalVolume
 api/worker/v1alpha1/{generated.*,zz_generated.*}# regenerated (proto, deepcopy, CRDs, model names)
-api/worker/v1/{generated.*,zz_generated.*}      # regenerated; v1.Instance is a type conversion of the
-                                                # v1alpha1 struct, so no hand edit to api/worker/v1/instance.go
+api/worker/zz_generated.openapi.go              # regenerated; api/worker/v1 itself is untouched, because
+                                                # v1.Instance is a type conversion of the v1alpha1 struct
+                                                # rather than a struct of its own
 pkg/kubeclients/**                              # regenerated applyconfigurations for the new struct
 pkg/worker/controllers/worker/instance.go       # convertPodFromInstance: one main-container builder (T1),
                                                 # nodeSelector (T3), additional volumes + mounts (T4)
 pkg/worker/webhooks/worker/instance.go          # node-pin validation (T3), volume validation (T4),
-                                                # the CREATE-only host-access gate (T5)
+                                                # the host-access gates (T5)
 pkg/worker/settings/value.go                    # the instance-privileged-allowed and
                                                 # instance-host-path-volume-allowed Settings
 docs/settings.md                                # the two new Setting rows
@@ -391,13 +429,14 @@ The new Settings follow the existing catalog declaration verbatim:
 ```go
 // InstancePrivilegedAllowed indicates to allow Instances to request privileged mode,
 // which escapes the container boundary and exposes the node's devices and kernel surface.
-// Enforced when creating an Instance only: turning it off never blocks an existing
-// Instance from being updated, edited while stopped, or restarted.
+// Enforced when an Instance takes privileged mode, whether at creation or by a later
+// change: turning it off never blocks an Instance that already runs privileged from
+// being updated, edited while stopped, or restarted.
 InstancePrivilegedAllowed = settings.NewEditable(
 	"instance-privileged-allowed",
 	"Indicates to allow Instances to request privileged mode. "+
-		"Enforced when creating an Instance only, "+
-		"so disabling it never blocks an existing Instance from being updated or restarted.",
+		"Enforced when an Instance takes privileged mode, at creation or later, "+
+		"so disabling it never blocks an already-privileged Instance from being updated or restarted.",
 	setting.InitializeFromEnv("false"),
 	setting.AllowBool(),
 )
@@ -405,12 +444,12 @@ InstancePrivilegedAllowed = settings.NewEditable(
 // InstanceHostPathVolumeAllowed indicates to allow Instances to mount hostPath volumes,
 // which reaches the node's filesystem. It is separate from InstancePrivilegedAllowed
 // because it grants strictly less: the filesystem, but not the node's devices or kernel.
-// Enforced when creating an Instance only, like InstancePrivilegedAllowed.
+// Enforced when an Instance takes a hostPath mount, like InstancePrivilegedAllowed.
 InstanceHostPathVolumeAllowed = settings.NewEditable(
 	"instance-host-path-volume-allowed",
 	"Indicates to allow Instances to mount hostPath volumes. "+
-		"Enforced when creating an Instance only, "+
-		"so disabling it never blocks an existing Instance from being updated or restarted.",
+		"Enforced when an Instance takes a hostPath mount, at creation or later, "+
+		"so disabling it never blocks an Instance that already has one from being updated or restarted.",
 	setting.InitializeFromEnv("false"),
 	setting.AllowBool(),
 )
@@ -446,7 +485,8 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         `GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED` / `GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED`; one
         table-driven catalog test pins both names, defaults, editability and env mapping the way the
         existing switches are pinned; `docs/settings.md` gains a row for each in the online-adjustable
-        table, each stating that enforcement is CREATE-only.
+        table, each stating that a gate is enforced when an Instance takes the escape, at creation
+        or later, and never on an escape it already holds.
       Verify: `go test -race -count=1 ./pkg/worker/settings/...`
 
 - [x] **T3 · Node pinning tracer bullet**
@@ -479,17 +519,19 @@ concurrently — scaffolding for parallelism's sake, deliberately not done.
         field is immutable while running and editable while stopped.
       Verify: the regeneration recipe above → `go test -race -count=1 ./pkg/worker/... -run Instance` → `make lint`
 
-- [x] **T5 · CREATE-only host-access gates**
+- [x] **T5 · Host-access gates**
       Blocked by: T2, T4
       Owns: `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/webhooks/worker/instance_test.go`,
         `pkg/worker/webhooks/worker/testmain_test.go` (added while building: wiring the gate makes every
         `ValidateCreate` test resolve a setting, which nil-panics without a configured loopback client)
       Gate: review
-      Acceptance: AC3.1-AC3.4. The rule is a pure helper over the two already-resolved booleans, so it
-        can be table-tested exhaustively without touching the un-flushable 30s setting cache; each
-        setting gates only its own field, and the wiring is covered by one test on the default-`false`
-        path, which never populates that cache. UPDATE is never gated — a stopped edit and a restart
-        both pass with both settings off.
+      Acceptance: AC3.1-AC3.4. The rule is a pure helper over the two already-resolved booleans and the
+        Instance as it stands, so it can be table-tested exhaustively without touching the un-flushable
+        30s setting cache; each setting gates only its own field, and the wiring is covered by one test
+        on the default-`false` path, which never populates that cache. A gate fires on the escape a
+        change TAKES, on create and update alike, and never on one the Instance already holds — a
+        stopped edit and a restart both pass with both settings off, while a patch adding an escape
+        does not.
       Verify: `go test -race -count=1 ./pkg/worker/webhooks/worker/...`
 
 - [x] **T6 · Checkpoint: docs + live e2e**
@@ -525,8 +567,14 @@ regression guard.
 
 #### Unit tests
 
-- `pkg/worker/webhooks/worker`: `2026-07-31` - baseline `78.9%`, target ≥ `80%`
-- `pkg/worker/controllers/worker`: `2026-07-31` - baseline `63.4%`, target ≥ `65%`
+- `pkg/worker/webhooks/worker`: `2026-07-31` - baseline `78.9%`, target ≥ `80%` → **measured `80.9%`, met**
+- `pkg/worker/controllers/worker`: `2026-07-31` - baseline `63.4%`, target ≥ `65%` → **measured `64.5%`,
+  short by `0.5pp`**. Every statement this spec added is covered: `convertAdditionalVolumes` and
+  `getNodeHostname` are at `100%`, and the workspace's two rendering branches (emptyDir and claim) each
+  append the additions themselves, so both are asserted. The residual gap is entirely pre-existing
+  untested plumbing in the same package — `Reconcile` (`33.7%`), `SetupController`, the three enqueue
+  handlers and `getPortName` (all `0%`) — none of which this spec touches. Closing it would mean writing
+  tests for unrelated code to move a number, so the miss is recorded rather than papered over.
 - `pkg/worker/settings`: `2026-07-31` - declaration-only package (`0.0%` of statements); covered by the
   catalog assertions in `value_test.go` rather than by a coverage number.
 
@@ -600,9 +648,13 @@ Run through the `gpustack-operator-e2e` skill against a reachable cluster:
 
 ## Open Questions
 
-1. The CREATE-only gates leave a stop → patch → start bypass. Keep them exactly as decided, or tighten
-   UPDATE to reject only a `false → true` transition (which still never blocks an already-deployed
-   Instance)?
+1. ~~The CREATE-only gates leave a stop → patch → start bypass.~~ **Resolved during the end-of-build
+   review.** The review showed the bypass is not a narrowing of the control but its complete defeat —
+   an Instance created stopped and empty passes the create gate trivially, and a single patch then
+   grants both escapes — so the gates were changed to judge the escape a change **takes**, comparing
+   new against old on every verb. An escape already held is still never re-judged, so no deployed
+   Instance can be stranded, which is the property the create-only reading existed to guarantee. A
+   test reproducing the two-call escalation was written first and failed before the fix.
 2. Does the downstream Python `GPUInstanceSpec` expose `nodeName` / `additionalVolumes` in the same
    release (separate repo), or is this operator-side only for now?
 3. Any cap on the number of additional volumes? Proposal: none (atomic list).

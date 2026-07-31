@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrladmission "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -108,10 +109,9 @@ func (r *InstanceWebhook) ValidateCreate(ctx context.Context, obj runtime.Object
 		errs = append(errs, nodeErr)
 	}
 	errs = append(errs, validateAdditionalVolumes(inst)...)
-	// Gate the host-boundary escapes on create only, so turning a gate off never blocks an existing
-	// Instance from being updated, edited while stopped, or restarted. Both settings default to off,
-	// so a failed settings read denies rather than allows.
-	errs = append(errs, validateHostAccess(inst,
+	// Nothing is held yet on create, so every escape the Instance asks for is one it is taking. Both
+	// settings default to off, so a failed settings read denies rather than allows.
+	errs = append(errs, validateHostAccess(nil, inst,
 		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
 		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 	switch {
@@ -224,6 +224,14 @@ func (r *InstanceWebhook) ValidateUpdate(ctx context.Context, oldObj, newObj run
 			field.NewPath("spec.volume"), "volume is immutable"),
 		)
 	}
+
+	// Gate the host-boundary escapes this update TAKES, whatever the Instance's state: while it is
+	// stopped the immutability guard above is skipped, so an escape can be written into the spec at
+	// any point, not only at creation. An escape the Instance already holds passes untouched, which
+	// is what keeps a setting turned off later from stranding it.
+	errs = append(errs, validateHostAccess(instOld, inst,
+		settings.InstancePrivilegedAllowed.ShouldValueBool(ctx),
+		settings.InstanceHostPathVolumeAllowed.ShouldValueBool(ctx))...)
 
 	// Validate state transition.
 	switch {
@@ -364,9 +372,19 @@ func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fld
 			continue
 		}
 		set = append(set, r.name)
+		namePath := fldPath.Child(r.name, "name")
 		if r.ref.Name == "" {
-			errs = append(errs, field.Required(fldPath.Child(r.name, "name"),
+			errs = append(errs, field.Required(namePath,
 				"name of the referenced object must be specified"))
+			continue
+		}
+		// A name no object could carry can never resolve, unlike one that merely does not exist
+		// yet. Pod validation does not catch it — a volume source's object reference is only
+		// checked for emptiness there — so the Pod is admitted and then wedges in ContainerCreating
+		// on a mount that cannot succeed, for the Pod's whole life, since it is rendered once and
+		// never re-diffed. Admission is the only place the author sees a reason.
+		if msgs := validation.IsDNS1123Subdomain(r.ref.Name); len(msgs) > 0 {
+			errs = append(errs, field.Invalid(namePath, r.ref.Name, strings.Join(msgs, "; ")))
 		}
 	}
 	if av.HostPath != nil {
@@ -392,20 +410,38 @@ func validateAdditionalVolumeSource(av *workercore.InstanceAdditionalVolume, fld
 // gated independently because privileged grants strictly more: the node's devices and kernel surface
 // on top of its filesystem.
 //
+// What is gated is the act of TAKING an escape, not of holding one. instOld is the Instance as it
+// stands (nil on create), and an escape it already holds is never rejected again: turning a setting
+// off must not strand an Instance that was legitimately granted the escape while it was on. Without
+// the old object the rule would be create-only, and then it would guard nothing — an Instance created
+// stopped and empty asks for nothing, so a single later patch would hand it both escapes.
+//
 // The rule takes the resolved settings rather than reading them, so every combination can be tested
 // without seeding a value that would cache for 30s with no flush and leak into later tests.
-func validateHostAccess(inst *workercore.Instance, privilegedAllowed, hostPathAllowed bool) field.ErrorList {
+func validateHostAccess(instOld, inst *workercore.Instance, privilegedAllowed, hostPathAllowed bool) field.ErrorList {
 	var errs field.ErrorList
 
-	if inst.Spec.Privileged && !privilegedAllowed {
+	heldPrivileged := instOld != nil && instOld.Spec.Privileged
+	if inst.Spec.Privileged && !privilegedAllowed && !heldPrivileged {
 		errs = append(errs, field.Forbidden(field.NewPath("spec.privileged"),
 			fmt.Sprintf("privileged mode is not allowed: enable the %q setting to allow it",
 				settings.InstancePrivilegedAllowed.Name())))
 	}
 
 	if !hostPathAllowed {
+		var held []*workercore.InstanceAdditionalVolume
+		if instOld != nil {
+			for i := range instOld.Spec.AdditionalVolumes {
+				if instOld.Spec.AdditionalVolumes[i].HostPath != nil {
+					held = append(held, &instOld.Spec.AdditionalVolumes[i])
+				}
+			}
+		}
 		for i := range inst.Spec.AdditionalVolumes {
-			if inst.Spec.AdditionalVolumes[i].HostPath == nil {
+			av := &inst.Spec.AdditionalVolumes[i]
+			if av.HostPath == nil || slices.ContainsFunc(held, func(h *workercore.InstanceAdditionalVolume) bool {
+				return coversHostAccess(h, av)
+			}) {
 				continue
 			}
 			errs = append(errs, field.Forbidden(
@@ -416,6 +452,40 @@ func validateHostAccess(inst *workercore.Instance, privilegedAllowed, hostPathAl
 	}
 
 	return errs
+}
+
+// coversHostAccess reports whether a host-path entry the Instance already holds grants at least what
+// another one asks for, so the other is not a new escape.
+//
+// The comparison is by position-independent value, so reordering the list or editing a sibling entry
+// never reads as taking a new escape. It is the whole grant that is compared, not just the node path:
+// widening the same path — dropping a sub path, or turning a read-only mount writable — hands the
+// Instance access it did not have, so that has to face the gate like any other new escape. Narrowing
+// is free in the other direction, since a mount exposing less than one already held adds nothing.
+func coversHostAccess(held, want *workercore.InstanceAdditionalVolume) bool {
+	if !kubemeta.DeepEqual(normalizeHostPath(held.HostPath), normalizeHostPath(want.HostPath)) {
+		return false
+	}
+	// A sub path covers itself and anything beneath it, and an absent one covers everything, since
+	// it exposes the volume's root. Both sides are already known to be relative and free of "..",
+	// so a prefix really is a subtree here rather than a string that merely looks like one.
+	if held.SubPath != "" &&
+		want.SubPath != held.SubPath &&
+		!strings.HasPrefix(want.SubPath, held.SubPath+"/") {
+		return false
+	}
+	// A writable mount covers a read-only one, never the reverse.
+	return !held.ReadOnly || want.ReadOnly
+}
+
+// normalizeHostPath returns the source with its Type spelled canonically, since Kubernetes reads an
+// absent Type and an empty one as the same "unset" kind — comparing the pointers raw would read a
+// client that writes `type: ""` as naming a different node path than one that omits it.
+func normalizeHostPath(hp *core.HostPathVolumeSource) *core.HostPathVolumeSource {
+	if hp == nil || hp.Type == nil || *hp.Type != core.HostPathUnset {
+		return hp
+	}
+	return &core.HostPathVolumeSource{Path: hp.Path}
 }
 
 // _HostPathTypes is the set of node path kinds Kubernetes accepts on a hostPath volume.
@@ -430,10 +500,12 @@ var _HostPathTypes = []core.HostPathType{
 	core.HostPathBlockDev,
 }
 
-// validateHostPathSource checks a hostPath source the way Pod validation will: an absolute, canonical
-// node path — Kubernetes refuses one carrying a ".." element — of a supported kind. Admitting
-// anything else would only move the rejection to Pod creation, which the reconciler retries forever
-// because the backing Pod is rendered once and never re-diffed.
+// validateHostPathSource checks a hostPath source for what a node can actually serve: an absolute,
+// canonical path of a supported kind. Kubernetes itself refuses a path carrying a ".." element and a
+// type it does not know, so admitting those would only move the rejection to Pod creation, which
+// leaves the reconciler retrying forever; the absoluteness and trailing-element rules go a step
+// further, because a path the API server accepts but the node cannot resolve wedges the Pod just as
+// permanently — it is rendered once and never re-diffed.
 func validateHostPathSource(hp *core.HostPathVolumeSource, fldPath *field.Path) field.ErrorList {
 	var errs field.ErrorList
 
@@ -470,7 +542,7 @@ func (r *InstanceWebhook) validateNodePin(ctx context.Context, nodeName string) 
 		return nil, nil
 	}
 
-	path := field.NewPath("spec.nodeName")
+	fldPath := field.NewPath("spec.nodeName")
 	nd := &core.Node{
 		ObjectMeta: meta.ObjectMeta{
 			Name: nodeName,
@@ -479,18 +551,22 @@ func (r *InstanceWebhook) validateNodePin(ctx context.Context, nodeName string) 
 	err := r.Client.Get(ctx, ctrlcli.ObjectKeyFromObject(nd), nd)
 	if err != nil {
 		if !kerrors.IsNotFound(err) {
-			return nil, field.InternalError(path, fmt.Errorf("get node: %w", err))
+			return nil, field.InternalError(fldPath, fmt.Errorf("get node: %w", err))
 		}
-		// A cache miss can be an unsynced informer, so confirm against the live reader — where
-		// only a real "not found" is a permanent rejection. A timeout or an authorization
-		// failure must stay retryable rather than read as a node that does not exist.
+		// A cache miss can be an unsynced informer, so ask the API server directly before
+		// rejecting — only a real "not found" from it is a permanent verdict, while a timeout or
+		// an authorization failure stays retryable rather than reading as a node that is absent.
+		// The read is served from the API server's own cache rather than through etcd quorum, as
+		// every read in this package is: it is fresh enough to answer for an informer that has
+		// not caught up, and the cost of the remaining window is a retryable rejection of a Node
+		// created moments ago, not a wrong admission.
 		err = r.APIReader.Get(ctx, ctrlcli.ObjectKeyFromObject(nd), nd,
 			ctrlclix.WithoutQuorum)
 		if err != nil {
 			if !kerrors.IsNotFound(err) {
-				return nil, field.InternalError(path, fmt.Errorf("get node: %w", err))
+				return nil, field.InternalError(fldPath, fmt.Errorf("get node: %w", err))
 			}
-			return field.NotFound(path, nodeName), nil
+			return field.NotFound(fldPath, nodeName), nil
 		}
 	}
 

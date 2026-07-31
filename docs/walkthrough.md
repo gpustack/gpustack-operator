@@ -681,7 +681,12 @@ defaulting to `false`:
 | `instance-host-path-volume-allowed` | `spec.additionalVolumes[*].hostPath` — reaches the node's filesystem, but not its devices or kernel. |
 
 They are kept separate so an administrator can allow node-path mounts without allowing a container
-escape. Both are enforced **when an Instance is created** and at no other time: turning a gate off
-stops new Instances from taking the escape, while every Instance already using it stays updatable,
-editable while stopped, and restartable. See [Settings](./settings.md#online-adjustable-settings) for
-how to change one.
+escape. Each gates the act of **taking** its escape — on creation, and on any later change that adds
+one — while an Instance that already holds one keeps it: turning a gate off stops new grants without
+stranding what was granted while it was on. See
+[Settings](./settings.md#online-adjustable-settings) for how to change one.
+
+The two gates govern the **node** boundary, not the namespace one. A `persistent`, `configMap` or
+`secret` source names an object in the Instance's own namespace, and any of them may be mounted — the
+same reach a Pod created directly in that namespace has. Namespaces remain the tenancy boundary; put
+Instances whose authors should not read each other's Secrets in namespaces of their own.

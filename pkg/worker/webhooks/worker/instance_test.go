@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +16,7 @@ import (
 	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
@@ -135,6 +138,47 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstanceWebhook_ValidateCreate_NodePinUnreadable pins the half of the node-pin contract the
+// table above cannot reach: a read that fails for a reason other than "not found" must come back as
+// a retryable error, never as a rejection. A node the webhook simply could not look at is not a node
+// that is absent, and treating the two alike would turn an apiserver hiccup into a permanent refusal
+// of a perfectly good Instance.
+func TestInstanceWebhook_ValidateCreate_NodePinUnreadable(t *testing.T) {
+	const typeName = "generic-type"
+
+	readFails := func(obj ctrlcli.Object, key ctrlcli.ObjectKey) error {
+		if _, ok := obj.(*core.Node); ok && key.Name == "node-1" {
+			return kerrors.NewInternalError(errors.New("etcd unavailable"))
+		}
+		return nil
+	}
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(pinnedType(typeName)).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey,
+				obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+			) error {
+				if err := readFails(obj, key); err != nil {
+					return err
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	w := &InstanceWebhook{Client: cli, APIReader: cli}
+
+	inst := webhookInstance("a", typeName)
+	inst.Spec.NodeName = "node-1"
+
+	_, err := w.ValidateCreate(context.Background(), inst)
+
+	require.Error(t, err)
+	assert.False(t, kerrors.IsInvalid(err),
+		"an unreadable node is a retryable failure, not an invalid Instance")
+	assert.Contains(t, err.Error(), "etcd unavailable", "the underlying read failure is reported")
 }
 
 // pinnedType builds the InstanceType a pinned Instance references. The pin is not validated against
@@ -313,8 +357,8 @@ func TestInstanceWebhook_ValidateUpdate_NodePin(t *testing.T) {
 // TestInstanceWebhook_ValidateCreate_AdditionalVolumes pins what an additional volume entry must
 // look like for the backing Pod to be constructible: an absolute mount path that neither repeats
 // another entry's nor shadows the workspace, exactly one source, a relative sub path that cannot
-// escape the volume, and a reference that names something. The referenced object itself is not
-// looked up, matching spec.volume.persistent.
+// escape the volume, and a reference carrying a name an object could actually have. The referenced
+// object itself is not looked up, matching spec.volume.persistent.
 func TestInstanceWebhook_ValidateCreate_AdditionalVolumes(t *testing.T) {
 	const typeName = "generic-type"
 
@@ -424,6 +468,16 @@ func TestInstanceWebhook_ValidateCreate_AdditionalVolumes(t *testing.T) {
 			name: "an unnamed reference",
 			volumes: []workercore.InstanceAdditionalVolume{
 				{MountPath: "/data", Persistent: ref("")},
+			},
+			wantErr: true,
+		},
+		{
+			// A name no object could carry is rejected here, because nothing downstream does:
+			// the Pod is admitted and then wedges on a mount that can never succeed. Existence
+			// is still not checked.
+			name: "a reference no object could ever carry",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/etc/app", ConfigMap: ref("App_Config")},
 			},
 			wantErr: true,
 		},
@@ -620,6 +674,17 @@ func TestValidateHostAccess(t *testing.T) {
 		privileged        bool
 		hostPath          bool
 
+		// held gives the change an old object carrying the same escapes, so the rule judges what is
+		// taken rather than what is carried. heldOnly narrows that to one escape, repointsHost keeps
+		// the entry but aims it at another node path, reordersAll moves it within the list, and the
+		// heldHost/wantHost pair spells out the grant on each side when the two differ in reach.
+		held         bool
+		heldOnly     string
+		repointsHost bool
+		reordersAll  bool
+		heldHost     *workercore.InstanceAdditionalVolume
+		wantHost     *workercore.InstanceAdditionalVolume
+
 		wantFields []string
 	}{
 		{name: "nothing requested, nothing allowed"},
@@ -683,6 +748,104 @@ func TestValidateHostAccess(t *testing.T) {
 			privileged:        true,
 			hostPath:          true,
 		},
+		// Holding an escape already is what a gate turned off must not undo, so each held case is
+		// the denied one above with the escape carried over from the old object.
+		{
+			name:       "privileged already held, nothing allowed",
+			held:       true,
+			privileged: true,
+		},
+		{
+			name:     "host path already held, nothing allowed",
+			held:     true,
+			hostPath: true,
+		},
+		{
+			name:       "both already held, nothing allowed",
+			held:       true,
+			privileged: true,
+			hostPath:   true,
+		},
+		{
+			// Holding one escape says nothing about the other: the old object here carries only
+			// what it is allowed to, and the new one reaches for the second as well.
+			name:       "privileged held, a host path taken alongside it",
+			held:       true,
+			heldOnly:   "privileged",
+			privileged: true,
+			hostPath:   true,
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Repointing a held entry at another node path is taking a new escape, not keeping one.
+			name:         "a held host path repointed elsewhere",
+			held:         true,
+			hostPath:     true,
+			repointsHost: true,
+			wantFields:   []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Matching by value rather than by index is what makes the rule survive an edit to the
+			// rest of the list: the same node path at a new position is the escape it already had.
+			name:        "a held host path moved to another position",
+			held:        true,
+			hostPath:    true,
+			reordersAll: true,
+		},
+		{
+			// The grant is the whole mount, not just the node path. Holding one subtree read-only
+			// must not license the same path whole and writable, or the gate can be walked open one
+			// harmless-looking mount at a time.
+			name:       "a held sub path widened to the whole volume",
+			held:       true,
+			hostPath:   true,
+			heldHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe", ReadOnly: true, HostPath: &core.HostPathVolumeSource{Path: "/"}},
+			wantHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/all", HostPath: &core.HostPathVolumeSource{Path: "/"}},
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:       "a held read-only mount turned writable",
+			held:       true,
+			hostPath:   true,
+			heldHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", ReadOnly: true, HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Narrowing is the other direction and costs the Instance nothing it had, so it passes.
+			name:     "a held mount narrowed to a read-only sub path",
+			held:     true,
+			hostPath: true,
+			heldHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "sub", ReadOnly: true, HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+		},
+		{
+			// A held sub path covers what lies beneath it: going deeper exposes strictly less, so
+			// the rule must not read it as reaching for something new.
+			name:     "a held sub path narrowed to one beneath it",
+			held:     true,
+			hostPath: true,
+			heldHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe/deeper", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+		},
+		{
+			// A sibling is not beneath it, however much of its name it shares.
+			name:       "a held sub path swapped for a sibling",
+			held:       true,
+			hostPath:   true,
+			heldHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safer", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Kubernetes reads an absent Type and an empty one as the same unset kind, so a client
+			// that spells it out must not be told it is asking for a different node path.
+			name:     "a held mount respelled with an explicit unset type",
+			held:     true,
+			hostPath: true,
+			heldHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models", Type: ptr.To(core.HostPathUnset)}},
+		},
 	}
 
 	for _, c := range cases {
@@ -693,10 +856,42 @@ func TestValidateHostAccess(t *testing.T) {
 			// The plain volume goes first so a rejection has to carry the offending index.
 			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{plainVolume}
 			if c.hostPath {
-				inst.Spec.AdditionalVolumes = append(inst.Spec.AdditionalVolumes, hostPathVolume)
+				hp := hostPathVolume
+				switch {
+				case c.wantHost != nil:
+					hp = *c.wantHost
+				case c.repointsHost:
+					hp.HostPath = &core.HostPathVolumeSource{Path: "/mnt/elsewhere"}
+				}
+				inst.Spec.AdditionalVolumes = append(inst.Spec.AdditionalVolumes, hp)
+			}
+			if c.reordersAll {
+				// The host path now leads and the plain entry trails, so a rule keyed on the index
+				// would see a fresh escape at position 0 where the old object had none.
+				slices.Reverse(inst.Spec.AdditionalVolumes)
 			}
 
-			errs := validateHostAccess(inst, c.privilegedAllowed, c.hostPathAllowed)
+			// The old object holds whatever the case says it already had, so the rule sees the
+			// escapes this change TAKES rather than the ones it merely carries.
+			var instOld *workercore.Instance
+			if c.held {
+				instOld = webhookInstance("a", "generic-type")
+				instOld.Spec.Privileged = c.privileged
+				instOld.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{plainVolume}
+				if c.hostPath && c.heldOnly != "privileged" {
+					heldHost := hostPathVolume
+					if c.heldHost != nil {
+						heldHost = *c.heldHost
+					}
+					instOld.Spec.AdditionalVolumes = append(
+						instOld.Spec.AdditionalVolumes, heldHost)
+				}
+				if c.heldOnly == "privileged" {
+					instOld.Spec.Privileged = true
+				}
+			}
+
+			errs := validateHostAccess(instOld, inst, c.privilegedAllowed, c.hostPathAllowed)
 
 			got := make([]string, 0, len(errs))
 			for _, e := range errs {
@@ -716,10 +911,16 @@ func nonEmpty(s []string) []string {
 	return s
 }
 
-// TestInstanceWebhook_HostAccessGates pins the gates' wiring: they are read on create, where both
-// settings resolve to their default (off) so a privileged or hostPath Instance is rejected, and they
-// are never read on update — an existing Instance stays editable while stopped and restartable with
-// both gates off, which is what keeps an administrator's later change from stranding it.
+// TestInstanceWebhook_HostAccessGates pins the gates' wiring on both verbs, where both settings
+// resolve to their default (off). A create asking for either escape is rejected; so is an update
+// that adds one the Instance did not already hold, including the patch that restarts it. An escape
+// it does hold is never re-judged, so it stays editable while stopped and restartable — which is
+// what keeps an administrator's later change from stranding it.
+//
+// Both settings are at the same default here, so this cannot tell which setting feeds which
+// parameter — seeding them apart would cache a value for 30s with no flush and leak into every later
+// test in the package. That one reading is left to the e2e suite's node-pin case, which runs with the
+// two settings at different values and asserts each gate covers only its own field.
 func TestInstanceWebhook_HostAccessGates(t *testing.T) {
 	const typeName = "generic-type"
 
@@ -754,7 +955,53 @@ func TestInstanceWebhook_HostAccessGates(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("update never enforces the gates", func(t *testing.T) {
+	// Taking an escape the Instance did not already hold is a create, whichever verb delivers it.
+	// Without this, the gates protect nothing at all: an Instance created stopped and empty is
+	// accepted because it asks for nothing, and a single patch then grants it both escapes while
+	// both settings are off.
+	t.Run("update rejects an escape the instance did not already hold", func(t *testing.T) {
+		stoppedPlain := func() *workercore.Instance {
+			inst := webhookInstance("a", typeName)
+			inst.Spec.VolumeMount = "/workspace"
+			inst.Spec.Stop = true
+			inst.Status.Phase = workerctrl.InstancePhaseStopped
+			return inst
+		}
+
+		t.Run("privileged turned on while stopped", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			instOld := stoppedPlain()
+			inst := instOld.DeepCopy()
+			inst.Spec.Privileged = true
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.Error(t, err)
+		})
+
+		t.Run("a host path added while stopped", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			instOld := stoppedPlain()
+			inst := instOld.DeepCopy()
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.Error(t, err)
+		})
+
+		t.Run("both taken in the same patch that restarts it", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			instOld := stoppedPlain()
+			inst := instOld.DeepCopy()
+			inst.Spec.Stop = false
+			inst.Spec.Privileged = true
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("update never gates an escape the instance already holds", func(t *testing.T) {
 		// An Instance created while the gates were on: privileged, with a host path mount.
 		instOld := webhookInstance("a", typeName)
 		instOld.Spec.VolumeMount = "/workspace"

@@ -27,7 +27,9 @@ type InstanceAdditionalVolumeApplyConfiguration struct {
 	// Secret is the reference to the Secret to mount, in the same namespace.
 	Secret *v1.LocalObjectReferenceApplyConfiguration `json:"secret,omitempty"`
 	// HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so
-	// creating an Instance that uses it requires the instance-host-path-volume-allowed Setting.
+	// taking it requires the instance-host-path-volume-allowed Setting — at creation, and on any
+	// later change that adds or widens such a mount. One the Instance already holds is never
+	// re-judged, so the Setting going off does not strand it.
 	HostPath *v1.HostPathVolumeSourceApplyConfiguration `json:"hostPath,omitempty"`
 }
 

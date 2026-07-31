@@ -2907,7 +2907,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceAdditionalVolume(ref common.Ref
 					},
 					"hostPath": {
 						SchemaProps: spec.SchemaProps{
-							Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so creating an Instance that uses it requires the instance-host-path-volume-allowed Setting.",
+							Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so taking it requires the instance-host-path-volume-allowed Setting — at creation, and on any later change that adds or widens such a mount. One the Instance already holds is never re-judged, so the Setting going off does not strand it.",
 							Ref:         ref(corev1.HostPathVolumeSource{}.OpenAPIModelName()),
 						},
 					},

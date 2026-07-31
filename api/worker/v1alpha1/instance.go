@@ -167,7 +167,9 @@ type InstanceAdditionalVolume struct {
 	Secret *core.LocalObjectReference `json:"secret,omitempty" protobuf:"bytes,6,opt,name=secret"`
 
 	// HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so
-	// creating an Instance that uses it requires the instance-host-path-volume-allowed Setting.
+	// taking it requires the instance-host-path-volume-allowed Setting — at creation, and on any
+	// later change that adds or widens such a mount. One the Instance already holds is never
+	// re-judged, so the Setting going off does not strand it.
 	HostPath *core.HostPathVolumeSource `json:"hostPath,omitempty" protobuf:"bytes,7,opt,name=hostPath"`
 }
 

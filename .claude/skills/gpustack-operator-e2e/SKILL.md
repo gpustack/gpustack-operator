@@ -79,7 +79,7 @@ Each case is self-contained; its header (see **Case header contract**) states go
 | 32 | An instance carved outside GPUStack: placement sees it, the node keys never do (observation) | `pkg/device/physical_placement.go`, `pkg/devicemanager/allocator/nvidia/mig.go`, `pkg/worker/controllers/worker/node_capacity.go` | `cases/case-32.sh` | yes (confirm) | partition-capable NVIDIA card, **exactly one partitioned**, **+ node SSH with MIG instance management** · skips: not partition-capable / ≠1 partitioned card / no vendor profile id / carve produced nothing / no `MIG_NODE_SSH` (exit 2) |
 | 34 | `single-numa-node` topology with partition capacity only on the far socket (observation) | `pkg/deviceplugin/server.go` (the NUMA topology reported per family) | `cases/case-34.sh` | yes (confirm) | **dual-socket** node running `topologyManagerPolicy: single-numa-node`, partition-capable card **+ node SSH** · skips: <2 NUMA nodes / policy is not `single-numa-node` / policy unreadable / card has no NUMA affinity / no `MIG_NODE_SSH` (exit 2) |
 | 35 | Ascend logical-slice placement: claims pack, spill only on a misfit, and never cross into an exclusive card | `pkg/deviceplugin/{server,helper}.go`, `pkg/devicemanager/allocator/ascend/**`, `pkg/worker/webhooks/worker/pod.go` | `cases/case-35.sh` | yes (confirm) | real **Ascend** hardware, >=3 logically sliceable cards on one node with >=1 free at start, **+ a CANN-family image** · skips: <3 logically sliceable ascend cards; fails setup: no free card |
-| 36 | Node-pinned Instance with additional volumes, and the CREATE-only host-access gates | `pkg/worker/controllers/worker/instance.go`, `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/settings/value.go`, `api/worker/v1alpha1/instance.go` | `cases/case-36.sh` | yes (confirm) | any + a default StorageClass · sub-checks skip: <2 schedulable managed nodes (the pin-chose-the-node reading), no `ssh`/`ssh-keygen` (the sidecar and over-SSH readings) |
+| 36 | Node-pinned Instance with additional volumes, and the host-access gates | `pkg/worker/controllers/worker/instance.go`, `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/settings/value.go`, `api/worker/v1alpha1/instance.go` | `cases/case-36.sh` | yes (confirm) | any + a default StorageClass · sub-checks skip: <2 schedulable managed nodes (the pin-chose-the-node reading), no `ssh`/`ssh-keygen` (the sidecar and over-SSH readings) |
 
 - Also run **CASE 1 at minimum** for changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`, `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
 - `spec.os`/`spec.arch` materialization is asserted **inline** — CASE 1 (cpu pool) + CASE 6 (accelerated) — not as a standalone case.
@@ -95,9 +95,12 @@ Each case is self-contained; its header (see **Case header contract**) states go
   of its readings are only meaningful on a wider cluster and record **SKIP** rather than a vacuous PASS:
   landing on the pinned node says the pin *chose* it only with at least two schedulable managed nodes,
   and the over-SSH reading needs the `ssh` client. It is also the one case that flips **two** editable
-  Settings, and both are restored by its trap — the gates are enforced on CREATE only, so the case has
-  to create a fresh Instance per verdict, and because the webhook resolves a Setting through a 30s
-  cache it **retries each verdict to a steady state** rather than sleeping a fixed amount.
+  Settings, and both are restored by its trap — a gate judges the escape a change *takes*, so the case
+  has to create a fresh Instance per create verdict, and because the webhook resolves a Setting through
+  a 30s cache it **retries each verdict to a steady state** rather than sleeping a fixed amount. Its
+  update half is deliberately two-sided: an Instance that already holds an escape must survive the gate
+  going off, and one that never held it must not acquire it by patch — a gate that only fired on create
+  would stop nothing, since an Instance created stopped and empty passes it trivially.
 - **CASES 24–32 and 34 are the hardware-partition family** and share one sourced helper,
   `cases/_partition-lib.sh` — node correlation, the `MIG_NODE_SSH` gate, profile/key discovery, the pod
   plumbing and the `record` idiom. The leading underscore marks it as **not a case**: it has no header, no

@@ -662,6 +662,9 @@ func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
 		require.Len(t, pod.Spec.Volumes, 2, "only the sshd key and the workspace")
 		assert.Equal(t, []core.VolumeMount{{Name: "workspace", MountPath: "/workspace"}},
 			pod.Spec.Containers[0].VolumeMounts, "main mounts only the workspace")
+		// Both new fields unset must leave the Pod exactly as it renders today, and the selector is
+		// the other half of that: this instance pins no node either.
+		assert.Nil(t, pod.Spec.NodeSelector, "an unpinned instance adds no selector")
 	})
 
 	t.Run("every source renders one volume and one mount on main", func(t *testing.T) {
@@ -726,6 +729,29 @@ func TestConvertPodFromInstance_AdditionalVolumes(t *testing.T) {
 
 		assert.Len(t, pod.Spec.Volumes, 2, "a sourceless entry renders no volume")
 		assert.Len(t, pod.Spec.Containers[0].VolumeMounts, 1, "and no mount")
+	})
+
+	// The workspace is rendered by one of two branches — an emptyDir or a claim — and each appends
+	// the additions itself, so a persistent workspace has to be asserted on its own.
+	t.Run("a persistent workspace carries the additions too", func(t *testing.T) {
+		inst := newInstance(workercore.InstanceAdditionalVolume{
+			MountPath: "/etc/app",
+			ConfigMap: &core.LocalObjectReference{Name: "app-config"},
+		})
+		inst.Spec.Volume = workercore.InstanceVolume{
+			Persistent: &core.LocalObjectReference{Name: "inst-disk"},
+		}
+
+		pod := r.convertPodFromInstance(context.Background(), inst, instType)
+
+		require.Len(t, pod.Spec.Volumes, 3, "the sshd key, the claimed workspace and the addition")
+		assert.Equal(t, "inst-disk", pod.Spec.Volumes[1].PersistentVolumeClaim.ClaimName,
+			"the workspace is still the claim")
+		assert.Equal(t, "app-config", pod.Spec.Volumes[2].ConfigMap.Name)
+		assert.Equal(t, []core.VolumeMount{
+			{Name: "workspace", MountPath: "/workspace"},
+			{Name: "additional-0", MountPath: "/etc/app"},
+		}, pod.Spec.Containers[0].VolumeMounts)
 	})
 }
 

@@ -750,9 +750,17 @@ func (r *InstanceReconciler) getNodeHostname(ctx context.Context, nodeName strin
 		err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, nd,
 			ctrlclix.WithoutQuorum)
 		if err != nil {
+			// The Pod is rendered once, so this fallback is what the Instance is pinned to for
+			// good. On a node whose hostname label differs from its name that selector matches
+			// nothing, and the Pod's own Pending reason names the selector rather than the read
+			// that produced it — so say here what the scheduler cannot.
+			ctrllog.FromContext(ctx).Error(err, "fetch node for pin", "node", nodeName)
 			return nodeName
 		}
 	}
+	// Neither read waits on etcd quorum, so a label written moments ago may not be visible yet.
+	// That is the accepted trade: kubelet sets the hostname label once, at registration, and does
+	// not change it, so the value being read is one that has been settled since the node joined.
 	if hostname := nd.Labels[core.LabelHostname]; hostname != "" {
 		return hostname
 	}

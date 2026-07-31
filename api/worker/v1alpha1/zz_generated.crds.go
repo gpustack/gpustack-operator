@@ -657,7 +657,7 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 															Nullable: true,
 														},
 														"hostPath": {
-															Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so\ncreating an Instance that uses it requires the instance-host-path-volume-allowed Setting.",
+															Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so\ntaking it requires the instance-host-path-volume-allowed Setting — at creation, and on any\nlater change that adds or widens such a mount. One the Instance already holds is never\nre-judged, so the Setting going off does not strand it.",
 															Type:        "object",
 															Required: []string{
 																"path",
