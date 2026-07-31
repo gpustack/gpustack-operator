@@ -1,0 +1,54 @@
+# Per-product unit-resource presets for node-derived acceleratable InstanceTypes.
+#
+# A product name is normalized into a token key, the leading marketing token sequences listed in
+# "strip" are removed, and the key is then matched against at most one prefix entry of its
+# manufacturer. An entry's ordered "by" list refines the tier by whole-token match: the first
+# listed token present in the key wins, otherwise the entry's own tier applies. A key matching no
+# entry, and a manufacturer absent from "families", both resolve to the "fallback" tier.
+#
+# This file carries matching facts only. Why each family sits on the tier it does is recorded in
+# docs/instance-type-unit-resources.md.
+#
+# Editing rules, all enforced when the table loads (see unit_resources_preset.go):
+#   - the tier set is exactly the five below, "fallback" is exactly 4 CPU / 16Gi, the ladder is
+#     monotonic, and every tier is a value the InstanceType admission webhook accepts;
+#   - a manufacturer key must be one the operator can detect;
+#   - within a manufacturer no prefix may repeat or be a token-prefix of another, which is what
+#     makes "one product resolves to one tier" a property of this table rather than of the
+#     resolver;
+#   - a "family" name is unique across the whole file;
+#   - a "by" token may not repeat inside its entry, nor equal a token of the entry's own prefix;
+#   - a prefix may not start with a strip sequence or with its own manufacturer name, since both
+#     are already gone by the time matching runs.
+
+tiers:
+  fallback: {cpu: "4", ram: 16Gi}
+  small: {cpu: "8", ram: 32Gi}
+  medium: {cpu: "8", ram: 64Gi}
+  large: {cpu: "12", ram: 128Gi}
+  xlarge: {cpu: "12", ram: 192Gi}
+
+strip:
+  - tesla
+
+families:
+  nvidia:
+    - prefix: h100
+      family: h100
+      tier: xlarge
+    - prefix: a100
+      family: a100
+      tier: medium
+      by:
+        - {token: 80gb, family: a100-80gb, tier: large}
+        - {token: 40gb, family: a100-40gb, tier: medium}
+    - prefix: gb10
+      family: gb10
+      tier: small
+    - prefix: t4
+      family: t4
+      tier: small
+  ascend:
+    - prefix: "910b2"
+      family: "910b2"
+      tier: large
