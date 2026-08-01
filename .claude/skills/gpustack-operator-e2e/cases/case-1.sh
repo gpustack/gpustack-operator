@@ -8,7 +8,12 @@
 #              that NO Cohort is created — exactly one isolated ClusterQueue per pool.
 # Environment: Any cluster with a materialized general pool (operator core healthy, NFD +
 #              Worker running). No GPU — device-manager DaemonSets scheduling zero pods on a
-#              GPU-less node is expected. Read-only, level-based, safe to re-run.
+#              GPU-less node is expected. Read-only, level-based, safe to re-run. Waits for the
+#              chain to converge rather than reading it once: on a fresh install the worker's
+#              first ResourceFlavor write can lose a race with the Kueue webhook's endpoints
+#              ("connect: connection refused"), and the reconciler then retries on its own
+#              backoff — measured at ~40s. A single-shot read right after a deploy reports that
+#              as a chain that never materialized.
 # Inputs:      None injected — reads live cluster state only (operator-core health delegated
 #              to assert-core.sh). Nothing mocked.
 # Expected:    - assert-core.sh passes (rollout / running revision == HEAD / apiservices /
@@ -37,6 +42,19 @@ assert_nonempty() { # check  command-output
   if [ -n "$2" ]; then record PASS "$1" "$(echo "$2" | tr '\n' ' ' | cut -c1-60)"; else record FAIL "$1" "none found"; fi
 }
 
+# await_nonempty re-runs a read until it returns something, up to ~2min. The chain is level-based
+# and materializes asynchronously, so "not there yet" and "never going to be there" look identical
+# in a single read — only the passage of time tells them apart.
+await_nonempty() { # command-string
+  local out=""
+  for _ in $(seq 1 40); do
+    out=$(eval "$1" 2>/dev/null)
+    [ -n "$out" ] && break
+    sleep 3
+  done
+  printf '%s' "$out"
+}
+
 # NFD labeled the node(s) with CPU identity and marked GPU-less nodes (non-)acceleratable.
 nfd=$(kubectl get nodes -o json | grep -Eo '"feature\.gpustack\.ai/(cpu-[a-z]+|acceleratable)"[^,]*' | sort -u)
 assert_nonempty "NFD cpu/acceleratable labels" "$nfd"
@@ -47,14 +65,16 @@ assert_nonempty "Worker general.* labels" "$gen"
 
 # The pooling chain materialized the general objects (all prefixed "gpustack-"). A CPU
 # flavor carries the -${count}c suffix; the CQ/InstanceType is the flavor name without it.
-assert_nonempty "ResourceFlavor (general)" "$(kubectl get resourceflavors.kueue.x-k8s.io -o name | grep -E 'gpustack-.*-[0-9]+c$')"
-assert_nonempty "ClusterQueue (general)"   "$(kubectl get clusterqueues.kueue.x-k8s.io   -o name | grep 'gpustack-')"
-assert_nonempty "LocalQueue (general)"     "$(kubectl get localqueues.kueue.x-k8s.io -A  -o name | grep 'gpustack-fnv64-')"
+# The flavor is the head of the chain, so it is the one worth waiting on; the rest follow it
+# within a reconcile and are read directly.
+assert_nonempty "ResourceFlavor (general)" "$(await_nonempty "kubectl get resourceflavors.kueue.x-k8s.io -o name | grep -E 'gpustack-.*-[0-9]+c\$'")"
+assert_nonempty "ClusterQueue (general)"   "$(await_nonempty "kubectl get clusterqueues.kueue.x-k8s.io   -o name | grep 'gpustack-'")"
+assert_nonempty "LocalQueue (general)"     "$(await_nonempty "kubectl get localqueues.kueue.x-k8s.io -A  -o name | grep 'gpustack-fnv64-'")"
 
 # The InstanceType materialized and reports Active with an entrance LocalQueue (the pool
 # surfaces as a real CRD whose .status the reconciler writes).
-itActive=$(kubectl get instancetypes.worker.gpustack.ai \
-  -o jsonpath='{range .items[?(@.status.phase=="Active")]}{.metadata.name}{" entrance="}{.status.entrance}{"\n"}{end}' 2>/dev/null | grep 'gpustack-')
+itActive=$(await_nonempty "kubectl get instancetypes.worker.gpustack.ai \
+  -o jsonpath='{range .items[?(@.status.phase==\"Active\")]}{.metadata.name}{\" entrance=\"}{.status.entrance}{\"\n\"}{end}' | grep 'gpustack-'")
 assert_nonempty "InstanceType Active (+entrance)" "$itActive"
 
 # The general InstanceType materializes spec.os/spec.arch from the backing ClusterQueue's
