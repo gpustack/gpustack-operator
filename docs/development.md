@@ -1,8 +1,20 @@
 # Development
 
+> **Purpose** — every command you need to build, lint, test and regenerate the operator, plus how the
+> vendored subcharts and patched dependencies work.
+> **Audience** contributors · **Prerequisites** none (read [Architecture](architecture.md) before
+> changing behavior) · **Read time** ~10 min
+
 Build, lint, test, code generation, and dependency management for GPUStack Operator. For the
 runtime architecture see [architecture.md](architecture.md); for settings and the `GPUSTACK_*`
 knobs see [settings.md](settings.md).
+
+## Contents
+
+- [Commands](#commands)
+- [Runtime log verbosity](#runtime-log-verbosity)
+- [API groups & code generation](#api-groups--code-generation)
+- [Vendored / patched dependencies](#vendored--patched-dependencies)
 
 ## Commands
 
@@ -141,3 +153,10 @@ patched copies under `./staging/`. These are checked out and patched by `make de
 versions in `hack/deps.sh`, patches in `hack/staging/`). Don't hand-edit `staging/`; change the
 patch and re-run `make deps`. The chart's subcharts are staged the same way, and for the same
 reason — see [Vendored subcharts](#vendored-subcharts).
+
+---
+
+**See also** — [Internals](architecture/internals.md) (the invariants the code keeps) ·
+[Two install modes](architecture/install-modes.md) · [Settings](settings.md)
+
+**Next** → [All documentation](README.md) — pick the next page on the contributor path.

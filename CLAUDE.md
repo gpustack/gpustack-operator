@@ -19,18 +19,23 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 ## Architecture
 
 Three subcommands (`worker`, `worker-gateway`, `device-manager`) drive a four-stage chain: NFD labels
-nodes → the Device Manager detects accelerators → the worker profiles node capacity → four
-controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` → `Cohort` / `LocalQueue` objects.
-`pkg/nodefeature` holds the label algebra.
+nodes → the Device Manager detects accelerators → the worker profiles node capacity → five
+controllers materialize Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no
+Cohort) → `LocalQueue` plus an `InstanceType` CRD. `pkg/nodefeature` holds the label algebra.
 
-Read `docs/architecture.md` before touching the scheduling chain or `pkg/nodefeature` — it has the
-stage-by-stage detail, label/naming conventions, and a worked example.
+Read `docs/architecture.md` first — one page, the four stages, the life of a request, the vocabulary.
+Then the deep page for what you are touching: `docs/architecture/discovery.md` (NFD, Device Manager,
+allocator), `scheduling-chain.md` (capacity labels, flavors/queues/InstanceTypes, `pkg/nodefeature`),
+`admission.md` (the five gates, webhooks, four-view status), `install-modes.md`, `internals.md`
+(startup order and the invariants that fail silently). `docs/README.md` indexes all of it.
 
 ## Development
 
 See `docs/development.md` for build/lint/test commands, code generation, and vendored dependencies.
 For a guided tour of the directory layout and naming conventions, use the `gpustack-operator-overview` skill;
-after editing API types or webhooks, use the `gpustack-operator-generate` skill to run `make generate`.
+after editing API types or webhooks, use the `gpustack-operator-generate` skill to run `make generate`;
+when a change needs a doc change, use the `gpustack-operator-docs` skill — it routes the fact to the
+right page and checks the index, links and tables of contents.
 The `gpustack-operator-lint` hook runs `make lint` after Go changes; run it yourself too when editing Go.
 
 ### Go conventions

@@ -19,8 +19,9 @@ One `gpustack-operator` binary, three subcommands; the scheduling chain builds i
 4. **Queue construction & admission** — worker controllers materialize the labels into Kueue `ResourceFlavor` → `ClusterQueue` (one isolated queue per pool, no Cohort) plus a materialized `InstanceType` CRD, fronted by a per-namespace `LocalQueue` and gated per-card by a `gpustack-node-devices` AdmissionCheck.
 
 `pkg/nodefeature` is the heart of the label algebra (construct/extract of node keys, flavors,
-queues, credits). Full stage-by-stage detail and a worked example live in
-[architecture.md](../../../docs/architecture.md).
+queues, credits). [architecture.md](../../../docs/architecture.md) is the one-page version — the four
+stages, the life of a sliced-GPU request, and the vocabulary; load **one** deep page from
+[Going deeper](#going-deeper) when the question needs it, not all of them.
 
 ## Key directories
 
@@ -60,7 +61,7 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 ## Naming conventions
 
 - **Kueue object names**: `gpustack-${key}-${os}-${arch}-${count}{c|d}` for a `ResourceFlavor` (`c` = CPU cores, `d` = devices); `gpustack-${key}-${os}-${arch}` for the `ClusterQueue` / `InstanceType` — single dash, CPU and device pools split (not composite), os/arch in full.
-- **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue name goes in the `schedule.gpustack.ai/cluster-queue` annotation).
+- **LocalQueue names**: `gpustack-fnv64-<fnv64a-hash>` — always 31 chars (the full ClusterQueue name goes in the `schedule.gpustack.ai/queue` annotation).
 - **Label domains**: `feature.gpustack.ai/` (CPU/PCI facts), `acceleratable.feature.gpustack.ai/` (device models + `.sliced.*` / `.partitioned.*` capacities), `general.feature.gpustack.ai/` (CPU-only capacity), `credits.gpustack.ai/<mfr>` (Kueue quota resource), `schedule.gpustack.ai/` + `note.gpustack.ai/` (long names / unit-spec annotations); `gpustack.ai/managed` and `gpustack.ai/controlled` mark node onboarding and queue teardown.
 - **63-char rule**: Kubernetes label *values* cap at 63 chars — names that exceed it live in annotations, not labels. Always check when generating a name that flows into a label value.
 - **Build-constrained files**: `_linux.go` / `_other.go` split platform-specific code.
@@ -68,7 +69,14 @@ controller uses via `WithIndex` — see the `*_test.go` beside each reconciler.
 
 ## Going deeper
 
-- Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
-- Scheduling chain, label tables, worked example → [architecture.md](../../../docs/architecture.md)
+- The whole map, with reading paths per role → [docs/README.md](../../../docs/README.md)
+- What the operator builds, in one page → [architecture.md](../../../docs/architecture.md)
+- NFD labels, Device Manager detection, the `Devices` ledger, allocator injection → [architecture/discovery.md](../../../docs/architecture/discovery.md)
+- Capacity labels, flavor/queue/InstanceType naming, the five reconcilers → [architecture/scheduling-chain.md](../../../docs/architecture/scheduling-chain.md)
+- The five admission gates, webhook rules, the four-view status → [architecture/admission.md](../../../docs/architecture/admission.md)
+- Chart mode vs image mode, what the worker applies itself → [architecture/install-modes.md](../../../docs/architecture/install-modes.md)
+- Startup ordering, the gateway mirror, CGO bindings, the 63-char rule → [architecture/internals.md](../../../docs/architecture/internals.md)
 - The two accelerator families, their resource keys and request rules → [accelerator-requests.md](../../../docs/accelerator-requests.md)
 - Settings & `GPUSTACK_*` configuration knobs → [settings.md](../../../docs/settings.md)
+- Build / lint / test / codegen / vendored deps → [development.md](../../../docs/development.md)
+- Writing or updating any of the above → the `gpustack-operator-docs` skill

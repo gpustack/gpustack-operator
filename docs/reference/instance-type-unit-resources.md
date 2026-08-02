@@ -1,5 +1,11 @@
 # Instance Type Unit Resources Preset Reference
 
+> **Purpose** — the per-product CPU/RAM tier a node-derived `InstanceType` is sized with, and the
+> public configuration each tier was taken from.
+> **Audience** operators · **Prerequisites** [Scheduling
+> Chain](../architecture/scheduling-chain.md#the-unit-spec-is-not-derived-from-node-capacity) ·
+> **Read time** reference — look up your product
+
 When `instance-type-derived-from-node` is enabled, the operator summarizes a node's hardware into an
 `InstanceType` and stamps its **unit resources** — the CPU and RAM that go with *one unit* of that
 type. For an acceleratable type a unit is **one whole accelerator card**.
@@ -10,6 +16,24 @@ configuration each preset was taken from.
 The value is chosen once, at creation. `spec.unitResources` is immutable afterwards, and the
 operator never updates a type it did not just create — so an `InstanceType` you create yourself, or
 one an earlier version already created, is never touched.
+
+## Contents
+
+- [What the preset does and does not affect](#what-the-preset-does-and-does-not-affect)
+- [The tiers](#the-tiers)
+- [NVIDIA](#nvidia)
+- [Ascend](#ascend)
+- [AMD](#amd)
+- [Cambricon](#cambricon)
+- [Hygon](#hygon)
+- [MetaX](#metax)
+- [MThreads](#mthreads)
+- [Iluvatar](#iluvatar)
+- [T-Head](#t-head)
+- [Intel](#intel)
+- [Kunlun](#kunlun)
+- [Biren](#biren)
+- [If a preset does not fit your hardware](#if-a-preset-does-not-fit-your-hardware)
 
 ## What the preset does and does not affect
 
@@ -228,3 +252,11 @@ Two things to know before relying on that:
 
 The table lives in `pkg/nodefeature/unit_resources_preset.yaml`; the rules an edit must satisfy are
 documented at the top of that file, and a test asserts every entry appears on this page.
+
+---
+
+**See also** — [Scheduling Chain](../architecture/scheduling-chain.md#the-unit-spec-is-not-derived-from-node-capacity)
+(where the unit spec is stamped) · [Admission](../architecture/admission.md#the-instancetype-and-instance-webhooks)
+(what the webhooks enforce on it) · [Walkthrough](../walkthrough.md#4-managing-a-custom-instancetype)
+
+**Next** → [Settings](../settings.md#online-adjustable-settings) — the switches named on this page.

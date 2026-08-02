@@ -1,5 +1,10 @@
 # Accelerator Requests
 
+> **Purpose** — the normative request contract: every resource key a workload may set, the seven rules
+> admission enforces, and a worked example per family.
+> **Audience** users writing workloads, contributors touching the webhooks · **Prerequisites**
+> [Architecture](./architecture.md) · **Read time** ~15 min
+
 The normative contract for asking GPUStack for an accelerator: the resource keys a workload may set, the
 seven rules the admission webhooks enforce, and a worked example per family. Every rule below is checked at
 admission — a violating Pod is rejected at `CREATE`, never discovered at container start.
@@ -7,6 +12,16 @@ admission — a violating Pod is rejected at `CREATE`, never discovered at conta
 The rules bind the **Kueue-managed path**. Both Pod webhooks select on the `kueue.x-k8s.io/queue-name`
 label, so a hand-written Pod without it bypasses every rule and every fold while still being able to request
 the device-plugin resources. The contract is complete for managed workloads and advisory otherwise.
+
+## Contents
+
+- [Two families, two card populations](#two-families-two-card-populations)
+- [The resource keys](#the-resource-keys)
+- [Worked example per family](#worked-example-per-family)
+- [The request rules](#the-request-rules)
+- [Requesting through the Instance API](#requesting-through-the-instance-api)
+- [Pre-release breaks](#pre-release-breaks)
+- [Limitations](#limitations)
 
 ## Two families, two card populations
 
@@ -29,7 +44,7 @@ hardware partitioning has no kind, hence no `.partitioned*` keys at all.
 ## The resource keys
 
 `<base>` is the manufacturer's device resource (`nvidia.com/gpu`, `huawei.com/npu`, … — see
-[Supported Accelerators](../README.md#supported-accelerators)).
+[Accelerator support](../README.md#accelerator-support)).
 
 | Key | Served by | Cards that serve it | Request value | Node value |
 |---|---|---|---|---|
@@ -416,8 +431,11 @@ rolling the device-manager DaemonSet, then let the workloads reschedule.
   CPU and memory providers can settle on one socket while the only card with room is on the other. The
   default policy `none` is unaffected.
 
-## See also
+---
 
-- [NVIDIA MIG Operations](./operation/nvidia-mig.md) — the administrator runbook for a card's partitioning
-  mode, plus a recorded enable → request → reclaim → disable walkthrough.
-- [Architecture](./architecture.md) — where these keys are produced and consumed along the scheduling chain.
+**See also** — [NVIDIA MIG Operations](./operation/nvidia-mig.md) (the administrator runbook for a
+card's partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough) ·
+[Admission](./architecture/admission.md) (where these keys are checked) ·
+[Device Discovery](./architecture/discovery.md#the-device-plugin-allocator) (where they are served)
+
+**Next** → [Walkthrough](./walkthrough.md) — the same requests on a live cluster.

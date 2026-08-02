@@ -1,5 +1,10 @@
 # Migrating the GPUStack Operator from v0.5.x to a higher version
 
+> **Purpose** — the two supported upgrade paths across the scheduling-chain refactor, and how to clear
+> the v0.5.x orphans a plain `helm upgrade` leaves behind.
+> **Audience** operators on a v0.5.x install · **Prerequisites** [Architecture](../architecture.md) ·
+> **Read time** ~10 min
+
 v0.5.x is superseded by higher versions that fundamentally reshape the scheduling objects the
 operator materializes. The first such release, v0.6.x ("unified-pool refactor",
 [`specs/2026-06-29-instancetype-unified-pool-refactor.md`](../../specs/2026-06-29-instancetype-unified-pool-refactor.md)),
@@ -10,6 +15,16 @@ but backward compatible for your **workloads** (running Pods are never touched),
 
 This guide explains what changes and gives two supported upgrade paths. It uses v0.6.x as the concrete
 worked example throughout; substitute your actual target version in the commands.
+
+## Contents
+
+- [What changes (v0.5.x → v0.6.x, the first higher version)](#what-changes-v05x--v06x-the-first-higher-version)
+- [Why a plain helm upgrade is not enough](#why-a-plain-helm-upgrade-is-not-enough)
+- [Kueue finalizer deadlock (self-healed automatically)](#kueue-finalizer-deadlock-self-healed-automatically)
+- [Path A — uninstall then reinstall (recommended)](#path-a--uninstall-then-reinstall-recommended)
+- [Path B — in-place upgrade, then remove the orphans](#path-b--in-place-upgrade-then-remove-the-orphans)
+- [Verify](#verify)
+- [Notes](#notes)
 
 ## What changes (v0.5.x → v0.6.x, the first higher version)
 
@@ -162,3 +177,11 @@ kubectl get nodes -o json | grep -oE '"[^"]*(\.z-[a-z]+|generic-ln-x64)[^"]*"' |
   composite ResourceFlavors + a ClusterQueue + a Cohort + a LocalQueue) was removed by the script with
   zero residue, and the healthy v0.6.x chain (its double-dash split flavors, queues, and InstanceTypes)
   was left byte-for-byte identical.
+
+---
+
+**See also** — [Migrating to the bundled subcharts](to-subcharts.md) (the other one-time upgrade, from
+v0.7.x or earlier) · [Scheduling Chain](../architecture/scheduling-chain.md#naming-and-grouping) (the
+object names this upgrade moves to)
+
+**Next** → [Architecture](../architecture.md) — what the new object set means.
