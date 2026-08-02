@@ -1,5 +1,10 @@
 # High Availability
 
+> **Purpose** — which replica knob to raise per control-plane component, what each bundled subchart can
+> and cannot spread, and the one topology that must stay single-replica.
+> **Audience** operators · **Prerequisites** [Two install
+> modes](../architecture/install-modes.md) · **Read time** ~8 min
+
 Every control-plane component the operator chart deploys elects a leader. Extra replicas therefore
 stand by rather than share the work: **they buy failover, not throughput.** A highly available
 install raises the replica count of each one and turns on the disruption budget that goes with it.
@@ -10,6 +15,18 @@ and both CSI node DaemonSets — so there is nothing to make redundant there.
 All of it is configured in the file you already edit, `values.yaml`. No separate HA values file
 ships with the chart; every knob below is declared there at its own chart's default, with the same
 caveats repeated inline.
+
+## Contents
+
+- [Before you start: count your nodes](#before-you-start-count-your-nodes)
+- [The knobs, per component](#the-knobs-per-component)
+- [A values file to start from](#a-values-file-to-start-from)
+- [Worker (control plane)](#worker-control-plane)
+- [Kueue controller manager](#kueue-controller-manager)
+- [NFD master](#nfd-master)
+- [The two CSI controllers](#the-two-csi-controllers)
+- [The one topology that cannot be made redundant](#the-one-topology-that-cannot-be-made-redundant)
+- [Verify](#verify)
 
 ## Before you start: count your nodes
 
@@ -190,3 +207,11 @@ kubectl -n "$NS" rollout status deploy/gpustack-operator-worker
 kubectl get instancetypes          # served throughout by the surviving replicas
 kubectl uncordon <node>
 ```
+
+---
+
+**See also** — [Two install modes](../architecture/install-modes.md) (image mode has no user-values
+channel, so these knobs need chart mode) · [Internals](../architecture/internals.md#worker-startup-order-matters)
+(what every replica runs before leader election) · [Settings](../settings.md)
+
+**Next** → [NVIDIA MIG Operations](nvidia-mig.md) — the other operator runbook.

@@ -1,5 +1,9 @@
 # Settings & Environment Variables
 
+> **Purpose** — the two configuration surfaces: settings an administrator changes at runtime with
+> `kubectl`, and the `GPUSTACK_*` environment read once at process startup.
+> **Audience** operators · **Prerequisites** none · **Read time** ~10 min
+
 GPUStack Operator is configured two ways, and the distinction matters operationally:
 
 - **[Online-adjustable Settings](#online-adjustable-settings)** — a fixed catalog of named values surfaced
@@ -21,6 +25,11 @@ GPUStack Operator is configured two ways, and the distinction matters operationa
 > variable is an *initial seed only* — after the first deploy, change a Setting through the `Setting`
 > resource (below), not by editing the environment (an env edit does not re-apply while a stored value
 > exists).
+
+## Contents
+
+- [Online-Adjustable Settings](#online-adjustable-settings)
+- [Deploy-Time Environment Variables](#deploy-time-environment-variables)
 
 ## Online-Adjustable Settings
 
@@ -146,3 +155,11 @@ These are populated by the Pod specs that GPUStack Operator itself renders (Down
 | `ALL_PROXY` / `HTTP_PROXY` / `HTTPS_PROXY` / `NO_PROXY` | — | Standard proxy settings, passed through to the embedded Kubernetes installer. |
 | `NO_PROXY` / `no_proxy` | — | Also parsed (hosts, IPs, CIDRs) to bypass the proxy on direct HTTP calls. |
 | `_RUNNING_INSIDE_CONTAINER_` | `false` | Internal marker baked into the container image; switches data/conf paths to their absolute in-container locations. Not intended to be set by users. |
+
+---
+
+**See also** — [Architecture](./architecture.md) (what each setting regroups) ·
+[Two install modes](./architecture/install-modes.md) (which flags a mode sets for you) ·
+[High Availability](./operation/high-availability.md)
+
+**Next** → [Walkthrough](./walkthrough.md) — a setting flipped on a live cluster, before and after.

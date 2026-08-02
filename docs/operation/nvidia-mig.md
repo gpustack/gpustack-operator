@@ -1,5 +1,10 @@
 # NVIDIA MIG Operations
 
+> **Purpose** — the administrator runbook for MIG *mode* on a node (enable, disable, reboot recovery)
+> and the user contract for requesting a MIG instance, with a recorded three-configuration walkthrough.
+> **Audience** operators, users requesting partitions · **Prerequisites** [Accelerator
+> Requests](../accelerator-requests.md) · **Read time** ~30 min
+
 GPUStack treats a card's NVIDIA **MIG** (Multi-Instance GPU) *mode* as a **manually managed** node property:
 the operator *observes* MIG geometry through the Device Manager and reflects it in the `Devices` ledger and the
 advertised partitioning capability; it never enables, disables, or reconfigures MIG *mode* on your behalf. Once a
@@ -20,6 +25,18 @@ re-detects.** A capability change enters the cluster only through Device Manager
 detect loop's re-detect trigger watches the device set and health rather than the partitioning mode, a mode
 toggle needs a **DaemonSet restart** to be picked up. There are no nodeconfig or label triggers, no automatic
 mode flips, no geometry rewrites, and no descheduling.
+
+## Contents
+
+- [Supported profiles](#supported-profiles)
+- [Requesting a MIG instance](#requesting-a-mig-instance)
+- [Prerequisites](#prerequisites)
+- [Limitations](#limitations)
+- [Enabling MIG on a node](#enabling-mig-on-a-node)
+- [Disabling MIG on a node](#disabling-mig-on-a-node)
+- [Node reboot recovery](#node-reboot-recovery)
+- [Walkthrough: three MIG configurations on one node](#walkthrough-three-mig-configurations-on-one-node)
+- [What GPUStack Operator does *NOT* do](#what-gpustack-operator-does-not-do)
 
 ## Supported profiles
 
@@ -760,3 +777,12 @@ gpustack--nvidia-h100-80gb-hbm3-linux-amd64   gpustack-fnv64-e4768a65ca0ce96b   
   accounts for is reclaimed as an orphan once its card is idle — see [Limitations](#limitations).)
 
 A capability change reaches the cluster **only** through Device Manager restart or re-detection.
+
+---
+
+**See also** — [Accelerator Requests](../accelerator-requests.md) (the full key set and request rules) ·
+[Admission](../architecture/admission.md#capability-versus-availability) (which status field answers
+"what can I still get") · [Device Discovery](../architecture/discovery.md#the-partitioned-family-fungible-tokens)
+(how a partition is placed and reclaimed)
+
+**Next** → [Walkthrough](../walkthrough.md) — the logical-slicing counterpart on a live cluster.

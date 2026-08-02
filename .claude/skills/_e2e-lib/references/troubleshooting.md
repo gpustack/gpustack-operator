@@ -91,7 +91,7 @@ accelerator schedulable on this node" signal, with one caveat about timing:
 
 - **Extension APIService not `Available`** — the aggregated apiserver isn't ready; check the worker
   logs. Startup order matters: controllers start only after the extension APIs report ready
-  (see `docs/architecture.md`).
+  (see `docs/architecture/internals.md`, *Worker startup order matters*).
 
 - **`clusterqueues.kueue.x-k8s.io "…" not found` in worker logs** — benign transient while the
   scheduling chain materializes (a level-based reconcile races ahead of object creation and retries).

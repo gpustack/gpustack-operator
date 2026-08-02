@@ -1,7 +1,11 @@
 # Walkthrough
 
+> **Purpose** — the whole scheduling chain on a real four-node cluster: every materialized object as
+> real YAML, and a before/after for each operation.
+> **Audience** everyone · **Prerequisites** [Architecture](./architecture.md) · **Read time** ~20 min
+
 A recorded run of the scheduling chain on a live Kubernetes cluster, referenced from the
-[architecture](./architecture.md#walkthrough). Every command is the real `kubectl` invocation and
+[architecture](./architecture.md). Every command is the real `kubectl` invocation and
 its real output; every object is shown as YAML (trimmed to the relevant `metadata.labels` / `spec` /
 `status`); every operation shows a **before / after** comparison via `kubectl get instancetypes`.
 
@@ -21,6 +25,16 @@ The `kubectl get instancetypes` columns used throughout:
   For the other two configurations — every card partitioned, and a **mixed** node serving both families
   at once — see the [three-configuration walkthrough](./operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
 - **CPU** — the collapsed CPU pool's `remaining/capacity` cores.
+
+## Contents
+
+- [The cluster](#the-cluster)
+- [1. Initial state](#1-initial-state)
+- [2. Removing a node from management](#2-removing-a-node-from-management)
+- [3. Requesting a logical sliced GPU](#3-requesting-a-logical-sliced-gpu)
+- [4. Managing a custom InstanceType](#4-managing-a-custom-instancetype)
+- [5. Enabling CPU-manufacturer awareness](#5-enabling-cpu-manufacturer-awareness)
+- [6. Pinning an Instance to a node, and mounting more than the workspace](#6-pinning-an-instance-to-a-node-and-mounting-more-than-the-workspace)
 
 ## The cluster
 
@@ -693,3 +707,12 @@ The two gates govern the **node** boundary, not the namespace one. A `persistent
 `secret` source names an object in the Instance's own namespace, and any of them may be mounted — the
 same reach a Pod created directly in that namespace has. Namespaces remain the tenancy boundary; put
 Instances whose authors should not read each other's Secrets in namespaces of their own.
+
+---
+
+**See also** — [Accelerator Requests](./accelerator-requests.md) (the request contract behind step 3) ·
+[NVIDIA MIG Operations](./operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node)
+(the same treatment for hardware partitioning) · [Settings](./settings.md#online-adjustable-settings)
+
+**Next** → [NVIDIA MIG Operations](./operation/nvidia-mig.md) — the same treatment for hardware
+partitioning, from enabling the mode to reclaiming the instance.

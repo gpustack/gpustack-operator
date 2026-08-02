@@ -1,5 +1,10 @@
 # Migrating an existing install to the bundled subcharts
 
+> **Purpose** — the one-time ownership transfer that folds the runtime-installed Kueue / NFD / CSI
+> releases into the operator release, and the four things it changes permanently.
+> **Audience** operators on a v0.7.x-or-earlier install · **Prerequisites** [Two install
+> modes](../architecture/install-modes.md) · **Read time** ~15 min
+
 Up to and including v0.7.x, the operator chart deployed only the worker and the device managers.
 Kueue, Node Feature Discovery and the two CSI drivers were installed by the **worker at runtime**,
 each as a Helm release of its own:
@@ -18,6 +23,16 @@ From this version they are **subcharts of the operator release**, configured in 
 Nothing in the cluster is torn down to get there. The objects those four releases created are
 **adopted** by the operator release, in place, by Helm's own ownership transfer. Your ClusterQueues,
 Workloads, ResourceFlavors, node labels and mounted volumes all survive.
+
+## Contents
+
+- [The one-time upgrade](#the-one-time-upgrade)
+- [What runs during the upgrade](#what-runs-during-the-upgrade)
+- [Image mode migrates itself](#image-mode-migrates-itself)
+- [If Kueue or NFD was not installed by Helm](#if-kueue-or-nfd-was-not-installed-by-helm)
+- [Four things that change permanently](#four-things-that-change-permanently)
+- [Do not roll back with helm rollback](#do-not-roll-back-with-helm-rollback)
+- [Verify](#verify)
 
 ## The one-time upgrade
 
@@ -338,3 +353,11 @@ kubectl get nodes -o json | grep -c 'feature.gpustack.ai/'
 # No Kueue CRD is wedged Terminating (DELETING is <none> for every row).
 kubectl get crd -o custom-columns=NAME:.metadata.name,DELETING:.metadata.deletionTimestamp | grep kueue
 ```
+
+---
+
+**See also** — [Two install modes](../architecture/install-modes.md) (what the two modes own after the
+transfer) · [High Availability](../operation/high-availability.md) (the replica knobs now live in one
+`values.yaml`) · [Migrating from v0.5.x](from-v0.5.md)
+
+**Next** → [Settings](../settings.md) — the configuration surface the transfer unifies.
