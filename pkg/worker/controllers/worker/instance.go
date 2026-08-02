@@ -33,6 +33,7 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/ctrlclix"
 	"gpustack.ai/gpustack/pkg/utils/ctrlhandlerx"
 	"gpustack.ai/gpustack/pkg/utils/slicex"
+	"gpustack.ai/gpustack/pkg/utils/strconvx"
 	"gpustack.ai/gpustack/pkg/worker/apistatus"
 	"gpustack.ai/gpustack/pkg/worker/kuberequest"
 	"gpustack.ai/gpustack/pkg/worker/settings"
@@ -490,44 +491,48 @@ func (r *InstanceReconciler) convertPodFromInstance(
 
 	overcommit := settings.InstanceGeneralResourcesOvercommit.ShouldValueBool(ctx)
 
-	// Construct containers.
-	var containers []core.Container
-	if needSSHD {
-		// Main container.
-		mainC := core.Container{
-			Name:            "main",
-			Image:           inst.Spec.Image,
-			ImagePullPolicy: inst.Spec.ImagePullPolicy,
-			Command:         inst.Spec.Command,
-			SecurityContext: func() *core.SecurityContext {
-				sc := &core.SecurityContext{
-					RunAsUser: ptr.To[int64](0),
-				}
-				if inst.Spec.Privileged {
-					sc.Privileged = ptr.To(true)
-				}
-				return sc
-			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
-			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
-				return core.ContainerPort{
-					Name:          getPortName(p),
-					Protocol:      p.Protocol,
-					ContainerPort: p.Port,
-				}
-			}),
-			Env: slicex.Transform(inst.Spec.Env, func(e workercore.InstanceEnvVar) core.EnvVar {
-				return core.EnvVar{
-					Name:  e.Name,
-					Value: e.Value,
-				}
-			}),
-			VolumeMounts: []core.VolumeMount{{
-				Name:      "workspace",
-				MountPath: inst.Spec.VolumeMount,
-			}},
-		}
+	additionalVols, additionalMounts := convertAdditionalVolumes(inst)
 
+	// Construct containers.
+	// Main container.
+	mainC := core.Container{
+		Name:            "main",
+		Image:           inst.Spec.Image,
+		ImagePullPolicy: inst.Spec.ImagePullPolicy,
+		Command:         inst.Spec.Command,
+		SecurityContext: func() *core.SecurityContext {
+			sc := &core.SecurityContext{
+				RunAsUser: ptr.To[int64](0),
+			}
+			if inst.Spec.Privileged {
+				sc.Privileged = ptr.To(true)
+			}
+			return sc
+		}(),
+		Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
+		Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
+			return core.ContainerPort{
+				Name:          getPortName(p),
+				Protocol:      p.Protocol,
+				ContainerPort: p.Port,
+			}
+		}),
+		Env: slicex.Transform(inst.Spec.Env, func(e workercore.InstanceEnvVar) core.EnvVar {
+			return core.EnvVar{
+				Name:  e.Name,
+				Value: e.Value,
+			}
+		}),
+		// Additional volumes are mounted into the workload container only; the sshd sidecar
+		// nsenters into this container's mount namespace, so they are reachable over SSH anyway.
+		VolumeMounts: append([]core.VolumeMount{{
+			Name:      "workspace",
+			MountPath: inst.Spec.VolumeMount,
+		}}, additionalMounts...),
+	}
+	containers := []core.Container{mainC}
+
+	if needSSHD {
 		// SSHD container.
 		sshdC := core.Container{
 			Name: "sshd",
@@ -574,44 +579,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 			}(),
 		}
 
-		containers = []core.Container{mainC, sshdC}
-	} else {
-		// Main container.
-		mainC := core.Container{
-			Name:            "main",
-			Image:           inst.Spec.Image,
-			ImagePullPolicy: inst.Spec.ImagePullPolicy,
-			Command:         inst.Spec.Command,
-			SecurityContext: func() *core.SecurityContext {
-				sc := &core.SecurityContext{
-					RunAsUser: ptr.To[int64](0),
-				}
-				if inst.Spec.Privileged {
-					sc.Privileged = ptr.To(true)
-				}
-				return sc
-			}(),
-			Resources: getResourceRequirements(inst, instType, true, overcommit, true, false),
-			Ports: slicex.Transform(inst.Spec.Ports, func(p workercore.InstancePort) core.ContainerPort {
-				return core.ContainerPort{
-					Name:          getPortName(p),
-					Protocol:      p.Protocol,
-					ContainerPort: p.Port,
-				}
-			}),
-			Env: slicex.Transform(inst.Spec.Env, func(e workercore.InstanceEnvVar) core.EnvVar {
-				return core.EnvVar{
-					Name:  e.Name,
-					Value: e.Value,
-				}
-			}),
-			VolumeMounts: []core.VolumeMount{{
-				Name:      "workspace",
-				MountPath: inst.Spec.VolumeMount,
-			}},
-		}
-
-		containers = []core.Container{mainC}
+		containers = append(containers, sshdC)
 	}
 
 	// Construct pod.
@@ -639,6 +607,17 @@ func (r *InstanceReconciler) convertPodFromInstance(
 					*inst.Spec.ImagePullSecret,
 				}
 			}(),
+			// Pin a node-pinned Instance through a nodeSelector, never through the Pod's own
+			// nodeName: nodeName skips the scheduler entirely, so Kueue's admission gating and
+			// the node's predicate checks would never run.
+			NodeSelector: func() map[string]string {
+				if inst.Spec.NodeName == "" {
+					return nil
+				}
+				return map[string]string{
+					core.LabelHostname: r.getNodeHostname(ctx, inst.Spec.NodeName),
+				}
+			}(),
 			Volumes: func() (vols []core.Volume) {
 				if inst.Spec.SSHPublicKey != nil {
 					vols = append(vols, core.Volume{
@@ -660,7 +639,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 							},
 						},
 					})
-					return vols
+					return append(vols, additionalVols...)
 				}
 				vols = append(vols, core.Volume{
 					Name: "workspace",
@@ -670,7 +649,7 @@ func (r *InstanceReconciler) convertPodFromInstance(
 						},
 					},
 				})
-				return vols
+				return append(vols, additionalVols...)
 			}(),
 			Containers: containers,
 		},
@@ -693,6 +672,99 @@ func (r *InstanceReconciler) convertPodFromInstance(
 	kubemeta.ControlOnWithoutBlock(pod, inst, workercore.SchemeGroupVersionKind("Instance"))
 
 	return pod
+}
+
+// convertAdditionalVolumes renders the Instance's additional volumes as Pod volumes paired with the
+// mounts that place them in the workload container. Both are returned together so the volume name —
+// derived from the entry's index, never from user input, so it can collide with neither "workspace"
+// nor "sshd-authorized-keys" — is decided in one place.
+//
+// An entry with no source is skipped rather than rendered: admission rejects one, and a volume with
+// an empty source would make the API server refuse the whole Pod on every reconcile.
+func convertAdditionalVolumes(inst *workercore.Instance) (vols []core.Volume, mounts []core.VolumeMount) {
+	avs := inst.Spec.AdditionalVolumes
+	if len(avs) == 0 {
+		return nil, nil
+	}
+
+	vols = make([]core.Volume, 0, len(avs))
+	mounts = make([]core.VolumeMount, 0, len(avs))
+	for i := range avs {
+		av := &avs[i]
+
+		var vs core.VolumeSource
+		switch {
+		case av.Persistent != nil:
+			vs.PersistentVolumeClaim = &core.PersistentVolumeClaimVolumeSource{
+				ClaimName: av.Persistent.Name,
+			}
+		case av.ConfigMap != nil:
+			vs.ConfigMap = &core.ConfigMapVolumeSource{
+				LocalObjectReference: *av.ConfigMap,
+			}
+		case av.Secret != nil:
+			vs.Secret = &core.SecretVolumeSource{
+				SecretName: av.Secret.Name,
+			}
+		case av.HostPath != nil:
+			vs.HostPath = av.HostPath.DeepCopy()
+		default:
+			continue
+		}
+
+		name := additionalVolumeName(i)
+		vols = append(vols, core.Volume{
+			Name:         name,
+			VolumeSource: vs,
+		})
+		mounts = append(mounts, core.VolumeMount{
+			Name:      name,
+			MountPath: av.MountPath,
+			ReadOnly:  av.ReadOnly,
+			SubPath:   av.SubPath,
+		})
+	}
+
+	return vols, mounts
+}
+
+// additionalVolumeName is the Pod volume name of the additional volume at the given index.
+func additionalVolumeName(i int) string {
+	return "additional-" + strconvx.Itoa(i)
+}
+
+// getNodeHostname returns the node's own kubernetes.io/hostname label value, which some providers
+// set to something other than the Node object's name, so the rendered selector must be read from the
+// node rather than assumed. The Pod is rendered once, at creation, and never re-diffed, so a stale
+// cache read here would pin the Pod to a wrong hostname for its whole life: fall back to a live read
+// before giving up.
+//
+// It returns the given name when the node cannot be read at all or carries no hostname label. Both
+// are visible states rather than silent ones — the Pod then selects a hostname nothing matches and
+// stays Pending with the scheduler's own reason, which the Instance phase message surfaces.
+func (r *InstanceReconciler) getNodeHostname(ctx context.Context, nodeName string) string {
+	nd := new(core.Node)
+	err := r.Client.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, nd,
+		ctrlclix.WithoutQuorum)
+	if err != nil {
+		err = r.APIReader.Get(ctx, ctrlcli.ObjectKey{Name: nodeName}, nd,
+			ctrlclix.WithoutQuorum)
+		if err != nil {
+			// The Pod is rendered once, so this fallback is what the Instance is pinned to for
+			// good. On a node whose hostname label differs from its name that selector matches
+			// nothing, and the Pod's own Pending reason names the selector rather than the read
+			// that produced it — so say here what the scheduler cannot.
+			ctrllog.FromContext(ctx).Error(err, "fetch node for pin", "node", nodeName)
+			return nodeName
+		}
+	}
+	// Neither read waits on etcd quorum, so a label written moments ago may not be visible yet.
+	// That is the accepted trade: kubelet sets the hostname label once, at registration, and does
+	// not change it, so the value being read is one that has been settled since the node joined.
+	if hostname := nd.Labels[core.LabelHostname]; hostname != "" {
+		return hostname
+	}
+	return nodeName
 }
 
 func (r *InstanceReconciler) convertServiceFromPod(

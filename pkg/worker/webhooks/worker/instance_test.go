@@ -2,20 +2,27 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	core "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation/field"
+	"k8s.io/utils/ptr"
 	ctrlcli "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlfake "sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/kubeclients/kubernetes/scheme"
 	"gpustack.ai/gpustack/pkg/system"
+	"gpustack.ai/gpustack/pkg/systemname"
 	workerctrl "gpustack.ai/gpustack/pkg/worker/controllers/worker"
 )
 
@@ -131,6 +138,909 @@ func TestInstanceWebhook_ValidateCreate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstanceWebhook_ValidateCreate_NodePinUnreadable pins the half of the node-pin contract the
+// table above cannot reach: a read that fails for a reason other than "not found" must come back as
+// a retryable error, never as a rejection. A node the webhook simply could not look at is not a node
+// that is absent, and treating the two alike would turn an apiserver hiccup into a permanent refusal
+// of a perfectly good Instance.
+func TestInstanceWebhook_ValidateCreate_NodePinUnreadable(t *testing.T) {
+	const typeName = "generic-type"
+
+	readFails := func(obj ctrlcli.Object, key ctrlcli.ObjectKey) error {
+		if _, ok := obj.(*core.Node); ok && key.Name == "node-1" {
+			return kerrors.NewInternalError(errors.New("etcd unavailable"))
+		}
+		return nil
+	}
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(pinnedType(typeName)).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c ctrlcli.WithWatch, key ctrlcli.ObjectKey,
+				obj ctrlcli.Object, opts ...ctrlcli.GetOption,
+			) error {
+				if err := readFails(obj, key); err != nil {
+					return err
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	w := &InstanceWebhook{Client: cli, APIReader: cli}
+
+	inst := webhookInstance("a", typeName)
+	inst.Spec.NodeName = "node-1"
+
+	_, err := w.ValidateCreate(context.Background(), inst)
+
+	require.Error(t, err)
+	assert.False(t, kerrors.IsInvalid(err),
+		"an unreadable node is a retryable failure, not an invalid Instance")
+	assert.Contains(t, err.Error(), "etcd unavailable", "the underlying read failure is reported")
+}
+
+// pinnedType builds the InstanceType a pinned Instance references. The pin is not validated against
+// it — only the node's existence is checked — but a running Instance still requires the type to
+// exist.
+func pinnedType(name string) *worker.InstanceType {
+	return &worker.InstanceType{
+		ObjectMeta: meta.ObjectMeta{Name: name},
+		Spec: workercore.InstanceTypeSpec{
+			OS:   "linux",
+			Arch: "amd64",
+		},
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_NodePin pins the whole of the node pin's admission contract:
+// creation rejects a node that does not exist, so a typo is caught rather than leaving the Instance
+// Pending forever, and nothing else about the node is checked. In particular a node outside the
+// referenced InstanceType's pool is accepted by design — forbidding it would block pinning a
+// card-less Instance (a model download, say) onto a specific accelerated node.
+func TestInstanceWebhook_ValidateCreate_NodePin(t *testing.T) {
+	const typeName = "generic-type"
+
+	cases := []struct {
+		name string
+
+		nodeName   string
+		nodeLabels map[string]string
+		nodeAbsent bool
+		stop       bool
+
+		wantErr bool
+	}{
+		{
+			name: "no pin",
+		},
+		{
+			name:     "pin to an existing node",
+			nodeName: "node-1",
+		},
+		{
+			name:       "pin to a node that does not exist",
+			nodeName:   "node-1",
+			nodeAbsent: true,
+			wantErr:    true,
+		},
+		{
+			name:       "pin to an unmanaged node is accepted",
+			nodeName:   "node-1",
+			nodeLabels: map[string]string{},
+		},
+		{
+			name:     "pin to a node outside the pool is accepted",
+			nodeName: "node-1",
+			nodeLabels: map[string]string{
+				systemname.ManagedLabelKey: "true",
+				core.LabelArchStable:       "arm64",
+			},
+		},
+		{
+			name:       "stopped instance still rejects a node that does not exist",
+			nodeName:   "node-1",
+			nodeAbsent: true,
+			stop:       true,
+			wantErr:    true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{pinnedType(typeName)}
+			if c.nodeName != "" && !c.nodeAbsent {
+				objs = append(objs, &core.Node{
+					ObjectMeta: meta.ObjectMeta{Name: c.nodeName, Labels: c.nodeLabels},
+				})
+			}
+			w := newInstanceWebhook(objs...)
+
+			inst := webhookInstance("a", typeName)
+			inst.Spec.NodeName = c.nodeName
+			inst.Spec.Stop = c.stop
+
+			_, err := w.ValidateCreate(context.Background(), inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateUpdate_NodePin pins the node pin's mutability contract — frozen while
+// the Instance runs, free while it is stopped — and that no update path re-checks the node. A pin
+// whose node has since gone away still starts: the Pod then stays Pending with the scheduler's own
+// reason instead of the start being blocked.
+func TestInstanceWebhook_ValidateUpdate_NodePin(t *testing.T) {
+	const typeName = "generic-type"
+
+	cases := []struct {
+		name string
+
+		oldNodeName string
+		newNodeName string
+		oldStop     bool
+		newStop     bool
+		nodeAbsent  bool
+
+		wantErr bool
+	}{
+		{
+			name:        "running instance cannot change the pin",
+			oldNodeName: "node-1",
+			newNodeName: "node-2",
+			wantErr:     true,
+		},
+		{
+			name:        "running instance may keep the pin",
+			oldNodeName: "node-1",
+			newNodeName: "node-1",
+		},
+		{
+			name:        "stopped instance may change the pin",
+			oldNodeName: "node-1",
+			newNodeName: "node-2",
+			oldStop:     true,
+			newStop:     true,
+		},
+		{
+			name:        "start accepts a pin",
+			oldNodeName: "node-2",
+			newNodeName: "node-2",
+			oldStop:     true,
+		},
+		{
+			name:        "start accepts a pin whose node is gone",
+			oldNodeName: "node-2",
+			newNodeName: "node-2",
+			oldStop:     true,
+			nodeAbsent:  true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			objs := []ctrlcli.Object{pinnedType(typeName)}
+			if !c.nodeAbsent {
+				objs = append(objs, &core.Node{
+					ObjectMeta: meta.ObjectMeta{Name: c.newNodeName},
+				})
+			}
+			w := newInstanceWebhook(objs...)
+
+			instOld := webhookInstance("a", typeName)
+			instOld.Spec.NodeName = c.oldNodeName
+			instOld.Spec.Stop = c.oldStop
+			if c.oldStop {
+				instOld.Status.Phase = workerctrl.InstancePhaseStopped
+			}
+			inst := instOld.DeepCopy()
+			inst.Spec.NodeName = c.newNodeName
+			inst.Spec.Stop = c.newStop
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInstanceWebhook_ValidateCreate_AdditionalVolumes pins what an additional volume entry must
+// look like for the backing Pod to be constructible: an absolute mount path that neither repeats
+// another entry's nor shadows the workspace, exactly one source, a relative sub path that cannot
+// escape the volume, and a reference carrying a name an object could actually have. The referenced
+// object itself is not looked up, matching spec.volume.persistent.
+func TestInstanceWebhook_ValidateCreate_AdditionalVolumes(t *testing.T) {
+	const typeName = "generic-type"
+
+	ref := func(name string) *core.LocalObjectReference {
+		return &core.LocalObjectReference{Name: name}
+	}
+
+	cases := []struct {
+		name string
+
+		volumes []workercore.InstanceAdditionalVolume
+
+		wantErr bool
+	}{
+		{
+			name: "no additional volumes",
+		},
+		{
+			name: "a persistent source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+			},
+		},
+		{
+			name: "a config map source, read-only by sub path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/etc/app", ReadOnly: true, SubPath: "conf", ConfigMap: ref("app-config")},
+			},
+		},
+		{
+			name: "a secret source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/var/run/creds", Secret: ref("app-creds")},
+			},
+		},
+		{
+			name: "a host path source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			},
+		},
+		{
+			name: "several entries at distinct paths",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+				{MountPath: "/models", Persistent: ref("models")},
+			},
+		},
+		{
+			name: "a missing mount path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a relative mount path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "data", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a duplicated mount path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+				{MountPath: "/data", Persistent: ref("models")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a mount path shadowing the workspace",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/workspace", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "no source",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "two sources",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset"), ConfigMap: ref("app-config")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an absolute sub path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", SubPath: "/conf", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a sub path escaping the volume",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", SubPath: "conf/../../etc", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an unnamed reference",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("")},
+			},
+			wantErr: true,
+		},
+		{
+			// A name no object could carry is rejected here, because nothing downstream does:
+			// the Pod is admitted and then wedges on a mount that can never succeed. Existence
+			// is still not checked.
+			name: "a reference no object could ever carry",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/etc/app", ConfigMap: ref("App_Config")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an empty host path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a non-canonical mount path shadowing the workspace",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/workspace/.", Persistent: ref("dataset")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "mount paths that differ textually but resolve to one place",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/data", Persistent: ref("dataset")},
+				{MountPath: "/tmp/../data", Persistent: ref("models")},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a host path stepping back out of its parent",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/etc", HostPath: &core.HostPathVolumeSource{Path: "/tmp/../etc"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a relative host path",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "models"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "an unsupported host path type",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{
+					Path: "/mnt/models",
+					Type: ptr.To[core.HostPathType]("Bogus"),
+				}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "a supported host path type",
+			volumes: []workercore.InstanceAdditionalVolume{
+				{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{
+					Path: "/mnt/models",
+					Type: ptr.To(core.HostPathDirectoryOrCreate),
+				}},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst := webhookInstance("a", typeName)
+			inst.Spec.VolumeMount = "/workspace"
+			inst.Spec.AdditionalVolumes = c.volumes
+
+			// The shape rules are asserted on their own, so a host path entry is judged by its
+			// path and type here rather than by the administrator gate that governs it separately.
+			errs := validateAdditionalVolumes(inst)
+			if c.wantErr {
+				assert.NotEmpty(t, errs)
+			} else {
+				assert.Empty(t, errs)
+			}
+		})
+	}
+
+	t.Run("wired into create", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+
+		inst := webhookInstance("a", typeName)
+		inst.Spec.VolumeMount = "/workspace"
+		inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{
+			{MountPath: "/data", Persistent: ref("dataset")},
+			{MountPath: "/data", Persistent: ref("models")},
+		}
+
+		_, err := w.ValidateCreate(context.Background(), inst)
+		assert.Error(t, err, "create runs the shape rules")
+	})
+}
+
+// TestInstanceWebhook_ValidateUpdate_AdditionalVolumes pins that the list is frozen while the
+// Instance runs and free while it is stopped, and that starting re-checks it — an entry edited into
+// an unbuildable shape while stopped would otherwise yield a Pod the API server refuses on every
+// reconcile, unlike the node pin, whose worst case is merely staying Pending.
+func TestInstanceWebhook_ValidateUpdate_AdditionalVolumes(t *testing.T) {
+	const typeName = "generic-type"
+
+	valid := []workercore.InstanceAdditionalVolume{
+		{MountPath: "/data", Persistent: &core.LocalObjectReference{Name: "dataset"}},
+	}
+	invalid := []workercore.InstanceAdditionalVolume{
+		{MountPath: "/data"},
+	}
+
+	cases := []struct {
+		name string
+
+		oldVolumes []workercore.InstanceAdditionalVolume
+		newVolumes []workercore.InstanceAdditionalVolume
+		oldStop    bool
+		newStop    bool
+
+		wantErr bool
+	}{
+		{
+			name:       "running instance cannot change the list",
+			newVolumes: valid,
+			wantErr:    true,
+		},
+		{
+			name:       "running instance may keep the list",
+			oldVolumes: valid,
+			newVolumes: valid,
+		},
+		{
+			name:       "stopped instance may change the list",
+			newVolumes: valid,
+			oldStop:    true,
+			newStop:    true,
+		},
+		{
+			name:       "start accepts a valid list",
+			oldVolumes: valid,
+			newVolumes: valid,
+			oldStop:    true,
+		},
+		{
+			name:       "start rejects a list edited while stopped into an unbuildable shape",
+			oldVolumes: invalid,
+			newVolumes: invalid,
+			oldStop:    true,
+			wantErr:    true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+
+			instOld := webhookInstance("a", typeName)
+			instOld.Spec.VolumeMount = "/workspace"
+			instOld.Spec.AdditionalVolumes = c.oldVolumes
+			instOld.Spec.Stop = c.oldStop
+			if c.oldStop {
+				instOld.Status.Phase = workerctrl.InstancePhaseStopped
+			}
+			inst := instOld.DeepCopy()
+			inst.Spec.AdditionalVolumes = c.newVolumes
+			inst.Spec.Stop = c.newStop
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			if c.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestValidateHostAccess pins the administrator gates over the full cross-product of what is allowed
+// and what is requested, which is what proves each setting gates only its own field: allowing host
+// paths must not allow privileged mode, and the reverse. The rule is exercised directly over resolved
+// booleans, so no setting is seeded into the un-flushable 30s value cache.
+func TestValidateHostAccess(t *testing.T) {
+	hostPathVolume := workercore.InstanceAdditionalVolume{
+		MountPath: "/host/models",
+		HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+	}
+	plainVolume := workercore.InstanceAdditionalVolume{
+		MountPath:  "/data",
+		Persistent: &core.LocalObjectReference{Name: "dataset"},
+	}
+
+	cases := []struct {
+		name string
+
+		privilegedAllowed bool
+		hostPathAllowed   bool
+		privileged        bool
+		hostPath          bool
+
+		// held gives the change an old object carrying the same escapes, so the rule judges what is
+		// taken rather than what is carried. heldOnly narrows that to one escape, repointsHost keeps
+		// the entry but aims it at another node path, reordersAll moves it within the list, and the
+		// heldHost/wantHost pair spells out the grant on each side when the two differ in reach.
+		held         bool
+		heldOnly     string
+		repointsHost bool
+		reordersAll  bool
+		heldHost     *workercore.InstanceAdditionalVolume
+		wantHost     *workercore.InstanceAdditionalVolume
+
+		wantFields []string
+	}{
+		{name: "nothing requested, nothing allowed"},
+		{name: "nothing requested, both allowed", privilegedAllowed: true, hostPathAllowed: true},
+		{
+			name:       "privileged requested, nothing allowed",
+			privileged: true,
+			wantFields: []string{"spec.privileged"},
+		},
+		{
+			name:              "privileged requested and allowed",
+			privilegedAllowed: true,
+			privileged:        true,
+		},
+		{
+			name:            "privileged requested, only host paths allowed",
+			hostPathAllowed: true,
+			privileged:      true,
+			wantFields:      []string{"spec.privileged"},
+		},
+		{
+			name:       "host path requested, nothing allowed",
+			hostPath:   true,
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:            "host path requested and allowed",
+			hostPathAllowed: true,
+			hostPath:        true,
+		},
+		{
+			name:              "host path requested, only privileged allowed",
+			privilegedAllowed: true,
+			hostPath:          true,
+			wantFields:        []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:       "both requested, nothing allowed",
+			privileged: true,
+			hostPath:   true,
+			wantFields: []string{"spec.privileged", "spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:              "both requested, only privileged allowed",
+			privilegedAllowed: true,
+			privileged:        true,
+			hostPath:          true,
+			wantFields:        []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:            "both requested, only host paths allowed",
+			hostPathAllowed: true,
+			privileged:      true,
+			hostPath:        true,
+			wantFields:      []string{"spec.privileged"},
+		},
+		{
+			name:              "both requested and allowed",
+			privilegedAllowed: true,
+			hostPathAllowed:   true,
+			privileged:        true,
+			hostPath:          true,
+		},
+		// Holding an escape already is what a gate turned off must not undo, so each held case is
+		// the denied one above with the escape carried over from the old object.
+		{
+			name:       "privileged already held, nothing allowed",
+			held:       true,
+			privileged: true,
+		},
+		{
+			name:     "host path already held, nothing allowed",
+			held:     true,
+			hostPath: true,
+		},
+		{
+			name:       "both already held, nothing allowed",
+			held:       true,
+			privileged: true,
+			hostPath:   true,
+		},
+		{
+			// Holding one escape says nothing about the other: the old object here carries only
+			// what it is allowed to, and the new one reaches for the second as well.
+			name:       "privileged held, a host path taken alongside it",
+			held:       true,
+			heldOnly:   "privileged",
+			privileged: true,
+			hostPath:   true,
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Repointing a held entry at another node path is taking a new escape, not keeping one.
+			name:         "a held host path repointed elsewhere",
+			held:         true,
+			hostPath:     true,
+			repointsHost: true,
+			wantFields:   []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Matching by value rather than by index is what makes the rule survive an edit to the
+			// rest of the list: the same node path at a new position is the escape it already had.
+			name:        "a held host path moved to another position",
+			held:        true,
+			hostPath:    true,
+			reordersAll: true,
+		},
+		{
+			// The grant is the whole mount, not just the node path. Holding one subtree read-only
+			// must not license the same path whole and writable, or the gate can be walked open one
+			// harmless-looking mount at a time.
+			name:       "a held sub path widened to the whole volume",
+			held:       true,
+			hostPath:   true,
+			heldHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe", ReadOnly: true, HostPath: &core.HostPathVolumeSource{Path: "/"}},
+			wantHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/all", HostPath: &core.HostPathVolumeSource{Path: "/"}},
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			name:       "a held read-only mount turned writable",
+			held:       true,
+			hostPath:   true,
+			heldHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", ReadOnly: true, HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Narrowing is the other direction and costs the Instance nothing it had, so it passes.
+			name:     "a held mount narrowed to a read-only sub path",
+			held:     true,
+			hostPath: true,
+			heldHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "sub", ReadOnly: true, HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+		},
+		{
+			// A held sub path covers what lies beneath it: going deeper exposes strictly less, so
+			// the rule must not read it as reaching for something new.
+			name:     "a held sub path narrowed to one beneath it",
+			held:     true,
+			hostPath: true,
+			heldHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe/deeper", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+		},
+		{
+			// A sibling is not beneath it, however much of its name it shares.
+			name:       "a held sub path swapped for a sibling",
+			held:       true,
+			hostPath:   true,
+			heldHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safe", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost:   &workercore.InstanceAdditionalVolume{MountPath: "/host/models", SubPath: "safer", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantFields: []string{"spec.additionalVolumes[1].hostPath"},
+		},
+		{
+			// Kubernetes reads an absent Type and an empty one as the same unset kind, so a client
+			// that spells it out must not be told it is asking for a different node path.
+			name:     "a held mount respelled with an explicit unset type",
+			held:     true,
+			hostPath: true,
+			heldHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models"}},
+			wantHost: &workercore.InstanceAdditionalVolume{MountPath: "/host/models", HostPath: &core.HostPathVolumeSource{Path: "/mnt/models", Type: ptr.To(core.HostPathUnset)}},
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			inst := webhookInstance("a", "generic-type")
+			inst.Spec.Privileged = c.privileged
+			// The plain volume goes first so a rejection has to carry the offending index.
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{plainVolume}
+			if c.hostPath {
+				hp := hostPathVolume
+				switch {
+				case c.wantHost != nil:
+					hp = *c.wantHost
+				case c.repointsHost:
+					hp.HostPath = &core.HostPathVolumeSource{Path: "/mnt/elsewhere"}
+				}
+				inst.Spec.AdditionalVolumes = append(inst.Spec.AdditionalVolumes, hp)
+			}
+			if c.reordersAll {
+				// The host path now leads and the plain entry trails, so a rule keyed on the index
+				// would see a fresh escape at position 0 where the old object had none.
+				slices.Reverse(inst.Spec.AdditionalVolumes)
+			}
+
+			// The old object holds whatever the case says it already had, so the rule sees the
+			// escapes this change TAKES rather than the ones it merely carries.
+			var instOld *workercore.Instance
+			if c.held {
+				instOld = webhookInstance("a", "generic-type")
+				instOld.Spec.Privileged = c.privileged
+				instOld.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{plainVolume}
+				if c.hostPath && c.heldOnly != "privileged" {
+					heldHost := hostPathVolume
+					if c.heldHost != nil {
+						heldHost = *c.heldHost
+					}
+					instOld.Spec.AdditionalVolumes = append(
+						instOld.Spec.AdditionalVolumes, heldHost)
+				}
+				if c.heldOnly == "privileged" {
+					instOld.Spec.Privileged = true
+				}
+			}
+
+			errs := validateHostAccess(instOld, inst, c.privilegedAllowed, c.hostPathAllowed)
+
+			got := make([]string, 0, len(errs))
+			for _, e := range errs {
+				assert.Equal(t, field.ErrorTypeForbidden, e.Type, "a gate rejects as forbidden")
+				got = append(got, e.Field)
+			}
+			assert.Equal(t, c.wantFields, nonEmpty(got), "rejected fields")
+		})
+	}
+}
+
+// nonEmpty normalizes an empty slice to nil so a table case can leave its expectation unset.
+func nonEmpty(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
+}
+
+// TestInstanceWebhook_HostAccessGates pins the gates' wiring on both verbs, where both settings
+// resolve to their default (off). A create asking for either escape is rejected; so is an update
+// that adds one the Instance did not already hold, including the patch that restarts it. An escape
+// it does hold is never re-judged, so it stays editable while stopped and restartable — which is
+// what keeps an administrator's later change from stranding it.
+//
+// Both settings are at the same default here, so this cannot tell which setting feeds which
+// parameter — seeding them apart would cache a value for 30s with no flush and leak into every later
+// test in the package. That one reading is left to the e2e suite's node-pin case, which runs with the
+// two settings at different values and asserts each gate covers only its own field.
+func TestInstanceWebhook_HostAccessGates(t *testing.T) {
+	const typeName = "generic-type"
+
+	hostPathVolume := workercore.InstanceAdditionalVolume{
+		MountPath: "/host/models",
+		HostPath:  &core.HostPathVolumeSource{Path: "/mnt/models"},
+	}
+
+	t.Run("create rejects privileged while the gate is off", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+		inst := webhookInstance("a", typeName)
+		inst.Spec.Privileged = true
+
+		_, err := w.ValidateCreate(context.Background(), inst)
+		assert.Error(t, err)
+	})
+
+	t.Run("create rejects a host path while the gate is off", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+		inst := webhookInstance("a", typeName)
+		inst.Spec.VolumeMount = "/workspace"
+		inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+		_, err := w.ValidateCreate(context.Background(), inst)
+		assert.Error(t, err)
+	})
+
+	t.Run("create accepts an instance requesting neither", func(t *testing.T) {
+		w := newInstanceWebhook(pinnedType(typeName))
+
+		_, err := w.ValidateCreate(context.Background(), webhookInstance("a", typeName))
+		assert.NoError(t, err)
+	})
+
+	// Taking an escape the Instance did not already hold is a create, whichever verb delivers it.
+	// Without this, the gates protect nothing at all: an Instance created stopped and empty is
+	// accepted because it asks for nothing, and a single patch then grants it both escapes while
+	// both settings are off.
+	t.Run("update rejects an escape the instance did not already hold", func(t *testing.T) {
+		stoppedPlain := func() *workercore.Instance {
+			inst := webhookInstance("a", typeName)
+			inst.Spec.VolumeMount = "/workspace"
+			inst.Spec.Stop = true
+			inst.Status.Phase = workerctrl.InstancePhaseStopped
+			return inst
+		}
+
+		t.Run("privileged turned on while stopped", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			instOld := stoppedPlain()
+			inst := instOld.DeepCopy()
+			inst.Spec.Privileged = true
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.Error(t, err)
+		})
+
+		t.Run("a host path added while stopped", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			instOld := stoppedPlain()
+			inst := instOld.DeepCopy()
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.Error(t, err)
+		})
+
+		t.Run("both taken in the same patch that restarts it", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			instOld := stoppedPlain()
+			inst := instOld.DeepCopy()
+			inst.Spec.Stop = false
+			inst.Spec.Privileged = true
+			inst.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.Error(t, err)
+		})
+	})
+
+	t.Run("update never gates an escape the instance already holds", func(t *testing.T) {
+		// An Instance created while the gates were on: privileged, with a host path mount.
+		instOld := webhookInstance("a", typeName)
+		instOld.Spec.VolumeMount = "/workspace"
+		instOld.Spec.Privileged = true
+		instOld.Spec.AdditionalVolumes = []workercore.InstanceAdditionalVolume{hostPathVolume}
+
+		t.Run("while running", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			inst := instOld.DeepCopy()
+			inst.Spec.DisplayName = "renamed"
+
+			_, err := w.ValidateUpdate(context.Background(), instOld, inst)
+			assert.NoError(t, err)
+		})
+
+		t.Run("while stopped", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			stopped := instOld.DeepCopy()
+			stopped.Spec.Stop = true
+			stopped.Status.Phase = workerctrl.InstancePhaseStopped
+			inst := stopped.DeepCopy()
+			inst.Spec.Image = "other"
+
+			_, err := w.ValidateUpdate(context.Background(), stopped, inst)
+			assert.NoError(t, err)
+		})
+
+		t.Run("on restart", func(t *testing.T) {
+			w := newInstanceWebhook(pinnedType(typeName))
+			stopped := instOld.DeepCopy()
+			stopped.Spec.Stop = true
+			stopped.Status.Phase = workerctrl.InstancePhaseStopped
+			inst := stopped.DeepCopy()
+			inst.Spec.Stop = false
+
+			_, err := w.ValidateUpdate(context.Background(), stopped, inst)
+			assert.NoError(t, err)
+		})
+	})
 }
 
 // TestInstanceWebhook_ValidateCreate_SlicedPercentages pins the sliced request

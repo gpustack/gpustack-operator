@@ -32,6 +32,38 @@ func TestInstanceTypeManagementSettings(t *testing.T) {
 	}
 }
 
+// TestInstanceHostAccessSettings pins the two administrator gates guarding the ways an
+// Instance crosses the node boundary — privileged mode and a hostPath volume mount. They
+// are separate settings because privileged grants strictly more than hostPath, so an admin
+// can allow node-path mounts without allowing a container escape. This pins their stable
+// names (which drive the GPUSTACK_ env mapping), their default-off boot values, and that
+// they stay editable booleans so an admin can flip them at runtime.
+func TestInstanceHostAccessSettings(t *testing.T) {
+	cases := []struct {
+		s        setting.Setting
+		wantName string
+		wantEnv  string
+	}{
+		{InstancePrivilegedAllowed, "instance-privileged-allowed", "GPUSTACK_INSTANCE_PRIVILEGED_ALLOWED"},
+		{
+			InstanceHostPathVolumeAllowed,
+			"instance-host-path-volume-allowed",
+			"GPUSTACK_INSTANCE_HOST_PATH_VOLUME_ALLOWED",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.wantName, func(t *testing.T) {
+			assert.Equal(t, c.wantName, c.s.Name(), "name drives the GPUSTACK_ env mapping")
+			assert.Equal(t, "false", c.s.DefaultValue(), "host access must be opt-in, so the default is off")
+			assert.True(t, c.s.Editable(), "must stay editable for runtime adjustment")
+
+			t.Setenv(c.wantEnv, "true")
+			assert.Equal(t, "true", setting.InitializeFromEnv("false")(c.s.Name()),
+				"env %s must override the default", c.wantEnv)
+		})
+	}
+}
+
 // TestInstanceTypeManagementSettingsEnvMapping pins the operator-facing contract
 // that each setting resolves its boot value from GPUSTACK_${UPPER_SNAKE(name)},
 // with an env override winning over the default.

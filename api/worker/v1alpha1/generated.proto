@@ -390,6 +390,42 @@ message Instance {
   optional InstanceStatus status = 3;
 }
 
+// InstanceAdditionalVolume defines one volume to mount in the Instance besides its workspace.
+// Exactly one source must be specified.
+message InstanceAdditionalVolume {
+  // MountPath is the absolute in-container path to mount the volume at. It must not duplicate
+  // another entry's path, nor the workspace's VolumeMount.
+  //
+  // +required
+  // +k8s:validation:pattern="^(/[^/]+)+$"
+  // +k8s:validation:maxLength=1024
+  optional string mountPath = 1;
+
+  // ReadOnly mounts the volume read-only.
+  optional bool readOnly = 2;
+
+  // SubPath mounts a relative path inside the volume rather than its root.
+  // It must not be absolute nor contain a ".." element.
+  //
+  // +k8s:validation:maxLength=1024
+  optional string subPath = 3;
+
+  // Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.
+  optional .k8s.io.api.core.v1.LocalObjectReference persistent = 4;
+
+  // ConfigMap is the reference to the ConfigMap to mount, in the same namespace.
+  optional .k8s.io.api.core.v1.LocalObjectReference configMap = 5;
+
+  // Secret is the reference to the Secret to mount, in the same namespace.
+  optional .k8s.io.api.core.v1.LocalObjectReference secret = 6;
+
+  // HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so
+  // taking it requires the instance-host-path-volume-allowed Setting — at creation, and on any
+  // later change that adds or widens such a mount. One the Instance already holds is never
+  // re-judged, so the Setting going off does not strand it.
+  optional .k8s.io.api.core.v1.HostPathVolumeSource hostPath = 7;
+}
+
 // InstanceEnvVar defines the environment variable to set in the Instance.
 message InstanceEnvVar {
   // Name is the name of the environment variable,
@@ -526,6 +562,17 @@ message InstanceSpec {
 
   // Stop indicates whether to stop the Instance after it is created.
   optional bool stop = 7;
+
+  // NodeName pins the Instance to one Kubernetes Node, which must exist when the Instance is
+  // created. It is rendered as the backing Pod's nodeSelector on kubernetes.io/hostname, never
+  // as the Pod's own nodeName, so the scheduler and Kueue admission still mediate placement.
+  // Nothing beyond the node's existence is validated, so a node that cannot serve the referenced
+  // InstanceType leaves the Pod Pending rather than being refused. Empty means no pinning.
+  //
+  // Immutable unless the Instance is stopped.
+  //
+  // +k8s:validation:maxLength=253
+  optional string nodeName = 8;
 }
 
 // InstanceStatus defines the observed state of Instance.
@@ -608,6 +655,15 @@ message InstanceTemplate {
 
   // ImagePullSecret is the reference to the InstanceImagePullSecret that contains the credentials to pull the container image.
   optional .k8s.io.api.core.v1.LocalObjectReference imagePullSecret = 9;
+
+  // AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace,
+  // each at a path of its own. They are mounted into the Instance's main container only, which
+  // the SSH server also observes.
+  //
+  // Immutable unless the Instance is stopped.
+  //
+  // +listType=atomic
+  repeated InstanceAdditionalVolume additionalVolumes = 10;
 }
 
 // InstanceType is the schema for worker.gpustack.ai.

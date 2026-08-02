@@ -609,3 +609,87 @@ $ kubectl get resourceflavor --no-headers | wc -l
 ```
 
 Turning the setting back off collapses the aggregation layer again, still without touching a flavor.
+
+---
+
+## 6. Pinning an Instance to a node, and mounting more than the workspace
+
+An Instance normally lets the scheduler pick any node its pool covers. `spec.nodeName` narrows that to
+one node, and `spec.additionalVolumes` mounts paths beside the workspace — here a shared dataset, one
+key of a ConfigMap, and a directory on the node itself:
+
+```yaml
+kind: Instance
+metadata:
+  name: pinned-demo
+  namespace: default
+spec:
+  type: gpustack--nvidia-tesla-t4-linux-amd64
+  nodeName: node-t4-b                          # pin to this node
+  image: ubuntu:24.04
+  command:
+    - sleep
+    - "86400"
+  resources:
+    accelerator: "1"
+  volume:
+    ephemeral:
+      capacity: 1Gi
+  volumeMount: /workspace                      # the workspace, as always
+  additionalVolumes:
+    - mountPath: /mnt/datasets                 # a shared dataset, read-write
+      persistent:
+        name: datasets
+    - mountPath: /etc/model/config.json        # one ConfigMap key, as a file
+      subPath: config.json
+      readOnly: true
+      configMap:
+        name: model-config
+    - mountPath: /mnt/host-cache               # a directory on node-t4-b itself
+      readOnly: true
+      hostPath:
+        path: /var/lib/gpustack-cache
+        type: DirectoryOrCreate
+```
+
+- **The pin is a `nodeSelector`, never a direct assignment.** The backing Pod gets exactly one selector
+  entry, `kubernetes.io/hostname: <the node's own hostname label>` — read from the Node, because a
+  provider may set that label to something other than the Node's name. `pod.spec.nodeName` is left to
+  the scheduler, so the Pod still queues through Kueue and its `ClusterQueue` quota, and the
+  `node-devices` AdmissionCheck still gates per-card feasibility. A pin that cannot be satisfied
+  therefore surfaces as a Pending Pod with the scheduler's own reason, not as a Pod running somewhere
+  else.
+- **The node only has to exist.** It is checked when the Instance is *created*, and nothing more is
+  required of it: it need not be managed by the operator, nor belong to the pinned type's pool. That is
+  deliberate — a card-less Instance that only downloads a model must still be able to land on a
+  specific accelerated node.
+- **Pool membership is still the scheduler's business.** The pool a `type` covers and the node a pin
+  names are decided independently, so pinning into a heterogeneous pool can be admitted by Kueue and
+  then stay Pending because the chosen flavor's labels do not match that node.
+- **Each additional volume needs an absolute, canonical `mountPath`** that duplicates neither another
+  entry's path nor `spec.volumeMount`, and **exactly one** source: `persistent` (an
+  `InstancePersistentVolume` in the same namespace), `configMap`, `secret`, or `hostPath`. `readOnly`
+  and `subPath` behave as they do on any Pod volume mount.
+- **They are mounted into the workload container only.** The SSH sidecar needs no change: it enters the
+  workload container's mount namespace per session, so every additional mount is visible over SSH too.
+- **Both new fields are immutable while the Instance is running**, and editable while it is stopped —
+  the same rule the rest of `spec` follows.
+
+Two of these cross the host boundary, so each is gated by its own administrator Setting, both
+defaulting to `false`:
+
+| Setting | Gates |
+|---|---|
+| `instance-privileged-allowed` | `spec.privileged` — escapes the container boundary, exposing the node's devices and kernel surface. |
+| `instance-host-path-volume-allowed` | `spec.additionalVolumes[*].hostPath` — reaches the node's filesystem, but not its devices or kernel. |
+
+They are kept separate so an administrator can allow node-path mounts without allowing a container
+escape. Each gates the act of **taking** its escape — on creation, and on any later change that adds
+one — while an Instance that already holds one keeps it: turning a gate off stops new grants without
+stranding what was granted while it was on. See
+[Settings](./settings.md#online-adjustable-settings) for how to change one.
+
+The two gates govern the **node** boundary, not the namespace one. A `persistent`, `configMap` or
+`secret` source names an object in the Instance's own namespace, and any of them may be mounted — the
+same reach a Pod created directly in that namespace has. Namespaces remain the tenancy boundary; put
+Instances whose authors should not read each other's Secrets in namespaces of their own.

@@ -1320,6 +1320,8 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.DeviceTopologyApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("Instance"):
 		return &applyconfigurationworkerv1alpha1.InstanceApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceAdditionalVolume"):
+		return &applyconfigurationworkerv1alpha1.InstanceAdditionalVolumeApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceEnvVar"):
 		return &applyconfigurationworkerv1alpha1.InstanceEnvVarApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("InstanceEphemeralVolume"):

@@ -71,6 +71,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.DevicesSpec{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_DevicesSpec(ref),
 		v1alpha1.DevicesStatus{}.OpenAPIModelName():                          schema_gpustack_api_worker_v1alpha1_DevicesStatus(ref),
 		v1alpha1.Instance{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1alpha1_Instance(ref),
+		v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_InstanceAdditionalVolume(ref),
 		v1alpha1.InstanceEnvVar{}.OpenAPIModelName():                         schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref),
 		v1alpha1.InstanceEphemeralVolume{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_InstanceEphemeralVolume(ref),
 		v1alpha1.InstanceList{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1alpha1_InstanceList(ref),
@@ -2854,6 +2855,71 @@ func schema_gpustack_api_worker_v1alpha1_Instance(ref common.ReferenceCallback) 
 	}
 }
 
+func schema_gpustack_api_worker_v1alpha1_InstanceAdditionalVolume(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceAdditionalVolume defines one volume to mount in the Instance besides its workspace. Exactly one source must be specified.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"mountPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MountPath is the absolute in-container path to mount the volume at. It must not duplicate another entry's path, nor the workspace's VolumeMount.",
+							Default:     "",
+							MaxLength:   ptr.To[int64](1024),
+							Pattern:     "^(/[^/]+)+$",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"readOnly": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ReadOnly mounts the volume read-only.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+					"subPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "SubPath mounts a relative path inside the volume rather than its root. It must not be absolute nor contain a \"..\" element.",
+							MaxLength:   ptr.To[int64](1024),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"persistent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Persistent is the reference to the InstancePersistentVolume to mount, in the same namespace.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"configMap": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ConfigMap is the reference to the ConfigMap to mount, in the same namespace.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"secret": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Secret is the reference to the Secret to mount, in the same namespace.",
+							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
+						},
+					},
+					"hostPath": {
+						SchemaProps: spec.SchemaProps{
+							Description: "HostPath is the path on the Kubernetes Node to mount. It crosses the node boundary, so taking it requires the instance-host-path-volume-allowed Setting — at creation, and on any later change that adds or widens such a mount. One the Instance already holds is never re-judged, so the Setting going off does not strand it.",
+							Ref:         ref(corev1.HostPathVolumeSource{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"mountPath"},
+			},
+		},
+		Dependencies: []string{
+			corev1.HostPathVolumeSource{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+	}
+}
+
 func schema_gpustack_api_worker_v1alpha1_InstanceEnvVar(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -3245,6 +3311,25 @@ func schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref common.ReferenceCallba
 							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
 						},
 					},
+					"additionalVolumes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace, each at a path of its own. They are mounted into the Instance's main container only, which the SSH server also observes.\n\nImmutable unless the Instance is stopped.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 					"volume": {
 						SchemaProps: spec.SchemaProps{
 							Description: "Volume is the volume to mount in the Instance.\n\nImmutable after creation.",
@@ -3265,12 +3350,20 @@ func schema_gpustack_api_worker_v1alpha1_InstanceSpec(ref common.ReferenceCallba
 							Format:      "",
 						},
 					},
+					"nodeName": {
+						SchemaProps: spec.SchemaProps{
+							Description: "NodeName pins the Instance to one Kubernetes Node, which must exist when the Instance is created. It is rendered as the backing Pod's nodeSelector on kubernetes.io/hostname, never as the Pod's own nodeName, so the scheduler and Kueue admission still mediate placement. Nothing beyond the node's existence is validated, so a node that cannot serve the referenced InstanceType leaves the Pod Pending rather than being refused. Empty means no pinning.\n\nImmutable unless the Instance is stopped.",
+							MaxLength:   ptr.To[int64](253),
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
 				},
 				Required: []string{"type", "image", "volume"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), v1alpha1.InstanceVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName(), v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), v1alpha1.InstanceVolume{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
@@ -3503,12 +3596,31 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTemplate(ref common.ReferenceCa
 							Ref:         ref(corev1.LocalObjectReference{}.OpenAPIModelName()),
 						},
 					},
+					"additionalVolumes": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AdditionalVolumes is the list of volumes to mount in the Instance besides its workspace, each at a path of its own. They are mounted into the Instance's main container only, which the SSH server also observes.\n\nImmutable unless the Instance is stopped.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
 				},
 				Required: []string{"image"},
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
+			v1alpha1.InstanceAdditionalVolume{}.OpenAPIModelName(), v1alpha1.InstanceEnvVar{}.OpenAPIModelName(), v1alpha1.InstancePort{}.OpenAPIModelName(), v1alpha1.InstanceResources{}.OpenAPIModelName(), corev1.LocalObjectReference{}.OpenAPIModelName()},
 	}
 }
 
