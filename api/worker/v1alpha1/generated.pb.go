@@ -103,6 +103,8 @@ func (m *InstanceTypeDetail) Reset() { *m = InstanceTypeDetail{} }
 
 func (m *InstanceTypeList) Reset() { *m = InstanceTypeList{} }
 
+func (m *InstanceTypePartitionedResource) Reset() { *m = InstanceTypePartitionedResource{} }
+
 func (m *InstanceTypeResource) Reset() { *m = InstanceTypeResource{} }
 
 func (m *InstanceTypeSpec) Reset() { *m = InstanceTypeSpec{} }
@@ -2140,6 +2142,67 @@ func (m *InstanceTypeList) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	return len(dAtA) - i, nil
 }
 
+func (m *InstanceTypePartitionedResource) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *InstanceTypePartitionedResource) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *InstanceTypePartitionedResource) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.RemainingProfiles) > 0 {
+		for iNdEx := len(m.RemainingProfiles) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.RemainingProfiles[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x1a
+		}
+	}
+	if len(m.AllocatedProfiles) > 0 {
+		for iNdEx := len(m.AllocatedProfiles) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.AllocatedProfiles[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x12
+		}
+	}
+	{
+		size, err := m.InstanceTypeResource.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
 func (m *InstanceTypeResource) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
@@ -3195,6 +3258,29 @@ func (m *InstanceTypeList) Size() (n int) {
 	return n
 }
 
+func (m *InstanceTypePartitionedResource) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = m.InstanceTypeResource.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	if len(m.AllocatedProfiles) > 0 {
+		for _, e := range m.AllocatedProfiles {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	if len(m.RemainingProfiles) > 0 {
+		for _, e := range m.RemainingProfiles {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
+	}
+	return n
+}
+
 func (m *InstanceTypeResource) Size() (n int) {
 	if m == nil {
 		return 0
@@ -3896,6 +3982,28 @@ func (this *InstanceTypeList) String() string {
 	}, "")
 	return s
 }
+func (this *InstanceTypePartitionedResource) String() string {
+	if this == nil {
+		return "nil"
+	}
+	repeatedStringForAllocatedProfiles := "[]AcceleratorProfileCount{"
+	for _, f := range this.AllocatedProfiles {
+		repeatedStringForAllocatedProfiles += strings.Replace(strings.Replace(f.String(), "AcceleratorProfileCount", "AcceleratorProfileCount", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForAllocatedProfiles += "}"
+	repeatedStringForRemainingProfiles := "[]AcceleratorProfileCount{"
+	for _, f := range this.RemainingProfiles {
+		repeatedStringForRemainingProfiles += strings.Replace(strings.Replace(f.String(), "AcceleratorProfileCount", "AcceleratorProfileCount", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForRemainingProfiles += "}"
+	s := strings.Join([]string{`&InstanceTypePartitionedResource{`,
+		`InstanceTypeResource:` + strings.Replace(strings.Replace(this.InstanceTypeResource.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
+		`AllocatedProfiles:` + repeatedStringForAllocatedProfiles + `,`,
+		`RemainingProfiles:` + repeatedStringForRemainingProfiles + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *InstanceTypeResource) String() string {
 	if this == nil {
 		return "nil"
@@ -3940,7 +4048,7 @@ func (this *InstanceTypeStatus) String() string {
 		`AcceleratorShared:` + strings.Replace(strings.Replace(this.AcceleratorShared.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`AcceleratorSliced:` + strings.Replace(strings.Replace(this.AcceleratorSliced.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
 		`CPU:` + strings.Replace(strings.Replace(this.CPU.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
-		`AcceleratorPartitioned:` + strings.Replace(strings.Replace(this.AcceleratorPartitioned.String(), "InstanceTypeResource", "InstanceTypeResource", 1), `&`, ``, 1) + `,`,
+		`AcceleratorPartitioned:` + strings.Replace(strings.Replace(this.AcceleratorPartitioned.String(), "InstanceTypePartitionedResource", "InstanceTypePartitionedResource", 1), `&`, ``, 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -10547,6 +10655,157 @@ func (m *InstanceTypeList) Unmarshal(dAtA []byte) error {
 			}
 			m.Items = append(m.Items, InstanceType{})
 			if err := m.Items[len(m.Items)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *InstanceTypePartitionedResource) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: InstanceTypePartitionedResource: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: InstanceTypePartitionedResource: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field InstanceTypeResource", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.InstanceTypeResource.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field AllocatedProfiles", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.AllocatedProfiles = append(m.AllocatedProfiles, AcceleratorProfileCount{})
+			if err := m.AllocatedProfiles[len(m.AllocatedProfiles)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RemainingProfiles", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.RemainingProfiles = append(m.RemainingProfiles, AcceleratorProfileCount{})
+			if err := m.RemainingProfiles[len(m.RemainingProfiles)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex

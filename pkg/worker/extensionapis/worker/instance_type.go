@@ -2,6 +2,8 @@ package worker
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -47,6 +49,26 @@ func (h *InstanceTypeHandler) SetupHandler(
 	// Declare GVR.
 	gvr = worker.SchemeGroupVersionResource(_InstanceTypeResource)
 
+	// The four-view column can only show the partition view as a single scalar, which is a best
+	// case over profiles competing for the same physical slices. This column is the per-profile
+	// menu behind it — which profiles the pool can still host, a profile it offers but cannot
+	// currently build shown at zero. Priority 1 keeps it to `-o wide`: it is long, and empty for
+	// every pool with no partitioned card.
+	partitions := extensionapi.RenderColumn("Partitions", func(obj *worker.InstanceType) string {
+		profiles := obj.Status.AcceleratorPartitioned.RemainingProfiles
+		if len(profiles) == 0 {
+			// A pool with no partitioned card offers no menu. Render the same placeholder the
+			// jsonpath columns use for a missing value, so the wide table stays uniform.
+			return "-"
+		}
+		parts := make([]string, 0, len(profiles))
+		for i := range profiles {
+			parts = append(parts, fmt.Sprintf("%s:%d", profiles[i].Name, profiles[i].Count))
+		}
+		return strings.Join(parts, " ")
+	})
+	partitions.Priority = 1
+
 	// Create table converter to pretty the kubectl's output.
 	tc, err := extensionapi.NewJSONPathTemplateTableConvertor(
 		extensionapi.JSONPathTemplateColumn("Entrance", "{.status.entrance}"),
@@ -60,6 +82,7 @@ func (h *InstanceTypeHandler) SetupHandler(
 				"{.status.acceleratorShared.onceMaxRequest}/{.status.acceleratorShared.remaining} "+
 				"{.status.acceleratorSliced.onceMaxRequest}/{.status.acceleratorSliced.remaining} "+
 				"{.status.acceleratorPartitioned.onceMaxRequest}/{.status.acceleratorPartitioned.remaining}"),
+		partitions,
 		extensionapi.JSONPathTemplateColumn("CPU", "{.status.cpu.onceMaxRequest}/{.status.cpu.remaining}"),
 		extensionapi.JSONPathTemplateColumn("Phase", "{.status.phase}"))
 	if err != nil {

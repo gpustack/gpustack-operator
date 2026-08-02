@@ -1,7 +1,9 @@
 package service
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -9,6 +11,8 @@ import (
 
 	worker "gpustack.ai/gpustack/api/worker/v1"
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
+	"gpustack.ai/gpustack/pkg/utils/mapx"
+	"gpustack.ai/gpustack/pkg/utils/slicex"
 	"gpustack.ai/gpustack/pkg/workergateway/manager"
 )
 
@@ -127,12 +131,11 @@ func (in *ListAggregateInstanceTypeFlavors) Next(cluster string, obj runtime.Obj
 // cluster iteration order.
 func (in *ListAggregateInstanceTypeFlavors) Result(sorted bool) AggregatedInstanceTypeFlavorList {
 	if sorted {
-		sort.Slice(in.list.Items, func(i, j int) bool {
-			a, b := in.list.Items[i], in.list.Items[j]
-			if a.Spec.Acceleratable != b.Spec.Acceleratable {
-				return a.Spec.Acceleratable
+		slices.SortFunc(in.list.Items, func(a, b AggregatedInstanceTypeFlavor) int {
+			if c := slicex.CompareTrueFirst(a.Spec.Acceleratable, b.Spec.Acceleratable); c != 0 {
+				return c
 			}
-			return a.Name < b.Name
+			return cmp.Compare(a.Name, b.Name)
 		})
 	}
 
@@ -339,14 +342,14 @@ func dropCluster(clusters []string, cluster string) []string {
 	return kept
 }
 
-// lessTierByPrimary returns whether tier i should come before tier j when sorting
-// ascending by the primary dimension: Accelerator if Spec.Acceleratable, otherwise CPU.
-// Bind as item.lessTierByPrimary and pass to sort.Slice for consistent ordering.
-func (in *AggregatedInstanceType) lessTierByPrimary(i, j int) bool {
+// compareTierByPrimary orders two tiers ascending by the primary dimension: Accelerator if
+// Spec.Acceleratable, otherwise CPU. Bind as item.compareTierByPrimary and pass to
+// slices.SortFunc for consistent ordering.
+func (in *AggregatedInstanceType) compareTierByPrimary(a, b AggregatedInstanceTypeOnceMaxRequestTier) int {
 	if in.Spec.Acceleratable {
-		return in.Status.Tiers[i].OnceMaxRequest.Accelerator.Cmp(in.Status.Tiers[j].OnceMaxRequest.Accelerator) < 0
+		return a.OnceMaxRequest.Accelerator.Cmp(b.OnceMaxRequest.Accelerator)
 	}
-	return in.Status.Tiers[i].OnceMaxRequest.CPU.Cmp(in.Status.Tiers[j].OnceMaxRequest.CPU) < 0
+	return a.OnceMaxRequest.CPU.Cmp(b.OnceMaxRequest.CPU)
 }
 
 // Recompute rebuilds the item-level OnceMaxRequest and Remaining overviews from the tiers.
@@ -396,7 +399,8 @@ func (in *AggregatedInstanceType) Recompute() {
 		newRemaining.CPU.Add(tier.Remaining.CPU)
 		newRemaining.AcceleratorShared.Add(tier.Remaining.AcceleratorShared)
 		newRemaining.AcceleratorSliced.Add(tier.Remaining.AcceleratorSliced)
-		newRemaining.AcceleratorPartitioned.Add(tier.Remaining.AcceleratorPartitioned)
+		newRemaining.AcceleratorPartitioned = sumProfileCounts(
+			newRemaining.AcceleratorPartitioned, tier.Remaining.AcceleratorPartitioned)
 	}
 
 	in.Status.OnceMaxRequest = newOnceMaxRequest
@@ -417,7 +421,18 @@ func (in *AggregatedInstanceType) Recompute() {
 // bundle offers no single allocation on any dimension.
 func overviewResourceIsZero(r AggregatedInstanceTypeOverviewResource) bool {
 	return r.Accelerator.IsZero() && r.AcceleratorShared.IsZero() &&
-		r.AcceleratorSliced.IsZero() && r.AcceleratorPartitioned.IsZero() && r.CPU.IsZero()
+		r.AcceleratorSliced.IsZero() && profileCountsAreZero(r.AcceleratorPartitioned) && r.CPU.IsZero()
+}
+
+// profileCountsAreZero reports whether a per-profile ledger offers nothing. An offered profile that
+// cannot currently be built stays listed at zero, so a non-empty ledger is not by itself an offer.
+func profileCountsAreZero(counts []workercore.AcceleratorProfileCount) bool {
+	for _, p := range counts {
+		if p.Count > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // Recompute rebuilds the tier-level OnceMaxRequest and Remaining overviews from the candidates.
@@ -465,7 +480,7 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 				CPU:                    candidate.CPU.OnceMaxRequest,
 				AcceleratorShared:      candidate.AcceleratorShared.OnceMaxRequest,
 				AcceleratorSliced:      candidate.AcceleratorSliced.OnceMaxRequest,
-				AcceleratorPartitioned: candidate.AcceleratorPartitioned.OnceMaxRequest,
+				AcceleratorPartitioned: capProfileCountsAtOne(candidate.AcceleratorPartitioned.RemainingProfiles),
 			}
 		}
 		seeded = true
@@ -474,7 +489,8 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 		newRemaining.CPU.Add(candidate.CPU.Remaining)
 		newRemaining.AcceleratorShared.Add(candidate.AcceleratorShared.Remaining)
 		newRemaining.AcceleratorSliced.Add(candidate.AcceleratorSliced.Remaining)
-		newRemaining.AcceleratorPartitioned.Add(candidate.AcceleratorPartitioned.Remaining)
+		newRemaining.AcceleratorPartitioned = sumProfileCounts(
+			newRemaining.AcceleratorPartitioned, candidate.AcceleratorPartitioned.RemainingProfiles)
 	}
 
 	in.OnceMaxRequest = newOnceMaxRequest
@@ -495,6 +511,9 @@ func (in *AggregatedInstanceTypeOnceMaxRequestTier) Recompute(acceleratable bool
 // Remaining are the candidate's raw values (Recompute later replaces them with the tier aggregate).
 // A tier groups candidates by accelerator OnceMaxRequest and carries no identity — the observed
 // descriptor lives only on the item Status.Detail. The caller appends candidates.
+//
+// The partition ledger is the one dimension held by reference, so both bundles take a fresh copy of it
+// rather than the InstanceType's own slice, which belongs to the informer's cached object.
 func newAggregatedTier(instType *worker.InstanceType) AggregatedInstanceTypeOnceMaxRequestTier {
 	return AggregatedInstanceTypeOnceMaxRequestTier{
 		OnceMaxRequest: AggregatedInstanceTypeOverviewResource{
@@ -502,14 +521,14 @@ func newAggregatedTier(instType *worker.InstanceType) AggregatedInstanceTypeOnce
 			CPU:                    instType.Status.CPU.OnceMaxRequest,
 			AcceleratorShared:      instType.Status.AcceleratorShared.OnceMaxRequest,
 			AcceleratorSliced:      instType.Status.AcceleratorSliced.OnceMaxRequest,
-			AcceleratorPartitioned: instType.Status.AcceleratorPartitioned.OnceMaxRequest,
+			AcceleratorPartitioned: capProfileCountsAtOne(instType.Status.AcceleratorPartitioned.RemainingProfiles),
 		},
 		Remaining: AggregatedInstanceTypeOverviewResource{
 			Accelerator:            instType.Status.Accelerator.Remaining,
 			CPU:                    instType.Status.CPU.Remaining,
 			AcceleratorShared:      instType.Status.AcceleratorShared.Remaining,
 			AcceleratorSliced:      instType.Status.AcceleratorSliced.Remaining,
-			AcceleratorPartitioned: instType.Status.AcceleratorPartitioned.Remaining,
+			AcceleratorPartitioned: sumProfileCounts(nil, instType.Status.AcceleratorPartitioned.RemainingProfiles),
 		},
 	}
 }
@@ -568,6 +587,57 @@ func addAcceleratorSlicedDetail(dst *workercore.AcceleratorSlicedDetail, src wor
 			Count: p.Count,
 		})
 	}
+}
+
+// sumProfileCounts sums src into dst by profile name and returns the result ordered by name. Both
+// inputs are already name-ordered, but a member offering a profile the others do not would
+// otherwise land out of order. It returns its result rather than mutating through a dst pointer as
+// its neighbor addAcceleratorSlicedDetail does, hence "sum" rather than "add".
+//
+// A profile carried at zero stays listed: the cluster InstanceType reports every profile its pool
+// offers, so zero means "offered but currently full" and dropping it would make that
+// indistinguishable from "not offered at all". Unlike addAcceleratorSlicedDetail, which sums a
+// capability, this sums availability — so its callers fold in Active members only, exactly as they
+// do for Remaining.
+//
+// The render half duplicates device.ProfileCountSlice deliberately: pkg/device reaches the CGO
+// vendor-library bindings, and the gateway is a separate binary that must not link them for a
+// map-to-slice conversion — the same reason instanceTypePhaseActive is duplicated above.
+func sumProfileCounts(dst, src []workercore.AcceleratorProfileCount) []workercore.AcceleratorProfileCount {
+	if len(src) == 0 {
+		return dst
+	}
+	sums := make(map[string]int32, len(dst)+len(src))
+	for _, p := range dst {
+		sums[p.Name] += p.Count
+	}
+	for _, p := range src {
+		sums[p.Name] += p.Count
+	}
+	out := mapx.Slice(sums, func(name string, count int32) workercore.AcceleratorProfileCount {
+		return workercore.AcceleratorProfileCount{Name: name, Count: count}
+	})
+	slices.SortFunc(out, func(a, b workercore.AcceleratorProfileCount) int { return cmp.Compare(a.Name, b.Name) })
+	return out
+}
+
+// capProfileCountsAtOne copies a per-profile ledger with every count capped at one: the once max
+// request form of the partition dimension, since a partition request is always a single instance on a
+// single card, so per profile the answer is whether one more can be built, not how many could be.
+// It is the per-profile counterpart of the scalar cap the cluster InstanceType applies.
+//
+// A profile listed at zero stays at zero, keeping "offered but currently full" distinct from "not
+// offered at all". The copy is fresh, so a bundle carried into a tier or item overview never aliases
+// the ledger of the member it was seeded from. Ordering is preserved, hence already by name.
+func capProfileCountsAtOne(counts []workercore.AcceleratorProfileCount) []workercore.AcceleratorProfileCount {
+	if len(counts) == 0 {
+		return nil
+	}
+	out := make([]workercore.AcceleratorProfileCount, len(counts))
+	for i, p := range counts {
+		out[i] = workercore.AcceleratorProfileCount{Name: p.Name, Count: min(p.Count, 1)}
+	}
+	return out
 }
 
 type ListAggregateInstanceTypes struct {
@@ -629,11 +699,11 @@ func (in *ListAggregateInstanceTypes) Next(cluster string, obj runtime.Object) e
 func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceTypeList {
 	if sorted {
 		// Sorted by acceleratable and name for better readability.
-		sort.Slice(in.list.Items, func(i, j int) bool {
-			if in.list.Items[i].Spec.Acceleratable == in.list.Items[j].Spec.Acceleratable && in.list.Items[i].Spec.Acceleratable {
-				return in.list.Items[i].Name < in.list.Items[j].Name
+		slices.SortFunc(in.list.Items, func(a, b AggregatedInstanceType) int {
+			if c := slicex.CompareTrueFirst(a.Spec.Acceleratable, b.Spec.Acceleratable); c != 0 {
+				return c
 			}
-			return in.list.Items[i].Spec.Acceleratable
+			return cmp.Compare(a.Name, b.Name)
 		})
 	}
 
@@ -648,7 +718,7 @@ func (in *ListAggregateInstanceTypes) Result(sorted bool) AggregatedInstanceType
 		}
 
 		// Sorted ascending by the primary dimension for better readability.
-		sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
+		slices.SortFunc(item.Status.Tiers, item.compareTierByPrimary)
 
 		// Calculate the once max request of the item.
 		item.Recompute()
@@ -865,7 +935,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 					item.Status.Tiers[len(item.Status.Tiers)-1].Recompute(item.Spec.Acceleratable)
 
 					// Sorted ascending by the primary dimension.
-					sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
+					slices.SortFunc(item.Status.Tiers, item.compareTierByPrimary)
 				}
 			}
 
@@ -926,7 +996,7 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 			item.Status.Tiers[len(item.Status.Tiers)-1].Recompute(item.Spec.Acceleratable)
 
 			// Sorted ascending by the primary dimension.
-			sort.Slice(item.Status.Tiers, item.lessTierByPrimary)
+			slices.SortFunc(item.Status.Tiers, item.compareTierByPrimary)
 
 			// Recompute the item.
 			item.Recompute()
@@ -945,18 +1015,14 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 		tier.Recompute(instType.Spec.Acceleratable)
 
 		// The item descriptor identity comes from this first candidate (empty during its pre-reconcile
-		// window, self-healed by a later adopt), and its SlicedDetail is the single tier's Σ.
-		detail := instType.Status.Detail
-		detail.SlicedDetail = tier.AcceleratorSlicedDetail
-
+		// window, self-healed by a later adopt); every derived field below it — SlicedDetail, the two
+		// overviews and the per-profile partition ledger — is owned by Recompute.
 		// Not found the same item, tier and candidate, create a new item with a new tier and candidate.
 		in.state.Items = append(in.state.Items, AggregatedInstanceType{
 			Name: buildAggregatedInstanceTypeName(instType.Spec),
 			Spec: instType.Spec,
 			Status: AggregatedInstanceTypeStatus{
-				Detail:         detail,
-				OnceMaxRequest: tier.OnceMaxRequest,
-				Remaining:      tier.Remaining,
+				Detail: instType.Status.Detail,
 				Tiers: []AggregatedInstanceTypeOnceMaxRequestTier{
 					tier,
 				},
@@ -964,6 +1030,12 @@ func (in *HandleAggregatedInstanceType) Handle(evt *manager.WorkerEvent) []*mana
 		})
 
 		item := &in.state.Items[len(in.state.Items)-1]
+
+		// Recompute rather than hand-copying the tier's overviews: it derives the same values from
+		// the single tier, and it is the only place that folds the derived aggregates. Copying field
+		// by field silently drops whichever aggregate is added next — a newly onboarded pool then
+		// emits one Added event contradicting its own tier and, while idle, never corrects itself.
+		item.Recompute()
 
 		// Report an added event.
 		evts = append(evts, &manager.WorkerEvent{

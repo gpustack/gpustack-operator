@@ -1469,6 +1469,34 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 											Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances\nthe pool's partitioned cards can still host, summed over those cards. It is disjoint\nfrom the three views above — a card in a partitioning mode can serve no other kind of\nclaim — so a pool with no partitioned card reports zero here.",
 											Type:        "object",
 											Properties: map[string]v1.JSONSchemaProps{
+												"allocatedProfiles": {
+													Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's\npartitioned cards currently hold, summed over those cards. A profile holding nothing is\nabsent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide\naggregate it serves, so changing its zero-handling or its presence changes that aggregate too.\nIts readers are the consumers of this status — the UI and the GPUStack app — which show what a\npool is running beside what it can still take, and which cannot derive it: RemainingProfiles\nalone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"name",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"count": {
+																	Description: "Count is the number of instances of this profile.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"name": {
+																	Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																	Type:        "string",
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"name",
+													},
+													XListType: ptr.To[string]("map"),
+												},
 												"capacity": {
 													Description: "Capacity is the total value of the resource.",
 													Pattern:     `^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`,
@@ -1507,6 +1535,34 @@ func crd_gpustack_api_worker_v1alpha1_InstanceType() *v1.CustomResourceDefinitio
 														},
 													},
 													XIntOrString: true,
+												},
+												"remainingProfiles": {
+													Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool\ncan still host, summed over its partitioned cards.\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a\nsibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but\ncurrently full\" from \"not offered at all\", and the wholesale status write does not churn the\nkey set on every carve and release.",
+													Type:        "array",
+													Items: &v1.JSONSchemaPropsOrArray{
+														Schema: &v1.JSONSchemaProps{
+															Type: "object",
+															Required: []string{
+																"name",
+															},
+															Properties: map[string]v1.JSONSchemaProps{
+																"count": {
+																	Description: "Count is the number of instances of this profile.",
+																	Type:        "integer",
+																	Format:      "int32",
+																},
+																"name": {
+																	Description: "Name is the profile identifier, e.g. \"1g.10gb\".",
+																	Type:        "string",
+																},
+															},
+														},
+													},
+													Nullable: true,
+													XListMapKeys: []string{
+														"name",
+													},
+													XListType: ptr.To[string]("map"),
 												},
 											},
 										},

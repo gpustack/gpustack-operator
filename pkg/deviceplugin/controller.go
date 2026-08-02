@@ -3,6 +3,7 @@ package deviceplugin
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -674,8 +675,8 @@ func (r *DevicesReconciler) getAllocatingPod(
 		return nil, nil, fmt.Errorf("no pods found with node name %s", r.NodeName)
 	}
 
-	sort.Slice(podList.Items, func(i, j int) bool {
-		return podList.Items[i].CreationTimestamp.Before(&podList.Items[j].CreationTimestamp)
+	slices.SortFunc(podList.Items, func(a, b core.Pod) int {
+		return a.CreationTimestamp.Compare(b.CreationTimestamp.Time)
 	})
 
 	type candidate struct {

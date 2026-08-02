@@ -79,8 +79,12 @@ func partitionedInstanceType(name string) *worker.InstanceType {
 			UnitResources: workercore.InstanceTypeUnitResources{CPU: "16", RAM: "40Gi"},
 		},
 		Status: workercore.InstanceTypeStatus{
-			Detail:                 partitionedDetail,
-			AcceleratorPartitioned: workercore.InstanceTypeResource{OnceMaxRequest: resource.MustParse("2"), Capacity: resource.MustParse("4")},
+			Detail: partitionedDetail,
+			AcceleratorPartitioned: workercore.InstanceTypePartitionedResource{
+				InstanceTypeResource: workercore.InstanceTypeResource{
+					OnceMaxRequest: resource.MustParse("2"), Capacity: resource.MustParse("4"),
+				},
+			},
 		},
 	}
 }
@@ -1889,7 +1893,7 @@ func TestInstanceWebhook_ValidateCreate_PartitionedProfile(t *testing.T) {
 			}
 			if c.logicalOnly {
 				instType.Status.Detail = sliceableDetail
-				instType.Status.AcceleratorPartitioned = workercore.InstanceTypeResource{}
+				instType.Status.AcceleratorPartitioned = workercore.InstanceTypePartitionedResource{}
 			}
 			w := newInstanceWebhook(instType)
 

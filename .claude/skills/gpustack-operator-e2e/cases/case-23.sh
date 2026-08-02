@@ -522,7 +522,28 @@ echo "[case-23] === Phase I: InstanceType numeric values ==="
 # PT (acceleratorPartitioned) is the partitioned cards' view and must be non-zero. SL
 # (acceleratorSliced) is the unpartitioned cards' view, and must collapse to zero — but only when every
 # card of the pool is partitioned; with an unpartitioned sibling the SL check is not applicable.
-it_ok="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null | MID="$MID" FULL="$FULL" NCARD="${NCARD:-1}" ALLMIG="$([ "${NCARD:-0}" = "${NTOT:-0}" ] && [ "${NTOT:-0}" != 0 ] && echo 1 || echo 0)" python3 -c "
+#
+# The POOL decides both of those, not the node. A pool spanning several GPU nodes keeps its logical
+# view alive on the sibling nodes' whole cards while one node's card is partitioned, and its aggregate
+# profile counts sum over every partitioned card it has. NCARD/NTOT are the toggled node's own group —
+# right for the node-key assertions above, wrong here — so count the pool's cards from every Devices
+# object reporting its group.
+read -r POOL_PART POOL_TOT <<<"$(kubectl get devices.v1alpha1.worker.gpustack.ai -o json 2>/dev/null | GRP="${GROUPID}" python3 -c "
+import json, os, sys
+grp = os.environ['GRP']
+tot = part = 0
+for d in json.load(sys.stdin).get('items', []):
+    for g in d.get('spec', {}).get('groups', []) or []:
+        if g.get('id') != grp:
+            continue
+        for a in g.get('accelerators', []) or []:
+            tot += 1
+            if ((a.get('status') or {}).get('physicalSliced') or {}).get('count', 0) > 0:
+                part += 1
+print(part, tot)
+" 2>/dev/null)"
+echo "[case-23]   pool-wide partitioned cards: ${POOL_PART:-0} of ${POOL_TOT:-0} (node-local was ${NCARD:-0} of ${NTOT:-0})"
+it_ok="$(kubectl get instancetypes.worker.gpustack.ai "$IT" -o json 2>/dev/null | MID="$MID" FULL="$FULL" NCARD="${POOL_PART:-1}" ALLMIG="$([ "${POOL_PART:-0}" = "${POOL_TOT:-0}" ] && [ "${POOL_TOT:-0}" != 0 ] && echo 1 || echo 0)" python3 -c "
 import json,sys,os
 it=json.load(sys.stdin); st=it.get('status',{})
 det=st.get('detail',{}).get('slicedDetail',{}).get('physical',{})
@@ -535,7 +556,7 @@ ok = profs.get(mid)==2*n and profs.get(full)==1*n and pcap>0 and (scap==0 or not
 print('OK' if ok else 'BAD', 'mid=%s full=%s ptCap=%s slCap=%s allPartitioned=%s' % (profs.get(mid), profs.get(full), pcap, scap, allmig))
 " 2>/dev/null)"
 if [[ "$it_ok" == OK* ]]; then
-  record PASS "InstanceType four-view reflects MIG geometry" "aggregate profiles ${MID}=$((2*${NCARD:-1})), ${FULL}=$((1*${NCARD:-1})), PT capacity > 0 [${it_ok#OK }]"
+  record PASS "InstanceType four-view reflects MIG geometry" "aggregate profiles ${MID}=$((2*${POOL_PART:-1})), ${FULL}=$((1*${POOL_PART:-1})), PT capacity > 0 over ${POOL_PART:-0}/${POOL_TOT:-0} partitioned card(s) [${it_ok#OK }]"
 else
   record FAIL "InstanceType four-view reflects MIG geometry" "status detail mismatch [${it_ok:-<empty>}] — PT must carry the partition instances and SL must read 0 on an all-partitioned pool"
 fi

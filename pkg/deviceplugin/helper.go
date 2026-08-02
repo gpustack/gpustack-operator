@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -210,9 +210,7 @@ func GetResourceRangeFromResourceUnits(resUnits []ResourceUnit) (resRanges []Res
 	}
 	for res, indexes := range resIndexes {
 		// Sort the indexes to ensure adjacent ones are next to each other.
-		sort.Slice(indexes, func(i, j int) bool {
-			return indexes[i] < indexes[j]
-		})
+		slices.Sort(indexes)
 		start := indexes[0]
 		prev := start
 		for _, idx := range indexes[1:] {
