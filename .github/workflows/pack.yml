@@ -20,10 +20,18 @@ on:
         type: choice
         options:
           - ssh-server
+          - thead-ppu-devel
       tag:
         description: 'Tag of packed image.'
         required: true
         type: string
+      # Allow passing build arguments at pack time, for an image input that must not be
+      # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>".
+      args:
+        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url>.'
+        required: false
+        type: string
+        default: ""
 
 env:
   INPUT_PASSWORD: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
@@ -39,19 +47,23 @@ jobs:
       - name: Set Matrix
         id: expand-matrix
         run: |
-          cat <<EOF > matrix.json
-          [
-              {
-                "runner": "ubuntu-24.04",
-                "platform": "linux/amd64"
-              },
-              {
-                "runner": "ubuntu-24.04-arm",
-                "platform": "linux/arm64"
-              }
-          ]
-          EOF
-          MATRIX="$(jq -cr . matrix.json)"
+          #
+          # Platform coverage is per image: an image whose upstream ships only one
+          # architecture must not be built for the others, otherwise that leg fails and
+          # the manifest job cannot assemble a complete list.
+          #
+          #   - thead-ppu-devel: the T-Head PPU SDK ships targets/x86_64-linux only.
+          #
+          # The manifest job derives its platform list from this output, so it follows
+          # automatically.
+          #
+          AMD64='{"runner":"ubuntu-24.04","platform":"linux/amd64"}'
+          ARM64='{"runner":"ubuntu-24.04-arm","platform":"linux/arm64"}'
+          case "${INPUT_REPOSITORY}" in
+            thead-ppu-devel) ENTRIES="${AMD64}" ;;
+            *) ENTRIES="${AMD64},${ARM64}" ;;
+          esac
+          MATRIX="$(jq -cr . <<<"[${ENTRIES}]")"
           echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
           echo "DEBUG: matrix=${MATRIX}"
 
@@ -179,6 +191,31 @@ jobs:
           echo "DEBUG: GITHUB_REF=${GITHUB_REF}"
           echo "DEBUG: CACHE_FROM_REFS=${CACHE_FROM_REFS}"
           echo "DEBUG: CACHE_TO_REF=${CACHE_TO_REF}"
+      - name: Get Build Args
+        env:
+          INPUT_ARGS: ${{ inputs.args }}
+        run: |
+          #
+          # Expand the space-separated "KEY=VALUE ..." input into one build argument per
+          # line. Split with read -ra rather than an unquoted for-loop: a value may hold
+          # shell-special characters (a presigned URL carries '&', '?' and '%'), and an
+          # unquoted expansion would additionally glob-expand '?' and '*'.
+          #
+          # Never echo the expanded values — a presigned URL carries its signature.
+          # Emit them with printf rather than echo, which would eat a value that begins
+          # with a dash by reading it as one of its own options.
+          #
+          read -ra ARGS <<<"${INPUT_ARGS}" || true
+          {
+            echo "BUILD_ARGS<<BUILD_ARGS_EOF"
+            for arg in "${ARGS[@]}"; do
+              if [[ -n "${arg}" ]]; then
+                printf '%s\n' "${arg}"
+              fi
+            done
+            echo "BUILD_ARGS_EOF"
+          } >>"$GITHUB_ENV"
+          echo "DEBUG: received ${#ARGS[@]} build argument(s)"
       - name: Package
         uses: docker/build-push-action@v6
         with:
@@ -194,6 +231,8 @@ jobs:
           file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
           context: ${{ github.workspace }}
           platforms: ${{ matrix.platform }}
+          build-args: |
+            ${{ env.BUILD_ARGS }}
           tags: |
             ${{ steps.metadata.outputs.tags }}
           labels: |
