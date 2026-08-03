@@ -62,6 +62,17 @@ function pack() {
     for label in "${labels[@]}"; do
       extra_args+=("--label" "${label}")
     done
+    # The T-Head PPU SDK is only distributed as a presigned object-storage link, so the
+    # thead-ppu-devel image takes it as a build argument instead of hardcoding it, passed
+    # through from the environment when set. Only that task consumes it: the `set -x` below
+    # traces the whole buildx invocation, so forwarding it to an unrelated image's build
+    # would print the presigned value for nothing. Even for this task the value lands in a
+    # local build's own terminal output — do not paste that output anywhere. CI never takes
+    # this path: there the value arrives through the pack workflow's build-argument input
+    # and is not traced.
+    if [[ "${task}" == "thead-ppu-devel" ]] && [[ -n "${PPU_SDK_URL:-}" ]]; then
+      extra_args+=("--build-arg" "PPU_SDK_URL=${PPU_SDK_URL}")
+    fi
     tag="${PACKAGE_NAMESPACE}/${task}:${PACKAGE_TAG}"
     gpustack::log::info "Building '${tag}' platform 'linux/${PACKAGE_ARCH}'"
     set -x
