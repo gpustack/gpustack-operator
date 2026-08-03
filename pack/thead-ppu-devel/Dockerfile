@@ -78,7 +78,12 @@ ARG PPU_SDK_EXPECT_RT="v3"
 ARG PPU_SDK_URL
 
 RUN <<EOF
-    set -exo pipefail
+    # Tracing stays OFF across every command that reads the URL. `set -x` prints every
+    # expanded word, so tracing the emptiness guard or the curl publishes the presigned
+    # link -- signature included -- into the build log, which for a CI build is
+    # world-readable. PPU_SDK_URL is an ARG, so it stays set for the whole stage; what
+    # makes the re-enable below safe is that no command after it reads the URL.
+    set -eo pipefail
 
     if [[ -z "${PPU_SDK_URL}" ]]; then
         echo "[ERROR] PPU_SDK_URL is required; see the header comment in this Dockerfile." >&2
@@ -90,6 +95,8 @@ RUN <<EOF
     fi
 
     curl -fsSL --retry 3 --retry-delay 5 -o /tmp/ppu-sdk.run "${PPU_SDK_URL}"
+
+    set -x
 
     # Self-extract instead of running the bundled install-ppu.pl: that installer needs
     # the Perl module Tie::File, which a clean Ubuntu base does not carry (it ships
@@ -142,13 +149,13 @@ ENV PPU_HOME="${PPU_HOME}" \
 # of library the builder stage needs, and that it stays loadable in an old workload
 # container. Three properties are asserted, all of which have bitten before:
 #
-#   1. hgml.h is not C-clean — it uses a bare `bool` in one declaration without
-#      including <stdbool.h>, so plain C compilation fails unless <stdbool.h> is pulled
-#      in ahead of it. The generated source below does that with an explicit #include as
-#      its first line; a consumer that cannot edit its sources gets the same effect from
-#      gcc's -include stdbool.h. Pinning the requirement here means a future SDK
-#      regression shows up as a build failure rather than as a confusing failure in the
-#      operator build.
+#   1. hgml.h includes no header at all, so it supplies neither the `bool` its own
+#      hgmlDeviceDestroyVgpuInstance declaration uses nor the NULL a caller needs; both
+#      must be pulled in ahead of it or plain C compilation fails. The generated source
+#      below does that with explicit <stdbool.h> and <stddef.h> includes; a consumer that
+#      cannot edit its sources gets the same effect from gcc's -include. Pinning the
+#      requirement here means a future SDK regression shows up as a build failure rather
+#      than as a confusing failure in the operator build.
 #   2. NEEDED must never name an HGGC/HGML library: the product is preloaded into a
 #      container that brings its own SDK, so it must not hard-link one. libc.so.6 is
 #      the only entry a correct build may carry — and none at all is equally correct,
@@ -162,6 +169,7 @@ RUN <<EOF
     inc="${PPU_HOME}/targets/x86_64-linux/include"
     printf '%s\n' \
         '#include <stdbool.h>' \
+        '#include <stddef.h>' \
         '#include "hgml.h"' \
         'hgmlReturn_t hgmlDeviceGetMemoryInfo(hgmlDevice_t device, hgmlMemory_t *memory)' \
         '{' \
