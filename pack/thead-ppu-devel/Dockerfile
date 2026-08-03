@@ -133,6 +133,13 @@ ARG PPU_HOME="/usr/local/PPU_SDK"
 
 COPY --from=sdk /out ${PPU_HOME}
 
+# ppu-smi is on PATH in its own right: the SDK does not put it in ${PPU_HOME}/bin (which
+# carries only the compiler toolchain — hgcc, hglink, llvm-*) but in a sibling subtree,
+# ${PPU_HOME}/ppu-smi/bin. Without this entry the image ships ppu-smi and hides it, and
+# anything verifying a slice's visibility has to hardcode the absolute path. The SDK's
+# third bin directory, ${PPU_HOME}/asight/bin (the profiler suite), is deliberately left
+# off — nothing here uses it.
+#
 # LD_LIBRARY_PATH is appended with ${LD_LIBRARY_PATH:+:...} rather than a bare colon:
 # an empty entry (which a trailing colon leaves behind when the base image sets no
 # LD_LIBRARY_PATH, as ubuntu:20.04 does not) means the current directory to the dynamic
@@ -140,15 +147,18 @@ COPY --from=sdk /out ${PPU_HOME}
 # from it.
 ENV PPU_HOME="${PPU_HOME}" \
     PPU_SDK="${PPU_HOME}" \
-    PATH="${PPU_HOME}/bin:${PATH}" \
+    PATH="${PPU_HOME}/bin:${PPU_HOME}/ppu-smi/bin:${PATH}" \
     LD_LIBRARY_PATH="${PPU_HOME}/targets/x86_64-linux/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}" \
     C_INCLUDE_PATH="${PPU_HOME}/targets/x86_64-linux/include" \
     CPLUS_INCLUDE_PATH="${PPU_HOME}/targets/x86_64-linux/include"
 
 # Build-time smoke test: prove the headers and toolchain can actually produce the kind
 # of library the builder stage needs, and that it stays loadable in an old workload
-# container. Three properties are asserted, all of which have bitten before:
+# container. Four properties are asserted, all of which have bitten before:
 #
+#   0. ppu-smi resolves on PATH. It is the tool a slice's visibility is judged by, and the
+#      SDK hides it one directory deeper than the toolchain, so an incomplete PATH is easy
+#      to ship and invisible until something tries to run it.
 #   1. hgml.h includes no header at all, so it supplies neither the `bool` its own
 #      hgmlDeviceDestroyVgpuInstance declaration uses nor the NULL a caller needs; both
 #      must be pulled in ahead of it or plain C compilation fails. The generated source
@@ -165,6 +175,8 @@ ENV PPU_HOME="${PPU_HOME}" \
 #      guard, not the base image tag. It must not exceed the SDK's own floor (2.17).
 RUN <<EOF
     set -exo pipefail
+
+    command -v ppu-smi
 
     inc="${PPU_HOME}/targets/x86_64-linux/include"
     printf '%s\n' \
