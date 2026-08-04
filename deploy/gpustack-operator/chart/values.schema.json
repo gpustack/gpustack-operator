@@ -874,6 +874,11 @@
             },
             "thead": {
               "properties": {
+                "partitionKind": {
+                  "default": "mig",
+                  "title": "partitionKind",
+                  "type": "string"
+                },
                 "pciVendorID": {
                   "default": "1ded",
                   "title": "pciVendorID",

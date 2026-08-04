@@ -138,6 +138,7 @@ global:
     thead:
       pciVendorID: "1ded"
       resourceName: alibabacloud.com/ppu
+      partitionKind: mig
 
 # -- Override the chart name used in resource names.
 nameOverride: ""

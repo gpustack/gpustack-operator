@@ -204,6 +204,9 @@ func init() {
 	// overridable by GPUSTACK_<MANUFACTURER>_PARTITION_KIND.
 	_ManufacturerPartitionKindMap = map[string]string{
 		ManufacturerNVIDIA: "mig",
+		// T-Head PPU carves a card into GPU instances under the same feature name its
+		// own management library and CLI use, so it shares the word rather than coining one.
+		ManufacturerTHead: "mig",
 	}
 	for _, manufacturer := range maps.Keys(_ManufacturerPartitionKindMap) {
 		// Extract the hardware partitioning name from environment variable if exists,
@@ -391,6 +394,33 @@ func GetAcceleratablePartitionedProfileResourceName(manufacturer, profile string
 		return ""
 	}
 	return core.ResourceName(name)
+}
+
+// NormalizePartitionedProfileName reduces a vendor-reported hardware-partition profile
+// name to the bare geometry a partition resource key carries: whitespace-trimmed,
+// lower-cased, and stripped of the feature-name prefix a vendor's library or CLI displays
+// ahead of the geometry ("MIG 1c.12g" → "1c.12g"). No vendor geometry name contains a
+// space, so the geometry is the final whitespace-separated field. Nothing here knows a
+// vendor's prefix words, so a lone field is taken as the geometry; a name of only
+// whitespace normalizes to the empty string.
+//
+// It never rewrites a character to make a name key-safe. A name that still cannot form a
+// valid resource-name segment is unusable and must be dropped by the caller — checked with
+// GetAcceleratablePartitionedProfileResourceName, which returns "" for it — because a
+// rewritten key could not be mapped back to the profile it names.
+//
+// Both ends of the round trip must normalize through this one function: a detector
+// publishes a profile's resource key from the normalized name, and the vendor driver seam
+// resolves that key back to a raw driver profile id by comparing the normalized name
+// against the names the driver reports. Two copies of this transform that drifted apart
+// would leave a published profile silently unrequestable — the key would exist and admit a
+// request that allocation could then never match.
+func NormalizePartitionedProfileName(raw string) string {
+	fields := strings.Fields(strings.ToLower(raw))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[len(fields)-1]
 }
 
 // PartitionedProfileOf returns the physical-partition profile name encoded in a

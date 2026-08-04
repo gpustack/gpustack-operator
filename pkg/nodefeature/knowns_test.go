@@ -91,6 +91,49 @@ func TestGetAcceleratablePartitionedProfileResourceName(t *testing.T) {
 	}
 }
 
+func TestNormalizePartitionedProfileName(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare geometry passes through", "1c.12g", "1c.12g"},
+		{"vendor feature prefix is dropped", "MIG 1c.12g", "1c.12g"},
+		{"several prefix words are dropped", "PPU MIG 1c.12g", "1c.12g"},
+		{"surrounding whitespace is trimmed", "  1c.12g\t", "1c.12g"},
+		{"inner whitespace runs are one separator", "mig \t 1c.12g", "1c.12g"},
+		{"case is folded", "1C.12G", "1c.12g"},
+		// A lone field is taken as the geometry: nothing here knows a vendor's prefix
+		// words, so a prefix with no geometry behind it is indistinguishable from a
+		// geometry. It normalizes consistently on both ends of the round trip, which is
+		// what the transform owes its callers.
+		{"a lone prefix word is taken as the geometry", "MIG ", "mig"},
+		{"whitespace only normalizes to empty", " \t ", ""},
+		{"empty stays empty", "", ""},
+		// Characters are never rewritten to make a name key-safe: an unusable name is
+		// rejected by the caller instead, so a key always maps back to its profile.
+		{"invalid characters are kept, not rewritten", "1c.12g+me", "1c.12g+me"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, NormalizePartitionedProfileName(c.in))
+		})
+	}
+}
+
+func TestNormalizePartitionedProfileNameRoundTrip(t *testing.T) {
+	// The published key carries the normalized name, and PartitionedProfileOf must
+	// return exactly what a driver-name match is performed against.
+	profile := NormalizePartitionedProfileName("MIG 3G.40GB")
+	key := GetAcceleratablePartitionedProfileResourceName(ManufacturerNVIDIA, profile)
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.partitioned.mig-3g.40gb"), key)
+
+	got, ok := PartitionedProfileOf(key)
+	assert.True(t, ok)
+	assert.Equal(t, profile, got)
+	assert.Equal(t, profile, NormalizePartitionedProfileName(got))
+}
+
 func TestPartitionedProfileOf(t *testing.T) {
 	cases := []struct {
 		name    string

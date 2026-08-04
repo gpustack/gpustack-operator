@@ -184,6 +184,20 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+
+			// A card currently in the partitioning mode is hard-partitioned and reports only
+			// its physical partition profiles; the capability is set solely when the driver
+			// actually offers one, so a mode-enabled card whose driver offers nothing reports
+			// no capability rather than an empty one. Every other card — mode off, mode
+			// unsupported, or the mode unreadable — is left exactly as it was detected before
+			// this vendor gained partitioning: it advertises no slicing capability, since
+			// logical (software) slicing is not supported here, which keeps the two
+			// capabilities mutually exclusive per card. A pending-mode transition is not
+			// partitioned yet and is re-detected after the administrator's DeviceManager
+			// restart, because the re-detect trigger does not include the partitioning mode.
+			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == hgml.DEVICE_MIG_ENABLE {
+				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, memory, logger))
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -198,6 +212,17 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		)
 		index++
 	}
+
+	// Cards of one group must agree on what a profile name means before the aggregation below
+	// merges them by name, so any name they disagree on is withheld from the whole group.
+	for i := range grpList {
+		for _, reason := range rejectDivergentGroupProfiles(&grpList[i]) {
+			in.logger.Info("withheld a partition profile the group's cards disagree on",
+				"group", grpList[i].ID, "reason", reason)
+		}
+	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }
