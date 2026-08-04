@@ -324,34 +324,16 @@ func lowestFreeSlot(used map[int]bool, limit int) (int, error) {
 	return 0, fmt.Errorf("no free slot below %d", limit)
 }
 
-// writeVdevConf publishes a vdev.conf via a temp file + atomic rename, so a concurrent
-// scanner never reads a partially written record.
+// writeVdevConf publishes a vdev.conf durably: a concurrent scanner never reads a partial
+// record, and a record that has been written survives an unclean shutdown.
 func writeVdevConf(path string, c vdevConf) error {
 	dir := filepath.Dir(path)
 	if err := osx.MkdirAll(dir, 0o777); err != nil {
-		return fmt.Errorf("create vdev dir %q: %w", dir, err)
+		return fmt.Errorf("create vdev.conf dir %q: %w", dir, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".vdev-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp vdev.conf: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.WriteString(c.render()); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("write temp vdev.conf: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("close temp vdev.conf: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("chmod temp vdev.conf: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("rename vdev.conf into place: %w", err)
+	data := []byte(c.render())
+	if err := osx.DurableWrite(path, data, 0o644); err != nil {
+		return fmt.Errorf("write vdev.conf %q: %w", path, err)
 	}
 	return nil
 }
