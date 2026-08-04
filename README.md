@@ -13,8 +13,9 @@ whole-card and shared allocation it adds:
 - **Logical (software) slicing on 6 vendors** — one card serves many workloads, each with its own
   **compute budget and VRAM budget, set independently**. The limits are applied at runtime by the
   vendor's own facility — a preload library, a kernel module, a sub-device — not just by accounting.
-- **Physical (hardware) partitioning** — NVIDIA MIG, as a resource family of its own: the device plugin
-  materializes the instance during allocation and reclaims it once the Pod exits.
+- **Physical (hardware) partitioning** — NVIDIA MIG and T-Head's own MIG-named partitioning, as a
+  resource family of its own: the device plugin materializes the instance during allocation and reclaims
+  it once the Pod exits.
 
 Built on [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) and
 [Kueue](https://github.com/kubernetes-sigs/kueue) — both vendored into this chart, so you install one
@@ -35,7 +36,7 @@ slots per card) requests. What differs is how — and whether — a single card 
 | **MetaX** | GPU | `metax-tech.com/gpu` | ✅ | — |
 | **Moore Threads** | GPU | `mthreads.com/gpu` | ✅ | — |
 | **NVIDIA** | GPU | `nvidia.com/gpu` | ✅ | ✅ **MIG** |
-| **T-Head** | PPU | `alibabacloud.com/ppu` | — | — |
+| **T-Head** | PPU | `alibabacloud.com/ppu` | — | ✅ **MIG** |
 
 - **Logical slicing is software.** The card stays whole; each container gets the vendor's own sharing
   facility applied to it — a preload library, a kernel module, a sub-device — budgeting its compute
@@ -44,7 +45,8 @@ slots per card) requests. What differs is how — and whether — a single card 
   weight rather than a hard cap.
 - **Physical partitioning is hardware.** It is a driver-level configuration mode an administrator
   enables on the card — the operator observes it, never flips it. See [NVIDIA MIG
-  Operations](./docs/operation/nvidia-mig.md).
+  Operations](./docs/operation/nvidia-mig.md) and [T-Head PPU Partitioning
+  Operations](./docs/operation/thead-mig.md).
 - Each vendor's PCI vendor ID, resource name, and runtime class can be overridden — see [Settings &
   Environment Variables](./docs/settings.md#per-manufacturer-overrides).
 
@@ -241,6 +243,7 @@ For running the operator, for operating a cluster, and for changing the code, th
 | [Walkthrough](./docs/walkthrough.md) | A recorded end-to-end run with real output |
 | [Settings & Environment Variables](./docs/settings.md) | Runtime settings and every `GPUSTACK_*` |
 | [NVIDIA MIG Operations](./docs/operation/nvidia-mig.md) | The MIG runbook, mode changes included |
+| [T-Head PPU Partitioning Operations](./docs/operation/thead-mig.md) | The same runbook for T-Head's own MIG-named partitioning |
 | [High Availability](./docs/operation/high-availability.md) | The replica knob per component |
 | [Development](./docs/development.md) | Build, lint, test, code generation |
 

@@ -91,12 +91,13 @@ partitioned card gets no `.partitioned.*` key.
 > saturated, which would delete the keys while instances are live.
 
 Stale cleanup covers all four `.sliced.*` suffixes, `.partitioned.units` and every per-profile
-partition key. Enabling or disabling NVIDIA MIG on a card is a manual `nvidia-smi` operation the
-operator only observes on the next Device Manager detection — see [NVIDIA MIG
-Operations](../operation/nvidia-mig.md), whose [three-configuration
+partition key. Enabling or disabling hardware partitioning on a card is a manual vendor-CLI operation
+(`nvidia-smi` for NVIDIA, `ppu-smi mig` for T-Head) the operator only observes on the next Device Manager
+detection — see [NVIDIA MIG Operations](../operation/nvidia-mig.md), whose [three-configuration
 walkthrough](../operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node) shows the
 disjoint populations on a recorded 8-card node, including a **mixed** one where both families are
-advertised at once.
+advertised at once, and [T-Head PPU Partitioning Operations](../operation/thead-mig.md) for the same
+procedure on T-Head.
 
 ## The unit spec is not derived from node capacity
 

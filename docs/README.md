@@ -19,7 +19,9 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 3. [High Availability](operation/high-availability.md) — the replica knob per component.
 4. [Settings & Environment Variables](settings.md) — online-adjustable settings and every `GPUSTACK_*`.
 5. [NVIDIA MIG Operations](operation/nvidia-mig.md) — the runbook for enabling/disabling MIG on a node.
-6. Upgrading: [to the bundled subcharts](migration/to-subcharts.md) · [from
+6. [T-Head PPU Partitioning Operations](operation/thead-mig.md) — the same runbook for T-Head's own
+   MIG-named partitioning.
+7. Upgrading: [to the bundled subcharts](migration/to-subcharts.md) · [from
    v0.5.x](migration/from-v0.5.md).
 
 **I change the code** — read the overview first; it is the map for everything else.
@@ -53,6 +55,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Development](development.md) | Build, lint, test, code generation, vendored subcharts and dependencies | contributors | ~10 min |
 | [High Availability](operation/high-availability.md) | Which knob to raise per control-plane component, and the one topology that cannot be redundant | operators | ~8 min |
 | [NVIDIA MIG Operations](operation/nvidia-mig.md) | Enabling/disabling MIG, reboot recovery, and a recorded three-configuration walkthrough | operators | ~30 min |
+| [T-Head PPU Partitioning Operations](operation/thead-mig.md) | Enabling/disabling T-Head's own MIG-named partitioning, the busy-mode-change prerequisite, and reboot recovery | operators | ~15 min |
 | [Migrating to the bundled subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~15 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~10 min |
 | [Instance Type Unit Resources Preset Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |

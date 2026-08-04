@@ -30,16 +30,18 @@ A card is shared in one of two physically incompatible ways, and GPUStack names 
 | Term | What it is | How isolation is enforced | Example |
 |---|---|---|---|
 | **Logical slicing** (`.sliced*`) | software slicing of a whole card | a vendor preload library caps compute and VRAM per container (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`) | 50 % of an A10G |
-| **Physical partitioning** (`.partitioned*`) | hardware partitioning of a card put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb` |
+| **Physical partitioning** (`.partitioned*`) | hardware partitioning of a card put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb` or a T-Head PPU partition |
 
 The two never apply to the same card. A card in a partitioning mode advertises **only** the partition
 family; an unpartitioned card advertises **only** the whole-card, shared and logical-slice families. That is
 why a pool's `InstanceType` reports four separate views (`EX` / `SH` / `SL` / `PT`) instead of folding them:
 each card feeds exactly one of them.
 
-`<kind>` in the partition keys is the manufacturer's own name for hardware partitioning — `mig` for NVIDIA —
-so an NVIDIA `3g.40gb` request reads `nvidia.com/gpu.partitioned.mig-3g.40gb`. A manufacturer with no
-hardware partitioning has no kind, hence no `.partitioned*` keys at all.
+`<kind>` in the partition keys is the manufacturer's own name for hardware partitioning — `mig` for both
+NVIDIA and T-Head, since T-Head's management library and CLI use the same word for its own feature — so
+an NVIDIA `3g.40gb` request reads `nvidia.com/gpu.partitioned.mig-3g.40gb` and a T-Head partition reads
+`alibabacloud.com/ppu.partitioned.mig-<profile>`. A manufacturer with no hardware partitioning has no
+kind, hence no `.partitioned*` keys at all.
 
 ## The resource keys
 
@@ -424,8 +426,9 @@ rolling the device-manager DaemonSet, then let the workloads reschedule.
   tool, then **restart that node's Device Manager DaemonSet**: the detect loop's re-detect trigger watches
   the device set and health, not the partitioning mode, so nothing else picks the change up. Deleting the
   node's `Devices` object is **not** required — an existing group's capability is rewritten in place. The
-  NVIDIA procedure end to end is in
-  [NVIDIA MIG Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node).
+  procedure end to end is in [NVIDIA MIG
+  Operations](./operation/nvidia-mig.md#enabling-mig-on-a-node) and [T-Head PPU Partitioning
+  Operations](./operation/thead-mig.md#enabling-partitioning-on-a-node).
 - **A non-default `TopologyManager` policy can mis-align a partition.** The Partitioned resource reports no
   NUMA topology (the plugin may not use the card the kubelet aligned to), so under `single-numa-node` the
   CPU and memory providers can settle on one socket while the only card with room is on the other. The
@@ -435,7 +438,8 @@ rolling the device-manager DaemonSet, then let the workloads reschedule.
 
 **See also** — [NVIDIA MIG Operations](./operation/nvidia-mig.md) (the administrator runbook for a
 card's partitioning mode, plus a recorded enable → request → reclaim → disable walkthrough) ·
-[Admission](./architecture/admission.md) (where these keys are checked) ·
+[T-Head PPU Partitioning Operations](./operation/thead-mig.md) (the same runbook for T-Head's own
+MIG-named partitioning) · [Admission](./architecture/admission.md) (where these keys are checked) ·
 [Device Discovery](./architecture/discovery.md#the-device-plugin-allocator) (where they are served)
 
 **Next** → [Walkthrough](./walkthrough.md) — the same requests on a live cluster.
