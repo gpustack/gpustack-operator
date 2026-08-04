@@ -2,6 +2,7 @@ package nvidia
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"gpustack.ai/gpustack/binding/nvml"
@@ -19,10 +20,11 @@ func profileName(s string) [96]int8 {
 
 func TestDeriveSlicedProfiles(t *testing.T) {
 	testCases := []struct {
-		name          string
-		infos         []nvml.GpuInstanceProfileInfo_v3
-		cardMemoryMiB uint64
-		want          []device.AcceleratorPhysicalSlicedProfile
+		name            string
+		infos           []nvml.GpuInstanceProfileInfo_v3
+		cardMemoryMiB   uint64
+		want            []device.AcceleratorPhysicalSlicedProfile
+		wantErrContains []string
 	}{
 		{
 			// The full A100-40GB probe set (ids 0-4 + REV1 id 7 supported); asserts the
@@ -69,28 +71,65 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			},
 		},
 		{
-			// V1 path (no Name): ids 0-9 kept, 10-16 dropped, names derived from geometry.
-			name:          "v1 fallback derives names from geometry",
+			// V1 path (no Name): nothing is publishable, because a name the driver never
+			// reported is a resource key the allocator's name probe can never resolve back
+			// to a profile id. Every dropped id is named in the error.
+			name:          "a driver that names nothing publishes nothing",
 			cardMemoryMiB: 40960,
 			infos: []nvml.GpuInstanceProfileInfo_v3{
 				{Id: 0, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 4864},
 				{Id: 4, SliceCount: 7, InstanceCount: 1, MemorySizeMB: 40192},
 				{Id: 10, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 4864},
 			},
+			want:            nil,
+			wantErrContains: []string{"profile 0", "profile 4", "profile 10", "no name"},
+		},
+		{
+			// A driver naming only some ids: the named profiles are published untouched and
+			// only the nameless one is dropped, so one unnamed id costs no other capacity.
+			name:          "named profiles survive a nameless sibling intact",
+			cardMemoryMiB: 40960,
+			infos: []nvml.GpuInstanceProfileInfo_v3{
+				{Id: 0, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 4864, Name: profileName("1g.5gb")},
+				{Id: 1, SliceCount: 2, InstanceCount: 3, MemorySizeMB: 9856},
+				{Id: 4, SliceCount: 7, InstanceCount: 1, MemorySizeMB: 40192, Name: profileName("7g.40gb")},
+			},
 			want: []device.AcceleratorPhysicalSlicedProfile{
 				{Name: "1g.5gb", MemoryMib: 4864, ComputeSlices: 1, MemorySlices: 1, Count: 7},
 				{Name: "7g.40gb", MemoryMib: 40192, ComputeSlices: 7, MemorySlices: 8, Count: 1},
 			},
+			wantErrContains: []string{"profile 1", "no name"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := deriveSlicedProfiles(tc.infos, tc.cardMemoryMiB, nil)
+			got, err := deriveSlicedProfiles(tc.infos, tc.cardMemoryMiB, nil)
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("deriveSlicedProfiles() mismatch\n got: %+v\nwant: %+v", got, tc.want)
 			}
+			assertErrContains(t, err, tc.wantErrContains)
 		})
+	}
+}
+
+// assertErrContains asserts that err mentions every want substring, and that err is nil
+// when no substring is wanted — so a case expecting no rejection asserts it.
+func assertErrContains(t *testing.T, err error, want []string) {
+	t.Helper()
+	if len(want) == 0 {
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		return
+	}
+	if err == nil {
+		t.Fatalf("got no error, want one mentioning %v", want)
+	}
+	for _, w := range want {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("error %q does not mention %q", err, w)
+		}
 	}
 }
 
@@ -119,9 +158,12 @@ func TestDeriveSlicedProfilesCachesPlacementsByID(t *testing.T) {
 		{Id: 0, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 4864, Name: profileName("1g.5gb")},
 		{Id: 7, SliceCount: 1, InstanceCount: 4, MemorySizeMB: 9856, Name: profileName("1g.10gb")},
 	}
-	got := deriveSlicedProfiles(infos, 40960, func(id uint32) []device.AcceleratorPhysicalPlacement {
+	got, err := deriveSlicedProfiles(infos, 40960, func(id uint32) []device.AcceleratorPhysicalPlacement {
 		return placementsByID[id]
 	})
+	if err != nil {
+		t.Fatalf("deriveSlicedProfiles() unexpected error: %v", err)
+	}
 
 	want := map[string][]device.AcceleratorPhysicalPlacement{
 		"1g.5gb":  {{Start: 0, Length: 1}, {Start: 1, Length: 1}},
@@ -135,6 +177,204 @@ func TestDeriveSlicedProfilesCachesPlacementsByID(t *testing.T) {
 		if !reflect.DeepEqual(p.Placements, want[p.Name]) {
 			t.Errorf("%s placements = %+v, want %+v", p.Name, p.Placements, want[p.Name])
 		}
+	}
+}
+
+func TestDeriveSlicedProfilesSpanFromPlacements(t *testing.T) {
+	testCases := []struct {
+		name              string
+		infos             []nvml.GpuInstanceProfileInfo_v3
+		cardMemoryMiB     uint64
+		placementsByID    map[uint32][]device.AcceleratorPhysicalPlacement
+		want              []device.AcceleratorPhysicalSlicedProfile
+		wantErrContains   []string
+		spanFromEverySlot bool
+	}{
+		{
+			// A card partitioned into four memory slices, where dividing by eight understates
+			// each slice and so overstates the span (4 instead of 2). The driver's placements
+			// are the authority.
+			name:          "placement length overrides the eight-slice division",
+			cardMemoryMiB: 24576,
+			infos: []nvml.GpuInstanceProfileInfo_v3{
+				{Id: 1, SliceCount: 2, InstanceCount: 2, MemorySizeMB: 11776, Name: profileName("2g.12gb")},
+			},
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{
+				1: {{Start: 0, Length: 2}, {Start: 2, Length: 2}},
+			},
+			want: []device.AcceleratorPhysicalSlicedProfile{
+				{
+					Name: "2g.12gb", MemoryMib: 11776, ComputeSlices: 2, MemorySlices: 2, Count: 2,
+					Placements: []device.AcceleratorPhysicalPlacement{{Start: 0, Length: 2}, {Start: 2, Length: 2}},
+				},
+			},
+			spanFromEverySlot: true,
+		},
+		{
+			// Every legal placement of a profile is as long as the profile's span, so the
+			// span read off the first slot holds for all of them.
+			name:          "every placement of a profile carries the same span",
+			cardMemoryMiB: 81920,
+			infos: []nvml.GpuInstanceProfileInfo_v3{
+				{Id: 0, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 9856, Name: profileName("1g.10gb")},
+			},
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{
+				0: {{Start: 0, Length: 2}, {Start: 2, Length: 2}, {Start: 4, Length: 2}, {Start: 6, Length: 2}},
+			},
+			want: []device.AcceleratorPhysicalSlicedProfile{
+				{
+					Name: "1g.10gb", MemoryMib: 9856, ComputeSlices: 1, MemorySlices: 2, Count: 7,
+					Placements: []device.AcceleratorPhysicalPlacement{
+						{Start: 0, Length: 2}, {Start: 2, Length: 2}, {Start: 4, Length: 2}, {Start: 6, Length: 2},
+					},
+				},
+			},
+			spanFromEverySlot: true,
+		},
+		{
+			// A driver that enumerates no placement leaves the division as the only source.
+			name:          "no enumerated placement keeps the divided span",
+			cardMemoryMiB: 40960,
+			infos: []nvml.GpuInstanceProfileInfo_v3{
+				{Id: 2, SliceCount: 3, InstanceCount: 2, MemorySizeMB: 19968, Name: profileName("3g.20gb")},
+			},
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{},
+			want: []device.AcceleratorPhysicalSlicedProfile{
+				{Name: "3g.20gb", MemoryMib: 19968, ComputeSlices: 3, MemorySlices: 4, Count: 2},
+			},
+		},
+		{
+			// A placement of zero length spans nothing, so it cannot be the published span.
+			name:          "zero-length placement keeps the divided span",
+			cardMemoryMiB: 40960,
+			infos: []nvml.GpuInstanceProfileInfo_v3{
+				{Id: 2, SliceCount: 3, InstanceCount: 2, MemorySizeMB: 19968, Name: profileName("3g.20gb")},
+			},
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{
+				2: {{Start: 0, Length: 0}},
+			},
+			want: []device.AcceleratorPhysicalSlicedProfile{
+				{
+					Name: "3g.20gb", MemoryMib: 19968, ComputeSlices: 3, MemorySlices: 4, Count: 2,
+					Placements: []device.AcceleratorPhysicalPlacement{{Start: 0, Length: 0}},
+				},
+			},
+		},
+		{
+			// A nameless profile is dropped however well the driver placed it: a placement
+			// set cannot supply the name the allocator has to match.
+			name:          "a nameless profile is dropped despite enumerated placements",
+			cardMemoryMiB: 40960,
+			infos: []nvml.GpuInstanceProfileInfo_v3{
+				{Id: 0, SliceCount: 1, InstanceCount: 7, MemorySizeMB: 4864},
+			},
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{
+				0: {{Start: 0, Length: 2}, {Start: 2, Length: 2}},
+			},
+			want:            nil,
+			wantErrContains: []string{"profile 0", "no name"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := deriveSlicedProfiles(tc.infos, tc.cardMemoryMiB, func(id uint32) []device.AcceleratorPhysicalPlacement {
+				return tc.placementsByID[id]
+			})
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("deriveSlicedProfiles() mismatch\n got: %+v\nwant: %+v", got, tc.want)
+			}
+			assertErrContains(t, err, tc.wantErrContains)
+			if !tc.spanFromEverySlot {
+				return
+			}
+			for _, p := range got {
+				for _, pl := range p.Placements {
+					if pl.Length != p.MemorySlices {
+						t.Errorf("%s placement %+v length != published span %d", p.Name, pl, p.MemorySlices)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestMigPlacementsByProfile(t *testing.T) {
+	const failing = uint32(3)
+
+	testCases := []struct {
+		name         string
+		infos        []nvml.GpuInstanceProfileInfo_v3
+		slots        map[uint32][]nvml.GpuInstancePlacement
+		wantAnswered []uint32
+		want         map[uint32][]device.AcceleratorPhysicalPlacement
+		wantErr      bool
+	}{
+		{
+			name:  "enumerated placements are converted and keyed by profile id",
+			infos: []nvml.GpuInstanceProfileInfo_v3{{Id: 0}, {Id: 7}},
+			slots: map[uint32][]nvml.GpuInstancePlacement{
+				0: {{Start: 0, Size: 1}, {Start: 1, Size: 1}},
+				7: {{Start: 0, Size: 2}},
+			},
+			wantAnswered: []uint32{0, 7},
+			want: map[uint32][]device.AcceleratorPhysicalPlacement{
+				0: {{Start: 0, Length: 1}, {Start: 1, Length: 1}},
+				7: {{Start: 0, Length: 2}},
+			},
+		},
+		{
+			// The driver answered, with nothing: the profile stays publishable and the
+			// derivation falls back to arithmetic for its span.
+			name:         "an enumerated-none profile is kept with a nil placement set",
+			infos:        []nvml.GpuInstanceProfileInfo_v3{{Id: 0}},
+			wantAnswered: []uint32{0},
+			want:         map[uint32][]device.AcceleratorPhysicalPlacement{0: nil},
+		},
+		{
+			// The driver failed to answer: the profile is withheld and the failure reported.
+			name:         "a failed query withholds the profile and errors",
+			infos:        []nvml.GpuInstanceProfileInfo_v3{{Id: failing}},
+			wantAnswered: []uint32{},
+			want:         map[uint32][]device.AcceleratorPhysicalPlacement{},
+			wantErr:      true,
+		},
+		{
+			name:  "a failed query does not hide the profiles that answered",
+			infos: []nvml.GpuInstanceProfileInfo_v3{{Id: 0}, {Id: failing}},
+			slots: map[uint32][]nvml.GpuInstancePlacement{
+				0: {{Start: 0, Size: 1}},
+			},
+			wantAnswered: []uint32{0},
+			want:         map[uint32][]device.AcceleratorPhysicalPlacement{0: {{Start: 0, Length: 1}}},
+			wantErr:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			answered, got, err := migPlacementsByProfile(
+				tc.infos,
+				func(id uint32) ([]nvml.GpuInstancePlacement, nvml.Return) {
+					if id == failing {
+						return nil, nvml.ERROR_NOT_SUPPORTED
+					}
+					return tc.slots[id], nvml.SUCCESS
+				})
+			if (err != nil) != tc.wantErr {
+				t.Errorf("migPlacementsByProfile() error = %v, wantErr %v", err, tc.wantErr)
+			}
+			gotAnswered := make([]uint32, 0, len(answered))
+			for _, info := range answered {
+				gotAnswered = append(gotAnswered, info.Id)
+			}
+			if !reflect.DeepEqual(gotAnswered, tc.wantAnswered) {
+				t.Errorf("migPlacementsByProfile() answered = %v, want %v", gotAnswered, tc.wantAnswered)
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("migPlacementsByProfile() mismatch\n got: %+v\nwant: %+v", got, tc.want)
+			}
+		})
 	}
 }
 
