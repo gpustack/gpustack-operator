@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"runtime"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -29,6 +30,7 @@ type Manager struct {
 	CtrlManager CtrlManager
 
 	sentinel _CtrlManagerSentinel
+	stopped  atomic.Bool
 }
 
 // Prepare prepares the runtime for the manager,
@@ -117,11 +119,29 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	// Start.
+	//
+	// The controller manager returning is terminal, and not only when it returns an error:
+	// controller-runtime stops every controller and returns as soon as the leader lease is lost,
+	// which a single slow apiserver round trip is enough to cause. Record that it happened,
+	// because the process does not necessarily exit when it does — a sibling task that fails to
+	// return on cancellation keeps the process, and its HTTP handlers, alive — and a process that
+	// keeps answering its liveness probe while reconciling nothing is the worst of both outcomes:
+	// Kubernetes sees a healthy Pod and the whole chain silently stops converging.
+	defer m.stopped.Store(true)
 	return cm.Start(ctx)
 }
 
 // WaitForReady waits for the manager to be ready.
+//
+// It reports an error once the manager has stopped, and never becomes ready again after that:
+// a manager that returned has no controllers running, whatever else about the process still works.
 func (m *Manager) WaitForReady(ctx context.Context) error {
+	// Asked before the waits below, which a stopped manager would still satisfy: the sentinel
+	// stays closed once started, and a stopped cache reports itself synced.
+	if m.stopped.Load() {
+		return errors.New("controller manager has stopped")
+	}
+
 	// Wait for controller manager to start.
 	select {
 	case <-ctx.Done():
