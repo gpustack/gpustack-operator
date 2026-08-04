@@ -98,7 +98,7 @@ csi-driver-s3:
 ```
 
 ```bash
-helm upgrade gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+helm upgrade gpustack-operator gpustack/gpustack-operator \
   --namespace gpustack-system --values ha.yaml
 ```
 

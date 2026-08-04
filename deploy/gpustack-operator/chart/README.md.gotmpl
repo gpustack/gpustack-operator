@@ -42,7 +42,8 @@ Running more than one replica of each control-plane component is described in th
 To install the chart with the release name `gpustack-operator`:
 
 ```bash
-helm install gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+helm install gpustack-operator gpustack/gpustack-operator \
   --namespace gpustack-system \
   --create-namespace
 ```
@@ -63,6 +64,11 @@ objects, and the CRDs, aggregated APIServices and webhook configurations the wor
 stay behind. Run the chart's `files/cleanup.sh` afterwards to clear them, or install with
 `--set cleanupOnUninstall=true` to have a gated post-delete Job do it — which is safe only where this
 release exclusively owns those CRDs.
+
+The dependencies listed below are **vendored subcharts**: their sources are committed into this
+chart's `charts/` directory, so the `Repository` column is intentionally empty — `helm install`
+fetches nothing beyond the chart itself. Each is pinned at the version shown and sits behind its own
+`<name>.enabled` switch (`kueue`, `node-feature-discovery`, `csi-driver-nfs`, `csi-driver-s3`).
 
 {{ template "chart.requirementsSection" . }}
 

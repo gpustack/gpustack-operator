@@ -27,14 +27,14 @@ slots per card) requests. What differs is how — and whether — a single card 
 
 | Vendor | Class | Kubernetes resource | Logical slicing (`.sliced`) | Physical partitioning (`.partitioned`) |
 |---|---|---|---|---|
-| **NVIDIA** | GPU | `nvidia.com/gpu` | ✅ | ✅ **MIG** |
-| **Huawei Ascend** | NPU | `huawei.com/npu` | ✅ | — |
+| **AMD** | GPU | `amd.com/gpu` | — | — |
 | **Cambricon** | MLU | `cambricon.com/mlu` | ✅ | — |
+| **Huawei Ascend** | NPU | `huawei.com/npu` | ✅ | — |
+| **Hygon** | DCU | `hygon.com/dcu` | ✅ | — |
+| **Iluvatar** | GPU | `iluvatar.com/gpu` | — | — |
 | **MetaX** | GPU | `metax-tech.com/gpu` | ✅ | — |
 | **Moore Threads** | GPU | `mthreads.com/gpu` | ✅ | — |
-| **Hygon** | DCU | `hygon.com/dcu` | ✅ | — |
-| **AMD** | GPU | `amd.com/gpu` | — | — |
-| **Iluvatar** | GPU | `iluvatar.com/gpu` | — | — |
+| **NVIDIA** | GPU | `nvidia.com/gpu` | ✅ | ✅ **MIG** |
 | **T-Head** | PPU | `alibabacloud.com/ppu` | — | — |
 
 - **Logical slicing is software.** The card stays whole; each container gets the vendor's own sharing
@@ -59,7 +59,8 @@ otherwise every component self-signs.
 **1. Install the chart.**
 
 ```bash
-helm install gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+helm install gpustack-operator gpustack/gpustack-operator \
   --namespace gpustack-system --create-namespace
 ```
 

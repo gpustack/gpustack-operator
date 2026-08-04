@@ -37,7 +37,9 @@ Workloads, ResourceFlavors, node labels and mounted volumes all survive.
 ## The one-time upgrade
 
 ```bash
-helm upgrade gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+helm repo add gpustack https://docs.gpustack.ai/gpustack-operator/charts
+helm repo update
+helm upgrade gpustack-operator gpustack/gpustack-operator \
   --namespace gpustack-system \
   --take-ownership
 ```
@@ -138,7 +140,7 @@ So pick a starting point rather than forcing it through.
 **Keep what you have** — the right answer whenever something else in the cluster depends on that Kueue:
 
 ```bash
-helm upgrade --install gpustack-operator oci://docker.io/gpustack/charts/gpustack-operator \
+helm upgrade --install gpustack-operator gpustack/gpustack-operator \
   --namespace gpustack-system --create-namespace \
   --set kueue.enabled=false --set node-feature-discovery.enabled=false
 ```
