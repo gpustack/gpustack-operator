@@ -92,3 +92,175 @@ Concrete failure modes hit while building this skill, with fixes.
   reported field. Confirm it via the HAMi log `device N: core utilization limit = <N>`
   (`LIBCUDA_LOG_LEVEL=3`) or by sampling `utilization.gpu` under load (see
   `nvidia-smi-and-sm-limit.md`).
+
+## THead (PPU / `libhggc.so` / `libhgml.so`)
+- **`ppu-smi` exits 0 even when it fails** — with no driver it prints `init HGML error: driver is not
+  loaded` and still returns 0. Its exit status carries no verdict, so every check must parse its
+  output. Its `ldd` is also clean of any HGML library, which is the linkage-level confirmation that it
+  reaches HGML through `dlopen` at runtime (see `thead-hgml-dlsym-and-ppu-smi.md`).
+- **A preload that defines `hgmlDeviceGetMemoryInfo` changes nothing** — `ppu-smi` resolves it with
+  `dlsym` on an explicit `dlopen` handle, which never consults the global scope a preload sits in.
+  Interpose `dlsym` itself. Check which object won with `dladdr` on the returned pointer rather than
+  guessing; `cases/thead-case-2.sh` does this with no hardware.
+- **`nm -D <so> | grep dlsym` matches a library that only CALLS `dlsym`** — `nm -D` lists undefined
+  symbols too, so it cannot tell "defines" from "references" and will pass an artifact that interposes
+  nothing. Use `readelf -W --dyn-syms` and require `GLOBAL DEFAULT` with a non-`UND` section index.
+- **`hgml.h` won't compile: `NULL` undeclared / unknown type `bool`** — the header carries zero
+  `#include` lines. Supply `<stdbool.h>` and `<stddef.h>` before it, or `gcc -include stdbool.h`.
+- **`-Wnonnull-compare` on a `dlsym` interposer** — glibc declares `dlsym`'s `symbol` parameter
+  `__nonnull`, so comparing it to `NULL` is dead code the compiler rejects. Drop the check.
+- **A shim picks up `DT_NEEDED libdl.so.2` and fails the linkage assertion** — dropping `-ldl` is
+  deliberate, not an omission: `dlsym`/`dlvsym` stay undefined in the object and resolve from whatever
+  glibc the workload container has. A test *binary* that dlopens does need `-ldl`; a preloaded shim
+  must not.
+- **`hgMemAlloc` is not the symbol a shim must interpose** — `hggc.h` maps it onto `hgMemAlloc_v2` the
+  way `cuda.h` maps `cuMemAlloc`, and `libhggc.so` exports both. The plain form is the v1 ABI with
+  different parameter types (`HGdeviceptr_v1` is `unsigned int`), so it cannot be covered by reusing
+  the v2 prototype.
+- **`hggcMalloc` is a runtime-layer symbol** — it lives in `libhggcrt.13.0.so`, not `libhggc.so`.
+  Interposing it would prove nothing about the driver layer; drive it from the test side and interpose
+  `hgMemAlloc_v2` instead.
+- **An over-quota allocation succeeds and no shim counter moved** — that is the shim watching a name
+  nobody called, not the allocation bypassing `libhggc.so`. Read the counter line the shim's
+  destructor prints before concluding anything about the interception layer.
+- **`ppu-smi` shows a card the container was not given, or renumbers the one it was** — pass only
+  `/dev/alixpu`, `/dev/alixpu_ctl` and the one `/dev/alixpu_ppu<N>`, and parse the row whose index
+  matches, falling back to the single row when only one is visible.
+- **A hardware case picks a busy card** — never hardcode an index. The PPU test host runs production
+  inference and one card has held ~91 GB; `lib.sh: thead_idle_cards` reads idle cards out of
+  `ppu-smi`'s own table.
+- **`nerdctl` on a k3s/rke2 host sees no images** — its containerd namespace defaults away from the
+  cluster's. Set `XB_CTR_ARGS='--namespace k8s.io'`. `nerdctl pull` also does not read containerd's
+  `config.toml` mirrors, so on a host where `docker.io` times out, pull with `crictl pull` (which goes
+  through CRI and therefore the cluster's configured mirrors) and then run with `nerdctl`.
+- **No `buildkitd` on the target** — expected, and nothing here needs it: the THead cases only
+  `run` containers. Build the image on a docker host and load it. `preflight.sh` reports this as a
+  build-capable WARN, not a FAIL.
+- **`ERROR: ld.so: object '/tmp/…' from LD_PRELOAD cannot be preloaded … ignored`, and the slice reads the
+  physical size** — the preload path is the HOST staging path, but the loader resolving it lives inside the
+  container. Name the mount point (`/work/…`), not `${XB_STAGE}/…`. The tell is that the row fails while the
+  hardware-free mechanism rows, which hardcode `/work`, pass.
+- **`hgmlDeviceGetHandleByIndex` returns `Invalid Argument` for the card you passed through** — the SDK
+  **renumbers devices inside the container**: give it one `/dev/alixpu_ppu<N>` and `hgmlDeviceGetCount` reports
+  `1` and the only valid index is `0`. The host ordinal names the device node; it is not the index the container's
+  SDK addresses. Same for `hgDeviceGet` and `hggcSetDevice`.
+- **A card index comes out as a login banner** — `thead_idle_cards` output is consumed directly as an index, so a
+  banner line `XB_BANNER_RE` does not cover becomes "the chosen card". The helper now filters to bare digits;
+  when adding a similar helper, filter rather than trusting the banner regex to be complete.
+- **`refund: freed bytes are returned to the quota` FAILs while all four path groups PASS** — the shim counted the
+  frees but did not credit them back, so the whole-quota request after both frees hit our own `DENIED`. Read the
+  `accounted=` figure in that marker: non-zero after every allocation was freed is the ledger losing a refund.
+  The four path groups cannot catch this — each runs one allocation in a fresh process, so the corrupt total dies
+  with it. If you are growing the ledger, note that deleting an entry by **emptying** its slot is what caused it:
+  open addressing needs a tombstone, and page-aligned device pointers put nearly every key in one probe chain.
+- **`arm c: vendor wrapper coexists` SKIPs with "not loadable in this image"** — expected on an image that ships no
+  `libhggc_wrapper.so`; the arm cannot ask about coexistence with something absent. It is deliberately not a PASS:
+  the wrapper failing to load leaves the hook working by itself and reporting exactly the quota the arm expects.
+  A `could not prove … loaded` FAIL instead means the loader neither initialised it nor said why — check the arm's
+  `LD_DEBUG=libs` output for the wrapper's path.
+- **`DENIED … device=<i>: no usable HGGC_DEVICE_MEMORY_LIMIT_<i> and no usable HGGC_DEVICE_MEMORY_LIMIT`** —
+  fail-closed, working as designed: the shim is only preloaded into sliced containers, so a card being allocated
+  on with no figure is a misconfiguration, and letting it through would be an unlimited slice. Both variables are
+  named because either could have carried the card — the indexed figure, or the un-indexed one it falls back to.
+  Three causes worth separating: neither variable was injected, `<i>` is wrong, or the indexed figure IS set and
+  is unusable (which does not fall back — the load-time report names it as `unusable …`). `<i>` is the
+  **container-local** index — the SDK renumbers, so a container given `/dev/alixpu_ppu7` addresses it as `0` and
+  wants `…_LIMIT_0`, not `…_LIMIT_7`.
+- **No `[vppu]` load marker or counter dump, but denials still appear** — expected at the default
+  `LIBHGGC_LOG_LEVEL` of `1`, which carries denials and errors only. The markers and the dump are level `2`, which
+  is why every case pins it. `0` silences denials as well. Case 1 is unaffected either way: it greps the strings in
+  the built object, not runtime output.
+- **`not intercepting hgmlDeviceGetMemoryInfo: hgmlDeviceGetIndex unavailable`** — the visibility shim declines to
+  rewrite anything rather than apply one card's figure to every card, which on a multi-card container would report
+  the wrong number for every card but one. It means the caller's `dlopen` handle could not resolve
+  `hgmlDeviceGetIndex`; check that the handle is `libhgml.so` itself and not a wrapper that re-exports only part
+  of the surface.
+- **`util=others-only`** — `hgmlDeviceGetProcessUtilization` returned samples, but none for the probe's own pid.
+  The call passes `lastSeenTimeStamp=0` and so returns all history, which means a neighbouring container's stale
+  sample can make the count non-zero. Per-process feedback needs *our* sample, so this is a FAIL rather than the
+  `supported` it used to be counted as.
+- **`DT_NEEDED` grows `ld-linux-x86-64.so.2` after a change to `common/`** — almost certainly a new `__thread`
+  variable. General-dynamic TLS, which is the default model in a shared object, resolves through
+  `__tls_get_addr` in the dynamic linker, and that puts `ld-linux` in `DT_NEEDED` — which case 1 fails, because
+  the shipped library may need nothing but `libc.so.6`. Mark the variable
+  `__attribute__((tls_model("initial-exec")))`: correct here because this library only ever arrives through
+  `LD_PRELOAD` or `/etc/ld.so.preload`, so it is always in the initial exec set and never `dlopen`ed.
+- **`cannot open the ledger /dev/shm/vppu-ledger`** — the region is where the container's quota is accounted, so
+  this is fail-closed: every allocation is then denied with `the ledger is unavailable`. Either `/dev/shm` is not
+  writable in this container (the allocator mounts the ledger directory read-write for exactly this reason), or
+  `HGGC_LEDGER_PATH` points somewhere that does not exist. It is created lazily by the first process that
+  allocates, so a container whose workload never allocated has no file and that is not a fault.
+- **`the ledger … is layout version <n> and this build speaks <m>`** — two builds of the library are sharing one
+  region, or a stale region file outlived an upgrade. Refusing is deliberate: the layout is a documented contract
+  that `tools/` and a future scraper parse by offset, so misparsing it would be worse than declining. Delete the
+  file (nothing in it survives a container restart that matters) or point the newer build at its own
+  `HGGC_LEDGER_PATH`.
+- **`<path> is not a vppu ledger — refusing to overwrite it`** — `HGGC_LEDGER_PATH` names an existing file that is
+  not ours. Never overwritten on purpose; point it elsewhere.
+- **`device <i> has no free ledger slot`** — more than 32 processes hold a charge against one card, and the
+  allocation is refused rather than admitted unaccounted, since an allocation nobody is charged for can never be
+  reclaimed either. Dead processes' slots are swept on the path that would otherwise refuse, so this means 32
+  *live* processes, which is a workload shape worth looking at before raising the bound.
+- **A unit-test row PASSes while its DETAIL column shows an impossible figure** — the assertion called something
+  that writes an out-parameter and the row also formats that out-parameter. The order in which a call's arguments
+  are evaluated is unspecified, and both orders were seen here: clang evaluated the condition first, the image's
+  gcc the varargs first, so the detail was formatted from the value *before* the call. Split the call into its own
+  statement. Worth fixing even when the row passes — the same pattern makes a FAIL row print a figure that never
+  existed.
+- **A forked worker hangs on its first allocation, or gets memory the container's quota was already spent on** —
+  both are the same cause: `fork()` duplicates the in-process lock state, so the child inherits either a spinlock
+  flag held by a thread that does not exist in it or a thread-local "I hold this card" depth it then treats as its
+  own re-entry. `pthread_atfork` is unusable here (`-lpthread` in `DT_NEEDED`), so the state carries its owning pid
+  and is reset on first use in a new process. If either symptom appears, check that every entry point which takes
+  one of those flags still calls the reset first — case 6's `fork:` row is the guard.
+- **A memory path is not refused and no counter moved** — the module never saw it. The counter dump names every
+  interposed entry even at zero, so a name absent from the dump is a name the module does not define, and that is a
+  different fault from a zero count. Three causes, in the order worth checking: the entry is one of the plain v1
+  names and only the `_v2` form is defined (`hgMemAlloc` and `hgMemAlloc_v2` are two symbols, and `hggc.h` maps the
+  source name onto the second); the caller resolved the entry through `hgGetProcAddress` on a driver that returns
+  its own internal address rather than the interposed one; or the path reached the driver through
+  `hgGetExportTable`, whose table is opaque and deliberately not rewritten — the `an opaque table was handed out`
+  line at level `2` is what says so.
+- **`resolved <name> as <abi-name>: already the interposed entry`** — not a warning. On SDK `2.1.1` the driver's own
+  resolver returns the interposed address, so nothing needs substituting; the line exists because a substitution
+  that silently matched nothing would be indistinguishable from one that worked. Its absence for an entry the
+  module covers is the thing to investigate.
+- **`<n> bytes of row padding not accounted, the ledger is full`** — a pitched allocation succeeded and its real
+  size (the driver's stride × height) exceeded what was admitted, but the card's process table had no room for the
+  correction. The allocation is left alone rather than freed behind the caller's back; the card is under-charged by
+  the padding until that process's slot is reclaimed.
+- **A wrapper's signature is wrong and nothing catches it** — only possible for the plain v1 names, since every
+  other entry is written with the source-level name the header declares, and a suffixed variant takes its type from
+  the plain entry with `__typeof__`. The v1 forms need `#undef` to reach at all, which is what removes the header's
+  check, so case 1 runs a syntax-only compile with `__HGGC_API_VERSION_INTERNAL` and `__HGGC_API_VERSION_UMD`
+  defined — both are needed, and with only the first the header's v1 declarations stay invisible and the row passes
+  vacuously. If that row is ever changed, re-prove it by retyping one size: it must fail with
+  `conflicting types for 'hgMemAlloc'`.
+- **A workload is throttled to a crawl, or not throttled at all, and the `compute` line explains which** — the
+  loop prints one line per step at level `2`: `compute device=<i> target=<cap> measured=<util> allow_us=<open>
+  period_us=<window> step_us=<interval> graph_util=<avg>/<n> plain_util=<avg>/<n>`. `measured` carrying
+  `(unread)` means utilisation could not be read at all, and the loop is then holding the quota's own share of
+  the window rather than controlling — check that `libhgml.so` is resolvable inside the container, because the
+  library reaches it with `dlopen` (it may not appear in `DT_NEEDED`) and a container without it gets feed-forward
+  only. `allow_us` pinned at one hundredth of `period_us` is the floor: the container is asking for more of the
+  card than its cap however little it is given, which one long kernel per window is enough to do.
+- **The loop oscillates between the whole window and the floor** — it is stepping faster than its sensor answers.
+  The driver's per-process utilisation figure is slew-rate limited to about ten percentage points per hundred
+  milliseconds in both directions, so a card that went from idle to pinned reads `0, 10, 22, 32 …` and needs a
+  full second to say `100`; a loop stepping every 100 ms window therefore acts on a figure up to a second stale in
+  the direction it has just moved. `HGGC_SM_CONTROL_STEP_MS` (default 1000) is that interval and is deliberately
+  not the window — lowering it to the window reproduces the oscillation, which is how it was found.
+- **Every allocation is refused in a container that was sliced for memory** — check the compute figure:
+  `HGGC_DEVICE_SM_LIMIT_<i>` for the card, or the un-indexed `HGGC_DEVICE_SM_LIMIT` it falls back to. The
+  compute figure became part of the usable-configuration latch when the controller landed, so a container carrying
+  a memory figure and no compute figure for **any** card it holds is refused outright, memory allocations included.
+  A card's own figure that is set and malformed does not fall back either — the load-time line names the variable
+  it rejected (`unusable HGGC_DEVICE_SM_LIMIT_1=abc`), which is the fastest way to tell the two apart. It is deliberate: the
+  allocator's own helper defaults a missing compute request to 100%, so treating the variable as optional would
+  hand out a whole card's compute silently. `100` is the value to inject when compute is genuinely uncapped.
+- **A capped container settles at a fraction of its cap rather than near it** — the utilisation being fed to the
+  loop is not the container's own. The sum is taken over this container's processes only, identified through the
+  ledger region's process table (the region is per container, so the pids in it are this container's) plus the
+  caller's own pid; a filter that let a neighbour's samples in makes each loop read the card total, and two
+  containers capped at 25% then settle near 13% each. Case 7's two-container row is the guard, and its floor is
+  set to catch exactly that — a floor of "anything non-zero" passes it.

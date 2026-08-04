@@ -45,6 +45,7 @@ api/
   worker/v1/                      worker.gpustack.ai/v1 extension API
   worker/v1alpha1/                worker.gpustack.ai/v1alpha1 CRDs (Instance, Devices, InstanceType)
 binding/<runtime>/                generated CGO bindings (nvml, rsmi, cndev, dcmi, …)
+csrc/<mfr>/                       hand-written C preload libraries injected into sliced containers
 gen/
   api/generator/                  custom code generators (apireg-gen, crd-gen, webhook-gen)
   binding/<runtime>/config.yaml   c-for-go config per GPU runtime

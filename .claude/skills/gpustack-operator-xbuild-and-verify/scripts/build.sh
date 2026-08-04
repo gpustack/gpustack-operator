@@ -1,12 +1,21 @@
 #!/usr/bin/env bash
 #
-# build.sh <TARGET> — build one xbuild-* builder stage on the target and stage its
-# /out artifacts onto the target host. Backend is inferred from the target prefix:
+# build.sh <TARGET> — produce one backend's artifacts and stage them on the target host, so
+# every case that follows only has to inspect and run them. Backend is inferred from the target:
 #   xbuild-ascend-cann-* -> vcann-rt   (libvruntime.so + enpu-monitor -> XB_STAGE/{lib,tools})
 #   xbuild-nvidia-cuda-* -> HAMi-core  (libvgpu.so -> XB_STAGE/libvgpu.so)
+#   xbuild-thead-ppu     -> the slicing shims (csrc/thead/ppu-slicing-shim -> XB_STAGE)
 #
 #   XB_MODE=local                       bash .../build.sh xbuild-ascend-cann-8-910b
 #   XB_MODE=ssh XB_HOST=root@host         bash .../build.sh xbuild-nvidia-cuda-13
+#   XB_MODE=ssh XB_HOST=root@ppu-host XB_CTR=nerdctl  bash .../build.sh xbuild-thead-ppu
+#
+# THEAD IS BUILT DIFFERENTLY, and the difference is the backend's own: there is no builder stage
+# for it in the Dockerfile yet, and its host needs none — the sources are compiled INSIDE the
+# published SDK image with `run`, because that image is where hggc.h lives, and `run` is all a
+# docker-less host with nerdctl can do. The recipes themselves are not here: the shim tree owns
+# them in its own `build.sh`, which this arm stages and calls. Once the `xbuild-thead-ppu` stage
+# exists in the Dockerfile, this arm can switch to buildx under the same target name.
 #
 # Env:
 #   XB_PLATFORM   linux/arm64 | linux/amd64   (default: detect from the target arch)
@@ -25,7 +34,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "${HERE}/lib.sh"
 
-TARGET="${1:?usage: build.sh <TARGET>  e.g. xbuild-ascend-cann-8-910b | xbuild-nvidia-cuda-13}"
+TARGET="${1:?usage: build.sh <TARGET>  e.g. xbuild-ascend-cann-8-910b | xbuild-nvidia-cuda-13 | xbuild-thead-ppu}"
 XB_REMOTE_CTX="${XB_REMOTE_CTX:-vcann-build}"   # relative to remote $HOME
 XB_REPO="${XB_REPO:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 DOCKERFILE_REL="pack/gpustack-operator/Dockerfile"
@@ -48,8 +57,61 @@ case "${TARGET}" in
     XB_IMAGE="${XB_IMAGE:-vgpu-build:${TARGET#xbuild-nvidia-cuda-}}"
     XB_STAGE="${XB_STAGE:-/opt/vgpu}"
     ;;
-  *) echo "build.sh: unknown target '${TARGET}' (expect xbuild-ascend-cann-* or xbuild-nvidia-cuda-*)" >&2; exit 2 ;;
+  xbuild-thead-ppu)
+    XB_BACKEND=thead
+    XB_IMAGE="${XB_IMAGE:-gpustack/thead-ppu-devel:2.1.1}"
+    XB_STAGE="${XB_STAGE:-/tmp/vppu}"
+    SHIM_REL="csrc/thead/ppu-slicing-shim"
+    ;;
+  *) echo "build.sh: unknown target '${TARGET}' (expect xbuild-ascend-cann-*, xbuild-nvidia-cuda-* or xbuild-thead-ppu)" >&2; exit 2 ;;
 esac
+
+# THead: stage the shim tree onto the target and compile it inside the SDK image. It shares
+# nothing with the buildx path below, so it returns rather than threading conditionals through it.
+if [ "${XB_BACKEND}" = thead ]; then
+  XB_PLATFORM="${XB_PLATFORM:-linux/amd64}"   # the SDK ships targets/x86_64-linux and nothing else
+  xctr_resolve || { echo "build.sh: no container runtime on $(xtarget_desc)" >&2; exit 2; }
+  echo "# build ${TARGET} in ${XB_IMAGE} (${XB_PLATFORM}) on $(xtarget_desc)"
+
+  # Every source, by the tree's own layout: the module directories keep their names because the
+  # sources include each other by that path, and the compile has to resolve them exactly as a
+  # host build would.
+  for f in build.sh \
+           common/vppu.h common/vppu_log.c common/vppu_quota.h common/vppu_quota.c \
+           common/vppu_ledger.h common/vppu_ledger.c common/vppu_pid.h common/vppu_pid.c \
+           common/vppu_test.c \
+           hggc/hggc_quota.h hggc/hggc_quota.c hggc/hggc_mem.c hggc/hggc_mem_v1.c \
+           hggc/hggc_entry.c hggc/hggc_compute.c hggc/hggc_launch.c \
+           hgml/hgml_dlsym_hook.c \
+           tools/ppu_monitor.c \
+           testing/hgml_nohook.c testing/hgml_util_probe.c testing/hggc_mem_paths.c \
+           testing/dlsym_origin.c testing/dlsym_stack.c testing/hggc_launch_load.cu; do
+    [ -f "${XB_REPO}/${SHIM_REL}/${f}" ] \
+      || { echo "build.sh: source not found: ${SHIM_REL}/${f}" >&2; exit 2; }
+    xput "${XB_REPO}/${SHIM_REL}/${f}" "${XB_STAGE}/${f}" \
+      || { echo "build.sh: failed to stage ${f}" >&2; exit 2; }
+  done
+
+  # V=1 so the log shows what was compiled; the tree's build.sh is otherwise silent, which is
+  # what lets thead-case-1.sh judge "compiles clean" on empty output.
+  xsh XB_CTR="${XB_CTR}" XB_CTR_ARGS="${XB_CTR_ARGS}" IMG="${XB_IMAGE}" \
+      STAGE="${XB_STAGE}" PLATFORM="${XB_PLATFORM}" <<'PAYLOAD'
+set -u
+# shellcheck disable=SC2086  # XB_CTR_ARGS is word-split on purpose
+${XB_CTR} ${XB_CTR_ARGS} run --rm -i --platform "${PLATFORM}" \
+  -v "${STAGE}:/work" -w /work "${IMG}" bash -lc 'set -e
+  chmod +x /work/build.sh
+  V=1 /work/build.sh lib
+  V=1 /work/build.sh tool
+  V=1 /work/build.sh test
+  V=1 /work/build.sh unit
+  ls -la /work/*.so /work/ppu-monitor'
+PAYLOAD
+  rc=$?
+  [ "${rc}" -eq 0 ] || { echo "build.sh: the shim build failed (rc=${rc})"; exit 1; }
+  echo "# built the slicing shims; artifacts staged at ${XB_STAGE} on $(xtarget_desc)"
+  exit 0
+fi
 
 # Resolve platform from the target arch unless pinned.
 if [ -z "${XB_PLATFORM:-}" ]; then
