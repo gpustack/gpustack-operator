@@ -37,6 +37,14 @@ func (h *hookedMigDriver) ListInstances() ([]migLiveInstance, error) {
 	return h.fakeMigDriver.ListInstances()
 }
 
+// CardInstances runs the same hook as ListInstances: the two are the node-wide read and the per-card
+// one, and a case arming on "the Nth enumeration of this run" is counting reads of the card's state
+// whichever seam they came through.
+func (h *hookedMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	h.onList()
+	return h.fakeMigDriver.CardInstances(cardUUID)
+}
+
 func (h *hookedMigDriver) CreateInstance(
 	cardUUID, profile string, computeSlices, memorySlices int32, slot migPlacement,
 ) (migInstance, error) {
@@ -140,7 +148,9 @@ type reclaimCase struct {
 	corrupt *corruptFixture
 	// claims is the attribution self-check source; nil means no running Pod claims anything.
 	claims func() (map[string][]migPlacement, error)
-	// listHook runs before each driver ListInstances, numbered from 1 across the whole run, so a case
+	// listHook runs before each driver read of the card state — the node-wide ListInstances a pass
+	// opens with and the per-card CardInstances the destroy re-reads under the lock — numbered from 1
+	// across the whole run, so a case
 	// can act inside the snapshot-to-lock window.
 	listHook        func(t *testing.T, drv *fakeMigDriver, podsDir string, call int)
 	live            []string
@@ -452,9 +462,9 @@ func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(t *testing.T, drv *fakeMigDriver, podsDir string)
-		// wantInLockLists is the number of under-lock re-reads the destroying pass must add on top of
-		// the one enumeration every pass makes.
-		wantInLockLists int
+		// wantInLockReads is the number of under-lock re-reads the destroying pass must make: one per
+		// distinct card carrying a dead pod's markers, however many markers that card carries.
+		wantInLockReads int
 		wantDestroyed   []uint32
 	}{
 		{
@@ -463,7 +473,7 @@ func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 				seedMarkedInstanceOf(t, drv, podsDir, "pod-dead", "main", testPPUUUID0, 1, migPlacement{0, 2})
 				seedMarkedInstanceOf(t, drv, podsDir, "pod-dead", "worker", testPPUUUID0, 2, migPlacement{2, 2})
 			},
-			wantInLockLists: 1,
+			wantInLockReads: 1,
 			wantDestroyed:   []uint32{1, 2},
 		},
 		{
@@ -472,7 +482,7 @@ func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 				seedMarkedInstance(t, drv, podsDir, "pod-dead", testPPUUUID0, 1, migPlacement{0, 2})
 				seedMarkedInstance(t, drv, podsDir, "pod-dead", testPPUUUID1, 2, migPlacement{0, 2})
 			},
-			wantInLockLists: 2,
+			wantInLockReads: 2,
 			wantDestroyed:   []uint32{1, 2},
 		},
 	}
@@ -491,8 +501,11 @@ func TestReclaimEnumeratesOncePerCard(t *testing.T) {
 			}
 
 			assert.ElementsMatch(t, c.wantDestroyed, destroyedGiIDs(drv))
-			assert.Equal(t, reclaimMaxMisses+c.wantInLockLists, drv.listCalls,
-				"one node-wide enumeration per pass, plus one per distinct card with dead markers")
+			assert.Equal(t, reclaimMaxMisses, drv.listCalls,
+				"the node-wide enumeration is made once per pass and never for the under-lock re-read: "+
+					"that read happens with a card's lock held, so it must cost one card, not the node")
+			assert.Equal(t, c.wantInLockReads, drv.cardListCalls,
+				"one per-card re-read per distinct card with dead markers, shared by that card's markers")
 		})
 	}
 }

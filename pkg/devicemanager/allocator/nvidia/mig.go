@@ -89,6 +89,12 @@ type migDriver interface {
 	// carrying its card UUID, so reclaim's orphan GC can find a marker-less GI on a drained
 	// card. A MIG GI carries no operator tag, so this is the only way to see an untracked one.
 	ListInstances() ([]migLiveInstance, error)
+	// CardInstances enumerates one card's live GPU instances, for the callers that already know
+	// which card they are deciding about. It exists so the reclaim loop's verification re-read does
+	// not have to walk the node: that read happens with the card's lock held, and the node-wide walk
+	// is hundreds of NVML calls per card, every one of which would block every allocation on the card
+	// meanwhile. It errors on the same terms as ListInstances.
+	CardInstances(cardUUID string) ([]migInstance, error)
 }
 
 // cardLocks holds a per-card mutex guarding the create+marker-write (and reclaim destroy)

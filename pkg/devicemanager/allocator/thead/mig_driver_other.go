@@ -33,3 +33,5 @@ func (stubMigDriver) CreateInstance(_, _ string, _, _ int32, _ migPlacement) (mi
 func (stubMigDriver) DestroyInstance(string, migInstance) error { return errStubMigDriver }
 
 func (stubMigDriver) ListInstances() ([]migLiveInstance, error) { return nil, errStubMigDriver }
+
+func (stubMigDriver) CardInstances(string) ([]migInstance, error) { return nil, errStubMigDriver }

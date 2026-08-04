@@ -37,12 +37,14 @@ type fakeMigDriver struct {
 	inUseGiIDs map[uint32]bool
 	listErr    error
 
-	// listCalls counts the node-wide enumerations, and listHook runs before each one with that
-	// count. Together they let a case change the card's live set between the enumeration a pass
-	// opens with and the one taken under the card lock — the only way to model an out-of-band
-	// destroy plus id reuse landing inside that window.
-	listCalls int
-	listHook  func(drv *fakeMigDriver, call int)
+	// listCalls and cardListCalls count the node-wide and the per-card enumerations, and listHook
+	// runs before each of either with the combined count. Together they let a case change the card's
+	// live set between the enumeration a pass opens with and the one taken under the card lock — the
+	// only way to model an out-of-band destroy plus id reuse landing inside that window — and let one
+	// assert that the under-lock read costs a card rather than the node.
+	listCalls     int
+	cardListCalls int
+	listHook      func(drv *fakeMigDriver, call int)
 }
 
 func newFakeMigDriver() *fakeMigDriver {
@@ -103,7 +105,7 @@ func (f *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
 	defer f.mu.Unlock()
 	f.listCalls++
 	if f.listHook != nil {
-		f.listHook(f, f.listCalls)
+		f.listHook(f, f.listCalls+f.cardListCalls)
 	}
 	if f.listErr != nil {
 		return nil, f.listErr
@@ -115,6 +117,21 @@ func (f *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
 		}
 	}
 	return out, nil
+}
+
+// CardInstances returns one card's seeded live instances (the verification-re-read seam), so a caller
+// holding that card's lock never pays for the node-wide walk.
+func (f *fakeMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cardListCalls++
+	if f.listHook != nil {
+		f.listHook(f, f.listCalls+f.cardListCalls)
+	}
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return append([]migInstance(nil), f.live[cardUUID]...), nil
 }
 
 // seedLive appends a live instance to a card (an out-of-band / reusable partition).

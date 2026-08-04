@@ -304,9 +304,9 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 	unlock := lockCard(card)
 	defer unlock()
 
-	instances, lerr := r.driver.ListInstances()
+	instances, lerr := r.driver.CardInstances(card)
 	if lerr != nil {
-		r.logger.Error(lerr, "reclaim: re-list partitions before destroy, skipping this card",
+		r.logger.Error(lerr, "reclaim: re-read this card's partitions before destroy, skipping it",
 			"podUID", uid, "card", card, "partitions", len(entries))
 		return false, false
 	}
@@ -314,7 +314,7 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 	done = true
 	for i := range entries {
 		m := entries[i].marker
-		inst, present := findLiveGiOnCard(instances, card, m.GiID)
+		inst, present := findLiveGi(instances, m.GiID)
 		switch {
 		case present && (inst.UUID != m.MigUUID || inst.ProfileID != m.ProfileID):
 			r.logger.Info("reclaim: gpu-instance id reused by a different partition, dropping stale marker without destroy",
@@ -340,11 +340,11 @@ func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []mar
 	return done, inUseHit
 }
 
-// findLiveGiOnCard returns the live GPU instance with giID on the card, if the enumeration holds one.
-func findLiveGiOnCard(instances []migLiveInstance, cardUUID string, giID uint32) (migInstance, bool) {
+// findLiveGi returns the GPU instance with giID from one card's enumeration, if it holds one.
+func findLiveGi(instances []migInstance, giID uint32) (migInstance, bool) {
 	for i := range instances {
-		if instances[i].Card == cardUUID && instances[i].Inst.GiID == giID {
-			return instances[i].Inst, true
+		if instances[i].GiID == giID {
+			return instances[i], true
 		}
 	}
 	return migInstance{}, false

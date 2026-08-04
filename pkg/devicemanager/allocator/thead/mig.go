@@ -112,6 +112,12 @@ type migDriver interface {
 	// card. A GPU instance carries no operator tag, so this is the only way to see an untracked
 	// one. It errors rather than returning a list it cannot prove complete.
 	ListInstances() ([]migLiveInstance, error)
+	// CardInstances enumerates one card's live GPU instances, for the callers that already know
+	// which card they are deciding about. It exists so the reclaim loop's verification re-read does
+	// not have to walk the node: that read happens with the card's lock held, and the node-wide walk
+	// is a few thousand driver calls on a fully populated host, every one of which would block every
+	// allocation on the card meanwhile. It errors on the same terms as ListInstances.
+	CardInstances(cardUUID string) ([]migInstance, error)
 }
 
 // cardLocks holds a per-card mutex guarding the create+marker-write (and reclaim destroy) critical

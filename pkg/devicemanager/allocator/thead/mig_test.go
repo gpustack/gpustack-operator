@@ -42,11 +42,14 @@ type fakeMigDriver struct {
 
 	nextGiID    uint32
 	createCalls int
-	// stateCalls and listCalls count the per-card and the node-wide enumerations. They are the cost
-	// side of the seam contract: the node-wide one probes every card's whole profile space, so a loop
-	// that calls it once per marker instead of once per card is a defect the counts make visible.
-	stateCalls int
-	listCalls  int
+	// stateCalls, listCalls and cardListCalls count the per-card profile read, the node-wide
+	// enumeration and the per-card enumeration. They are the cost side of the seam contract: the
+	// node-wide one probes every card's whole profile space, so a loop that calls it once per marker
+	// instead of once per card is a defect the counts make visible — and so is one that reaches for it
+	// at all where it already knows which card it is deciding about.
+	stateCalls    int
+	listCalls     int
+	cardListCalls int
 	// cardStateErr, createErr and listErr inject the enumeration/actuation failures the seam
 	// contract requires to be errors rather than partial state.
 	cardStateErr error
@@ -116,6 +119,18 @@ func (f *fakeMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 	}
 	f.live[cardUUID] = kept
 	return nil
+}
+
+// CardInstances returns one card's seeded live instances (the verification-re-read seam), so a caller
+// holding that card's lock never pays for the node-wide walk.
+func (f *fakeMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cardListCalls++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return append([]migInstance(nil), f.live[cardUUID]...), nil
 }
 
 // ListInstances returns every seeded live instance across all cards (the orphan-collection seam).

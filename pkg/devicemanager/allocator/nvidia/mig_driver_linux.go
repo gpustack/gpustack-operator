@@ -3,6 +3,7 @@ package nvidia
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"gpustack.ai/gpustack/binding/nvml"
 )
@@ -13,7 +14,11 @@ import (
 // uses the stub in mig_driver_other.go instead.
 func newMigDriver() migDriver {
 	l := nvml.New()
-	return &nvmlMigDriver{lib: l, initRet: l.Init()}
+	return &nvmlMigDriver{
+		lib:      l,
+		initRet:  l.Init(),
+		profiles: make(map[string][]nvml.GpuInstanceProfileInfo_v3),
+	}
 }
 
 // nvmlMigDriver is the real migDriver, driving binding/nvml on a card addressed by GPU UUID
@@ -25,6 +30,67 @@ type nvmlMigDriver struct {
 	// initRet captures nvmlInit's result so the first device() call reports a single,
 	// actionable root cause when the library failed to load/initialize.
 	initRet nvml.Return
+
+	// profiles caches each card's MIG profile catalogue under profilesMu. The catalogue is a property
+	// of the card and of its MIG mode, and both are fixed for this process's life: a mode change is
+	// only ever picked up by a reset and a restart. Caching it is worth the state because probing it
+	// walks the whole profile id space and that walk happens on every allocation and on every reclaim
+	// pass, the latter with a card's lock held.
+	//
+	// An EMPTY catalogue is deliberately not cached. That is what a card reads as while MIG is off,
+	// and remembering it would outlive the restart that turns MIG on. The lock is real rather than
+	// theoretical: one driver value is shared by the partitioned and the visibility servers.
+	profilesMu sync.Mutex
+	profiles   map[string][]nvml.GpuInstanceProfileInfo_v3
+}
+
+// cardProfileCatalogue returns the card's MIG profile catalogue, probing NVML only the first time it
+// is asked for a card that offers any.
+func (d *nvmlMigDriver) cardProfileCatalogue(dev nvml.Device, cardUUID string) ([]nvml.GpuInstanceProfileInfo_v3, error) {
+	d.profilesMu.Lock()
+	cached, ok := d.profiles[cardUUID]
+	d.profilesMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
+	probed, err := cardProfiles(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	if len(probed) == 0 {
+		return probed, nil
+	}
+
+	d.profilesMu.Lock()
+	d.profiles[cardUUID] = probed
+	d.profilesMu.Unlock()
+	return probed, nil
+}
+
+// CardInstances enumerates one card's live GPU instances. It is the whole-node enumeration's unit of
+// work, and the reclaim loop's verification re-read calls it directly so that read costs one card
+// rather than the node while it holds that card's lock.
+func (d *nvmlMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	dev, err := d.device(cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	return d.cardInstances(dev, cardUUID)
+}
+
+// cardInstances is CardInstances over a handle the caller already resolved, so the whole-node walk
+// does not resolve every card twice. A card whose driver disclaims MIG contributes nothing.
+func (d *nvmlMigDriver) cardInstances(dev nvml.Device, cardUUID string) ([]migInstance, error) {
+	uuidByGI, err := d.migUUIDs(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	return liveInstances(dev, cardUUID, infos, uuidByGI)
 }
 
 func (d *nvmlMigDriver) device(cardUUID string) (nvml.Device, error) {
@@ -205,7 +271,7 @@ func (d *nvmlMigDriver) CardState(cardUUID, profile string, _, _ int32) (migCard
 
 	// Collect every live GPU instance across all profiles, so occupancy accounts for
 	// partitions of any profile (a 3g.20gb blocks a 1g.10gb's slot).
-	infos, err := cardProfiles(dev, cardUUID)
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
 	if err != nil {
 		return migCardState{}, err
 	}
@@ -308,15 +374,7 @@ func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
 		}
-		uuidByGI, err := d.migUUIDs(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		infos, err := cardProfiles(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		live, err := liveInstances(dev, cardUUID, infos, uuidByGI)
+		live, err := d.cardInstances(dev, cardUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +405,7 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 	if !ok {
 		return fmt.Errorf("card %s: no compute-instance profile for %d compute slices", cardUUID, inst.ComputeSlices)
 	}
-	infos, err := cardProfiles(dev, cardUUID)
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
 	if err != nil {
 		return err
 	}

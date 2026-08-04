@@ -5,6 +5,7 @@ package thead
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"gpustack.ai/gpustack/binding/hgml"
 	"gpustack.ai/gpustack/pkg/nodefeature"
@@ -16,7 +17,11 @@ import (
 // vendor symbols, so the darwin build uses the stub in mig_driver_other.go instead.
 func newMigDriver() migDriver {
 	l := hgml.New()
-	return &hgmlMigDriver{lib: l, initRet: l.Init()}
+	return &hgmlMigDriver{
+		lib:      l,
+		initRet:  l.Init(),
+		profiles: make(map[string][]hgml.GpuInstanceProfileInfo_v3),
+	}
 }
 
 // hgmlMigDriver is the real migDriver, driving the vendor management binding on a card addressed
@@ -34,6 +39,76 @@ type hgmlMigDriver struct {
 	// actionable root cause when the library failed to load or initialize, instead of failing
 	// obscurely deeper in a call that cannot possibly work.
 	initRet hgml.Return
+
+	// profiles caches each card's partition-profile catalogue under profilesMu. The catalogue is a
+	// property of the card and of its partitioning mode, and both are fixed for this process's life:
+	// a mode change is only ever picked up by a restart. Caching it is worth the state because
+	// probing it walks the vendor's whole profile id space — 85 ids, up to three library calls each,
+	// so ~255 calls — and that walk happens on every allocation and on every reclaim pass, the
+	// latter with a card's lock held.
+	//
+	// An EMPTY catalogue is deliberately not cached. That is what a card reads as while its
+	// partitioning mode is off, and remembering it would outlive the restart that turns the mode on.
+	// The lock is real rather than theoretical: one driver value is shared by the partitioned and the
+	// visibility servers.
+	profilesMu sync.Mutex
+	profiles   map[string][]hgml.GpuInstanceProfileInfo_v3
+}
+
+// cardProfileCatalogue returns the card's partition-profile catalogue, probing the driver only the
+// first time it is asked for a card that offers any.
+func (d *hgmlMigDriver) cardProfileCatalogue(dev hgml.Device, cardUUID string) ([]hgml.GpuInstanceProfileInfo_v3, error) {
+	d.profilesMu.Lock()
+	cached, ok := d.profiles[cardUUID]
+	d.profilesMu.Unlock()
+	if ok {
+		return cached, nil
+	}
+
+	probed, err := cardProfiles(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	if len(probed) == 0 {
+		return probed, nil
+	}
+
+	d.profilesMu.Lock()
+	d.profiles[cardUUID] = probed
+	d.profilesMu.Unlock()
+	return probed, nil
+}
+
+// CardInstances enumerates one card's live GPU instances. It is the whole-node enumeration's unit of
+// work, and the reclaim loop's verification re-read calls it directly so that read costs one card
+// rather than the node while it holds that card's lock.
+func (d *hgmlMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
+	dev, err := d.device(cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	return d.cardInstances(dev, cardUUID)
+}
+
+// cardInstances is CardInstances over a handle the caller already resolved, so the whole-node walk
+// does not resolve every card twice.
+func (d *hgmlMigDriver) cardInstances(dev hgml.Device, cardUUID string) ([]migInstance, error) {
+	partitioning, err := migModeEnabled(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	if !partitioning {
+		return nil, nil
+	}
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	identityByGI, err := migIdentities(dev, cardUUID)
+	if err != nil {
+		return nil, err
+	}
+	return liveInstances(dev, cardUUID, infos, identityByGI)
 }
 
 // ready reports the captured initialization failure, so a driver that cannot work says so on
@@ -397,7 +472,7 @@ func (d *hgmlMigDriver) CardState(cardUUID, profile string, _, _ int32) (migCard
 	if err != nil {
 		return migCardState{}, err
 	}
-	infos, err := cardProfiles(dev, cardUUID)
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
 	if err != nil {
 		return migCardState{}, err
 	}
@@ -443,7 +518,7 @@ func (d *hgmlMigDriver) CreateInstance(
 	if err != nil {
 		return migInstance{}, err
 	}
-	infos, err := cardProfiles(dev, cardUUID)
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
 	if err != nil {
 		return migInstance{}, err
 	}
@@ -535,23 +610,7 @@ func (d *hgmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 			return nil, fmt.Errorf("get card uuid at device index %d: %s", i, ret.Error())
 		}
 
-		partitioning, err := migModeEnabled(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		if !partitioning {
-			continue
-		}
-
-		infos, err := cardProfiles(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		identityByGI, err := migIdentities(dev, cardUUID)
-		if err != nil {
-			return nil, err
-		}
-		live, err := liveInstances(dev, cardUUID, infos, identityByGI)
+		live, err := d.cardInstances(dev, cardUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -575,7 +634,7 @@ func (d *hgmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 	if err != nil {
 		return err
 	}
-	infos, err := cardProfiles(dev, cardUUID)
+	infos, err := d.cardProfileCatalogue(dev, cardUUID)
 	if err != nil {
 		return err
 	}
