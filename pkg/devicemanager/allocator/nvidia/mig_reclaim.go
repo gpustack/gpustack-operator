@@ -26,9 +26,29 @@ const reclaimMaxMisses = 3
 // the log is the operator-visible surface.
 const reclaimMaxDestroyMisses = 8
 
+// reclaimMaxCorruptHoldMisses bounds how many consecutive reconciles an unattributable corrupt path —
+// one whose own path names no Pod, so no liveness evidence can ever retire it — may hold the node
+// before the loop surfaces an operator-visible log. The hold itself is never released (there is
+// nothing to release it on), so unlike the debounces above this bound changes no decision: it exists
+// because that hold is node-wide and permanent (no adoption on any card, no orphan GC'd on any card)
+// and must not degrade the node silently. It mirrors the NVML_ERROR_IN_USE bound's surface: an
+// operator-visible log, once, since Devices.Status is rebuilt wholesale each reconcile and a status
+// condition would be stomped.
+const reclaimMaxCorruptHoldMisses = 8
+
+// errCorruptPathUnattributable is the fault the bounded hold above reports: a path under the pod work
+// root that neither parses as a marker nor names the Pod or card it belonged to. It is carried as an
+// error rather than as message text so the operator-visible log reads like the IN_USE one.
+var errCorruptPathUnattributable = errors.New("unreadable path names neither a pod nor a card")
+
 // cardMissPrefix namespaces a per-card orphan-GC miss counter in the same misses map as the
 // per-pod counters; pod UIDs are UUIDs, so they never collide with this prefix.
 const cardMissPrefix = "card:"
+
+// corruptMissPrefix namespaces a per-corrupt-marker-path miss counter in the same misses map, so
+// retiring an unparseable marker is debounced exactly like every other liveness decision here
+// (never acted on from one transient pass). Pod UIDs are UUIDs, so they never collide with it.
+const corruptMissPrefix = "corrupt:"
 
 // reclaimer is the level-based MIG reclaim loop's state, driven by the reconciler's broadcast
 // live pod-UID set plus a periodic resync ticker (deviceplugin.RunSlicedReclaimLoop). A sliced
@@ -46,7 +66,7 @@ type reclaimer struct {
 	// same-profile Pod) never destroys an instance a running Pod holds. It is injected so the
 	// loop is table-tested without a Kubernetes client.
 	liveClaims func() (map[string][]migPlacement, error)
-	misses     map[string]int // pod UID / "card:<uuid>" -> consecutive absent-or-idle reconciles
+	misses     map[string]int // pod UID / "card:<uuid>" / "corrupt:<path>" -> consecutive absent-or-idle reconciles
 	inUse      map[string]int // pod UID -> consecutive IN_USE-failed destroy reconciles
 }
 
@@ -69,13 +89,17 @@ func newReclaimer(driver migDriver, podsDir string, logger klog.Logger, liveClai
 //     one) is destroyed only once its card is fully drained (no live Pod claims or marks it), as
 //     MetaX does for unidentifiable orphans — a MIG GI carries no operator tag, so per-pod
 //     attribution of a marker-less GI is impossible.
+//
+// An unparseable marker is not merely logged: its GPU instance is absent from the parsed
+// ownership set, so it would look exactly like a collectable orphan while a running Pod still
+// holds it. Its card is therefore held back from the drained verdict (fail closed per card, by the
+// card the corrupt file's name encodes), and the corrupt file itself is retired once its Pod — read
+// from its path — is gone, which is what lets the card converge instead of leaking a partition for
+// the node's lifetime.
 func (r *reclaimer) reconcile(livePodUIDs []string) {
 	live := sets.New[string](livePodUIDs...)
 
 	markers, corrupt := scanMarkers(r.podsDir)
-	for _, p := range corrupt {
-		r.logger.Info("reclaim: skipping unparseable marker", "path", p)
-	}
 
 	// The attribution self-check needs the live claim set; without it fail closed (skip the
 	// whole pass) rather than risk destroying an instance a running Pod holds.
@@ -143,6 +167,13 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		r.destroyPod(uid, entries, claims, liveByCard)
 	}
 
+	// Retire the corrupt markers whose Pod is gone. It runs after the per-pod decisions (a dead
+	// Pod's parseable markers are reclaimed by the same evidence) and before the orphan GC, but the
+	// corrupt list of THIS pass still holds its cards back below: the retirement is only observed
+	// by the next pass's scan, which is deliberate — the card is released once the file is provably
+	// gone, never on the strength of having just tried to remove it.
+	r.pruneCorruptMarkers(corrupt, live, touched)
+
 	// Orphan GC: a marker-less GI is destroyed only on a fully drained card.
 	orphansByCard := make(map[string][]migInstance)
 	for i := range instances {
@@ -155,7 +186,11 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	for card, orphans := range orphansByCard {
 		key := cardMissPrefix + card
 		touched.Insert(key)
-		if liveOnCard[card] {
+		// A card a corrupt marker names is never treated as drained: one of these "orphans" may be
+		// the instance that unreadable record owns, and destroying it would rip the partition out of
+		// a running container whose only ownership record was truncated. The debounce is reset, so
+		// the card starts the count from scratch once its ownership is readable again.
+		if liveOnCard[card] || ownershipUnknownOnCard(corrupt, card) {
 			r.misses[key] = 0
 			r.inUse[key] = 0
 			continue
@@ -265,19 +300,92 @@ func (r *reclaimer) removeMarker(path string) bool {
 	return true
 }
 
+// pruneCorruptMarkers retires the unparseable markers whose Pod is gone, so a truncated record
+// holds its card back only while it can still stand for something. A corrupt file's contents say
+// nothing, but its path names its Pod, and that is evidence enough on its own: once the Pod is
+// absent from the live set for reclaimMaxMisses consecutive passes — the same debounce every other
+// liveness decision in this loop uses, so a transient list gap never retires a live Pod's record —
+// the file is removed. The partition it shadowed then becomes a genuine marker-less orphan the
+// collector takes once its card drains, which is how the card converges instead of leaking a
+// partition for the node's lifetime. No card lock is needed: the Pod is dead, so no concurrent
+// Allocate is writing that path.
+//
+// Two cases are kept indefinitely, deliberately:
+//   - a corrupt marker whose Pod is alive — it still records an ownership its Pod depends on;
+//   - a corrupt path whose Pod cannot be read from it (a walk error, not a marker file at marker
+//     depth) — with no owner there is no liveness evidence to act on, and it is a filesystem fault
+//     to be repaired, not an ownership record to retire.
+//
+// The second case is permanent, and its cost is node-wide rather than per card: such a path names no
+// card either, so ownershipUnknownOnCard darkens every card — no adoption anywhere and no orphan
+// GC'd anywhere — for as long as it stays unreadable. Nothing here can fix that without destroying
+// state it cannot account for, so the hold stands; what it must not do is stand silently. The
+// bounded count below surfaces one operator-visible log naming the path, at
+// reclaimMaxCorruptHoldMisses consecutive passes, so the repair can be made by the one actor able to
+// make it.
+func (r *reclaimer) pruneCorruptMarkers(corrupt []string, live, touched sets.Set[string]) {
+	for _, path := range corrupt {
+		uid, ok := podUIDFromMarkerPath(r.podsDir, path)
+		if !ok {
+			r.holdUnattributablePath(path, touched)
+			continue
+		}
+		key := corruptMissPrefix + path
+		touched.Insert(key)
+		if live.Has(uid) {
+			r.misses[key] = 0
+			r.logger.Info("reclaim: unparseable marker of a live pod, holding its card closed", "path", path, "podUID", uid)
+			continue
+		}
+		r.misses[key]++
+		if r.misses[key] < reclaimMaxMisses {
+			continue
+		}
+		if r.removeMarker(path) {
+			delete(r.misses, key)
+			r.logger.Info("reclaim: removed unparseable marker of a dead pod", "path", path, "podUID", uid)
+		}
+	}
+}
+
+// holdUnattributablePath keeps a corrupt path whose owner cannot be read from it — there is no
+// liveness evidence any decision here could rest on — and counts the consecutive passes it has held
+// the node, surfacing one operator-visible log at reclaimMaxCorruptHoldMisses. The count shares the
+// misses map under the same corrupt-path key space as the retirement debounce; a given path is
+// attributable or not for its whole life, so the two meanings never mix on one key. The path is
+// touched so the count survives to the next pass, and disappears with the count once the path does.
+func (r *reclaimer) holdUnattributablePath(path string, touched sets.Set[string]) {
+	key := corruptMissPrefix + path
+	touched.Insert(key)
+	r.misses[key]++
+	r.logger.Info("reclaim: unparseable marker path names no pod, holding its cards closed",
+		"path", path, "passes", r.misses[key])
+	if r.misses[key] == reclaimMaxCorruptHoldMisses {
+		r.logger.Error(errCorruptPathUnattributable,
+			"reclaim: an unreadable path under the pod work root names neither a pod nor a card, so MIG ownership "+
+				"cannot be proven on ANY card of this node: no leftover partition is adopted and none is reclaimed "+
+				"while it persists; this is a filesystem fault that will not clear by itself — repair or remove the "+
+				"path",
+			"path", path, "passes", r.misses[key])
+	}
+}
+
 // destroyOrphans removes the marker-less GPU instances on a fully drained card (no live Pod). It
 // re-scans markers under the card lock and bails if the card now carries ANY marker: create+marker
 // is atomic under this same lock, so a marker appearing since the lock-free snapshot means an
 // allocation arrived and the card is no longer fully drained — its orphans wait for a later pass
-// (as MetaX keeps unidentifiable orphans while any pod holds the card). A residual
+// (as MetaX keeps unidentifiable orphans while any pod holds the card). An UNPARSEABLE marker
+// naming the card bails the same way: it is an ownership record, and the fact that its contents
+// cannot be read is exactly why the card is not provably drained — honoring only the parseable
+// ones here would destroy the partition that record owns. A residual
 // NVML_ERROR_IN_USE is a bounded retryable failure with the same condition-at-the-bound surface as
 // the per-pod path; the miss counter is cleared only when every removal succeeds.
 func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) {
 	unlock := lockCard(card)
 	defer unlock()
 
-	entries, _ := scanMarkers(r.podsDir)
-	if len(ownedGiIDsOnCard(entries, card)) > 0 {
+	entries, corrupt := scanMarkers(r.podsDir)
+	if len(ownedGiIDsOnCard(entries, card)) > 0 || ownershipUnknownOnCard(corrupt, card) {
 		return
 	}
 

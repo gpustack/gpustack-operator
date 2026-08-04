@@ -3,6 +3,8 @@ package nvidia
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -295,6 +297,128 @@ func TestReserveMigInstance_SkipsEmptyUUIDInstance(t *testing.T) {
 	assert.NotEqual(t, uint32(9), inst.GiID)
 	assert.Equal(t, migPlacement{2, 2}, inst.Placement, "the orphan's slot 0 is treated as occupied")
 	assert.NotEmpty(t, inst.UUID)
+}
+
+// writeCorruptMarker writes an unparseable marker file (a truncated write an unclean node
+// shutdown leaves behind: the name is complete, the record is not) into dir, so a scan collects it
+// as a corrupt path. dir and fileName are passed verbatim so a test can place the file where a real
+// marker lives or one level off, and name the card the corrupt record belonged to or name none.
+func writeCorruptMarker(t *testing.T, dir, fileName string) string {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dir, 0o777))
+	path := filepath.Join(dir, fileName)
+	require.NoError(t, os.WriteFile(path, []byte(`{"podUID":"pod-crash","card":"GPU-aaa`), 0o644))
+	return path
+}
+
+// TestReserveMigInstance_CorruptMarkerFailsAdoptionClosed asserts a corrupt ownership marker fails
+// adoption closed on the card its FILE NAME names, and only there: the record it can no longer
+// prove is that the leftover on that card is unowned, so adopting it could put a second Pod on a
+// partition another Pod still holds. Everything the missing record does not bear on is unaffected —
+// a fresh create in a free slot on the same card (occupancy comes from the driver, not from
+// markers) and adoption on a sibling card. A corrupt name that yields no card fails closed
+// everywhere, because the scope of what is unknown is itself unknown.
+func TestReserveMigInstance_CorruptMarkerFailsAdoptionClosed(t *testing.T) {
+	const profile = "1g.10gb"
+	// leftoverGiID/leftoverSlot describe the unmarked, geometry-matching leftover a healthy scan
+	// would adopt (a crashed create or an out-of-band tool left it behind).
+	const leftoverGiID = uint32(7)
+	leftoverSlot := migPlacement{0, 2}
+
+	cases := []struct {
+		name string
+		// corruptFile is the marker file name written unparseable under a dead pod's work dir.
+		corruptFile string
+		// mismatchedPod, when set, owns a marker that is complete and parseable but records a card its
+		// own file name does not — the other way an ownership set becomes unprovable.
+		mismatchedPod string
+		// seedLeftover seeds the adoptable leftover on the requested card.
+		seedLeftover  bool
+		wantOutcome   migReserveOutcome
+		wantCreates   int
+		wantPlacement migPlacement
+	}{
+		{
+			name:          "refuses adopting a leftover on the card the corrupt marker names",
+			corruptFile:   markerFileName(testGPUUUID0),
+			seedLeftover:  true,
+			wantOutcome:   migCreated,
+			wantCreates:   1,
+			wantPlacement: migPlacement{2, 2}, // the unadopted leftover still occupies slot 0
+		},
+		{
+			name:          "a fresh create in a free slot on that same card still succeeds",
+			corruptFile:   markerFileName(testGPUUUID0),
+			wantOutcome:   migCreated,
+			wantCreates:   1,
+			wantPlacement: migPlacement{0, 2},
+		},
+		{
+			name:          "adoption on a sibling card is unaffected",
+			corruptFile:   markerFileName(testGPUUUID1),
+			seedLeftover:  true,
+			wantOutcome:   migBound,
+			wantCreates:   0,
+			wantPlacement: leftoverSlot,
+		},
+		{
+			// A record that parses and carries every required field, but names a card its own file name
+			// does not: grouping the ownership set by the recorded card alone would leave the leftover
+			// looking unowned and hand it to this second Pod, putting two Pods on one MIG partition. It
+			// must instead count as unreadable ownership on the card its file belongs to.
+			name:          "refuses adopting a leftover while a marker's record disagrees with its file name",
+			mismatchedPod: "pod-mismatch",
+			seedLeftover:  true,
+			wantOutcome:   migCreated,
+			wantCreates:   1,
+			wantPlacement: migPlacement{2, 2},
+		},
+		{
+			name:          "a corrupt name yielding no card refuses adoption everywhere",
+			corruptFile:   markerFileName(""), // nvidia-mig-.json: a marker file naming no card
+			seedLeftover:  true,
+			wantOutcome:   migCreated,
+			wantCreates:   1,
+			wantPlacement: migPlacement{2, 2},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectLogicalSliceDirs(t)
+			drv := newFakeMigDriver()
+			drv.possible[testGPUUUID0] = evenSlots()
+			if c.seedLeftover {
+				drv.seedLive(testGPUUUID0, migInstance{
+					GiID: leftoverGiID, CiID: leftoverGiID, ComputeSlices: 1,
+					Placement: leftoverSlot, UUID: "MIG-reuse",
+				})
+			}
+			if c.corruptFile != "" {
+				writeCorruptMarker(t, deviceplugin.PodWorkDir("pod-crash", "c"), c.corruptFile)
+			}
+			if c.mismatchedPod != "" {
+				// Written at the requested card's own path, but recording the sibling card.
+				require.NoError(t, writeMarker(markerPath(c.mismatchedPod, "c", testGPUUUID0), migMarker{
+					PodUID: c.mismatchedPod, Container: "c", Card: testGPUUUID1, Profile: profile,
+					GiID: leftoverGiID, CiID: leftoverGiID, MigUUID: "MIG-reuse",
+					ComputeSlices: 1, Start: leftoverSlot.Start, Length: leftoverSlot.Length,
+				}))
+			}
+
+			inst, outcome, err := reserveMigInstance(
+				drv, deviceplugin.OperatorPodsDir, "pod-new", "c", testGPUUUID0, profile, 1, 2)
+			require.NoError(t, err, "a corrupt marker never fails the allocation outright")
+			assert.Equal(t, c.wantOutcome, outcome)
+			assert.Equal(t, c.wantCreates, drv.createCalls)
+			assert.Equal(t, c.wantPlacement, inst.Placement)
+			assert.NotEmpty(t, inst.UUID)
+			if c.wantOutcome == migBound {
+				assert.Equal(t, leftoverGiID, inst.GiID, "the sibling card's leftover is adopted")
+			} else if c.seedLeftover {
+				assert.NotEqual(t, leftoverGiID, inst.GiID, "the leftover is not adopted")
+			}
+		})
+	}
 }
 
 func TestReserveMigInstance_IdempotentRetry(t *testing.T) {

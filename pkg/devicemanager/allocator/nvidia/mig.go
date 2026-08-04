@@ -153,6 +153,15 @@ func markerPath(podUID, container, cardUUID string) string {
 
 // parseMarker reads a marker fail-closed: a missing/malformed/incomplete record is an error,
 // so the self-marker reuse and reclaim never silently mis-read a live partition.
+//
+// The recorded card must be the card the file's own NAME encodes. A record that disagrees with its
+// name is internally inconsistent, and either reading of it is unsafe: the ownership set is grouped
+// by the recorded card, so the GI the record owns would look unowned on the card the file belongs
+// to and a second Pod could adopt a partition another Pod is using; while the self-marker rebind
+// reads the record's ids against the card its path names, so it would rebind one card's GI id onto
+// another card. It is therefore refused here, which reports it to the scan as a corrupt path —
+// attributable to the card its name encodes, held closed on that card alone, and retired once its
+// Pod is gone, the same as any other unreadable record.
 func parseMarker(path string) (migMarker, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -164,6 +173,10 @@ func parseMarker(path string) (migMarker, error) {
 	}
 	if m.PodUID == "" || m.Card == "" || m.Profile == "" || m.MigUUID == "" {
 		return migMarker{}, fmt.Errorf("marker %q: incomplete record", path)
+	}
+	if card, ok := cardFromMarkerPath(path); !ok || card != m.Card {
+		return migMarker{}, fmt.Errorf(
+			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card)
 	}
 	return m, nil
 }
@@ -205,9 +218,20 @@ func writeMarker(path string, m migMarker) error {
 }
 
 // scanMarkers parses every MIG marker under podsDir. Like MetaX it is lenient: an
-// unparseable marker is collected as a corrupt path (for the caller to log) rather than
-// failing the whole scan; the fail-closed guard lives at the self-marker reuse check, scoped
-// to the owning pod's allocation on that card.
+// unparseable marker is collected as a corrupt path rather than failing the whole scan, so one
+// truncated file (an unclean node shutdown is enough) never aborts a pass.
+//
+// The corrupt list is load-bearing, not log fodder, and every caller must honor it. A corrupt
+// file's contents are unreadable, but its PATH still names the card (markerFileName) and the Pod
+// (deviceplugin.PodWorkDir) the record belonged to, and that is enough to fail closed on exactly
+// the two decisions the missing record would corrupt, on that card alone:
+//   - adoption of an unmarked leftover (reserveMigInstance) — the corrupt file may be the very
+//     record owning it, so adopting would hand one partition to a second Pod;
+//   - the drained-card verdict the orphan collector destroys on (reclaimer.reconcile and
+//     destroyOrphans) — a card whose only ownership record is corrupt is not provably drained.
+//
+// The self-marker reuse check in reserveMigInstance is a separate, narrower guard: it protects
+// only the owning Pod's own re-reservation, never another Pod's adoption or reclaim's sweep.
 func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 	_ = filepath.WalkDir(podsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -247,6 +271,71 @@ func ownedGiIDsOnCard(entries []markerEntry, cardUUID string) map[uint32]bool {
 		}
 	}
 	return owned
+}
+
+// cardFromMarkerPath returns the card UUID a marker file's NAME encodes
+// (nvidia-mig-<card>.json), which parses even when the file's contents do not — the property
+// that keeps a corrupt marker's blast radius down to one card. It reports ok=false when the base
+// name is not a marker name at all (a path a walk error collected, e.g. an unreadable directory)
+// or encodes an empty card, because such a path cannot be attributed to any one card.
+func cardFromMarkerPath(path string) (string, bool) {
+	name := filepath.Base(path)
+	if !isMarkerFile(name) {
+		return "", false
+	}
+	card := strings.TrimSuffix(strings.TrimPrefix(name, strings.TrimSuffix(markerName, ".json")+"-"), ".json")
+	if card == "" {
+		return "", false
+	}
+	return card, true
+}
+
+// podUIDFromMarkerPath returns the Pod UID a marker path encodes — markers live at
+// <podsDir>/<podUID>/c-<container>/<marker>, so the owner parses from the path even when the
+// record inside is truncated. That is what lets the reclaim loop retire a corrupt marker on
+// liveness evidence alone. It reports ok=false for a path that is not a marker file at that
+// depth, whose owner is therefore unknowable.
+func podUIDFromMarkerPath(podsDir, path string) (string, bool) {
+	if !isMarkerFile(filepath.Base(path)) {
+		return "", false
+	}
+	rel, err := filepath.Rel(podsDir, path)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 || parts[0] == "" || parts[0] == ".." {
+		return "", false
+	}
+	return parts[0], true
+}
+
+// ownershipUnknownOnCard reports whether any corrupt marker path leaves cardUUID's ownership set
+// unknowable, in which case an unmarked leftover on that card cannot be proven unbound and every
+// decision resting on that proof must fail closed. Scoping is by the card the corrupt file's name
+// encodes, so one bad file never darkens a sibling card: failing closed node-wide would let a
+// single truncated file deny a whole node's partition capacity, while failing closed on the one
+// card it names cannot.
+//
+// A corrupt path that names no card darkens every card, because the scope of what is unknown is
+// itself unknown — it may stand for markers of any card. Refusing adoption is not refusing
+// capacity (occupancy comes from the driver's live set, so a fresh create in a free slot still
+// succeeds), and a corrupt MARKER clears by itself: the reclaim loop retires it once the Pod its
+// path names is gone. A corrupt path that names no card, however, names no Pod either — a walk
+// error over a pod directory is the reachable case — so there is no liveness evidence to retire it
+// on and the loop deliberately keeps it. That hold is therefore permanent, not transient: no
+// adoption anywhere on the node and no orphan GC'd on any card, for as long as the path stays
+// unreadable. It is a filesystem fault an operator can repair, and the reclaim loop says so out
+// loud at a retry bound (reclaimMaxCorruptHoldMisses) rather than letting the node degrade
+// silently.
+func ownershipUnknownOnCard(corrupt []string, cardUUID string) bool {
+	for _, p := range corrupt {
+		card, ok := cardFromMarkerPath(p)
+		if !ok || card == cardUUID {
+			return true
+		}
+	}
+	return false
 }
 
 // reuseUnboundInstance returns a live instance on the card whose geometry matches the profile
@@ -356,10 +445,23 @@ func reserveMigInstance(
 		return migInstance{}, migCreated, fmt.Errorf("read card %s state: %w", cardUUID, err)
 	}
 
-	entries, _ := scanMarkers(podsDir)
-	owned := ownedGiIDsOnCard(entries, cardUUID)
+	// A corrupt marker naming this card makes the owned set incomplete for it, so an unmarked
+	// leftover cannot be proven unbound: refuse to adopt it (a truncated marker write is enough to
+	// reach here, and adopting would put a second Pod on a partition another Pod still owns).
+	// Only the adoption is refused — the create path below reads occupancy from the driver's live
+	// set, never from markers, so the leftover still counts as occupied and a fresh create in a
+	// free slot on this same card proceeds normally.
+	entries, corrupt := scanMarkers(podsDir)
+	var (
+		reused    migInstance
+		adoptable bool
+	)
+	if !ownershipUnknownOnCard(corrupt, cardUUID) {
+		owned := ownedGiIDsOnCard(entries, cardUUID)
+		reused, adoptable = reuseUnboundInstance(state, owned, computeSlices, memorySlices)
+	}
 
-	if reused, ok := reuseUnboundInstance(state, owned, computeSlices, memorySlices); ok {
+	if adoptable {
 		inst = reused
 		outcome = migBound
 	} else {
