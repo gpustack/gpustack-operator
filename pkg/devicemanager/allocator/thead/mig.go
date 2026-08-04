@@ -2,6 +2,7 @@ package thead
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+
+	"golang.org/x/sys/unix"
+	core "k8s.io/api/core/v1"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
@@ -431,6 +437,11 @@ const (
 //
 // A card state the driver cannot prove complete is an error, never an empty card: reading a live
 // partition as absent would hand its slot out twice.
+//
+// The outcome is only meaningful when the returned error is nil. Several error paths return a non-zero
+// outcome — the value a rollback would act on if it trusted it — so a caller must check the error
+// first and roll back nothing at all on a failed reservation: the failure has already undone whatever
+// it did.
 func reserveMigInstance(
 	drv migDriver, podsDir, podUID, container, cardUUID, profile string, computeSlices, memorySlices int32,
 ) (inst migInstance, outcome migReserveOutcome, err error) {
@@ -565,4 +576,352 @@ func resourceForCard(devs *workercore.Devices, cardUUID string) deviceplugin.Res
 		}
 	}
 	return deviceplugin.Resource{Device: cardUUID}
+}
+
+// hostDevDir and hostProcDriverDir are the roots of the vendor's device nodes and of the driver's
+// procfs capability tree. They are vars rather than consts so a test can point them at a temporary
+// directory instead of reading the host's own /dev and /proc.
+var (
+	hostDevDir        = "/dev"
+	hostProcDriverDir = "/proc/driver"
+)
+
+// The device-node and procfs capability layout below comes from the vendor's container-isolation
+// documentation, and remains subject to confirmation on hardware. That documentation's own example
+// injects exactly the five nodes a partitioned container is given here — the two shared control nodes,
+// the parent card's node, and the capability nodes of one GPU instance and its compute instance — and
+// describes the result as a container that can use that one partition and see no other device. There
+// is no environment-variable equivalent and no runtime hook: these nodes are the whole of the
+// container's access.
+const (
+	// devControlName and devCtlName are the shared control nodes every container addressing any
+	// partition needs. They are not per card, so they are addressed by name alone.
+	devControlName = "alixpu"
+	devCtlName     = "alixpu_ctl"
+	// devCardPrefix names a card's own device node, suffixed by the driver's card ordinal.
+	devCardPrefix = "alixpu_ppu"
+	// devCapDir and devCapPrefix name a capability node, which is addressed by its minor number
+	// alone — the number the driver publishes in procfs, never one computed here.
+	devCapDir    = "alixpu-caps"
+	devCapPrefix = "alixpu-cap"
+	// procDriverName is the driver's own directory under the procfs driver root, holding the
+	// capability tree.
+	procDriverName = "alixpu"
+	// procCapMinorField is the field an access file carries its capability node's minor number on.
+	procCapMinorField = "DeviceFileMinor:"
+)
+
+// sharedControlNodePaths returns the vendor's shared control nodes, needed once per container.
+func sharedControlNodePaths() []string {
+	return []string{
+		filepath.Join(hostDevDir, devControlName),
+		filepath.Join(hostDevDir, devCtlName),
+	}
+}
+
+// cardNodePath returns the device node of the card with the given driver ordinal.
+func cardNodePath(ordinal uint32) string {
+	return filepath.Join(hostDevDir, devCardPrefix+strconv.FormatUint(uint64(ordinal), 10))
+}
+
+// capNodePath returns the capability device node carrying the given minor number.
+func capNodePath(minor uint32) string {
+	return filepath.Join(hostDevDir, devCapDir, devCapPrefix+strconv.FormatUint(uint64(minor), 10))
+}
+
+// cardCapDir returns the procfs capability directory holding one card's partition access files. The
+// card is always named by its numeric driver ordinal, so this can never address the tree's card-less
+// branch — the driver's own config and monitor capabilities, which sit beside the per-card directories
+// rather than under one of them.
+func cardCapDir(ordinal uint32) string {
+	return filepath.Join(hostProcDriverDir, procDriverName, "capabilities",
+		"ppu"+strconv.FormatUint(uint64(ordinal), 10), "mig")
+}
+
+// giAccessPath returns the procfs access file of a GPU instance on a card.
+func giAccessPath(ordinal, giID uint32) string {
+	return filepath.Join(cardCapDir(ordinal), "gi"+strconv.FormatUint(uint64(giID), 10), "access")
+}
+
+// ciAccessPath returns the procfs access file of a compute instance inside its GPU instance.
+func ciAccessPath(ordinal, giID, ciID uint32) string {
+	return filepath.Join(cardCapDir(ordinal),
+		"gi"+strconv.FormatUint(uint64(giID), 10), "ci"+strconv.FormatUint(uint64(ciID), 10), "access")
+}
+
+// readCapMinor reads a capability node's minor number from the driver's procfs access file, failing
+// closed on a file it cannot read or cannot find the field in.
+//
+// The number must be resolved at allocation time and must never be cached at detection time. The
+// vendor's numbering is neither per card nor sequential nor derivable from the instance ids — its
+// documented example places the first GPU instance's capability at 256 while another instance's sits
+// at 1280 and that instance's first compute instance at 1281, with unrelated capabilities numbered
+// before any partition exists — and the numbers are reassigned as partitions are created and
+// destroyed. A cached value would therefore eventually address a stranger's partition.
+func readCapMinor(path string) (uint32, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("read capability file: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), procCapMinorField)
+		if !ok {
+			continue
+		}
+		minor, perr := strconv.ParseUint(strings.TrimSpace(rest), 10, 32)
+		if perr != nil {
+			return 0, fmt.Errorf("capability file %q: parse %s %w", path, procCapMinorField, perr)
+		}
+		return uint32(minor), nil
+	}
+	return 0, fmt.Errorf("capability file %q carries no %s field", path, procCapMinorField)
+}
+
+// deviceNodeMinor reports the minor number of the character device at a path. It is a package var so a
+// test can substitute the single fact it cannot produce in a temporary directory without root — a real
+// character device — while the path's existence stays a genuine filesystem property.
+var deviceNodeMinor = statDeviceNodeMinor
+
+// statDeviceNodeMinor stats path and reports its device minor number, erroring when the path is absent
+// or is not a character device.
+func statDeviceNodeMinor(path string) (uint32, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0, err
+	}
+	if fi.Mode()&os.ModeCharDevice == 0 {
+		return 0, fmt.Errorf("%q is not a character device", path)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, fmt.Errorf("%q exposes no device numbers", path)
+	}
+	// The Rdev field is platform-typed — uint64 on linux, int32 on the development platform — so this
+	// conversion is REQUIRED to compile there and redundant on linux, which is why it carries a
+	// directive rather than being "cleaned up": removing it breaks the development build, and no single
+	// untagged expression satisfies the linter on both. Note this file carries no build tag at all;
+	// touching a platform-typed syscall field is enough to make an ordinary file lint differently per
+	// platform, which is not the same trap as a _linux.go seam skipping the local checks.
+	return unix.Minor(uint64(st.Rdev)), nil //nolint:unconvert // platform-typed Rdev, see above
+}
+
+// newPartitionDeviceSpec renders one verified node as a read-write device specification.
+func newPartitionDeviceSpec(path string) *deviceplugin.DeviceSpec {
+	return &deviceplugin.DeviceSpec{
+		ContainerPath: path,
+		HostPath:      path,
+		Permissions:   "rw",
+	}
+}
+
+// requireDeviceNode verifies a node the partition's device set needs and returns its specification.
+//
+// It deliberately does not use the shared device-spec helper, which returns nil for a path that does
+// not exist: the whole-card responder appends only what is non-nil, so reusing that helper here would
+// turn a missing node into a SUCCESSFUL allocation carrying a silently incomplete device set. A
+// partition needs every node in its set, so an absent one — or one that is not a character device —
+// fails the allocation.
+func requireDeviceNode(path string) (*deviceplugin.DeviceSpec, error) {
+	if _, err := deviceNodeMinor(path); err != nil {
+		return nil, fmt.Errorf("device node %q: %w", path, err)
+	}
+	return newPartitionDeviceSpec(path), nil
+}
+
+// requireNumberedDeviceNode verifies a node whose minor number is its identity — a card's node, whose
+// minor is its ordinal plus one, and a capability node, whose minor is the one procfs published for it.
+// A node carrying a different number is a /dev tree that disagrees with the driver, so it fails the
+// allocation rather than being handed over as if it were the right one.
+func requireNumberedDeviceNode(path string, wantMinor uint32) (*deviceplugin.DeviceSpec, error) {
+	minor, err := deviceNodeMinor(path)
+	if err != nil {
+		return nil, fmt.Errorf("device node %q: %w", path, err)
+	}
+	if minor != wantMinor {
+		return nil, fmt.Errorf("device node %q carries minor %d, want %d: fail closed", path, minor, wantMinor)
+	}
+	return newPartitionDeviceSpec(path), nil
+}
+
+// cardOrdinal returns the driver card ordinal of cardUUID — the detector's accelerator index, which is
+// what both the card's device node and its procfs capability subtree are keyed by, so one value serves
+// both and they cannot diverge. It reports ok=false when the card is absent from devs, or when the
+// card's recorded minor number is not its ordinal plus one.
+//
+// That offset is what makes the ordinal provable. The accelerator index is a post-filter counter: it
+// advances only for a card the detector accepted, so a card skipped mid-enumeration shifts every later
+// card's index down by one and silently desynchronizes it from the driver's ordinal. The vendor's
+// shared control node occupies minor 0 of the same character-device major as the per-card nodes, so a
+// card's minor number is its ordinal plus one — an invariant the recorded minor gives for free.
+// Addressing a card that violates it would hand a container the next card's node.
+func cardOrdinal(devs *workercore.Devices, cardUUID string) (uint32, bool) {
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if acc.ID != cardUUID {
+				continue
+			}
+			if len(acc.PhysicalIndexes) == 0 || acc.PhysicalIndexes[0] != acc.Index+1 {
+				return 0, false
+			}
+			return acc.Index, true
+		}
+	}
+	return 0, false
+}
+
+// partitionDeviceSpecs returns the device specifications a container needs to address exactly one
+// partition on one card: the parent card's node, then the capability nodes of the GPU instance and of
+// its compute instance. The shared control nodes are not included — they are per container rather than
+// per card, so the caller adds them once.
+//
+// Every node is required. This vendor has no container-runtime hook, so the injected nodes are the
+// whole of the container's access: too few leaves the partition unusable, and a node belonging to
+// another card or another partition re-opens the isolation the partition exists to provide.
+func partitionDeviceSpecs(ordinal uint32, inst migInstance) ([]*deviceplugin.DeviceSpec, error) {
+	// The card node's minor is its ordinal plus one — the same invariant cardOrdinal proved against
+	// the detector's record, re-checked here against the node the container is actually handed.
+	card, err := requireNumberedDeviceNode(cardNodePath(ordinal), ordinal+1)
+	if err != nil {
+		return nil, err
+	}
+
+	specs := []*deviceplugin.DeviceSpec{card}
+	for _, access := range []string{
+		giAccessPath(ordinal, inst.GiID),
+		ciAccessPath(ordinal, inst.GiID, inst.CiID),
+	} {
+		minor, merr := readCapMinor(access)
+		if merr != nil {
+			return nil, merr
+		}
+		spec, derr := requireNumberedDeviceNode(capNodePath(minor), minor)
+		if derr != nil {
+			return nil, derr
+		}
+		specs = append(specs, spec)
+	}
+	return specs, nil
+}
+
+// ActuatePhysicalSliced materializes one partition of profile per allocated card, serialized per card
+// by the card lock, records each chosen placement upward for the ledger reconciler, and returns the
+// container response injecting the partitions' device nodes: the shared control nodes once, then each
+// card's own node and the capability nodes of its partition's GPU and compute instances.
+//
+// Nothing is delegated to a container runtime here, so the response's device specifications are the
+// whole of the container's access and are assembled fail-closed — any node it cannot produce fails the
+// allocation. On any card's failure it rolls back exactly what this call did, per the per-card
+// reservation outcome, so no half-owned Pod persists and no partition a prior allocation owns is
+// touched.
+//
+// This is one half of the physical-sliced responder capability; the compile-time assertion that the
+// server implements the whole of it belongs with the other half, the visibility response.
+func (s *server) ActuatePhysicalSliced(
+	_ context.Context,
+	pod *core.Pod,
+	ctr *core.Container,
+	devs *workercore.Devices,
+	allocated map[deviceplugin.Resource]int32,
+	profile string,
+) (*deviceplugin.PhysicalSlicedAllocation, error) {
+	if s.mig == nil {
+		return nil, fmt.Errorf("mig actuator not configured")
+	}
+
+	cards := allocatedCards(devs, allocated)
+	if len(cards) == 0 {
+		return nil, fmt.Errorf("no allocated card for physical-slice container %q", ctr.Name)
+	}
+
+	// The shared control nodes are verified before anything is reserved: they are needed by every
+	// card's partition, so a node set that cannot include them is a failure worth taking for free.
+	sharedPaths := sharedControlNodePaths()
+	devices := make([]*deviceplugin.DeviceSpec, 0, len(sharedPaths)+3*len(cards))
+	for _, path := range sharedPaths {
+		spec, err := requireDeviceNode(path)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, spec)
+	}
+
+	placements := make(map[deviceplugin.Resource][]workercore.AcceleratorPhysicalPlacement, len(cards))
+	// results records how each card resolved so rollback undoes exactly this call's work under the same
+	// per-card lock the create took (so it never races a concurrent same-card allocation's state read,
+	// and never removes a marker or destroys an instance a prior allocation owns).
+	type cardResult struct {
+		card    string
+		inst    migInstance
+		outcome migReserveOutcome
+	}
+	var results []cardResult
+	rollback := func() {
+		for i := range results {
+			r := results[i]
+			unlock := lockCard(r.card)
+			switch r.outcome {
+			case migCreated:
+				_ = s.mig.DestroyInstance(r.card, r.inst)
+				_ = os.Remove(markerPath(deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, r.card))
+			case migBound:
+				// The instance was pre-existing (adopted), so only drop our ownership marker,
+				// returning it to the unbound pool; reclaim destroys it once the card drains.
+				_ = os.Remove(markerPath(deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, r.card))
+			case migRebound:
+				// A prior allocation owns this marker and instance; leave both intact.
+			}
+			unlock()
+		}
+	}
+
+	for _, cardUUID := range cards {
+		computeSlices, memorySlices, ok := profileGeometry(devs, cardUUID, profile)
+		if !ok {
+			rollback()
+			return nil, fmt.Errorf("card %s has no physical-slice profile %q", cardUUID, profile)
+		}
+		// The ordinal is proven before the reservation, so a card whose index cannot be trusted costs
+		// no create: it is refused with a warning rather than addressed, since addressing it would
+		// inject a neighboring card's node.
+		ordinal, ok := cardOrdinal(devs, cardUUID)
+		if !ok {
+			s.Logger.Info("refusing a partition on a card whose recorded minor number is not its accelerator "+
+				"index plus one; the index cannot be trusted to address the driver's card",
+				"card", cardUUID, "profile", profile, "container", ctr.Name)
+			rollback()
+			return nil, fmt.Errorf(
+				"card %s: recorded minor number is not its accelerator index plus one: fail closed", cardUUID)
+		}
+
+		unlock := lockCard(cardUUID)
+		inst, outcome, err := reserveMigInstance(
+			s.mig, deviceplugin.OperatorPodsDir, string(pod.UID), ctr.Name, cardUUID, profile, computeSlices, memorySlices)
+		unlock()
+		if err != nil {
+			rollback()
+			return nil, err
+		}
+		results = append(results, cardResult{card: cardUUID, inst: inst, outcome: outcome})
+
+		specs, derr := partitionDeviceSpecs(ordinal, inst)
+		if derr != nil {
+			rollback()
+			return nil, fmt.Errorf("card %s partition device nodes: %w", cardUUID, derr)
+		}
+		devices = append(devices, specs...)
+
+		res := resourceForCard(devs, cardUUID)
+		placements[res] = []workercore.AcceleratorPhysicalPlacement{
+			{Start: inst.Placement.Start, Length: inst.Placement.Length},
+		}
+	}
+
+	return &deviceplugin.PhysicalSlicedAllocation{
+		Profile:    profile,
+		Placements: placements,
+		Response:   &deviceplugin.ContainerAllocateResponse{Devices: devices},
+		Rollback:   rollback,
+	}, nil
 }
