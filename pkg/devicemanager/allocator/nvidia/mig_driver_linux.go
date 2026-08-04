@@ -29,11 +29,11 @@ type nvmlMigDriver struct {
 
 func (d *nvmlMigDriver) device(cardUUID string) (nvml.Device, error) {
 	if !d.initRet.IsSuccess() {
-		return nvml.Device{}, fmt.Errorf("nvml init failed: %s", d.initRet)
+		return nvml.Device{}, fmt.Errorf("nvml init failed: %w", d.initRet)
 	}
 	dev, ret := d.lib.DeviceGetHandleByUUID(cardUUID)
 	if !ret.IsSuccess() {
-		return nvml.Device{}, fmt.Errorf("get nvml handle for %s: %s", cardUUID, ret)
+		return nvml.Device{}, fmt.Errorf("get nvml handle for %s: %w", cardUUID, ret)
 	}
 	return dev, nil
 }
@@ -100,7 +100,7 @@ func (d *nvmlMigDriver) CardState(cardUUID, profile string, _, _ int32) (migCard
 	}
 	possibleSlots, ret := dev.GetGpuInstancePossiblePlacements(targetID)
 	if !ret.IsSuccess() {
-		return migCardState{}, fmt.Errorf("card %s: get possible placements: %s", cardUUID, ret)
+		return migCardState{}, fmt.Errorf("card %s: get possible placements: %w", cardUUID, ret)
 	}
 	possible := make([]migPlacement, 0, len(possibleSlots))
 	for i := range possibleSlots {
@@ -156,20 +156,20 @@ func (d *nvmlMigDriver) CreateInstance(
 	placement := &nvml.GpuInstancePlacement{Start: uint32(slot.Start), Size: uint32(slot.Length)}
 	gi, ret := dev.CreateGpuInstanceWithPlacement(giInfo, placement)
 	if !ret.IsSuccess() {
-		return migInstance{}, fmt.Errorf("card %s: create gpu instance: %s", cardUUID, ret)
+		return migInstance{}, fmt.Errorf("card %s: create gpu instance: %w", cardUUID, ret)
 	}
 	giID := gi.GetInfo().Id
 
 	ciInfo, ret := gi.GetComputeInstanceProfileInfo(ciIDs.ComputeInstanceProfileID, ciIDs.ComputeInstanceEngineProfileID)
 	if !ret.IsSuccess() {
 		_ = gi.Destroy()
-		return migInstance{}, fmt.Errorf("card %s: get compute-instance profile info: %s", cardUUID, ret)
+		return migInstance{}, fmt.Errorf("card %s: get compute-instance profile info: %w", cardUUID, ret)
 	}
 	ci, ret := gi.CreateComputeInstance(&ciInfo)
 	if !ret.IsSuccess() {
 		// Mirror mig-parted's cleanup: a GI without its CI is unusable, so destroy it.
 		_ = gi.Destroy()
-		return migInstance{}, fmt.Errorf("card %s: create compute instance: %s", cardUUID, ret)
+		return migInstance{}, fmt.Errorf("card %s: create compute instance: %w", cardUUID, ret)
 	}
 
 	// Resolve the MIG-device UUID (NVIDIA_VISIBLE_DEVICES) for the just-created GI.
@@ -195,11 +195,11 @@ func (d *nvmlMigDriver) CreateInstance(
 // placements (orphan destroy needs only the ids + compute slices, not a slot to fill).
 func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf("nvml init failed: %s", d.initRet)
+		return nil, fmt.Errorf("nvml init failed: %w", d.initRet)
 	}
 	count, ret := d.lib.DeviceGetCount()
 	if !ret.IsSuccess() {
-		return nil, fmt.Errorf("get device count: %s", ret)
+		return nil, fmt.Errorf("get device count: %w", ret)
 	}
 	var out []migLiveInstance
 	for i := 0; i < count; i++ {
@@ -270,7 +270,7 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 						if r == nvml.ERROR_IN_USE {
 							return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, errInstanceInUse)
 						}
-						return fmt.Errorf("card %s: destroy compute instance: %s", cardUUID, r)
+						return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, r)
 					}
 				}
 			}
@@ -278,7 +278,7 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 				if r == nvml.ERROR_IN_USE {
 					return fmt.Errorf("card %s: destroy gpu instance %d: %w", cardUUID, inst.GiID, errInstanceInUse)
 				}
-				return fmt.Errorf("card %s: destroy gpu instance %d: %s", cardUUID, inst.GiID, r)
+				return fmt.Errorf("card %s: destroy gpu instance %d: %w", cardUUID, inst.GiID, r)
 			}
 			return nil
 		}

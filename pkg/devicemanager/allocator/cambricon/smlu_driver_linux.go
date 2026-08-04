@@ -31,11 +31,11 @@ type cndevSMLUDriver struct {
 
 func (d *cndevSMLUDriver) device(card string) (cndev.Device, error) {
 	if !d.initRet.IsSuccess() {
-		return cndev.Device{}, fmt.Errorf("cndev init failed: %s", d.initRet)
+		return cndev.Device{}, fmt.Errorf("cndev init failed: %w", d.initRet)
 	}
 	dev, ret := d.lib.GetDeviceHandleByPciBusId(card)
 	if !ret.IsSuccess() {
-		return cndev.Device{}, fmt.Errorf("get cndev handle for %s: %s", card, ret)
+		return cndev.Device{}, fmt.Errorf("get cndev handle for %s: %w", card, ret)
 	}
 	return dev, nil
 }
@@ -49,7 +49,7 @@ func (d *cndevSMLUDriver) EnsureSMLUMode(card string) error {
 		return nil
 	}
 	if ret := dev.SetSMLUMode(true); !ret.IsSuccess() {
-		return fmt.Errorf("card %s: set smlu mode: %s", card, ret)
+		return fmt.Errorf("card %s: set smlu mode: %w", card, ret)
 	}
 	return nil
 }
@@ -62,7 +62,7 @@ func (d *cndevSMLUDriver) CreateProfile(card string, coresPct int, memMiB int64)
 	mluQuota, memorySize := smluSetFor(coresPct, memMiB)
 	id, ret := dev.CreateSMluProfile(cndev.SMluSet{MluQuota: mluQuota, MemorySize: memorySize})
 	if !ret.IsSuccess() {
-		return 0, fmt.Errorf("card %s: create smlu profile: %s", card, ret)
+		return 0, fmt.Errorf("card %s: create smlu profile: %w", card, ret)
 	}
 	return id, nil
 }
@@ -73,7 +73,7 @@ func (d *cndevSMLUDriver) DestroyProfile(card string, profileID int32) error {
 		return err
 	}
 	if ret := dev.DestroySMluProfile(profileID); !ret.IsSuccess() {
-		return fmt.Errorf("card %s: destroy smlu profile %d: %s", card, profileID, ret)
+		return fmt.Errorf("card %s: destroy smlu profile %d: %w", card, profileID, ret)
 	}
 	return nil
 }
@@ -84,12 +84,12 @@ func (d *cndevSMLUDriver) CreateInstance(card string, profileID int32, name stri
 		return smluInstance{}, err
 	}
 	if ret := dev.CreateSMluInstance(uint32(profileID), name); !ret.IsSuccess() {
-		return smluInstance{}, fmt.Errorf("card %s: create smlu instance %q: %s", card, name, ret)
+		return smluInstance{}, fmt.Errorf("card %s: create smlu instance %q: %w", card, name, ret)
 	}
 	// Read the created instance back to recover its device node.
 	infos, ret := dev.GetAllSMluInstanceInfo()
 	if !ret.IsSuccess() {
-		return smluInstance{}, fmt.Errorf("card %s: list smlu instances after create: %s", card, ret)
+		return smluInstance{}, fmt.Errorf("card %s: list smlu instances after create: %w", card, ret)
 	}
 	for i := range infos {
 		if infos[i].GetInstanceName() == name {
@@ -105,18 +105,18 @@ func (d *cndevSMLUDriver) DestroyInstance(card, name string) error {
 		return err
 	}
 	if ret := dev.DestroySMluInstanceByName(name); !ret.IsSuccess() && ret != cndev.ERROR_NOT_FOUND {
-		return fmt.Errorf("card %s: destroy smlu instance %q: %s", card, name, ret)
+		return fmt.Errorf("card %s: destroy smlu instance %q: %w", card, name, ret)
 	}
 	return nil
 }
 
 func (d *cndevSMLUDriver) ListInstances() ([]smluInstance, error) {
 	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf("cndev init failed: %s", d.initRet)
+		return nil, fmt.Errorf("cndev init failed: %w", d.initRet)
 	}
 	count, ret := d.lib.GetDeviceCount()
 	if !ret.IsSuccess() {
-		return nil, fmt.Errorf("get cndev device count: %s", ret)
+		return nil, fmt.Errorf("get cndev device count: %w", ret)
 	}
 	var out []smluInstance
 	for i := 0; i < count; i++ {
@@ -124,16 +124,16 @@ func (d *cndevSMLUDriver) ListInstances() ([]smluInstance, error) {
 		// profile GC treat a still-referenced profile as orphaned and destroy it.
 		dev, ret := d.lib.GetDeviceHandleByIndex(i)
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get cndev handle for device %d: %s", i, ret)
+			return nil, fmt.Errorf("get cndev handle for device %d: %w", i, ret)
 		}
 		pcie, ret := dev.GetPCIeInfoV().V2()
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get pcie info for device %d: %s", i, ret)
+			return nil, fmt.Errorf("get pcie info for device %d: %w", i, ret)
 		}
 		card := pcie.GetBusId()
 		infos, ret := dev.GetAllSMluInstanceInfo()
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("list smlu instances on %s: %s", card, ret)
+			return nil, fmt.Errorf("list smlu instances on %s: %w", card, ret)
 		}
 		for j := range infos {
 			out = append(out, instanceFromInfo(card, infos[j]))
@@ -144,26 +144,26 @@ func (d *cndevSMLUDriver) ListInstances() ([]smluInstance, error) {
 
 func (d *cndevSMLUDriver) ListProfiles() ([]profileKey, error) {
 	if !d.initRet.IsSuccess() {
-		return nil, fmt.Errorf("cndev init failed: %s", d.initRet)
+		return nil, fmt.Errorf("cndev init failed: %w", d.initRet)
 	}
 	count, ret := d.lib.GetDeviceCount()
 	if !ret.IsSuccess() {
-		return nil, fmt.Errorf("get cndev device count: %s", ret)
+		return nil, fmt.Errorf("get cndev device count: %w", ret)
 	}
 	var out []profileKey
 	for i := 0; i < count; i++ {
 		dev, ret := d.lib.GetDeviceHandleByIndex(i)
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get cndev handle for device %d: %s", i, ret)
+			return nil, fmt.Errorf("get cndev handle for device %d: %w", i, ret)
 		}
 		pcie, ret := dev.GetPCIeInfoV().V2()
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("get pcie info for device %d: %s", i, ret)
+			return nil, fmt.Errorf("get pcie info for device %d: %w", i, ret)
 		}
 		card := pcie.GetBusId()
 		ids, ret := dev.GetSMluProfileIds()
 		if !ret.IsSuccess() {
-			return nil, fmt.Errorf("list smlu profiles on %s: %s", card, ret)
+			return nil, fmt.Errorf("list smlu profiles on %s: %w", card, ret)
 		}
 		for _, id := range ids {
 			out = append(out, profileKey{card: card, profileID: id})
