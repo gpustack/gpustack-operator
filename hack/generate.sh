@@ -68,6 +68,14 @@ function _generate_binding() {
   for h in "${src}"/*.h; do
     cp -f "${h}" "${dst}"
     dst_h="${dst}/$(basename "${h}")"
+    # Declare bool, which the hgml header uses without including stdbool.h,
+    # as the generator's parser has no bool keyword. Scoped to hgml: the vendors
+    # including stdbool.h define bool as a macro expanding to _Bool.
+    if [[ "${runtime}" == "hgml" ]]; then
+      gpustack::util::awk_inplace \
+        'NR==1{print "typedef _Bool bool;"} {print}' \
+        "${dst_h}"
+    fi
     # Expand typedef struct to struct with handle field.
     gpustack::util::sed_inplace -E \
       -e 's#(typedef\s+struct)\s+([A-Za-z_][A-Za-z0-9_]*)(\*)\s+(.*_t);#\1\n{\n    struct \2\3 handle;\n} \4;#g' \
@@ -106,8 +114,8 @@ function _generate_binding() {
     && go fmt "zz_generated.types.go" >/dev/null \
     && popd >/dev/null 2>&1
 
-  # Clean up
-  rm -rf "${dst}/config.yaml" "${dst}/cgo_helpers.go" "${dst}/types.go" "${dst}/_obj"
+  # Clean up. The godefs step also leaves object files behind, which no .gitignore covers.
+  rm -rf "${dst}/config.yaml" "${dst}/cgo_helpers.go" "${dst}/types.go" "${dst}/_obj" "${dst}"/*.o
 }
 
 function generate_binding() {
