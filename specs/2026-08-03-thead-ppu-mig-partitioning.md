@@ -1479,6 +1479,40 @@ verified rather than assumed. The stale `/dev` capability nodes were deliberatel
 Item 3 of the Phase 4 list — stale extended resources — did not arise, because the deployed release predates
 this feature and never advertised a partition key.
 
+### A third window, on NVIDIA hardware
+
+The two windows above ran on the PPU. Three of this branch's changes are NVIDIA-side, though — the
+version-ordered profile-info probe, the locked re-read in the MIG reclaimer, and the device-plugin's
+partition credit fold — and none of them had ever been exercised on an NVIDIA card. A third window ran them
+on a **single-card H100 80GB node** (driver 580.x, CUDA 13.0) in a managed Kubernetes cluster provisioned for
+the run and destroyed immediately after, with the operator deployed from this branch's final code.
+
+**Detection and publication.** With MIG enabled the node advertised the partition family, the units key at
+the whole-card basis, and one key per offered profile — six of them, each carrying its own per-instance
+memory and its full placement list. The `+me` engine variant the driver also offers was correctly excluded,
+and the profile names were the driver's own with the vendor's `MIG ` prefix stripped. The detector logged no
+error at all across the window.
+
+**The credit fold, which this window is what motivated.** A partition Pod submitted **without** a queue
+label — the path both Pod webhooks are scoped away from — charged its card the profile's real cost:
+`remaining` fell by exactly the fold of the profile's memory into the per-card basis, and the durable
+allocation record carried the same figure and the profile's name, with a real hardware instance on the card
+to match. Before the fix that same Pod charged **one** unit, leaving a card carved to a seventh of its
+memory reading as untouched. Deleting it returned the ledger to its starting value exactly and destroyed the
+instance.
+
+**The pre-existing reclaim window, observed twice more.** A same-profile replacement requested while the
+predecessor's instance is still awaiting its reclaim debounce is refused. With the locked re-read in place
+the refusal is now *clean* — one terminal allocation failure, no stale instance identity handed to the
+kubelet — and a replacement that retries converges by itself, measured at 45 seconds. A single-shot
+replacement on a card with no free room still surfaces as `UnexpectedAdmissionError`. That window is a
+pre-existing defect of the shared reclaim path, not of this feature; what this branch changed is that
+failing inside it no longer risks a destroyed instance being handed out.
+
+Of the suite's ten partition scenarios, seven applied to a single-card node and were run: six passed
+outright, and the one failing check is the reclaim window above. The other three need either a second card
+or a dual-socket `single-numa-node` node, so they were not run at all rather than reported as passing.
+
 **Checkpoints.** After T1+T2+T11 the foundations are green and the seam has real symbols to compile against.
 After T3+T4 the capability and the pure core are green with no hardware. After T6+T7+T8 the feature is
 complete and locally verified. T10 is the hardware gate.
@@ -1508,7 +1542,7 @@ follows.
 | `feat(nodefeature)`: publish a thead partition profile name with the separator | T17 |
 | `refactor(devicemanager)`: read a mig profile's span only from the driver's placements | T18 |
 | `fix(devicemanager)`: publish an allocator's ownership record durably, not just atomically | T19 |
-| `docs(spec)`: record the plan, both hardware windows and what shipped | T10, and this file |
+| `docs(spec)`: record the plan, all three hardware windows and what shipped | T10, and this file |
 | `fix(devicemanager)`: bound the hold a live pod's unreadable ownership record takes | T20 |
 | `fix(devicemanager)`: stop one unreadable drm directory killing a node's device plugin | T21 |
 | `fix(binding)`: serialize the dynamic-library symbol cache | T22 |
