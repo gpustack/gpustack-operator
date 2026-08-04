@@ -13,7 +13,7 @@ ARG UBUNTU_IMAGE="ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49
 
 # Logical-slicing preload-library sources, cloned inline per build stage at a pinned
 # commit (no git submodule). Bump the commit to update; the ARG busts the build cache.
-ARG LIB_UBS_VIRT_ENPU_COMMIT="9f8c779685edeb0939a681922bb56f09128f3445"
+ARG LIB_UBS_VIRT_ENPU_COMMIT="bac3d461c9312acfaa388bed89e9ed2a61971d1a"
 ARG LIB_HAMI_CORE_COMMIT="52f33fc7fa1fbb3f08148ab076d0e7447bec7f2a"
 
 # =============================================================================
