@@ -48,9 +48,10 @@ upstream's own writes to it are.
 This hook's own fprintf diagnostics are direct rather than routed through log_print, so
 they are unaffected and still reach the operator.
 
-AGAINST: ubs-virt 9f8c779685edeb0939a681922bb56f09128f3445 (the pin in
+AGAINST: ubs-virt bac3d461c9312acfaa388bed89e9ed2a61971d1a (the pin in
 pack/gpustack-operator/Dockerfile), subdir ubs-virt-enpu/vcann-rt. Applied by
 external/ascend/build-libvnpu.sh with `patch -p1` in its work copy of that subdir.
+The hunks apply byte-clean to that pin; only this reference moved.
 
 REFRESHED from 476bb968d477a4eab7719197af212c6c3470ff0b for that pin, whose 310P dcmi
 adapter replaced `soc_version`'s `SOC_VERSION_NOT_ASCEND_950` with `SOC_VERSION_ASCEND_910`
