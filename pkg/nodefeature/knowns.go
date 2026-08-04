@@ -1,6 +1,7 @@
 package nodefeature
 
 import (
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -375,17 +376,18 @@ func GetAcceleratablePartitionedUnitsResourceName(manufacturer string) core.Reso
 
 // GetAcceleratablePartitionedProfileResourceName returns the per-profile physical-partition
 // key for a manufacturer and profile — profile "3g.40gb" for nvidia yields
-// "nvidia.com/gpu.partitioned.mig-3g.40gb". The profile name is used verbatim: a name that
-// is not a valid resource-name segment is excluded upstream when the card's inventory is
-// built, so the key always maps back to its profile by plain prefix strip. It returns ""
-// when the manufacturer has no partition kind, or when the name would not yield a valid
-// resource name.
+// "nvidia.com/gpu.partitioned.mig-3g.40gb". The profile is published through
+// PublishPartitionedProfileName, so the key always carries the published spelling whichever
+// spelling the caller holds, and VendorPartitionedProfileOf maps it back. Beyond that the
+// name is used verbatim: one that is not a valid resource-name segment is excluded upstream
+// when the card's inventory is built. It returns "" when the manufacturer has no partition
+// kind, or when the name would not yield a valid resource name.
 func GetAcceleratablePartitionedProfileResourceName(manufacturer, profile string) core.ResourceName {
 	prefix := _PartitionedProfileResourceNamePrefixMap[manufacturer]
 	if prefix == "" || profile == "" {
 		return ""
 	}
-	name := prefix + profile
+	name := prefix + PublishPartitionedProfileName(manufacturer, profile)
 	if errs := validation.IsQualifiedName(name); len(errs) != 0 {
 		// The profile name is never rewritten to make it key-safe: a rewritten key
 		// could not be mapped back to the hardware profile it names.
@@ -409,12 +411,13 @@ func GetAcceleratablePartitionedProfileResourceName(manufacturer, profile string
 // GetAcceleratablePartitionedProfileResourceName, which returns "" for it — because a
 // rewritten key could not be mapped back to the profile it names.
 //
-// Both ends of the round trip must normalize through this one function: a detector
-// publishes a profile's resource key from the normalized name, and the vendor driver seam
-// resolves that key back to a raw driver profile id by comparing the normalized name
-// against the names the driver reports. Two copies of this transform that drifted apart
-// would leave a published profile silently unrequestable — the key would exist and admit a
-// request that allocation could then never match.
+// Both ends of the round trip must normalize through this one function: a detector records a
+// profile under the normalized name, and the vendor driver seam resolves that name back to a
+// raw driver profile id by comparing the normalized name against the names the driver
+// reports. Two copies of this transform that drifted apart would leave a published profile
+// silently unrequestable — the key would exist and admit a request that allocation could then
+// never match. The name this function yields is the vendor's own spelling; publishing it as a
+// resource key is PublishPartitionedProfileName's separate job.
 func NormalizePartitionedProfileName(raw string) string {
 	fields := strings.Fields(strings.ToLower(raw))
 	if len(fields) == 0 {
@@ -423,22 +426,104 @@ func NormalizePartitionedProfileName(raw string) string {
 	return fields[len(fields)-1]
 }
 
+// _SeparatorlessPartitionedProfileManufacturerSet holds the manufacturers whose own library
+// spells a partition profile's geometry with no separator between its two numbers — T-Head
+// reports "MIG 4g48gb" where NVIDIA reports "3g.40gb". The two describe the same shape of
+// thing and read the same way to whoever writes a Pod spec only if they are spelled the same,
+// so a profile of a manufacturer listed here is published with the separator and handled
+// internally without one.
+var _SeparatorlessPartitionedProfileManufacturerSet = sets.New(ManufacturerTHead)
+
+var (
+	// _VendorPartitionedProfileGeometryRegex matches a profile geometry spelled the way a
+	// separator-less manufacturer writes it, capturing the compute-slice and memory numbers.
+	_VendorPartitionedProfileGeometryRegex = regexp.MustCompile(`^([0-9]+)g([0-9]+)gb$`)
+	// _PublishedPartitionedProfileGeometryRegex matches the same geometry carrying the
+	// separator, which is the form this operator publishes.
+	_PublishedPartitionedProfileGeometryRegex = regexp.MustCompile(`^([0-9]+)g\.([0-9]+)gb$`)
+)
+
+// PublishPartitionedProfileName converts a partition profile name from the spelling its
+// manufacturer's library uses to the spelling this operator publishes — for a manufacturer
+// that omits the separator, "4g48gb" becomes "4g.48gb". It is the forward half of the naming
+// boundary: the resource key, the per-profile ledgers a user reads, and the request a user
+// writes all carry the published name, while the Devices record, the ownership markers and
+// every name handed to or matched against a vendor library keep the vendor's own.
+//
+// A name outside the two-number geometry is published unchanged rather than guessed at, and a
+// name already carrying the separator is returned as-is — so the conversion is idempotent and
+// a caller need not know which spelling it holds. A manufacturer whose library writes the
+// separator itself (NVIDIA) is never touched, so its published keys are unaffected.
+func PublishPartitionedProfileName(manufacturer, profile string) string {
+	if !_SeparatorlessPartitionedProfileManufacturerSet.Has(manufacturer) {
+		return profile
+	}
+	m := _VendorPartitionedProfileGeometryRegex.FindStringSubmatch(profile)
+	if m == nil {
+		return profile
+	}
+	return m[1] + "g." + m[2] + "gb"
+}
+
+// VendorPartitionedProfileName is the reverse of PublishPartitionedProfileName: it converts a
+// published profile name back to the spelling the manufacturer's own library uses, so a name
+// crossing back into the operator can be matched against the Devices record, an ownership
+// marker or the vendor library. It is equally idempotent, and equally leaves a name of another
+// shape — and every manufacturer that writes the separator itself — untouched.
+//
+// An empty manufacturer is a pass-through, so a caller that has not resolved one yet reads the
+// name it was given rather than a silently rewritten one.
+func VendorPartitionedProfileName(manufacturer, profile string) string {
+	if !_SeparatorlessPartitionedProfileManufacturerSet.Has(manufacturer) {
+		return profile
+	}
+	m := _PublishedPartitionedProfileGeometryRegex.FindStringSubmatch(profile)
+	if m == nil {
+		return profile
+	}
+	return m[1] + "g" + m[2] + "gb"
+}
+
 // PartitionedProfileOf returns the physical-partition profile name encoded in a
 // "<base>.partitioned.<kind>-<profile>" resource key of a known accelerator base whose
-// manufacturer declares that kind, and whether name is such a key. It is the reverse of
-// GetAcceleratablePartitionedProfileResourceName.
+// manufacturer declares that kind, and whether name is such a key. It is the plain reverse of
+// GetAcceleratablePartitionedProfileResourceName: the name comes back in the published
+// spelling the key carries, which is what a user-facing ledger or message wants. A caller
+// about to match it against the Devices record, an ownership marker or a vendor library wants
+// VendorPartitionedProfileOf instead.
 //
 // The counting key "<base>.partitioned.units" shares the ".partitioned." prefix but is
 // not a per-profile key, so it is never read as a profile.
 func PartitionedProfileOf(name core.ResourceName) (string, bool) {
+	_, profile, ok := partitionedProfileOf(name)
+	return profile, ok
+}
+
+// VendorPartitionedProfileOf returns the profile a "<base>.partitioned.<kind>-<profile>" key
+// names, in the spelling the manufacturer's own library uses, and whether name is such a key.
+// It is the reverse half of the naming boundary — the one every caller crossing back into the
+// operator's internals must use, since the Devices record, the ownership markers and the
+// vendor library all carry the vendor's spelling.
+func VendorPartitionedProfileOf(name core.ResourceName) (string, bool) {
+	manufacturer, profile, ok := partitionedProfileOf(name)
+	if !ok {
+		return "", false
+	}
+	return VendorPartitionedProfileName(manufacturer, profile), true
+}
+
+// partitionedProfileOf resolves a per-profile partition key to the manufacturer that owns it
+// and the profile name it carries, so the two public readers cannot disagree about which key
+// is a profile key.
+func partitionedProfileOf(name core.ResourceName) (manufacturer, profile string, ok bool) {
 	s := string(name)
-	for _, prefix := range _PartitionedProfileResourceNamePrefixMap {
-		profile, ok := strings.CutPrefix(s, prefix)
-		if ok && profile != "" {
-			return profile, true
+	for m, prefix := range _PartitionedProfileResourceNamePrefixMap {
+		p, cut := strings.CutPrefix(s, prefix)
+		if cut && p != "" {
+			return m, p, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // IsKnownAcceleratableResourceName reports whether the given resource name is a key of one

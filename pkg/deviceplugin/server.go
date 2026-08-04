@@ -1031,9 +1031,14 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 // partitionProfileOf returns the single "<base>.partitioned.<kind>-<profile>" profile a
 // container requests, and whether it requests one. The Pod webhook guarantees at most one
 // distinct profile per container, so the first match is authoritative.
+//
+// The name comes back in the manufacturer's own spelling, not the key's published one: every
+// consumer here matches it against the Devices record, records it in the allocation and the
+// ownership marker, or hands it to the vendor library, and a name the library does not
+// recognize cannot create a partition.
 func partitionProfileOf(ctr *core.Container) (string, bool) {
 	for name := range ctr.Resources.Limits {
-		if profile, ok := nodefeature.PartitionedProfileOf(name); ok {
+		if profile, ok := nodefeature.VendorPartitionedProfileOf(name); ok {
 			return profile, true
 		}
 	}

@@ -136,10 +136,19 @@ rather than a behaviour to adapt to.
 
 One product's inventory, as an illustration of the shape rather than a table to rely on: a card reporting
 two profiles, `MIG 4g48gb` (two instances of four memory slices) and `MIG 8g96gb` (one instance spanning all
-eight), where creating either takes the other to zero free. Note the vendor's display names carry a `MIG `
-prefix and a space; the published resource key is the normalized form, so `MIG 4g48gb` is requested as
-`<base>.partitioned.mig-4g48gb`. Note too that the driver's profile ids are sparse — 5 and 3 for those two —
-which is why nothing in the operator indexes profiles by position.
+eight), where creating either takes the other to zero free. Note too that the driver's profile ids are sparse
+— 5 and 3 for those two — which is why nothing in the operator indexes profiles by position.
+
+**The published profile name carries a separator the vendor's own does not.** This vendor's display names
+carry a `MIG ` prefix and a space, which normalization drops, and they spell the geometry with no separator
+between its two numbers where NVIDIA writes one. So that a partition of either vendor reads the same way in
+a Pod spec, the operator publishes the separator: `MIG 4g48gb` is advertised and requested as
+`<base>.partitioned.mig-4g.48gb`, and `MIG 8g96gb` as `<base>.partitioned.mig-8g.96gb`. The same published
+name appears in the InstanceType's offered inventory and in its per-profile ledgers, so the name you read is
+the name you write. Everything below that boundary keeps the driver's own spelling — `ppu-smi` output, the
+`Devices` record, and the operator's on-disk ownership markers all say `4g48gb` — so a name seen on the host
+and a name written in a manifest differ by exactly that separator and nothing else. A profile name outside
+this two-number shape is published exactly as the driver reports it.
 
 ## Requesting a partition
 

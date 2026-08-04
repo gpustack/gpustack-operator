@@ -32,11 +32,23 @@ func placementsFrom(span, count int32) []device.AcceleratorPhysicalPlacement {
 	return out
 }
 
-// zw810eProfiles is the profile set of the product this vendor currently ships (96 GiB over
-// eight memory slices). Its shape — the "<compute>c.<memory>g" naming, the halving instance
-// counts and the end-to-end placements — is derived from the card's geometry and from the
-// vendor's CLI documentation; the raw ids and the exact memory sizes await confirmation
-// against a real host, which is why nothing here derives meaning from an id.
+// zw810eHardwareProfiles is the profile set a real host of the current product reported: two
+// profiles named "<memory slices>g<memory>gb", with sparse ids that carry no slice-count
+// meaning. It is the naming the profile-name boundary acts on — the detector records these
+// names as the driver spells them, and only the published resource key gains the separator —
+// so nothing here may be rewritten to the published form.
+func zw810eHardwareProfiles() []hgml.GpuInstanceProfileInfo_v3 {
+	return []hgml.GpuInstanceProfileInfo_v3{
+		{Id: 5, SliceCount: 4, InstanceCount: 2, MemorySizeMB: 49152, Name: profileName("4g48gb")},
+		{Id: 3, SliceCount: 8, InstanceCount: 1, MemorySizeMB: 98304, Name: profileName("8g96gb")},
+	}
+}
+
+// zw810eProfiles is a documented-shape profile set of the same product (96 GiB over eight
+// memory slices): the "<compute>c.<memory>g" naming and the halving instance counts come from
+// the vendor's CLI documentation rather than from a host, so it exercises the derivation over a
+// wider profile set than the two a real card offers. zw810eHardwareProfiles is what hardware
+// actually reported. Neither derives meaning from an id.
 func zw810eProfiles() []hgml.GpuInstanceProfileInfo_v3 {
 	return []hgml.GpuInstanceProfileInfo_v3{
 		{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g")},
@@ -88,6 +100,26 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 				},
 				{
 					Name: "8c.96g", MemoryMib: 98304, ComputeSlices: 8, MemorySlices: 8, Count: 1,
+					Placements: placementsFrom(8, 1),
+				},
+			},
+		},
+		{
+			// The set a real host reports. The recorded names keep the driver's own spelling:
+			// the record is what the driver seam matches a profile by and what the ownership
+			// marker and the per-card ledger are keyed by, so publishing the separator here
+			// would leave every published profile unresolvable against the driver.
+			name:           "hardware profile set is recorded as the driver spells it",
+			cardMemoryMiB:  zw810eMemoryMib,
+			infos:          zw810eHardwareProfiles(),
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{5: placementsFrom(4, 2), 3: placementsFrom(8, 1)},
+			want: []device.AcceleratorPhysicalSlicedProfile{
+				{
+					Name: "4g48gb", MemoryMib: 49152, ComputeSlices: 4, MemorySlices: 4, Count: 2,
+					Placements: placementsFrom(4, 2),
+				},
+				{
+					Name: "8g96gb", MemoryMib: 98304, ComputeSlices: 8, MemorySlices: 8, Count: 1,
 					Placements: placementsFrom(8, 1),
 				},
 			},

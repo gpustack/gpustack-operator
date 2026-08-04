@@ -994,6 +994,49 @@ func TestDevicesReconciler_GetAllocatingPod_Feasibility(t *testing.T) {
 // indistinguishable to it. A partition's demand is its geometry, and the offered tokens name no
 // card the allocation will use, so the test is against the whole node — the candidate whose
 // profile the node can still host wins over an older one it cannot.
+// TestPartitionProfileOf pins the reverse half of the profile-name boundary at the device
+// plugin: a container's request is read back in the manufacturer's own spelling, because every
+// consumer here matches it against the Devices ledger, records it in the allocation and the
+// ownership marker, or hands it to the vendor library — a name the library never reports cannot
+// create a partition.
+func TestPartitionProfileOf(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     core.ResourceName
+		profile string
+		ok      bool
+	}{
+		{
+			name: "a published key reads back as its manufacturer spells it",
+			key: nodefeature.GetAcceleratablePartitionedProfileResourceName(
+				nodefeature.ManufacturerTHead, "4g48gb"),
+			profile: "4g48gb", ok: true,
+		},
+		{
+			name: "a manufacturer writing the separator keeps it",
+			key: nodefeature.GetAcceleratablePartitionedProfileResourceName(
+				nodefeature.ManufacturerNVIDIA, "3g.40gb"),
+			profile: "3g.40gb", ok: true,
+		},
+		{
+			name: "the counting key is not a profile request",
+			key:  nodefeature.GetAcceleratablePartitionedUnitsResourceName(nodefeature.ManufacturerTHead),
+		},
+		{name: "a container requesting no partition", key: core.ResourceCPU},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			require.NotEmpty(t, c.key, "the fixture's resource key")
+			ctr := &core.Container{Resources: core.ResourceRequirements{
+				Limits: core.ResourceList{c.key: resource.MustParse("1")},
+			}}
+			profile, ok := partitionProfileOf(ctr)
+			assert.Equal(t, c.ok, ok)
+			assert.Equal(t, c.profile, profile)
+		})
+	}
+}
+
 func TestResourceServer_CandidateFeasible_Partitioned(t *testing.T) {
 	const nodeName = "node-feasible-partition"
 	partitionRes := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned)
