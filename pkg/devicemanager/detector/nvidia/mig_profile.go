@@ -164,17 +164,66 @@ func isMediaOrGraphicsVariant(info nvml.GpuInstanceProfileInfo_v3, name string) 
 		info.Capabilities&nvml.GPU_INSTANCE_PROFILE_CAPS_GFX != 0
 }
 
-// detectMigProfiles probes every GPU instance profile id on the device and returns the card's
-// physical-slice profile inventory (filtered and derived by deriveSlicedProfiles). Unsupported
-// ids surface as non-success returns and are skipped.
-func detectMigProfiles(dev nvml.Device) []device.AcceleratorPhysicalSlicedProfile {
+// driverReportsAbsent reports whether a non-success return is the driver ANSWERING that it has
+// nothing at the id asked about, rather than failing to answer at all. It draws the same line the
+// placement resolution above rests on: an id the driver disclaims is inventory information, while an
+// id it could not read leaves the inventory short of a profile the card may well offer. The two are
+// worth separating because the inventory is published either way, and a short one is
+// indistinguishable from a card that never had the profile.
+func driverReportsAbsent(ret nvml.Return) bool {
+	switch ret {
+	case nvml.ERROR_NOT_SUPPORTED, nvml.ERROR_NOT_FOUND, nvml.ERROR_INVALID_ARGUMENT:
+		return true
+	default:
+		return false
+	}
+}
+
+// probeMigProfiles walks the whole GPU instance profile-id space and separates the three answers a
+// probe can give: a profile, an id the driver disclaims, and an id it could not answer for. The
+// disclaimed ids are the ordinary case — the space is a fixed enumeration and a card offers a few of
+// it — so they are skipped without comment, and only the unanswered ones are joined into the returned
+// error, which leaves that error meaning "this card's inventory is short" and nothing else.
+//
+// probe is injected so the walk stays hardware-free and unit-testable, as the placement resolution is.
+func probeMigProfiles(
+	probe func(giProfileID uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return),
+) ([]nvml.GpuInstanceProfileInfo_v3, error) {
 	var infos []nvml.GpuInstanceProfileInfo_v3
+	var unreadable []error
 	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
-		info, ret := dev.GetGpuInstanceProfileInfo(id)
+		info, ret := probe(id)
 		if !ret.IsSuccess() {
+			if !driverReportsAbsent(ret) {
+				unreadable = append(unreadable, fmt.Errorf("profile %d: %s", id, ret.Error()))
+			}
 			continue
 		}
 		infos = append(infos, info)
+	}
+	return infos, errors.Join(unreadable...)
+}
+
+// detectMigProfiles probes every GPU instance profile id on the device and returns the card's
+// physical-slice profile inventory (filtered and derived by deriveSlicedProfiles). An id the driver
+// disclaims is skipped as the answer it is.
+//
+// An id the driver could not answer for is also skipped — a profile cannot be published without the
+// geometry the probe carries — but it is reported rather than dropped in silence, because what it
+// costs is not local. A profile missing from this inventory is missing from the card's Devices
+// record, from the node's capacity keys, from its flavor and from its InstanceType: a Pod already
+// holding a MIG instance of that profile stops being able to have it named, and a new request for it
+// is refused by admission as a profile the card does not offer. The disclaimed ids are filtered out
+// first precisely so that what remains is a driver fault worth an error rather than a routine answer.
+func detectMigProfiles(dev nvml.Device) []device.AcceleratorPhysicalSlicedProfile {
+	infos, probeErr := probeMigProfiles(dev.GetGpuInstanceProfileInfo)
+	if probeErr != nil {
+		uuid, _ := dev.GetUUID()
+		klog.Background().Error(probeErr,
+			"Left MIG profiles out of a card's inventory because the driver could not answer for them; "+
+				"a profile absent here is absent from the node's capacity, its flavor and its InstanceType, "+
+				"so a MIG instance of it can stop being nameable and a new request for it is refused",
+			"device", uuid)
 	}
 
 	// Cache each profile's empty-card legal placement set at detect time so the reconciler

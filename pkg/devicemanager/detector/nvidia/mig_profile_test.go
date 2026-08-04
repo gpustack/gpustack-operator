@@ -1,6 +1,7 @@
 package nvidia
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -402,5 +403,107 @@ func TestMigPlacementsFromNVML(t *testing.T) {
 	}
 	if migPlacementsFromNVML(nil) != nil {
 		t.Errorf("migPlacementsFromNVML(nil) = non-nil, want nil")
+	}
+}
+
+// The profile-id space is a fixed enumeration a card offers a handful of, so an id the driver
+// disclaims is inventory information and an id it could not answer for is a fault. Collapsing the two
+// is what made a transient read indistinguishable from a card that never had the profile: the
+// inventory is published either way, and everything downstream — the node's capacity keys, the
+// flavor, the InstanceType — is built from it.
+func TestProbeMigProfiles(t *testing.T) {
+	testCases := []struct {
+		name string
+		// answered are the ids the driver reports a profile for; failed are the ids it returns a
+		// non-success for. Every id named in neither is disclaimed with ERROR_NOT_SUPPORTED, which
+		// is what the vast majority of the enumeration answers on any real card.
+		answered   map[uint32]string
+		failed     map[uint32]nvml.Return
+		wantIDs    []uint32
+		wantErrIDs []uint32
+	}{
+		{
+			name:     "the profiles a card offers are returned and nothing is reported",
+			answered: map[uint32]string{0: "1g.5gb", 5: "2g.10gb", 15: "7g.80gb"},
+			wantIDs:  []uint32{0, 5, 15},
+		},
+		{
+			// A MIG-enabled card whose driver offers no profile at all: an empty inventory is an
+			// answer, not a failure.
+			name: "a card offering nothing is not a failure",
+		},
+		{
+			name:       "an id the driver could not answer for is reported",
+			answered:   map[uint32]string{0: "1g.5gb", 5: "2g.10gb"},
+			failed:     map[uint32]nvml.Return{3: nvml.ERROR_UNKNOWN},
+			wantIDs:    []uint32{0, 5},
+			wantErrIDs: []uint32{3},
+		},
+		{
+			// Every unanswered id is named, so a card losing several profiles at once is diagnosable
+			// as that rather than as one failure hiding the rest.
+			name:       "every unanswerable id is named",
+			answered:   map[uint32]string{0: "1g.5gb"},
+			failed:     map[uint32]nvml.Return{2: nvml.ERROR_GPU_IS_LOST, 7: nvml.ERROR_TIMEOUT, 11: nvml.ERROR_UNKNOWN},
+			wantIDs:    []uint32{0},
+			wantErrIDs: []uint32{2, 7, 11},
+		},
+		{
+			// The three codes that mean "there is nothing here" stay silent even when they arrive at
+			// ids a card would otherwise offer.
+			name:     "a disclaimed id is an answer, whichever way the driver disclaims it",
+			answered: map[uint32]string{0: "1g.5gb"},
+			failed: map[uint32]nvml.Return{
+				1: nvml.ERROR_NOT_SUPPORTED,
+				2: nvml.ERROR_NOT_FOUND,
+				3: nvml.ERROR_INVALID_ARGUMENT,
+			},
+			wantIDs: []uint32{0},
+		},
+		{
+			name:       "an uninitialized library is a fault, not a disclaimer",
+			failed:     map[uint32]nvml.Return{0: nvml.ERROR_UNINITIALIZED},
+			wantErrIDs: []uint32{0},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := func(id uint32) (nvml.GpuInstanceProfileInfo_v3, nvml.Return) {
+				if name, ok := tc.answered[id]; ok {
+					return nvml.GpuInstanceProfileInfo_v3{
+						Id: id, SliceCount: 1, InstanceCount: 7, Name: profileName(name),
+					}, nvml.SUCCESS
+				}
+				if ret, ok := tc.failed[id]; ok {
+					return nvml.GpuInstanceProfileInfo_v3{}, ret
+				}
+				return nvml.GpuInstanceProfileInfo_v3{}, nvml.ERROR_NOT_SUPPORTED
+			}
+
+			infos, err := probeMigProfiles(probe)
+
+			var gotIDs []uint32
+			for i := range infos {
+				gotIDs = append(gotIDs, infos[i].Id)
+			}
+			if !reflect.DeepEqual(tc.wantIDs, gotIDs) {
+				t.Errorf("profiles carried out of the walk = %v, want %v", gotIDs, tc.wantIDs)
+			}
+
+			if len(tc.wantErrIDs) == 0 {
+				if err != nil {
+					t.Errorf("a disclaimed id must not read as a fault, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("an unanswerable id must be reported, got no error")
+			}
+			for _, id := range tc.wantErrIDs {
+				if want := fmt.Sprintf("profile %d", id); !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %q; the missing capacity must be diagnosable", err, want)
+				}
+			}
+		})
 	}
 }

@@ -208,7 +208,20 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			// capabilities mutually exclusive per card. A pending-mode transition is not
 			// partitioned yet and is re-detected after the administrator's DeviceManager
 			// restart, because the re-detect trigger does not include the partitioning mode.
-			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == hgml.DEVICE_MIG_ENABLE {
+			//
+			// A mode the driver could not read is treated as not-partitioned, as it always has
+			// been, but it is no longer treated in silence: that card loses its partitioning
+			// capability for as long as the read keeps failing, and since a card in the mode
+			// reports ONLY partition profiles, an administrator who enabled the mode would
+			// otherwise see a card that simply advertises nothing. A driver answering that the
+			// mode is unsupported is not a failure — that is a card which does not partition.
+			migCurrent, _, migRet := dev.GetMigMode()
+			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
+				logger.Error(migRet, "could not read a card's partitioning mode, so it is reported as "+
+					"not partitioned; if the mode is in fact enabled, the card advertises no capacity at all",
+					"card", uuid)
+			}
+			if migCurrent == hgml.DEVICE_MIG_ENABLE {
 				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, logger))
 			}
 		}

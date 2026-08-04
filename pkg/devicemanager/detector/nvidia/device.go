@@ -218,7 +218,20 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			// transition is not partitioned yet and is re-detected after the administrator's
 			// reset + DeviceManager restart. This runs per card, fixing the old placeholder's
 			// first-card-only-seed defect.
-			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == nvml.DEVICE_MIG_ENABLE {
+			//
+			// A mode the driver could not read is treated as MIG off, as it always has been, but
+			// it is no longer treated in silence: since a card in the mode reports ONLY its MIG
+			// profiles, an administrator who enabled MIG would otherwise see a card quietly
+			// advertising the logical-slice capability it cannot serve. A driver answering that
+			// the mode is unsupported is not a failure — that is a card which does not do MIG.
+			migCurrent, _, migRet := dev.GetMigMode()
+			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
+				uuid, _ := dev.GetUUID()
+				klog.Background().Error(migRet, "Could not read a card's MIG mode, so it is reported as "+
+					"MIG off; if MIG is in fact enabled, the card advertises logical slicing it cannot serve",
+					"device", uuid)
+			}
+			if migCurrent == nvml.DEVICE_MIG_ENABLE {
 				profiles := detectMigProfiles(dev)
 				status.PhysicalSliced = device.AcceleratorPhysicalSliced{
 					Profiles: profiles,
