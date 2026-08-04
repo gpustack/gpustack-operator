@@ -69,7 +69,8 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 		setup func(t *testing.T, drv *fakeMigDriver, podsDir string)
 		// wantNodes are the device-node names, in order, relative to the redirected /dev root.
 		wantNodes []string
-		// breakOrdinal drops the first card's recorded minor number, so its ordinal cannot be proven.
+		// breakOrdinal drops the first card's recorded minor number, leaving nothing to prove that its
+		// ordinal addresses the card the detector measured.
 		breakOrdinal bool
 		wantErr      string
 	}{
@@ -81,7 +82,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 				createdFixture().write(t)
 			},
 			wantNodes: []string{
-				"alixpu", "alixpu_ctl", "alixpu_ppu0",
+				"alixpu", "alixpu_ctl", "alixpu_ppu14",
 				filepath.Join("alixpu-caps", "alixpu-cap1280"),
 				filepath.Join("alixpu-caps", "alixpu-cap1281"),
 			},
@@ -95,13 +96,16 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID1, visInstance1)
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID0, visInstance)
 				createdFixture().write(t)
-				nodeFixture{ordinal: 1, giID: 2, ciID: 2, giMinor: 4352, ciMinor: 4353}.write(t)
+				nodeFixture{
+					cardIndex: testPPUIndex1, cardMinor: testPPUMinor1,
+					giID: 2, ciID: 2, giMinor: 4352, ciMinor: 4353,
+				}.write(t)
 			},
 			wantNodes: []string{
-				"alixpu", "alixpu_ctl", "alixpu_ppu0",
+				"alixpu", "alixpu_ctl", "alixpu_ppu14",
 				filepath.Join("alixpu-caps", "alixpu-cap1280"),
 				filepath.Join("alixpu-caps", "alixpu-cap1281"),
-				"alixpu_ppu1",
+				"alixpu_ppu15",
 				filepath.Join("alixpu-caps", "alixpu-cap4352"),
 				filepath.Join("alixpu-caps", "alixpu-cap4353"),
 			},
@@ -182,19 +186,19 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID0, visInstance)
 				createdFixture().write(t)
-				removeFixture(t, ciAccessPath(0, visInstance.GiID, visInstance.CiID))
+				removeFixture(t, ciAccessPath(testPPUIndex0, visInstance.GiID, visInstance.CiID))
 			},
 			wantErr: "read capability file",
 		},
 		{
-			name:  "a card whose ordinal cannot be proven is refused rather than addressed",
+			name:  "a card the detector recorded no minor number for is refused rather than addressed",
 			cards: []string{testPPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID0, visInstance)
 				createdFixture().write(t)
 			},
 			breakOrdinal: true,
-			wantErr:      "not its accelerator index plus one",
+			wantErr:      "no recorded minor number to prove its device node addresses it",
 		},
 		{
 			name:  "a shared control node the container needs is missing",

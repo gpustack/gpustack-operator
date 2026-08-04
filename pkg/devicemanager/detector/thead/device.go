@@ -169,14 +169,27 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			grpIndex = len(grpList) - 1
 		}
 
+		// The recorded minor number is what PROVES that a device node addresses the card this record
+		// describes. The node is named after the card's ordinal, not after this number, and the
+		// allocator stats the node the ordinal names and compares its kernel character-device minor
+		// against this value. So it is left ABSENT when the driver cannot answer for it rather than
+		// substituted by the enumeration index: a substituted value would make a wrong ordinal look
+		// proven, and a container would be handed whichever card happened to answer to it. An absent
+		// record is refusable; a plausible wrong one is not.
 		var physicalIndexes []uint32
-		{
-			minorNum, ret := dev.GetMinorNumber()
-			if ret.IsSuccess() {
-				physicalIndexes = []uint32{minorNum}
-			} else {
-				physicalIndexes = []uint32{uint32(i)}
-			}
+		if minorNum, ret := dev.GetMinorNumber(); ret.IsSuccess() {
+			physicalIndexes = []uint32{minorNum}
+		} else {
+			// Behind a verbosity level, like every other per-card driver read that fails in this
+			// loop: the condition is static and the loop is periodic, so at default verbosity this
+			// would repeat for the life of the node without telling an operator anything the moment
+			// it matters. What it costs is reported where it bites instead — a card without this
+			// number is refused by EVERY allocation path, whole-card and partition alike, and that
+			// refusal carries the same reason to the Pod that asked for the card.
+			logger.V(3).Info("recorded no minor number for a card whose driver could not answer for it; "+
+				"every allocation on it will be refused rather than addressed by an ordinal nothing "+
+				"can prove",
+				"card", uuid, "reason", ret.Error())
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)

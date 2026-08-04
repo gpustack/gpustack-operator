@@ -189,14 +189,19 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			grpIndex = len(grpList) - 1
 		}
 
+		// The recorded minor number is what a card's device node is NAMED after on the vendors that
+		// build one from it (/dev/dri/card<minor> and friends), so it is left ABSENT when the driver
+		// cannot answer for it rather than substituted by the enumeration index: a substituted value is
+		// indistinguishable from a real minor at every later consumer, which would then build a device
+		// path out of a guess. No allocator of this vendor reads the field today; publishing a number
+		// the driver never gave is what the next consumer would inherit.
 		var physicalIndexes []uint32
-		{
-			minorNum, ret := dev.GetMinorNumber()
-			if ret.IsSuccess() {
-				physicalIndexes = []uint32{minorNum}
-			} else {
-				physicalIndexes = []uint32{uint32(i)}
-			}
+		if minorNum, ret := dev.GetMinorNumber(); ret.IsSuccess() {
+			physicalIndexes = []uint32{minorNum}
+		} else {
+			logger.V(3).Info("recorded no minor number for a card whose driver could not answer for it; "+
+				"a consumer that names a device node after that number cannot address this card",
+				"card", uuid, "reason", ret.Error())
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)

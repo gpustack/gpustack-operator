@@ -183,6 +183,15 @@ func markerPath(podsDir, podUID, container, cardUUID string) string {
 // parseMarker reads a marker fail-closed: a missing, malformed or incomplete record is an error,
 // so the self-marker reuse and reclaim never silently mis-read a live partition. The raw profile
 // id is not checked for presence because 0 is a legal vendor id.
+//
+// The recorded card must be the card the file's own NAME encodes. A record that disagrees with its
+// name is internally inconsistent, and either reading of it is unsafe: the ownership set is grouped
+// by the recorded card, so the gpu instance the record owns would look unowned on the card the file
+// belongs to and a second Pod could adopt a partition another Pod is using; while the self-marker
+// rebind reads the record's ids against the card its path names, so it would rebind one card's
+// instance id onto another card. It is therefore refused here, which reports it to the scan as a
+// corrupt path — attributable to the card its name encodes, held closed on that card alone, and
+// retired once its Pod is gone, the same as any other unreadable record.
 func parseMarker(path string) (migMarker, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -194,6 +203,10 @@ func parseMarker(path string) (migMarker, error) {
 	}
 	if m.PodUID == "" || m.Card == "" || m.Profile == "" || m.MigUUID == "" {
 		return migMarker{}, fmt.Errorf("marker %q: incomplete record", path)
+	}
+	if card, ok := cardFromMarkerPath(path); !ok || card != m.Card {
+		return migMarker{}, fmt.Errorf(
+			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card)
 	}
 	return m, nil
 }
@@ -329,10 +342,15 @@ func podUIDFromMarkerPath(podsDir, path string) (string, bool) {
 // capacity, while failing closed on the one card it names cannot.
 //
 // A corrupt path that names no card darkens every card, because the scope of what is unknown is
-// itself unknown — it may stand for markers of any card. The cost is bounded: refusing adoption is
-// not refusing capacity (occupancy comes from the driver's live set, so a fresh create in a free slot
-// still succeeds), and the state is transient rather than permanent — the reclaim loop retires a
-// corrupt marker once its Pod is gone, so the card clears by itself.
+// itself unknown — it may stand for markers of any card. Refusing adoption is not refusing capacity
+// (occupancy comes from the driver's live set, so a fresh create in a free slot still succeeds), and
+// a corrupt MARKER clears by itself: the reclaim loop retires it once the Pod its path names is
+// gone. A corrupt path that names no card, however, names no Pod either — a walk error over a pod
+// directory is the reachable case — so there is no liveness evidence to retire it on and the loop
+// deliberately keeps it. That hold is therefore permanent, not transient: no adoption anywhere on
+// the node and no orphan collected on any card, for as long as the path stays unreadable. It is a
+// filesystem fault an operator can repair, and the reclaim loop says so out loud at a retry bound
+// (reclaimMaxCorruptHoldMisses) rather than letting the node degrade silently.
 func ownershipUnknownOnCard(corrupt []string, cardUUID string) bool {
 	for _, p := range corrupt {
 		card, ok := cardFromMarkerPath(p)
@@ -586,19 +604,31 @@ var (
 	hostProcDriverDir = "/proc/driver"
 )
 
-// The device-node and procfs capability layout below comes from the vendor's container-isolation
-// documentation, and remains subject to confirmation on hardware. That documentation's own example
-// injects exactly the five nodes a partitioned container is given here — the two shared control nodes,
-// the parent card's node, and the capability nodes of one GPU instance and its compute instance — and
+// The set of nodes below comes from the vendor's container-isolation documentation, whose own example
+// injects exactly the five a partitioned container is given here — the two shared control nodes, the
+// parent card's node, and the capability nodes of one GPU instance and its compute instance — and
 // describes the result as a container that can use that one partition and see no other device. There
 // is no environment-variable equivalent and no runtime hook: these nodes are the whole of the
 // container's access.
+//
+// How those nodes are NAMED is measured on hardware instead, because the documentation's naming rule does
+// not describe this driver. On a 16-card host every card's node is /dev/alixpu_ppu<ordinal> and its
+// capability subtree is /proc/driver/alixpu/capabilities/ppu<ordinal>, one ordinal for both, running
+// 0..15 with no ppu16; a live GPU instance created on the card at ordinal 14 appeared under ppu14.
+//
+// The kernel minor number each of those nodes carries is a different number, and it is the card's identity
+// rather than its name: it is what the detector records, and what proves an ordinal reaches the card that
+// record describes. On that host the two ran one apart, because the shared control node /dev/alixpu holds
+// minor 0 of the same character-device major as the per-card nodes — but that is an observation about one
+// host and one driver, not a rule this file may lean on. Nothing here computes either number from the
+// other, in either direction, and the addressing proof below holds at any offset or at none.
 const (
 	// devControlName and devCtlName are the shared control nodes every container addressing any
 	// partition needs. They are not per card, so they are addressed by name alone.
 	devControlName = "alixpu"
 	devCtlName     = "alixpu_ctl"
-	// devCardPrefix names a card's own device node, suffixed by the driver's card ordinal.
+	// devCardPrefix names a card's own device node, suffixed by the card's ORDINAL — its accelerator
+	// index — and never by the kernel minor number that node carries.
 	devCardPrefix = "alixpu_ppu"
 	// devCapDir and devCapPrefix name a capability node, which is addressed by its minor number
 	// alone — the number the driver publishes in procfs, never one computed here.
@@ -619,7 +649,7 @@ func sharedControlNodePaths() []string {
 	}
 }
 
-// cardNodePath returns the device node of the card with the given driver ordinal.
+// cardNodePath returns the device node of the card with the given ordinal.
 func cardNodePath(ordinal uint32) string {
 	return filepath.Join(hostDevDir, devCardPrefix+strconv.FormatUint(uint64(ordinal), 10))
 }
@@ -629,10 +659,12 @@ func capNodePath(minor uint32) string {
 	return filepath.Join(hostDevDir, devCapDir, devCapPrefix+strconv.FormatUint(uint64(minor), 10))
 }
 
-// cardCapDir returns the procfs capability directory holding one card's partition access files. The
-// card is always named by its numeric driver ordinal, so this can never address the tree's card-less
-// branch — the driver's own config and monitor capabilities, which sit beside the per-card directories
-// rather than under one of them.
+// cardCapDir returns the procfs capability directory holding one card's partition access files. The card
+// is keyed by the same ordinal its device node is named after — the driver publishes both trees under
+// that one number — so the two paths cannot come to denote different cards and hand a container one
+// card's node with another card's capability. The suffix is always numeric, so this can never address the
+// tree's card-less branch — the driver's own config and monitor capabilities, which sit beside the
+// per-card directories rather than under one of them.
 func cardCapDir(ordinal uint32) string {
 	return filepath.Join(hostProcDriverDir, procDriverName, "capabilities",
 		"ppu"+strconv.FormatUint(uint64(ordinal), 10), "mig")
@@ -728,10 +760,14 @@ func requireDeviceNode(path string) (*deviceplugin.DeviceSpec, error) {
 	return newPartitionDeviceSpec(path), nil
 }
 
-// requireNumberedDeviceNode verifies a node whose minor number is its identity — a card's node, whose
-// minor is its ordinal plus one, and a capability node, whose minor is the one procfs published for it.
-// A node carrying a different number is a /dev tree that disagrees with the driver, so it fails the
-// allocation rather than being handed over as if it were the right one.
+// requireNumberedDeviceNode verifies a node whose minor number is its identity: a capability node, whose
+// minor is the one procfs published for it, and a card's own node, whose minor is the one the detector
+// recorded for that card. A node carrying a different number is a /dev tree that disagrees with the
+// driver, so it fails the allocation rather than being handed over as if it were the right one.
+//
+// Only the two shared control nodes are verified by requireDeviceNode instead, with no number to
+// compare: they are addressed by name alone rather than per card, so there is nothing they could be
+// confused with.
 func requireNumberedDeviceNode(path string, wantMinor uint32) (*deviceplugin.DeviceSpec, error) {
 	minor, err := deviceNodeMinor(path)
 	if err != nil {
@@ -743,18 +779,31 @@ func requireNumberedDeviceNode(path string, wantMinor uint32) (*deviceplugin.Dev
 	return newPartitionDeviceSpec(path), nil
 }
 
-// cardOrdinal returns the driver card ordinal of cardUUID — the detector's accelerator index, which is
-// what both the card's device node and its procfs capability subtree are keyed by, so one value serves
-// both and they cannot diverge. It reports ok=false when the card is absent from devs, or when the
-// card's recorded minor number is not its ordinal plus one.
+// requireCardNode returns the ordinal that names cardUUID's own device node and keys its procfs
+// capability subtree — the card's accelerator index — together with the verified specification of that
+// device node. It is the one definition of how a card is addressed on this vendor's node, so both the
+// whole-card and the partition responders reach a card through it and cannot come to address one
+// differently.
 //
-// That offset is what makes the ordinal provable. The accelerator index is a post-filter counter: it
-// advances only for a card the detector accepted, so a card skipped mid-enumeration shifts every later
-// card's index down by one and silently desynchronizes it from the driver's ordinal. The vendor's
-// shared control node occupies minor 0 of the same character-device major as the per-card nodes, so a
-// card's minor number is its ordinal plus one — an invariant the recorded minor gives for free.
-// Addressing a card that violates it would hand a container the next card's node.
-func cardOrdinal(devs *workercore.Devices, cardUUID string) (uint32, bool) {
+// The ordinal is only usable once it is shown to reach the card the detector measured, and the proof is
+// the node's OWN kernel minor number against the minor number the detector recorded for that
+// accelerator: equal means this ordinal addresses that card. It asserts nothing about how the two numbers
+// relate. Whatever offset the driver's numbering puts between them belongs to the driver, and is not
+// reconstructed here: an offset assumed from one host's observation would address a card that departed
+// from it anyway, and would refuse every card on a host that numbered differently.
+//
+// The proof is what makes the accelerator index safe to name a path with, because the index is a
+// post-filter counter — it advances only for a card the detector accepted — so a card skipped
+// mid-enumeration shifts every later index onto its neighbor. A shifted index names a node whose minor
+// is not the one recorded for the accelerator, which is exactly what this refuses.
+//
+// It fails closed and never substitutes: an accelerator absent from devs, one carrying no recorded minor
+// number, a node that is missing or is not a character device, and a node whose minor disagrees with the
+// record are all errors. The detector is what makes the no-record refusal meaningful — it records nothing
+// when the driver cannot answer for a card's minor number, rather than substituting the enumeration
+// counter, because a substituted number is indistinguishable from a real one here and would let an
+// unprovable ordinal be handed over as a proven one.
+func requireCardNode(devs *workercore.Devices, cardUUID string) (uint32, *deviceplugin.DeviceSpec, error) {
 	for i := range devs.Spec.Groups {
 		grp := &devs.Spec.Groups[i]
 		for j := range grp.Accelerators {
@@ -762,13 +811,18 @@ func cardOrdinal(devs *workercore.Devices, cardUUID string) (uint32, bool) {
 			if acc.ID != cardUUID {
 				continue
 			}
-			if len(acc.PhysicalIndexes) == 0 || acc.PhysicalIndexes[0] != acc.Index+1 {
-				return 0, false
+			if len(acc.PhysicalIndexes) == 0 {
+				return 0, nil, fmt.Errorf(
+					"card %s: no recorded minor number to prove its device node addresses it: fail closed", cardUUID)
 			}
-			return acc.Index, true
+			spec, err := requireNumberedDeviceNode(cardNodePath(acc.Index), acc.PhysicalIndexes[0])
+			if err != nil {
+				return 0, nil, fmt.Errorf("card %s: %w", cardUUID, err)
+			}
+			return acc.Index, spec, nil
 		}
 	}
-	return 0, false
+	return 0, nil, fmt.Errorf("card %s: absent from the device record: fail closed", cardUUID)
 }
 
 // partitionDeviceSpecs returns the device specifications a container needs to address exactly one
@@ -779,14 +833,17 @@ func cardOrdinal(devs *workercore.Devices, cardUUID string) (uint32, bool) {
 // Every node is required. This vendor has no container-runtime hook, so the injected nodes are the
 // whole of the container's access: too few leaves the partition unusable, and a node belonging to
 // another card or another partition re-opens the isolation the partition exists to provide.
-func partitionDeviceSpecs(ordinal uint32, inst migInstance) ([]*deviceplugin.DeviceSpec, error) {
-	// The card node's minor is its ordinal plus one — the same invariant cardOrdinal proved against
-	// the detector's record, re-checked here against the node the container is actually handed.
-	card, err := requireNumberedDeviceNode(cardNodePath(ordinal), ordinal+1)
-	if err != nil {
-		return nil, err
-	}
-
+//
+// The card's own node arrives already verified, from the addressing guard the caller cleared before
+// reserving anything, and is passed through rather than re-derived here: the node handed to the container
+// is then the very node whose kernel minor was proven against the detector's record. The ordinal is that
+// guard's result too, so the capability subtree read below is the one belonging to the card that proof
+// addressed.
+func partitionDeviceSpecs(
+	ordinal uint32,
+	card *deviceplugin.DeviceSpec,
+	inst migInstance,
+) ([]*deviceplugin.DeviceSpec, error) {
 	specs := []*deviceplugin.DeviceSpec{card}
 	for _, access := range []string{
 		giAccessPath(ordinal, inst.GiID),
@@ -882,17 +939,18 @@ func (s *server) ActuatePhysicalSliced(
 			rollback()
 			return nil, fmt.Errorf("card %s has no physical-slice profile %q", cardUUID, profile)
 		}
-		// The ordinal is proven before the reservation, so a card whose index cannot be trusted costs
-		// no create: it is refused with a warning rather than addressed, since addressing it would
-		// inject a neighboring card's node.
-		ordinal, ok := cardOrdinal(devs, cardUUID)
-		if !ok {
-			s.Logger.Info("refusing a partition on a card whose recorded minor number is not its accelerator "+
-				"index plus one; the index cannot be trusted to address the driver's card",
-				"card", cardUUID, "profile", profile, "container", ctr.Name)
+		// The card is addressed before the reservation, so a card whose ordinal cannot be shown to reach
+		// the card the detector measured costs no create: it is refused with a warning rather than
+		// addressed, since addressing it would carve a partition on one card and hand the container
+		// another card's node and capability tree.
+		ordinal, cardNode, aerr := requireCardNode(devs, cardUUID)
+		if aerr != nil {
+			s.Logger.Info("refusing a partition on a card whose device node cannot be shown to address it; "+
+				"the node named by the card's accelerator index must carry the minor number the detector "+
+				"recorded for that card",
+				"card", cardUUID, "profile", profile, "container", ctr.Name, "reason", aerr.Error())
 			rollback()
-			return nil, fmt.Errorf(
-				"card %s: recorded minor number is not its accelerator index plus one: fail closed", cardUUID)
+			return nil, aerr
 		}
 
 		unlock := lockCard(cardUUID)
@@ -905,7 +963,7 @@ func (s *server) ActuatePhysicalSliced(
 		}
 		results = append(results, cardResult{card: cardUUID, inst: inst, outcome: outcome})
 
-		specs, derr := partitionDeviceSpecs(ordinal, inst)
+		specs, derr := partitionDeviceSpecs(ordinal, cardNode, inst)
 		if derr != nil {
 			rollback()
 			return nil, fmt.Errorf("card %s partition device nodes: %w", cardUUID, derr)

@@ -25,10 +25,37 @@ import (
 
 // The capability minor numbers of the vendor's own isolation example: a card's first partition sits at
 // 1280 and its compute instance at 1281, neither derivable from the instance ids nor from the card.
-// The fixtures use them so a test would fail if the minors were ever computed instead of read.
+// The fixtures use them so a test would fail if the minors were ever computed instead of read. Hardware
+// measured a first instance at 229632 with its compute instance at 229633 — a different magnitude and
+// exactly as underivable, which is the only property the code relies on, so either pair serves.
 const (
 	testCapGiMinor = uint32(1280)
 	testCapCiMinor = uint32(1281)
+)
+
+// testPPUIndex0 and testPPUIndex1 are the accelerator indexes of the two fixture cards — the ordinals
+// the vendor names their device nodes after (/dev/alixpu_ppu<ordinal>) and keys their procfs capability
+// subtrees by — while testPPUMinor0 and testPPUMinor1 are the kernel minor numbers those nodes carry,
+// which are the numbers the detector records. Both halves of a pair are stated rather than derived from
+// one another, because nothing in the allocator may compute either from the other and a fixture that
+// computed one would prove nothing.
+//
+// The pairs reproduce what was measured on one 16-card host running one driver version, where the node at
+// ordinal N carried kernel minor N+1 — the vendor's shared control node holds minor 0 of the same
+// character-device major as the per-card nodes, which is why the cards start one along. That relation is
+// an observation about that host, not a rule: neither these tests nor the code they exercise would change
+// at another offset, or at none, because what is asserted is only that the node an ordinal names carries
+// the minor its accelerator's record states.
+//
+// Reproducing it is what makes the fixture sharp. Card 1 is card 0's decoy, and both failure modes seen on
+// that host fall out of the one pair: card 0's RECORDED minor, 15, names card 1's real node, so a path
+// built from the record lands on the neighboring card silently; and card 1's record, 16, names an
+// alixpu_ppu16 that exists on no 16-card host at all, so that card is refused outright.
+const (
+	testPPUIndex0 = uint32(14)
+	testPPUMinor0 = uint32(15)
+	testPPUIndex1 = uint32(15)
+	testPPUMinor1 = uint32(16)
 )
 
 // notCharDevice marks a fixture path that exists but is not a character device.
@@ -96,44 +123,56 @@ func writeAccessFile(t *testing.T, path string, minor uint32) {
 }
 
 // nodeFixture is the vendor node tree one partition on one card needs. A case builds it and then
-// removes or corrupts exactly one member.
+// removes or corrupts exactly one member. cardIndex is the card's accelerator index — the ordinal its
+// device node is NAMED after and its procfs capability subtree is keyed by — and cardMinor the kernel
+// minor number that node carries, which is the number the detector records for the card.
 type nodeFixture struct {
-	ordinal uint32
-	giID    uint32
-	ciID    uint32
-	giMinor uint32
-	ciMinor uint32
+	cardIndex uint32
+	cardMinor uint32
+	giID      uint32
+	ciID      uint32
+	giMinor   uint32
+	ciMinor   uint32
 }
 
-// write publishes the whole node set: the two shared control nodes, the card's node at its ordinal plus
-// one, both capability nodes, and both procfs access files.
+// write publishes the whole node set: the two shared control nodes, the card's node under the name its
+// ordinal gives it and carrying the minor the detector recorded, both capability nodes, and both procfs
+// access files.
 func (f nodeFixture) write(t *testing.T) {
 	t.Helper()
 	for _, path := range sharedControlNodePaths() {
 		writeCharNode(t, path, 0)
 	}
-	writeCharNode(t, cardNodePath(f.ordinal), f.ordinal+1)
+	writeCharNode(t, cardNodePath(f.cardIndex), f.cardMinor)
 	writeCharNode(t, capNodePath(f.giMinor), f.giMinor)
 	writeCharNode(t, capNodePath(f.ciMinor), f.ciMinor)
-	writeAccessFile(t, giAccessPath(f.ordinal, f.giID), f.giMinor)
-	writeAccessFile(t, ciAccessPath(f.ordinal, f.giID, f.ciID), f.ciMinor)
+	writeAccessFile(t, giAccessPath(f.cardIndex, f.giID), f.giMinor)
+	writeAccessFile(t, ciAccessPath(f.cardIndex, f.giID, f.ciID), f.ciMinor)
 }
 
 // createdFixture is the node tree of the partition the fake driver creates first (GPU instance 1,
-// compute instance 1) on the card at ordinal 0.
+// compute instance 1) on the first card, which sits at accelerator index testPPUIndex0.
 func createdFixture() nodeFixture {
-	return nodeFixture{ordinal: 0, giID: 1, ciID: 1, giMinor: testCapGiMinor, ciMinor: testCapCiMinor}
+	return nodeFixture{
+		cardIndex: testPPUIndex0, cardMinor: testPPUMinor0,
+		giID: 1, ciID: 1, giMinor: testCapGiMinor, ciMinor: testCapCiMinor,
+	}
 }
 
-// partitionDevices builds the shared partition fixture and records each card's driver minor number as
-// its accelerator index plus one — the invariant the ordinal guard proves — since the shared helper
-// carries the index alone.
+// partitionDevices builds the shared partition fixture, giving each card the accelerator index its
+// device node and procfs capability subtree are named after and recording the kernel minor number that
+// node carries. The two are deliberately different for every card, so every expected path in these
+// tests can only be right if it was built from the index, and a path built from the record lands on the
+// neighboring card or on nothing at all.
 func partitionDevices(uuids ...string) *workercore.Devices {
+	indexes := []uint32{testPPUIndex0, testPPUIndex1}
+	minors := []uint32{testPPUMinor0, testPPUMinor1}
 	devs := theadDevices(testProfile, 1, 2, uuids...)
 	for i := range devs.Spec.Groups {
 		accels := devs.Spec.Groups[i].Accelerators
 		for j := range accels {
-			accels[j].PhysicalIndexes = []uint32{accels[j].Index + 1}
+			accels[j].Index = indexes[j]
+			accels[j].PhysicalIndexes = []uint32{minors[j]}
 		}
 	}
 	return devs
@@ -298,6 +337,155 @@ func TestNew_ReclaimLoopFollowsThePartitionServer(t *testing.T) {
 	assert.False(t, withoutPartitions.partitioned, "no partition server, nothing to reclaim")
 }
 
+// TestGetContainerAllocateResponse pins the whole-card node set — the set every Exclusive, Shared and
+// non-partition Visibility allocation takes: the vendor's two shared control nodes once, then each
+// allocated card's own node, which the vendor names after the card's ORDINAL — its accelerator index —
+// and never after the kernel minor number that node carries. That the ordinal reaches the card the
+// detector measured is proven, not assumed: the node's own minor number must be the minor the detector
+// recorded for the accelerator. Every node is required, so a node the responder cannot produce fails the
+// allocation instead of shortening the response: this vendor has no container-runtime hook, so an
+// incomplete set that looks like success starts a container whose access to its card is silently missing.
+func TestGetContainerAllocateResponse(t *testing.T) {
+	cases := []struct {
+		name string
+		// allocated names the cards the allocation covers, out of the fixture's two.
+		allocated []string
+		// breaks removes or corrupts exactly one member of the written node set, or one card's
+		// recorded minor number.
+		breaks func(t *testing.T, devs *workercore.Devices)
+		// want are the expected device-node names under the device root, in order.
+		want    []string
+		wantErr string
+	}{
+		{
+			name:      "the allocated card's node is the one its ordinal names",
+			allocated: []string{testPPUUUID0},
+			want:      []string{"alixpu", "alixpu_ctl", "alixpu_ppu14"},
+		},
+		{
+			name:      "every allocated card contributes its own node, the control nodes once",
+			allocated: []string{testPPUUUID0, testPPUUUID1},
+			want:      []string{"alixpu", "alixpu_ctl", "alixpu_ppu14", "alixpu_ppu15"},
+		},
+		{
+			name:      "a card the detector recorded no minor number for is refused",
+			allocated: []string{testPPUUUID0},
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+			},
+			wantErr: "no recorded minor number to prove its device node addresses it",
+		},
+		{
+			// The desynchronized index: the accelerator index is a post-filter counter, so a card the
+			// detector skipped mid-enumeration shifts every later index and the shifted index addresses
+			// the wrong card. The node it names carries a minor the detector never recorded for this
+			// accelerator, which is what makes the shift detectable without knowing any offset.
+			name:      "the node the ordinal names carries a minor the record disagrees with",
+			allocated: []string{testPPUUUID0},
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{testPPUMinor1}
+			},
+			wantErr: "carries minor 15, want 16",
+		},
+		{
+			// The same disagreement from the other side: the /dev tree was renumbered under the record.
+			name:      "the node the ordinal names was renumbered under the record",
+			allocated: []string{testPPUUUID0},
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				writeCharNode(t, cardNodePath(testPPUIndex0), testPPUMinor1)
+			},
+			wantErr: "carries minor 16, want 15",
+		},
+		{
+			name:      "an unallocated card missing its record does not fail the allocation",
+			allocated: []string{testPPUUUID0},
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[1].PhysicalIndexes = nil
+			},
+			want: []string{"alixpu", "alixpu_ctl", "alixpu_ppu14"},
+		},
+		{
+			name:      "the allocated card's node is missing",
+			allocated: []string{testPPUUUID0},
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				removeFixture(t, cardNodePath(testPPUIndex0))
+			},
+			wantErr: "alixpu_ppu14\":",
+		},
+		{
+			name:      "the allocated card's node exists but is not a character device",
+			allocated: []string{testPPUUUID0},
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				writeFixtureFile(t, cardNodePath(testPPUIndex0), notCharDevice)
+			},
+			wantErr: "is not a character device",
+		},
+		{
+			name:      "the shared control node is missing",
+			allocated: []string{testPPUUUID0},
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				removeFixture(t, sharedControlNodePaths()[0])
+			},
+			wantErr: "alixpu\":",
+		},
+		{
+			name:      "the shared control ioctl node is missing",
+			allocated: []string{testPPUUUID0},
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				removeFixture(t, sharedControlNodePaths()[1])
+			},
+			wantErr: "alixpu_ctl\":",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			devDir, _ := redirectNodeRoots(t)
+			for _, path := range sharedControlNodePaths() {
+				writeCharNode(t, path, 0)
+			}
+			// Each card's node under the name its ordinal gives it, carrying the kernel minor the
+			// detector recorded for it. No separate decoy is needed: the second card's node is the very
+			// node the first card's RECORDED minor names, so a response built from the record hands the
+			// container the neighboring card and fails here rather than passing silently.
+			writeCharNode(t, cardNodePath(testPPUIndex0), testPPUMinor0)
+			writeCharNode(t, cardNodePath(testPPUIndex1), testPPUMinor1)
+
+			devs := partitionDevices(testPPUUUID0, testPPUUUID1)
+			if c.breaks != nil {
+				c.breaks(t, devs)
+			}
+
+			s, ok := newServer(klog.Background(), workercore.DeviceAllocationModeExclusive, nil).(*server)
+			require.True(t, ok)
+			pod, ctr := partitionPod("pod-a")
+
+			got, err := s.GetContainerAllocateResponse(
+				context.Background(), pod, ctr, devs, allocatedOn(c.allocated...))
+			if c.wantErr != "" {
+				require.Error(t, err, "an incomplete device set must fail the allocation, never shorten the response")
+				assert.Nil(t, got)
+				assert.Contains(t, err.Error(), c.wantErr)
+				return
+			}
+			require.NoError(t, err)
+
+			want := make([]string, 0, len(c.want))
+			for _, name := range c.want {
+				want = append(want, filepath.Join(devDir, name))
+			}
+			assert.Equal(t, want, devicePaths(got),
+				"the node the card's ordinal names is injected, not the one its recorded minor would")
+			assert.Empty(t, got.Envs, "the device nodes are the whole of the container's access")
+			for i := range got.Devices {
+				spec := got.Devices[i]
+				assert.Equal(t, spec.HostPath, spec.ContainerPath, "a node is injected at its host path")
+				assert.Equal(t, "rw", spec.Permissions)
+			}
+		})
+	}
+}
+
 // TestActuatePhysicalSliced pins the whole node set a partitioned container is given, in order: the
 // vendor's two shared control nodes, the parent card's node, and the capability nodes of the GPU
 // instance and of its compute instance — nothing else, and no environment variable, because this
@@ -323,7 +511,7 @@ func TestActuatePhysicalSliced(t *testing.T) {
 	assert.Equal(t, []string{
 		filepath.Join(devDir, "alixpu"),
 		filepath.Join(devDir, "alixpu_ctl"),
-		filepath.Join(devDir, "alixpu_ppu0"),
+		filepath.Join(devDir, "alixpu_ppu14"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1280"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1281"),
 	}, devicePaths(got.Response))
@@ -338,12 +526,17 @@ func TestActuatePhysicalSliced(t *testing.T) {
 	assert.FileExists(t, markerPath(podsDir, "pod-a", "c", testPPUUUID0))
 }
 
-// TestActuatePhysicalSlicedVendorExample reproduces the card/instance numbering of the vendor's own
-// isolation example — card 0, GPU instance 4, its compute instance 0, capability minors 1280 and 1281 —
-// over an adopted instance, so the injected set can be compared against the documented one directly.
+// TestActuatePhysicalSlicedVendorExample reproduces the instance numbering of the vendor's own isolation
+// example — GPU instance 4, its compute instance 0, capability minors 1280 and 1281 — over an adopted
+// instance, so the injected set can be compared against the documented one directly. The card carrying
+// it sits at the fixture's measured ordinal rather than the example's card 0, because the numbering under
+// test here is the instances' and not the card's.
 func TestActuatePhysicalSlicedVendorExample(t *testing.T) {
 	devDir, _ := redirectNodeRoots(t)
-	nodeFixture{ordinal: 0, giID: 4, ciID: 0, giMinor: testCapGiMinor, ciMinor: testCapCiMinor}.write(t)
+	nodeFixture{
+		cardIndex: testPPUIndex0, cardMinor: testPPUMinor0,
+		giID: 4, ciID: 0, giMinor: testCapGiMinor, ciMinor: testCapCiMinor,
+	}.write(t)
 
 	s, drv := newPartitionedServer(testPPUUUID0)
 	drv.seedLive(testPPUUUID0, migInstance{
@@ -359,7 +552,7 @@ func TestActuatePhysicalSlicedVendorExample(t *testing.T) {
 	assert.Equal(t, []string{
 		filepath.Join(devDir, "alixpu"),
 		filepath.Join(devDir, "alixpu_ctl"),
-		filepath.Join(devDir, "alixpu_ppu0"),
+		filepath.Join(devDir, "alixpu_ppu14"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1280"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1281"),
 	}, devicePaths(got.Response))
@@ -373,7 +566,10 @@ func TestActuatePhysicalSlicedMultiCard(t *testing.T) {
 	createdFixture().write(t)
 	// The second card's partition: the fake driver creates GPU instance 2 on it, and its capability
 	// minors are unrelated to the first card's.
-	nodeFixture{ordinal: 1, giID: 2, ciID: 2, giMinor: 4352, ciMinor: 4353}.write(t)
+	nodeFixture{
+		cardIndex: testPPUIndex1, cardMinor: testPPUMinor1,
+		giID: 2, ciID: 2, giMinor: 4352, ciMinor: 4353,
+	}.write(t)
 
 	s, _ := newPartitionedServer(testPPUUUID0, testPPUUUID1)
 	pod, ctr := partitionPod("pod-a")
@@ -385,10 +581,10 @@ func TestActuatePhysicalSlicedMultiCard(t *testing.T) {
 	assert.Equal(t, []string{
 		filepath.Join(devDir, "alixpu"),
 		filepath.Join(devDir, "alixpu_ctl"),
-		filepath.Join(devDir, "alixpu_ppu0"),
+		filepath.Join(devDir, "alixpu_ppu14"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1280"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1281"),
-		filepath.Join(devDir, "alixpu_ppu1"),
+		filepath.Join(devDir, "alixpu_ppu15"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap4352"),
 		filepath.Join(devDir, "alixpu-caps", "alixpu-cap4353"),
 	}, devicePaths(got.Response))
@@ -421,10 +617,12 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 			wantErr: "alixpu_ctl\":",
 		},
 		{
-			name:        "the parent card's node is missing",
-			breaks:      func(t *testing.T, f nodeFixture) { removeFixture(t, cardNodePath(f.ordinal)) },
-			wantErr:     "alixpu_ppu0\":",
-			wantCreated: true,
+			// The card's own node is verified by the addressing guard, which runs before the
+			// reservation, so an unusable one costs no create — unlike every capability-node case
+			// below, which can only be reached once the partition exists.
+			name:    "the parent card's node is missing",
+			breaks:  func(t *testing.T, f nodeFixture) { removeFixture(t, cardNodePath(f.cardIndex)) },
+			wantErr: "alixpu_ppu14\":",
 		},
 		{
 			name:        "the gpu instance's capability node is missing",
@@ -440,14 +638,14 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 		},
 		{
 			name:        "the gpu instance's procfs access file is missing",
-			breaks:      func(t *testing.T, f nodeFixture) { removeFixture(t, giAccessPath(f.ordinal, f.giID)) },
+			breaks:      func(t *testing.T, f nodeFixture) { removeFixture(t, giAccessPath(f.cardIndex, f.giID)) },
 			wantErr:     "read capability file",
 			wantCreated: true,
 		},
 		{
 			name: "the compute instance's procfs access file is missing",
 			breaks: func(t *testing.T, f nodeFixture) {
-				removeFixture(t, ciAccessPath(f.ordinal, f.giID, f.ciID))
+				removeFixture(t, ciAccessPath(f.cardIndex, f.giID, f.ciID))
 			},
 			wantErr:     "read capability file",
 			wantCreated: true,
@@ -455,7 +653,7 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 		{
 			name: "the procfs access file carries no minor field",
 			breaks: func(t *testing.T, f nodeFixture) {
-				writeFixtureFile(t, giAccessPath(f.ordinal, f.giID), "DeviceFileMode: 292\n")
+				writeFixtureFile(t, giAccessPath(f.cardIndex, f.giID), "DeviceFileMode: 292\n")
 			},
 			wantErr:     "carries no DeviceFileMinor: field",
 			wantCreated: true,
@@ -463,7 +661,7 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 		{
 			name: "the procfs access file's minor is unparseable",
 			breaks: func(t *testing.T, f nodeFixture) {
-				writeFixtureFile(t, giAccessPath(f.ordinal, f.giID), "DeviceFileMinor: none\n")
+				writeFixtureFile(t, giAccessPath(f.cardIndex, f.giID), "DeviceFileMinor: none\n")
 			},
 			wantErr:     "parse DeviceFileMinor:",
 			wantCreated: true,
@@ -477,12 +675,14 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 			wantCreated: true,
 		},
 		{
-			name: "the card's node carries a minor that is not its ordinal plus one",
+			// Also the addressing guard's, and so also before the reservation: a path that is not a
+			// character device carries no minor to compare the record against, which is a /dev tree
+			// that cannot be proven to address this card rather than one that proves it does not.
+			name: "the parent card's node exists but is not a character device",
 			breaks: func(t *testing.T, f nodeFixture) {
-				writeCharNode(t, cardNodePath(f.ordinal), f.ordinal+7)
+				writeFixtureFile(t, cardNodePath(f.cardIndex), notCharDevice)
 			},
-			wantErr:     "carries minor 7, want 1",
-			wantCreated: true,
+			wantErr: "is not a character device",
 		},
 		{
 			name: "a capability node carries a minor the driver did not publish for it",
@@ -513,7 +713,7 @@ func TestActuatePhysicalSlicedRequiredNodes(t *testing.T) {
 			if c.wantCreated {
 				assert.Len(t, drv.destroyed, 1, "the instance this call created is rolled back")
 			} else {
-				assert.Zero(t, drv.createCalls, "a control node missing before any reservation costs no create")
+				assert.Zero(t, drv.createCalls, "a node verified before any reservation costs no create")
 			}
 			assert.NoFileExists(t, markerPath(podsDir, "pod-a", "c", testPPUUUID0),
 				"a rolled-back allocation leaves no ownership marker")
@@ -527,39 +727,144 @@ func removeFixture(t *testing.T, path string) {
 	require.NoError(t, os.Remove(path))
 }
 
-// TestActuatePhysicalSlicedOrdinalGuard pins that a card whose recorded minor number is not its
-// accelerator index plus one is refused rather than addressed. The index is a post-filter counter, so a
-// card skipped mid-enumeration desynchronizes it from the driver's ordinal; addressing it anyway would
-// hand the container the next card's node. The guard runs before the reservation, so it costs no create.
-func TestActuatePhysicalSlicedOrdinalGuard(t *testing.T) {
+// TestActuatePhysicalSlicedCardAddressingGuard pins the states in which a card's ordinal cannot be shown
+// to address the card the detector measured, each refused before anything is reserved so it costs no
+// create. The proof is the node's own kernel minor number against the minor the detector recorded for
+// that accelerator: equal means this ordinal reaches that card, whatever offset the driver's numbering
+// puts between the two numbers. Nothing here computes one number from the other, because a card that
+// violated an assumed offset would be addressed anyway and a host with a different offset would have
+// every card refused.
+func TestActuatePhysicalSlicedCardAddressingGuard(t *testing.T) {
 	cases := []struct {
-		name            string
-		physicalIndexes []uint32
+		name string
+		// breaks corrupts the record, or the node the record is compared against.
+		breaks  func(t *testing.T, devs *workercore.Devices)
+		wantErr string
 	}{
-		{name: "the recorded minor equals the index, as if the offset were absent", physicalIndexes: []uint32{0}},
-		{name: "the recorded minor is a later card's", physicalIndexes: []uint32{2}},
-		{name: "no minor number was recorded at all", physicalIndexes: nil},
+		{
+			// The detector records nothing for a card whose driver could not answer for its minor
+			// number, rather than substituting the enumeration counter, exactly so this refusal is
+			// reachable: a substituted number is indistinguishable from a real one here, and would let
+			// an unprovable ordinal be addressed as if it had been proven.
+			name: "the detector recorded no minor number to prove the ordinal against",
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+			},
+			wantErr: "no recorded minor number to prove its device node addresses it",
+		},
+		{
+			// The desynchronized index: the accelerator index is a post-filter counter, so a card the
+			// detector skipped mid-enumeration shifts every later index onto a neighbor. The shifted
+			// ordinal names a node whose minor is not the one recorded for this accelerator.
+			name: "the node the ordinal names carries a minor the record disagrees with",
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{testPPUMinor1}
+			},
+			wantErr: "carries minor 15, want 16",
+		},
+		{
+			name: "the node the ordinal names was renumbered under the record",
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				writeCharNode(t, cardNodePath(testPPUIndex0), testPPUMinor1)
+			},
+			wantErr: "carries minor 16, want 15",
+		},
+		{
+			name: "the node the ordinal names is missing",
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				removeFixture(t, cardNodePath(testPPUIndex0))
+			},
+			wantErr: "alixpu_ppu14\":",
+		},
+		{
+			name: "the node the ordinal names is not a character device",
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				writeFixtureFile(t, cardNodePath(testPPUIndex0), notCharDevice)
+			},
+			wantErr: "is not a character device",
+		},
+		{
+			name: "an unallocated card missing its record does not fail the allocation",
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[1].PhysicalIndexes = nil
+			},
+		},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			redirectNodeRoots(t)
+			_, podsDir := redirectNodeRoots(t)
 			createdFixture().write(t)
 
-			devs := partitionDevices(testPPUUUID0)
-			devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = c.physicalIndexes
+			devs := partitionDevices(testPPUUUID0, testPPUUUID1)
+			c.breaks(t, devs)
 
 			s, drv := newPartitionedServer(testPPUUUID0)
 			pod, ctr := partitionPod("pod-a")
 
 			got, err := s.ActuatePhysicalSliced(
 				context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0), testProfile)
+			if c.wantErr == "" {
+				require.NoError(t, err, "an unallocated card is never addressed, so its record is never needed")
+				assert.Equal(t, 1, drv.createCalls)
+				return
+			}
 			require.Error(t, err)
 			assert.Nil(t, got)
-			assert.Contains(t, err.Error(), "not its accelerator index plus one")
-			assert.Zero(t, drv.createCalls, "an unprovable ordinal is refused before anything is created")
+			assert.Contains(t, err.Error(), c.wantErr)
+			assert.Zero(t, drv.createCalls,
+				"a card whose ordinal cannot be proven is refused before anything is created")
+			assert.NoFileExists(t, markerPath(podsDir, "pod-a", "c", testPPUUUID0),
+				"a refused allocation leaves no ownership marker")
 		})
 	}
+}
+
+// TestActuatePhysicalSlicedAddressesTheNodeTheOrdinalNames pins the vendor's addressing rule end to end:
+// the injected card node and the procfs capability subtree the partition's minors are read from are both
+// the ones the card's ORDINAL — its accelerator index — names, never the ones its recorded kernel minor
+// number would name.
+//
+// The fixture reproduces a measured 16-card host rather than a constructed arrangement: the card under
+// test sits at ordinal 14 and its node, /dev/alixpu_ppu14, carries kernel minor 15, which is what the
+// detector recorded for it. The decoy at /dev/alixpu_ppu15 carrying minor 16 is that host's next card,
+// and the decoy procfs branch under ppu15 is that card's own capability tree. On the real host the last
+// card's record names a ppu16 that does not exist at all — so a response carrying the decoy, or reading
+// the capability minors out of the decoy's procfs branch, is the neighboring card's partition and fails
+// here.
+func TestActuatePhysicalSlicedAddressesTheNodeTheOrdinalNames(t *testing.T) {
+	devDir, _ := redirectNodeRoots(t)
+	createdFixture().write(t)
+
+	// The neighboring card, at the path the card under test's RECORDED minor number names: the node a
+	// record-keyed response would have injected, and the procfs branch it would have read the capability
+	// minors from. Both belong to a DIFFERENT card.
+	writeCharNode(t, cardNodePath(testPPUIndex1), testPPUMinor1)
+	writeAccessFile(t, giAccessPath(testPPUIndex1, 1), 9990)
+	writeAccessFile(t, ciAccessPath(testPPUIndex1, 1, 1), 9991)
+	writeCharNode(t, capNodePath(9990), 9990)
+	writeCharNode(t, capNodePath(9991), 9991)
+
+	s, drv := newPartitionedServer(testPPUUUID0)
+	devs := partitionDevices(testPPUUUID0)
+	acc := devs.Spec.Groups[0].Accelerators[0]
+	require.Equal(t, testPPUIndex0, acc.Index)
+	require.Equal(t, []uint32{testPPUMinor0}, acc.PhysicalIndexes,
+		"the card under test is addressed by an ordinal its recorded minor number is deliberately not")
+	pod, ctr := partitionPod("pod-a")
+
+	got, err := s.ActuatePhysicalSliced(
+		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0), testProfile)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{
+		filepath.Join(devDir, "alixpu"),
+		filepath.Join(devDir, "alixpu_ctl"),
+		filepath.Join(devDir, "alixpu_ppu14"),
+		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1280"),
+		filepath.Join(devDir, "alixpu-caps", "alixpu-cap1281"),
+	}, devicePaths(got.Response), "the node the ordinal names is injected, not the one the record would")
+	assert.Equal(t, 1, drv.createCalls)
 }
 
 // TestActuatePhysicalSlicedRollbackPerOutcome pins that a failure undoes exactly what this call did, per
@@ -591,7 +896,10 @@ func TestActuatePhysicalSlicedRollbackPerOutcome(t *testing.T) {
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				drv.seedLive(testPPUUUID0, adopted)
 			},
-			fixture:       nodeFixture{ordinal: 0, giID: 4, ciID: 0, giMinor: testCapGiMinor, ciMinor: testCapCiMinor},
+			fixture: nodeFixture{
+				cardIndex: testPPUIndex0, cardMinor: testPPUMinor0,
+				giID: 4, ciID: 0, giMinor: testCapGiMinor, ciMinor: testCapCiMinor,
+			},
 			wantDestroyed: 0,
 		},
 		{
@@ -600,7 +908,10 @@ func TestActuatePhysicalSlicedRollbackPerOutcome(t *testing.T) {
 				drv.seedLive(testPPUUUID0, adopted)
 				writeMarkerFixture(t, podsDir, selfMarker("pod-a", testPPUUUID0, adopted))
 			},
-			fixture:         nodeFixture{ordinal: 0, giID: 4, ciID: 0, giMinor: testCapGiMinor, ciMinor: testCapCiMinor},
+			fixture: nodeFixture{
+				cardIndex: testPPUIndex0, cardMinor: testPPUMinor0,
+				giID: 4, ciID: 0, giMinor: testCapGiMinor, ciMinor: testCapCiMinor,
+			},
 			wantDestroyed:   0,
 			wantKeepsMarker: true,
 		},
@@ -749,16 +1060,105 @@ func TestReadCapMinor(t *testing.T) {
 	}
 }
 
-// TestCardOrdinal pins that the ordinal comes from the accelerator index — the value both the device
-// node and the procfs capability subtree are keyed by — and only when the recorded minor number proves
-// it.
-func TestCardOrdinal(t *testing.T) {
-	devs := partitionDevices(testPPUUUID0, testPPUUUID1)
+// TestRequireCardNode pins the single definition of how a card is addressed on this vendor's node: the
+// ordinal that names its device node and keys its procfs capability subtree is the card's accelerator
+// index, and that ordinal may only be used once the node it names has been shown to carry the very kernel
+// minor number the detector recorded for that accelerator. Neither number is ever derived from the other,
+// in either direction — the equality of the node's own minor with the record is the whole proof, and it
+// holds whatever offset the driver's numbering puts between an ordinal and a minor.
+func TestRequireCardNode(t *testing.T) {
+	cases := []struct {
+		name string
+		card string
+		// breaks corrupts the record, or the node the record is compared against.
+		breaks func(t *testing.T, devs *workercore.Devices)
+		// want is the ordinal the card's paths are keyed by.
+		want    uint32
+		wantErr string
+	}{
+		{
+			name: "a card's ordinal is its accelerator index, proven by the node's own minor",
+			card: testPPUUUID0,
+			want: testPPUIndex0,
+		},
+		{
+			name: "the second card's ordinal is its own index, not a number derived from the first's",
+			card: testPPUUUID1,
+			want: testPPUIndex1,
+		},
+		{
+			name:    "a card absent from the device record has no ordinal to address",
+			card:    "PPU-absent",
+			wantErr: "absent from the device record",
+		},
+		{
+			name: "a card the detector recorded no minor number for cannot be proven",
+			card: testPPUUUID0,
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+			},
+			wantErr: "no recorded minor number to prove its device node addresses it",
+		},
+		{
+			name: "a node carrying the neighbor's minor is refused, not addressed",
+			card: testPPUUUID0,
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				writeCharNode(t, cardNodePath(testPPUIndex0), testPPUMinor1)
+			},
+			wantErr: "carries minor 16, want 15",
+		},
+		{
+			name: "a record naming the neighbor's minor is refused, not addressed",
+			card: testPPUUUID0,
+			breaks: func(_ *testing.T, devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = []uint32{testPPUMinor1}
+			},
+			wantErr: "carries minor 15, want 16",
+		},
+		{
+			name: "a missing node proves nothing",
+			card: testPPUUUID0,
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				removeFixture(t, cardNodePath(testPPUIndex0))
+			},
+			wantErr: "alixpu_ppu14\":",
+		},
+		{
+			name: "a node that is not a character device carries no minor to compare",
+			card: testPPUUUID0,
+			breaks: func(t *testing.T, _ *workercore.Devices) {
+				writeFixtureFile(t, cardNodePath(testPPUIndex0), notCharDevice)
+			},
+			wantErr: "is not a character device",
+		},
+	}
 
-	ordinal, ok := cardOrdinal(devs, testPPUUUID1)
-	assert.True(t, ok)
-	assert.Equal(t, uint32(1), ordinal, "the second card's ordinal is its accelerator index, not its minor")
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectNodeRoots(t)
+			writeCharNode(t, cardNodePath(testPPUIndex0), testPPUMinor0)
+			writeCharNode(t, cardNodePath(testPPUIndex1), testPPUMinor1)
 
-	_, ok = cardOrdinal(devs, "PPU-absent")
-	assert.False(t, ok, "an unknown card has no ordinal")
+			devs := partitionDevices(testPPUUUID0, testPPUUUID1)
+			if c.breaks != nil {
+				c.breaks(t, devs)
+			}
+
+			ordinal, spec, err := requireCardNode(devs, c.card)
+			if c.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), c.wantErr)
+				assert.Zero(t, ordinal)
+				assert.Nil(t, spec, "an unproven card yields no node to inject")
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, c.want, ordinal)
+			require.NotNil(t, spec)
+			assert.Equal(t, cardNodePath(c.want), spec.HostPath,
+				"the node handed over is the one the ordinal names, and the one that was proven")
+			assert.Equal(t, spec.HostPath, spec.ContainerPath)
+			assert.Equal(t, "rw", spec.Permissions)
+		})
+	}
 }

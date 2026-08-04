@@ -169,14 +169,18 @@ func (s *server) GetContainerAllocateResponse(
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
 
-	// Mount control devices.
-	for _, p := range []string{
-		"/dev/alixpu",
-		"/dev/alixpu_ctl",
-	} {
-		if pDev := deviceplugin.NewRWDevice(p); pDev != nil {
-			ctrResp.Devices = append(ctrResp.Devices, pDev)
+	// Mount control devices. They are needed once per container rather than per card, and every node
+	// here is required: this vendor has no container-runtime hook, so the injected nodes are the whole
+	// of the container's access, and a set missing one of them would start a container that cannot
+	// address its card at all. They are resolved through the same fail-closed helper the partition path
+	// uses, rather than the shared device-spec helper, which returns nil for a path that does not exist
+	// and would turn a missing node into a SUCCESSFUL allocation carrying a silently incomplete set.
+	for _, p := range sharedControlNodePaths() {
+		pDev, err := requireDeviceNode(p)
+		if err != nil {
+			return nil, err
 		}
+		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 
 	// Mount specified devices.
@@ -192,9 +196,17 @@ func (s *server) GetContainerAllocateResponse(
 				continue
 			}
 
-			if pDev := deviceplugin.NewRWDevicef("/dev/alixpu_ppu%d", devsAccelerator.Index); pDev != nil {
-				ctrResp.Devices = append(ctrResp.Devices, pDev)
+			// The vendor names a card's device node after the card's ordinal — its accelerator index —
+			// and that the ordinal reaches the card the detector measured is proven rather than assumed,
+			// through the same guard the partition path uses: the node it names must carry the minor
+			// number the detector recorded for this card. A card that cannot be proven is refused rather
+			// than answered with a device set that is silently short of its card, or that carries a
+			// neighboring card's node.
+			_, cardNode, err := requireCardNode(devs, devsAccelerator.ID)
+			if err != nil {
+				return nil, err
 			}
+			ctrResp.Devices = append(ctrResp.Devices, cardNode)
 		}
 	}
 

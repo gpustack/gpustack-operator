@@ -62,13 +62,14 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	}
 
 	for _, cardUUID := range cards {
-		// The ordinal keys both the card's device node and its procfs capability subtree, so a card
-		// whose index cannot be trusted cannot be addressed at all: addressing it would inject a
-		// neighboring card's node, which is the very isolation this response exists to keep.
-		ordinal, ok := cardOrdinal(devs, cardUUID)
-		if !ok {
-			return nil, fmt.Errorf(
-				"card %s: recorded minor number is not its accelerator index plus one: fail closed", cardUUID)
+		// The card's ordinal names both its device node and its procfs capability subtree, and it is
+		// proven to reach the card the detector measured before either is built — through the same guard
+		// the actuator cleared, so this response addresses the card exactly as the owner's own did.
+		// Addressing an unproven ordinal would show this container a neighboring card's partition, which
+		// is the very isolation this response exists to keep.
+		ordinal, cardNode, err := requireCardNode(devs, cardUUID)
+		if err != nil {
+			return nil, err
 		}
 
 		inst, err := s.liveOwnedInstance(devs, string(pod.UID), owner, cardUUID)
@@ -76,7 +77,7 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 			return nil, err
 		}
 
-		specs, derr := partitionDeviceSpecs(ordinal, inst)
+		specs, derr := partitionDeviceSpecs(ordinal, cardNode, inst)
 		if derr != nil {
 			return nil, fmt.Errorf("card %s partition device nodes: %w", cardUUID, derr)
 		}
