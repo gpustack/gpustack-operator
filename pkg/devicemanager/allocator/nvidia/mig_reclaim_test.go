@@ -304,6 +304,44 @@ func TestReclaim_UnattributableCorruptPathBoundedLog(t *testing.T) {
 	assert.Equal(t, 1, bounded, "the operator-visible log fires exactly once at the bound")
 }
 
+// TestReclaim_LiveOwnersCorruptMarkerBoundedLog asserts the sibling hold is not silent either. An
+// unparseable record whose Pod is still running is kept — the Pod depends on the ownership it records —
+// and nothing in this loop can release it while that Pod lives, which is the case that reads as
+// transient and is not. So it earns the same surface: one operator-visible log naming the card, the Pod
+// and the path, at the bound and only there. What the record does is unchanged, before the bound and
+// after it.
+func TestReclaim_LiveOwnersCorruptMarkerBoundedLog(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	seedInstances(drv, []migSeed{{card: testGPUUUID0, giID: 1}})
+	path := writeCorruptMarker(t, deviceplugin.PodWorkDir("pod-live", "c"), markerFileName(testGPUUUID0))
+
+	var bounded int
+	logger := funcr.New(func(_, args string) {
+		if strings.Contains(args, "delete the pod to release the card") {
+			bounded++
+		}
+	}, funcr.Options{})
+	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logger, noClaims)
+	live := []string{"pod-live"}
+
+	for i := 0; i < reclaimMaxCorruptHoldMisses-1; i++ {
+		r.reconcile(live)
+	}
+	assert.Zero(t, bounded, "the operator-visible log does not fire before the bound")
+	assert.FileExists(t, path, "and the record is kept meanwhile")
+
+	r.reconcile(live)
+	assert.Equal(t, 1, bounded, "it fires at the bound")
+
+	for i := 0; i < 3; i++ {
+		r.reconcile(live)
+	}
+	assert.Equal(t, 1, bounded, "and exactly once, however long the hold stands")
+	assert.FileExists(t, path, "the record is still kept: its live pod depends on the ownership it records")
+	assert.Empty(t, drv.destroyed, "and its card stays off the orphan sweep throughout")
+}
+
 // TestReclaim_CorruptMarkerOfDeadPodConverges asserts the hold clears by itself instead of leaking
 // a partition for the node's lifetime: a corrupt marker whose Pod is gone is retired on that
 // evidence alone (its path names the Pod) after the same debounce every other decision here uses,

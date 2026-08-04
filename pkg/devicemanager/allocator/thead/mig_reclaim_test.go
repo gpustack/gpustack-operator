@@ -529,6 +529,46 @@ func TestReclaimUnattributableCorruptPathBoundedLog(t *testing.T) {
 	assert.Equal(t, 1, bounded, "the operator-visible log fires exactly once at the bound")
 }
 
+// TestReclaimLiveOwnersCorruptMarkerBoundedLog asserts the sibling hold is not silent either. An
+// unparseable record whose Pod is still running is kept — the Pod depends on the ownership it records —
+// and nothing in this loop can release it while that Pod lives, which is the case that reads as
+// transient and is not. So it earns the same surface: one operator-visible log naming the card, the Pod
+// and the path, at the bound and only there. What the record does is unchanged, before the bound and
+// after it.
+func TestReclaimLiveOwnersCorruptMarkerBoundedLog(t *testing.T) {
+	podsDir := t.TempDir()
+	drv := newFakeMigDriver()
+	drv.seedCard(testPPUUUID0)
+	seedInstances(drv, migSeed{card: testPPUUUID0, giID: 1, slot: migPlacement{0, 2}})
+	path := writeCorruptMarker(t,
+		corruptDir(podsDir, corruptFixture{pod: "pod-live"}), markerFileName(testPPUUUID0))
+
+	var bounded int
+	logger := funcr.New(func(_, args string) {
+		if strings.Contains(args, "delete the pod to release the card") {
+			bounded++
+		}
+	}, funcr.Options{})
+	r := newReclaimer(drv, podsDir, logger, noClaims)
+	live := []string{"pod-live"}
+
+	for range reclaimMaxCorruptHoldMisses - 1 {
+		r.reconcile(live)
+	}
+	assert.Zero(t, bounded, "the operator-visible log does not fire before the bound")
+	assert.FileExists(t, path, "and the record is kept meanwhile")
+
+	r.reconcile(live)
+	assert.Equal(t, 1, bounded, "it fires at the bound")
+
+	for range 3 {
+		r.reconcile(live)
+	}
+	assert.Equal(t, 1, bounded, "and exactly once, however long the hold stands")
+	assert.FileExists(t, path, "the record is still kept: its live pod depends on the ownership it records")
+	assert.Empty(t, drv.destroyed, "and its card stays off the orphan sweep throughout")
+}
+
 // TestReclaimRacesAllocationOnSameCard asserts a reclaim pass and an allocation on the SAME card do not
 // corrupt each other's partition, with the interleaving pinned rather than hoped for: the pass is parked
 // inside the card lock — after its under-lock re-read, before its destroy — and only then does the

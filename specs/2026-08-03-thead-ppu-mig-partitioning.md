@@ -411,13 +411,26 @@ write at all — an out-of-band edit or a restored backup, a copy of one card's 
 name (which the record's own card field refuses), a media or filesystem error, and a schema skew across a
 downgrade, the one route that would surface fleet-wide at once rather than on a single card. So this
 feature is still the defence; it is just no longer the routine one.
+**Both indefinite holds must be visible, and only one was (T20).** A corrupt path that names no Pod
+counts its consecutive passes and surfaces one operator-visible log at a bound, naming the repair. A
+corrupt marker whose Pod is *alive* logged once per pass, forever, and never escalated — the asymmetry
+the wrong way round, because the live-owner case is the one that reads as transient. The Pod is alive, so
+the hold looks like something the Pod's exit will clear, and it is not: while it stands, nothing on that
+card is adopted and nothing on it is reclaimed, and the Pod itself can never be re-admitted either,
+because a re-created container's reserve reads its own record first and fails closed on any parse failure
+that is not "absent". So restarting the Pod cannot clear it, and the record cannot be rebuilt from
+anything outside the file — the ids that identify the partition were only ever in it. Deleting the Pod is
+the repair, and the operator has to be told that. T20 gives that case the same bounded surface, on both
+vendors, and changes no decision.
 *Acceptance:* on both vendors — an unmarked leftover on a card with a corrupt marker is not adopted,
 while a fresh create in a free slot on that same card still succeeds and an unmarked leftover on a
 *sibling* card is still adopted; a card named by a corrupt marker is never treated as drained, so its
 partitions are not collected as orphans; a corrupt marker whose Pod is gone is removed, and one whose Pod
 is alive is kept; a corrupt path that names no card at all fails closed on every card, since the scope of
 what is unknown is itself unknown; and the scan stays lenient, so one bad file still cannot fail a whole
-pass. The existing NVIDIA tests pass unchanged.
+pass. The existing NVIDIA tests pass unchanged. Neither indefinite hold stands silently: each counts its
+own consecutive passes and surfaces one operator-visible log at the same bound — once, not per pass —
+naming the path, the owner it can identify and the repair.
 
 **F13 — A profile the driver did not name must not be published, on either vendor.**
 The published resource key is the profile's name, and the driver seam resolves that key back to a vendor
@@ -426,7 +439,8 @@ cannot complete that round trip: the detector synthesizes a display name for it 
 asks the driver for a name and gets nothing, and the two never meet. Publishing it produces a key a user
 can request and admission will accept, and that then fails at allocation — the worst place to discover it.
 The rule is therefore that only a profile the driver itself named is published; a nameless one is dropped
-with a warning, and the arithmetic value survives solely as the memory-slice span fallback F10 gave it.
+with a warning, and the arithmetic value survived solely as the memory-slice span fallback F10 gave it —
+until T18 deleted that fallback too, leaving the synthesized value with no consumer at all.
 This is reachable only on a driver so old that the *named* profile-info versions are all unavailable —
 the vendor library tries the newest first, accepts it only when it carries a name, and falls back through
 a second named version before reaching the nameless one. On any such driver the seam's name matching was
@@ -437,6 +451,8 @@ rather than published under a synthesized name; the memory-slice span still fall
 value for a driver that enumerates no placement; and no profile that the driver *did* name changes in any
 way. The existing NVIDIA tests pass unchanged except where they assert the synthesized name, which is the
 behaviour being removed — that one expectation may change, and the change must be visible in the diff.
+**Amended after T18 landed:** the span clause is void. A profile the driver enumerated no placement for is
+now refused outright, so there is no fallback left for this criterion to hold to.
 
 **F14 — A device node the container must have and the responder cannot produce fails the allocation, on
 the whole-card path too.**
@@ -1201,6 +1217,25 @@ neither of which any other task depends on for its own correctness.
       created directories would decide that on their behalf — so each call site keeps its own `MkdirAll`
       and the only behaviour that changes anywhere is the added durability.
 
+- [x] **T20 · Give the live-owner corrupt-marker hold the bound its sibling already had**
+      Blocked by: T7, T11
+      Owns: `pkg/devicemanager/allocator/nvidia/mig_reclaim.go`,
+      `pkg/devicemanager/allocator/nvidia/mig_reclaim_test.go`,
+      `pkg/devicemanager/allocator/thead/mig_reclaim.go`,
+      `pkg/devicemanager/allocator/thead/mig_reclaim_test.go`
+      Gate: review
+      Acceptance: on both vendors, an unparseable marker whose Pod is alive counts its own consecutive
+      passes and surfaces exactly one operator-visible error at `reclaimMaxCorruptHoldMisses`, naming the
+      card, the Pod, the path and the repair — not before the bound, and not again after it. The record is
+      still kept, the card is still held closed, and no other decision moves: observability only, asserted
+      by a case that fails if the log fires early, twice, or never.
+      Verify: `go test -race ./pkg/devicemanager/allocator/nvidia/... ./pkg/devicemanager/allocator/thead/... && make lint`
+      Ordered after the build, on the user's decision, from a question about F12: what happens when the
+      corrupt marker's Pod is still alive. The counter the retirement debounce keeps for that path is reset
+      to zero on every such pass — which that debounce needs, so a Pod outliving a transient list gap never
+      has its record retired — so the escalation cannot count there and gets its own key space, still
+      touched each pass so it survives to the next and disappears with the path.
+
 #### T10 execution checklist
 
 Written before the window is scheduled, so the window is spent collecting rather than deciding. Card
@@ -1397,9 +1432,10 @@ complete and locally verified. T10 is the hardware gate.
 **Shipped as.** The task ids above are the plan's own order — a DAG, and the order the build ran in. The
 branch is published in a different order, by subsystem, so that each commit is one subject a reviewer can
 read whole: a task's review and hardware findings are folded into the commit they correct rather than
-following it, and the whole of this file lands in one commit rather than a paragraph in each. Task numbering
-is left alone, because every commit's trailer and every `Blocked by:` above reads by it. The two orders map
-as follows.
+following it, and this file's whole accumulated record lands in one commit rather than a paragraph in each.
+Work ordered after that consolidation carries its own write-back, as any new task does. Task numbering is
+left alone, because every commit's trailer and every `Blocked by:` above reads by it. The two orders map as
+follows.
 
 | Commit | Tasks |
 | --- | --- |
@@ -1419,6 +1455,7 @@ as follows.
 | `refactor(devicemanager)`: read a mig profile's span only from the driver's placements | T18 |
 | `fix(devicemanager)`: publish an allocator's ownership record durably, not just atomically | T19 |
 | `docs(spec)`: record the plan, both hardware windows and what shipped | T10, and this file |
+| `fix(devicemanager)`: bound the hold a live pod's unreadable ownership record takes | T20 |
 
 ### Test Plan
 

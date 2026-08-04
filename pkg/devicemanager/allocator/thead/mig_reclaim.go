@@ -39,6 +39,11 @@ const reclaimMaxCorruptHoldMisses = 8
 // error rather than as message text so the operator-visible log reads like the busy-destroy one.
 var errCorruptPathUnattributable = errors.New("unreadable path names neither a pod nor a card")
 
+// errCorruptMarkerHeldByLivePod is the fault the live-owner hold reports: an unreadable ownership
+// record whose Pod is still running, so no liveness evidence can retire it and nothing can rebuild
+// it. It is carried as an error rather than as message text for the same reason as the fault above.
+var errCorruptMarkerHeldByLivePod = errors.New("unreadable marker of a live pod")
+
 // cardMissPrefix namespaces a per-card orphan-collection miss counter in the same misses map as the
 // per-pod counters; pod UIDs are UUIDs, so they never collide with this prefix.
 const cardMissPrefix = "card:"
@@ -47,6 +52,13 @@ const cardMissPrefix = "card:"
 // retiring an unparseable marker is debounced exactly like every other liveness decision here (never
 // acted on from one transient pass). Pod UIDs are UUIDs, so they never collide with it.
 const corruptMissPrefix = "corrupt:"
+
+// corruptHeldMissPrefix namespaces the same path's held-passes counter, which cannot share the key
+// above: that one is reset to zero on every pass whose Pod is alive — the retirement debounce needs
+// that reset, so a Pod outliving a transient list gap never has its record retired — and a hold
+// counted there would therefore never reach any bound. Pod UIDs are UUIDs, so neither prefix collides
+// with them.
+const corruptHeldMissPrefix = "corrupt-held:"
 
 // reclaimer is the level-based partition reclaim loop's state, driven by the reconciler's live
 // pod-UID set plus a periodic resync. A physically sliced pool has no Release callback, so a Pod's
@@ -369,9 +381,12 @@ func (r *reclaimer) removeMarker(path string) bool {
 // card either, so ownershipUnknownOnCard darkens every card — no adoption anywhere and no orphan
 // collected anywhere — for as long as it stays unreadable. Nothing here can fix that without
 // destroying state it cannot account for, so the hold stands; what it must not do is stand silently.
-// The bounded count below surfaces one operator-visible log naming the path, at
-// reclaimMaxCorruptHoldMisses consecutive passes, so the repair can be made by the one actor able to
-// make it.
+//
+// Neither kept case stands silently: each counts its consecutive passes under its own key and surfaces
+// one operator-visible log at reclaimMaxCorruptHoldMisses naming the path and the repair, so the repair
+// can be made by the one actor able to make it. The first case needs that as much as the second,
+// because it is the one that only looks transient — the Pod is alive, so the hold reads as something
+// its exit will clear, and it is not: see holdLiveOwnersMarker.
 func (r *reclaimer) pruneCorruptMarkers(corrupt []string, live, touched sets.Set[string]) {
 	for _, path := range corrupt {
 		uid, ok := podUIDFromMarkerPath(r.podsDir, path)
@@ -383,7 +398,7 @@ func (r *reclaimer) pruneCorruptMarkers(corrupt []string, live, touched sets.Set
 		touched.Insert(key)
 		if live.Has(uid) {
 			r.misses[key] = 0
-			r.logger.Info("reclaim: unparseable marker of a live pod, holding its card closed", "path", path, "podUID", uid)
+			r.holdLiveOwnersMarker(path, uid, touched)
 			continue
 		}
 		r.misses[key]++
@@ -395,6 +410,43 @@ func (r *reclaimer) pruneCorruptMarkers(corrupt []string, live, touched sets.Set
 			r.logger.Info("reclaim: removed unparseable marker of a dead pod", "path", path, "podUID", uid)
 		}
 	}
+}
+
+// holdLiveOwnersMarker keeps the unparseable marker of a live Pod — it still records an ownership its
+// Pod depends on — and counts the consecutive passes that hold has cost the card, surfacing one
+// operator-visible log at reclaimMaxCorruptHoldMisses. Like the unattributable hold it changes no
+// decision: the record is kept either way. The count lives in its own key space, because the
+// retirement debounce's key for this same path is reset to zero on every one of these passes. The key
+// is touched so the count survives to the next pass, and disappears with it once the path does.
+//
+// The bound is worth spending on this case precisely because it reads as the transient one: the Pod is
+// alive, so the hold looks like something the Pod's exit will clear. It is not. While it stands, no
+// leftover on the card can be adopted and none can be reclaimed; and the Pod cannot be re-admitted
+// either, because a re-created container's reserve reads its own record first and fails closed on any
+// parse failure that is not "absent" — so restarting the Pod cannot clear it, and nothing the operator
+// still holds can rebuild the record, since the ids that identify the partition were only ever in the
+// file. Deleting the Pod is what releases the card: the retirement debounce then removes the record on
+// the evidence of its path.
+func (r *reclaimer) holdLiveOwnersMarker(path, uid string, touched sets.Set[string]) {
+	key := corruptHeldMissPrefix + path
+	touched.Insert(key)
+	r.misses[key]++
+	r.logger.Info("reclaim: unparseable marker of a live pod, holding its card closed",
+		"path", path, "podUID", uid, "passes", r.misses[key])
+	if r.misses[key] != reclaimMaxCorruptHoldMisses {
+		return
+	}
+	card, ok := cardFromMarkerPath(path)
+	if !ok {
+		card = "ALL (the file name encodes no card)"
+	}
+	r.logger.Error(errCorruptMarkerHeldByLivePod,
+		"reclaim: an unreadable partition ownership record of a RUNNING pod is holding its card closed: while it "+
+			"persists no leftover partition on that card is adopted and none is reclaimed, and the pod cannot be "+
+			"re-admitted either, because a container's reserve reads its own record first and fails closed on an "+
+			"unreadable one — so restarting the pod cannot clear this, and the record cannot be rebuilt from "+
+			"anything outside it; delete the pod to release the card",
+		"path", path, "podUID", uid, "card", card, "passes", r.misses[key])
 }
 
 // holdUnattributablePath keeps a corrupt path whose owner cannot be read from it — there is no
