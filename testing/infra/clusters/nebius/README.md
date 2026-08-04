@@ -125,7 +125,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 |---|---|---|
 | `project_id` | Nebius project ID (required); its region fixes node placement & platform availability | *(required)* |
 | `name_prefix` | Prefix for the cluster and its network/subnet/security-group names (a random suffix is appended) | `gpustack-nebius` |
-| `release` | Kubernetes version (`<major>.<minor>`) | `1.31` |
+| `release` | Kubernetes version (`<major>.<minor>`) | `1.33` |
 | `ssh_public_key` | Path to the SSH public key injected into every node via cloud-init | `~/.ssh/id_rsa.pub` |
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
@@ -186,6 +186,15 @@ Applies to `gpu-l40s-a`, `gpu-l40s-d`, `gpu-h100-sxm`, `gpu-h200-sxm`. Note the
 break at 1.33: the `cuda12*` presets are **not** implemented for 1.33+ -- only
 `cuda13.0` -- so `release = "1.34"` with `cuda12.8` is rejected. (`gpu-b200-sxm*`
 use `cuda12.8`/`cuda13.0` on `ubuntu24.04`; check the matrix.)
+
+The older rows are kept for the driver pairing only: **a version near its end of
+life is refused outright**, with `spec.control_plane.version - Forbidden: k8s
+version <x> is deprecated and cannot be used (end of life: <date>)`, and the
+window is generous -- 1.31 was already rejected a month before its 2026-09-01
+EOL. The compatibility matrix does **not** catch this (it answers for a
+deprecated version just as happily), so the rejection only ever surfaces at
+apply time, after the network and security group are created. Raise `release`
+and re-apply; the created resources are reused.
 
 ### Empty preset / installing drivers manually
 
