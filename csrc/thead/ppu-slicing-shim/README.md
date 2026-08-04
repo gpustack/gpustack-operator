@@ -133,14 +133,29 @@ docker run --rm \
 inside a container, so one card passed through is index `0` whatever `/dev/alixpu_ppu<N>` it came
 from.
 
-A container holding **several** cards gets one figure per card, and each allocation is charged to the card it
-actually lands on: the calling thread's context normally, but `prop->location.id` for the VMM path and the pool's
-own card for a pool allocation, because those name a card that need not be the context's.
+A container holding **several** cards gets one figure per card **on both dimensions**, and each allocation is
+charged to the card it actually lands on: the calling thread's context normally, but `prop->location.id` for the
+VMM path and the pool's own card for a pool allocation, because those name a card that need not be the context's.
+Two cards at half a card each:
+
+```bash
+docker run --rm \
+  --device /dev/alixpu --device /dev/alixpu_ctl \
+  --device /dev/alixpu_ppu3 --device /dev/alixpu_ppu4 \
+  -v "$PWD:/work" \
+  -e LD_PRELOAD=/work/hggc_quota.so \
+  -e HGGC_DEVICE_MEMORY_LIMIT_0=49152 -e HGGC_DEVICE_SM_LIMIT_0=50 \
+  -e HGGC_DEVICE_MEMORY_LIMIT_1=49152 -e HGGC_DEVICE_SM_LIMIT_1=50 \
+  -e LIBHGGC_LOG_LEVEL=2 \
+  gpustack/thead-ppu-devel:2.1.1 ./your-workload
+```
 
 | Variable | Meaning | Absent |
 | --- | --- | --- |
-| `HGGC_DEVICE_MEMORY_LIMIT_<i>` | per-card VRAM cap, MiB | **init error** |
-| `HGGC_DEVICE_SM_LIMIT` | compute cap for the container, percent | **init error** |
+| `HGGC_DEVICE_MEMORY_LIMIT_<i>` | per-card VRAM cap, MiB | falls back to `HGGC_DEVICE_MEMORY_LIMIT` |
+| `HGGC_DEVICE_MEMORY_LIMIT` | VRAM cap for every card carrying no figure of its own, MiB | **init error** for those cards |
+| `HGGC_DEVICE_SM_LIMIT_<i>` | per-card compute cap, percent | falls back to `HGGC_DEVICE_SM_LIMIT` |
+| `HGGC_DEVICE_SM_LIMIT` | compute cap for every card carrying no figure of its own, percent | **init error** for those cards |
 | `LIBHGGC_LOG_LEVEL` | `0` silent · `1` denials and errors · `2` also load markers, the per-entry counter dump and one line per control step | defaults to `1` |
 | `HGGC_LEDGER_PATH` | the cross-process usage region's file | `/dev/shm/vppu-ledger` |
 | `HGGC_SM_CONTROL_PERIOD_MS` | the compute controller's gating window | `100` |
@@ -156,6 +171,19 @@ configuration is reported at load and then refuses every allocation and every la
 `_exit()`, because arriving through `/etc/ld.so.preload` means exiting would kill every process
 in the container, including the shell someone would diagnose it from. Compute that is genuinely
 uncapped is written `HGGC_DEVICE_SM_LIMIT=100`.
+
+**The precedence both figures follow, and where it stops.** `HGGC_DEVICE_<dimension>_LIMIT_<i>` decides card
+`<i>` wherever it is **set**; every other card reads the un-indexed `HGGC_DEVICE_<dimension>_LIMIT`. Being set
+is what stops the search, not being valid: a figure that is set and cannot be parsed — or, for compute, is
+above 100 — makes **that card** unusable and never falls through to the level above, so a mistyped per-card
+figure denies the card rather than quietly buying it the container-wide one. HAMi-core reads
+`CUDA_DEVICE_{MEMORY,SM}_LIMIT{,_<i>}` in the same order but falls through on a bad value, and for compute
+then defaults to `100` — which turns a typo into a whole card's compute.
+
+With only the un-indexed forms set, **every** card is a card this container was given: nothing in the
+environment says how many it holds. So the un-indexed pair is a complete configuration on its own — which is
+what an allocator that knows one figure per dimension can inject — and both halves of that pair have to be
+usable, exactly as an indexed pair does.
 
 One more ordering rule, and it is not this library's to enforce: **the visibility shim must be
 preloaded before any other library that interposes `dlsym`.** Two such libraries do not chain

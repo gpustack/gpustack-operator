@@ -9,6 +9,7 @@ accelerators (GPU/NPU/TPU), built on Node Feature Discovery (NFD) + Kueue.
 - `pkg/` — implementation: `worker` (control plane), `devicemanager` (per-node DaemonSet), `nodefeature` (label algebra), and supporting packages.
 - `api/` — API types: CRDs + aggregated extension APIs.
 - `binding/` — generated CGO bindings to vendor GPU runtime/management libraries.
+- `csrc/` — hand-written C sources for the vendor preload libraries injected into sliced workload containers (`thead/ppu-slicing-shim`).
 - `gen/` — code generators (`api`, `binding`).
 - `hack/` — build/lint/test/deps/generate scripts behind the Makefile.
 - `staging/` — patched k8s modules, managed by `make deps`.

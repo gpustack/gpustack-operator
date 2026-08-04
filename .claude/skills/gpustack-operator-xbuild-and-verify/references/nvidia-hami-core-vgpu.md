@@ -30,6 +30,10 @@ sliced container:
 
 HAMi-core resolution (`multiprocess_memory_limit.c: do_init_device_{memory,sm}_limits`): per-card
 `_<i>` wins; else the un-indexed `CUDA_DEVICE_MEMORY_LIMIT` / `CUDA_DEVICE_SM_LIMIT`; SM default 100 (no cap).
+Note the asymmetry above: **GPUStack's allocator emits `CUDA_DEVICE_SM_LIMIT` only**, never `_<i>`, so the
+library's per-card SM cap is not requestable through GPUStack on NVIDIA — every card gets the same figure.
+The THead shim reads `HGGC_DEVICE_{MEMORY,SM}_LIMIT{,_<i>}` in the same order on both dimensions, but refuses a
+set-and-malformed figure instead of falling through — and then, for compute, defaulting to 100.
 
 **Mounts**
 | Container path | Host source | Mode |
