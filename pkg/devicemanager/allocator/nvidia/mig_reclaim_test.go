@@ -1,6 +1,7 @@
 package nvidia
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -437,4 +438,63 @@ func TestReclaim_OrphanGCOnlyOnDrainedCard(t *testing.T) {
 		require.Len(t, drv.destroyed, 1, "gc'd once the card is drained past the debounce")
 		assert.Equal(t, uint32(2), drv.destroyed[0].GiID)
 	})
+}
+
+// The identity check has to read the card INSIDE its lock, not from the snapshot the pass opened
+// with. That snapshot can be a whole allocation old by the time a given card is reached, and an
+// out-of-band `nvidia-smi mig -dgi` plus NVML's id reuse can put a different — possibly live —
+// instance at the recorded id in exactly that window. Checked against the stale view, the marker
+// still "matches" and a running Pod's MIG device is destroyed under it.
+func TestReclaim_IDReusedAfterThePassSnapshotIsNotDestroyed(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
+
+	// The reclaimMaxMisses-th pass is the one that destroys. Its own snapshot is enumeration number
+	// reclaimMaxMisses, and the re-read under the card lock is the one after it — so replacing the
+	// instance there lands strictly between the two.
+	drv.listHook = func(d *fakeMigDriver, call int) {
+		if call != reclaimMaxMisses+1 {
+			return
+		}
+		d.live[testGPUUUID0] = []migInstance{{
+			GiID: 1, CiID: 1, ComputeSlices: 1,
+			Placement: migPlacement{Start: 0, Length: 2}, UUID: "MIG-reused",
+		}}
+	}
+
+	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+	for i := 0; i < reclaimMaxMisses; i++ {
+		r.reconcile(nil)
+	}
+
+	assert.Empty(t, drv.destroyed,
+		"the id now carries somebody else's instance, so nothing may be destroyed under this marker")
+	_, err := parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+	require.Error(t, err, "the stale marker is dropped, since it describes an instance that is gone")
+}
+
+// A re-read that fails is a per-card skip rather than a destroy on an unvalidated view: the marker
+// stays, the debounce is not cleared, and the next pass tries again.
+func TestReclaim_FailsClosedWhenTheLockedRereadFails(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	drv := newFakeMigDriver()
+	seedMarkedInstance(t, drv, "pod-dead", testGPUUUID0, 1)
+
+	// Fail only the re-read under the lock, so the pass gets as far as deciding to destroy.
+	drv.listHook = func(d *fakeMigDriver, call int) {
+		d.listErr = nil
+		if call == reclaimMaxMisses+1 {
+			d.listErr = errors.New("nvml enumeration failed")
+		}
+	}
+
+	r := newReclaimer(drv, deviceplugin.OperatorPodsDir, logr.Discard(), noClaims)
+	for i := 0; i < reclaimMaxMisses; i++ {
+		r.reconcile(nil)
+	}
+
+	assert.Empty(t, drv.destroyed, "an unreadable card is never destroyed on")
+	_, err := parseMarker(markerPath("pod-dead", "c", testGPUUUID0))
+	require.NoError(t, err, "the marker is kept, so the next pass can retry")
 }

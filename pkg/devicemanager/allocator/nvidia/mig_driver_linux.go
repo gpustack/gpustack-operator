@@ -59,33 +59,124 @@ func (d *nvmlMigDriver) profileID(dev nvml.Device, profile string) (uint32, erro
 	return 0, fmt.Errorf("card has no gpu-instance profile named %q", profile)
 }
 
+// driverReportsAbsent reports whether a non-success return is NVML ANSWERING that there is nothing
+// at the id asked about, as opposed to failing to answer at all. Everything below rests on the
+// distinction: a disclaimed id is state, and an unreadable one is a hole in a view whose completeness
+// each caller here depends on.
+func driverReportsAbsent(ret nvml.Return) bool {
+	switch ret {
+	case nvml.ERROR_NOT_SUPPORTED, nvml.ERROR_NOT_FOUND, nvml.ERROR_INVALID_ARGUMENT:
+		return true
+	default:
+		return false
+	}
+}
+
 // migUUIDs maps each live GPU-instance id on the device to its MIG-device UUID (the
 // NVIDIA_VISIBLE_DEVICES value), by enumerating the card's MIG device handles and reading each
-// one's owning GPU-instance id. A GI with no materialized MIG device yet is simply absent.
-func (d *nvmlMigDriver) migUUIDs(dev nvml.Device) map[uint32]string {
-	out := make(map[uint32]string)
+// one's owning GPU-instance id. A GI with no materialized MIG device yet is simply absent — that is
+// a GPU instance without its compute instance, which addresses nothing and which reclaim destroys.
+//
+// A card whose driver disclaims MIG devices altogether yields an empty map and no error: that is a
+// plain GPU, and the enumeration above it walks every card on the node. Every other failure IS an
+// error, because a handle in hand whose owner or identity cannot be read leaves the map missing a
+// live partition — and a missing identity is exactly what makes a live partition look reclaimable,
+// or makes a destroy verify against nothing.
+func (d *nvmlMigDriver) migUUIDs(dev nvml.Device, cardUUID string) (map[uint32]string, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
-		return out
+		if driverReportsAbsent(ret) {
+			return map[uint32]string{}, nil
+		}
+		return nil, fmt.Errorf("card %s: get max mig device count: %w", cardUUID, ret)
 	}
+	out := make(map[uint32]string, count)
 	for i := 0; i < count; i++ {
 		mig, ret := dev.GetMigDeviceHandleByIndex(i)
-		if !ret.IsSuccess() || mig == nil {
-			continue
+		if !ret.IsSuccess() {
+			if driverReportsAbsent(ret) {
+				continue
+			}
+			return nil, fmt.Errorf("card %s: get mig device handle %d: %w", cardUUID, i, ret)
+		}
+		if mig == nil {
+			return nil, fmt.Errorf(
+				"card %s: mig device handle %d is absent though the driver reported success", cardUUID, i)
 		}
 		// Read the owning GPU-instance id directly from the MIG device handle; resolving
 		// the full instance needs the parent device and fails (INVALID_ARGUMENT) here.
 		giID, ret := mig.GetGpuInstanceId()
 		if !ret.IsSuccess() {
-			continue
+			return nil, fmt.Errorf("card %s: get owning gpu-instance id of mig device %d: %w", cardUUID, i, ret)
 		}
 		uuid, ret := mig.GetUUID()
 		if !ret.IsSuccess() {
-			continue
+			return nil, fmt.Errorf("card %s: get identity of mig device %d: %w", cardUUID, i, ret)
+		}
+		if prev, dup := out[giID]; dup {
+			return nil, fmt.Errorf(
+				"card %s: gpu instance %d owns more than one mig device (%s and %s): refusing to address it by either",
+				cardUUID, giID, prev, uuid)
 		}
 		out[giID] = uuid
 	}
-	return out
+	return out, nil
+}
+
+// cardProfiles probes every GPU-instance profile id on the card and returns the ones the driver
+// answered for. An id the driver disclaims is skipped as the answer it is; an id it could not read
+// fails the whole probe, because a profile missing from this set takes its live instances with it and
+// every caller here reads the result as complete.
+func cardProfiles(dev nvml.Device, cardUUID string) ([]nvml.GpuInstanceProfileInfo_v3, error) {
+	var infos []nvml.GpuInstanceProfileInfo_v3
+	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
+		info, ret := dev.GetGpuInstanceProfileInfo(id)
+		if !ret.IsSuccess() {
+			if driverReportsAbsent(ret) {
+				continue
+			}
+			return nil, fmt.Errorf("card %s: get gpu-instance profile info %d: %w", cardUUID, id, ret)
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+// liveInstances enumerates every live GPU instance on the card across all profiles, each carrying its
+// compute-slice count, its placement and its MIG-device identity. Occupancy must span every profile,
+// because an instance of one profile occupies a placement another profile could otherwise use.
+//
+// A failed instance query is an error rather than a skipped profile. Two callers make that
+// load-bearing: the allocation path subtracts these placements to pick a free slot, so a profile
+// silently missing hands out a slot that is already taken; and reclaim reads absence from this set as
+// "already gone" and removes the ownership marker, so a live partition reading as absent leaks with no
+// owner and its placement is handed out a second time.
+func liveInstances(
+	dev nvml.Device, cardUUID string, infos []nvml.GpuInstanceProfileInfo_v3, uuidByGI map[uint32]string,
+) ([]migInstance, error) {
+	var live []migInstance
+	for i := range infos {
+		info := infos[i]
+		gis, ret := dev.GetGpuInstances(info.Id)
+		if !ret.IsSuccess() {
+			return nil, fmt.Errorf("card %s: list live gpu instances of profile %d: %w", cardUUID, info.Id, ret)
+		}
+		for j := range gis {
+			gi := gis[j].GetInfo()
+			if gi.ProfileId != info.Id {
+				return nil, fmt.Errorf(
+					"card %s: gpu instance %d reports profile %d while enumerated under profile %d: fail closed",
+					cardUUID, gi.Id, gi.ProfileId, info.Id)
+			}
+			live = append(live, migInstance{
+				GiID:          gi.Id,
+				ComputeSlices: int32(info.SliceCount),
+				Placement:     migPlacement{Start: int32(gi.Placement.Start), Length: int32(gi.Placement.Size)},
+				UUID:          uuidByGI[gi.Id],
+			})
+		}
+	}
+	return live, nil
 }
 
 func (d *nvmlMigDriver) CardState(cardUUID, profile string, _, _ int32) (migCardState, error) {
@@ -107,29 +198,20 @@ func (d *nvmlMigDriver) CardState(cardUUID, profile string, _, _ int32) (migCard
 		possible = append(possible, migPlacement{Start: int32(possibleSlots[i].Start), Length: int32(possibleSlots[i].Size)})
 	}
 
-	uuidByGI := d.migUUIDs(dev)
+	uuidByGI, err := d.migUUIDs(dev, cardUUID)
+	if err != nil {
+		return migCardState{}, err
+	}
 
 	// Collect every live GPU instance across all profiles, so occupancy accounts for
 	// partitions of any profile (a 3g.20gb blocks a 1g.10gb's slot).
-	var live []migInstance
-	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
-		info, ret := dev.GetGpuInstanceProfileInfo(id)
-		if !ret.IsSuccess() {
-			continue
-		}
-		gis, ret := dev.GetGpuInstances(info.Id)
-		if !ret.IsSuccess() {
-			continue
-		}
-		for j := range gis {
-			gi := gis[j].GetInfo()
-			live = append(live, migInstance{
-				GiID:          gi.Id,
-				ComputeSlices: int32(info.SliceCount),
-				Placement:     migPlacement{Start: int32(gi.Placement.Start), Length: int32(gi.Placement.Size)},
-				UUID:          uuidByGI[gi.Id],
-			})
-		}
+	infos, err := cardProfiles(dev, cardUUID)
+	if err != nil {
+		return migCardState{}, err
+	}
+	live, err := liveInstances(dev, cardUUID, infos, uuidByGI)
+	if err != nil {
+		return migCardState{}, err
 	}
 
 	return migCardState{Possible: possible, Live: live}, nil
@@ -172,8 +254,16 @@ func (d *nvmlMigDriver) CreateInstance(
 		return migInstance{}, fmt.Errorf("card %s: create compute instance: %w", cardUUID, ret)
 	}
 
-	// Resolve the MIG-device UUID (NVIDIA_VISIBLE_DEVICES) for the just-created GI.
-	uuid := d.migUUIDs(dev)[giID]
+	// Resolve the MIG-device UUID (NVIDIA_VISIBLE_DEVICES) for the just-created GI. A read that
+	// fails is rolled back like any other failure here: the pair is unusable without the identity
+	// the container is addressed by, and leaving it behind would strand the placement.
+	uuidByGI, err := d.migUUIDs(dev, cardUUID)
+	if err != nil {
+		_ = ci.Destroy()
+		_ = gi.Destroy()
+		return migInstance{}, err
+	}
+	uuid := uuidByGI[giID]
 	if uuid == "" {
 		_ = ci.Destroy()
 		_ = gi.Destroy()
@@ -193,6 +283,13 @@ func (d *nvmlMigDriver) CreateInstance(
 // one's MIG-device UUID, so reclaim's orphan GC can find a marker-less GI on a drained card. It
 // mirrors CardState's Live loop but across all cards and without the per-profile possible
 // placements (orphan destroy needs only the ids + compute slices, not a slot to fill).
+//
+// A card the driver answers has no MIG devices holds no partition and contributes nothing; a card
+// whose handle, identity, profiles, mig devices or instances could not be READ fails the whole
+// enumeration. The difference matters because of what the callers do with absence: reclaim reads a
+// missing GPU instance as one already gone and removes its ownership marker, and reads a card
+// contributing nothing as a drained card whose orphans it may collect. A list quietly short of one
+// card's partitions therefore destroys or double-books exactly what it could not see.
 func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	if !d.initRet.IsSuccess() {
 		return nil, fmt.Errorf("nvml init failed: %w", d.initRet)
@@ -205,39 +302,42 @@ func (d *nvmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	for i := 0; i < count; i++ {
 		dev, ret := d.lib.DeviceGetHandleByIndex(i)
 		if !ret.IsSuccess() {
-			continue
+			return nil, fmt.Errorf("get device handle at index %d: %w", i, ret)
 		}
 		cardUUID, ret := dev.GetUUID()
 		if !ret.IsSuccess() {
-			continue
+			return nil, fmt.Errorf("get card uuid at device index %d: %w", i, ret)
 		}
-		uuidByGI := d.migUUIDs(dev)
-		for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
-			info, ret := dev.GetGpuInstanceProfileInfo(id)
-			if !ret.IsSuccess() {
-				continue
-			}
-			gis, ret := dev.GetGpuInstances(info.Id)
-			if !ret.IsSuccess() {
-				continue
-			}
-			for j := range gis {
-				gi := gis[j].GetInfo()
-				out = append(out, migLiveInstance{
-					Card: cardUUID,
-					Inst: migInstance{
-						GiID:          gi.Id,
-						ComputeSlices: int32(info.SliceCount),
-						Placement:     migPlacement{Start: int32(gi.Placement.Start), Length: int32(gi.Placement.Size)},
-						UUID:          uuidByGI[gi.Id],
-					},
-				})
-			}
+		uuidByGI, err := d.migUUIDs(dev, cardUUID)
+		if err != nil {
+			return nil, err
+		}
+		infos, err := cardProfiles(dev, cardUUID)
+		if err != nil {
+			return nil, err
+		}
+		live, err := liveInstances(dev, cardUUID, infos, uuidByGI)
+		if err != nil {
+			return nil, err
+		}
+		for j := range live {
+			out = append(out, migLiveInstance{Card: cardUUID, Inst: live[j]})
 		}
 	}
 	return out, nil
 }
 
+// DestroyInstance tears down the MIG instance the caller snapshotted, under the card lock the caller
+// holds. It re-reads the card's live set inside that critical section and verifies the GPU-instance id
+// still carries the recorded identity before destroying anything: a destroyed instance's id can be
+// reassigned by NVML, so a snapshot that aged by one allocation can point at a different — possibly
+// live — instance. On a mismatch nothing is destroyed and the contradiction is returned.
+//
+// An id absent from a COMPLETE enumeration is an instance that is already gone, which is a success:
+// the reclaim loop's removal of the ownership marker depends on that idempotence. Which is exactly why
+// an incomplete enumeration may not reach that return — a profile or instance query that failed used
+// to fall through to it and report a destroy that never happened, after which the marker was removed
+// as reclaimed and the live instance leaked with no owner.
 func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error {
 	dev, err := d.device(cardUUID)
 	if err != nil {
@@ -247,31 +347,41 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 	if !ok {
 		return fmt.Errorf("card %s: no compute-instance profile for %d compute slices", cardUUID, inst.ComputeSlices)
 	}
+	infos, err := cardProfiles(dev, cardUUID)
+	if err != nil {
+		return err
+	}
+	uuidByGI, err := d.migUUIDs(dev, cardUUID)
+	if err != nil {
+		return err
+	}
 
 	// Find the live GPU instance by id across profiles, then destroy its compute instances
 	// before the instance itself (the F1 reverse sequence).
-	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
-		info, ret := dev.GetGpuInstanceProfileInfo(id)
+	for i := range infos {
+		gis, ret := dev.GetGpuInstances(infos[i].Id)
 		if !ret.IsSuccess() {
-			continue
-		}
-		gis, ret := dev.GetGpuInstances(info.Id)
-		if !ret.IsSuccess() {
-			continue
+			return fmt.Errorf("card %s: list live gpu instances of profile %d: %w", cardUUID, infos[i].Id, ret)
 		}
 		for j := range gis {
-			if gis[j].GetInfo().Id != inst.GiID {
+			giInfo := gis[j].GetInfo()
+			if giInfo.Id != inst.GiID {
 				continue
 			}
+			if verr := verifyInstanceIdentity(cardUUID, inst, giInfo, uuidByGI[giInfo.Id]); verr != nil {
+				return verr
+			}
 			cis, ret := gis[j].GetComputeInstances(ciIDs.ComputeInstanceProfileID)
-			if ret.IsSuccess() {
-				for k := range cis {
-					if r := cis[k].Destroy(); !r.IsSuccess() {
-						if r == nvml.ERROR_IN_USE {
-							return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, errInstanceInUse)
-						}
-						return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, r)
+			if !ret.IsSuccess() && !driverReportsAbsent(ret) {
+				return fmt.Errorf(
+					"card %s: list compute instances on gpu instance %d: %w", cardUUID, inst.GiID, ret)
+			}
+			for k := range cis {
+				if r := cis[k].Destroy(); !r.IsSuccess() {
+					if r == nvml.ERROR_IN_USE {
+						return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, errInstanceInUse)
 					}
+					return fmt.Errorf("card %s: destroy compute instance: %w", cardUUID, r)
 				}
 			}
 			if r := gis[j].Destroy(); !r.IsSuccess() {
@@ -282,6 +392,29 @@ func (d *nvmlMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 			}
 			return nil
 		}
+	}
+	return nil
+}
+
+// verifyInstanceIdentity checks that the live GPU instance at a recorded id is still the instance that
+// was recorded, by its identity string and its placement. The placement test sits beside the identity
+// test as an inconsistency trap: it is redundant against a self-consistent driver, and an instance
+// matching one while contradicting the other is exactly the unprovable state a destroy must refuse
+// rather than resolve.
+func verifyInstanceIdentity(
+	cardUUID string, inst migInstance, live nvml.GpuInstanceInfo, liveUUID string,
+) error {
+	if liveUUID != inst.UUID {
+		return fmt.Errorf(
+			"card %s: gpu instance %d now carries mig device %q, not the recorded %q: refusing to destroy",
+			cardUUID, inst.GiID, liveUUID, inst.UUID)
+	}
+	if int32(live.Placement.Start) != inst.Placement.Start || int32(live.Placement.Size) != inst.Placement.Length {
+		return fmt.Errorf(
+			"card %s: gpu instance %d now occupies slices [%d,%d), not the recorded [%d,%d): refusing to destroy",
+			cardUUID, inst.GiID,
+			live.Placement.Start, live.Placement.Start+live.Placement.Size,
+			inst.Placement.Start, inst.Placement.Start+inst.Placement.Length)
 	}
 	return nil
 }

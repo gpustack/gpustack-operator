@@ -183,6 +183,12 @@ func parseMarker(path string) (migMarker, error) {
 
 // writeMarker publishes a marker durably: a concurrent scanner never reads a partial record,
 // and a record that has been written survives an unclean shutdown.
+//
+// The two modes are deliberately different. The directory is the shared per-container work
+// directory every allocator writes its artifacts into, and it is wide because the logical-slicing
+// artifacts living beside it are read by a container running as whatever user its image chose. The
+// record itself is read by nothing outside this process — not by the container, not by NVML — so it
+// is written for its writer alone, as the cambricon allocator's own record is.
 func writeMarker(path string, m migMarker) error {
 	dir := filepath.Dir(path)
 	if err := osx.MkdirAll(dir, 0o777); err != nil {
@@ -192,7 +198,7 @@ func writeMarker(path string, m migMarker) error {
 	if err != nil {
 		return fmt.Errorf("marshal marker: %w", err)
 	}
-	if err := osx.DurableWrite(path, data, 0o644); err != nil {
+	if err := osx.DurableWrite(path, data, 0o600); err != nil {
 		return fmt.Errorf("write marker %q: %w", path, err)
 	}
 	return nil

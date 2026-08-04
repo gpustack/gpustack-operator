@@ -36,6 +36,13 @@ type fakeMigDriver struct {
 	// residual process), so the reclaim loop's bounded-retry path is table-tested.
 	inUseGiIDs map[uint32]bool
 	listErr    error
+
+	// listCalls counts the node-wide enumerations, and listHook runs before each one with that
+	// count. Together they let a case change the card's live set between the enumeration a pass
+	// opens with and the one taken under the card lock — the only way to model an out-of-band
+	// destroy plus id reuse landing inside that window.
+	listCalls int
+	listHook  func(drv *fakeMigDriver, call int)
 }
 
 func newFakeMigDriver() *fakeMigDriver {
@@ -94,6 +101,10 @@ func (f *fakeMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 func (f *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.listCalls++
+	if f.listHook != nil {
+		f.listHook(f, f.listCalls)
+	}
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
@@ -670,4 +681,27 @@ func TestActuatePhysicalSliced_UnknownProfileFails(t *testing.T) {
 	_, err := s.ActuatePhysicalSliced(context.Background(), pod, ctr, devs, allocated, "3g.20gb")
 	require.Error(t, err)
 	assert.Equal(t, 0, drv.createCalls, "an unknown profile geometry never reaches create")
+}
+
+// The record is written for its writer alone while the directory holding it stays traversable, and
+// the two are easy to conflate: they sit two lines apart and the wide one is load-bearing for the
+// logical-slicing artifacts every other allocator puts in the same place. Pin both.
+func TestWriteMarkerModes(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	m := migMarker{
+		PodUID: "pod-a", Container: "c", Card: testGPUUUID0, Profile: "1g.5gb",
+		GiID: 1, CiID: 0, MigUUID: "MIG-0", ComputeSlices: 1, Start: 0, Length: 1,
+	}
+	path := markerPath(m.PodUID, m.Container, m.Card)
+	require.NoError(t, writeMarker(path, m))
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"nothing outside this process reads the record, so nothing outside it may")
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o777), dirInfo.Mode().Perm(),
+		"the per-container work directory is shared with artifacts a container reads as its own user")
 }

@@ -121,21 +121,14 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		return
 	}
 
-	// The live instance list backs both the marker identity check (a GI id NVML reused after an
-	// out-of-band destroy must not be destroyed under a stale marker) and the orphan sweep;
-	// without it fail closed (skip the pass) rather than act on an unvalidated view.
+	// The live instance list backs the orphan sweep below; without it fail closed (skip the pass)
+	// rather than act on an unvalidated view. The marker identity check does NOT read this snapshot:
+	// by the time a given card is reached it may be a whole allocation old, so that check re-reads the
+	// card inside its own lock instead.
 	instances, lerr := r.driver.ListInstances()
 	if lerr != nil {
 		r.logger.Error(lerr, "reclaim: list mig instances, skipping this pass")
 		return
-	}
-	liveByCard := make(map[string]map[uint32]migInstance)
-	for i := range instances {
-		li := instances[i]
-		if liveByCard[li.Card] == nil {
-			liveByCard[li.Card] = make(map[uint32]migInstance)
-		}
-		liveByCard[li.Card][li.Inst.GiID] = li.Inst
 	}
 
 	// touched marks every miss key still relevant this pass; the rest are pruned at the end.
@@ -176,7 +169,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		if r.misses[uid] < reclaimMaxMisses {
 			continue
 		}
-		r.destroyPod(uid, entries, claims, liveByCard)
+		r.destroyPod(uid, entries, claims)
 	}
 
 	// Retire the corrupt markers whose Pod is gone. It runs after the per-pod decisions (a dead
@@ -230,55 +223,41 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 // (under that card's lock) and remove only that marker file. Two guards precede the destroy:
 //   - attribution self-check — if a running Pod claims the placement, the marker is
 //     mis-attributed (a dead pod's marker over a live pod's instance), so it is never destroyed;
-//   - identity check — the GI id must still carry the instance the marker recorded (compare the
-//     MIG-device UUID against liveByCard); an out-of-band destroy + NVML GI-id reuse can put a
-//     different, possibly live, instance at that id, so on a UUID mismatch the stale marker is
-//     dropped without any destroy, and a GI already gone needs only its marker removed.
+//   - identity check — the GI id must still carry the instance the marker recorded, compared against
+//     a live set re-read INSIDE that card's lock; an out-of-band destroy + NVML GI-id reuse can put a
+//     different, possibly live, instance at that id, so on a mismatch the stale marker is dropped
+//     without any destroy, and a GI already gone needs only its marker removed. A re-read that fails
+//     is a per-card skip, never a destroy on an unvalidated view.
 //
 // A residual NVML_ERROR_IN_USE is a bounded retryable failure: the pod's miss counter is not
 // cleared (retry next pass) and an operator-visible log is surfaced once the retries cross the
 // bound. The miss/in-use counters are cleared only when every one of the pod's partitions is
 // reclaimed.
-func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[string][]migPlacement, liveByCard map[string]map[uint32]migInstance) {
+func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[string][]migPlacement) {
 	ok := true
 	inUseHit := false
+
+	// Group by card first: the attribution self-check needs no NVML call and no lock, so it filters
+	// here, and what survives it is destroyed one card at a time under that card's own lock.
+	byCard := make(map[string][]markerEntry)
 	for i := range entries {
 		m := entries[i].marker
-		card := m.Card
-
-		if placementOverlapsAny(migPlacement{Start: m.Start, Length: m.Length}, claims[card]) {
+		if placementOverlapsAny(migPlacement{Start: m.Start, Length: m.Length}, claims[m.Card]) {
 			r.logger.Info("reclaim: placement is claimed by a running pod, skipping destroy (attribution conflict)",
-				"podUID", uid, "card", card, "giID", m.GiID)
+				"podUID", uid, "card", m.Card, "giID", m.GiID)
 			ok = false
 			continue
 		}
+		byCard[m.Card] = append(byCard[m.Card], entries[i])
+	}
 
-		if live, present := liveByCard[card][m.GiID]; present && live.UUID != m.MigUUID {
-			// The GI id was reused by a different instance; drop the stale marker, never destroy.
-			r.logger.Info("reclaim: gpu-instance id reused by a different instance, dropping stale marker without destroy",
-				"podUID", uid, "card", card, "giID", m.GiID, "markerUUID", m.MigUUID, "liveUUID", live.UUID)
-			if !r.removeMarker(entries[i].path) {
-				ok = false
-			}
-			continue
-		} else if present {
-			// The marker still describes the live instance: destroy it under the card lock.
-			unlock := lockCard(card)
-			derr := r.driver.DestroyInstance(card, m.instance())
-			unlock()
-			if derr != nil {
-				ok = false
-				if errors.Is(derr, errInstanceInUse) {
-					inUseHit = true
-					continue
-				}
-				r.logger.Error(derr, "reclaim: destroy gpu instance", "podUID", uid, "card", card, "giID", m.GiID)
-				continue
-			}
-		}
-		// The instance is destroyed or was already gone: remove the marker.
-		if !r.removeMarker(entries[i].path) {
+	for card, cardEntries := range byCard {
+		done, busy := r.destroyMarkedInstancesOnCard(uid, card, cardEntries)
+		if !done {
 			ok = false
+		}
+		if busy {
+			inUseHit = true
 		}
 	}
 
@@ -298,6 +277,84 @@ func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[str
 		delete(r.inUse, uid)
 		r.logger.Info("reclaim: reclaimed dead pod's partitions", "podUID", uid, "partitions", len(entries))
 	}
+}
+
+// destroyMarkedInstancesOnCard destroys every one of a dead pod's partitions on ONE card, under that
+// card's lock, re-verifying inside the critical section that each recorded GPU-instance id still
+// carries the recorded identity and placement. It reports whether every marker on the card is now
+// gone, and whether any destroy was rejected as in-use. A reused id is retained, not destroyed: only
+// the stale marker is dropped, because the instance now at that id belongs to somebody else.
+//
+// Re-reading inside the lock is what makes the identity check mean anything. The snapshot the pass
+// opened with can age by a whole allocation before this card is reached, and an out-of-band
+// `nvidia-smi mig -dgi` plus NVML's id reuse can put a different — possibly live — instance at the
+// recorded id in exactly that window; a check against the stale snapshot would then match the marker
+// against an instance that no longer exists and destroy a running Pod's MIG device instead.
+//
+// The live set is re-read ONCE for the whole card rather than once per marker: several containers of
+// one Pod on one card are the common multi-marker case, and the enumeration is node-wide and
+// expensive. Reading it once is not weaker, because the lock is held across the whole group, so
+// nothing outside this loop can change the card between the markers — only this loop's own destroys
+// do, and each marker is verified against the identity it recorded rather than against the residue of
+// a sibling's destroy.
+func (r *reclaimer) destroyMarkedInstancesOnCard(uid, card string, entries []markerEntry) (done, inUseHit bool) {
+	unlock := lockCard(card)
+	defer unlock()
+
+	instances, lerr := r.driver.ListInstances()
+	if lerr != nil {
+		r.logger.Error(lerr, "reclaim: re-list mig instances before destroy, skipping this card",
+			"podUID", uid, "card", card, "partitions", len(entries))
+		return false, false
+	}
+
+	done = true
+	for i := range entries {
+		m := entries[i].marker
+		inst, present := findLiveGiOnCard(instances, card, m.GiID)
+		switch {
+		case present && !inst.matchesMarker(m):
+			r.logger.Info("reclaim: gpu-instance id reused by a different instance, dropping stale marker without destroy",
+				"podUID", uid, "card", card, "giID", m.GiID,
+				"markerUUID", m.MigUUID, "liveUUID", inst.UUID,
+				"markerPlacement", migPlacement{Start: m.Start, Length: m.Length}, "livePlacement", inst.Placement)
+		case present:
+			if derr := r.driver.DestroyInstance(card, m.instance()); derr != nil {
+				done = false
+				if errors.Is(derr, errInstanceInUse) {
+					inUseHit = true
+					continue
+				}
+				r.logger.Error(derr, "reclaim: destroy gpu instance", "podUID", uid, "card", card, "giID", m.GiID)
+				continue
+			}
+		}
+		// The instance is destroyed, was already gone, or belongs to somebody else: drop the marker.
+		if !r.removeMarker(entries[i].path) {
+			done = false
+		}
+	}
+	return done, inUseHit
+}
+
+// findLiveGiOnCard returns the live GPU instance with giID on the card, if the enumeration holds one.
+func findLiveGiOnCard(instances []migLiveInstance, cardUUID string, giID uint32) (migInstance, bool) {
+	for i := range instances {
+		if instances[i].Card == cardUUID && instances[i].Inst.GiID == giID {
+			return instances[i].Inst, true
+		}
+	}
+	return migInstance{}, false
+}
+
+// matchesMarker reports whether a live instance is still the one a marker recorded. The identity
+// string alone would do against a self-consistent driver; the placement sits beside it as an
+// inconsistency trap, since an instance matching one while contradicting the other is exactly the
+// unprovable state a destroy must refuse rather than resolve.
+func (in migInstance) matchesMarker(m migMarker) bool {
+	return in.UUID == m.MigUUID &&
+		in.Placement.Start == m.Start &&
+		in.Placement.Length == m.Length
 }
 
 // removeMarker removes a marker file (and its now-empty container/pod dirs, so a sibling
