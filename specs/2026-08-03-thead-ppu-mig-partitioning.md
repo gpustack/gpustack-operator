@@ -639,9 +639,14 @@ byte-identical to before, since that vendor already writes the separator itself.
   (hygon, metax, cambricon) carried their own copy of the record-publishing dance with the same missing
   syncs. The answer was again to proceed, because converting all five to one helper is a net deletion and
   leaves no vendor holding a copy that still cannot survive a reboot, whereas converting two would have
-  left the defect live on three and a helper with two callers where five apply. Also before choosing a
-  partition kind word other than the vendor's own, and before regenerating any binding other than the
-  vendor's.
+  left the defect live on three and a helper with two callers where five apply. It fired a third time for
+  T21, over hygon and metax again, and a fourth for T22, over `binding/dl` — the symbol-lookup layer every
+  vendor's binding sits on — and over the whole NVIDIA MIG driver and reclaim loop. The answer was to
+  proceed each time, and for the same reason in each: what was found is a defect of the shared or mirrored
+  layer rather than a parity gap, it kills or corrupts state for manufacturers this spec does not otherwise
+  touch, and leaving it while shipping a second consumer of the same code would be shipping a known fault.
+  Also before choosing a partition kind word other than the vendor's own, and before regenerating any
+  binding other than the vendor's.
 - **Never:** set or clear MIG mode from operator code. Never port the static slice-count-to-profile-id
   table. Never fall back to naming the parent card when a partition cannot be proven. Never publish a
   profile whose name cannot be normalized into a valid resource-name segment. Never hand-edit generated
@@ -1236,6 +1241,55 @@ neither of which any other task depends on for its own correctness.
       has its record retired — so the escalation cannot count there and gets its own key space, still
       touched each pass so it survives to the next and disappears with the path.
 
+- [x] **T21 · Stop one unreadable drm directory killing a node's device plugin**
+      Blocked by: —
+      Owns: `pkg/devicemanager/allocator/hygon/deviceplugin.go`,
+      `pkg/devicemanager/allocator/hygon/deviceplugin_test.go`,
+      `pkg/devicemanager/allocator/metax/deviceplugin.go`,
+      `pkg/devicemanager/allocator/metax/deviceplugin_test.go`
+      Gate: review
+      Acceptance: on both vendors an allocated card whose recorded drm index list is empty, or holds one
+      element where two are read, is served without indexing past it and without a panic, and says in the
+      log that the card has no recorded index. A regression case per vendor drives the nil and the
+      one-element shape and fails without the guard.
+      Verify: `go test ./pkg/devicemanager/allocator/hygon/... ./pkg/devicemanager/allocator/metax/... && make lint`
+      Ordered after the build, on the user's decision, from a question about the record field this spec's
+      own T14 finding left absent when the driver cannot answer for it. Both vendors indexed
+      `PhysicalIndexes[0]` and `[1]` unguarded while their sysfs derivation returns nil, one or two
+      elements — and nothing in the serving path recovers a panic, so one unreadable drm directory took
+      down the process serving EVERY allocation on that node, for every manufacturer. It belongs to this
+      spec because the absent-rather-than-fabricated record is this spec's change; the two vendors reading
+      it unguarded is what that change turned from latent into reachable. Deliberately left in place and
+      named in the commit: the vestigial total-count check sitting between the two injections.
+
+- [x] **T22 · Answer the end-of-build review**
+      Blocked by: T21
+      Owns: `binding/dl/dl.go`, `binding/dl/dl_test.go`,
+      `binding/hgml/library_device.go`, `binding/hgml/library_device_test.go`,
+      `binding/nvml/library_device.go`, `binding/nvml/library_device_test.go`,
+      `pkg/devicemanager/allocator/nvidia/*`, `pkg/devicemanager/allocator/thead/*`,
+      `pkg/devicemanager/detector/nvidia/*`, `pkg/devicemanager/detector/thead/*`
+      Gate: review
+      Acceptance: every finding is either fixed with a case that fails without the fix, or refused with the
+      source that refutes it. Nothing is accepted on the reviewer's word and nothing is dropped in silence.
+      Verify: `go test -race ./binding/... ./pkg/devicemanager/... && go test ./... && make lint`
+      Ordered after the build, on the user's decision, from the five-axis and spec-axis review this file's
+      own process owes. Fixed: the shared symbol cache was a plain map read on every vendor call and written
+      on each symbol's first resolution, which is a runtime throw no `recover` contains, so one concurrent
+      lookup takes the node's whole device manager with it; the NVIDIA reclaim loop checked identity against
+      a snapshot taken with no card lock and its driver reported success for a destroy it never performed,
+      both of which this spec's own thead sibling was written to avoid; the versioned profile-info read was
+      told apart from its predecessor by whether a name came back, which is unsound because the two structs
+      are the same size and a size-dispatching library writes the older layout into the newer buffer
+      silently; a card's detected profile inventory could lose a profile to one transient driver read with
+      no distinction from a profile the card never had; one GPU instance owning two compute instances was
+      resolved by last-index-wins; the ownership record was world-readable; and the reclaim loop's
+      verification re-read walked the whole node while holding one card's lock. Refused, with the source:
+      the per-pass hold logs are not at default verbosity, because the logger these packages receive is
+      already `V(3)` and logr's `V` is additive — the escalation is visible only because `Error` is never
+      verbosity-filtered; and `destroyGpuInstance` does cover every compute instance that can exist,
+      because SHARED is the only engine profile either vendor's header defines.
+
 #### T10 execution checklist
 
 Written before the window is scheduled, so the window is spent collecting rather than deciding. Card
@@ -1441,13 +1495,13 @@ follows.
 | --- | --- |
 | `chore(lint)`: report every occurrence, and sort the imports no check ever formatted | — |
 | `refactor(devicemanager)`: wrap vendor return codes so `errors.Is` reaches them | T15 findings |
-| `build(binding)`: refresh the vendor hgml surface and wrap its whole mig api | T2, T13 findings |
+| `build(binding)`: refresh the vendor hgml surface and wrap its whole mig api | T2, T13 findings, T22 findings |
 | `refactor(devicemanager)`: give the nvidia mig reclaim loop its own file | T0 |
 | `fix(devicemanager)`: stop a corrupt mig marker from costing a partition its owner | T11, T14 findings |
-| `fix(devicemanager)`: publish only a mig profile the driver fully described | T1, T12 |
-| `feat(devicemanager)`: add the thead hardware-partitioning core and its reclaim loop | T4, T7, T14 findings |
-| `feat(devicemanager)`: drive thead partitions through the vendor library | T5, T13 findings |
-| `feat(devicemanager)`: report thead partition profiles and declare the capability | T3 |
+| `fix(devicemanager)`: publish only a mig profile the driver fully described | T1, T12, T22 findings |
+| `feat(devicemanager)`: add the thead hardware-partitioning core and its reclaim loop | T4, T7, T14 findings, T22 findings |
+| `feat(devicemanager)`: drive thead partitions through the vendor library | T5, T13 findings, T22 findings |
+| `feat(devicemanager)`: report thead partition profiles and declare the capability | T3, T22 findings |
 | `feat(devicemanager)`: serve thead partitions and name them for a sidecar | T6, T8 |
 | `fix(devicemanager)`: address a thead card by its ordinal, proven with the recorded minor | T10, T14, T15 findings |
 | `docs`: add the thead partitioning runbook and name the second vendor | T9 |
@@ -1456,6 +1510,16 @@ follows.
 | `fix(devicemanager)`: publish an allocator's ownership record durably, not just atomically | T19 |
 | `docs(spec)`: record the plan, both hardware windows and what shipped | T10, and this file |
 | `fix(devicemanager)`: bound the hold a live pod's unreadable ownership record takes | T20 |
+| `fix(devicemanager)`: stop one unreadable drm directory killing a node's device plugin | T21 |
+| `fix(binding)`: serialize the dynamic-library symbol cache | T22 |
+| `fix(devicemanager)`: prove what the nvidia mig enumerations report before acting on them | T22 |
+| `perf(devicemanager)`: read one card, not the node, while holding that card's lock | T22 |
+
+A row reading `T22 findings` is a commit an earlier task owns that absorbed a correction from that review
+round, per the folding rule above; the four rows after `docs(spec)` are work that had no commit to fold
+into. Those four sit after it because this file stays in one commit: a task ordered later writes its record
+into that commit and lands its code in its own, which is why the spec row is not last and is not meant to
+be.
 
 ### Test Plan
 
