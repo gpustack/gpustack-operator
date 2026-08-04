@@ -987,3 +987,26 @@ func TestFakeDriverBusyDestroy(t *testing.T) {
 	_, err = drv.ListInstances()
 	assert.Error(t, err, "an enumeration that cannot prove completeness is an error")
 }
+
+// The record is written for its writer alone while the directory holding it stays traversable, and
+// the two are easy to conflate: they sit two lines apart and the wide one is load-bearing for the
+// logical-slicing artifacts every other allocator puts in the same place. Pin both.
+func TestWriteMarkerModes(t *testing.T) {
+	podsDir := t.TempDir()
+	m := selfMarker("pod-a", testPPUUUID0, migInstance{
+		GiID: 1, ProfileID: 19, UUID: "PPU-MIG-0", ComputeSlices: 1,
+		Placement: migPlacement{Start: 0, Length: 1},
+	})
+	writeMarkerFixture(t, podsDir, m)
+	path := markerPath(podsDir, m.PodUID, m.Container, m.Card)
+
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(),
+		"nothing outside this process reads the record, so nothing outside it may")
+
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o777), dirInfo.Mode().Perm(),
+		"the per-container work directory is shared with artifacts a container reads as its own user")
+}

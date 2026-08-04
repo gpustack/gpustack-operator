@@ -217,6 +217,15 @@ type migIdentity struct {
 // compute-instance id is read, never defaulted, for the same reason the profile id is: 0 is a legal
 // id, so a zero left behind by an unreadable query would address partition ci0 — either a path that
 // does not exist, or a different compute instance's capability node.
+//
+// Two partition devices reporting the same owning GPU instance is an error rather than a last-one-wins
+// overwrite. GPUStack carves one compute instance per GPU instance, so a second is something it did
+// not create, and the map has exactly one slot to describe it with: whichever the driver happened to
+// return last would become that GPU instance's recorded address. Reclaim would then read a
+// compute-instance id its marker never recorded and drop the marker without destroying, leaking the
+// partition, while a reserve for the same card would fail closed on the mismatch and keep failing for
+// as long as the extra device exists. Refusing names the card instead of silently addressing the
+// wrong half of it.
 func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
@@ -251,6 +260,12 @@ func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, er
 		uuid, ret := mig.GetUUID()
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf("card %s: get identity of partition device %d: %s", cardUUID, i, ret.Error())
+		}
+		if prev, dup := out[giID]; dup {
+			return nil, fmt.Errorf(
+				"card %s: gpu instance %d owns more than one partition device (%s ci%d and %s ci%d): "+
+					"refusing to address it by either",
+				cardUUID, giID, prev.UUID, prev.CiID, uuid, ciID)
 		}
 		out[giID] = migIdentity{UUID: uuid, CiID: ciID}
 	}
@@ -622,11 +637,18 @@ func verifyInstanceIdentity(
 // either is mapped onto the shared in-use error, so the reclaim loop treats it as the bounded,
 // retryable partial failure it is instead of a permanent one.
 //
-// It removes every compute instance the GPU instance reports under any of its compute-instance
-// profiles, not only the whole-instance profile GPUStack creates. That is deliberately wider than
+// It removes every compute instance the GPU instance reports under any compute-instance profile
+// INDEX, not only the whole-instance index GPUStack creates from. That is deliberately wider than
 // the vendor implementation this mirrors: an out-of-band or partially created compute instance of
-// another profile would leave the GPU instance's own teardown rejected as busy forever, turning a
+// another index would leave the GPU instance's own teardown rejected as busy forever, turning a
 // bounded retry into a permanently blocked reclamation that nothing on the node can clear.
+//
+// "Any profile" is any of those indexes and not any engine profile — a distinction worth stating,
+// because the enumeration underneath resolves each index through the SHARED engine profile alone,
+// so a reader could take this loop for a narrower sweep than it is. It is not narrower: SHARED is
+// the only engine profile the vendor header defines (COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT is 1, as
+// it is upstream), so there is no engine a compute instance could exist under and stay unseen. If a
+// later header adds one, this sweep stops being exhaustive and the busy-forever case returns.
 func destroyGpuInstance(cardUUID string, gi hgml.GpuInstance, giID uint32) error {
 	for ciID := uint32(0); ciID < hgml.COMPUTE_INSTANCE_PROFILE_COUNT; ciID++ {
 		cis, ret := gi.GetComputeInstances(ciID)
