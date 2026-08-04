@@ -2,6 +2,7 @@ package dl
 
 import (
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -9,6 +10,18 @@ func skipOnMacOS(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("libdl.so is not available on macOS")
 	}
+}
+
+// systemLibrary names a library the running platform can open, and several symbols it exports. The
+// cases above pin a Linux-only library and skip everywhere else; a case about concurrency has to run
+// on the machine a developer actually runs the suite on, or the race it guards against is never
+// exercised at all.
+func systemLibrary() (string, []string) {
+	symbols := []string{"malloc", "free", "getpid", "strlen", "memcpy", "abort"}
+	if runtime.GOOS == "darwin" {
+		return "libSystem.B.dylib", symbols
+	}
+	return "libc.so.6", symbols
 }
 
 func TestNew(t *testing.T) {
@@ -117,4 +130,42 @@ func TestLookupFailed(t *testing.T) {
 	if err == nil {
 		t.Errorf("Should have errored loking up symbol but did not")
 	}
+}
+
+// One library handle is looked up from several goroutines at once, because that is how it is used:
+// the wrapper one package up serializes loading and unloading but deliberately not looking up, and a
+// device manager hands a single handle to more than one server. Every goroutine walks every symbol,
+// so each symbol's first resolution — the only time the cache is written — happens while the others
+// are reading that same map.
+//
+// This case is meaningful under -race, where an unguarded cache reports a data race. Without the
+// race detector the same interleaving is a runtime throw ("concurrent map read and map write") that
+// no recover can contain, which is why it is worth a case of its own: in production it does not fail
+// the one call, it takes the process down.
+func TestLookupConcurrent(t *testing.T) {
+	t.Parallel()
+
+	name, symbols := systemLibrary()
+	dl := New(name, RTLD_LAZY|RTLD_GLOBAL)
+	if err := dl.Open(); err != nil {
+		t.Fatalf("Error opening %s: %v", name, err)
+	}
+	t.Cleanup(func() { _ = dl.Close() })
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Repeat the walk so the cached read path is driven too, not only the first write.
+			for range 4 {
+				for _, symbol := range symbols {
+					if err := dl.Lookup(symbol); err != nil {
+						t.Errorf("Error looking up %s in %s: %v", symbol, name, err)
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
