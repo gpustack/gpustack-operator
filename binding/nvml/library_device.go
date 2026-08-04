@@ -643,28 +643,62 @@ func (l GpuInstanceProfileInfoHandler) V3() (GpuInstanceProfileInfo_v3, Return) 
 }
 
 // GetGpuInstanceProfileInfo probes the GPU instance profile identified by profileId
-// directly from the device, without requiring an existing GPU instance. It prefers the
-// versioned NVML calls (which carry the profile Name) and falls back to the legacy call
-// (no Name) on older drivers, returning the first successful result or the last error.
-// An unsupported profile id surfaces as a non-success Return, which the caller skips.
+// directly from the device, without requiring an existing GPU instance. An unsupported
+// profile id surfaces as a non-success Return, which the caller skips.
 //
-// The V3 result is accepted only when it actually carries a Name: some drivers dispatch
-// the versioned call purely on the (v2==v3) struct size and write the v2 layout, leaving
-// the v3-offset Name empty; in that case V2 is queried, which returns the same profile
-// with its Name populated.
+// The versioned read is taken as V2, because it is the only one whose layout the driver
+// cannot mislay. Both versioned reads go through ONE NVML symbol and are told apart only by
+// the struct version the caller writes into the buffer it passes — and v2 and v3 are
+// exactly the SAME SIZE (152 bytes) while differing from their third field onward, v2
+// carrying an IsP2pSupported that v3 dropped and v3 a Capabilities that v2 lacks. A driver
+// that dispatches on the size encoded in that version word instead of on the version itself
+// therefore fills a v3-typed buffer with the v2 layout and reports success, and every field
+// from the third on is then read from the wrong offset: the name comes out of MemorySizeMB's
+// bytes, which reads as empty only for the memory sizes whose low byte happens to be zero.
+// That is the driver behavior observed on an H100 under the 570 series, and reading V2 into
+// a v2-typed buffer and copying field by field leaves no offset to get wrong.
+//
+// v3 adds exactly one field any caller here consumes — Capabilities, which marks a media or
+// graphics variant — so it is read separately and kept only when that read describes the
+// same profile V2 just described. Where the two disagree the capability is left unset and
+// the callers testing it fall back to the '+' in the profile name, which is the tell they
+// already treat as primary.
+//
+// A driver too old for the versioned symbol falls back to V1, which carries no name. So does
+// one that rejects the v2 struct while accepting the v3 one: there the v3 read is the only
+// one carrying a name, and a driver refusing v2 is by construction not the size-dispatching
+// kind this guards against.
 func (l Device) GetGpuInstanceProfileInfo(profileId uint32) (GpuInstanceProfileInfo_v3, Return) {
 	h := GpuInstanceProfileInfoHandler{
 		device:               l.handle,
 		gpuInstanceProfileId: profileId,
 		so:                   l.so,
 	}
-	if info, ret := h.V3(); ret.IsSuccess() && info.GetName() != "" {
+	if info, ret := h.V2(); ret.IsSuccess() {
+		if v3, v3ret := h.V3(); v3ret.IsSuccess() && describesSameProfile(info, v3) {
+			info.Capabilities = v3.Capabilities
+		}
 		return info, ret
 	}
-	if info, ret := h.V2(); ret.IsSuccess() {
+	if info, ret := h.V3(); ret.IsSuccess() {
 		return info, ret
 	}
 	return h.V1()
+}
+
+// describesSameProfile reports whether two reads of one profile agree on everything both struct
+// versions carry. It is what makes a v3 read usable: a v3 buffer the driver filled with the v2 layout
+// reads its slice count out of IsP2pSupported, its memory size out of the field before it and its
+// name out of the memory size, so a read agreeing on all of those was laid out as asked for.
+//
+// The name is compared as a name rather than as the raw array, so trailing bytes the driver did or
+// did not write past the terminator cannot decide the answer.
+func describesSameProfile(a, b GpuInstanceProfileInfo_v3) bool {
+	return a.Id == b.Id &&
+		a.SliceCount == b.SliceCount &&
+		a.InstanceCount == b.InstanceCount &&
+		a.MemorySizeMB == b.MemorySizeMB &&
+		a.GetName() == b.GetName()
 }
 
 // GetName returns the canonical profile name (e.g. "1g.5gb") from the C char array, read no
@@ -1037,7 +1071,8 @@ func (l GpuInstance) GetComputeInstanceProfileInfo(ciProfileIndex, ciEngProfileI
 // from the lookup so the call is right by construction rather than by that coincidence.
 //
 // The buffer is sized from the profile's InstanceCount, queried with the SHARED engine profile —
-// the only engine profile GPUStack creates. An out-count equal to that buffer is a GPU instance
+// the only engine profile that exists — NVML_COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT is 1 — so this
+// enumeration misses no compute instance, whoever created it. An out-count equal to that buffer is a GPU instance
 // filled to its profile's ceiling, not a truncated read.
 func (l GpuInstance) GetComputeInstances(ciProfileIndex uint32) ([]ComputeInstance, Return) {
 	if l.so.Lookup("nvmlGpuInstanceGetComputeInstances") != nil {
