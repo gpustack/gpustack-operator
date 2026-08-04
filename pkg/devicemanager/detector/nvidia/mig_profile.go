@@ -17,25 +17,31 @@ import (
 // slice geometry, and de-duplicates by name.
 //
 // infos holds one entry per successfully probed GI profile id; the caller skips ids that
-// NVML reports as unsupported. cardMemoryMiB is the card's total memory in MiB, used to
-// express a profile's memory size in memory-slice units on a card assumed to hold eight
-// of them.
+// NVML reports as unsupported.
 //
-// placementsFor, when non-nil, returns a profile's full empty-card legal placement set to
-// cache in Placements, keyed by the profile's own probed GI profile id (info.Id) — the
-// authoritative id that distinguishes the same-compute-slice REV profiles (1g.5gb id 0 vs
-// 1g.10gb id 7) a compute-slice count alone cannot. It is injected so this derivation
-// stays hardware-free and unit-testable; detectMigProfiles passes a map-backed closure.
+// placementsFor returns a profile's full empty-card legal placement set, keyed by the
+// profile's own probed GI profile id (info.Id) — the authoritative id that distinguishes
+// the same-compute-slice REV profiles (1g.5gb id 0 vs 1g.10gb id 7) a compute-slice count
+// alone cannot. It is injected so this derivation stays hardware-free and unit-testable;
+// detectMigProfiles passes a map-backed closure.
 //
-// The published memory-slice span comes from a placement's length whenever the driver
-// enumerates one: every legal placement of a profile is exactly as long as that profile's
-// span, making it the driver's own authoritative answer, whereas the memory division
-// assumes an eight-slice card. The division survives as the fallback for a driver that
-// enumerates no placement at all. The number of slices a card holds cannot be recovered
-// from a profile's compute-slice count instead: the whole-card profile reports seven
-// compute slices while occupying all eight memory ones. An absent placement set here
-// always means "the driver enumerated none" — a profile whose placement query failed never
-// reaches this derivation.
+// A profile is published only if the driver enumerated at least one legal placement of
+// positive length for it, and the published memory-slice span is that length. Every legal
+// placement of a profile is exactly as long as that profile's span, so the length is the
+// driver's own authoritative answer, and it is the only source: the span is what the
+// allocator matches a leftover instance's identity by and creates an instance with, so a
+// span this derivation computed rather than read would be a guess in the one place a guess
+// can hand out somebody else's partition. Nothing else can supply it — a profile's
+// compute-slice count cannot (the whole-card profile reports seven compute slices while
+// occupying all eight memory ones), and dividing card memory by an assumed slice count
+// assumes exactly the number that cannot be recovered.
+//
+// So a profile the driver placed nowhere is dropped and named in the returned error.
+// Nothing is forfeited: the pool's per-profile ledger is placement-derived and slot
+// selection has nothing to choose from, so such a profile was a requestable key whose
+// allocation could only fail. An absent placement set here always means "the driver
+// enumerated none" — a profile whose placement query failed never reaches this derivation,
+// and both now cost the profile its place in the inventory rather than only one of them.
 //
 // Only a profile the driver itself named is published; a nameless one is dropped and named
 // in the returned error, whose ids the caller reports. A published name becomes the
@@ -49,11 +55,8 @@ import (
 // rest.
 func deriveSlicedProfiles(
 	infos []nvml.GpuInstanceProfileInfo_v3,
-	cardMemoryMiB uint64,
 	placementsFor func(giProfileID uint32) []device.AcceleratorPhysicalPlacement,
 ) ([]device.AcceleratorPhysicalSlicedProfile, error) {
-	perSlice := cardMemoryMiB / 8
-
 	seen := make(map[string]struct{}, len(infos))
 	var profiles []device.AcceleratorPhysicalSlicedProfile
 	var errs []error
@@ -67,10 +70,17 @@ func deriveSlicedProfiles(
 			continue
 		}
 
-		// Round the memory size to whole memory slices: round(MemorySizeMB / perSlice).
-		var memorySlices int32
-		if perSlice > 0 {
-			memorySlices = int32((info.MemorySizeMB + perSlice/2) / perSlice)
+		// Refused before the de-duplication, so a profile with no span never claims a name a
+		// sibling id could still publish.
+		var placements []device.AcceleratorPhysicalPlacement
+		if placementsFor != nil {
+			placements = placementsFor(info.Id)
+		}
+		if len(placements) == 0 || placements[0].Length <= 0 {
+			errs = append(errs, fmt.Errorf(
+				"profile %d named %q: driver enumerated no legal placement, so its memory-slice span is unknown",
+				info.Id, name))
+			continue
 		}
 
 		if _, dup := seen[name]; dup {
@@ -78,20 +88,14 @@ func deriveSlicedProfiles(
 		}
 		seen[name] = struct{}{}
 
-		p := device.AcceleratorPhysicalSlicedProfile{
+		profiles = append(profiles, device.AcceleratorPhysicalSlicedProfile{
 			Name:          name,
 			MemoryMib:     int64(info.MemorySizeMB),
 			ComputeSlices: int32(info.SliceCount),
-			MemorySlices:  memorySlices,
+			MemorySlices:  placements[0].Length,
 			Count:         int32(info.InstanceCount),
-		}
-		if placementsFor != nil {
-			p.Placements = placementsFor(info.Id)
-			if len(p.Placements) > 0 && p.Placements[0].Length > 0 {
-				p.MemorySlices = p.Placements[0].Length
-			}
-		}
-		profiles = append(profiles, p)
+			Placements:    placements,
+		})
 	}
 	return profiles, errors.Join(errs...)
 }
@@ -119,11 +123,13 @@ func migPlacementsFromNVML(slots []nvml.GpuInstancePlacement) []device.Accelerat
 //
 // Separating a driver that enumerates no placement from a query that failed is the point:
 // a lookup collapsing a failure to an empty set makes an unreadable card indistinguishable
-// from a placement-free one, and the derivation would then publish a span from unverified
-// geometry. A profile whose query failed is therefore withheld from the returned set — it
-// could not be admitted without a placement set anyway — and named in the returned error,
-// while a profile the driver answered with nothing is kept with a nil placement set. The
-// errors of all failing ids are joined so one failure does not hide the rest.
+// from a placement-free one, and a failure would then be reported as a fact about the card.
+// A profile whose query failed is therefore withheld from the returned set — it could not be
+// admitted without a placement set anyway — and named in the returned error, while a profile
+// the driver answered with nothing is kept here, with a nil placement set, and refused by the
+// derivation instead. The two reach the same outcome by different routes on purpose: this one
+// reports an unreadable card, that one an unplaceable profile. The errors of all failing ids
+// are joined so one failure does not hide the rest.
 //
 // query is injected so the resolution stays hardware-free and unit-testable.
 func migPlacementsByProfile(
@@ -161,7 +167,7 @@ func isMediaOrGraphicsVariant(info nvml.GpuInstanceProfileInfo_v3, name string) 
 // detectMigProfiles probes every GPU instance profile id on the device and returns the card's
 // physical-slice profile inventory (filtered and derived by deriveSlicedProfiles). Unsupported
 // ids surface as non-success returns and are skipped.
-func detectMigProfiles(dev nvml.Device, cardMemoryMiB uint64) []device.AcceleratorPhysicalSlicedProfile {
+func detectMigProfiles(dev nvml.Device) []device.AcceleratorPhysicalSlicedProfile {
 	var infos []nvml.GpuInstanceProfileInfo_v3
 	for id := uint32(0); id < nvml.GPU_INSTANCE_PROFILE_COUNT; id++ {
 		info, ret := dev.GetGpuInstanceProfileInfo(id)
@@ -191,13 +197,14 @@ func detectMigProfiles(dev nvml.Device, cardMemoryMiB uint64) []device.Accelerat
 	}
 
 	// A profile the driver did not name is dropped rather than published under an invented
-	// name the allocator's name probe could never resolve. The rejection names the card and
-	// the profile ids so the omitted capacity is diagnosable instead of merely absent.
-	profiles, err := deriveSlicedProfiles(answered, cardMemoryMiB, placementsFor)
+	// name the allocator's name probe could never resolve, and so is one the driver placed
+	// nowhere, whose memory-slice span would otherwise have to be guessed. The rejection
+	// names the card and the profile ids so the omitted capacity is diagnosable instead of
+	// merely absent.
+	profiles, err := deriveSlicedProfiles(answered, placementsFor)
 	if err != nil {
 		uuid, _ := dev.GetUUID()
-		klog.Background().Error(err, "Dropped MIG profiles the driver did not name",
-			"device", uuid)
+		klog.Background().Error(err, "Dropped unpublishable MIG profiles", "device", uuid)
 	}
 	return profiles
 }

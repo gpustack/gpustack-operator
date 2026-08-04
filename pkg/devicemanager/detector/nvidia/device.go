@@ -219,7 +219,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			// reset + DeviceManager restart. This runs per card, fixing the old placeholder's
 			// first-card-only-seed defect.
 			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == nvml.DEVICE_MIG_ENABLE {
-				profiles := detectMigProfiles(dev, memory)
+				profiles := detectMigProfiles(dev)
 				status.PhysicalSliced = device.AcceleratorPhysicalSliced{
 					Profiles: profiles,
 					Count:    maxProfileCount(profiles),

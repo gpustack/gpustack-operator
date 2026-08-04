@@ -209,7 +209,7 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 			// partitioned yet and is re-detected after the administrator's DeviceManager
 			// restart, because the re-detect trigger does not include the partitioning mode.
 			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == hgml.DEVICE_MIG_ENABLE {
-				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, memory, logger))
+				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, logger))
 			}
 		}
 

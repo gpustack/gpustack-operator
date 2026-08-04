@@ -68,12 +68,9 @@ func zw810ePlacements() map[uint32][]device.AcceleratorPhysicalPlacement {
 }
 
 func TestDeriveSlicedProfiles(t *testing.T) {
-	const zw810eMemoryMib = 98304
-
 	testCases := []struct {
 		name           string
 		infos          []hgml.GpuInstanceProfileInfo_v3
-		cardMemoryMiB  uint64
 		placementsByID map[uint32][]device.AcceleratorPhysicalPlacement
 		want           []device.AcceleratorPhysicalSlicedProfile
 		wantRejected   int
@@ -82,7 +79,6 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			// The documented set of the current product yields one profile per record,
 			// in probe order, each spanning the memory slices its placements state.
 			name:           "current product profile set",
-			cardMemoryMiB:  zw810eMemoryMib,
 			infos:          zw810eProfiles(),
 			placementsByID: zw810ePlacements(),
 			want: []device.AcceleratorPhysicalSlicedProfile{
@@ -110,7 +106,6 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			// marker and the per-card ledger are keyed by, so publishing the separator here
 			// would leave every published profile unresolvable against the driver.
 			name:           "hardware profile set is recorded as the driver spells it",
-			cardMemoryMiB:  zw810eMemoryMib,
 			infos:          zw810eHardwareProfiles(),
 			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{5: placementsFrom(4, 2), 3: placementsFrom(8, 1)},
 			want: []device.AcceleratorPhysicalSlicedProfile{
@@ -127,14 +122,12 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		{
 			// A card whose driver offers no profile yields no profile, so its caller
 			// reports no physical capability rather than an empty one.
-			name:          "a driver offering no profile yields none",
-			cardMemoryMiB: zw810eMemoryMib,
+			name: "a driver offering no profile yields none",
 		},
 		{
 			// The vendor's display prefix, stray whitespace and upper case all reduce to
 			// the bare geometry the resource key carries.
-			name:          "names are normalized to the bare geometry",
-			cardMemoryMiB: zw810eMemoryMib,
+			name: "names are normalized to the bare geometry",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("PPU MIG 1C.12G")},
 				{Id: 5, SliceCount: 2, InstanceCount: 4, MemorySizeMB: 24576, Name: profileName("  2c.24g\t")},
@@ -154,8 +147,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		{
 			// Media-engine and graphics variants are not offered, and are dropped before
 			// normalization so they raise no rejection of their own.
-			name:          "media and graphics variants are dropped silently",
-			cardMemoryMiB: zw810eMemoryMib,
+			name: "media and graphics variants are dropped silently",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g+me")},
 				{Id: 4, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g+me.all")},
@@ -177,8 +169,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 		{
 			// A name that cannot form a resource-name segment makes the profile
 			// unrequestable, so it is dropped with a reason rather than published broken.
-			name:          "a name that cannot form a key is dropped with a reason",
-			cardMemoryMiB: zw810eMemoryMib,
+			name: "a name that cannot form a key is dropped with a reason",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c/12g")},
 				{Id: 5, SliceCount: 2, InstanceCount: 4, MemorySizeMB: 24576, Name: profileName("-2c.24g-")},
@@ -200,8 +191,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			// A nameless record is dropped: the published key is the profile's name, and
 			// the driver seam resolves that key back to a raw id by matching names, so a
 			// synthesized name could never match anything the driver reports.
-			name:          "a nameless profile is dropped with a reason",
-			cardMemoryMiB: zw810eMemoryMib,
+			name: "a nameless profile is dropped with a reason",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288},
 				{Id: 9, SliceCount: 8, InstanceCount: 1, MemorySizeMB: 98304, Name: profileName("8c.96g")},
@@ -216,22 +206,35 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			wantRejected: 1,
 		},
 		{
-			// A driver that enumerates no placement leaves the memory division as the only
-			// source of the span: 12288 MiB of a 98304 MiB eight-slice card is one slice.
-			name:          "no enumerated placement keeps the divided span",
-			cardMemoryMiB: zw810eMemoryMib,
+			// The driver's placement set is the only source of the span, so a profile it
+			// placed nowhere cannot be published: the span is what the allocator matches a
+			// leftover instance's identity by, and a computed one would be a guess there.
+			name: "a profile with no enumerated placement is dropped with a reason",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g")},
 			},
-			want: []device.AcceleratorPhysicalSlicedProfile{
-				{Name: "1c.12g", MemoryMib: 12288, ComputeSlices: 1, MemorySlices: 1, Count: 8},
-			},
+			wantRejected: 1,
 		},
 		{
-			// The driver's placement is the authority: on a card divided into four memory
-			// slices the eight-slice division would overstate the span as four.
-			name:          "placement length overrides the division",
-			cardMemoryMiB: 24576,
+			// Dropping it costs no other profile: the placed siblings are published intact.
+			name: "a placed sibling survives an unplaceable profile",
+			infos: []hgml.GpuInstanceProfileInfo_v3{
+				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g")},
+				{Id: 5, SliceCount: 2, InstanceCount: 4, MemorySizeMB: 24576, Name: profileName("2c.24g")},
+			},
+			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{5: placementsFrom(2, 4)},
+			want: []device.AcceleratorPhysicalSlicedProfile{
+				{
+					Name: "2c.24g", MemoryMib: 24576, ComputeSlices: 2, MemorySlices: 2, Count: 4,
+					Placements: placementsFrom(2, 4),
+				},
+			},
+			wantRejected: 1,
+		},
+		{
+			// The placement length is the span, whatever the profile's memory size implies
+			// about a card of some assumed slice count.
+			name: "the placement length is the published span",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 5, SliceCount: 2, InstanceCount: 2, MemorySizeMB: 12288, Name: profileName("2c.12g")},
 			},
@@ -244,27 +247,21 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 			},
 		},
 		{
-			// A zero-length placement spans nothing, so it cannot be the published span.
-			name:          "a zero-length placement keeps the divided span",
-			cardMemoryMiB: zw810eMemoryMib,
+			// A zero-length placement spans nothing, so it cannot be the published span
+			// either — and there is nothing else to fall back to.
+			name: "a zero-length placement is dropped with a reason",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 5, SliceCount: 2, InstanceCount: 4, MemorySizeMB: 24576, Name: profileName("2c.24g")},
 			},
 			placementsByID: map[uint32][]device.AcceleratorPhysicalPlacement{
 				5: {{Start: 0, Length: 0}},
 			},
-			want: []device.AcceleratorPhysicalSlicedProfile{
-				{
-					Name: "2c.24g", MemoryMib: 24576, ComputeSlices: 2, MemorySlices: 2, Count: 4,
-					Placements: []device.AcceleratorPhysicalPlacement{{Start: 0, Length: 0}},
-				},
-			},
+			wantRejected: 1,
 		},
 		{
 			// Two raw names normalizing to one are the same profile when every published
 			// field agrees, so one is kept and nothing is rejected.
-			name:          "an agreeing normalization duplicate is de-duplicated",
-			cardMemoryMiB: zw810eMemoryMib,
+			name: "an agreeing normalization duplicate is de-duplicated",
 			infos: []hgml.GpuInstanceProfileInfo_v3{
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g")},
 				{Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("MIG 1C.12G")},
@@ -281,7 +278,7 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, rejected := deriveSlicedProfiles(tc.infos, tc.cardMemoryMiB, func(
+			got, rejected := deriveSlicedProfiles(tc.infos, func(
 				id uint32,
 			) []device.AcceleratorPhysicalPlacement {
 				return tc.placementsByID[id]
@@ -297,8 +294,6 @@ func TestDeriveSlicedProfiles(t *testing.T) {
 // counts and keeps the first one's memory, so publishing two disagreeing profiles under one
 // name would silently misstate the pool's capacity and its Kueue credits.
 func TestDeriveSlicedProfilesRejectsCollisions(t *testing.T) {
-	const cardMemoryMiB = 98304
-
 	base := hgml.GpuInstanceProfileInfo_v3{
 		Id: 3, SliceCount: 1, InstanceCount: 8, MemorySizeMB: 12288, Name: profileName("1c.12g"),
 	}
@@ -326,7 +321,6 @@ func TestDeriveSlicedProfilesRejectsCollisions(t *testing.T) {
 
 			got, rejected := deriveSlicedProfiles(
 				[]hgml.GpuInstanceProfileInfo_v3{base, collided, keeper},
-				cardMemoryMiB,
 				func(id uint32) []device.AcceleratorPhysicalPlacement {
 					return zw810ePlacements()[id]
 				})
@@ -345,7 +339,7 @@ func TestDeriveSlicedProfilesRejectsCollisions(t *testing.T) {
 // it is the length of every legal placement of its profile, so the published field must
 // agree with the set it was derived from rather than be trusted on its own.
 func TestDeriveSlicedProfilesSpanMatchesPlacements(t *testing.T) {
-	got, rejected := deriveSlicedProfiles(zw810eProfiles(), 98304, func(
+	got, rejected := deriveSlicedProfiles(zw810eProfiles(), func(
 		id uint32,
 	) []device.AcceleratorPhysicalPlacement {
 		return zw810ePlacements()[id]

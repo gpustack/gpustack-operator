@@ -13,12 +13,6 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// cardMemorySlices is the number of memory slices a partitionable card holds, and the
-// denominator that recovers a profile's memory-slice span from its memory size. It is only
-// the fallback: the driver's own placement set states the span authoritatively, and a
-// profile's compute-slice count cannot substitute for it.
-const cardMemorySlices = 8
-
 // deriveSlicedProfiles turns a probed set of GPU-instance profiles into the card's
 // physical-slice profile inventory: it drops the media-engine and graphics variants,
 // normalizes each kept profile's name into the bare geometry its resource key carries, and
@@ -27,23 +21,32 @@ const cardMemorySlices = 8
 // function makes, so it is returned rather than logged here, which keeps it assertable.
 //
 // infos holds one entry per successfully probed profile id; the caller skips ids the driver
-// reports as unsupported. cardMemoryMiB is the card's total memory in MiB.
+// reports as unsupported.
 //
-// placementsFor, when non-nil, returns a profile's full empty-card legal placement set to
-// cache in Placements, keyed by the profile's own probed profile id — the authoritative id,
-// since the vendor does not assign its ids the upstream slice-count meaning, so profiles of
-// equal compute width are told apart by id alone. It is injected so this derivation stays
+// placementsFor returns a profile's full empty-card legal placement set to cache in
+// Placements, keyed by the profile's own probed profile id — the authoritative id, since the
+// vendor does not assign its ids the upstream slice-count meaning, so profiles of equal
+// compute width are told apart by id alone. It is injected so this derivation stays
 // hardware-free and unit-testable.
 //
-// The published memory-slice span comes from a placement's length whenever the driver
-// enumerates one: every legal placement of a profile is exactly as long as that profile's
-// span, making it the driver's own authoritative answer, whereas the memory division assumes
-// a fixed slice count per card. An absent placement set here always means "the driver
-// enumerated none" — a profile whose placement query failed never reaches this derivation.
+// A profile is published only if the driver enumerated at least one legal placement of
+// positive length for it, and the published memory-slice span is that length. Every legal
+// placement of a profile is exactly as long as that profile's span, so the length is the
+// driver's own authoritative answer, and it is the only source: the span is what the allocator
+// matches a leftover instance's identity by and creates an instance with, so a span this
+// derivation computed rather than read would be a guess in the one place a guess can hand out
+// somebody else's partition. Nothing else can supply it — a profile's compute-slice count
+// cannot, and dividing card memory by an assumed slice count assumes exactly the number that
+// cannot be recovered. An absent placement set here always means "the driver enumerated none"
+// — a profile whose placement query failed never reaches this derivation, and both cost the
+// profile its place in the inventory rather than only one of them.
 //
-// Two refusals are deliberately stricter than the vendor implementation this mirrors, and
-// both exist because the shared group aggregation merges profiles by name, sums their counts
-// and keeps the first one's memory:
+// Three refusals are deliberately stricter than the vendor implementation this mirrors. The
+// last two exist because the shared group aggregation merges profiles by name, sums their
+// counts and keeps the first one's memory:
+//   - A profile the driver placed nowhere forfeits nothing by being dropped: the pool's
+//     per-profile ledger is placement-derived and slot selection has nothing to choose from,
+//     so it was a requestable key whose allocation could only fail.
 //   - A profile whose normalized name cannot form a valid resource-name segment, the
 //     nameless records included, is unrequestable: the published key is the name, and the
 //     driver seam resolves that key back to a raw id by matching names, so a name that
@@ -54,11 +57,8 @@ const cardMemorySlices = 8
 //     entirely rather than aggregated.
 func deriveSlicedProfiles(
 	infos []hgml.GpuInstanceProfileInfo_v3,
-	cardMemoryMiB uint64,
 	placementsFor func(giProfileID uint32) []device.AcceleratorPhysicalPlacement,
 ) (profiles []device.AcceleratorPhysicalSlicedProfile, rejected []string) {
-	perSlice := cardMemoryMiB / cardMemorySlices
-
 	seen := make(map[string]int, len(infos))
 	withheld := make(map[string]struct{}, len(infos))
 	for _, info := range infos {
@@ -74,24 +74,25 @@ func deriveSlicedProfiles(
 			continue
 		}
 
-		// Round the memory size to whole memory slices: round(MemorySizeMB / perSlice).
-		var memorySlices int32
-		if perSlice > 0 {
-			memorySlices = int32((info.MemorySizeMB + perSlice/2) / perSlice)
+		// Refused before the name bookkeeping below, so a profile with no span never claims a
+		// name a sibling id could still publish, and never withholds one.
+		var placements []device.AcceleratorPhysicalPlacement
+		if placementsFor != nil {
+			placements = placementsFor(info.Id)
+		}
+		if len(placements) == 0 || placements[0].Length <= 0 {
+			rejected = append(rejected, fmt.Sprintf(
+				"profile %d named %q has no legal placement, so its memory-slice span is unknown", info.Id, raw))
+			continue
 		}
 
 		p := device.AcceleratorPhysicalSlicedProfile{
 			Name:          name,
 			MemoryMib:     int64(info.MemorySizeMB),
 			ComputeSlices: int32(info.SliceCount),
-			MemorySlices:  memorySlices,
+			MemorySlices:  placements[0].Length,
 			Count:         int32(info.InstanceCount),
-		}
-		if placementsFor != nil {
-			p.Placements = placementsFor(info.Id)
-			if len(p.Placements) > 0 && p.Placements[0].Length > 0 {
-				p.MemorySlices = p.Placements[0].Length
-			}
+			Placements:    placements,
 		}
 
 		if _, dropped := withheld[name]; dropped {
@@ -246,7 +247,7 @@ func isMediaOrGraphicsVariant(info hgml.GpuInstanceProfileInfo_v3, name string) 
 // detectMigProfiles probes every GPU-instance profile id on the device and returns the card's
 // physical-slice profile inventory. Unsupported ids surface as non-success returns and are
 // skipped; every id that answers is carried by its own value, never by one derived from it.
-func detectMigProfiles(dev hgml.Device, cardMemoryMiB uint64, logger klog.Logger) []device.AcceleratorPhysicalSlicedProfile {
+func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.AcceleratorPhysicalSlicedProfile {
 	var infos []hgml.GpuInstanceProfileInfo_v3
 	for id := uint32(0); id < hgml.GPU_INSTANCE_PROFILE_COUNT; id++ {
 		info, ret := dev.GetGpuInstanceProfileInfo(id)
@@ -268,7 +269,7 @@ func detectMigProfiles(dev hgml.Device, cardMemoryMiB uint64, logger klog.Logger
 		logger.Error(err, "dropped partition profiles whose possible placements are unreadable")
 	}
 
-	profiles, rejected := deriveSlicedProfiles(answered, cardMemoryMiB,
+	profiles, rejected := deriveSlicedProfiles(answered,
 		func(giProfileID uint32) []device.AcceleratorPhysicalPlacement {
 			return placementsByID[giProfileID]
 		})

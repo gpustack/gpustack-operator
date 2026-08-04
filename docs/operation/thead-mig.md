@@ -117,7 +117,10 @@ card in front of it, and offers exactly those.
   prefix and whitespace, stripped by the same shared normalization both the detector and the driver seam
   call, so the round trip from resource key back to vendor profile stays closed.
 - **A profile's memory-slice span is read from the driver's own placement records**, never divided out of
-  a hardcoded per-card slice count.
+  a hardcoded per-card slice count — and a profile the driver enumerates *no* legal placement for is not
+  offered at all, since the span then has no source and could only be guessed. Nothing is lost by that:
+  the per-profile ledger is placement-derived, so such a profile would be a requestable key whose
+  allocation could never succeed. The card names it in a warning. This rule is shared with NVIDIA.
 
 To see what a card offers, and to read the answer correctly:
 
