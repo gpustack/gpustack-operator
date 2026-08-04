@@ -6,10 +6,11 @@ package dl
 // #include <stdlib.h>
 // #include <linux/limits.h>
 import "C"
+
 import (
 	"fmt"
-	"unsafe"
 	"path"
+	"unsafe"
 )
 
 const (

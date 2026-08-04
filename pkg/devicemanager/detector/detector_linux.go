@@ -5,12 +5,12 @@ import (
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/amd"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/ascend"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/cambricon"
+	"gpustack.ai/gpustack/pkg/devicemanager/detector/hygon"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/iluvatar"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/metax"
-	"gpustack.ai/gpustack/pkg/devicemanager/detector/hygon"
+	"gpustack.ai/gpustack/pkg/devicemanager/detector/mthreads"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/nvidia"
 	"gpustack.ai/gpustack/pkg/devicemanager/detector/thead"
-	"gpustack.ai/gpustack/pkg/devicemanager/detector/mthreads"
 	"k8s.io/apimachinery/pkg/util/sets"
 )
 
