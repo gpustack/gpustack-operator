@@ -198,31 +198,43 @@ func (in *thead) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, 
 		{
 			status.Unhealthy = memoryUnhealthy
 
-			// A card currently in the partitioning mode is hard-partitioned and reports only
-			// its physical partition profiles; the capability is set solely when the driver
+			// Logical (software) and physical (partition) slicing are mutually exclusive per
+			// card, which is what keeps the two capacity-key families from both counting one
+			// card. A card currently in the partitioning mode is hard-partitioned and reports
+			// only its physical partition profiles; the capability is set solely when the driver
 			// actually offers one, so a mode-enabled card whose driver offers nothing reports
 			// no capability rather than an empty one. Every other card — mode off, mode
-			// unsupported, or the mode unreadable — is left exactly as it was detected before
-			// this vendor gained partitioning: it advertises no slicing capability, since
-			// logical (software) slicing is not supported here, which keeps the two
-			// capabilities mutually exclusive per card. A pending-mode transition is not
-			// partitioned yet and is re-detected after the administrator's DeviceManager
-			// restart, because the re-detect trigger does not include the partitioning mode.
+			// unsupported, or the mode unreadable — offers logical slicing instead. A
+			// pending-mode transition is not partitioned yet and is re-detected after the
+			// administrator's DeviceManager restart, because the re-detect trigger does not
+			// include the partitioning mode.
 			//
 			// A mode the driver could not read is treated as not-partitioned, as it always has
-			// been, but it is no longer treated in silence: that card loses its partitioning
-			// capability for as long as the read keeps failing, and since a card in the mode
-			// reports ONLY partition profiles, an administrator who enabled the mode would
-			// otherwise see a card that simply advertises nothing. A driver answering that the
-			// mode is unsupported is not a failure — that is a card which does not partition.
+			// been, but it is not treated in silence: since a card in the mode reports ONLY its
+			// partition profiles, an administrator who enabled the mode would otherwise see a
+			// card quietly advertising the logical slicing it cannot serve. A driver answering
+			// that the mode is unsupported is not a failure — that is a card which does not
+			// partition.
 			migCurrent, _, migRet := dev.GetMigMode()
 			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
 				logger.Error(migRet, "could not read a card's partitioning mode, so it is reported as "+
-					"not partitioned; if the mode is in fact enabled, the card advertises no capacity at all",
+					"not partitioned; if the mode is in fact enabled, the card advertises logical "+
+					"slicing it cannot serve",
 					"card", uuid)
 			}
 			if migCurrent == hgml.DEVICE_MIG_ENABLE {
 				status.PhysicalSliced = physicalSliced(detectMigProfiles(dev, logger))
+			} else {
+				// Logical (software) slicing via the preload pair this image stages. Unlike
+				// CUDA, hgml.h documents no per-card user-process ceiling, so the count is a
+				// deliberately loose device-plugin token pool — the binding constraint on a
+				// slice request is its memory budget — set to the same 128 the NVIDIA detector
+				// publishes. Overcommit is true because the compute cap is a duty-cycle window
+				// over wall time; memory is the exact dimension and the flag does not touch it.
+				status.LogicalSliced = device.AcceleratorLogicalSliced{
+					Count:                     128,
+					CoresPercentageOvercommit: true,
+				}
 			}
 		}
 

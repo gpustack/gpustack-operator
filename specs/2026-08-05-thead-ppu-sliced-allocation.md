@@ -63,9 +63,10 @@ and what this spec leaves unproven on hardware is the wiring, not the enforcemen
   `ppu-monitor` compiled from `csrc/` — the repo's first library built from its own sources rather than
   a pinned upstream commit — installed into `${GPUSTACK_LIB_DIR}/thead/` beside a `thead/ld.so.preload`
   that names the container paths in the required order.
-- **Advertise the capability only where the image actually built it.** The SDK is `linux/amd64` only, so
-  the arm64 operator image ships no PPU shim; a detector that advertised slicing there would place a
-  Pod that cannot start. The gate is the library's presence on disk, checked per detect pass.
+- **Advertise the capability in the NVIDIA detector's exact shape** — the `else` arm of the
+  partitioning-mode branch and nothing beyond it: no library-presence check, no architecture check. The
+  two detectors then differ only in the driver call they read the mode with, which is what keeps a later
+  change to one of them from silently diverging from the other.
 - **Emit both quota dimensions in the NVIDIA branch's shape, and make both mandatory.** A per-card
   `HGGC_DEVICE_MEMORY_LIMIT_<i>` against that card's own VRAM plus one un-indexed `HGGC_DEVICE_SM_LIMIT`
   — the keys HAMi-core is given, aligned deliberately rather than improved on, since admission pins a
@@ -78,12 +79,11 @@ and what this spec leaves unproven on hardware is the wiring, not the enforcemen
   the credit accounting, the `.sliced.units` capacity fold, and the reclaim loop are unchanged; the
   regression evidence is that `make test` still passes with no edits to their tests.
 - Success is testable: (1) `make lint` and `make test` pass, with new table-driven cases covering the
-  detector gate and the allocator's response; (2) a locally built `linux/amd64` operator image carries
+  allocator's response; (2) a locally built `linux/amd64` operator image carries
   `${GPUSTACK_LIB_DIR}/thead/{hggc_quota.so,hgml_dlsym_hook.so,ppu-monitor,ld.so.preload}`, each shared
   object's `DT_NEEDED` naming at most `libc.so.6` and no `GLIBC_` requirement above the SDK's floor;
   (3) an arm64 build of the same Dockerfile succeeds and leaves that directory without the shared
-  objects, and the detector withholds the capability for exactly that reason; (4) `ppu-monitor` runs in
-  a container with no SDK and no device.
+  objects; (4) `ppu-monitor` runs in a container with no SDK and no device.
 
 ### Non-Goals
 
@@ -102,8 +102,15 @@ and what this spec leaves unproven on hardware is the wiring, not the enforcemen
 - **A metrics scraper over the ledger region.** The region's layout is already a documented contract and
   `ppu-monitor` already reads it; exposing it as a GPUStack metric is a separate effort with its own
   surface (there is no per-slice usage metric for any vendor today).
-- **arm64 support for the shim.** The SDK ships `targets/x86_64-linux` and nothing else. The arm64
-  operator image stays buildable and simply offers no PPU logical slicing.
+- **arm64 support for the shim, and any detector branch standing in for it.** The SDK ships
+  `targets/x86_64-linux` and nothing else, so the arm64 operator image stays buildable and carries no
+  shim. The detector does **not** check for it: an earlier revision gated the capability on both shared
+  objects being present under the staged tree, and that gate is dropped in favour of NVIDIA's plain
+  `else`. The residual is stated rather than solved — on an arm64 node the detector would advertise a
+  slice whose libraries the image never built, and a Pod admitted against it would fail in the loader at
+  container start. It is unreachable in practice (a PPU card is only sold in an x86_64 host, and the
+  vendor's driver builds for x86_64 only), and a branch guarding it would have to be removed again the
+  day the SDK gains arm64. Whoever adds that arm64 support owns this line.
 - **Switching `gpustack-operator-xbuild-and-verify`'s `xbuild-thead-ppu` arm to buildx.** The shim spec
   anticipated it ("once that stage lands the arm can switch to buildx without moving anything else"),
   but the only host that runs the hardware cases has no docker and no running buildkitd, so switching
@@ -126,11 +133,10 @@ Three pieces, in the order they gate each other:
    `gpustack/thead-ppu-devel:2.1.1` and installs the two preloaded objects plus the reader; the final
    image copies them to `${GPUSTACK_LIB_DIR}/thead/` and installs the `ld.so.preload` asset beside them.
    The device-manager's existing init container stages that tree onto the host unchanged.
-2. **The detector advertises what the image built.** Per card, in the branch that already decides
+2. **The detector advertises the capability.** Per card, in the branch that already decides
    partitioning: a card in the mode keeps reporting only partition profiles; every other card reports
-   `LogicalSliced{Count: 128, CoresPercentageOvercommit: true}` — but only where the staged library tree
-   is actually present, so an arm64 node with a PPU card advertises nothing rather than advertising a
-   slice it cannot start.
+   `LogicalSliced{Count: 128, CoresPercentageOvercommit: true}` — the NVIDIA detector's `else` arm,
+   verbatim in shape.
 3. **The allocator hands out the slice.** A `Sliced` server behind `!opts.NoSliced`, whose response is
    the same fail-closed device set every other THead mode builds, plus the mounts that preload the shim
    and the environment that carries the quota — in the same key shape the NVIDIA branch uses, a per-card
@@ -156,9 +162,9 @@ flavors and queues without me configuring anything per node.
 
 #### Story 3
 
-As a GPUStack Operator maintainer, I want the operator image to build and stage the shim itself and the
-detector to advertise slicing only where that build landed, so that the capability a node advertises and
-the library a container mounts can never disagree — including on arm64, where the SDK does not exist.
+As a GPUStack Operator maintainer, I want the operator image to build and stage the shim from this
+repo's own sources, so that the library a sliced container preloads ships with the operator that
+allocates the slice instead of arriving out of band.
 
 #### Story 4
 
@@ -190,8 +196,8 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
     BuildKit's pre-defined `TARGETARCH` with no declaration of its own. The unreferenced leg is pruned:
     an arm64 build never resolves the amd64-only devel image at all.
   - Why not `FROM --platform=linux/amd64`: buildx would resolve an amd64 manifest under emulation on the
-    arm64 leg and the final arm64 image would then carry an amd64 `.so` that no container can load —
-    a capability the detector's file check would wrongly accept. Why not simply omitting the stage: the
+    arm64 leg and the final arm64 image would then carry an amd64 `.so` that no container can load, and
+    nothing downstream inspects the file to catch it. Why not simply omitting the stage: the
     `COPY --from` in the final stage is unconditional, so the alias is what keeps one Dockerfile
     building on both legs.
 - **The final stage** copies `/out` to `${GPUSTACK_LIB_DIR}/thead` beside the Ascend and NVIDIA copies,
@@ -230,21 +236,19 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   budget — so the safe direction is generous: too small gates scheduling, too large does not.
   Overcommit is `true` because the compute cap is a duty-cycle window over wall time, so two slices may
   each ask for up to 100 %; memory is the non-oversubscribable dimension and is unaffected by the flag.
-- **The capability is gated on the staged library tree existing.** Both shared objects must be present
-  under `<OperatorLibDir>/thead/`, checked once per detect pass, not per card: either one alone is a
-  broken slice (an inert visibility half reports the physical card; a missing enforcement half caps
-  nothing). The staged path is checked rather than the in-image one because it is the exact file the
-  allocator will mount, and the device-manager's init container completes before the detector runs, so
-  the check is stable for the pod's lifetime.
+- **Nothing gates the capability** — not the staged library's presence, not `runtime.GOARCH`. The two
+  detectors stay one shape, and the case a gate would guard is recorded as a Non-Goal instead.
 - `device.SetGroupSlicedDetails(grpList)` is **already called** (added with the partitioning work), so
   the group-level aggregate follows automatically once the per-card field is set — the failure the shim
   spec warned about (`Logical.Count == 0` makes the pool silently un-sliceable) no longer needs a
-  separate fix, and a test pins the aggregate rather than assuming it.
-- Acceptance: table-driven detector cases assert (a) a not-partitioned card with the tree present
-  reports `Logical.Count == 128` and the group aggregate sums it; (b) the same card with the tree absent
-  reports zero and no aggregate; (c) a card in the partitioning mode reports profiles and zero logical
-  capability with the tree present; (d) a card whose partitioning mode could not be read is treated as
-  not partitioned, as it already is.
+  separate fix.
+- The stale comment on the existing branch — "logical (software) slicing is not supported here" — and
+  the log message telling an administrator that an unreadable partitioning mode costs the card *all* its
+  capacity are both corrected: that card now advertises logical slicing it cannot serve, which is
+  exactly what the NVIDIA message says.
+- Acceptance: no new test. The added arm is a two-field struct literal inside `DetectAccelerator`, which
+  needs a real card to reach, and the NVIDIA branch it mirrors carries no test either; the group-level
+  aggregate it feeds is covered where it lives, in `pkg/device`. `make test` still passing is the claim.
 
 #### F3 — Allocator: the `Sliced` server and its injection
 
@@ -374,8 +378,8 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
 
 - **Always:** keep every preload container-scoped; keep each shared object's `NEEDED` at `libc.so.6` or
   nothing and assert it inside the build; emit both quota dimensions per card, compute included at
-  100 %; advertise logical slicing only where the staged library tree exists; keep a card's logical and
-  physical capabilities mutually exclusive; keep the ledger region per container.
+  100 %; keep a card's logical and physical capabilities mutually exclusive; keep the ledger region per
+  container.
 - **Ask first:** publishing any image; anything that runs on, deploys to, or consumes a card on the PPU
   host; changing the `ld.so.preload` order; adding a compile recipe anywhere other than the tree's own
   `build.sh`.
@@ -394,14 +398,16 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   risk becomes live only if multi-card logical slicing is opened, and it lands on the NVIDIA branch at
   the same moment and in the same way — which is the second reason to hold the same shape rather than
   invent a THead-only ordering rule that would have to be reconciled with NVIDIA's later.
-- The arm64 image ships an amd64 `.so` and the detector accepts it because the file exists → the arm64
-  leg builds an **empty** `/out` through a `TARGETARCH` stage alias rather than pulling the amd64 image
-  under emulation, so there is no file to accept.
+- The arm64 image ships an amd64 `.so` that no container can load → the arm64 leg builds an **empty**
+  `/out` through a `TARGETARCH` stage alias rather than pulling the amd64 image under emulation, so the
+  wrong-arch file is never produced. The build is the only mitigation: nothing downstream inspects the
+  file, since the detector carries no gate (see Non-Goals for the residual that leaves).
 - A capability change never reaches the `Devices` status, because the re-detect trigger ignores slicing
-  capability and the align path can discard an updated group → not reachable through this gate: the init
-  container stages the tree before the detector's first pass and nothing changes it while the pod lives,
-  so the check answers the same way for the pod's lifetime. The underlying staleness is a pre-existing
-  defect and stays out of scope.
+  capability and the align path can discard an updated group → nothing this spec adds can change between
+  passes: with no gate to read, a card's logical capability is a constant given its partitioning mode.
+  The one input that *can* change is that mode, and an administrator toggling it already requires a
+  DeviceManager restart for the partitioning work that landed before this. The underlying staleness is a
+  pre-existing defect and stays out of scope.
 - The two preloads are ordered correctly by us and then a workload image's own `dlsym` interposer wins
   the race anyway → nothing inside the library can detect it; the constraint is documented in
   `discovery.md` and the asset's ordering is what we control. `ppu-smi` then reports the physical card
@@ -492,9 +498,9 @@ pack/gpustack-operator/external/thead/build-libvppu.sh  # NEW: wrapper over csrc
 pack/gpustack-operator/rootfs/etc/gpustack/lib/thead/ld.so.preload
                                                         # NEW: the two container paths of the preloads
 pkg/devicemanager/detector/thead/device.go              # + Status.LogicalSliced in the else arm of the
-                                                        #   partitioning branch, gated on the staged tree
-pkg/devicemanager/detector/thead/device_test.go         # NEW (the package has only mig_profile_test.go
-                                                        #   today): the gate's arms and their exclusivity
+                                                        #   partitioning branch, NVIDIA's shape verbatim
+pkg/devicemanager/detector/nvidia/device.go             # the same arm's log call: the card loop's own
+                                                        #   logger/uuid, not klog.Background() + a re-read
 pkg/devicemanager/allocator/thead/deviceplugin.go       # + Sliced server behind !opts.NoSliced,
                                                         #   + the sliced branch: per-card envs + mounts
 pkg/devicemanager/allocator/thead/deviceplugin_test.go  # + the sliced response cases
@@ -541,8 +547,8 @@ top, a heredoc `RUN` whose body is verbatim, `set -exo pipefail`.
 
 ### Implementation Plan
 
-Four tasks. **T1, T2 and T3 have no dependency on each other** — they touch three disjoint trees, and the
-allocator never reads the detector's gate — so they can run concurrently; T4 documents what the three of
+Four tasks. **T1, T2 and T3 have no dependency on each other** — they touch three disjoint trees, and
+neither Go task reads the other's output — so they can run concurrently; T4 documents what the three of
 them landed. T1 is the one carrying an unretired *build-system* unknown (whether a `TARGETARCH`-selected
 `FROM` alias resolves, and whether the unreferenced leg is pruned rather than resolved), so it goes first
 in practice even though nothing blocks on it.
@@ -571,23 +577,24 @@ in practice even though nothing blocks on it.
       lists three artifacts with clean linkage, arm64 lists none), then the remote full-image build and its
       `ls` / `head -2` / `ppu-monitor` run
 
-- [ ] **T2 · The detector advertises the capability, gated on the staged library**
+- [x] **T2 · The detector advertises the capability**
       Blocked by: None
-      Owns: `pkg/devicemanager/detector/thead/device.go`, `pkg/devicemanager/detector/thead/device_test.go`
+      Owns: `pkg/devicemanager/detector/thead/device.go`, `pkg/devicemanager/detector/nvidia/device.go`
       Gate: review
-      Acceptance: the per-card sliced decision is collected into one function taking the partitioning mode,
-      the detected profile list and the library directory, and returning the physical/logical pair — a small
-      prefactor that buys the thing the inline branch cannot have: a test that pins **mutual exclusivity**
-      rather than trusting an `else`. Logical is `{Count: 128, CoresPercentageOvercommit: true}` and is
-      returned only when **both** `hggc_quota.so` and `hgml_dlsym_hook.so` are present under the staged
-      directory, checked once per detect pass. That directory is a redirectable package var in this package,
-      **not** `deviceplugin.OperatorLibDir`, and the comment says why: `pkg/deviceplugin` transitively links
-      the stdlib `plugin` package while this package links `runtime/cgo` through `binding/hgml`, and that
-      combination aborts the darwin test binary at load. Cases: both files → 128; either one alone → zero;
-      neither → zero; partitioning mode on → profiles and zero logical, with the tree present, so the arms
-      are shown to exclude each other rather than to differ.
-      Verify: `go test -count=1 -cover ./pkg/devicemanager/detector/thead/...` (coverage above the 35.2 %
-      baseline; the new function is fully covered, `DetectAccelerator` itself stays untestable without a card)
+      Acceptance: the existing partitioning-mode branch in `DetectAccelerator` gains its `else` arm, holding
+      `device.AcceleratorLogicalSliced{Count: 128, CoresPercentageOvercommit: true}` and nothing else — the
+      NVIDIA detector's shape (`detector/nvidia/device.go:233-248`), with no gate over the staged library, no
+      architecture check and no extracted function, so the two vendors' decisions stay one shape and read as
+      one. The branch comment loses its "logical (software) slicing is not supported here" clause, and the
+      unreadable-mode log message stops claiming the card advertises no capacity at all — it now advertises
+      logical slicing it cannot serve, the wording NVIDIA already uses. In the same pass the NVIDIA arm of
+      that message drops `klog.Background()` and its redundant second `GetUUID()` for the card loop's own
+      `logger` and `uuid`, which is what every other read in both loops uses. No new test: the added arm is a
+      struct literal inside a function that needs a real card, its aggregate is covered in
+      `pkg/device/sliced_test.go`, and the NVIDIA arm it mirrors carries no test either.
+      Verify: `make lint` clean, and `go test -count=1 -cover ./pkg/devicemanager/detector/...` still passing
+      — `thead` 35.2 % → **35.1 %** and `nvidia` 22.5 % unchanged, the dip being the four uncovered statements
+      of the new arm and reported rather than hidden behind a test that would only restate the literal
 
 - [ ] **T3 · The allocator hands out the slice**
       Blocked by: None
@@ -647,19 +654,18 @@ code solid enough prior to committing the changes necessary to implement this en
   `--no-sliced`, which is also the one place a regression that silently stops registering it would show.
 - **A sliced-path fixture helper** in the same file, modelled on the NVIDIA test's
   `redirectLogicalSliceDirs` (`allocator/nvidia/deviceplugin_test.go:29`): redirect
-  `deviceplugin.OperatorLibDir` / `OperatorPodsDir` into `t.TempDir()` and write the staged library files
-  there, composed with the existing `redirectNodeRoots` so a sliced case still gets its faked character
-  device nodes and minors.
-- **`pkg/devicemanager/detector/thead/device_test.go` does not exist** — the package's only test file today
-  is `mig_profile_test.go`. T2 adds it, following that file's table-driven shape.
+  `deviceplugin.OperatorLibDir` / `OperatorPodsDir` into `t.TempDir()` — paths only, no files, since the
+  response composes paths rather than reading them — composed with the existing `redirectNodeRoots` so a
+  sliced case still gets its faked character device nodes and minors.
 
 #### Unit tests
 
 - `pkg/devicemanager/allocator/thead`: `2026-08-05` - `88.9%` (baseline; must not regress, and the sliced
   branch and its ordering rule are covered by the T3 cases)
-- `pkg/devicemanager/detector/thead`: `2026-08-05` - `35.2%` (baseline; the T2 function is covered in full.
-  The package ceiling stays low because `DetectAccelerator` and `MonitorAccelerator` need a real card, which
-  is why the sliced decision is extracted rather than tested through them)
+- `pkg/devicemanager/detector/thead`: `2026-08-05` - `35.2%` → `35.1%` (T2 adds no test: its four statements
+  sit inside `DetectAccelerator`, which needs a real card, and extracting them to buy coverage would be a
+  test that restates a struct literal. The same four are the whole reason the figure moves)
+- `pkg/devicemanager/detector/nvidia`: `2026-08-05` - `22.5%` (unchanged; T2's edit there is one log call)
 - `pkg/deviceplugin`, `pkg/device`, `pkg/worker/controllers/worker`: unchanged, and that is the claim —
   every capability, credit and capacity path this feature rides is vendor-blind and already covered. A
   diff touching them means the design drifted.
@@ -673,8 +679,8 @@ The integration surface here is the **image**, not a cluster, and it is asserted
   and no `GLIBC_` requirement above `GLIBC_2.17` — assertions that live *inside* the build, so a regression
   fails the build rather than a later read; `--platform linux/arm64` yields an empty `/out`.
 - **Image level** (remote amd64 builder): `${GPUSTACK_LIB_DIR}/thead/` carries those three plus
-  `ld.so.preload`; the preload file's first line is the visibility shim; `ppu-monitor` runs to its own
-  "no usage region" message rather than dying in the loader.
+  `ld.so.preload`, which names the two container paths; `ppu-monitor` runs to its own "no usage region"
+  message rather than dying in the loader.
 - `make lint chart` — the chart is untouched; this is the evidence, not a change.
 - **No live-cluster integration test.** Nothing in this feature is reachable without a PPU card: the
   device-plugin registration, the pool capability and the injection all need a node whose detector saw a
@@ -704,9 +710,13 @@ admit is renumbered to `0`, which the shim spec already measured.
   able to win the `dlsym` race independently of the enforcement half, and the tree already ships two
   objects with their own translation-unit lists. Merging them would mean editing the shim tree — which
   this spec deliberately does not touch — for no gain.
-- **Gate the detector on `runtime.GOARCH` rather than on the library's presence.** Cheaper, and wrong in
-  the interesting cases: a partial build, a staging failure, or a hand-modified image all produce an
-  amd64 node with no library, which GOARCH cannot see and a file check can.
+- **Gate the detector at all** — either on `runtime.GOARCH` or, as an earlier revision of this spec did,
+  on both shared objects existing under the staged tree (the file check being the stronger of the two: a
+  partial build, a staging failure or a hand-modified image are invisible to GOARCH). Rejected on
+  alignment: the NVIDIA detector has no such branch, HAMi-core builds for both arches so it never needed
+  one, and the node the gate protects — arm64 with a PPU card — cannot exist while the vendor's own
+  driver is x86_64-only. A branch that guards nothing today would have to be removed again the day the
+  SDK gains arm64. Recorded in Non-Goals with the residual it leaves.
 - **Mount the host's `/dev/shm` and keep the shim's default ledger path**, the NVIDIA branch's shape.
   Rejected because the region is addressed by container-local card index: two containers' index `0`
   would charge the same slot, so a node-wide region is not a sharing optimisation but a correctness bug.
