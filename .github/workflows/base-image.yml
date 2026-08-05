@@ -1,0 +1,137 @@
+# This workflow packs for dependent container images of the project.
+
+name: Base Image
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: 'Repository of packed image.'
+        required: true
+        type: choice
+        options:
+          - ssh-server
+          - thead-ppu-devel
+      tag:
+        description: 'Tag of packed image.'
+        required: true
+        type: string
+      # Allow passing build arguments at pack time, for an image input that must not be
+      # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>".
+      args:
+        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url>.'
+        required: false
+        type: string
+        default: ""
+      heavy:
+        description: 'Build on the larger "-8x" runners: "auto" decides from the changed files, "true" forces them, "false" keeps the standard runners.'
+        required: false
+        type: choice
+        options:
+          - "auto"
+          - "true"
+          - "false"
+        default: "auto"
+
+env:
+  INPUT_REPOSITORY: ${{ inputs.repository }}
+
+jobs:
+  expand-matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.expand-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Two commits: the tip and its parent, which is all "auto" needs to see what the
+          # tip changed.
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Detect Heavy Changes
+        id: detect-heavy
+        env:
+          HEAVY_INPUT: ${{ github.event.inputs.heavy || 'auto' }}
+        run: |
+          #
+          # A change to the image's own Dockerfile rebuilds it from its base, which needs a
+          # bigger runner. This workflow is only ever dispatched, so there is no event base
+          # to diff against: read the tip commit alone, which is the commit whose Dockerfile
+          # change is normally the reason for dispatching in the first place.
+          #
+          # An explicit input overrides that, because the detection can only see this
+          # repository: a vendor base image moving under a mutable tag, or a build argument
+          # naming a new upstream artifact, makes the build a full one without changing any
+          # file here.
+          #
+          if [[ "${HEAVY_INPUT}" != "auto" ]]; then
+            echo "heavy=${HEAVY_INPUT}" >>"$GITHUB_OUTPUT"
+            echo "DEBUG: heavy=${HEAVY_INPUT} (forced by input)"
+            exit 0
+          fi
+          HEAVY="false"
+          CHANGED="$(git show --name-only --format='' HEAD)"
+          if grep -qxF "pack/${INPUT_REPOSITORY}/Dockerfile" <<<"${CHANGED}"; then
+            HEAVY="true"
+          fi
+          echo "heavy=${HEAVY}" >>"$GITHUB_OUTPUT"
+          echo "DEBUG: CHANGED=${CHANGED}"
+          echo "DEBUG: heavy=${HEAVY}"
+      - name: Set Matrix
+        id: expand-matrix
+        env:
+          HEAVY: ${{ steps.detect-heavy.outputs.heavy }}
+        run: |
+          #
+          # Platform coverage is per image: an image whose upstream ships only one
+          # architecture must not be built for the others, otherwise that leg fails and
+          # the manifest job cannot assemble a complete list.
+          #
+          #   - thead-ppu-devel: the T-Head PPU SDK ships targets/x86_64-linux only.
+          #
+          # The manifest job derives its platform list from this output, so it follows
+          # automatically.
+          #
+          # A heavy build targets the "-8x" runner variant (4x resources), matching ci.yml.
+          #
+          SUFFIX=""
+          if [[ "${HEAVY}" == "true" ]]; then
+            SUFFIX="-8x"
+          fi
+          AMD64='{"runner":"ubuntu-24.04'"${SUFFIX}"'","platform":"linux/amd64"}'
+          ARM64='{"runner":"ubuntu-24.04-arm'"${SUFFIX}"'","platform":"linux/arm64"}'
+          case "${INPUT_REPOSITORY}" in
+            thead-ppu-devel) ENTRIES="${AMD64}" ;;
+            *) ENTRIES="${AMD64},${ARM64}" ;;
+          esac
+          MATRIX="$(jq -cr . <<<"[${ENTRIES}]")"
+          echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
+          echo "DEBUG: MATRIX=${MATRIX}"
+
+  image:
+    needs:
+      - expand-matrix
+    uses: ./.github/workflows/_image.yml
+    with:
+      repository: ${{ inputs.repository }}
+      matrix: ${{ needs.expand-matrix.outputs.matrix }}
+      # A dispatch exists in order to publish the image, so it always pushes.
+      push: true
+      tags: |
+        type=raw,value=${{ inputs.tag }}
+      flavor: |
+        latest=false
+      suffix-on-latest: true
+      build-args-secret: ${{ inputs.args }}
+    secrets:
+      dockerhub-password: ${{ secrets.CI_DOCKERHUB_PASSWORD }}

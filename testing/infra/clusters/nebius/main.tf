@@ -308,11 +308,23 @@ resource "null_resource" "kubeconfig" {
   }
 
   # Delete the context AND its cluster/user entries by their real names, so destroy leaves
-  # no orphaned cluster/user piling up in ~/.kube/config across runs.
+  # no orphaned cluster/user piling up in ~/.kube/config across runs. Deleting the context does
+  # NOT clear current-context when it names that context -- kubectl leaves the field pointing at
+  # a context that no longer exists -- and that dangling value is exactly what makes the next
+  # apply fail under switch_kube_context = false (it reads the current context to restore it).
+  # So clear it too, which also restores the "no current context" state a fresh kubeconfig had.
   provisioner "local-exec" {
-    when       = destroy
-    on_failure = continue
-    command    = "kubectl config delete-context '${self.triggers.context}' || true; kubectl config delete-cluster '${self.triggers.kubeconfig_entry}' || true; kubectl config unset 'users.${self.triggers.kubeconfig_entry}' || true"
+    when        = destroy
+    on_failure  = continue
+    interpreter = ["/bin/bash", "-c"]
+    command     = <<-EOT
+      kubectl config delete-context '${self.triggers.context}' || true
+      kubectl config delete-cluster '${self.triggers.kubeconfig_entry}' || true
+      kubectl config unset 'users.${self.triggers.kubeconfig_entry}' || true
+      if [ "$(kubectl config current-context 2>/dev/null || true)" = '${self.triggers.context}' ]; then
+        kubectl config unset current-context >/dev/null || true
+      fi
+    EOT
   }
 }
 

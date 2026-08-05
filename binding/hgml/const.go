@@ -17,817 +17,1219 @@ package hgml
 import "C"
 
 const (
-	// API_VERSION as defined in hgml/hgml.h:11
-	API_VERSION = 12
-	// API_VERSION_STR as defined in hgml/hgml.h:12
-	API_VERSION_STR = "12"
-	// VALUE_NOT_AVAILABLE as defined in hgml/hgml.h:29
+	// API_VERSION as defined in hgml/hgml.h:34
+	API_VERSION = 13
+	// API_VERSION_STR as defined in hgml/hgml.h:35
+	API_VERSION_STR = "13"
+	// VALUE_NOT_AVAILABLE as defined in hgml/hgml.h:39
 	VALUE_NOT_AVAILABLE = -1
-	// DEVICE_PCI_BUS_ID_BUFFER_SIZE as defined in hgml/hgml.h:39
+	// DEVICE_PCI_BUS_ID_BUFFER_SIZE as defined in hgml/hgml.h:53
 	DEVICE_PCI_BUS_ID_BUFFER_SIZE = 28
-	// DEVICE_PCI_BUS_ID_BUFFER_V2_SIZE as defined in hgml/hgml.h:44
+	// DEVICE_PCI_BUS_ID_BUFFER_V2_SIZE as defined in hgml/hgml.h:55
 	DEVICE_PCI_BUS_ID_BUFFER_V2_SIZE = 16
-	// DEVICE_PCI_BUS_ID_LEGACY_FMT as defined in hgml/hgml.h:68
+	// DEVICE_PCI_BUS_ID_LEGACY_FMT as defined in hgml/hgml.h:85
 	DEVICE_PCI_BUS_ID_LEGACY_FMT = "%04X:%02X:%02X.%01X"
-	// DEVICE_PCI_BUS_ID_FMT as defined in hgml/hgml.h:73
+	// DEVICE_PCI_BUS_ID_FMT as defined in hgml/hgml.h:87
 	DEVICE_PCI_BUS_ID_FMT = "%08X:%02X:%02X.%01X"
-	// ICNLINK_MAX_LINKS as defined in hgml/hgml.h:255
+	// ICNLINK_MAX_LINKS as defined in hgml/hgml.h:227
 	ICNLINK_MAX_LINKS = 8
-	// TOPOLOGY_CPU as defined in hgml/hgml.h:356
+	// TOPOLOGY_CPU as defined in hgml/hgml.h:299
 	TOPOLOGY_CPU = 0
-	// MAX_PHYSICAL_BRIDGE as defined in hgml/hgml.h:386
+	// MAX_PHYSICAL_BRIDGE as defined in hgml/hgml.h:325
 	MAX_PHYSICAL_BRIDGE = 128
-	// MAX_THERMAL_SENSORS_PER_GPU as defined in hgml/hgml.h:504
+	// MAX_THERMAL_SENSORS_PER_GPU as defined in hgml/hgml.h:413
 	MAX_THERMAL_SENSORS_PER_GPU = 3
-	// FlagDefault as defined in hgml/hgml.h:550
+	// DEVICE_UUID_ASCII_LEN as defined in hgml/hgml.h:496
+	DEVICE_UUID_ASCII_LEN = 41
+	// DEVICE_UUID_BINARY_LEN as defined in hgml/hgml.h:498
+	DEVICE_UUID_BINARY_LEN = 16
+	// FlagDefault as defined in hgml/hgml.h:538
 	FlagDefault = 0
-	// FlagForce as defined in hgml/hgml.h:552
+	// FlagForce as defined in hgml/hgml.h:540
 	FlagForce = 1
-	// SINGLE_BIT_ECC as defined in hgml/hgml.h:669
+	// SINGLE_BIT_ECC as defined in hgml/hgml.h:617
 	SINGLE_BIT_ECC = 0
-	// DOUBLE_BIT_ECC as defined in hgml/hgml.h:676
+	// DOUBLE_BIT_ECC as defined in hgml/hgml.h:619
 	DOUBLE_BIT_ECC = 0
-	// MAX_GPU_PERF_PSTATES as defined in hgml/hgml.h:764
+	// MAX_GPU_PERF_PSTATES as defined in hgml/hgml.h:674
 	MAX_GPU_PERF_PSTATES = 16
-	// GRID_LICENSE_BUFFER_SIZE as defined in hgml/hgml.h:1009
-	GRID_LICENSE_BUFFER_SIZE = 128
-	// VGPU_NAME_BUFFER_SIZE as defined in hgml/hgml.h:1011
-	VGPU_NAME_BUFFER_SIZE = 64
-	// GRID_LICENSE_FEATURE_MAX_COUNT as defined in hgml/hgml.h:1013
-	GRID_LICENSE_FEATURE_MAX_COUNT = 3
-	// SUPPORTED_VGPU_SCHEDULER_POLICY_COUNT as defined in hgml/hgml.h:1076
-	SUPPORTED_VGPU_SCHEDULER_POLICY_COUNT = 3
-	// SCHEDULER_SW_MAX_LOG_ENTRIES as defined in hgml/hgml.h:1078
-	SCHEDULER_SW_MAX_LOG_ENTRIES = 200
-	// DEVICE_ARCH_BEETHOVEN as defined in hgml/hgml.h:1255
+	// PERF_MODES_BUFFER_SIZE as defined in hgml/hgml.h:721
+	PERF_MODES_BUFFER_SIZE = 2048
+	// POWER_MIZER_MODE_ADAPTIVE as defined in hgml/hgml.h:741
+	POWER_MIZER_MODE_ADAPTIVE = 0
+	// POWER_MIZER_MODE_PREFER_MAXIMUM_PERFORMANCE as defined in hgml/hgml.h:742
+	POWER_MIZER_MODE_PREFER_MAXIMUM_PERFORMANCE = 1
+	// POWER_MIZER_MODE_AUTO as defined in hgml/hgml.h:743
+	POWER_MIZER_MODE_AUTO = 2
+	// POWER_MIZER_MODE_PREFER_CONSISTENT_PERFORMANCE as defined in hgml/hgml.h:744
+	POWER_MIZER_MODE_PREFER_CONSISTENT_PERFORMANCE = 3
+	// DEVICE_HOSTNAME_BUFFER_SIZE as defined in hgml/hgml.h:917
+	DEVICE_HOSTNAME_BUFFER_SIZE = 64
+	// GSP_FIRMWARE_VERSION_BUF_SIZE as defined in hgml/hgml.h:945
+	GSP_FIRMWARE_VERSION_BUF_SIZE = 64
+	// DEVICE_ARCH_BEETHOVEN as defined in hgml/hgml.h:947
 	DEVICE_ARCH_BEETHOVEN = 7
-	// DEVICE_ARCH_UNKNOWN as defined in hgml/hgml.h:1257
+	// DEVICE_ARCH_UNKNOWN as defined in hgml/hgml.h:949
 	DEVICE_ARCH_UNKNOWN = 4294967295
-	// BUS_TYPE_UNKNOWN as defined in hgml/hgml.h:1264
+	// BUS_TYPE_UNKNOWN as defined in hgml/hgml.h:953
 	BUS_TYPE_UNKNOWN = 0
-	// BUS_TYPE_PCI as defined in hgml/hgml.h:1265
+	// BUS_TYPE_PCI as defined in hgml/hgml.h:954
 	BUS_TYPE_PCI = 1
-	// BUS_TYPE_PCIE as defined in hgml/hgml.h:1266
+	// BUS_TYPE_PCIE as defined in hgml/hgml.h:955
 	BUS_TYPE_PCIE = 2
-	// BUS_TYPE_FPCI as defined in hgml/hgml.h:1267
+	// BUS_TYPE_FPCI as defined in hgml/hgml.h:956
 	BUS_TYPE_FPCI = 3
-	// BUS_TYPE_AGP as defined in hgml/hgml.h:1268
+	// BUS_TYPE_AGP as defined in hgml/hgml.h:957
 	BUS_TYPE_AGP = 4
-	// FAN_POLICY_TEMPERATURE_CONTINOUS_SW as defined in hgml/hgml.h:1279
+	// FAN_POLICY_TEMPERATURE_CONTINOUS_SW as defined in hgml/hgml.h:961
 	FAN_POLICY_TEMPERATURE_CONTINOUS_SW = 0
-	// FAN_POLICY_MANUAL as defined in hgml/hgml.h:1280
+	// FAN_POLICY_MANUAL as defined in hgml/hgml.h:962
 	FAN_POLICY_MANUAL = 1
-	// POWER_SOURCE_AC as defined in hgml/hgml.h:1287
+	// POWER_SOURCE_AC as defined in hgml/hgml.h:966
 	POWER_SOURCE_AC = 0
-	// POWER_SOURCE_BATTERY as defined in hgml/hgml.h:1288
+	// POWER_SOURCE_BATTERY as defined in hgml/hgml.h:967
 	POWER_SOURCE_BATTERY = 1
-	// POWER_SOURCE_UNDERSIZED as defined in hgml/hgml.h:1289
+	// POWER_SOURCE_UNDERSIZED as defined in hgml/hgml.h:968
 	POWER_SOURCE_UNDERSIZED = 2
-	// PCIE_LINK_MAX_SPEED_INVALID as defined in hgml/hgml.h:1296
+	// PCIE_LINK_MAX_SPEED_INVALID as defined in hgml/hgml.h:972
 	PCIE_LINK_MAX_SPEED_INVALID = 0
-	// PCIE_LINK_MAX_SPEED_2500MBPS as defined in hgml/hgml.h:1297
+	// PCIE_LINK_MAX_SPEED_2500MBPS as defined in hgml/hgml.h:973
 	PCIE_LINK_MAX_SPEED_2500MBPS = 1
-	// PCIE_LINK_MAX_SPEED_5000MBPS as defined in hgml/hgml.h:1298
+	// PCIE_LINK_MAX_SPEED_5000MBPS as defined in hgml/hgml.h:974
 	PCIE_LINK_MAX_SPEED_5000MBPS = 2
-	// PCIE_LINK_MAX_SPEED_8000MBPS as defined in hgml/hgml.h:1299
+	// PCIE_LINK_MAX_SPEED_8000MBPS as defined in hgml/hgml.h:975
 	PCIE_LINK_MAX_SPEED_8000MBPS = 3
-	// PCIE_LINK_MAX_SPEED_16000MBPS as defined in hgml/hgml.h:1300
+	// PCIE_LINK_MAX_SPEED_16000MBPS as defined in hgml/hgml.h:976
 	PCIE_LINK_MAX_SPEED_16000MBPS = 4
-	// PCIE_LINK_MAX_SPEED_32000MBPS as defined in hgml/hgml.h:1301
+	// PCIE_LINK_MAX_SPEED_32000MBPS as defined in hgml/hgml.h:977
 	PCIE_LINK_MAX_SPEED_32000MBPS = 5
-	// PCIE_LINK_MAX_SPEED_64000MBPS as defined in hgml/hgml.h:1302
+	// PCIE_LINK_MAX_SPEED_64000MBPS as defined in hgml/hgml.h:978
 	PCIE_LINK_MAX_SPEED_64000MBPS = 6
-	// ADAPTIVE_CLOCKING_INFO_STATUS_DISABLED as defined in hgml/hgml.h:1307
+	// ADAPTIVE_CLOCKING_INFO_STATUS_DISABLED as defined in hgml/hgml.h:980
 	ADAPTIVE_CLOCKING_INFO_STATUS_DISABLED = 0
-	// ADAPTIVE_CLOCKING_INFO_STATUS_ENABLED as defined in hgml/hgml.h:1308
+	// ADAPTIVE_CLOCKING_INFO_STATUS_ENABLED as defined in hgml/hgml.h:981
 	ADAPTIVE_CLOCKING_INFO_STATUS_ENABLED = 1
-	// MAX_GPU_UTILIZATIONS as defined in hgml/hgml.h:1310
+	// MAX_GPU_UTILIZATIONS as defined in hgml/hgml.h:983
 	MAX_GPU_UTILIZATIONS = 8
-	// FI_DEV_ECC_CURRENT as defined in hgml/hgml.h:1345
-	FI_DEV_ECC_CURRENT = 1
-	// FI_DEV_ECC_PENDING as defined in hgml/hgml.h:1346
-	FI_DEV_ECC_PENDING = 2
-	// FI_DEV_ECC_SBE_VOL_TOTAL as defined in hgml/hgml.h:1348
-	FI_DEV_ECC_SBE_VOL_TOTAL = 3
-	// FI_DEV_ECC_DBE_VOL_TOTAL as defined in hgml/hgml.h:1349
-	FI_DEV_ECC_DBE_VOL_TOTAL = 4
-	// FI_DEV_ECC_SBE_AGG_TOTAL as defined in hgml/hgml.h:1350
-	FI_DEV_ECC_SBE_AGG_TOTAL = 5
-	// FI_DEV_ECC_DBE_AGG_TOTAL as defined in hgml/hgml.h:1351
-	FI_DEV_ECC_DBE_AGG_TOTAL = 6
-	// FI_DEV_ECC_SBE_VOL_L1 as defined in hgml/hgml.h:1353
-	FI_DEV_ECC_SBE_VOL_L1 = 7
-	// FI_DEV_ECC_DBE_VOL_L1 as defined in hgml/hgml.h:1354
-	FI_DEV_ECC_DBE_VOL_L1 = 8
-	// FI_DEV_ECC_SBE_VOL_L2 as defined in hgml/hgml.h:1355
-	FI_DEV_ECC_SBE_VOL_L2 = 9
-	// FI_DEV_ECC_DBE_VOL_L2 as defined in hgml/hgml.h:1356
-	FI_DEV_ECC_DBE_VOL_L2 = 10
-	// FI_DEV_ECC_SBE_VOL_DEV as defined in hgml/hgml.h:1357
-	FI_DEV_ECC_SBE_VOL_DEV = 11
-	// FI_DEV_ECC_DBE_VOL_DEV as defined in hgml/hgml.h:1358
-	FI_DEV_ECC_DBE_VOL_DEV = 12
-	// FI_DEV_ECC_SBE_VOL_REG as defined in hgml/hgml.h:1359
-	FI_DEV_ECC_SBE_VOL_REG = 13
-	// FI_DEV_ECC_DBE_VOL_REG as defined in hgml/hgml.h:1360
-	FI_DEV_ECC_DBE_VOL_REG = 14
-	// FI_DEV_ECC_SBE_VOL_TEX as defined in hgml/hgml.h:1361
-	FI_DEV_ECC_SBE_VOL_TEX = 15
-	// FI_DEV_ECC_DBE_VOL_TEX as defined in hgml/hgml.h:1362
-	FI_DEV_ECC_DBE_VOL_TEX = 16
-	// FI_DEV_ECC_DBE_VOL_CBU as defined in hgml/hgml.h:1363
-	FI_DEV_ECC_DBE_VOL_CBU = 17
-	// FI_DEV_ECC_SBE_AGG_L1 as defined in hgml/hgml.h:1364
-	FI_DEV_ECC_SBE_AGG_L1 = 18
-	// FI_DEV_ECC_DBE_AGG_L1 as defined in hgml/hgml.h:1365
-	FI_DEV_ECC_DBE_AGG_L1 = 19
-	// FI_DEV_ECC_SBE_AGG_L2 as defined in hgml/hgml.h:1366
-	FI_DEV_ECC_SBE_AGG_L2 = 20
-	// FI_DEV_ECC_DBE_AGG_L2 as defined in hgml/hgml.h:1367
-	FI_DEV_ECC_DBE_AGG_L2 = 21
-	// FI_DEV_ECC_SBE_AGG_DEV as defined in hgml/hgml.h:1368
-	FI_DEV_ECC_SBE_AGG_DEV = 22
-	// FI_DEV_ECC_DBE_AGG_DEV as defined in hgml/hgml.h:1369
-	FI_DEV_ECC_DBE_AGG_DEV = 23
-	// FI_DEV_ECC_SBE_AGG_REG as defined in hgml/hgml.h:1370
-	FI_DEV_ECC_SBE_AGG_REG = 24
-	// FI_DEV_ECC_DBE_AGG_REG as defined in hgml/hgml.h:1371
-	FI_DEV_ECC_DBE_AGG_REG = 25
-	// FI_DEV_ECC_SBE_AGG_TEX as defined in hgml/hgml.h:1372
-	FI_DEV_ECC_SBE_AGG_TEX = 26
-	// FI_DEV_ECC_DBE_AGG_TEX as defined in hgml/hgml.h:1373
-	FI_DEV_ECC_DBE_AGG_TEX = 27
-	// FI_DEV_ECC_DBE_AGG_CBU as defined in hgml/hgml.h:1374
-	FI_DEV_ECC_DBE_AGG_CBU = 28
-	// FI_DEV_RETIRED_SBE as defined in hgml/hgml.h:1377
-	FI_DEV_RETIRED_SBE = 29
-	// FI_DEV_RETIRED_DBE as defined in hgml/hgml.h:1378
-	FI_DEV_RETIRED_DBE = 30
-	// FI_DEV_RETIRED_PENDING as defined in hgml/hgml.h:1379
-	FI_DEV_RETIRED_PENDING = 31
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L0 as defined in hgml/hgml.h:1382
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L0 = 32
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L1 as defined in hgml/hgml.h:1383
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L1 = 33
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L2 as defined in hgml/hgml.h:1384
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L2 = 34
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L3 as defined in hgml/hgml.h:1385
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L3 = 35
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L4 as defined in hgml/hgml.h:1386
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L4 = 36
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L5 as defined in hgml/hgml.h:1387
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L5 = 37
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1388
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_TOTAL = 38
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L0 as defined in hgml/hgml.h:1391
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L0 = 39
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L1 as defined in hgml/hgml.h:1392
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L1 = 40
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L2 as defined in hgml/hgml.h:1393
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L2 = 41
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L3 as defined in hgml/hgml.h:1394
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L3 = 42
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L4 as defined in hgml/hgml.h:1395
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L4 = 43
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L5 as defined in hgml/hgml.h:1396
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L5 = 44
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1397
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_TOTAL = 45
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L0 as defined in hgml/hgml.h:1400
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L0 = 46
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L1 as defined in hgml/hgml.h:1401
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L1 = 47
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L2 as defined in hgml/hgml.h:1402
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L2 = 48
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L3 as defined in hgml/hgml.h:1403
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L3 = 49
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L4 as defined in hgml/hgml.h:1404
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L4 = 50
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L5 as defined in hgml/hgml.h:1405
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L5 = 51
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1406
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_TOTAL = 52
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L0 as defined in hgml/hgml.h:1409
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L0 = 53
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L1 as defined in hgml/hgml.h:1410
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L1 = 54
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L2 as defined in hgml/hgml.h:1411
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L2 = 55
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L3 as defined in hgml/hgml.h:1412
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L3 = 56
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L4 as defined in hgml/hgml.h:1413
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L4 = 57
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L5 as defined in hgml/hgml.h:1414
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L5 = 58
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1415
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_TOTAL = 59
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L0 as defined in hgml/hgml.h:1427
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L0 = 60
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L1 as defined in hgml/hgml.h:1428
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L1 = 61
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L2 as defined in hgml/hgml.h:1429
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L2 = 62
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L3 as defined in hgml/hgml.h:1430
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L3 = 63
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L4 as defined in hgml/hgml.h:1431
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L4 = 64
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L5 as defined in hgml/hgml.h:1432
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L5 = 65
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_TOTAL as defined in hgml/hgml.h:1433
-	FI_DEV_ICNLINK_BANDWIDTH_C0_TOTAL = 66
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L0 as defined in hgml/hgml.h:1436
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L0 = 67
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L1 as defined in hgml/hgml.h:1437
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L1 = 68
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L2 as defined in hgml/hgml.h:1438
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L2 = 69
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L3 as defined in hgml/hgml.h:1439
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L3 = 70
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L4 as defined in hgml/hgml.h:1440
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L4 = 71
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L5 as defined in hgml/hgml.h:1441
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L5 = 72
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_TOTAL as defined in hgml/hgml.h:1442
-	FI_DEV_ICNLINK_BANDWIDTH_C1_TOTAL = 73
-	// FI_DEV_PERF_POLICY_POWER as defined in hgml/hgml.h:1445
-	FI_DEV_PERF_POLICY_POWER = 74
-	// FI_DEV_PERF_POLICY_THERMAL as defined in hgml/hgml.h:1446
-	FI_DEV_PERF_POLICY_THERMAL = 75
-	// FI_DEV_PERF_POLICY_SYNC_BOOST as defined in hgml/hgml.h:1447
-	FI_DEV_PERF_POLICY_SYNC_BOOST = 76
-	// FI_DEV_PERF_POLICY_BOARD_LIMIT as defined in hgml/hgml.h:1448
-	FI_DEV_PERF_POLICY_BOARD_LIMIT = 77
-	// FI_DEV_PERF_POLICY_LOW_UTILIZATION as defined in hgml/hgml.h:1449
-	FI_DEV_PERF_POLICY_LOW_UTILIZATION = 78
-	// FI_DEV_PERF_POLICY_RELIABILITY as defined in hgml/hgml.h:1450
-	FI_DEV_PERF_POLICY_RELIABILITY = 79
-	// FI_DEV_PERF_POLICY_TOTAL_APP_CLOCKS as defined in hgml/hgml.h:1451
-	FI_DEV_PERF_POLICY_TOTAL_APP_CLOCKS = 80
-	// FI_DEV_PERF_POLICY_TOTAL_BASE_CLOCKS as defined in hgml/hgml.h:1452
-	FI_DEV_PERF_POLICY_TOTAL_BASE_CLOCKS = 81
-	// FI_DEV_MEMORY_TEMP as defined in hgml/hgml.h:1455
-	FI_DEV_MEMORY_TEMP = 82
-	// FI_DEV_TOTAL_ENERGY_CONSUMPTION as defined in hgml/hgml.h:1458
-	FI_DEV_TOTAL_ENERGY_CONSUMPTION = 83
-	// FI_DEV_ICNLINK_SPEED_MBPS_L0 as defined in hgml/hgml.h:1461
-	FI_DEV_ICNLINK_SPEED_MBPS_L0 = 84
-	// FI_DEV_ICNLINK_SPEED_MBPS_L1 as defined in hgml/hgml.h:1462
-	FI_DEV_ICNLINK_SPEED_MBPS_L1 = 85
-	// FI_DEV_ICNLINK_SPEED_MBPS_L2 as defined in hgml/hgml.h:1463
-	FI_DEV_ICNLINK_SPEED_MBPS_L2 = 86
-	// FI_DEV_ICNLINK_SPEED_MBPS_L3 as defined in hgml/hgml.h:1464
-	FI_DEV_ICNLINK_SPEED_MBPS_L3 = 87
-	// FI_DEV_ICNLINK_SPEED_MBPS_L4 as defined in hgml/hgml.h:1465
-	FI_DEV_ICNLINK_SPEED_MBPS_L4 = 88
-	// FI_DEV_ICNLINK_SPEED_MBPS_L5 as defined in hgml/hgml.h:1466
-	FI_DEV_ICNLINK_SPEED_MBPS_L5 = 89
-	// FI_DEV_ICNLINK_SPEED_MBPS_COMMON as defined in hgml/hgml.h:1467
-	FI_DEV_ICNLINK_SPEED_MBPS_COMMON = 90
-	// FI_DEV_ICNLINK_LINK_COUNT as defined in hgml/hgml.h:1469
-	FI_DEV_ICNLINK_LINK_COUNT = 91
-	// FI_DEV_RETIRED_PENDING_SBE as defined in hgml/hgml.h:1471
-	FI_DEV_RETIRED_PENDING_SBE = 92
-	// FI_DEV_RETIRED_PENDING_DBE as defined in hgml/hgml.h:1472
-	FI_DEV_RETIRED_PENDING_DBE = 93
-	// FI_DEV_PCIE_REPLAY_COUNTER as defined in hgml/hgml.h:1474
-	FI_DEV_PCIE_REPLAY_COUNTER = 94
-	// FI_DEV_PCIE_REPLAY_ROLLOVER_COUNTER as defined in hgml/hgml.h:1475
-	FI_DEV_PCIE_REPLAY_ROLLOVER_COUNTER = 95
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L6 as defined in hgml/hgml.h:1478
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L6 = 96
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L7 as defined in hgml/hgml.h:1479
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L7 = 97
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L8 as defined in hgml/hgml.h:1480
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L8 = 98
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L9 as defined in hgml/hgml.h:1481
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L9 = 99
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L10 as defined in hgml/hgml.h:1482
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L10 = 100
-	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L11 as defined in hgml/hgml.h:1483
-	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L11 = 101
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L6 as defined in hgml/hgml.h:1486
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L6 = 102
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L7 as defined in hgml/hgml.h:1487
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L7 = 103
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L8 as defined in hgml/hgml.h:1488
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L8 = 104
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L9 as defined in hgml/hgml.h:1489
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L9 = 105
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L10 as defined in hgml/hgml.h:1490
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L10 = 106
-	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L11 as defined in hgml/hgml.h:1491
-	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L11 = 107
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L6 as defined in hgml/hgml.h:1494
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L6 = 108
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L7 as defined in hgml/hgml.h:1495
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L7 = 109
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L8 as defined in hgml/hgml.h:1496
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L8 = 110
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L9 as defined in hgml/hgml.h:1497
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L9 = 111
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L10 as defined in hgml/hgml.h:1498
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L10 = 112
-	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L11 as defined in hgml/hgml.h:1499
-	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L11 = 113
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L6 as defined in hgml/hgml.h:1502
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L6 = 114
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L7 as defined in hgml/hgml.h:1503
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L7 = 115
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L8 as defined in hgml/hgml.h:1504
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L8 = 116
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L9 as defined in hgml/hgml.h:1505
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L9 = 117
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L10 as defined in hgml/hgml.h:1506
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L10 = 118
-	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L11 as defined in hgml/hgml.h:1507
-	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L11 = 119
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L6 as defined in hgml/hgml.h:1518
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L6 = 120
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L7 as defined in hgml/hgml.h:1519
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L7 = 121
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L8 as defined in hgml/hgml.h:1520
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L8 = 122
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L9 as defined in hgml/hgml.h:1521
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L9 = 123
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L10 as defined in hgml/hgml.h:1522
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L10 = 124
-	// FI_DEV_ICNLINK_BANDWIDTH_C0_L11 as defined in hgml/hgml.h:1523
-	FI_DEV_ICNLINK_BANDWIDTH_C0_L11 = 125
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L6 as defined in hgml/hgml.h:1526
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L6 = 126
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L7 as defined in hgml/hgml.h:1527
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L7 = 127
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L8 as defined in hgml/hgml.h:1528
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L8 = 128
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L9 as defined in hgml/hgml.h:1529
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L9 = 129
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L10 as defined in hgml/hgml.h:1530
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L10 = 130
-	// FI_DEV_ICNLINK_BANDWIDTH_C1_L11 as defined in hgml/hgml.h:1531
-	FI_DEV_ICNLINK_BANDWIDTH_C1_L11 = 131
-	// FI_DEV_ICNLINK_SPEED_MBPS_L6 as defined in hgml/hgml.h:1534
-	FI_DEV_ICNLINK_SPEED_MBPS_L6 = 132
-	// FI_DEV_ICNLINK_SPEED_MBPS_L7 as defined in hgml/hgml.h:1535
-	FI_DEV_ICNLINK_SPEED_MBPS_L7 = 133
-	// FI_DEV_ICNLINK_SPEED_MBPS_L8 as defined in hgml/hgml.h:1536
-	FI_DEV_ICNLINK_SPEED_MBPS_L8 = 134
-	// FI_DEV_ICNLINK_SPEED_MBPS_L9 as defined in hgml/hgml.h:1537
-	FI_DEV_ICNLINK_SPEED_MBPS_L9 = 135
-	// FI_DEV_ICNLINK_SPEED_MBPS_L10 as defined in hgml/hgml.h:1538
-	FI_DEV_ICNLINK_SPEED_MBPS_L10 = 136
-	// FI_DEV_ICNLINK_SPEED_MBPS_L11 as defined in hgml/hgml.h:1539
-	FI_DEV_ICNLINK_SPEED_MBPS_L11 = 137
-	// FI_DEV_ICNLINK_THROUGHPUT_DATA_TX as defined in hgml/hgml.h:1548
-	FI_DEV_ICNLINK_THROUGHPUT_DATA_TX = 138
-	// FI_DEV_ICNLINK_THROUGHPUT_DATA_RX as defined in hgml/hgml.h:1549
-	FI_DEV_ICNLINK_THROUGHPUT_DATA_RX = 139
-	// FI_DEV_ICNLINK_THROUGHPUT_RAW_TX as defined in hgml/hgml.h:1550
-	FI_DEV_ICNLINK_THROUGHPUT_RAW_TX = 140
-	// FI_DEV_ICNLINK_THROUGHPUT_RAW_RX as defined in hgml/hgml.h:1551
-	FI_DEV_ICNLINK_THROUGHPUT_RAW_RX = 141
-	// FI_DEV_REMAPPED_COR as defined in hgml/hgml.h:1554
-	FI_DEV_REMAPPED_COR = 142
-	// FI_DEV_REMAPPED_UNC as defined in hgml/hgml.h:1555
-	FI_DEV_REMAPPED_UNC = 143
-	// FI_DEV_REMAPPED_PENDING as defined in hgml/hgml.h:1556
-	FI_DEV_REMAPPED_PENDING = 144
-	// FI_DEV_REMAPPED_FAILURE as defined in hgml/hgml.h:1557
-	FI_DEV_REMAPPED_FAILURE = 145
-	// FI_DEV_ICNLINK_REMOTE_ICNLINK_ID as defined in hgml/hgml.h:1564
-	FI_DEV_ICNLINK_REMOTE_ICNLINK_ID = 146
-	// FI_DEV_NVSWITCH_CONNECTED_LINK_COUNT as defined in hgml/hgml.h:1569
-	FI_DEV_NVSWITCH_CONNECTED_LINK_COUNT = 147
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L0 as defined in hgml/hgml.h:1576
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L0 = 148
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L1 as defined in hgml/hgml.h:1577
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L1 = 149
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L2 as defined in hgml/hgml.h:1578
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L2 = 150
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L3 as defined in hgml/hgml.h:1579
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L3 = 151
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L4 as defined in hgml/hgml.h:1580
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L4 = 152
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L5 as defined in hgml/hgml.h:1581
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L5 = 153
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L6 as defined in hgml/hgml.h:1582
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L6 = 154
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L7 as defined in hgml/hgml.h:1583
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L7 = 155
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L8 as defined in hgml/hgml.h:1584
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L8 = 156
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L9 as defined in hgml/hgml.h:1585
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L9 = 157
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L10 as defined in hgml/hgml.h:1586
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L10 = 158
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L11 as defined in hgml/hgml.h:1587
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L11 = 159
-	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1588
-	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_TOTAL = 160
-	// FI_DEV_ICNLINK_ERROR_DL_REPLAY as defined in hgml/hgml.h:1590
-	FI_DEV_ICNLINK_ERROR_DL_REPLAY = 161
-	// FI_DEV_ICNLINK_ERROR_DL_RECOVERY as defined in hgml/hgml.h:1591
-	FI_DEV_ICNLINK_ERROR_DL_RECOVERY = 162
-	// FI_DEV_ICNLINK_ERROR_DL_CRC as defined in hgml/hgml.h:1592
-	FI_DEV_ICNLINK_ERROR_DL_CRC = 163
-	// FI_DEV_ICNLINK_GET_SPEED as defined in hgml/hgml.h:1593
-	FI_DEV_ICNLINK_GET_SPEED = 164
-	// FI_DEV_ICNLINK_GET_STATE as defined in hgml/hgml.h:1594
-	FI_DEV_ICNLINK_GET_STATE = 165
-	// FI_DEV_ICNLINK_GET_VERSION as defined in hgml/hgml.h:1595
-	FI_DEV_ICNLINK_GET_VERSION = 166
-	// FI_DEV_ICNLINK_GET_POWER_STATE as defined in hgml/hgml.h:1597
-	FI_DEV_ICNLINK_GET_POWER_STATE = 167
-	// FI_DEV_ICNLINK_GET_POWER_THRESHOLD as defined in hgml/hgml.h:1598
-	FI_DEV_ICNLINK_GET_POWER_THRESHOLD = 168
-	// FI_DEV_PCIE_L0_TO_RECOVERY_COUNTER as defined in hgml/hgml.h:1600
-	FI_DEV_PCIE_L0_TO_RECOVERY_COUNTER = 169
-	// FI_DEV_C2C_LINK_COUNT as defined in hgml/hgml.h:1602
-	FI_DEV_C2C_LINK_COUNT = 170
-	// FI_DEV_C2C_LINK_GET_STATUS as defined in hgml/hgml.h:1603
-	FI_DEV_C2C_LINK_GET_STATUS = 171
-	// FI_DEV_C2C_LINK_GET_MAX_BW as defined in hgml/hgml.h:1604
-	FI_DEV_C2C_LINK_GET_MAX_BW = 172
-	// FI_DEV_PCIE_COUNT_CORRECTABLE_ERRORS as defined in hgml/hgml.h:1606
-	FI_DEV_PCIE_COUNT_CORRECTABLE_ERRORS = 173
-	// FI_DEV_PCIE_COUNT_NAKS_RECEIVED as defined in hgml/hgml.h:1607
-	FI_DEV_PCIE_COUNT_NAKS_RECEIVED = 174
-	// FI_DEV_PCIE_COUNT_RECEIVER_ERROR as defined in hgml/hgml.h:1608
-	FI_DEV_PCIE_COUNT_RECEIVER_ERROR = 175
-	// FI_DEV_PCIE_COUNT_BAD_TLP as defined in hgml/hgml.h:1609
-	FI_DEV_PCIE_COUNT_BAD_TLP = 176
-	// FI_DEV_PCIE_COUNT_NAKS_SENT as defined in hgml/hgml.h:1610
-	FI_DEV_PCIE_COUNT_NAKS_SENT = 177
-	// FI_DEV_PCIE_COUNT_BAD_DLLP as defined in hgml/hgml.h:1611
-	FI_DEV_PCIE_COUNT_BAD_DLLP = 178
-	// FI_DEV_PCIE_COUNT_NON_FATAL_ERROR as defined in hgml/hgml.h:1612
-	FI_DEV_PCIE_COUNT_NON_FATAL_ERROR = 179
-	// FI_DEV_PCIE_COUNT_FATAL_ERROR as defined in hgml/hgml.h:1613
-	FI_DEV_PCIE_COUNT_FATAL_ERROR = 180
-	// FI_DEV_PCIE_COUNT_UNSUPPORTED_REQ as defined in hgml/hgml.h:1614
-	FI_DEV_PCIE_COUNT_UNSUPPORTED_REQ = 181
-	// FI_DEV_PCIE_COUNT_LCRC_ERROR as defined in hgml/hgml.h:1615
-	FI_DEV_PCIE_COUNT_LCRC_ERROR = 182
-	// FI_DEV_PCIE_COUNT_LANE_ERROR as defined in hgml/hgml.h:1616
-	FI_DEV_PCIE_COUNT_LANE_ERROR = 183
-	// FI_DEV_IS_RESETLESS_MIG_SUPPORTED as defined in hgml/hgml.h:1618
-	FI_DEV_IS_RESETLESS_MIG_SUPPORTED = 184
-	// FI_DEV_POWER_AVERAGE as defined in hgml/hgml.h:1630
-	FI_DEV_POWER_AVERAGE = 185
-	// FI_DEV_POWER_INSTANT as defined in hgml/hgml.h:1631
-	FI_DEV_POWER_INSTANT = 186
-	// FI_DEV_POWER_MIN_LIMIT as defined in hgml/hgml.h:1632
-	FI_DEV_POWER_MIN_LIMIT = 187
-	// FI_DEV_POWER_MAX_LIMIT as defined in hgml/hgml.h:1633
-	FI_DEV_POWER_MAX_LIMIT = 188
-	// FI_DEV_POWER_DEFAULT_LIMIT as defined in hgml/hgml.h:1634
-	FI_DEV_POWER_DEFAULT_LIMIT = 189
-	// FI_DEV_POWER_CURRENT_LIMIT as defined in hgml/hgml.h:1635
-	FI_DEV_POWER_CURRENT_LIMIT = 190
-	// FI_DEV_ENERGY as defined in hgml/hgml.h:1636
-	FI_DEV_ENERGY = 191
-	// FI_DEV_POWER_REQUESTED_LIMIT as defined in hgml/hgml.h:1637
-	FI_DEV_POWER_REQUESTED_LIMIT = 192
-	// FI_DEV_TEMPERATURE_SHUTDOWN_TLIMIT as defined in hgml/hgml.h:1644
-	FI_DEV_TEMPERATURE_SHUTDOWN_TLIMIT = 193
-	// FI_DEV_TEMPERATURE_SLOWDOWN_TLIMIT as defined in hgml/hgml.h:1645
-	FI_DEV_TEMPERATURE_SLOWDOWN_TLIMIT = 194
-	// FI_DEV_TEMPERATURE_MEM_MAX_TLIMIT as defined in hgml/hgml.h:1646
-	FI_DEV_TEMPERATURE_MEM_MAX_TLIMIT = 195
-	// FI_DEV_TEMPERATURE_GPU_MAX_TLIMIT as defined in hgml/hgml.h:1647
-	FI_DEV_TEMPERATURE_GPU_MAX_TLIMIT = 196
-	// FI_DEV_ICNLINK_CABLE_STATUS as defined in hgml/hgml.h:1649
-	FI_DEV_ICNLINK_CABLE_STATUS = 500
-	// FI_DEV_ICNLINK_LANE_WIDTH as defined in hgml/hgml.h:1650
-	FI_DEV_ICNLINK_LANE_WIDTH = 501
-	// FI_DEV_ICNLINK_LINKUP_COUNT as defined in hgml/hgml.h:1651
-	FI_DEV_ICNLINK_LINKUP_COUNT = 502
-	// FI_DEV_ICNLINK_LINKDOWN_COUNT as defined in hgml/hgml.h:1652
-	FI_DEV_ICNLINK_LINKDOWN_COUNT = 503
-	// FI_DEV_ICNLINK_FECC_ERROR_COUNT as defined in hgml/hgml.h:1653
-	FI_DEV_ICNLINK_FECC_ERROR_COUNT = 504
-	// FI_DEV_ICNLINK_FECU_ERROR_COUNT as defined in hgml/hgml.h:1654
-	FI_DEV_ICNLINK_FECU_ERROR_COUNT = 505
-	// FI_DEV_ICNLINK_PACKET_ERROR_TX as defined in hgml/hgml.h:1655
-	FI_DEV_ICNLINK_PACKET_ERROR_TX = 506
-	// FI_DEV_ICNLINK_PACKET_ERROR_RX as defined in hgml/hgml.h:1656
-	FI_DEV_ICNLINK_PACKET_ERROR_RX = 507
-	// FI_DEV_ICNLINK_PACKET_TOTAL_TX as defined in hgml/hgml.h:1657
-	FI_DEV_ICNLINK_PACKET_TOTAL_TX = 508
-	// FI_DEV_ICNLINK_PACKET_TOTAL_RX as defined in hgml/hgml.h:1658
-	FI_DEV_ICNLINK_PACKET_TOTAL_RX = 509
-	// FI_DEV_CORE_UTILIZATION as defined in hgml/hgml.h:1661
-	FI_DEV_CORE_UTILIZATION = 510
-	// FI_DEV_AUTO_RESET_STATUS as defined in hgml/hgml.h:1662
-	FI_DEV_AUTO_RESET_STATUS = 511
-	// FI_DEV_ICNLINK_PHYSICAL_PORT as defined in hgml/hgml.h:1663
-	FI_DEV_ICNLINK_PHYSICAL_PORT = 512
-	// FI_DEV_OVERCLOCKING_MODE as defined in hgml/hgml.h:1664
-	FI_DEV_OVERCLOCKING_MODE = 513
-	// FI_DEV_HBM_VENDOR as defined in hgml/hgml.h:1665
-	FI_DEV_HBM_VENDOR = 514
-	// FI_DEV_BASE_CLOCK as defined in hgml/hgml.h:1666
-	FI_DEV_BASE_CLOCK = 515
-	// FI_DEV_REAR_ID as defined in hgml/hgml.h:1667
-	FI_DEV_REAR_ID = 516
-	// FI_DEV_XID_PPU_RESET as defined in hgml/hgml.h:1669
-	FI_DEV_XID_PPU_RESET = 517
-	// FI_DEV_XID_OS_REBOOT as defined in hgml/hgml.h:1670
-	FI_DEV_XID_OS_REBOOT = 518
-	// FI_DEV_XID_COLD_REBOOT as defined in hgml/hgml.h:1671
-	FI_DEV_XID_COLD_REBOOT = 519
-	// FI_DEV_PCM_ENABLED as defined in hgml/hgml.h:1673
-	FI_DEV_PCM_ENABLED = 520
-	// FI_DEV_GPM_ENABLED as defined in hgml/hgml.h:1674
-	FI_DEV_GPM_ENABLED = 521
-	// FI_DEV_TIDE_MODE_STATUS as defined in hgml/hgml.h:1675
-	FI_DEV_TIDE_MODE_STATUS = 522
-	// FI_DEV_MPS_MODE_STATUS as defined in hgml/hgml.h:1676
-	FI_DEV_MPS_MODE_STATUS = 523
-	// FI_MAX as defined in hgml/hgml.h:1678
-	FI_MAX = 524
-	// EventTypeSingleBitEccError as defined in hgml/hgml.h:1835
-	EventTypeSingleBitEccError = 1
-	// EventTypeDoubleBitEccError as defined in hgml/hgml.h:1841
-	EventTypeDoubleBitEccError = 2
-	// EventTypePState as defined in hgml/hgml.h:1849
-	EventTypePState = 4
-	// EventTypeXidCriticalError as defined in hgml/hgml.h:1852
-	EventTypeXidCriticalError = 8
-	// EventTypeClock as defined in hgml/hgml.h:1855
-	EventTypeClock = 16
-	// EventTypePowerSourceChange as defined in hgml/hgml.h:1858
-	EventTypePowerSourceChange = 128
-	// EventMigConfigChange as defined in hgml/hgml.h:1861
-	EventMigConfigChange = 256
-	// EventTypeNone as defined in hgml/hgml.h:1864
-	EventTypeNone = 0
-	// EventTypeAll as defined in hgml/hgml.h:1867
-	EventTypeAll = 415
-	// ClocksEventReasonGpuIdle as defined in hgml/hgml.h:1906
-	ClocksEventReasonGpuIdle = 1
-	// ClocksEventReasonApplicationsClocksSetting as defined in hgml/hgml.h:1913
-	ClocksEventReasonApplicationsClocksSetting = 2
-	// ClocksThrottleReasonUserDefinedClocks as defined in hgml/hgml.h:1919
-	ClocksThrottleReasonUserDefinedClocks = 2
-	// ClocksEventReasonSwPowerCap as defined in hgml/hgml.h:1927
-	ClocksEventReasonSwPowerCap = 4
-	// ClocksThrottleReasonHwSlowdown as defined in hgml/hgml.h:1942
-	ClocksThrottleReasonHwSlowdown = 8
-	// ClocksEventReasonSyncBoost as defined in hgml/hgml.h:1953
-	ClocksEventReasonSyncBoost = 16
-	// ClocksEventReasonSwThermalSlowdown as defined in hgml/hgml.h:1962
-	ClocksEventReasonSwThermalSlowdown = 32
-	// ClocksThrottleReasonHwThermalSlowdown as defined in hgml/hgml.h:1973
-	ClocksThrottleReasonHwThermalSlowdown = 64
-	// ClocksThrottleReasonHwPowerBrakeSlowdown as defined in hgml/hgml.h:1984
-	ClocksThrottleReasonHwPowerBrakeSlowdown = 128
-	// ClocksEventReasonDisplayClockSetting as defined in hgml/hgml.h:1990
-	ClocksEventReasonDisplayClockSetting = 256
-	// ClocksEventReasonNone as defined in hgml/hgml.h:1996
-	ClocksEventReasonNone = 0
-	// ClocksEventReasonAll as defined in hgml/hgml.h:2001
-	ClocksEventReasonAll = 511
-	// ClocksThrottleReasonGpuIdle as defined in hgml/hgml.h:2016
-	ClocksThrottleReasonGpuIdle = 1
-	// ClocksThrottleReasonApplicationsClocksSetting as defined in hgml/hgml.h:2020
-	ClocksThrottleReasonApplicationsClocksSetting = 2
-	// ClocksThrottleReasonSyncBoost as defined in hgml/hgml.h:2024
-	ClocksThrottleReasonSyncBoost = 16
-	// ClocksThrottleReasonSwPowerCap as defined in hgml/hgml.h:2028
-	ClocksThrottleReasonSwPowerCap = 4
-	// ClocksThrottleReasonSwThermalSlowdown as defined in hgml/hgml.h:2032
-	ClocksThrottleReasonSwThermalSlowdown = 32
-	// ClocksThrottleReasonDisplayClockSetting as defined in hgml/hgml.h:2036
-	ClocksThrottleReasonDisplayClockSetting = 256
-	// ClocksThrottleReasonNone as defined in hgml/hgml.h:2040
-	ClocksThrottleReasonNone = 0
-	// ClocksThrottleReasonAll as defined in hgml/hgml.h:2044
-	ClocksThrottleReasonAll = 511
-	// HGFBC_SESSION_FLAG_DIFFMAP_ENABLED as defined in hgml/hgml.h:2151
-	HGFBC_SESSION_FLAG_DIFFMAP_ENABLED = 1
-	// HGFBC_SESSION_FLAG_CLASSIFICATIONMAP_ENABLED as defined in hgml/hgml.h:2152
-	HGFBC_SESSION_FLAG_CLASSIFICATIONMAP_ENABLED = 2
-	// HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_NO_WAIT as defined in hgml/hgml.h:2153
-	HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_NO_WAIT = 4
-	// HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_INFINITE as defined in hgml/hgml.h:2154
-	HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_INFINITE = 8
-	// HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_TIMEOUT as defined in hgml/hgml.h:2155
-	HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_TIMEOUT = 16
-	// CC_SYSTEM_CPU_CAPS_NONE as defined in hgml/hgml.h:2212
-	CC_SYSTEM_CPU_CAPS_NONE = 0
-	// CC_SYSTEM_CPU_CAPS_AMD_SEV as defined in hgml/hgml.h:2213
-	CC_SYSTEM_CPU_CAPS_AMD_SEV = 1
-	// CC_SYSTEM_CPU_CAPS_INTEL_TDX as defined in hgml/hgml.h:2214
-	CC_SYSTEM_CPU_CAPS_INTEL_TDX = 2
-	// CC_SYSTEM_GPUS_CC_NOT_CAPABLE as defined in hgml/hgml.h:2219
-	CC_SYSTEM_GPUS_CC_NOT_CAPABLE = 0
-	// CC_SYSTEM_GPUS_CC_CAPABLE as defined in hgml/hgml.h:2220
-	CC_SYSTEM_GPUS_CC_CAPABLE = 1
-	// CC_SYSTEM_DEVTOOLS_MODE_OFF as defined in hgml/hgml.h:2230
-	CC_SYSTEM_DEVTOOLS_MODE_OFF = 0
-	// CC_SYSTEM_DEVTOOLS_MODE_ON as defined in hgml/hgml.h:2231
-	CC_SYSTEM_DEVTOOLS_MODE_ON = 1
-	// CC_SYSTEM_ENVIRONMENT_UNAVAILABLE as defined in hgml/hgml.h:2236
-	CC_SYSTEM_ENVIRONMENT_UNAVAILABLE = 0
-	// CC_SYSTEM_ENVIRONMENT_SIM as defined in hgml/hgml.h:2237
-	CC_SYSTEM_ENVIRONMENT_SIM = 1
-	// CC_SYSTEM_ENVIRONMENT_PROD as defined in hgml/hgml.h:2238
-	CC_SYSTEM_ENVIRONMENT_PROD = 2
-	// CC_SYSTEM_FEATURE_DISABLED as defined in hgml/hgml.h:2243
-	CC_SYSTEM_FEATURE_DISABLED = 0
-	// CC_SYSTEM_FEATURE_ENABLED as defined in hgml/hgml.h:2244
-	CC_SYSTEM_FEATURE_ENABLED = 1
-	// CC_ACCEPTING_CLIENT_REQUESTS_FALSE as defined in hgml/hgml.h:2265
-	CC_ACCEPTING_CLIENT_REQUESTS_FALSE = 0
-	// CC_ACCEPTING_CLIENT_REQUESTS_TRUE as defined in hgml/hgml.h:2266
-	CC_ACCEPTING_CLIENT_REQUESTS_TRUE = 1
-	// GPU_CERT_CHAIN_SIZE as defined in hgml/hgml.h:2271
-	GPU_CERT_CHAIN_SIZE = 4096
-	// GPU_ATTESTATION_CERT_CHAIN_SIZE as defined in hgml/hgml.h:2272
-	GPU_ATTESTATION_CERT_CHAIN_SIZE = 5120
-	// CC_GPU_CEC_NONCE_SIZE as defined in hgml/hgml.h:2284
-	CC_GPU_CEC_NONCE_SIZE = 32
-	// CC_GPU_ATTESTATION_REPORT_SIZE as defined in hgml/hgml.h:2285
-	CC_GPU_ATTESTATION_REPORT_SIZE = 8192
-	// CC_GPU_CEC_ATTESTATION_REPORT_SIZE as defined in hgml/hgml.h:2286
-	CC_GPU_CEC_ATTESTATION_REPORT_SIZE = 4096
-	// CC_CEC_ATTESTATION_REPORT_NOT_PRESENT as defined in hgml/hgml.h:2287
-	CC_CEC_ATTESTATION_REPORT_NOT_PRESENT = 0
-	// CC_CEC_ATTESTATION_REPORT_PRESENT as defined in hgml/hgml.h:2288
-	CC_CEC_ATTESTATION_REPORT_PRESENT = 1
-	// GPU_FABRIC_UUID_LEN as defined in hgml/hgml.h:2301
-	GPU_FABRIC_UUID_LEN = 16
-	// GPU_FABRIC_STATE_NOT_SUPPORTED as defined in hgml/hgml.h:2303
-	GPU_FABRIC_STATE_NOT_SUPPORTED = 0
-	// GPU_FABRIC_STATE_NOT_STARTED as defined in hgml/hgml.h:2304
-	GPU_FABRIC_STATE_NOT_STARTED = 1
-	// GPU_FABRIC_STATE_IN_PROGRESS as defined in hgml/hgml.h:2305
-	GPU_FABRIC_STATE_IN_PROGRESS = 2
-	// GPU_FABRIC_STATE_COMPLETED as defined in hgml/hgml.h:2306
-	GPU_FABRIC_STATE_COMPLETED = 3
-	// POWER_SCOPE_GPU as defined in hgml/hgml.h:2320
+	// PCIE_ATOMICS_CAP_FETCHADD32 as defined in hgml/hgml.h:1005
+	PCIE_ATOMICS_CAP_FETCHADD32 = 1
+	// PCIE_ATOMICS_CAP_FETCHADD64 as defined in hgml/hgml.h:1006
+	PCIE_ATOMICS_CAP_FETCHADD64 = 2
+	// PCIE_ATOMICS_CAP_SWAP32 as defined in hgml/hgml.h:1007
+	PCIE_ATOMICS_CAP_SWAP32 = 4
+	// PCIE_ATOMICS_CAP_SWAP64 as defined in hgml/hgml.h:1008
+	PCIE_ATOMICS_CAP_SWAP64 = 8
+	// PCIE_ATOMICS_CAP_CAS32 as defined in hgml/hgml.h:1009
+	PCIE_ATOMICS_CAP_CAS32 = 16
+	// PCIE_ATOMICS_CAP_CAS64 as defined in hgml/hgml.h:1010
+	PCIE_ATOMICS_CAP_CAS64 = 32
+	// PCIE_ATOMICS_CAP_CAS128 as defined in hgml/hgml.h:1011
+	PCIE_ATOMICS_CAP_CAS128 = 64
+	// PCIE_ATOMICS_OPS_MAX as defined in hgml/hgml.h:1012
+	PCIE_ATOMICS_OPS_MAX = 7
+	// POWER_SCOPE_GPU as defined in hgml/hgml.h:1014
 	POWER_SCOPE_GPU = 0
-	// POWER_SCOPE_MODULE as defined in hgml/hgml.h:2321
+	// POWER_SCOPE_MODULE as defined in hgml/hgml.h:1015
 	POWER_SCOPE_MODULE = 1
-	// POWER_SCOPE_MEMORY as defined in hgml/hgml.h:2322
+	// POWER_SCOPE_MEMORY as defined in hgml/hgml.h:1016
 	POWER_SCOPE_MEMORY = 2
-	// INIT_FLAG_NO_GPUS as defined in hgml/hgml.h:2346
-	INIT_FLAG_NO_GPUS = 1
-	// INIT_FLAG_NO_ATTACH as defined in hgml/hgml.h:2347
-	INIT_FLAG_NO_ATTACH = 2
-	// DEVICE_INFOROM_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2444
-	DEVICE_INFOROM_VERSION_BUFFER_SIZE = 16
-	// DEVICE_UUID_BUFFER_SIZE as defined in hgml/hgml.h:2449
-	DEVICE_UUID_BUFFER_SIZE = 80
-	// DEVICE_UUID_V2_BUFFER_SIZE as defined in hgml/hgml.h:2454
-	DEVICE_UUID_V2_BUFFER_SIZE = 96
-	// DEVICE_PART_NUMBER_BUFFER_SIZE as defined in hgml/hgml.h:2459
-	DEVICE_PART_NUMBER_BUFFER_SIZE = 80
-	// SYSTEM_DRIVER_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2464
-	SYSTEM_DRIVER_VERSION_BUFFER_SIZE = 80
-	// SYSTEM_HGML_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2469
-	SYSTEM_HGML_VERSION_BUFFER_SIZE = 80
-	// DEVICE_NAME_BUFFER_SIZE as defined in hgml/hgml.h:2474
-	DEVICE_NAME_BUFFER_SIZE = 64
-	// DEVICE_NAME_V2_BUFFER_SIZE as defined in hgml/hgml.h:2479
-	DEVICE_NAME_V2_BUFFER_SIZE = 96
-	// DEVICE_SERIAL_BUFFER_SIZE as defined in hgml/hgml.h:2484
-	DEVICE_SERIAL_BUFFER_SIZE = 30
-	// DEVICE_VBIOS_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2489
-	DEVICE_VBIOS_VERSION_BUFFER_SIZE = 32
-	// AFFINITY_SCOPE_NODE as defined in hgml/hgml.h:3139
-	AFFINITY_SCOPE_NODE = 0
-	// AFFINITY_SCOPE_SOCKET as defined in hgml/hgml.h:3141
-	AFFINITY_SCOPE_SOCKET = 1
-	// DEVICE_MIG_DISABLE as defined in hgml/hgml.h:8968
-	DEVICE_MIG_DISABLE = 0
-	// DEVICE_MIG_ENABLE as defined in hgml/hgml.h:8973
-	DEVICE_MIG_ENABLE = 1
-	// GPU_INSTANCE_PROFILE_1_SLICE as defined in hgml/hgml.h:8981
-	GPU_INSTANCE_PROFILE_1_SLICE = 0
-	// GPU_INSTANCE_PROFILE_2_SLICE as defined in hgml/hgml.h:8982
-	GPU_INSTANCE_PROFILE_2_SLICE = 1
-	// GPU_INSTANCE_PROFILE_3_SLICE as defined in hgml/hgml.h:8983
-	GPU_INSTANCE_PROFILE_3_SLICE = 2
-	// GPU_INSTANCE_PROFILE_4_SLICE as defined in hgml/hgml.h:8984
-	GPU_INSTANCE_PROFILE_4_SLICE = 3
-	// GPU_INSTANCE_PROFILE_7_SLICE as defined in hgml/hgml.h:8985
-	GPU_INSTANCE_PROFILE_7_SLICE = 4
-	// GPU_INSTANCE_PROFILE_8_SLICE as defined in hgml/hgml.h:8986
-	GPU_INSTANCE_PROFILE_8_SLICE = 5
-	// GPU_INSTANCE_PROFILE_6_SLICE as defined in hgml/hgml.h:8987
-	GPU_INSTANCE_PROFILE_6_SLICE = 6
-	// GPU_INSTANCE_PROFILE_1_SLICE_REV1 as defined in hgml/hgml.h:8988
-	GPU_INSTANCE_PROFILE_1_SLICE_REV1 = 7
-	// GPU_INSTANCE_PROFILE_2_SLICE_REV1 as defined in hgml/hgml.h:8989
-	GPU_INSTANCE_PROFILE_2_SLICE_REV1 = 8
-	// GPU_INSTANCE_PROFILE_1_SLICE_REV2 as defined in hgml/hgml.h:8990
-	GPU_INSTANCE_PROFILE_1_SLICE_REV2 = 9
-	// GPU_INSTANCE_PROFILE_2_CE as defined in hgml/hgml.h:8992
-	GPU_INSTANCE_PROFILE_2_CE = 10
-	// GPU_INSTANCE_PROFILE_4_CE as defined in hgml/hgml.h:8993
-	GPU_INSTANCE_PROFILE_4_CE = 11
-	// GPU_INSTANCE_PROFILE_8_CE as defined in hgml/hgml.h:8994
-	GPU_INSTANCE_PROFILE_8_CE = 12
-	// GPU_INSTANCE_PROFILE_16_CE as defined in hgml/hgml.h:8995
-	GPU_INSTANCE_PROFILE_16_CE = 13
-	// GPU_INSTANCE_PROFILE_17_CE as defined in hgml/hgml.h:8996
-	GPU_INSTANCE_PROFILE_17_CE = 14
-	// GPU_INSTANCE_PROFILE_COUNT as defined in hgml/hgml.h:8998
-	GPU_INSTANCE_PROFILE_COUNT = 15
-	// GPU_INTSTANCE_PROFILE_CAPS_P2P as defined in hgml/hgml.h:9006
-	GPU_INTSTANCE_PROFILE_CAPS_P2P = 1
-	// COMPUTE_INSTANCE_PROFILE_1_SLICE as defined in hgml/hgml.h:9117
-	COMPUTE_INSTANCE_PROFILE_1_SLICE = 0
-	// COMPUTE_INSTANCE_PROFILE_2_SLICE as defined in hgml/hgml.h:9118
-	COMPUTE_INSTANCE_PROFILE_2_SLICE = 1
-	// COMPUTE_INSTANCE_PROFILE_3_SLICE as defined in hgml/hgml.h:9119
-	COMPUTE_INSTANCE_PROFILE_3_SLICE = 2
-	// COMPUTE_INSTANCE_PROFILE_4_SLICE as defined in hgml/hgml.h:9120
-	COMPUTE_INSTANCE_PROFILE_4_SLICE = 3
-	// COMPUTE_INSTANCE_PROFILE_7_SLICE as defined in hgml/hgml.h:9121
-	COMPUTE_INSTANCE_PROFILE_7_SLICE = 4
-	// COMPUTE_INSTANCE_PROFILE_8_SLICE as defined in hgml/hgml.h:9122
-	COMPUTE_INSTANCE_PROFILE_8_SLICE = 5
-	// COMPUTE_INSTANCE_PROFILE_6_SLICE as defined in hgml/hgml.h:9123
-	COMPUTE_INSTANCE_PROFILE_6_SLICE = 6
-	// COMPUTE_INSTANCE_PROFILE_1_SLICE_REV1 as defined in hgml/hgml.h:9124
-	COMPUTE_INSTANCE_PROFILE_1_SLICE_REV1 = 7
-	// COMPUTE_INSTANCE_PROFILE_1_CU as defined in hgml/hgml.h:9126
-	COMPUTE_INSTANCE_PROFILE_1_CU = 8
-	// COMPUTE_INSTANCE_PROFILE_2_CU as defined in hgml/hgml.h:9127
-	COMPUTE_INSTANCE_PROFILE_2_CU = 9
-	// COMPUTE_INSTANCE_PROFILE_3_CU as defined in hgml/hgml.h:9128
-	COMPUTE_INSTANCE_PROFILE_3_CU = 10
-	// COMPUTE_INSTANCE_PROFILE_1_CE as defined in hgml/hgml.h:9130
-	COMPUTE_INSTANCE_PROFILE_1_CE = 11
-	// COMPUTE_INSTANCE_PROFILE_2_CE as defined in hgml/hgml.h:9131
-	COMPUTE_INSTANCE_PROFILE_2_CE = 12
-	// COMPUTE_INSTANCE_PROFILE_3_CE as defined in hgml/hgml.h:9132
-	COMPUTE_INSTANCE_PROFILE_3_CE = 13
-	// COMPUTE_INSTANCE_PROFILE_4_CE as defined in hgml/hgml.h:9133
-	COMPUTE_INSTANCE_PROFILE_4_CE = 14
-	// COMPUTE_INSTANCE_PROFILE_5_CE as defined in hgml/hgml.h:9134
-	COMPUTE_INSTANCE_PROFILE_5_CE = 15
-	// COMPUTE_INSTANCE_PROFILE_6_CE as defined in hgml/hgml.h:9135
-	COMPUTE_INSTANCE_PROFILE_6_CE = 16
-	// COMPUTE_INSTANCE_PROFILE_7_CE as defined in hgml/hgml.h:9136
-	COMPUTE_INSTANCE_PROFILE_7_CE = 17
-	// COMPUTE_INSTANCE_PROFILE_8_CE as defined in hgml/hgml.h:9137
-	COMPUTE_INSTANCE_PROFILE_8_CE = 18
-	// COMPUTE_INSTANCE_PROFILE_9_CE as defined in hgml/hgml.h:9138
-	COMPUTE_INSTANCE_PROFILE_9_CE = 19
-	// COMPUTE_INSTANCE_PROFILE_10_CE as defined in hgml/hgml.h:9139
-	COMPUTE_INSTANCE_PROFILE_10_CE = 20
-	// COMPUTE_INSTANCE_PROFILE_11_CE as defined in hgml/hgml.h:9140
-	COMPUTE_INSTANCE_PROFILE_11_CE = 21
-	// COMPUTE_INSTANCE_PROFILE_12_CE as defined in hgml/hgml.h:9141
-	COMPUTE_INSTANCE_PROFILE_12_CE = 22
-	// COMPUTE_INSTANCE_PROFILE_13_CE as defined in hgml/hgml.h:9142
-	COMPUTE_INSTANCE_PROFILE_13_CE = 23
-	// COMPUTE_INSTANCE_PROFILE_14_CE as defined in hgml/hgml.h:9143
-	COMPUTE_INSTANCE_PROFILE_14_CE = 24
-	// COMPUTE_INSTANCE_PROFILE_15_CE as defined in hgml/hgml.h:9144
-	COMPUTE_INSTANCE_PROFILE_15_CE = 25
-	// COMPUTE_INSTANCE_PROFILE_16_CE as defined in hgml/hgml.h:9145
-	COMPUTE_INSTANCE_PROFILE_16_CE = 26
-	// COMPUTE_INSTANCE_PROFILE_17_CE as defined in hgml/hgml.h:9146
-	COMPUTE_INSTANCE_PROFILE_17_CE = 27
-	// COMPUTE_INSTANCE_PROFILE_COUNT as defined in hgml/hgml.h:9148
-	COMPUTE_INSTANCE_PROFILE_COUNT = 28
-	// COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED as defined in hgml/hgml.h:9150
-	COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED = 0
-	// COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT as defined in hgml/hgml.h:9151
-	COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT = 1
-	// GPM_METRICS_GET_VERSION as defined in hgml/hgml.h:10091
-	GPM_METRICS_GET_VERSION = 1
-	// GPM_SUPPORT_VERSION as defined in hgml/hgml.h:10102
-	GPM_SUPPORT_VERSION = 2
-	// ICNLINK_POWER_STATE_HIGH_SPEED as defined in hgml/hgml.h:10240
+	// VGPU_NAME_BUFFER_SIZE as defined in hgml/hgml.h:1093
+	VGPU_NAME_BUFFER_SIZE = 64
+	// INVALID_VGPU_PLACEMENT_ID as defined in hgml/hgml.h:1099
+	INVALID_VGPU_PLACEMENT_ID = 65535
+	// VGPU_PGPU_HETEROGENEOUS_MODE as defined in hgml/hgml.h:1109
+	VGPU_PGPU_HETEROGENEOUS_MODE = 0
+	// VGPU_PGPU_HOMOGENEOUS_MODE as defined in hgml/hgml.h:1110
+	VGPU_PGPU_HOMOGENEOUS_MODE = 1
+	// VGPU_SCHEDULER_POLICY_UNKNOWN as defined in hgml/hgml.h:1237
+	VGPU_SCHEDULER_POLICY_UNKNOWN = 0
+	// VGPU_SCHEDULER_POLICY_BEST_EFFORT as defined in hgml/hgml.h:1238
+	VGPU_SCHEDULER_POLICY_BEST_EFFORT = 1
+	// VGPU_SCHEDULER_POLICY_EQUAL_SHARE as defined in hgml/hgml.h:1239
+	VGPU_SCHEDULER_POLICY_EQUAL_SHARE = 2
+	// VGPU_SCHEDULER_POLICY_FIXED_SHARE as defined in hgml/hgml.h:1240
+	VGPU_SCHEDULER_POLICY_FIXED_SHARE = 3
+	// SUPPORTED_VGPU_SCHEDULER_POLICY_COUNT as defined in hgml/hgml.h:1242
+	SUPPORTED_VGPU_SCHEDULER_POLICY_COUNT = 3
+	// SCHEDULER_SW_MAX_LOG_ENTRIES as defined in hgml/hgml.h:1244
+	SCHEDULER_SW_MAX_LOG_ENTRIES = 200
+	// VGPU_SCHEDULER_ARR_DEFAULT as defined in hgml/hgml.h:1246
+	VGPU_SCHEDULER_ARR_DEFAULT = 0
+	// VGPU_SCHEDULER_ARR_DISABLE as defined in hgml/hgml.h:1247
+	VGPU_SCHEDULER_ARR_DISABLE = 1
+	// VGPU_SCHEDULER_ARR_ENABLE as defined in hgml/hgml.h:1248
+	VGPU_SCHEDULER_ARR_ENABLE = 2
+	// VGPU_SCHEDULER_ENGINE_TYPE_GRAPHICS as defined in hgml/hgml.h:1250
+	VGPU_SCHEDULER_ENGINE_TYPE_GRAPHICS = 1
+	// FI_DEV_ECC_CURRENT as defined in hgml/hgml.h:1430
+	FI_DEV_ECC_CURRENT = 1
+	// FI_DEV_ECC_PENDING as defined in hgml/hgml.h:1431
+	FI_DEV_ECC_PENDING = 2
+	// FI_DEV_ECC_SBE_VOL_TOTAL as defined in hgml/hgml.h:1432
+	FI_DEV_ECC_SBE_VOL_TOTAL = 3
+	// FI_DEV_ECC_DBE_VOL_TOTAL as defined in hgml/hgml.h:1433
+	FI_DEV_ECC_DBE_VOL_TOTAL = 4
+	// FI_DEV_ECC_SBE_AGG_TOTAL as defined in hgml/hgml.h:1434
+	FI_DEV_ECC_SBE_AGG_TOTAL = 5
+	// FI_DEV_ECC_DBE_AGG_TOTAL as defined in hgml/hgml.h:1435
+	FI_DEV_ECC_DBE_AGG_TOTAL = 6
+	// FI_DEV_ECC_SBE_VOL_L1 as defined in hgml/hgml.h:1436
+	FI_DEV_ECC_SBE_VOL_L1 = 7
+	// FI_DEV_ECC_DBE_VOL_L1 as defined in hgml/hgml.h:1437
+	FI_DEV_ECC_DBE_VOL_L1 = 8
+	// FI_DEV_ECC_SBE_VOL_L2 as defined in hgml/hgml.h:1438
+	FI_DEV_ECC_SBE_VOL_L2 = 9
+	// FI_DEV_ECC_DBE_VOL_L2 as defined in hgml/hgml.h:1439
+	FI_DEV_ECC_DBE_VOL_L2 = 10
+	// FI_DEV_ECC_SBE_VOL_DEV as defined in hgml/hgml.h:1440
+	FI_DEV_ECC_SBE_VOL_DEV = 11
+	// FI_DEV_ECC_DBE_VOL_DEV as defined in hgml/hgml.h:1441
+	FI_DEV_ECC_DBE_VOL_DEV = 12
+	// FI_DEV_ECC_SBE_VOL_REG as defined in hgml/hgml.h:1442
+	FI_DEV_ECC_SBE_VOL_REG = 13
+	// FI_DEV_ECC_DBE_VOL_REG as defined in hgml/hgml.h:1443
+	FI_DEV_ECC_DBE_VOL_REG = 14
+	// FI_DEV_ECC_SBE_VOL_TEX as defined in hgml/hgml.h:1444
+	FI_DEV_ECC_SBE_VOL_TEX = 15
+	// FI_DEV_ECC_DBE_VOL_TEX as defined in hgml/hgml.h:1445
+	FI_DEV_ECC_DBE_VOL_TEX = 16
+	// FI_DEV_ECC_DBE_VOL_CBU as defined in hgml/hgml.h:1446
+	FI_DEV_ECC_DBE_VOL_CBU = 17
+	// FI_DEV_ECC_SBE_AGG_L1 as defined in hgml/hgml.h:1447
+	FI_DEV_ECC_SBE_AGG_L1 = 18
+	// FI_DEV_ECC_DBE_AGG_L1 as defined in hgml/hgml.h:1448
+	FI_DEV_ECC_DBE_AGG_L1 = 19
+	// FI_DEV_ECC_SBE_AGG_L2 as defined in hgml/hgml.h:1449
+	FI_DEV_ECC_SBE_AGG_L2 = 20
+	// FI_DEV_ECC_DBE_AGG_L2 as defined in hgml/hgml.h:1450
+	FI_DEV_ECC_DBE_AGG_L2 = 21
+	// FI_DEV_ECC_SBE_AGG_DEV as defined in hgml/hgml.h:1451
+	FI_DEV_ECC_SBE_AGG_DEV = 22
+	// FI_DEV_ECC_DBE_AGG_DEV as defined in hgml/hgml.h:1452
+	FI_DEV_ECC_DBE_AGG_DEV = 23
+	// FI_DEV_ECC_SBE_AGG_REG as defined in hgml/hgml.h:1453
+	FI_DEV_ECC_SBE_AGG_REG = 24
+	// FI_DEV_ECC_DBE_AGG_REG as defined in hgml/hgml.h:1454
+	FI_DEV_ECC_DBE_AGG_REG = 25
+	// FI_DEV_ECC_SBE_AGG_TEX as defined in hgml/hgml.h:1455
+	FI_DEV_ECC_SBE_AGG_TEX = 26
+	// FI_DEV_ECC_DBE_AGG_TEX as defined in hgml/hgml.h:1456
+	FI_DEV_ECC_DBE_AGG_TEX = 27
+	// FI_DEV_ECC_DBE_AGG_CBU as defined in hgml/hgml.h:1457
+	FI_DEV_ECC_DBE_AGG_CBU = 28
+	// FI_DEV_RETIRED_SBE as defined in hgml/hgml.h:1459
+	FI_DEV_RETIRED_SBE = 29
+	// FI_DEV_RETIRED_DBE as defined in hgml/hgml.h:1460
+	FI_DEV_RETIRED_DBE = 30
+	// FI_DEV_RETIRED_PENDING as defined in hgml/hgml.h:1461
+	FI_DEV_RETIRED_PENDING = 31
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L0 as defined in hgml/hgml.h:1463
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L0 = 32
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L1 as defined in hgml/hgml.h:1464
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L1 = 33
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L2 as defined in hgml/hgml.h:1465
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L2 = 34
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L3 as defined in hgml/hgml.h:1466
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L3 = 35
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L4 as defined in hgml/hgml.h:1467
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L4 = 36
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L5 as defined in hgml/hgml.h:1468
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L5 = 37
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1469
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_TOTAL = 38
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L0 as defined in hgml/hgml.h:1471
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L0 = 39
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L1 as defined in hgml/hgml.h:1472
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L1 = 40
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L2 as defined in hgml/hgml.h:1473
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L2 = 41
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L3 as defined in hgml/hgml.h:1474
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L3 = 42
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L4 as defined in hgml/hgml.h:1475
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L4 = 43
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L5 as defined in hgml/hgml.h:1476
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L5 = 44
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1477
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_TOTAL = 45
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L0 as defined in hgml/hgml.h:1479
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L0 = 46
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L1 as defined in hgml/hgml.h:1480
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L1 = 47
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L2 as defined in hgml/hgml.h:1481
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L2 = 48
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L3 as defined in hgml/hgml.h:1482
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L3 = 49
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L4 as defined in hgml/hgml.h:1483
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L4 = 50
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L5 as defined in hgml/hgml.h:1484
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L5 = 51
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1485
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_TOTAL = 52
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L0 as defined in hgml/hgml.h:1487
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L0 = 53
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L1 as defined in hgml/hgml.h:1488
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L1 = 54
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L2 as defined in hgml/hgml.h:1489
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L2 = 55
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L3 as defined in hgml/hgml.h:1490
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L3 = 56
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L4 as defined in hgml/hgml.h:1491
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L4 = 57
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L5 as defined in hgml/hgml.h:1492
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L5 = 58
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1493
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_TOTAL = 59
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L0 as defined in hgml/hgml.h:1495
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L0 = 60
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L1 as defined in hgml/hgml.h:1496
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L1 = 61
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L2 as defined in hgml/hgml.h:1497
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L2 = 62
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L3 as defined in hgml/hgml.h:1498
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L3 = 63
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L4 as defined in hgml/hgml.h:1499
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L4 = 64
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L5 as defined in hgml/hgml.h:1500
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L5 = 65
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_TOTAL as defined in hgml/hgml.h:1501
+	FI_DEV_ICNLINK_BANDWIDTH_C0_TOTAL = 66
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L0 as defined in hgml/hgml.h:1503
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L0 = 67
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L1 as defined in hgml/hgml.h:1504
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L1 = 68
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L2 as defined in hgml/hgml.h:1505
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L2 = 69
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L3 as defined in hgml/hgml.h:1506
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L3 = 70
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L4 as defined in hgml/hgml.h:1507
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L4 = 71
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L5 as defined in hgml/hgml.h:1508
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L5 = 72
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_TOTAL as defined in hgml/hgml.h:1509
+	FI_DEV_ICNLINK_BANDWIDTH_C1_TOTAL = 73
+	// FI_DEV_PERF_POLICY_POWER as defined in hgml/hgml.h:1511
+	FI_DEV_PERF_POLICY_POWER = 74
+	// FI_DEV_PERF_POLICY_THERMAL as defined in hgml/hgml.h:1512
+	FI_DEV_PERF_POLICY_THERMAL = 75
+	// FI_DEV_PERF_POLICY_SYNC_BOOST as defined in hgml/hgml.h:1513
+	FI_DEV_PERF_POLICY_SYNC_BOOST = 76
+	// FI_DEV_PERF_POLICY_BOARD_LIMIT as defined in hgml/hgml.h:1514
+	FI_DEV_PERF_POLICY_BOARD_LIMIT = 77
+	// FI_DEV_PERF_POLICY_LOW_UTILIZATION as defined in hgml/hgml.h:1515
+	FI_DEV_PERF_POLICY_LOW_UTILIZATION = 78
+	// FI_DEV_PERF_POLICY_RELIABILITY as defined in hgml/hgml.h:1516
+	FI_DEV_PERF_POLICY_RELIABILITY = 79
+	// FI_DEV_PERF_POLICY_TOTAL_APP_CLOCKS as defined in hgml/hgml.h:1517
+	FI_DEV_PERF_POLICY_TOTAL_APP_CLOCKS = 80
+	// FI_DEV_PERF_POLICY_TOTAL_BASE_CLOCKS as defined in hgml/hgml.h:1518
+	FI_DEV_PERF_POLICY_TOTAL_BASE_CLOCKS = 81
+	// FI_DEV_MEMORY_TEMP as defined in hgml/hgml.h:1520
+	FI_DEV_MEMORY_TEMP = 82
+	// FI_DEV_TOTAL_ENERGY_CONSUMPTION as defined in hgml/hgml.h:1522
+	FI_DEV_TOTAL_ENERGY_CONSUMPTION = 83
+	// FI_DEV_ICNLINK_SPEED_MBPS_L0 as defined in hgml/hgml.h:1524
+	FI_DEV_ICNLINK_SPEED_MBPS_L0 = 84
+	// FI_DEV_ICNLINK_SPEED_MBPS_L1 as defined in hgml/hgml.h:1525
+	FI_DEV_ICNLINK_SPEED_MBPS_L1 = 85
+	// FI_DEV_ICNLINK_SPEED_MBPS_L2 as defined in hgml/hgml.h:1526
+	FI_DEV_ICNLINK_SPEED_MBPS_L2 = 86
+	// FI_DEV_ICNLINK_SPEED_MBPS_L3 as defined in hgml/hgml.h:1527
+	FI_DEV_ICNLINK_SPEED_MBPS_L3 = 87
+	// FI_DEV_ICNLINK_SPEED_MBPS_L4 as defined in hgml/hgml.h:1528
+	FI_DEV_ICNLINK_SPEED_MBPS_L4 = 88
+	// FI_DEV_ICNLINK_SPEED_MBPS_L5 as defined in hgml/hgml.h:1529
+	FI_DEV_ICNLINK_SPEED_MBPS_L5 = 89
+	// FI_DEV_ICNLINK_SPEED_MBPS_COMMON as defined in hgml/hgml.h:1530
+	FI_DEV_ICNLINK_SPEED_MBPS_COMMON = 90
+	// FI_DEV_ICNLINK_LINK_COUNT as defined in hgml/hgml.h:1532
+	FI_DEV_ICNLINK_LINK_COUNT = 91
+	// FI_DEV_RETIRED_PENDING_SBE as defined in hgml/hgml.h:1534
+	FI_DEV_RETIRED_PENDING_SBE = 92
+	// FI_DEV_RETIRED_PENDING_DBE as defined in hgml/hgml.h:1535
+	FI_DEV_RETIRED_PENDING_DBE = 93
+	// FI_DEV_PCIE_REPLAY_COUNTER as defined in hgml/hgml.h:1537
+	FI_DEV_PCIE_REPLAY_COUNTER = 94
+	// FI_DEV_PCIE_REPLAY_ROLLOVER_COUNTER as defined in hgml/hgml.h:1538
+	FI_DEV_PCIE_REPLAY_ROLLOVER_COUNTER = 95
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L6 as defined in hgml/hgml.h:1540
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L6 = 96
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L7 as defined in hgml/hgml.h:1541
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L7 = 97
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L8 as defined in hgml/hgml.h:1542
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L8 = 98
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L9 as defined in hgml/hgml.h:1543
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L9 = 99
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L10 as defined in hgml/hgml.h:1544
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L10 = 100
+	// FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L11 as defined in hgml/hgml.h:1545
+	FI_DEV_ICNLINK_CRC_FLIT_ERROR_COUNT_L11 = 101
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L6 as defined in hgml/hgml.h:1547
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L6 = 102
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L7 as defined in hgml/hgml.h:1548
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L7 = 103
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L8 as defined in hgml/hgml.h:1549
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L8 = 104
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L9 as defined in hgml/hgml.h:1550
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L9 = 105
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L10 as defined in hgml/hgml.h:1551
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L10 = 106
+	// FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L11 as defined in hgml/hgml.h:1552
+	FI_DEV_ICNLINK_CRC_DATA_ERROR_COUNT_L11 = 107
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L6 as defined in hgml/hgml.h:1554
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L6 = 108
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L7 as defined in hgml/hgml.h:1555
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L7 = 109
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L8 as defined in hgml/hgml.h:1556
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L8 = 110
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L9 as defined in hgml/hgml.h:1557
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L9 = 111
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L10 as defined in hgml/hgml.h:1558
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L10 = 112
+	// FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L11 as defined in hgml/hgml.h:1559
+	FI_DEV_ICNLINK_REPLAY_ERROR_COUNT_L11 = 113
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L6 as defined in hgml/hgml.h:1561
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L6 = 114
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L7 as defined in hgml/hgml.h:1562
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L7 = 115
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L8 as defined in hgml/hgml.h:1563
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L8 = 116
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L9 as defined in hgml/hgml.h:1564
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L9 = 117
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L10 as defined in hgml/hgml.h:1565
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L10 = 118
+	// FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L11 as defined in hgml/hgml.h:1566
+	FI_DEV_ICNLINK_RECOVERY_ERROR_COUNT_L11 = 119
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L6 as defined in hgml/hgml.h:1568
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L6 = 120
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L7 as defined in hgml/hgml.h:1569
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L7 = 121
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L8 as defined in hgml/hgml.h:1570
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L8 = 122
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L9 as defined in hgml/hgml.h:1571
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L9 = 123
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L10 as defined in hgml/hgml.h:1572
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L10 = 124
+	// FI_DEV_ICNLINK_BANDWIDTH_C0_L11 as defined in hgml/hgml.h:1573
+	FI_DEV_ICNLINK_BANDWIDTH_C0_L11 = 125
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L6 as defined in hgml/hgml.h:1575
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L6 = 126
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L7 as defined in hgml/hgml.h:1576
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L7 = 127
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L8 as defined in hgml/hgml.h:1577
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L8 = 128
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L9 as defined in hgml/hgml.h:1578
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L9 = 129
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L10 as defined in hgml/hgml.h:1579
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L10 = 130
+	// FI_DEV_ICNLINK_BANDWIDTH_C1_L11 as defined in hgml/hgml.h:1580
+	FI_DEV_ICNLINK_BANDWIDTH_C1_L11 = 131
+	// FI_DEV_ICNLINK_SPEED_MBPS_L6 as defined in hgml/hgml.h:1582
+	FI_DEV_ICNLINK_SPEED_MBPS_L6 = 132
+	// FI_DEV_ICNLINK_SPEED_MBPS_L7 as defined in hgml/hgml.h:1583
+	FI_DEV_ICNLINK_SPEED_MBPS_L7 = 133
+	// FI_DEV_ICNLINK_SPEED_MBPS_L8 as defined in hgml/hgml.h:1584
+	FI_DEV_ICNLINK_SPEED_MBPS_L8 = 134
+	// FI_DEV_ICNLINK_SPEED_MBPS_L9 as defined in hgml/hgml.h:1585
+	FI_DEV_ICNLINK_SPEED_MBPS_L9 = 135
+	// FI_DEV_ICNLINK_SPEED_MBPS_L10 as defined in hgml/hgml.h:1586
+	FI_DEV_ICNLINK_SPEED_MBPS_L10 = 136
+	// FI_DEV_ICNLINK_SPEED_MBPS_L11 as defined in hgml/hgml.h:1587
+	FI_DEV_ICNLINK_SPEED_MBPS_L11 = 137
+	// FI_DEV_ICNLINK_THROUGHPUT_DATA_TX as defined in hgml/hgml.h:1589
+	FI_DEV_ICNLINK_THROUGHPUT_DATA_TX = 138
+	// FI_DEV_ICNLINK_THROUGHPUT_DATA_RX as defined in hgml/hgml.h:1590
+	FI_DEV_ICNLINK_THROUGHPUT_DATA_RX = 139
+	// FI_DEV_ICNLINK_THROUGHPUT_RAW_TX as defined in hgml/hgml.h:1591
+	FI_DEV_ICNLINK_THROUGHPUT_RAW_TX = 140
+	// FI_DEV_ICNLINK_THROUGHPUT_RAW_RX as defined in hgml/hgml.h:1592
+	FI_DEV_ICNLINK_THROUGHPUT_RAW_RX = 141
+	// FI_DEV_REMAPPED_COR as defined in hgml/hgml.h:1594
+	FI_DEV_REMAPPED_COR = 142
+	// FI_DEV_REMAPPED_UNC as defined in hgml/hgml.h:1595
+	FI_DEV_REMAPPED_UNC = 143
+	// FI_DEV_REMAPPED_PENDING as defined in hgml/hgml.h:1596
+	FI_DEV_REMAPPED_PENDING = 144
+	// FI_DEV_REMAPPED_FAILURE as defined in hgml/hgml.h:1597
+	FI_DEV_REMAPPED_FAILURE = 145
+	// FI_DEV_ICNLINK_REMOTE_ICNLINK_ID as defined in hgml/hgml.h:1599
+	FI_DEV_ICNLINK_REMOTE_ICNLINK_ID = 146
+	// FI_DEV_ICNSWITCH_CONNECTED_LINK_COUNT as defined in hgml/hgml.h:1601
+	FI_DEV_ICNSWITCH_CONNECTED_LINK_COUNT = 147
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L0 as defined in hgml/hgml.h:1603
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L0 = 148
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L1 as defined in hgml/hgml.h:1604
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L1 = 149
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L2 as defined in hgml/hgml.h:1605
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L2 = 150
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L3 as defined in hgml/hgml.h:1606
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L3 = 151
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L4 as defined in hgml/hgml.h:1607
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L4 = 152
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L5 as defined in hgml/hgml.h:1608
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L5 = 153
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L6 as defined in hgml/hgml.h:1609
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L6 = 154
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L7 as defined in hgml/hgml.h:1610
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L7 = 155
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L8 as defined in hgml/hgml.h:1611
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L8 = 156
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L9 as defined in hgml/hgml.h:1612
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L9 = 157
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L10 as defined in hgml/hgml.h:1613
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L10 = 158
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L11 as defined in hgml/hgml.h:1614
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_L11 = 159
+	// FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_TOTAL as defined in hgml/hgml.h:1615
+	FI_DEV_ICNLINK_ECC_DATA_ERROR_COUNT_TOTAL = 160
+	// FI_DEV_ICNLINK_ERROR_DL_REPLAY as defined in hgml/hgml.h:1617
+	FI_DEV_ICNLINK_ERROR_DL_REPLAY = 161
+	// FI_DEV_ICNLINK_ERROR_DL_RECOVERY as defined in hgml/hgml.h:1619
+	FI_DEV_ICNLINK_ERROR_DL_RECOVERY = 162
+	// FI_DEV_ICNLINK_ERROR_DL_CRC as defined in hgml/hgml.h:1621
+	FI_DEV_ICNLINK_ERROR_DL_CRC = 163
+	// FI_DEV_ICNLINK_GET_SPEED as defined in hgml/hgml.h:1623
+	FI_DEV_ICNLINK_GET_SPEED = 164
+	// FI_DEV_ICNLINK_GET_STATE as defined in hgml/hgml.h:1624
+	FI_DEV_ICNLINK_GET_STATE = 165
+	// FI_DEV_ICNLINK_GET_VERSION as defined in hgml/hgml.h:1625
+	FI_DEV_ICNLINK_GET_VERSION = 166
+	// FI_DEV_ICNLINK_GET_POWER_STATE as defined in hgml/hgml.h:1627
+	FI_DEV_ICNLINK_GET_POWER_STATE = 167
+	// FI_DEV_ICNLINK_GET_POWER_THRESHOLD as defined in hgml/hgml.h:1628
+	FI_DEV_ICNLINK_GET_POWER_THRESHOLD = 168
+	// FI_DEV_PCIE_L0_TO_RECOVERY_COUNTER as defined in hgml/hgml.h:1630
+	FI_DEV_PCIE_L0_TO_RECOVERY_COUNTER = 169
+	// FI_DEV_C2C_LINK_COUNT as defined in hgml/hgml.h:1632
+	FI_DEV_C2C_LINK_COUNT = 170
+	// FI_DEV_C2C_LINK_GET_STATUS as defined in hgml/hgml.h:1633
+	FI_DEV_C2C_LINK_GET_STATUS = 171
+	// FI_DEV_C2C_LINK_GET_MAX_BW as defined in hgml/hgml.h:1634
+	FI_DEV_C2C_LINK_GET_MAX_BW = 172
+	// FI_DEV_PCIE_COUNT_CORRECTABLE_ERRORS as defined in hgml/hgml.h:1636
+	FI_DEV_PCIE_COUNT_CORRECTABLE_ERRORS = 173
+	// FI_DEV_PCIE_COUNT_NAKS_RECEIVED as defined in hgml/hgml.h:1637
+	FI_DEV_PCIE_COUNT_NAKS_RECEIVED = 174
+	// FI_DEV_PCIE_COUNT_RECEIVER_ERROR as defined in hgml/hgml.h:1638
+	FI_DEV_PCIE_COUNT_RECEIVER_ERROR = 175
+	// FI_DEV_PCIE_COUNT_BAD_TLP as defined in hgml/hgml.h:1639
+	FI_DEV_PCIE_COUNT_BAD_TLP = 176
+	// FI_DEV_PCIE_COUNT_NAKS_SENT as defined in hgml/hgml.h:1640
+	FI_DEV_PCIE_COUNT_NAKS_SENT = 177
+	// FI_DEV_PCIE_COUNT_BAD_DLLP as defined in hgml/hgml.h:1641
+	FI_DEV_PCIE_COUNT_BAD_DLLP = 178
+	// FI_DEV_PCIE_COUNT_NON_FATAL_ERROR as defined in hgml/hgml.h:1642
+	FI_DEV_PCIE_COUNT_NON_FATAL_ERROR = 179
+	// FI_DEV_PCIE_COUNT_FATAL_ERROR as defined in hgml/hgml.h:1643
+	FI_DEV_PCIE_COUNT_FATAL_ERROR = 180
+	// FI_DEV_PCIE_COUNT_UNSUPPORTED_REQ as defined in hgml/hgml.h:1644
+	FI_DEV_PCIE_COUNT_UNSUPPORTED_REQ = 181
+	// FI_DEV_PCIE_COUNT_LCRC_ERROR as defined in hgml/hgml.h:1645
+	FI_DEV_PCIE_COUNT_LCRC_ERROR = 182
+	// FI_DEV_PCIE_COUNT_LANE_ERROR as defined in hgml/hgml.h:1646
+	FI_DEV_PCIE_COUNT_LANE_ERROR = 183
+	// FI_DEV_IS_RESETLESS_MIG_SUPPORTED as defined in hgml/hgml.h:1648
+	FI_DEV_IS_RESETLESS_MIG_SUPPORTED = 184
+	// FI_DEV_POWER_AVERAGE as defined in hgml/hgml.h:1650
+	FI_DEV_POWER_AVERAGE = 185
+	// FI_DEV_POWER_INSTANT as defined in hgml/hgml.h:1651
+	FI_DEV_POWER_INSTANT = 186
+	// FI_DEV_POWER_MIN_LIMIT as defined in hgml/hgml.h:1652
+	FI_DEV_POWER_MIN_LIMIT = 187
+	// FI_DEV_POWER_MAX_LIMIT as defined in hgml/hgml.h:1653
+	FI_DEV_POWER_MAX_LIMIT = 188
+	// FI_DEV_POWER_DEFAULT_LIMIT as defined in hgml/hgml.h:1654
+	FI_DEV_POWER_DEFAULT_LIMIT = 189
+	// FI_DEV_POWER_CURRENT_LIMIT as defined in hgml/hgml.h:1655
+	FI_DEV_POWER_CURRENT_LIMIT = 190
+	// FI_DEV_ENERGY as defined in hgml/hgml.h:1656
+	FI_DEV_ENERGY = 191
+	// FI_DEV_POWER_REQUESTED_LIMIT as defined in hgml/hgml.h:1657
+	FI_DEV_POWER_REQUESTED_LIMIT = 192
+	// FI_DEV_TEMPERATURE_SHUTDOWN_TLIMIT as defined in hgml/hgml.h:1659
+	FI_DEV_TEMPERATURE_SHUTDOWN_TLIMIT = 193
+	// FI_DEV_TEMPERATURE_SLOWDOWN_TLIMIT as defined in hgml/hgml.h:1660
+	FI_DEV_TEMPERATURE_SLOWDOWN_TLIMIT = 194
+	// FI_DEV_TEMPERATURE_MEM_MAX_TLIMIT as defined in hgml/hgml.h:1661
+	FI_DEV_TEMPERATURE_MEM_MAX_TLIMIT = 195
+	// FI_DEV_TEMPERATURE_GPU_MAX_TLIMIT as defined in hgml/hgml.h:1662
+	FI_DEV_TEMPERATURE_GPU_MAX_TLIMIT = 196
+	// FI_DEV_PCIE_COUNT_TX_BYTES as defined in hgml/hgml.h:1664
+	FI_DEV_PCIE_COUNT_TX_BYTES = 197
+	// FI_DEV_PCIE_COUNT_RX_BYTES as defined in hgml/hgml.h:1665
+	FI_DEV_PCIE_COUNT_RX_BYTES = 198
+	// FI_DEV_IS_MIG_MODE_INDEPENDENT_MIG_QUERY_CAPABLE as defined in hgml/hgml.h:1667
+	FI_DEV_IS_MIG_MODE_INDEPENDENT_MIG_QUERY_CAPABLE = 199
+	// FI_DEV_ICNLINK_GET_POWER_THRESHOLD_MAX as defined in hgml/hgml.h:1669
+	FI_DEV_ICNLINK_GET_POWER_THRESHOLD_MAX = 200
+	// FI_DEV_ICNLINK_COUNT_XMIT_PACKETS as defined in hgml/hgml.h:1671
+	FI_DEV_ICNLINK_COUNT_XMIT_PACKETS = 201
+	// FI_DEV_ICNLINK_COUNT_XMIT_BYTES as defined in hgml/hgml.h:1672
+	FI_DEV_ICNLINK_COUNT_XMIT_BYTES = 202
+	// FI_DEV_ICNLINK_COUNT_RCV_PACKETS as defined in hgml/hgml.h:1673
+	FI_DEV_ICNLINK_COUNT_RCV_PACKETS = 203
+	// FI_DEV_ICNLINK_COUNT_RCV_BYTES as defined in hgml/hgml.h:1674
+	FI_DEV_ICNLINK_COUNT_RCV_BYTES = 204
+	// FI_DEV_ICNLINK_COUNT_VL15_DROPPED as defined in hgml/hgml.h:1675
+	FI_DEV_ICNLINK_COUNT_VL15_DROPPED = 205
+	// FI_DEV_ICNLINK_COUNT_MALFORMED_PACKET_ERRORS as defined in hgml/hgml.h:1676
+	FI_DEV_ICNLINK_COUNT_MALFORMED_PACKET_ERRORS = 206
+	// FI_DEV_ICNLINK_COUNT_BUFFER_OVERRUN_ERRORS as defined in hgml/hgml.h:1677
+	FI_DEV_ICNLINK_COUNT_BUFFER_OVERRUN_ERRORS = 207
+	// FI_DEV_ICNLINK_COUNT_RCV_ERRORS as defined in hgml/hgml.h:1678
+	FI_DEV_ICNLINK_COUNT_RCV_ERRORS = 208
+	// FI_DEV_ICNLINK_COUNT_RCV_REMOTE_ERRORS as defined in hgml/hgml.h:1679
+	FI_DEV_ICNLINK_COUNT_RCV_REMOTE_ERRORS = 209
+	// FI_DEV_ICNLINK_COUNT_RCV_GENERAL_ERRORS as defined in hgml/hgml.h:1680
+	FI_DEV_ICNLINK_COUNT_RCV_GENERAL_ERRORS = 210
+	// FI_DEV_ICNLINK_COUNT_LOCAL_LINK_INTEGRITY_ERRORS as defined in hgml/hgml.h:1681
+	FI_DEV_ICNLINK_COUNT_LOCAL_LINK_INTEGRITY_ERRORS = 211
+	// FI_DEV_ICNLINK_COUNT_XMIT_DISCARDS as defined in hgml/hgml.h:1682
+	FI_DEV_ICNLINK_COUNT_XMIT_DISCARDS = 212
+	// FI_DEV_ICNLINK_COUNT_LINK_RECOVERY_SUCCESSFUL_EVENTS as defined in hgml/hgml.h:1684
+	FI_DEV_ICNLINK_COUNT_LINK_RECOVERY_SUCCESSFUL_EVENTS = 213
+	// FI_DEV_ICNLINK_COUNT_LINK_RECOVERY_FAILED_EVENTS as defined in hgml/hgml.h:1685
+	FI_DEV_ICNLINK_COUNT_LINK_RECOVERY_FAILED_EVENTS = 214
+	// FI_DEV_ICNLINK_COUNT_LINK_RECOVERY_EVENTS as defined in hgml/hgml.h:1686
+	FI_DEV_ICNLINK_COUNT_LINK_RECOVERY_EVENTS = 215
+	// FI_DEV_ICNLINK_COUNT_RAW_BER_LANE0 as defined in hgml/hgml.h:1688
+	FI_DEV_ICNLINK_COUNT_RAW_BER_LANE0 = 216
+	// FI_DEV_ICNLINK_COUNT_RAW_BER_LANE1 as defined in hgml/hgml.h:1689
+	FI_DEV_ICNLINK_COUNT_RAW_BER_LANE1 = 217
+	// FI_DEV_ICNLINK_COUNT_RAW_BER as defined in hgml/hgml.h:1690
+	FI_DEV_ICNLINK_COUNT_RAW_BER = 218
+	// FI_DEV_ICNLINK_COUNT_EFFECTIVE_ERRORS as defined in hgml/hgml.h:1691
+	FI_DEV_ICNLINK_COUNT_EFFECTIVE_ERRORS = 219
+	// FI_DEV_ICNLINK_COUNT_EFFECTIVE_BER as defined in hgml/hgml.h:1693
+	FI_DEV_ICNLINK_COUNT_EFFECTIVE_BER = 220
+	// FI_DEV_ICNLINK_COUNT_SYMBOL_ERRORS as defined in hgml/hgml.h:1694
+	FI_DEV_ICNLINK_COUNT_SYMBOL_ERRORS = 221
+	// FI_DEV_ICNLINK_COUNT_SYMBOL_BER as defined in hgml/hgml.h:1696
+	FI_DEV_ICNLINK_COUNT_SYMBOL_BER = 222
+	// FI_DEV_ICNLINK_GET_POWER_THRESHOLD_MIN as defined in hgml/hgml.h:1698
+	FI_DEV_ICNLINK_GET_POWER_THRESHOLD_MIN = 223
+	// FI_DEV_ICNLINK_GET_POWER_THRESHOLD_UNITS as defined in hgml/hgml.h:1699
+	FI_DEV_ICNLINK_GET_POWER_THRESHOLD_UNITS = 224
+	// FI_DEV_ICNLINK_GET_POWER_THRESHOLD_SUPPORTED as defined in hgml/hgml.h:1700
+	FI_DEV_ICNLINK_GET_POWER_THRESHOLD_SUPPORTED = 225
+	// FI_DEV_RESET_STATUS as defined in hgml/hgml.h:1702
+	FI_DEV_RESET_STATUS = 226
+	// FI_DEV_DRAIN_AND_RESET_STATUS as defined in hgml/hgml.h:1703
+	FI_DEV_DRAIN_AND_RESET_STATUS = 227
+	// FI_DEV_PCIE_OUTBOUND_ATOMICS_MASK as defined in hgml/hgml.h:1704
+	FI_DEV_PCIE_OUTBOUND_ATOMICS_MASK = 228
+	// FI_DEV_PCIE_INBOUND_ATOMICS_MASK as defined in hgml/hgml.h:1705
+	FI_DEV_PCIE_INBOUND_ATOMICS_MASK = 229
+	// FI_DEV_GET_GPU_RECOVERY_ACTION as defined in hgml/hgml.h:1706
+	FI_DEV_GET_GPU_RECOVERY_ACTION = 230
+	// FI_DEV_C2C_LINK_ERROR_INTR as defined in hgml/hgml.h:1707
+	FI_DEV_C2C_LINK_ERROR_INTR = 231
+	// FI_DEV_C2C_LINK_ERROR_REPLAY as defined in hgml/hgml.h:1708
+	FI_DEV_C2C_LINK_ERROR_REPLAY = 232
+	// FI_DEV_C2C_LINK_ERROR_REPLAY_B2B as defined in hgml/hgml.h:1709
+	FI_DEV_C2C_LINK_ERROR_REPLAY_B2B = 233
+	// FI_DEV_C2C_LINK_POWER_STATE as defined in hgml/hgml.h:1710
+	FI_DEV_C2C_LINK_POWER_STATE = 234
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_0 as defined in hgml/hgml.h:1712
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_0 = 235
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_1 as defined in hgml/hgml.h:1713
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_1 = 236
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_2 as defined in hgml/hgml.h:1714
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_2 = 237
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_3 as defined in hgml/hgml.h:1715
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_3 = 238
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_4 as defined in hgml/hgml.h:1716
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_4 = 239
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_5 as defined in hgml/hgml.h:1717
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_5 = 240
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_6 as defined in hgml/hgml.h:1718
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_6 = 241
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_7 as defined in hgml/hgml.h:1719
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_7 = 242
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_8 as defined in hgml/hgml.h:1720
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_8 = 243
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_9 as defined in hgml/hgml.h:1721
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_9 = 244
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_10 as defined in hgml/hgml.h:1722
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_10 = 245
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_11 as defined in hgml/hgml.h:1723
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_11 = 246
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_12 as defined in hgml/hgml.h:1724
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_12 = 247
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_13 as defined in hgml/hgml.h:1725
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_13 = 248
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_14 as defined in hgml/hgml.h:1726
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_14 = 249
+	// FI_DEV_ICNLINK_COUNT_FEC_HISTORY_15 as defined in hgml/hgml.h:1727
+	FI_DEV_ICNLINK_COUNT_FEC_HISTORY_15 = 250
+	// FI_PWR_SMOOTHING_ENABLED as defined in hgml/hgml.h:1728
+	FI_PWR_SMOOTHING_ENABLED = 251
+	// FI_PWR_SMOOTHING_PRIV_LVL as defined in hgml/hgml.h:1729
+	FI_PWR_SMOOTHING_PRIV_LVL = 252
+	// FI_PWR_SMOOTHING_IMM_RAMP_DOWN_ENABLED as defined in hgml/hgml.h:1730
+	FI_PWR_SMOOTHING_IMM_RAMP_DOWN_ENABLED = 253
+	// FI_PWR_SMOOTHING_APPLIED_TMP_CEIL as defined in hgml/hgml.h:1731
+	FI_PWR_SMOOTHING_APPLIED_TMP_CEIL = 254
+	// FI_PWR_SMOOTHING_APPLIED_TMP_FLOOR as defined in hgml/hgml.h:1732
+	FI_PWR_SMOOTHING_APPLIED_TMP_FLOOR = 255
+	// FI_PWR_SMOOTHING_MAX_PERCENT_TMP_FLOOR_SETTING as defined in hgml/hgml.h:1733
+	FI_PWR_SMOOTHING_MAX_PERCENT_TMP_FLOOR_SETTING = 256
+	// FI_PWR_SMOOTHING_MIN_PERCENT_TMP_FLOOR_SETTING as defined in hgml/hgml.h:1734
+	FI_PWR_SMOOTHING_MIN_PERCENT_TMP_FLOOR_SETTING = 257
+	// FI_PWR_SMOOTHING_HW_CIRCUITRY_PERCENT_LIFETIME_REMAINING as defined in hgml/hgml.h:1735
+	FI_PWR_SMOOTHING_HW_CIRCUITRY_PERCENT_LIFETIME_REMAINING = 258
+	// FI_PWR_SMOOTHING_MAX_NUM_PRESET_PROFILES as defined in hgml/hgml.h:1736
+	FI_PWR_SMOOTHING_MAX_NUM_PRESET_PROFILES = 259
+	// FI_PWR_SMOOTHING_PROFILE_PERCENT_TMP_FLOOR as defined in hgml/hgml.h:1737
+	FI_PWR_SMOOTHING_PROFILE_PERCENT_TMP_FLOOR = 260
+	// FI_PWR_SMOOTHING_PROFILE_RAMP_UP_RATE as defined in hgml/hgml.h:1738
+	FI_PWR_SMOOTHING_PROFILE_RAMP_UP_RATE = 261
+	// FI_PWR_SMOOTHING_PROFILE_RAMP_DOWN_RATE as defined in hgml/hgml.h:1739
+	FI_PWR_SMOOTHING_PROFILE_RAMP_DOWN_RATE = 262
+	// FI_PWR_SMOOTHING_PROFILE_RAMP_DOWN_HYST_VAL as defined in hgml/hgml.h:1740
+	FI_PWR_SMOOTHING_PROFILE_RAMP_DOWN_HYST_VAL = 263
+	// FI_PWR_SMOOTHING_ACTIVE_PRESET_PROFILE as defined in hgml/hgml.h:1741
+	FI_PWR_SMOOTHING_ACTIVE_PRESET_PROFILE = 264
+	// FI_PWR_SMOOTHING_ADMIN_OVERRIDE_PERCENT_TMP_FLOOR as defined in hgml/hgml.h:1742
+	FI_PWR_SMOOTHING_ADMIN_OVERRIDE_PERCENT_TMP_FLOOR = 265
+	// FI_PWR_SMOOTHING_ADMIN_OVERRIDE_RAMP_UP_RATE as defined in hgml/hgml.h:1743
+	FI_PWR_SMOOTHING_ADMIN_OVERRIDE_RAMP_UP_RATE = 266
+	// FI_PWR_SMOOTHING_ADMIN_OVERRIDE_RAMP_DOWN_RATE as defined in hgml/hgml.h:1744
+	FI_PWR_SMOOTHING_ADMIN_OVERRIDE_RAMP_DOWN_RATE = 267
+	// FI_PWR_SMOOTHING_ADMIN_OVERRIDE_RAMP_DOWN_HYST_VAL as defined in hgml/hgml.h:1745
+	FI_PWR_SMOOTHING_ADMIN_OVERRIDE_RAMP_DOWN_HYST_VAL = 268
+	// FI_DEV_CLOCKS_EVENT_REASON_SW_POWER_CAP as defined in hgml/hgml.h:1747
+	FI_DEV_CLOCKS_EVENT_REASON_SW_POWER_CAP = 74
+	// FI_DEV_CLOCKS_EVENT_REASON_SYNC_BOOST as defined in hgml/hgml.h:1748
+	FI_DEV_CLOCKS_EVENT_REASON_SYNC_BOOST = 76
+	// FI_DEV_CLOCKS_EVENT_REASON_SW_THERM_SLOWDOWN as defined in hgml/hgml.h:1749
+	FI_DEV_CLOCKS_EVENT_REASON_SW_THERM_SLOWDOWN = 269
+	// FI_DEV_CLOCKS_EVENT_REASON_HW_THERM_SLOWDOWN as defined in hgml/hgml.h:1750
+	FI_DEV_CLOCKS_EVENT_REASON_HW_THERM_SLOWDOWN = 270
+	// FI_DEV_CLOCKS_EVENT_REASON_HW_POWER_BRAKE_SLOWDOWN as defined in hgml/hgml.h:1751
+	FI_DEV_CLOCKS_EVENT_REASON_HW_POWER_BRAKE_SLOWDOWN = 271
+	// FI_DEV_POWER_SYNC_BALANCING_FREQ as defined in hgml/hgml.h:1752
+	FI_DEV_POWER_SYNC_BALANCING_FREQ = 272
+	// FI_DEV_POWER_SYNC_BALANCING_AF as defined in hgml/hgml.h:1753
+	FI_DEV_POWER_SYNC_BALANCING_AF = 273
+	// FI_DEV_ICNLINK_CABLE_STATUS as defined in hgml/hgml.h:1755
+	FI_DEV_ICNLINK_CABLE_STATUS = 500
+	// FI_DEV_ICNLINK_LANE_WIDTH as defined in hgml/hgml.h:1756
+	FI_DEV_ICNLINK_LANE_WIDTH = 501
+	// FI_DEV_ICNLINK_LINKUP_COUNT as defined in hgml/hgml.h:1757
+	FI_DEV_ICNLINK_LINKUP_COUNT = 502
+	// FI_DEV_ICNLINK_LINKDOWN_COUNT as defined in hgml/hgml.h:1758
+	FI_DEV_ICNLINK_LINKDOWN_COUNT = 503
+	// FI_DEV_ICNLINK_FECC_ERROR_COUNT as defined in hgml/hgml.h:1759
+	FI_DEV_ICNLINK_FECC_ERROR_COUNT = 504
+	// FI_DEV_ICNLINK_FECU_ERROR_COUNT as defined in hgml/hgml.h:1760
+	FI_DEV_ICNLINK_FECU_ERROR_COUNT = 505
+	// FI_DEV_ICNLINK_PACKET_ERROR_TX as defined in hgml/hgml.h:1761
+	FI_DEV_ICNLINK_PACKET_ERROR_TX = 506
+	// FI_DEV_ICNLINK_PACKET_ERROR_RX as defined in hgml/hgml.h:1762
+	FI_DEV_ICNLINK_PACKET_ERROR_RX = 507
+	// FI_DEV_ICNLINK_PACKET_TOTAL_TX as defined in hgml/hgml.h:1763
+	FI_DEV_ICNLINK_PACKET_TOTAL_TX = 508
+	// FI_DEV_ICNLINK_PACKET_TOTAL_RX as defined in hgml/hgml.h:1764
+	FI_DEV_ICNLINK_PACKET_TOTAL_RX = 509
+	// FI_DEV_CORE_UTILIZATION as defined in hgml/hgml.h:1766
+	FI_DEV_CORE_UTILIZATION = 510
+	// FI_DEV_AUTO_RESET_STATUS as defined in hgml/hgml.h:1767
+	FI_DEV_AUTO_RESET_STATUS = 511
+	// FI_DEV_ICNLINK_PHYSICAL_PORT as defined in hgml/hgml.h:1768
+	FI_DEV_ICNLINK_PHYSICAL_PORT = 512
+	// FI_DEV_OVERCLOCKING_MODE as defined in hgml/hgml.h:1769
+	FI_DEV_OVERCLOCKING_MODE = 513
+	// FI_DEV_HBM_VENDOR as defined in hgml/hgml.h:1770
+	FI_DEV_HBM_VENDOR = 514
+	// FI_DEV_BASE_CLOCK as defined in hgml/hgml.h:1771
+	FI_DEV_BASE_CLOCK = 515
+	// FI_DEV_REAR_ID as defined in hgml/hgml.h:1772
+	FI_DEV_REAR_ID = 516
+	// FI_DEV_XID_PPU_RESET as defined in hgml/hgml.h:1774
+	FI_DEV_XID_PPU_RESET = 517
+	// FI_DEV_XID_OS_REBOOT as defined in hgml/hgml.h:1775
+	FI_DEV_XID_OS_REBOOT = 518
+	// FI_DEV_XID_COLD_REBOOT as defined in hgml/hgml.h:1776
+	FI_DEV_XID_COLD_REBOOT = 519
+	// FI_DEV_PCM_ENABLED as defined in hgml/hgml.h:1778
+	FI_DEV_PCM_ENABLED = 520
+	// FI_DEV_GPM_ENABLED as defined in hgml/hgml.h:1779
+	FI_DEV_GPM_ENABLED = 521
+	// FI_DEV_TIDE_MODE_STATUS as defined in hgml/hgml.h:1780
+	FI_DEV_TIDE_MODE_STATUS = 522
+	// FI_DEV_MPS_MODE_STATUS as defined in hgml/hgml.h:1781
+	FI_DEV_MPS_MODE_STATUS = 523
+	// FI_DEV_ICNLINK_RX_BANDWIDTH_TOTAL as defined in hgml/hgml.h:1782
+	FI_DEV_ICNLINK_RX_BANDWIDTH_TOTAL = 524
+	// FI_MAX as defined in hgml/hgml.h:1784
+	FI_MAX = 525
+	// ICNLINK_LOW_POWER_THRESHOLD_UNIT_100US as defined in hgml/hgml.h:1786
+	ICNLINK_LOW_POWER_THRESHOLD_UNIT_100US = 0
+	// ICNLINK_LOW_POWER_THRESHOLD_UNIT_50US as defined in hgml/hgml.h:1787
+	ICNLINK_LOW_POWER_THRESHOLD_UNIT_50US = 1
+	// ICNLINK_POWER_STATE_HIGH_SPEED as defined in hgml/hgml.h:1789
 	ICNLINK_POWER_STATE_HIGH_SPEED = 0
-	// ICNLINK_POWER_STATE_LOW as defined in hgml/hgml.h:10241
+	// ICNLINK_POWER_STATE_LOW as defined in hgml/hgml.h:1790
 	ICNLINK_POWER_STATE_LOW = 1
-	// ICNLINK_LOW_POWER_THRESHOLD_MIN as defined in hgml/hgml.h:10243
+	// ICNLINK_LOW_POWER_THRESHOLD_MIN as defined in hgml/hgml.h:1792
 	ICNLINK_LOW_POWER_THRESHOLD_MIN = 1
-	// ICNLINK_LOW_POWER_THRESHOLD_MAX as defined in hgml/hgml.h:10244
+	// ICNLINK_LOW_POWER_THRESHOLD_MAX as defined in hgml/hgml.h:1794
 	ICNLINK_LOW_POWER_THRESHOLD_MAX = 8191
-	// ICNLINK_LOW_POWER_THRESHOLD_RESET as defined in hgml/hgml.h:10245
+	// ICNLINK_LOW_POWER_THRESHOLD_RESET as defined in hgml/hgml.h:1795
 	ICNLINK_LOW_POWER_THRESHOLD_RESET = 4294967295
+	// ICNLINK_LOW_POWER_THRESHOLD_DEFAULT as defined in hgml/hgml.h:1796
+	ICNLINK_LOW_POWER_THRESHOLD_DEFAULT = 4294967295
+	// C2C_POWER_STATE_FULL_POWER as defined in hgml/hgml.h:1804
+	C2C_POWER_STATE_FULL_POWER = 0
+	// C2C_POWER_STATE_LOW_POWER as defined in hgml/hgml.h:1805
+	C2C_POWER_STATE_LOW_POWER = 1
+	// EventTypeNone as defined in hgml/hgml.h:1880
+	EventTypeNone = 0
+	// EventTypeSingleBitEccError as defined in hgml/hgml.h:1881
+	EventTypeSingleBitEccError = 1
+	// EventTypeDoubleBitEccError as defined in hgml/hgml.h:1882
+	EventTypeDoubleBitEccError = 2
+	// EventTypePState as defined in hgml/hgml.h:1883
+	EventTypePState = 4
+	// EventTypeXidCriticalError as defined in hgml/hgml.h:1884
+	EventTypeXidCriticalError = 8
+	// EventTypeClock as defined in hgml/hgml.h:1885
+	EventTypeClock = 16
+	// EventTypePowerSourceChange as defined in hgml/hgml.h:1886
+	EventTypePowerSourceChange = 128
+	// EventMigConfigChange as defined in hgml/hgml.h:1887
+	EventMigConfigChange = 256
+	// EventTypeSingleBitEccErrorStorm as defined in hgml/hgml.h:1888
+	EventTypeSingleBitEccErrorStorm = 512
+	// EventTypeDramRetirementEvent as defined in hgml/hgml.h:1889
+	EventTypeDramRetirementEvent = 1024
+	// EventTypeDramRetirementFailure as defined in hgml/hgml.h:1890
+	EventTypeDramRetirementFailure = 2048
+	// EventTypeNonFatalPoisonError as defined in hgml/hgml.h:1891
+	EventTypeNonFatalPoisonError = 4096
+	// EventTypeFatalPoisonError as defined in hgml/hgml.h:1892
+	EventTypeFatalPoisonError = 8192
+	// EventTypeGpuUnavailableError as defined in hgml/hgml.h:1893
+	EventTypeGpuUnavailableError = 16384
+	// EventTypeGpuRecoveryAction as defined in hgml/hgml.h:1894
+	EventTypeGpuRecoveryAction = 32768
+	// EventTypeAll as defined in hgml/hgml.h:1895
+	EventTypeAll = 65439
+	// SystemEventTypeGpuDriverUnbind as defined in hgml/hgml.h:1925
+	SystemEventTypeGpuDriverUnbind = 1
+	// SystemEventTypeGpuDriverBind as defined in hgml/hgml.h:1926
+	SystemEventTypeGpuDriverBind = 2
+	// SystemEventTypeCount as defined in hgml/hgml.h:1928
+	SystemEventTypeCount = 2
+	// ClocksEventReasonGpuIdle as defined in hgml/hgml.h:1973
+	ClocksEventReasonGpuIdle = 1
+	// ClocksEventReasonApplicationsClocksSetting as defined in hgml/hgml.h:1974
+	ClocksEventReasonApplicationsClocksSetting = 2
+	// ClocksThrottleReasonUserDefinedClocks as defined in hgml/hgml.h:1975
+	ClocksThrottleReasonUserDefinedClocks = 2
+	// ClocksEventReasonSwPowerCap as defined in hgml/hgml.h:1976
+	ClocksEventReasonSwPowerCap = 4
+	// ClocksThrottleReasonHwSlowdown as defined in hgml/hgml.h:1977
+	ClocksThrottleReasonHwSlowdown = 8
+	// ClocksEventReasonSyncBoost as defined in hgml/hgml.h:1978
+	ClocksEventReasonSyncBoost = 16
+	// ClocksEventReasonSwThermalSlowdown as defined in hgml/hgml.h:1979
+	ClocksEventReasonSwThermalSlowdown = 32
+	// ClocksThrottleReasonHwThermalSlowdown as defined in hgml/hgml.h:1980
+	ClocksThrottleReasonHwThermalSlowdown = 64
+	// ClocksThrottleReasonHwPowerBrakeSlowdown as defined in hgml/hgml.h:1981
+	ClocksThrottleReasonHwPowerBrakeSlowdown = 128
+	// ClocksEventReasonDisplayClockSetting as defined in hgml/hgml.h:1982
+	ClocksEventReasonDisplayClockSetting = 256
+	// ClocksEventReasonNone as defined in hgml/hgml.h:1983
+	ClocksEventReasonNone = 0
+	// ClocksEventReasonAll as defined in hgml/hgml.h:1984
+	ClocksEventReasonAll = 511
+	// ClocksThrottleReasonGpuIdle as defined in hgml/hgml.h:1996
+	ClocksThrottleReasonGpuIdle = 1
+	// ClocksThrottleReasonApplicationsClocksSetting as defined in hgml/hgml.h:1997
+	ClocksThrottleReasonApplicationsClocksSetting = 2
+	// ClocksThrottleReasonSyncBoost as defined in hgml/hgml.h:1998
+	ClocksThrottleReasonSyncBoost = 16
+	// ClocksThrottleReasonSwPowerCap as defined in hgml/hgml.h:1999
+	ClocksThrottleReasonSwPowerCap = 4
+	// ClocksThrottleReasonSwThermalSlowdown as defined in hgml/hgml.h:2000
+	ClocksThrottleReasonSwThermalSlowdown = 32
+	// ClocksThrottleReasonDisplayClockSetting as defined in hgml/hgml.h:2001
+	ClocksThrottleReasonDisplayClockSetting = 256
+	// ClocksThrottleReasonNone as defined in hgml/hgml.h:2002
+	ClocksThrottleReasonNone = 0
+	// ClocksThrottleReasonAll as defined in hgml/hgml.h:2003
+	ClocksThrottleReasonAll = 511
+	// HGFBC_SESSION_FLAG_DIFFMAP_ENABLED as defined in hgml/hgml.h:2052
+	HGFBC_SESSION_FLAG_DIFFMAP_ENABLED = 1
+	// HGFBC_SESSION_FLAG_CLASSIFICATIONMAP_ENABLED as defined in hgml/hgml.h:2053
+	HGFBC_SESSION_FLAG_CLASSIFICATIONMAP_ENABLED = 2
+	// HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_NO_WAIT as defined in hgml/hgml.h:2054
+	HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_NO_WAIT = 4
+	// HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_INFINITE as defined in hgml/hgml.h:2055
+	HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_INFINITE = 8
+	// HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_TIMEOUT as defined in hgml/hgml.h:2056
+	HGFBC_SESSION_FLAG_CAPTURE_WITH_WAIT_TIMEOUT = 16
+	// CC_SYSTEM_CPU_CAPS_NONE as defined in hgml/hgml.h:2086
+	CC_SYSTEM_CPU_CAPS_NONE = 0
+	// CC_SYSTEM_CPU_CAPS_AMD_SEV as defined in hgml/hgml.h:2087
+	CC_SYSTEM_CPU_CAPS_AMD_SEV = 1
+	// CC_SYSTEM_CPU_CAPS_INTEL_TDX as defined in hgml/hgml.h:2088
+	CC_SYSTEM_CPU_CAPS_INTEL_TDX = 2
+	// CC_SYSTEM_CPU_CAPS_AMD_SEV_SNP as defined in hgml/hgml.h:2089
+	CC_SYSTEM_CPU_CAPS_AMD_SEV_SNP = 3
+	// CC_SYSTEM_CPU_CAPS_AMD_SNP_VTOM as defined in hgml/hgml.h:2090
+	CC_SYSTEM_CPU_CAPS_AMD_SNP_VTOM = 4
+	// CC_SYSTEM_GPUS_CC_NOT_CAPABLE as defined in hgml/hgml.h:2092
+	CC_SYSTEM_GPUS_CC_NOT_CAPABLE = 0
+	// CC_SYSTEM_GPUS_CC_CAPABLE as defined in hgml/hgml.h:2093
+	CC_SYSTEM_GPUS_CC_CAPABLE = 1
+	// CC_SYSTEM_DEVTOOLS_MODE_OFF as defined in hgml/hgml.h:2101
+	CC_SYSTEM_DEVTOOLS_MODE_OFF = 0
+	// CC_SYSTEM_DEVTOOLS_MODE_ON as defined in hgml/hgml.h:2102
+	CC_SYSTEM_DEVTOOLS_MODE_ON = 1
+	// CC_SYSTEM_ENVIRONMENT_UNAVAILABLE as defined in hgml/hgml.h:2104
+	CC_SYSTEM_ENVIRONMENT_UNAVAILABLE = 0
+	// CC_SYSTEM_ENVIRONMENT_SIM as defined in hgml/hgml.h:2105
+	CC_SYSTEM_ENVIRONMENT_SIM = 1
+	// CC_SYSTEM_ENVIRONMENT_PROD as defined in hgml/hgml.h:2106
+	CC_SYSTEM_ENVIRONMENT_PROD = 2
+	// CC_SYSTEM_FEATURE_DISABLED as defined in hgml/hgml.h:2108
+	CC_SYSTEM_FEATURE_DISABLED = 0
+	// CC_SYSTEM_FEATURE_ENABLED as defined in hgml/hgml.h:2109
+	CC_SYSTEM_FEATURE_ENABLED = 1
+	// CC_SYSTEM_MULTIGPU_NONE as defined in hgml/hgml.h:2118
+	CC_SYSTEM_MULTIGPU_NONE = 0
+	// CC_SYSTEM_MULTIGPU_PROTECTED_PCIE as defined in hgml/hgml.h:2119
+	CC_SYSTEM_MULTIGPU_PROTECTED_PCIE = 1
+	// CC_SYSTEM_MULTIGPU_HGLE as defined in hgml/hgml.h:2120
+	CC_SYSTEM_MULTIGPU_HGLE = 2
+	// CC_ACCEPTING_CLIENT_REQUESTS_FALSE as defined in hgml/hgml.h:2141
+	CC_ACCEPTING_CLIENT_REQUESTS_FALSE = 0
+	// CC_ACCEPTING_CLIENT_REQUESTS_TRUE as defined in hgml/hgml.h:2142
+	CC_ACCEPTING_CLIENT_REQUESTS_TRUE = 1
+	// GPU_CERT_CHAIN_SIZE as defined in hgml/hgml.h:2144
+	GPU_CERT_CHAIN_SIZE = 4096
+	// GPU_ATTESTATION_CERT_CHAIN_SIZE as defined in hgml/hgml.h:2145
+	GPU_ATTESTATION_CERT_CHAIN_SIZE = 5120
+	// CC_GPU_CEC_NONCE_SIZE as defined in hgml/hgml.h:2155
+	CC_GPU_CEC_NONCE_SIZE = 32
+	// CC_GPU_ATTESTATION_REPORT_SIZE as defined in hgml/hgml.h:2156
+	CC_GPU_ATTESTATION_REPORT_SIZE = 8192
+	// CC_GPU_CEC_ATTESTATION_REPORT_SIZE as defined in hgml/hgml.h:2157
+	CC_GPU_CEC_ATTESTATION_REPORT_SIZE = 4096
+	// CC_CEC_ATTESTATION_REPORT_NOT_PRESENT as defined in hgml/hgml.h:2158
+	CC_CEC_ATTESTATION_REPORT_NOT_PRESENT = 0
+	// CC_CEC_ATTESTATION_REPORT_PRESENT as defined in hgml/hgml.h:2159
+	CC_CEC_ATTESTATION_REPORT_PRESENT = 1
+	// CC_KEY_ROTATION_THRESHOLD_ATTACKER_ADVANTAGE_MIN as defined in hgml/hgml.h:2160
+	CC_KEY_ROTATION_THRESHOLD_ATTACKER_ADVANTAGE_MIN = 50
+	// CC_KEY_ROTATION_THRESHOLD_ATTACKER_ADVANTAGE_MAX as defined in hgml/hgml.h:2161
+	CC_KEY_ROTATION_THRESHOLD_ATTACKER_ADVANTAGE_MAX = 65
+	// GPU_FABRIC_UUID_LEN as defined in hgml/hgml.h:2193
+	GPU_FABRIC_UUID_LEN = 16
+	// GPU_FABRIC_STATE_NOT_SUPPORTED as defined in hgml/hgml.h:2195
+	GPU_FABRIC_STATE_NOT_SUPPORTED = 0
+	// GPU_FABRIC_STATE_NOT_STARTED as defined in hgml/hgml.h:2196
+	GPU_FABRIC_STATE_NOT_STARTED = 1
+	// GPU_FABRIC_STATE_IN_PROGRESS as defined in hgml/hgml.h:2197
+	GPU_FABRIC_STATE_IN_PROGRESS = 2
+	// GPU_FABRIC_STATE_COMPLETED as defined in hgml/hgml.h:2198
+	GPU_FABRIC_STATE_COMPLETED = 3
+	// GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_NOT_SUPPORTED as defined in hgml/hgml.h:2210
+	GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_NOT_SUPPORTED = 0
+	// GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_TRUE as defined in hgml/hgml.h:2211
+	GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_TRUE = 1
+	// GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_FALSE as defined in hgml/hgml.h:2212
+	GPU_FABRIC_HEALTH_MASK_DEGRADED_BW_FALSE = 2
+	// GPU_FABRIC_HEALTH_MASK_SHIFT_DEGRADED_BW as defined in hgml/hgml.h:2214
+	GPU_FABRIC_HEALTH_MASK_SHIFT_DEGRADED_BW = 0
+	// GPU_FABRIC_HEALTH_MASK_WIDTH_DEGRADED_BW as defined in hgml/hgml.h:2215
+	GPU_FABRIC_HEALTH_MASK_WIDTH_DEGRADED_BW = 3
+	// GPU_FABRIC_HEALTH_MASK_ROUTE_RECOVERY_NOT_SUPPORTED as defined in hgml/hgml.h:2217
+	GPU_FABRIC_HEALTH_MASK_ROUTE_RECOVERY_NOT_SUPPORTED = 0
+	// GPU_FABRIC_HEALTH_MASK_ROUTE_RECOVERY_TRUE as defined in hgml/hgml.h:2218
+	GPU_FABRIC_HEALTH_MASK_ROUTE_RECOVERY_TRUE = 1
+	// GPU_FABRIC_HEALTH_MASK_ROUTE_RECOVERY_FALSE as defined in hgml/hgml.h:2219
+	GPU_FABRIC_HEALTH_MASK_ROUTE_RECOVERY_FALSE = 2
+	// GPU_FABRIC_HEALTH_MASK_SHIFT_ROUTE_RECOVERY as defined in hgml/hgml.h:2221
+	GPU_FABRIC_HEALTH_MASK_SHIFT_ROUTE_RECOVERY = 2
+	// GPU_FABRIC_HEALTH_MASK_WIDTH_ROUTE_RECOVERY as defined in hgml/hgml.h:2222
+	GPU_FABRIC_HEALTH_MASK_WIDTH_ROUTE_RECOVERY = 3
+	// GPU_FABRIC_HEALTH_MASK_ROUTE_UNHEALTHY_NOT_SUPPORTED as defined in hgml/hgml.h:2224
+	GPU_FABRIC_HEALTH_MASK_ROUTE_UNHEALTHY_NOT_SUPPORTED = 0
+	// GPU_FABRIC_HEALTH_MASK_ROUTE_UNHEALTHY_TRUE as defined in hgml/hgml.h:2225
+	GPU_FABRIC_HEALTH_MASK_ROUTE_UNHEALTHY_TRUE = 1
+	// GPU_FABRIC_HEALTH_MASK_ROUTE_UNHEALTHY_FALSE as defined in hgml/hgml.h:2226
+	GPU_FABRIC_HEALTH_MASK_ROUTE_UNHEALTHY_FALSE = 2
+	// GPU_FABRIC_HEALTH_MASK_SHIFT_ROUTE_UNHEALTHY as defined in hgml/hgml.h:2228
+	GPU_FABRIC_HEALTH_MASK_SHIFT_ROUTE_UNHEALTHY = 4
+	// GPU_FABRIC_HEALTH_MASK_WIDTH_ROUTE_UNHEALTHY as defined in hgml/hgml.h:2229
+	GPU_FABRIC_HEALTH_MASK_WIDTH_ROUTE_UNHEALTHY = 3
+	// GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_NOT_SUPPORTED as defined in hgml/hgml.h:2231
+	GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_NOT_SUPPORTED = 0
+	// GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_TRUE as defined in hgml/hgml.h:2232
+	GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_TRUE = 1
+	// GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_FALSE as defined in hgml/hgml.h:2233
+	GPU_FABRIC_HEALTH_MASK_ACCESS_TIMEOUT_RECOVERY_FALSE = 2
+	// GPU_FABRIC_HEALTH_MASK_SHIFT_ACCESS_TIMEOUT_RECOVERY as defined in hgml/hgml.h:2235
+	GPU_FABRIC_HEALTH_MASK_SHIFT_ACCESS_TIMEOUT_RECOVERY = 6
+	// GPU_FABRIC_HEALTH_MASK_WIDTH_ACCESS_TIMEOUT_RECOVERY as defined in hgml/hgml.h:2236
+	GPU_FABRIC_HEALTH_MASK_WIDTH_ACCESS_TIMEOUT_RECOVERY = 3
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_NOT_SUPPORTED as defined in hgml/hgml.h:2238
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_NOT_SUPPORTED = 0
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_NONE as defined in hgml/hgml.h:2239
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_NONE = 1
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INCORRECT_SYSGUID as defined in hgml/hgml.h:2240
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INCORRECT_SYSGUID = 2
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INCORRECT_CHASSIS_SN as defined in hgml/hgml.h:2241
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INCORRECT_CHASSIS_SN = 3
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_NO_PARTITION as defined in hgml/hgml.h:2242
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_NO_PARTITION = 4
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INSUFFICIENT_ICNLINKS as defined in hgml/hgml.h:2243
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INSUFFICIENT_ICNLINKS = 5
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INCOMPATIBLE_GPU_FW as defined in hgml/hgml.h:2244
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INCOMPATIBLE_GPU_FW = 6
+	// GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INVALID_LOCATION as defined in hgml/hgml.h:2245
+	GPU_FABRIC_HEALTH_MASK_INCORRECT_CONFIGURATION_INVALID_LOCATION = 7
+	// GPU_FABRIC_HEALTH_MASK_SHIFT_INCORRECT_CONFIGURATION as defined in hgml/hgml.h:2247
+	GPU_FABRIC_HEALTH_MASK_SHIFT_INCORRECT_CONFIGURATION = 8
+	// GPU_FABRIC_HEALTH_MASK_WIDTH_INCORRECT_CONFIGURATION as defined in hgml/hgml.h:2248
+	GPU_FABRIC_HEALTH_MASK_WIDTH_INCORRECT_CONFIGURATION = 15
+	// GPU_FABRIC_HEALTH_SUMMARY_NOT_SUPPORTED as defined in hgml/hgml.h:2250
+	GPU_FABRIC_HEALTH_SUMMARY_NOT_SUPPORTED = 0
+	// GPU_FABRIC_HEALTH_SUMMARY_HEALTHY as defined in hgml/hgml.h:2251
+	GPU_FABRIC_HEALTH_SUMMARY_HEALTHY = 1
+	// GPU_FABRIC_HEALTH_SUMMARY_UNHEALTHY as defined in hgml/hgml.h:2252
+	GPU_FABRIC_HEALTH_SUMMARY_UNHEALTHY = 2
+	// GPU_FABRIC_HEALTH_SUMMARY_LIMITED_CAPACITY as defined in hgml/hgml.h:2253
+	GPU_FABRIC_HEALTH_SUMMARY_LIMITED_CAPACITY = 3
+	// INIT_FLAG_NO_GPUS as defined in hgml/hgml.h:2290
+	INIT_FLAG_NO_GPUS = 1
+	// INIT_FLAG_NO_ATTACH as defined in hgml/hgml.h:2291
+	INIT_FLAG_NO_ATTACH = 2
+	// DEVICE_INFOROM_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2293
+	DEVICE_INFOROM_VERSION_BUFFER_SIZE = 16
+	// DEVICE_UUID_BUFFER_SIZE as defined in hgml/hgml.h:2295
+	DEVICE_UUID_BUFFER_SIZE = 80
+	// DEVICE_UUID_V2_BUFFER_SIZE as defined in hgml/hgml.h:2297
+	DEVICE_UUID_V2_BUFFER_SIZE = 96
+	// DEVICE_PART_NUMBER_BUFFER_SIZE as defined in hgml/hgml.h:2299
+	DEVICE_PART_NUMBER_BUFFER_SIZE = 80
+	// SYSTEM_DRIVER_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2301
+	SYSTEM_DRIVER_VERSION_BUFFER_SIZE = 80
+	// SYSTEM_HGML_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2303
+	SYSTEM_HGML_VERSION_BUFFER_SIZE = 80
+	// DEVICE_NAME_BUFFER_SIZE as defined in hgml/hgml.h:2305
+	DEVICE_NAME_BUFFER_SIZE = 64
+	// DEVICE_NAME_V2_BUFFER_SIZE as defined in hgml/hgml.h:2307
+	DEVICE_NAME_V2_BUFFER_SIZE = 96
+	// DEVICE_SERIAL_BUFFER_SIZE as defined in hgml/hgml.h:2309
+	DEVICE_SERIAL_BUFFER_SIZE = 30
+	// DEVICE_VBIOS_VERSION_BUFFER_SIZE as defined in hgml/hgml.h:2311
+	DEVICE_VBIOS_VERSION_BUFFER_SIZE = 32
+	// AFFINITY_SCOPE_NODE as defined in hgml/hgml.h:2321
+	AFFINITY_SCOPE_NODE = 0
+	// AFFINITY_SCOPE_SOCKET as defined in hgml/hgml.h:2322
+	AFFINITY_SCOPE_SOCKET = 1
+	// ICNLINK_BER_MANTISSA_SHIFT as defined in hgml/hgml.h:2344
+	ICNLINK_BER_MANTISSA_SHIFT = 8
+	// ICNLINK_BER_MANTISSA_WIDTH as defined in hgml/hgml.h:2345
+	ICNLINK_BER_MANTISSA_WIDTH = 15
+	// ICNLINK_BER_EXP_SHIFT as defined in hgml/hgml.h:2347
+	ICNLINK_BER_EXP_SHIFT = 0
+	// ICNLINK_BER_EXP_WIDTH as defined in hgml/hgml.h:2348
+	ICNLINK_BER_EXP_WIDTH = 255
+	// ICNLINK_STATE_INACTIVE as defined in hgml/hgml.h:2354
+	ICNLINK_STATE_INACTIVE = 0
+	// ICNLINK_STATE_ACTIVE as defined in hgml/hgml.h:2355
+	ICNLINK_STATE_ACTIVE = 1
+	// ICNLINK_STATE_SLEEP as defined in hgml/hgml.h:2356
+	ICNLINK_STATE_SLEEP = 2
+	// ICNLINK_TOTAL_SUPPORTED_BW_MODES as defined in hgml/hgml.h:2358
+	ICNLINK_TOTAL_SUPPORTED_BW_MODES = 23
+	// ICNLINK_FIRMWARE_UCODE_TYPE_MSE as defined in hgml/hgml.h:2394
+	ICNLINK_FIRMWARE_UCODE_TYPE_MSE = 1
+	// ICNLINK_FIRMWARE_UCODE_TYPE_NETIR as defined in hgml/hgml.h:2395
+	ICNLINK_FIRMWARE_UCODE_TYPE_NETIR = 2
+	// ICNLINK_FIRMWARE_UCODE_TYPE_NETIR_UPHY as defined in hgml/hgml.h:2396
+	ICNLINK_FIRMWARE_UCODE_TYPE_NETIR_UPHY = 3
+	// ICNLINK_FIRMWARE_UCODE_TYPE_NETIR_CLN as defined in hgml/hgml.h:2397
+	ICNLINK_FIRMWARE_UCODE_TYPE_NETIR_CLN = 4
+	// ICNLINK_FIRMWARE_UCODE_TYPE_NETIR_DLN as defined in hgml/hgml.h:2398
+	ICNLINK_FIRMWARE_UCODE_TYPE_NETIR_DLN = 5
+	// ICNLINK_FIRMWARE_VERSION_LENGTH as defined in hgml/hgml.h:2399
+	ICNLINK_FIRMWARE_VERSION_LENGTH = 100
+	// PRM_DATA_MAX_SIZE as defined in hgml/hgml.h:2488
+	PRM_DATA_MAX_SIZE = 496
+	// DEVICE_MIG_DISABLE as defined in hgml/hgml.h:2500
+	DEVICE_MIG_DISABLE = 0
+	// DEVICE_MIG_ENABLE as defined in hgml/hgml.h:2502
+	DEVICE_MIG_ENABLE = 1
+	// GPU_INSTANCE_PROFILE_1_SLICE as defined in hgml/hgml.h:2504
+	GPU_INSTANCE_PROFILE_1_SLICE = 0
+	// GPU_INSTANCE_PROFILE_2_SLICE as defined in hgml/hgml.h:2505
+	GPU_INSTANCE_PROFILE_2_SLICE = 1
+	// GPU_INSTANCE_PROFILE_3_SLICE as defined in hgml/hgml.h:2506
+	GPU_INSTANCE_PROFILE_3_SLICE = 2
+	// GPU_INSTANCE_PROFILE_4_SLICE as defined in hgml/hgml.h:2507
+	GPU_INSTANCE_PROFILE_4_SLICE = 3
+	// GPU_INSTANCE_PROFILE_7_SLICE as defined in hgml/hgml.h:2508
+	GPU_INSTANCE_PROFILE_7_SLICE = 4
+	// GPU_INSTANCE_PROFILE_8_SLICE as defined in hgml/hgml.h:2509
+	GPU_INSTANCE_PROFILE_8_SLICE = 5
+	// GPU_INSTANCE_PROFILE_6_SLICE as defined in hgml/hgml.h:2510
+	GPU_INSTANCE_PROFILE_6_SLICE = 6
+	// GPU_INSTANCE_PROFILE_1_SLICE_REV1 as defined in hgml/hgml.h:2512
+	GPU_INSTANCE_PROFILE_1_SLICE_REV1 = 7
+	// GPU_INSTANCE_PROFILE_2_SLICE_REV1 as defined in hgml/hgml.h:2513
+	GPU_INSTANCE_PROFILE_2_SLICE_REV1 = 8
+	// GPU_INSTANCE_PROFILE_1_SLICE_REV2 as defined in hgml/hgml.h:2514
+	GPU_INSTANCE_PROFILE_1_SLICE_REV2 = 9
+	// GPU_INSTANCE_PROFILE_1_SLICE_GFX as defined in hgml/hgml.h:2515
+	GPU_INSTANCE_PROFILE_1_SLICE_GFX = 10
+	// GPU_INSTANCE_PROFILE_2_SLICE_GFX as defined in hgml/hgml.h:2516
+	GPU_INSTANCE_PROFILE_2_SLICE_GFX = 11
+	// GPU_INSTANCE_PROFILE_4_SLICE_GFX as defined in hgml/hgml.h:2517
+	GPU_INSTANCE_PROFILE_4_SLICE_GFX = 12
+	// GPU_INSTANCE_PROFILE_1_SLICE_NO_ME as defined in hgml/hgml.h:2518
+	GPU_INSTANCE_PROFILE_1_SLICE_NO_ME = 13
+	// GPU_INSTANCE_PROFILE_2_SLICE_NO_ME as defined in hgml/hgml.h:2519
+	GPU_INSTANCE_PROFILE_2_SLICE_NO_ME = 14
+	// GPU_INSTANCE_PROFILE_1_SLICE_ALL_ME as defined in hgml/hgml.h:2520
+	GPU_INSTANCE_PROFILE_1_SLICE_ALL_ME = 15
+	// GPU_INSTANCE_PROFILE_2_SLICE_ALL_ME as defined in hgml/hgml.h:2521
+	GPU_INSTANCE_PROFILE_2_SLICE_ALL_ME = 16
+	// GPU_INSTANCE_PROFILE_2_CE as defined in hgml/hgml.h:2523
+	GPU_INSTANCE_PROFILE_2_CE = 80
+	// GPU_INSTANCE_PROFILE_4_CE as defined in hgml/hgml.h:2524
+	GPU_INSTANCE_PROFILE_4_CE = 81
+	// GPU_INSTANCE_PROFILE_8_CE as defined in hgml/hgml.h:2525
+	GPU_INSTANCE_PROFILE_8_CE = 82
+	// GPU_INSTANCE_PROFILE_16_CE as defined in hgml/hgml.h:2526
+	GPU_INSTANCE_PROFILE_16_CE = 83
+	// GPU_INSTANCE_PROFILE_14_CE as defined in hgml/hgml.h:2527
+	GPU_INSTANCE_PROFILE_14_CE = 84
+	// GPU_INSTANCE_PROFILE_COUNT as defined in hgml/hgml.h:2529
+	GPU_INSTANCE_PROFILE_COUNT = 85
+	// GPU_INSTANCE_PROFILE_CAPS_P2P as defined in hgml/hgml.h:2531
+	GPU_INSTANCE_PROFILE_CAPS_P2P = 1
+	// GPU_INTSTANCE_PROFILE_CAPS_P2P as defined in hgml/hgml.h:2532
+	GPU_INTSTANCE_PROFILE_CAPS_P2P = 1
+	// GPU_INSTANCE_PROFILE_CAPS_GFX as defined in hgml/hgml.h:2533
+	GPU_INSTANCE_PROFILE_CAPS_GFX = 2
+	// COMPUTE_INSTANCE_PROFILE_CAPS_GFX as defined in hgml/hgml.h:2535
+	COMPUTE_INSTANCE_PROFILE_CAPS_GFX = 1
+	// COMPUTE_INSTANCE_PROFILE_1_SLICE as defined in hgml/hgml.h:2604
+	COMPUTE_INSTANCE_PROFILE_1_SLICE = 0
+	// COMPUTE_INSTANCE_PROFILE_2_SLICE as defined in hgml/hgml.h:2605
+	COMPUTE_INSTANCE_PROFILE_2_SLICE = 1
+	// COMPUTE_INSTANCE_PROFILE_3_SLICE as defined in hgml/hgml.h:2606
+	COMPUTE_INSTANCE_PROFILE_3_SLICE = 2
+	// COMPUTE_INSTANCE_PROFILE_4_SLICE as defined in hgml/hgml.h:2607
+	COMPUTE_INSTANCE_PROFILE_4_SLICE = 3
+	// COMPUTE_INSTANCE_PROFILE_7_SLICE as defined in hgml/hgml.h:2608
+	COMPUTE_INSTANCE_PROFILE_7_SLICE = 4
+	// COMPUTE_INSTANCE_PROFILE_8_SLICE as defined in hgml/hgml.h:2609
+	COMPUTE_INSTANCE_PROFILE_8_SLICE = 5
+	// COMPUTE_INSTANCE_PROFILE_6_SLICE as defined in hgml/hgml.h:2610
+	COMPUTE_INSTANCE_PROFILE_6_SLICE = 6
+	// COMPUTE_INSTANCE_PROFILE_1_SLICE_REV1 as defined in hgml/hgml.h:2611
+	COMPUTE_INSTANCE_PROFILE_1_SLICE_REV1 = 7
+	// COMPUTE_INSTANCE_PROFILE_1_CU as defined in hgml/hgml.h:2613
+	COMPUTE_INSTANCE_PROFILE_1_CU = 8
+	// COMPUTE_INSTANCE_PROFILE_2_CU as defined in hgml/hgml.h:2614
+	COMPUTE_INSTANCE_PROFILE_2_CU = 9
+	// COMPUTE_INSTANCE_PROFILE_3_CU as defined in hgml/hgml.h:2615
+	COMPUTE_INSTANCE_PROFILE_3_CU = 10
+	// COMPUTE_INSTANCE_PROFILE_1_CE as defined in hgml/hgml.h:2617
+	COMPUTE_INSTANCE_PROFILE_1_CE = 11
+	// COMPUTE_INSTANCE_PROFILE_2_CE as defined in hgml/hgml.h:2618
+	COMPUTE_INSTANCE_PROFILE_2_CE = 12
+	// COMPUTE_INSTANCE_PROFILE_3_CE as defined in hgml/hgml.h:2619
+	COMPUTE_INSTANCE_PROFILE_3_CE = 13
+	// COMPUTE_INSTANCE_PROFILE_4_CE as defined in hgml/hgml.h:2620
+	COMPUTE_INSTANCE_PROFILE_4_CE = 14
+	// COMPUTE_INSTANCE_PROFILE_5_CE as defined in hgml/hgml.h:2621
+	COMPUTE_INSTANCE_PROFILE_5_CE = 15
+	// COMPUTE_INSTANCE_PROFILE_6_CE as defined in hgml/hgml.h:2622
+	COMPUTE_INSTANCE_PROFILE_6_CE = 16
+	// COMPUTE_INSTANCE_PROFILE_7_CE as defined in hgml/hgml.h:2623
+	COMPUTE_INSTANCE_PROFILE_7_CE = 17
+	// COMPUTE_INSTANCE_PROFILE_8_CE as defined in hgml/hgml.h:2624
+	COMPUTE_INSTANCE_PROFILE_8_CE = 18
+	// COMPUTE_INSTANCE_PROFILE_9_CE as defined in hgml/hgml.h:2625
+	COMPUTE_INSTANCE_PROFILE_9_CE = 19
+	// COMPUTE_INSTANCE_PROFILE_10_CE as defined in hgml/hgml.h:2626
+	COMPUTE_INSTANCE_PROFILE_10_CE = 20
+	// COMPUTE_INSTANCE_PROFILE_11_CE as defined in hgml/hgml.h:2627
+	COMPUTE_INSTANCE_PROFILE_11_CE = 21
+	// COMPUTE_INSTANCE_PROFILE_12_CE as defined in hgml/hgml.h:2628
+	COMPUTE_INSTANCE_PROFILE_12_CE = 22
+	// COMPUTE_INSTANCE_PROFILE_13_CE as defined in hgml/hgml.h:2629
+	COMPUTE_INSTANCE_PROFILE_13_CE = 23
+	// COMPUTE_INSTANCE_PROFILE_14_CE as defined in hgml/hgml.h:2630
+	COMPUTE_INSTANCE_PROFILE_14_CE = 24
+	// COMPUTE_INSTANCE_PROFILE_15_CE as defined in hgml/hgml.h:2631
+	COMPUTE_INSTANCE_PROFILE_15_CE = 25
+	// COMPUTE_INSTANCE_PROFILE_16_CE as defined in hgml/hgml.h:2632
+	COMPUTE_INSTANCE_PROFILE_16_CE = 26
+	// COMPUTE_INSTANCE_PROFILE_COUNT as defined in hgml/hgml.h:2634
+	COMPUTE_INSTANCE_PROFILE_COUNT = 27
+	// COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED as defined in hgml/hgml.h:2636
+	COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED = 0
+	// COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT as defined in hgml/hgml.h:2637
+	COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT = 1
+	// GPM_METRICS_GET_VERSION as defined in hgml/hgml.h:2923
+	GPM_METRICS_GET_VERSION = 1
+	// GPM_SUPPORT_VERSION as defined in hgml/hgml.h:2931
+	GPM_SUPPORT_VERSION = 2
+	// DEV_CAP_EGM as defined in hgml/hgml.h:2933
+	DEV_CAP_EGM = 1
+	// WORKLOAD_POWER_MAX_PROFILES as defined in hgml/hgml.h:2962
+	WORKLOAD_POWER_MAX_PROFILES = 255
+	// POWER_SMOOTHING_MAX_NUM_PROFILES as defined in hgml/hgml.h:3023
+	POWER_SMOOTHING_MAX_NUM_PROFILES = 5
+	// POWER_SMOOTHING_NUM_PROFILE_PARAMS as defined in hgml/hgml.h:3024
+	POWER_SMOOTHING_NUM_PROFILE_PARAMS = 4
+	// POWER_SMOOTHING_ADMIN_OVERRIDE_NOT_SET as defined in hgml/hgml.h:3025
+	POWER_SMOOTHING_ADMIN_OVERRIDE_NOT_SET = 4294967295
+	// POWER_SMOOTHING_PROFILE_PARAM_PERCENT_TMP_FLOOR as defined in hgml/hgml.h:3026
+	POWER_SMOOTHING_PROFILE_PARAM_PERCENT_TMP_FLOOR = 0
+	// POWER_SMOOTHING_PROFILE_PARAM_RAMP_UP_RATE as defined in hgml/hgml.h:3027
+	POWER_SMOOTHING_PROFILE_PARAM_RAMP_UP_RATE = 1
+	// POWER_SMOOTHING_PROFILE_PARAM_RAMP_DOWN_RATE as defined in hgml/hgml.h:3028
+	POWER_SMOOTHING_PROFILE_PARAM_RAMP_DOWN_RATE = 2
+	// POWER_SMOOTHING_PROFILE_PARAM_RAMP_DOWN_HYSTERESIS as defined in hgml/hgml.h:3029
+	POWER_SMOOTHING_PROFILE_PARAM_RAMP_DOWN_HYSTERESIS = 3
+	// BlacklistDeviceInfo as defined in hgml/hgml.h:3049
+	BlacklistDeviceInfo = 0
 )
 
-// BridgeChipType as declared in hgml/hgml.h:250
+// DeviceAddressingModeType as declared in hgml/hgml.h:191
+type DeviceAddressingModeType int32
+
+// DeviceAddressingModeType enumeration from hgml/hgml.h:191
+const (
+	DEVICE_ADDRESSING_MODE_NONE DeviceAddressingModeType = iota
+	DEVICE_ADDRESSING_MODE_HMM  DeviceAddressingModeType = 1
+	DEVICE_ADDRESSING_MODE_ATS  DeviceAddressingModeType = 2
+)
+
+// BridgeChipType as declared in hgml/hgml.h:225
 type BridgeChipType int32
 
-// BridgeChipType enumeration from hgml/hgml.h:250
+// BridgeChipType enumeration from hgml/hgml.h:225
 const (
 	BRIDGE_CHIP_PLX  BridgeChipType = iota
 	BRIDGE_CHIP_BRO4 BridgeChipType = 1
 )
 
-// IcnLinkUtilizationCountUnits as declared in hgml/hgml.h:268
+// IcnLinkUtilizationCountUnits as declared in hgml/hgml.h:237
 type IcnLinkUtilizationCountUnits int32
 
-// IcnLinkUtilizationCountUnits enumeration from hgml/hgml.h:268
+// IcnLinkUtilizationCountUnits enumeration from hgml/hgml.h:237
 const (
 	ICNLINK_COUNTER_UNIT_CYCLES   IcnLinkUtilizationCountUnits = iota
 	ICNLINK_COUNTER_UNIT_PACKETS  IcnLinkUtilizationCountUnits = 1
@@ -836,10 +1238,10 @@ const (
 	ICNLINK_COUNTER_UNIT_COUNT    IcnLinkUtilizationCountUnits = 4
 )
 
-// IcnLinkUtilizationCountPktTypes as declared in hgml/hgml.h:288
+// IcnLinkUtilizationCountPktTypes as declared in hgml/hgml.h:250
 type IcnLinkUtilizationCountPktTypes int32
 
-// IcnLinkUtilizationCountPktTypes enumeration from hgml/hgml.h:288
+// IcnLinkUtilizationCountPktTypes enumeration from hgml/hgml.h:250
 const (
 	ICNLINK_COUNTER_PKTFILTER_NOP        IcnLinkUtilizationCountPktTypes = 1
 	ICNLINK_COUNTER_PKTFILTER_READ       IcnLinkUtilizationCountPktTypes = 2
@@ -852,10 +1254,10 @@ const (
 	ICNLINK_COUNTER_PKTFILTER_ALL        IcnLinkUtilizationCountPktTypes = 255
 )
 
-// IcnLinkCapability as declared in hgml/hgml.h:312
+// IcnLinkCapability as declared in hgml/hgml.h:268
 type IcnLinkCapability int32
 
-// IcnLinkCapability enumeration from hgml/hgml.h:312
+// IcnLinkCapability enumeration from hgml/hgml.h:268
 const (
 	ICNLINK_CAP_P2P_SUPPORTED  IcnLinkCapability = iota
 	ICNLINK_CAP_SYSMEM_ACCESS  IcnLinkCapability = 1
@@ -866,10 +1268,10 @@ const (
 	ICNLINK_CAP_COUNT          IcnLinkCapability = 6
 )
 
-// IcnLinkErrorCounter as declared in hgml/hgml.h:327
+// IcnLinkErrorCounter as declared in hgml/hgml.h:279
 type IcnLinkErrorCounter int32
 
-// IcnLinkErrorCounter enumeration from hgml/hgml.h:327
+// IcnLinkErrorCounter enumeration from hgml/hgml.h:279
 const (
 	ICNLINK_ERROR_DL_REPLAY   IcnLinkErrorCounter = iota
 	ICNLINK_ERROR_DL_RECOVERY IcnLinkErrorCounter = 1
@@ -879,20 +1281,21 @@ const (
 	ICNLINK_ERROR_COUNT       IcnLinkErrorCounter = 5
 )
 
-// IntIcnLinkDeviceType as declared in hgml/hgml.h:337
+// IntIcnLinkDeviceType as declared in hgml/hgml.h:287
 type IntIcnLinkDeviceType int32
 
-// IntIcnLinkDeviceType enumeration from hgml/hgml.h:337
+// IntIcnLinkDeviceType enumeration from hgml/hgml.h:287
 const (
 	ICNLINK_DEVICE_TYPE_PPU     IntIcnLinkDeviceType = iota
+	ICNLINK_DEVICE_TYPE_IBMNPU  IntIcnLinkDeviceType = 1
 	ICNLINK_DEVICE_TYPE_SWITCH  IntIcnLinkDeviceType = 2
 	ICNLINK_DEVICE_TYPE_UNKNOWN IntIcnLinkDeviceType = 255
 )
 
-// GpuTopologyLevel as declared in hgml/hgml.h:353
+// GpuTopologyLevel as declared in hgml/hgml.h:297
 type GpuTopologyLevel int32
 
-// GpuTopologyLevel enumeration from hgml/hgml.h:353
+// GpuTopologyLevel enumeration from hgml/hgml.h:297
 const (
 	TOPOLOGY_INTERNAL   GpuTopologyLevel = iota
 	TOPOLOGY_SINGLE     GpuTopologyLevel = 10
@@ -902,12 +1305,13 @@ const (
 	TOPOLOGY_SYSTEM     GpuTopologyLevel = 50
 )
 
-// GpuP2PStatus as declared in hgml/hgml.h:370
+// GpuP2PStatus as declared in hgml/hgml.h:311
 type GpuP2PStatus int32
 
-// GpuP2PStatus enumeration from hgml/hgml.h:370
+// GpuP2PStatus enumeration from hgml/hgml.h:311
 const (
 	P2P_STATUS_OK                         GpuP2PStatus = iota
+	P2P_STATUS_CHIPSET_NOT_SUPPORED       GpuP2PStatus = 1
 	P2P_STATUS_CHIPSET_NOT_SUPPORTED      GpuP2PStatus = 1
 	P2P_STATUS_GPU_NOT_SUPPORTED          GpuP2PStatus = 2
 	P2P_STATUS_IOH_TOPOLOGY_NOT_SUPPORTED GpuP2PStatus = 3
@@ -916,23 +1320,24 @@ const (
 	P2P_STATUS_UNKNOWN                    GpuP2PStatus = 6
 )
 
-// GpuP2PCapsIndex as declared in hgml/hgml.h:381
+// GpuP2PCapsIndex as declared in hgml/hgml.h:323
 type GpuP2PCapsIndex int32
 
-// GpuP2PCapsIndex enumeration from hgml/hgml.h:381
+// GpuP2PCapsIndex enumeration from hgml/hgml.h:323
 const (
 	P2P_CAPS_INDEX_READ    GpuP2PCapsIndex = iota
 	P2P_CAPS_INDEX_WRITE   GpuP2PCapsIndex = 1
 	P2P_CAPS_INDEX_ICNLINK GpuP2PCapsIndex = 2
 	P2P_CAPS_INDEX_ATOMICS GpuP2PCapsIndex = 3
+	P2P_CAPS_INDEX_PCI     GpuP2PCapsIndex = 4
 	P2P_CAPS_INDEX_PROP    GpuP2PCapsIndex = 4
 	P2P_CAPS_INDEX_UNKNOWN GpuP2PCapsIndex = 5
 )
 
-// SamplingType as declared in hgml/hgml.h:423
+// SamplingType as declared in hgml/hgml.h:353
 type SamplingType int32
 
-// SamplingType enumeration from hgml/hgml.h:423
+// SamplingType enumeration from hgml/hgml.h:353
 const (
 	TOTAL_POWER_SAMPLES        SamplingType = iota
 	GPU_UTILIZATION_SAMPLES    SamplingType = 1
@@ -942,23 +1347,25 @@ const (
 	PROCESSOR_CLK_SAMPLES      SamplingType = 5
 	MEMORY_CLK_SAMPLES         SamplingType = 6
 	MODULE_POWER_SAMPLES       SamplingType = 7
-	SAMPLINGTYPE_COUNT         SamplingType = 8
+	JPG_UTILIZATION_SAMPLES    SamplingType = 8
+	OFA_UTILIZATION_SAMPLES    SamplingType = 9
+	SAMPLINGTYPE_COUNT         SamplingType = 10
 )
 
-// PcieUtilCounter as declared in hgml/hgml.h:435
+// PcieUtilCounter as declared in hgml/hgml.h:361
 type PcieUtilCounter int32
 
-// PcieUtilCounter enumeration from hgml/hgml.h:435
+// PcieUtilCounter enumeration from hgml/hgml.h:361
 const (
 	PCIE_UTIL_TX_BYTES PcieUtilCounter = iota
 	PCIE_UTIL_RX_BYTES PcieUtilCounter = 1
 	PCIE_UTIL_COUNT    PcieUtilCounter = 2
 )
 
-// ValueType as declared in hgml/hgml.h:451
+// ValueType as declared in hgml/hgml.h:374
 type ValueType int32
 
-// ValueType enumeration from hgml/hgml.h:451
+// ValueType enumeration from hgml/hgml.h:374
 const (
 	VALUE_TYPE_DOUBLE             ValueType = iota
 	VALUE_TYPE_UNSIGNED_INT       ValueType = 1
@@ -966,13 +1373,14 @@ const (
 	VALUE_TYPE_UNSIGNED_LONG_LONG ValueType = 3
 	VALUE_TYPE_SIGNED_LONG_LONG   ValueType = 4
 	VALUE_TYPE_SIGNED_INT         ValueType = 5
-	VALUE_TYPE_COUNT              ValueType = 6
+	VALUE_TYPE_UNSIGNED_SHORT     ValueType = 6
+	VALUE_TYPE_COUNT              ValueType = 7
 )
 
-// PerfPolicyType as declared in hgml/hgml.h:493
+// PerfPolicyType as declared in hgml/hgml.h:405
 type PerfPolicyType int32
 
-// PerfPolicyType enumeration from hgml/hgml.h:493
+// PerfPolicyType enumeration from hgml/hgml.h:405
 const (
 	PERF_POLICY_POWER             PerfPolicyType = iota
 	PERF_POLICY_THERMAL           PerfPolicyType = 1
@@ -985,29 +1393,105 @@ const (
 	PERF_POLICY_COUNT             PerfPolicyType = 12
 )
 
-// EnableState as declared in hgml/hgml.h:547
+// ThermalTarget as declared in hgml/hgml.h:428
+type ThermalTarget int32
+
+// ThermalTarget enumeration from hgml/hgml.h:428
+const (
+	THERMAL_TARGET_NONE         ThermalTarget = iota
+	THERMAL_TARGET_GPU          ThermalTarget = 1
+	THERMAL_TARGET_MEMORY       ThermalTarget = 2
+	THERMAL_TARGET_POWER_SUPPLY ThermalTarget = 4
+	THERMAL_TARGET_BOARD        ThermalTarget = 8
+	THERMAL_TARGET_VCD_BOARD    ThermalTarget = 9
+	THERMAL_TARGET_VCD_INLET    ThermalTarget = 10
+	THERMAL_TARGET_VCD_OUTLET   ThermalTarget = 11
+	THERMAL_TARGET_ALL          ThermalTarget = 15
+	THERMAL_TARGET_UNKNOWN      ThermalTarget = -1
+)
+
+// ThermalController as declared in hgml/hgml.h:451
+type ThermalController int32
+
+// ThermalController enumeration from hgml/hgml.h:451
+const (
+	THERMAL_CONTROLLER_NONE            ThermalController = iota
+	THERMAL_CONTROLLER_GPU_INTERNAL    ThermalController = 1
+	THERMAL_CONTROLLER_ADM1032         ThermalController = 2
+	THERMAL_CONTROLLER_ADT7461         ThermalController = 3
+	THERMAL_CONTROLLER_MAX6649         ThermalController = 4
+	THERMAL_CONTROLLER_MAX1617         ThermalController = 5
+	THERMAL_CONTROLLER_LM99            ThermalController = 6
+	THERMAL_CONTROLLER_LM89            ThermalController = 7
+	THERMAL_CONTROLLER_LM64            ThermalController = 8
+	THERMAL_CONTROLLER_G781            ThermalController = 9
+	THERMAL_CONTROLLER_ADT7473         ThermalController = 10
+	THERMAL_CONTROLLER_SBMAX6649       ThermalController = 11
+	THERMAL_CONTROLLER_VBIOSEVT        ThermalController = 12
+	THERMAL_CONTROLLER_OS              ThermalController = 13
+	THERMAL_CONTROLLER_HGSYSCON_CANOAS ThermalController = 14
+	THERMAL_CONTROLLER_HGSYSCON_E551   ThermalController = 15
+	THERMAL_CONTROLLER_MAX6649R        ThermalController = 16
+	THERMAL_CONTROLLER_ADT7473S        ThermalController = 17
+	THERMAL_CONTROLLER_UNKNOWN         ThermalController = -1
+)
+
+// CoolerControl as declared in hgml/hgml.h:474
+type CoolerControl int32
+
+// CoolerControl enumeration from hgml/hgml.h:474
+const (
+	THERMAL_COOLER_SIGNAL_NONE     CoolerControl = iota
+	THERMAL_COOLER_SIGNAL_TOGGLE   CoolerControl = 1
+	THERMAL_COOLER_SIGNAL_VARIABLE CoolerControl = 2
+	THERMAL_COOLER_SIGNAL_COUNT    CoolerControl = 3
+)
+
+// CoolerTarget as declared in hgml/hgml.h:483
+type CoolerTarget int32
+
+// CoolerTarget enumeration from hgml/hgml.h:483
+const (
+	THERMAL_COOLER_TARGET_NONE         CoolerTarget = 1
+	THERMAL_COOLER_TARGET_GPU          CoolerTarget = 2
+	THERMAL_COOLER_TARGET_MEMORY       CoolerTarget = 4
+	THERMAL_COOLER_TARGET_POWER_SUPPLY CoolerTarget = 8
+	THERMAL_COOLER_TARGET_GPU_RELATED  CoolerTarget = 14
+)
+
+// UUIDType as declared in hgml/hgml.h:505
+type UUIDType int32
+
+// UUIDType enumeration from hgml/hgml.h:505
+const (
+	UUID_TYPE_NONE   UUIDType = iota
+	UUID_TYPE_ASCII  UUIDType = 1
+	UUID_TYPE_BINARY UUIDType = 2
+)
+
+// EnableState as declared in hgml/hgml.h:536
 type EnableState int32
 
-// EnableState enumeration from hgml/hgml.h:547
+// EnableState enumeration from hgml/hgml.h:536
 const (
 	FEATURE_DISABLED EnableState = iota
 	FEATURE_ENABLED  EnableState = 1
 )
 
-// BrandType as declared in hgml/hgml.h:563
+// BrandType as declared in hgml/hgml.h:557
 type BrandType int32
 
-// BrandType enumeration from hgml/hgml.h:563
+// BrandType enumeration from hgml/hgml.h:557
 const (
 	BRAND_UNKNOWN   BrandType = iota
 	BRAND_BEETHOVEN BrandType = 14
 	BRAND_COUNT     BrandType = 15
 )
 
-// TemperatureThresholds as declared in hgml/hgml.h:586
+// TemperatureThresholds as declared in hgml/hgml.h:571
 type TemperatureThresholds int32
 
-// TemperatureThresholds enumeration from hgml/hgml.h:586
+// TemperatureThresholds enumeration from hgml/hgml.h:571
 const (
 	TEMPERATURE_THRESHOLD_SHUTDOWN      TemperatureThresholds = iota
 	TEMPERATURE_THRESHOLD_SLOWDOWN      TemperatureThresholds = 1
@@ -1016,22 +1500,23 @@ const (
 	TEMPERATURE_THRESHOLD_ACOUSTIC_MIN  TemperatureThresholds = 4
 	TEMPERATURE_THRESHOLD_ACOUSTIC_CURR TemperatureThresholds = 5
 	TEMPERATURE_THRESHOLD_ACOUSTIC_MAX  TemperatureThresholds = 6
-	TEMPERATURE_THRESHOLD_COUNT         TemperatureThresholds = 7
+	TEMPERATURE_THRESHOLD_GPS_CURR      TemperatureThresholds = 7
+	TEMPERATURE_THRESHOLD_COUNT         TemperatureThresholds = 8
 )
 
-// TemperatureSensors as declared in hgml/hgml.h:597
+// TemperatureSensors as declared in hgml/hgml.h:578
 type TemperatureSensors int32
 
-// TemperatureSensors enumeration from hgml/hgml.h:597
+// TemperatureSensors enumeration from hgml/hgml.h:578
 const (
 	TEMPERATURE_GPU   TemperatureSensors = iota
 	TEMPERATURE_COUNT TemperatureSensors = 1
 )
 
-// ComputeMode as declared in hgml/hgml.h:615
+// ComputeMode as declared in hgml/hgml.h:598
 type ComputeMode int32
 
-// ComputeMode enumeration from hgml/hgml.h:615
+// ComputeMode enumeration from hgml/hgml.h:598
 const (
 	COMPUTEMODE_DEFAULT           ComputeMode = iota
 	COMPUTEMODE_EXCLUSIVE_THREAD  ComputeMode = 1
@@ -1040,30 +1525,45 @@ const (
 	COMPUTEMODE_COUNT             ComputeMode = 4
 )
 
-// MemoryErrorType as declared in hgml/hgml.h:702
+// MemoryErrorType as declared in hgml/hgml.h:627
 type MemoryErrorType int32
 
-// MemoryErrorType enumeration from hgml/hgml.h:702
+// MemoryErrorType enumeration from hgml/hgml.h:627
 const (
 	MEMORY_ERROR_TYPE_CORRECTED   MemoryErrorType = iota
 	MEMORY_ERROR_TYPE_UNCORRECTED MemoryErrorType = 1
 	MEMORY_ERROR_TYPE_COUNT       MemoryErrorType = 2
 )
 
-// EccCounterType as declared in hgml/hgml.h:719
+// IcnLinkVersion as declared in hgml/hgml.h:639
+type IcnLinkVersion int32
+
+// IcnLinkVersion enumeration from hgml/hgml.h:639
+const (
+	ICNLINK_VERSION_INVALID IcnLinkVersion = iota
+	ICNLINK_VERSION_1_0     IcnLinkVersion = 1
+	ICNLINK_VERSION_2_0     IcnLinkVersion = 2
+	ICNLINK_VERSION_2_2     IcnLinkVersion = 3
+	ICNLINK_VERSION_3_0     IcnLinkVersion = 4
+	ICNLINK_VERSION_3_1     IcnLinkVersion = 5
+	ICNLINK_VERSION_4_0     IcnLinkVersion = 6
+	ICNLINK_VERSION_5_0     IcnLinkVersion = 7
+)
+
+// EccCounterType as declared in hgml/hgml.h:647
 type EccCounterType int32
 
-// EccCounterType enumeration from hgml/hgml.h:719
+// EccCounterType enumeration from hgml/hgml.h:647
 const (
 	VOLATILE_ECC           EccCounterType = iota
 	AGGREGATE_ECC          EccCounterType = 1
 	ECC_COUNTER_TYPE_COUNT EccCounterType = 2
 )
 
-// ClockType as declared in hgml/hgml.h:735
+// ClockType as declared in hgml/hgml.h:657
 type ClockType int32
 
-// ClockType enumeration from hgml/hgml.h:735
+// ClockType enumeration from hgml/hgml.h:657
 const (
 	CLOCK_GRAPHICS ClockType = iota
 	CLOCK_SM       ClockType = 1
@@ -1072,10 +1572,10 @@ const (
 	CLOCK_COUNT    ClockType = 4
 )
 
-// ClockId as declared in hgml/hgml.h:750
+// ClockId as declared in hgml/hgml.h:667
 type ClockId int32
 
-// ClockId enumeration from hgml/hgml.h:750
+// ClockId enumeration from hgml/hgml.h:667
 const (
 	CLOCK_ID_CURRENT            ClockId = iota
 	CLOCK_ID_APP_CLOCK_TARGET   ClockId = 1
@@ -1084,19 +1584,18 @@ const (
 	CLOCK_ID_COUNT              ClockId = 4
 )
 
-// DriverModel as declared in hgml/hgml.h:762
+// DriverModel as declared in hgml/hgml.h:672
 type DriverModel int32
 
-// DriverModel enumeration from hgml/hgml.h:762
+// DriverModel enumeration from hgml/hgml.h:672
 const (
-	DRIVER_WDDM DriverModel = iota
-	DRIVER_WDM  DriverModel = 1
+	DRIVER_LINUX DriverModel = 255
 )
 
-// Pstates as declared in hgml/hgml.h:788
+// Pstates as declared in hgml/hgml.h:695
 type Pstates int32
 
-// Pstates enumeration from hgml/hgml.h:788
+// Pstates enumeration from hgml/hgml.h:695
 const (
 	PSTATE_0       Pstates = iota
 	PSTATE_1       Pstates = 1
@@ -1117,31 +1616,32 @@ const (
 	PSTATE_UNKNOWN Pstates = 32
 )
 
-// GpuOperationMode as declared in hgml/hgml.h:806
+// GpuOperationMode as declared in hgml/hgml.h:758
 type GpuOperationMode int32
 
-// GpuOperationMode enumeration from hgml/hgml.h:806
+// GpuOperationMode enumeration from hgml/hgml.h:758
 const (
 	GOM_ALL_ON  GpuOperationMode = iota
 	GOM_COMPUTE GpuOperationMode = 1
 	GOM_LOW_DP  GpuOperationMode = 2
 )
 
-// InforomObject as declared in hgml/hgml.h:819
+// InforomObject as declared in hgml/hgml.h:768
 type InforomObject int32
 
-// InforomObject enumeration from hgml/hgml.h:819
+// InforomObject enumeration from hgml/hgml.h:768
 const (
 	INFOROM_OEM   InforomObject = iota
 	INFOROM_ECC   InforomObject = 1
 	INFOROM_POWER InforomObject = 2
-	INFOROM_COUNT InforomObject = 3
+	INFOROM_DEN   InforomObject = 3
+	INFOROM_COUNT InforomObject = 4
 )
 
-// Return as declared in hgml/hgml.h:857
+// Return as declared in hgml/hgml.h:804
 type Return int32
 
-// Return enumeration from hgml/hgml.h:857
+// Return enumeration from hgml/hgml.h:804
 const (
 	SUCCESS                         Return = iota
 	ERROR_UNINITIALIZED             Return = 1
@@ -1172,13 +1672,15 @@ const (
 	ERROR_DEPRECATED                Return = 26
 	ERROR_NOT_READY                 Return = 27
 	ERROR_GPU_NOT_FOUND             Return = 28
+	ERROR_INVALID_STATE             Return = 29
+	ERROR_RESET_TYPE_NOT_SUPPORTED  Return = 30
 	ERROR_UNKNOWN                   Return = 999
 )
 
-// MemoryLocation as declared in hgml/hgml.h:875
+// MemoryLocation as declared in hgml/hgml.h:819
 type MemoryLocation int32
 
-// MemoryLocation enumeration from hgml/hgml.h:875
+// MemoryLocation enumeration from hgml/hgml.h:819
 const (
 	MEMORY_LOCATION_L1_CACHE       MemoryLocation = iota
 	MEMORY_LOCATION_L2_CACHE       MemoryLocation = 1
@@ -1192,30 +1694,41 @@ const (
 	MEMORY_LOCATION_COUNT          MemoryLocation = 8
 )
 
-// PageRetirementCause as declared in hgml/hgml.h:887
+// PageRetirementCause as declared in hgml/hgml.h:827
 type PageRetirementCause int32
 
-// PageRetirementCause enumeration from hgml/hgml.h:887
+// PageRetirementCause enumeration from hgml/hgml.h:827
 const (
 	PAGE_RETIREMENT_CAUSE_MULTIPLE_SINGLE_BIT_ECC_ERRORS PageRetirementCause = iota
 	PAGE_RETIREMENT_CAUSE_DOUBLE_BIT_ECC_ERROR           PageRetirementCause = 1
 	PAGE_RETIREMENT_CAUSE_COUNT                          PageRetirementCause = 2
 )
 
-// RestrictedAPI as declared in hgml/hgml.h:900
+// RestrictedAPI as declared in hgml/hgml.h:835
 type RestrictedAPI int32
 
-// RestrictedAPI enumeration from hgml/hgml.h:900
+// RestrictedAPI enumeration from hgml/hgml.h:835
 const (
 	RESTRICTED_API_SET_APPLICATION_CLOCKS  RestrictedAPI = iota
 	RESTRICTED_API_SET_AUTO_BOOSTED_CLOCKS RestrictedAPI = 1
 	RESTRICTED_API_COUNT                   RestrictedAPI = 2
 )
 
-// GpuVirtualizationMode as declared in hgml/hgml.h:923
+// GpuUtilizationDomainId as declared in hgml/hgml.h:991
+type GpuUtilizationDomainId int32
+
+// GpuUtilizationDomainId enumeration from hgml/hgml.h:991
+const (
+	GPU_UTILIZATION_DOMAIN_GPU GpuUtilizationDomainId = iota
+	GPU_UTILIZATION_DOMAIN_FB  GpuUtilizationDomainId = 1
+	GPU_UTILIZATION_DOMAIN_VID GpuUtilizationDomainId = 2
+	GPU_UTILIZATION_DOMAIN_BUS GpuUtilizationDomainId = 3
+)
+
+// GpuVirtualizationMode as declared in hgml/hgml.h:1036
 type GpuVirtualizationMode int32
 
-// GpuVirtualizationMode enumeration from hgml/hgml.h:923
+// GpuVirtualizationMode enumeration from hgml/hgml.h:1036
 const (
 	GPU_VIRTUALIZATION_MODE_NONE        GpuVirtualizationMode = iota
 	GPU_VIRTUALIZATION_MODE_PASSTHROUGH GpuVirtualizationMode = 1
@@ -1224,37 +1737,37 @@ const (
 	GPU_VIRTUALIZATION_MODE_HOST_VSGA   GpuVirtualizationMode = 4
 )
 
-// HostVgpuMode as declared in hgml/hgml.h:932
+// HostVgpuMode as declared in hgml/hgml.h:1042
 type HostVgpuMode int32
 
-// HostVgpuMode enumeration from hgml/hgml.h:932
+// HostVgpuMode enumeration from hgml/hgml.h:1042
 const (
 	HOST_VGPU_MODE_NON_SRIOV HostVgpuMode = iota
 	HOST_VGPU_MODE_SRIOV     HostVgpuMode = 1
 )
 
-// VgpuVmIdType as declared in hgml/hgml.h:940
+// VgpuVmIdType as declared in hgml/hgml.h:1048
 type VgpuVmIdType int32
 
-// VgpuVmIdType enumeration from hgml/hgml.h:940
+// VgpuVmIdType enumeration from hgml/hgml.h:1048
 const (
 	VGPU_VM_ID_DOMAIN_ID VgpuVmIdType = iota
 	VGPU_VM_ID_UUID      VgpuVmIdType = 1
 )
 
-// VgpuGuestInfoState as declared in hgml/hgml.h:949
+// VgpuGuestInfoState as declared in hgml/hgml.h:1054
 type VgpuGuestInfoState int32
 
-// VgpuGuestInfoState enumeration from hgml/hgml.h:949
+// VgpuGuestInfoState enumeration from hgml/hgml.h:1054
 const (
 	VGPU_INSTANCE_GUEST_INFO_STATE_UNINITIALIZED VgpuGuestInfoState = iota
 	VGPU_INSTANCE_GUEST_INFO_STATE_INITIALIZED   VgpuGuestInfoState = 1
 )
 
-// VgpuCapability as declared in hgml/hgml.h:971
+// VgpuCapability as declared in hgml/hgml.h:1065
 type VgpuCapability int32
 
-// VgpuCapability enumeration from hgml/hgml.h:971
+// VgpuCapability enumeration from hgml/hgml.h:1065
 const (
 	VGPU_CAP_ICNLINK_P2P          VgpuCapability = iota
 	VGPU_CAP_GPUDIRECT            VgpuCapability = 1
@@ -1264,80 +1777,82 @@ const (
 	VGPU_CAP_COUNT                VgpuCapability = 5
 )
 
-// VgpuDriverCapability as declared in hgml/hgml.h:981
+// VgpuDriverCapability as declared in hgml/hgml.h:1073
 type VgpuDriverCapability int32
 
-// VgpuDriverCapability enumeration from hgml/hgml.h:981
+// VgpuDriverCapability enumeration from hgml/hgml.h:1073
 const (
 	VGPU_DRIVER_CAP_HETEROGENEOUS_MULTI_VGPU VgpuDriverCapability = iota
-	VGPU_DRIVER_CAP_COUNT                    VgpuDriverCapability = 1
+	VGPU_DRIVER_CAP_WARM_UPDATE              VgpuDriverCapability = 1
+	VGPU_DRIVER_CAP_COUNT                    VgpuDriverCapability = 2
 )
 
-// DeviceVgpuCapability as declared in hgml/hgml.h:995
+// DeviceVgpuCapability as declared in hgml/hgml.h:1091
 type DeviceVgpuCapability int32
 
-// DeviceVgpuCapability enumeration from hgml/hgml.h:995
+// DeviceVgpuCapability enumeration from hgml/hgml.h:1091
 const (
 	DEVICE_VGPU_CAP_FRACTIONAL_MULTI_VGPU            DeviceVgpuCapability = iota
 	DEVICE_VGPU_CAP_HETEROGENEOUS_TIMESLICE_PROFILES DeviceVgpuCapability = 1
 	DEVICE_VGPU_CAP_HETEROGENEOUS_TIMESLICE_SIZES    DeviceVgpuCapability = 2
 	DEVICE_VGPU_CAP_READ_DEVICE_BUFFER_BW            DeviceVgpuCapability = 3
 	DEVICE_VGPU_CAP_WRITE_DEVICE_BUFFER_BW           DeviceVgpuCapability = 4
-	DEVICE_VGPU_CAP_COUNT                            DeviceVgpuCapability = 5
+	DEVICE_VGPU_CAP_DEVICE_STREAMING                 DeviceVgpuCapability = 5
+	DEVICE_VGPU_CAP_MINI_QUARTER_GPU                 DeviceVgpuCapability = 6
+	DEVICE_VGPU_CAP_COMPUTE_MEDIA_ENGINE_GPU         DeviceVgpuCapability = 7
+	DEVICE_VGPU_CAP_WARM_UPDATE                      DeviceVgpuCapability = 8
+	DEVICE_VGPU_CAP_HOMOGENEOUS_PLACEMENTS           DeviceVgpuCapability = 9
+	DEVICE_VGPU_CAP_MIG_TIMESLICING_SUPPORTED        DeviceVgpuCapability = 10
+	DEVICE_VGPU_CAP_MIG_TIMESLICING_ENABLED          DeviceVgpuCapability = 11
+	DEVICE_VGPU_CAP_COUNT                            DeviceVgpuCapability = 12
 )
 
-// GpuUtilizationDomainId as declared in hgml/hgml.h:1317
-type GpuUtilizationDomainId int32
+// DeviceGpuRecoveryAction as declared in hgml/hgml.h:1355
+type DeviceGpuRecoveryAction int32
 
-// GpuUtilizationDomainId enumeration from hgml/hgml.h:1317
+// DeviceGpuRecoveryAction enumeration from hgml/hgml.h:1355
 const (
-	GPU_UTILIZATION_DOMAIN_GPU GpuUtilizationDomainId = iota
-	GPU_UTILIZATION_DOMAIN_FB  GpuUtilizationDomainId = 1
-	GPU_UTILIZATION_DOMAIN_VID GpuUtilizationDomainId = 2
-	GPU_UTILIZATION_DOMAIN_BUS GpuUtilizationDomainId = 3
+	GPU_RECOVERY_ACTION_NONE            DeviceGpuRecoveryAction = iota
+	GPU_RECOVERY_ACTION_GPU_RESET       DeviceGpuRecoveryAction = 1
+	GPU_RECOVERY_ACTION_NODE_REBOOT     DeviceGpuRecoveryAction = 2
+	GPU_RECOVERY_ACTION_DRAIN_P2P       DeviceGpuRecoveryAction = 3
+	GPU_RECOVERY_ACTION_DRAIN_AND_RESET DeviceGpuRecoveryAction = 4
+	GPU_RECOVERY_ACTION_COLD_REBOOT     DeviceGpuRecoveryAction = 20
 )
 
-// OverclockingMode as declared in hgml/hgml.h:1724
-type OverclockingMode int32
-
-// OverclockingMode enumeration from hgml/hgml.h:1724
-const (
-	OVERCLOCKING_MODE_DEFAULT OverclockingMode = iota
-	OVERCLOCKING_MODE_ULTRA   OverclockingMode = 1
-)
-
-// FanState as declared in hgml/hgml.h:1733
+// FanState as declared in hgml/hgml.h:1833
 type FanState int32
 
-// FanState enumeration from hgml/hgml.h:1733
+// FanState enumeration from hgml/hgml.h:1833
 const (
 	FAN_NORMAL FanState = iota
 	FAN_FAILED FanState = 1
 )
 
-// LedColor as declared in hgml/hgml.h:1742
+// LedColor as declared in hgml/hgml.h:1839
 type LedColor int32
 
-// LedColor enumeration from hgml/hgml.h:1742
+// LedColor enumeration from hgml/hgml.h:1839
 const (
 	LED_COLOR_GREEN LedColor = iota
 	LED_COLOR_AMBER LedColor = 1
 )
 
-// EncoderType as declared in hgml/hgml.h:2103
+// EncoderType as declared in hgml/hgml.h:2022
 type EncoderType int32
 
-// EncoderType enumeration from hgml/hgml.h:2103
+// EncoderType enumeration from hgml/hgml.h:2022
 const (
-	ENCODER_QUERY_H264 EncoderType = iota
-	ENCODER_QUERY_HEVC EncoderType = 1
-	ENCODER_QUERY_AV1  EncoderType = 2
+	ENCODER_QUERY_H264    EncoderType = iota
+	ENCODER_QUERY_HEVC    EncoderType = 1
+	ENCODER_QUERY_AV1     EncoderType = 2
+	ENCODER_QUERY_UNKNOWN EncoderType = 255
 )
 
-// FBCSessionType as declared in hgml/hgml.h:2138
+// FBCSessionType as declared in hgml/hgml.h:2043
 type FBCSessionType int32
 
-// FBCSessionType enumeration from hgml/hgml.h:2138
+// FBCSessionType enumeration from hgml/hgml.h:2043
 const (
 	FBC_SESSION_TYPE_UNKNOWN FBCSessionType = iota
 	FBC_SESSION_TYPE_TOSYS   FBCSessionType = 1
@@ -1346,38 +1861,38 @@ const (
 	FBC_SESSION_TYPE_HWENC   FBCSessionType = 4
 )
 
-// DetachGpuState as declared in hgml/hgml.h:2191
+// DetachGpuState as declared in hgml/hgml.h:2078
 type DetachGpuState int32
 
-// DetachGpuState enumeration from hgml/hgml.h:2191
+// DetachGpuState enumeration from hgml/hgml.h:2078
 const (
 	DETACH_GPU_KEEP   DetachGpuState = iota
 	DETACH_GPU_REMOVE DetachGpuState = 1
 )
 
-// PcieLinkState as declared in hgml/hgml.h:2200
+// PcieLinkState as declared in hgml/hgml.h:2084
 type PcieLinkState int32
 
-// PcieLinkState enumeration from hgml/hgml.h:2200
+// PcieLinkState enumeration from hgml/hgml.h:2084
 const (
 	PCIE_LINK_KEEP      PcieLinkState = iota
 	PCIE_LINK_SHUT_DOWN PcieLinkState = 1
 )
 
-// ClockLimitId as declared in hgml/hgml.h:6325
+// ClockLimitId as declared in hgml/hgml.h:2342
 type ClockLimitId int32
 
-// ClockLimitId enumeration from hgml/hgml.h:6325
+// ClockLimitId enumeration from hgml/hgml.h:2342
 const (
 	CLOCK_LIMIT_ID_RANGE_START ClockLimitId = -256
 	CLOCK_LIMIT_ID_TDP         ClockLimitId = -255
 	CLOCK_LIMIT_ID_UNLIMITED   ClockLimitId = -254
 )
 
-// VgpuVmCompatibility as declared in hgml/hgml.h:8410
+// VgpuVmCompatibility as declared in hgml/hgml.h:2465
 type VgpuVmCompatibility int32
 
-// VgpuVmCompatibility enumeration from hgml/hgml.h:8410
+// VgpuVmCompatibility enumeration from hgml/hgml.h:2465
 const (
 	VGPU_VM_COMPATIBILITY_NONE      VgpuVmCompatibility = iota
 	VGPU_VM_COMPATIBILITY_COLD      VgpuVmCompatibility = 1
@@ -1386,10 +1901,10 @@ const (
 	VGPU_VM_COMPATIBILITY_LIVE      VgpuVmCompatibility = 8
 )
 
-// VgpuPgpuCompatibilityLimitCode as declared in hgml/hgml.h:8422
+// VgpuPgpuCompatibilityLimitCode as declared in hgml/hgml.h:2474
 type VgpuPgpuCompatibilityLimitCode int32
 
-// VgpuPgpuCompatibilityLimitCode enumeration from hgml/hgml.h:8422
+// VgpuPgpuCompatibilityLimitCode enumeration from hgml/hgml.h:2474
 const (
 	VGPU_COMPATIBILITY_LIMIT_NONE         VgpuPgpuCompatibilityLimitCode = iota
 	VGPU_COMPATIBILITY_LIMIT_HOST_DRIVER  VgpuPgpuCompatibilityLimitCode = 1
@@ -1398,110 +1913,216 @@ const (
 	VGPU_COMPATIBILITY_LIMIT_OTHER        VgpuPgpuCompatibilityLimitCode = -2147483648
 )
 
-// ThermalTarget as declared in hgml/hgml.h:510
-type ThermalTarget int32
-
-// ThermalTarget enumeration from hgml/hgml.h:510
-const (
-	THERMAL_TARGET_NONE    ThermalTarget = iota
-	THERMAL_TARGET_UNKNOWN ThermalTarget = -1
-)
-
-// ThermalController as declared in hgml/hgml.h:516
-type ThermalController int32
-
-// ThermalController enumeration from hgml/hgml.h:516
-const (
-	THERMAL_CONTROLLER_NONE    ThermalController = iota
-	THERMAL_CONTROLLER_UNKNOWN ThermalController = -1
-)
-
-// GridLicenseFeatureCode as declared in hgml/hgml.h:957
-type GridLicenseFeatureCode int32
-
-// GridLicenseFeatureCode enumeration from hgml/hgml.h:957
-const (
-	GRID_LICENSE_FEATURE_CODE_UNKNOWN GridLicenseFeatureCode = iota
-	GRID_LICENSE_FEATURE_CODE_VGPU    GridLicenseFeatureCode = 1
-)
-
-// GpmMetricId as declared in hgml/hgml.h:10043
+// GpmMetricId as declared in hgml/hgml.h:2894
 type GpmMetricId int32
 
-// GpmMetricId enumeration from hgml/hgml.h:10043
+// GpmMetricId enumeration from hgml/hgml.h:2894
 const (
-	GPM_METRIC_GRAPHICS_UTIL            GpmMetricId = 1
-	GPM_METRIC_SM_UTIL                  GpmMetricId = 2
-	GPM_METRIC_SM_OCCUPANCY             GpmMetricId = 3
-	GPM_METRIC_INTEGER_UTIL             GpmMetricId = 4
-	GPM_METRIC_ANY_TENSOR_UTIL          GpmMetricId = 5
-	GPM_METRIC_DFMA_TENSOR_UTIL         GpmMetricId = 6
-	GPM_METRIC_HMMA_TENSOR_UTIL         GpmMetricId = 7
-	GPM_METRIC_IMMA_TENSOR_UTIL         GpmMetricId = 9
-	GPM_METRIC_DRAM_BW_UTIL             GpmMetricId = 10
-	GPM_METRIC_FP64_UTIL                GpmMetricId = 11
-	GPM_METRIC_FP32_UTIL                GpmMetricId = 12
-	GPM_METRIC_FP16_UTIL                GpmMetricId = 13
-	GPM_METRIC_PCIE_TX_PER_SEC          GpmMetricId = 20
-	GPM_METRIC_PCIE_RX_PER_SEC          GpmMetricId = 21
-	GPM_METRIC_HGDEC_0_UTIL             GpmMetricId = 30
-	GPM_METRIC_HGDEC_1_UTIL             GpmMetricId = 31
-	GPM_METRIC_HGDEC_2_UTIL             GpmMetricId = 32
-	GPM_METRIC_HGDEC_3_UTIL             GpmMetricId = 33
-	GPM_METRIC_HGDEC_4_UTIL             GpmMetricId = 34
-	GPM_METRIC_HGDEC_5_UTIL             GpmMetricId = 35
-	GPM_METRIC_HGDEC_6_UTIL             GpmMetricId = 36
-	GPM_METRIC_HGDEC_7_UTIL             GpmMetricId = 37
-	GPM_METRIC_HGJPG_0_UTIL             GpmMetricId = 40
-	GPM_METRIC_HGJPG_1_UTIL             GpmMetricId = 41
-	GPM_METRIC_HGJPG_2_UTIL             GpmMetricId = 42
-	GPM_METRIC_HGJPG_3_UTIL             GpmMetricId = 43
-	GPM_METRIC_HGJPG_4_UTIL             GpmMetricId = 44
-	GPM_METRIC_HGJPG_5_UTIL             GpmMetricId = 45
-	GPM_METRIC_HGJPG_6_UTIL             GpmMetricId = 46
-	GPM_METRIC_HGJPG_7_UTIL             GpmMetricId = 47
-	GPM_METRIC_HGOFA_0_UTIL             GpmMetricId = 50
-	GPM_METRIC_ICNLINK_TOTAL_RX_PER_SEC GpmMetricId = 60
-	GPM_METRIC_ICNLINK_TOTAL_TX_PER_SEC GpmMetricId = 61
-	GPM_METRIC_ICNLINK_L0_RX_PER_SEC    GpmMetricId = 62
-	GPM_METRIC_ICNLINK_L0_TX_PER_SEC    GpmMetricId = 63
-	GPM_METRIC_ICNLINK_L1_RX_PER_SEC    GpmMetricId = 64
-	GPM_METRIC_ICNLINK_L1_TX_PER_SEC    GpmMetricId = 65
-	GPM_METRIC_ICNLINK_L2_RX_PER_SEC    GpmMetricId = 66
-	GPM_METRIC_ICNLINK_L2_TX_PER_SEC    GpmMetricId = 67
-	GPM_METRIC_ICNLINK_L3_RX_PER_SEC    GpmMetricId = 68
-	GPM_METRIC_ICNLINK_L3_TX_PER_SEC    GpmMetricId = 69
-	GPM_METRIC_ICNLINK_L4_RX_PER_SEC    GpmMetricId = 70
-	GPM_METRIC_ICNLINK_L4_TX_PER_SEC    GpmMetricId = 71
-	GPM_METRIC_ICNLINK_L5_RX_PER_SEC    GpmMetricId = 72
-	GPM_METRIC_ICNLINK_L5_TX_PER_SEC    GpmMetricId = 73
-	GPM_METRIC_ICNLINK_L6_RX_PER_SEC    GpmMetricId = 74
-	GPM_METRIC_ICNLINK_L6_TX_PER_SEC    GpmMetricId = 75
-	GPM_METRIC_ICNLINK_L7_RX_PER_SEC    GpmMetricId = 76
-	GPM_METRIC_ICNLINK_L7_TX_PER_SEC    GpmMetricId = 77
-	GPM_METRIC_ICNLINK_L8_RX_PER_SEC    GpmMetricId = 78
-	GPM_METRIC_ICNLINK_L8_TX_PER_SEC    GpmMetricId = 79
-	GPM_METRIC_ICNLINK_L9_RX_PER_SEC    GpmMetricId = 80
-	GPM_METRIC_ICNLINK_L9_TX_PER_SEC    GpmMetricId = 81
-	GPM_METRIC_ICNLINK_L10_RX_PER_SEC   GpmMetricId = 82
-	GPM_METRIC_ICNLINK_L10_TX_PER_SEC   GpmMetricId = 83
-	GPM_METRIC_ICNLINK_L11_RX_PER_SEC   GpmMetricId = 84
-	GPM_METRIC_ICNLINK_L11_TX_PER_SEC   GpmMetricId = 85
-	GPM_METRIC_ICNLINK_L12_RX_PER_SEC   GpmMetricId = 86
-	GPM_METRIC_ICNLINK_L12_TX_PER_SEC   GpmMetricId = 87
-	GPM_METRIC_ICNLINK_L13_RX_PER_SEC   GpmMetricId = 88
-	GPM_METRIC_ICNLINK_L13_TX_PER_SEC   GpmMetricId = 89
-	GPM_METRIC_ICNLINK_L14_RX_PER_SEC   GpmMetricId = 90
-	GPM_METRIC_ICNLINK_L14_TX_PER_SEC   GpmMetricId = 91
-	GPM_METRIC_ICNLINK_L15_RX_PER_SEC   GpmMetricId = 92
-	GPM_METRIC_ICNLINK_L15_TX_PER_SEC   GpmMetricId = 93
-	GPM_METRIC_ICNLINK_L16_RX_PER_SEC   GpmMetricId = 94
-	GPM_METRIC_ICNLINK_L16_TX_PER_SEC   GpmMetricId = 95
-	GPM_METRIC_ICNLINK_L17_RX_PER_SEC   GpmMetricId = 96
-	GPM_METRIC_ICNLINK_L17_TX_PER_SEC   GpmMetricId = 97
-	GPM_METRIC_KSD_HIT_RATE             GpmMetricId = 200
-	GPM_METRIC_KVD_HIT_RATE             GpmMetricId = 201
-	GPM_METRIC_L2_HIT_RATE              GpmMetricId = 202
-	GPM_METRIC_LLC_HIT_RATE             GpmMetricId = 203
-	GPM_METRIC_MAX                      GpmMetricId = 250
+	GPM_METRIC_GRAPHICS_UTIL               GpmMetricId = 1
+	GPM_METRIC_SM_UTIL                     GpmMetricId = 2
+	GPM_METRIC_SM_OCCUPANCY                GpmMetricId = 3
+	GPM_METRIC_INTEGER_UTIL                GpmMetricId = 4
+	GPM_METRIC_ANY_TENSOR_UTIL             GpmMetricId = 5
+	GPM_METRIC_DFMA_TENSOR_UTIL            GpmMetricId = 6
+	GPM_METRIC_HMMA_TENSOR_UTIL            GpmMetricId = 7
+	GPM_METRIC_IMMA_TENSOR_UTIL            GpmMetricId = 9
+	GPM_METRIC_DRAM_BW_UTIL                GpmMetricId = 10
+	GPM_METRIC_FP64_UTIL                   GpmMetricId = 11
+	GPM_METRIC_FP32_UTIL                   GpmMetricId = 12
+	GPM_METRIC_FP16_UTIL                   GpmMetricId = 13
+	GPM_METRIC_PCIE_TX_PER_SEC             GpmMetricId = 20
+	GPM_METRIC_PCIE_RX_PER_SEC             GpmMetricId = 21
+	GPM_METRIC_HGDEC_0_UTIL                GpmMetricId = 30
+	GPM_METRIC_HGDEC_1_UTIL                GpmMetricId = 31
+	GPM_METRIC_HGDEC_2_UTIL                GpmMetricId = 32
+	GPM_METRIC_HGDEC_3_UTIL                GpmMetricId = 33
+	GPM_METRIC_HGDEC_4_UTIL                GpmMetricId = 34
+	GPM_METRIC_HGDEC_5_UTIL                GpmMetricId = 35
+	GPM_METRIC_HGDEC_6_UTIL                GpmMetricId = 36
+	GPM_METRIC_HGDEC_7_UTIL                GpmMetricId = 37
+	GPM_METRIC_HGJPG_0_UTIL                GpmMetricId = 40
+	GPM_METRIC_HGJPG_1_UTIL                GpmMetricId = 41
+	GPM_METRIC_HGJPG_2_UTIL                GpmMetricId = 42
+	GPM_METRIC_HGJPG_3_UTIL                GpmMetricId = 43
+	GPM_METRIC_HGJPG_4_UTIL                GpmMetricId = 44
+	GPM_METRIC_HGJPG_5_UTIL                GpmMetricId = 45
+	GPM_METRIC_HGJPG_6_UTIL                GpmMetricId = 46
+	GPM_METRIC_HGJPG_7_UTIL                GpmMetricId = 47
+	GPM_METRIC_HGOFA_0_UTIL                GpmMetricId = 50
+	GPM_METRIC_ICNLINK_TOTAL_RX_PER_SEC    GpmMetricId = 60
+	GPM_METRIC_ICNLINK_TOTAL_TX_PER_SEC    GpmMetricId = 61
+	GPM_METRIC_ICNLINK_L0_RX_PER_SEC       GpmMetricId = 62
+	GPM_METRIC_ICNLINK_L0_TX_PER_SEC       GpmMetricId = 63
+	GPM_METRIC_ICNLINK_L1_RX_PER_SEC       GpmMetricId = 64
+	GPM_METRIC_ICNLINK_L1_TX_PER_SEC       GpmMetricId = 65
+	GPM_METRIC_ICNLINK_L2_RX_PER_SEC       GpmMetricId = 66
+	GPM_METRIC_ICNLINK_L2_TX_PER_SEC       GpmMetricId = 67
+	GPM_METRIC_ICNLINK_L3_RX_PER_SEC       GpmMetricId = 68
+	GPM_METRIC_ICNLINK_L3_TX_PER_SEC       GpmMetricId = 69
+	GPM_METRIC_ICNLINK_L4_RX_PER_SEC       GpmMetricId = 70
+	GPM_METRIC_ICNLINK_L4_TX_PER_SEC       GpmMetricId = 71
+	GPM_METRIC_ICNLINK_L5_RX_PER_SEC       GpmMetricId = 72
+	GPM_METRIC_ICNLINK_L5_TX_PER_SEC       GpmMetricId = 73
+	GPM_METRIC_ICNLINK_L6_RX_PER_SEC       GpmMetricId = 74
+	GPM_METRIC_ICNLINK_L6_TX_PER_SEC       GpmMetricId = 75
+	GPM_METRIC_ICNLINK_L7_RX_PER_SEC       GpmMetricId = 76
+	GPM_METRIC_ICNLINK_L7_TX_PER_SEC       GpmMetricId = 77
+	GPM_METRIC_ICNLINK_L8_RX_PER_SEC       GpmMetricId = 78
+	GPM_METRIC_ICNLINK_L8_TX_PER_SEC       GpmMetricId = 79
+	GPM_METRIC_ICNLINK_L9_RX_PER_SEC       GpmMetricId = 80
+	GPM_METRIC_ICNLINK_L9_TX_PER_SEC       GpmMetricId = 81
+	GPM_METRIC_ICNLINK_L10_RX_PER_SEC      GpmMetricId = 82
+	GPM_METRIC_ICNLINK_L10_TX_PER_SEC      GpmMetricId = 83
+	GPM_METRIC_ICNLINK_L11_RX_PER_SEC      GpmMetricId = 84
+	GPM_METRIC_ICNLINK_L11_TX_PER_SEC      GpmMetricId = 85
+	GPM_METRIC_ICNLINK_L12_RX_PER_SEC      GpmMetricId = 86
+	GPM_METRIC_ICNLINK_L12_TX_PER_SEC      GpmMetricId = 87
+	GPM_METRIC_ICNLINK_L13_RX_PER_SEC      GpmMetricId = 88
+	GPM_METRIC_ICNLINK_L13_TX_PER_SEC      GpmMetricId = 89
+	GPM_METRIC_ICNLINK_L14_RX_PER_SEC      GpmMetricId = 90
+	GPM_METRIC_ICNLINK_L14_TX_PER_SEC      GpmMetricId = 91
+	GPM_METRIC_ICNLINK_L15_RX_PER_SEC      GpmMetricId = 92
+	GPM_METRIC_ICNLINK_L15_TX_PER_SEC      GpmMetricId = 93
+	GPM_METRIC_ICNLINK_L16_RX_PER_SEC      GpmMetricId = 94
+	GPM_METRIC_ICNLINK_L16_TX_PER_SEC      GpmMetricId = 95
+	GPM_METRIC_ICNLINK_L17_RX_PER_SEC      GpmMetricId = 96
+	GPM_METRIC_ICNLINK_L17_TX_PER_SEC      GpmMetricId = 97
+	GPM_METRIC_C2C_TOTAL_TX_PER_SEC        GpmMetricId = 100
+	GPM_METRIC_C2C_TOTAL_RX_PER_SEC        GpmMetricId = 101
+	GPM_METRIC_C2C_DATA_TX_PER_SEC         GpmMetricId = 102
+	GPM_METRIC_C2C_DATA_RX_PER_SEC         GpmMetricId = 103
+	GPM_METRIC_C2C_LINK0_TOTAL_TX_PER_SEC  GpmMetricId = 104
+	GPM_METRIC_C2C_LINK0_TOTAL_RX_PER_SEC  GpmMetricId = 105
+	GPM_METRIC_C2C_LINK0_DATA_TX_PER_SEC   GpmMetricId = 106
+	GPM_METRIC_C2C_LINK0_DATA_RX_PER_SEC   GpmMetricId = 107
+	GPM_METRIC_C2C_LINK1_TOTAL_TX_PER_SEC  GpmMetricId = 108
+	GPM_METRIC_C2C_LINK1_TOTAL_RX_PER_SEC  GpmMetricId = 109
+	GPM_METRIC_C2C_LINK1_DATA_TX_PER_SEC   GpmMetricId = 110
+	GPM_METRIC_C2C_LINK1_DATA_RX_PER_SEC   GpmMetricId = 111
+	GPM_METRIC_C2C_LINK2_TOTAL_TX_PER_SEC  GpmMetricId = 112
+	GPM_METRIC_C2C_LINK2_TOTAL_RX_PER_SEC  GpmMetricId = 113
+	GPM_METRIC_C2C_LINK2_DATA_TX_PER_SEC   GpmMetricId = 114
+	GPM_METRIC_C2C_LINK2_DATA_RX_PER_SEC   GpmMetricId = 115
+	GPM_METRIC_C2C_LINK3_TOTAL_TX_PER_SEC  GpmMetricId = 116
+	GPM_METRIC_C2C_LINK3_TOTAL_RX_PER_SEC  GpmMetricId = 117
+	GPM_METRIC_C2C_LINK3_DATA_TX_PER_SEC   GpmMetricId = 118
+	GPM_METRIC_C2C_LINK3_DATA_RX_PER_SEC   GpmMetricId = 119
+	GPM_METRIC_C2C_LINK4_TOTAL_TX_PER_SEC  GpmMetricId = 120
+	GPM_METRIC_C2C_LINK4_TOTAL_RX_PER_SEC  GpmMetricId = 121
+	GPM_METRIC_C2C_LINK4_DATA_TX_PER_SEC   GpmMetricId = 122
+	GPM_METRIC_C2C_LINK4_DATA_RX_PER_SEC   GpmMetricId = 123
+	GPM_METRIC_C2C_LINK5_TOTAL_TX_PER_SEC  GpmMetricId = 124
+	GPM_METRIC_C2C_LINK5_TOTAL_RX_PER_SEC  GpmMetricId = 125
+	GPM_METRIC_C2C_LINK5_DATA_TX_PER_SEC   GpmMetricId = 126
+	GPM_METRIC_C2C_LINK5_DATA_RX_PER_SEC   GpmMetricId = 127
+	GPM_METRIC_C2C_LINK6_TOTAL_TX_PER_SEC  GpmMetricId = 128
+	GPM_METRIC_C2C_LINK6_TOTAL_RX_PER_SEC  GpmMetricId = 129
+	GPM_METRIC_C2C_LINK6_DATA_TX_PER_SEC   GpmMetricId = 130
+	GPM_METRIC_C2C_LINK6_DATA_RX_PER_SEC   GpmMetricId = 131
+	GPM_METRIC_C2C_LINK7_TOTAL_TX_PER_SEC  GpmMetricId = 132
+	GPM_METRIC_C2C_LINK7_TOTAL_RX_PER_SEC  GpmMetricId = 133
+	GPM_METRIC_C2C_LINK7_DATA_TX_PER_SEC   GpmMetricId = 134
+	GPM_METRIC_C2C_LINK7_DATA_RX_PER_SEC   GpmMetricId = 135
+	GPM_METRIC_C2C_LINK8_TOTAL_TX_PER_SEC  GpmMetricId = 136
+	GPM_METRIC_C2C_LINK8_TOTAL_RX_PER_SEC  GpmMetricId = 137
+	GPM_METRIC_C2C_LINK8_DATA_TX_PER_SEC   GpmMetricId = 138
+	GPM_METRIC_C2C_LINK8_DATA_RX_PER_SEC   GpmMetricId = 139
+	GPM_METRIC_C2C_LINK9_TOTAL_TX_PER_SEC  GpmMetricId = 140
+	GPM_METRIC_C2C_LINK9_TOTAL_RX_PER_SEC  GpmMetricId = 141
+	GPM_METRIC_C2C_LINK9_DATA_TX_PER_SEC   GpmMetricId = 142
+	GPM_METRIC_C2C_LINK9_DATA_RX_PER_SEC   GpmMetricId = 143
+	GPM_METRIC_C2C_LINK10_TOTAL_TX_PER_SEC GpmMetricId = 144
+	GPM_METRIC_C2C_LINK10_TOTAL_RX_PER_SEC GpmMetricId = 145
+	GPM_METRIC_C2C_LINK10_DATA_TX_PER_SEC  GpmMetricId = 146
+	GPM_METRIC_C2C_LINK10_DATA_RX_PER_SEC  GpmMetricId = 147
+	GPM_METRIC_C2C_LINK11_TOTAL_TX_PER_SEC GpmMetricId = 148
+	GPM_METRIC_C2C_LINK11_TOTAL_RX_PER_SEC GpmMetricId = 149
+	GPM_METRIC_C2C_LINK11_DATA_TX_PER_SEC  GpmMetricId = 150
+	GPM_METRIC_C2C_LINK11_DATA_RX_PER_SEC  GpmMetricId = 151
+	GPM_METRIC_C2C_LINK12_TOTAL_TX_PER_SEC GpmMetricId = 152
+	GPM_METRIC_C2C_LINK12_TOTAL_RX_PER_SEC GpmMetricId = 153
+	GPM_METRIC_C2C_LINK12_DATA_TX_PER_SEC  GpmMetricId = 154
+	GPM_METRIC_C2C_LINK12_DATA_RX_PER_SEC  GpmMetricId = 155
+	GPM_METRIC_C2C_LINK13_TOTAL_TX_PER_SEC GpmMetricId = 156
+	GPM_METRIC_C2C_LINK13_TOTAL_RX_PER_SEC GpmMetricId = 157
+	GPM_METRIC_C2C_LINK13_DATA_TX_PER_SEC  GpmMetricId = 158
+	GPM_METRIC_C2C_LINK13_DATA_RX_PER_SEC  GpmMetricId = 159
+	GPM_METRIC_HOSTMEM_CACHE_HIT           GpmMetricId = 160
+	GPM_METRIC_HOSTMEM_CACHE_MISS          GpmMetricId = 161
+	GPM_METRIC_PEERMEM_CACHE_HIT           GpmMetricId = 162
+	GPM_METRIC_PEERMEM_CACHE_MISS          GpmMetricId = 163
+	GPM_METRIC_DRAM_CACHE_HIT              GpmMetricId = 164
+	GPM_METRIC_DRAM_CACHE_MISS             GpmMetricId = 165
+	GPM_METRIC_HGENC_0_UTIL                GpmMetricId = 166
+	GPM_METRIC_HGENC_1_UTIL                GpmMetricId = 167
+	GPM_METRIC_HGENC_2_UTIL                GpmMetricId = 168
+	GPM_METRIC_HGENC_3_UTIL                GpmMetricId = 169
+	GPM_METRIC_GR0_CTXSW_CYCLES_ELAPSED    GpmMetricId = 170
+	GPM_METRIC_GR0_CTXSW_CYCLES_ACTIVE     GpmMetricId = 171
+	GPM_METRIC_GR0_CTXSW_REQUESTS          GpmMetricId = 172
+	GPM_METRIC_GR0_CTXSW_CYCLES_PER_REQ    GpmMetricId = 173
+	GPM_METRIC_GR0_CTXSW_ACTIVE_PCT        GpmMetricId = 174
+	GPM_METRIC_GR1_CTXSW_CYCLES_ELAPSED    GpmMetricId = 175
+	GPM_METRIC_GR1_CTXSW_CYCLES_ACTIVE     GpmMetricId = 176
+	GPM_METRIC_GR1_CTXSW_REQUESTS          GpmMetricId = 177
+	GPM_METRIC_GR1_CTXSW_CYCLES_PER_REQ    GpmMetricId = 178
+	GPM_METRIC_GR1_CTXSW_ACTIVE_PCT        GpmMetricId = 179
+	GPM_METRIC_GR2_CTXSW_CYCLES_ELAPSED    GpmMetricId = 180
+	GPM_METRIC_GR2_CTXSW_CYCLES_ACTIVE     GpmMetricId = 181
+	GPM_METRIC_GR2_CTXSW_REQUESTS          GpmMetricId = 182
+	GPM_METRIC_GR2_CTXSW_CYCLES_PER_REQ    GpmMetricId = 183
+	GPM_METRIC_GR2_CTXSW_ACTIVE_PCT        GpmMetricId = 184
+	GPM_METRIC_GR3_CTXSW_CYCLES_ELAPSED    GpmMetricId = 185
+	GPM_METRIC_GR3_CTXSW_CYCLES_ACTIVE     GpmMetricId = 186
+	GPM_METRIC_GR3_CTXSW_REQUESTS          GpmMetricId = 187
+	GPM_METRIC_GR3_CTXSW_CYCLES_PER_REQ    GpmMetricId = 188
+	GPM_METRIC_GR3_CTXSW_ACTIVE_PCT        GpmMetricId = 189
+	GPM_METRIC_GR4_CTXSW_CYCLES_ELAPSED    GpmMetricId = 190
+	GPM_METRIC_GR4_CTXSW_CYCLES_ACTIVE     GpmMetricId = 191
+	GPM_METRIC_GR4_CTXSW_REQUESTS          GpmMetricId = 192
+	GPM_METRIC_GR4_CTXSW_CYCLES_PER_REQ    GpmMetricId = 193
+	GPM_METRIC_GR4_CTXSW_ACTIVE_PCT        GpmMetricId = 194
+	GPM_METRIC_GR5_CTXSW_CYCLES_ELAPSED    GpmMetricId = 195
+	GPM_METRIC_GR5_CTXSW_CYCLES_ACTIVE     GpmMetricId = 196
+	GPM_METRIC_GR5_CTXSW_REQUESTS          GpmMetricId = 197
+	GPM_METRIC_GR5_CTXSW_CYCLES_PER_REQ    GpmMetricId = 198
+	GPM_METRIC_GR5_CTXSW_ACTIVE_PCT        GpmMetricId = 199
+	GPM_METRIC_GR6_CTXSW_CYCLES_ELAPSED    GpmMetricId = 200
+	GPM_METRIC_GR6_CTXSW_CYCLES_ACTIVE     GpmMetricId = 201
+	GPM_METRIC_GR6_CTXSW_REQUESTS          GpmMetricId = 202
+	GPM_METRIC_GR6_CTXSW_CYCLES_PER_REQ    GpmMetricId = 203
+	GPM_METRIC_GR6_CTXSW_ACTIVE_PCT        GpmMetricId = 204
+	GPM_METRIC_GR7_CTXSW_CYCLES_ELAPSED    GpmMetricId = 205
+	GPM_METRIC_GR7_CTXSW_CYCLES_ACTIVE     GpmMetricId = 206
+	GPM_METRIC_GR7_CTXSW_REQUESTS          GpmMetricId = 207
+	GPM_METRIC_GR7_CTXSW_CYCLES_PER_REQ    GpmMetricId = 208
+	GPM_METRIC_GR7_CTXSW_ACTIVE_PCT        GpmMetricId = 209
+	GPM_METRIC_KSD_HIT_RATE                GpmMetricId = 2048
+	GPM_METRIC_KVD_HIT_RATE                GpmMetricId = 2049
+	GPM_METRIC_L2_HIT_RATE                 GpmMetricId = 2050
+	GPM_METRIC_LLC_HIT_RATE                GpmMetricId = 2051
+	GPM_METRIC_MAX                         GpmMetricId = 2052
+)
+
+// PowerProfileType as declared in hgml/hgml.h:2982
+type PowerProfileType int32
+
+// PowerProfileType enumeration from hgml/hgml.h:2982
+const (
+	POWER_PROFILE_MAX_P         PowerProfileType = iota
+	POWER_PROFILE_MAX_Q         PowerProfileType = 1
+	POWER_PROFILE_COMPUTE       PowerProfileType = 2
+	POWER_PROFILE_MEMORY_BOUND  PowerProfileType = 3
+	POWER_PROFILE_NETWORK       PowerProfileType = 4
+	POWER_PROFILE_BALANCED      PowerProfileType = 5
+	POWER_PROFILE_LLM_INFERENCE PowerProfileType = 6
+	POWER_PROFILE_LLM_TRAINING  PowerProfileType = 7
+	POWER_PROFILE_RBM           PowerProfileType = 8
+	POWER_PROFILE_DCPCIE        PowerProfileType = 9
+	POWER_PROFILE_HMMA_SPARSE   PowerProfileType = 10
+	POWER_PROFILE_HMMA_DENSE    PowerProfileType = 11
+	POWER_PROFILE_SYNC_BALANCED PowerProfileType = 12
+	POWER_PROFILE_HPC           PowerProfileType = 13
+	POWER_PROFILE_MIG           PowerProfileType = 14
+	POWER_PROFILE_MAX           PowerProfileType = 15
 )

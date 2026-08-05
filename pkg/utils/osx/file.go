@@ -334,6 +334,70 @@ func DurableRemove(path string) error {
 	return syncDir(filepath.Dir(p))
 }
 
+// DurableWrite atomically replaces the file at path with data, and makes the replacement
+// durable: it writes a temporary file beside the target, syncs it, renames it into place and
+// syncs the parent directory. A concurrent reader therefore observes either the previous
+// contents or the complete new ones, never a partial record, and once the call returns the
+// replacement survives an unclean shutdown.
+//
+// Both syncs are load-bearing. A rename is journaled while the data blocks it points at are
+// not, so a crash inside the writeback window would otherwise leave the new name published
+// over a truncated or zero-length file — a file that exists, parses as nothing, and is
+// indistinguishable from one written that way on purpose.
+//
+// The parent directory must already exist; unlike WriteFile this creates nothing, so it can
+// never decide a directory's permissions on a caller's behalf. The temporary file is named after
+// the target, so one a crash leaves behind names what it was replacing.
+//
+// An error does not always mean the target is untouched, and a caller that retries needs to know
+// which it got. Every failure up to and including the rename leaves the previous contents in
+// place and no temporary file behind. A failure from the final directory sync is the exception:
+// the replacement is already published and readable, and what could not be confirmed is only
+// that the rename itself survives an unclean shutdown. Retrying is safe either way.
+func DurableWrite(path string, data []byte, perm os.FileMode) error {
+	p := filepath.Clean(path)
+	p = InlineTilde(p)
+
+	dir := filepath.Dir(p)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(p)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+
+	// Every step below acts through the handle rather than the path, so none of them can land on a
+	// file some other writer has since put at that name, and each one that fails takes the
+	// temporary file with it.
+	fail := func(err error) error {
+		Close(tmp)
+		_ = os.Remove(name)
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fail(err)
+	}
+	// The mode is set BEFORE the sync, not after: a sync flushes the inode as well as the data, so
+	// the mode reaching disk is part of the same guarantee. Chmod'ing afterwards would leave a crash
+	// in that window publishing the file under the temporary file's own creation mode (0600) instead
+	// of perm — harmless for a record only its writer reads, but not for one a container must read.
+	if err := tmp.Chmod(perm); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fail(err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+
+	if err := os.Rename(name, p); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	return syncDir(dir)
+}
+
 func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {

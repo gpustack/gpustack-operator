@@ -20,392 +20,47 @@ import (
 	"unsafe"
 )
 
-// hgmlInit_v2 function as declared in hgml/hgml.h:2376
-func hgmlInit_v2() Return {
-	__ret := C.hgmlInit_v2()
+// hgmlComputeInstanceDestroy function as declared in hgml/hgml.h:3051
+func hgmlComputeInstanceDestroy(hgmlComputeInstance hgmlComputeInstance) Return {
+	chgmlComputeInstance, chgmlComputeInstanceAllocMap := *(*C.hgmlComputeInstance_t)(unsafe.Pointer(&hgmlComputeInstance)), cgoAllocsUnknown
+	__ret := C.hgmlComputeInstanceDestroy(chgmlComputeInstance)
+	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlInitWithFlags function as declared in hgml/hgml.h:2393
-func hgmlInitWithFlags(Flags uint32) Return {
-	cFlags, cFlagsAllocMap := (C.uint)(Flags), cgoAllocsUnknown
-	__ret := C.hgmlInitWithFlags(cFlags)
-	runtime.KeepAlive(cFlagsAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlShutdown function as declared in hgml/hgml.h:2410
-func hgmlShutdown() Return {
-	__ret := C.hgmlShutdown()
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlErrorString function as declared in hgml/hgml.h:2431
-func hgmlErrorString(Result Return) string {
-	cResult, cResultAllocMap := (C.hgmlReturn_t)(Result), cgoAllocsUnknown
-	__ret := C.hgmlErrorString(cResult)
-	runtime.KeepAlive(cResultAllocMap)
-	__v := packPCharString(__ret)
-	return __v
-}
-
-// hgmlSystemGetDriverVersion function as declared in hgml/hgml.h:2518
-func hgmlSystemGetDriverVersion(Version *byte, Length uint32) Return {
-	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetDriverVersion(cVersion, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cVersionAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetHGMLVersion function as declared in hgml/hgml.h:2536
-func hgmlSystemGetHGMLVersion(Version *byte, Length uint32) Return {
-	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetHGMLVersion(cVersion, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cVersionAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetHggcDriverVersion function as declared in hgml/hgml.h:2552
-func hgmlSystemGetHggcDriverVersion(HggcDriverVersion *int32) Return {
-	cHggcDriverVersion, cHggcDriverVersionAllocMap := (*C.int)(unsafe.Pointer(HggcDriverVersion)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetHggcDriverVersion(cHggcDriverVersion)
-	runtime.KeepAlive(cHggcDriverVersionAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetHggcDriverVersion_v2 function as declared in hgml/hgml.h:2569
-func hgmlSystemGetHggcDriverVersion_v2(HggcDriverVersion *int32) Return {
-	cHggcDriverVersion, cHggcDriverVersionAllocMap := (*C.int)(unsafe.Pointer(HggcDriverVersion)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetHggcDriverVersion_v2(cHggcDriverVersion)
-	runtime.KeepAlive(cHggcDriverVersionAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetProcessName function as declared in hgml/hgml.h:2597
-func hgmlSystemGetProcessName(Pid uint32, Name *byte, Length uint32) Return {
-	cPid, cPidAllocMap := (C.uint)(Pid), cgoAllocsUnknown
-	cName, cNameAllocMap := (*C.char)(unsafe.Pointer(Name)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetProcessName(cPid, cName, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cNameAllocMap)
-	runtime.KeepAlive(cPidAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetHicVersion function as declared in hgml/hgml.h:2616
-func hgmlSystemGetHicVersion(HwbcCount *uint32, HwbcEntries *HwbcEntry) Return {
-	cHwbcCount, cHwbcCountAllocMap := (*C.uint)(unsafe.Pointer(HwbcCount)), cgoAllocsUnknown
-	cHwbcEntries, cHwbcEntriesAllocMap := (*C.hgmlHwbcEntry_t)(unsafe.Pointer(HwbcEntries)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetHicVersion(cHwbcCount, cHwbcEntries)
-	runtime.KeepAlive(cHwbcEntriesAllocMap)
-	runtime.KeepAlive(cHwbcCountAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetTopologyGpuSet function as declared in hgml/hgml.h:2635
-func hgmlSystemGetTopologyGpuSet(CpuNumber uint32, Count *uint32, DeviceArray *hgmlDevice) Return {
-	cCpuNumber, cCpuNumberAllocMap := (C.uint)(CpuNumber), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	cDeviceArray, cDeviceArrayAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(DeviceArray)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetTopologyGpuSet(cCpuNumber, cCount, cDeviceArray)
-	runtime.KeepAlive(cDeviceArrayAllocMap)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cCpuNumberAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlUnitGetCount function as declared in hgml/hgml.h:2662
-func hgmlUnitGetCount(UnitCount *uint32) Return {
-	cUnitCount, cUnitCountAllocMap := (*C.uint)(unsafe.Pointer(UnitCount)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetCount(cUnitCount)
-	runtime.KeepAlive(cUnitCountAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlUnitGetHandleByIndex function as declared in hgml/hgml.h:2683
-func hgmlUnitGetHandleByIndex(Index uint32, hgmlUnit *hgmlUnit) Return {
-	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
-	chgmlUnit, chgmlUnitAllocMap := (*C.hgmlUnit_t)(unsafe.Pointer(hgmlUnit)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetHandleByIndex(cIndex, chgmlUnit)
-	runtime.KeepAlive(chgmlUnitAllocMap)
-	runtime.KeepAlive(cIndexAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlUnitGetUnitInfo function as declared in hgml/hgml.h:2700
-func hgmlUnitGetUnitInfo(hgmlUnit hgmlUnit, Info *UnitInfo) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlUnitInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetUnitInfo(chgmlUnit, cInfo)
+// hgmlComputeInstanceGetInfo function as declared in hgml/hgml.h:3052
+func hgmlComputeInstanceGetInfo(hgmlComputeInstance hgmlComputeInstance, Info *hgmlComputeInstanceInfo) Return {
+	chgmlComputeInstance, chgmlComputeInstanceAllocMap := *(*C.hgmlComputeInstance_t)(unsafe.Pointer(&hgmlComputeInstance)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlComputeInstanceGetInfo(chgmlComputeInstance, cInfo)
 	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
+	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlUnitGetLedState function as declared in hgml/hgml.h:2721
-func hgmlUnitGetLedState(hgmlUnit hgmlUnit, State *LedState) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	cState, cStateAllocMap := (*C.hgmlLedState_t)(unsafe.Pointer(State)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetLedState(chgmlUnit, cState)
-	runtime.KeepAlive(cStateAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
+// hgmlComputeInstanceGetInfo_v2 function as declared in hgml/hgml.h:3053
+func hgmlComputeInstanceGetInfo_v2(hgmlComputeInstance hgmlComputeInstance, Info *hgmlComputeInstanceInfo) Return {
+	chgmlComputeInstance, chgmlComputeInstanceAllocMap := *(*C.hgmlComputeInstance_t)(unsafe.Pointer(&hgmlComputeInstance)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlComputeInstanceGetInfo_v2(chgmlComputeInstance, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlUnitGetPsuInfo function as declared in hgml/hgml.h:2740
-func hgmlUnitGetPsuInfo(hgmlUnit hgmlUnit, Psu *PSUInfo) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	cPsu, cPsuAllocMap := (*C.hgmlPSUInfo_t)(unsafe.Pointer(Psu)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetPsuInfo(chgmlUnit, cPsu)
-	runtime.KeepAlive(cPsuAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlUnitGetTemperature function as declared in hgml/hgml.h:2761
-func hgmlUnitGetTemperature(hgmlUnit hgmlUnit, _type uint32, Temp *uint32) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	c_type, c_typeAllocMap := (C.uint)(_type), cgoAllocsUnknown
-	cTemp, cTempAllocMap := (*C.uint)(unsafe.Pointer(Temp)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetTemperature(chgmlUnit, c_type, cTemp)
-	runtime.KeepAlive(cTempAllocMap)
-	runtime.KeepAlive(c_typeAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlUnitGetFanSpeedInfo function as declared in hgml/hgml.h:2780
-func hgmlUnitGetFanSpeedInfo(hgmlUnit hgmlUnit, FanSpeeds *UnitFanSpeeds) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	cFanSpeeds, cFanSpeedsAllocMap := (*C.hgmlUnitFanSpeeds_t)(unsafe.Pointer(FanSpeeds)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetFanSpeedInfo(chgmlUnit, cFanSpeeds)
-	runtime.KeepAlive(cFanSpeedsAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlUnitGetDevices function as declared in hgml/hgml.h:2801
-func hgmlUnitGetDevices(hgmlUnit hgmlUnit, DeviceCount *uint32, Devices *hgmlDevice) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
-	cDevices, cDevicesAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(Devices)), cgoAllocsUnknown
-	__ret := C.hgmlUnitGetDevices(chgmlUnit, cDeviceCount, cDevices)
-	runtime.KeepAlive(cDevicesAllocMap)
-	runtime.KeepAlive(cDeviceCountAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetCount_v2 function as declared in hgml/hgml.h:2835
-func hgmlDeviceGetCount_v2(DeviceCount *uint32) Return {
-	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCount_v2(cDeviceCount)
-	runtime.KeepAlive(cDeviceCountAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAttributes_v2 function as declared in hgml/hgml.h:2855
-func hgmlDeviceGetAttributes_v2(hgmlDevice hgmlDevice, Attributes *DeviceAttributes) Return {
+// hgmlDeviceClearAccountingPids function as declared in hgml/hgml.h:3054
+func hgmlDeviceClearAccountingPids(hgmlDevice hgmlDevice) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cAttributes, cAttributesAllocMap := (*C.hgmlDeviceAttributes_t)(unsafe.Pointer(Attributes)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAttributes_v2(chgmlDevice, cAttributes)
-	runtime.KeepAlive(cAttributesAllocMap)
+	__ret := C.hgmlDeviceClearAccountingPids(chgmlDevice)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetHandleByIndex_v2 function as declared in hgml/hgml.h:2903
-func hgmlDeviceGetHandleByIndex_v2(Index uint32, hgmlDevice *hgmlDevice) Return {
-	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHandleByIndex_v2(cIndex, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	runtime.KeepAlive(cIndexAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetHandleBySerial function as declared in hgml/hgml.h:2937
-func hgmlDeviceGetHandleBySerial(Serial string, hgmlDevice *hgmlDevice) Return {
-	cSerial, cSerialAllocMap := unpackPCharString(Serial)
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHandleBySerial(cSerial, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	runtime.KeepAlive(cSerialAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetHandleByUUID function as declared in hgml/hgml.h:2962
-func hgmlDeviceGetHandleByUUID(Uuid string, hgmlDevice *hgmlDevice) Return {
-	cUuid, cUuidAllocMap := unpackPCharString(Uuid)
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHandleByUUID(cUuid, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	runtime.KeepAlive(cUuidAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetHandleByPciBusId_v2 function as declared in hgml/hgml.h:2992
-func hgmlDeviceGetHandleByPciBusId_v2(PciBusId string, hgmlDevice *hgmlDevice) Return {
-	cPciBusId, cPciBusIdAllocMap := unpackPCharString(PciBusId)
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHandleByPciBusId_v2(cPciBusId, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	runtime.KeepAlive(cPciBusIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetName function as declared in hgml/hgml.h:3018
-func hgmlDeviceGetName(hgmlDevice hgmlDevice, Name *byte, Length uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cName, cNameAllocMap := (*C.char)(unsafe.Pointer(Name)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetName(chgmlDevice, cName, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cNameAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetBrand function as declared in hgml/hgml.h:3037
-func hgmlDeviceGetBrand(hgmlDevice hgmlDevice, _type *BrandType) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	c_type, c_typeAllocMap := (*C.hgmlBrandType_t)(unsafe.Pointer(_type)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetBrand(chgmlDevice, c_type)
-	runtime.KeepAlive(c_typeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIndex function as declared in hgml/hgml.h:3071
-func hgmlDeviceGetIndex(hgmlDevice hgmlDevice, Index *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIndex, cIndexAllocMap := (*C.uint)(unsafe.Pointer(Index)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIndex(chgmlDevice, cIndex)
-	runtime.KeepAlive(cIndexAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSerial function as declared in hgml/hgml.h:3095
-func hgmlDeviceGetSerial(hgmlDevice hgmlDevice, Serial *byte, Length uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSerial, cSerialAllocMap := (*C.char)(unsafe.Pointer(Serial)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetSerial(chgmlDevice, cSerial, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cSerialAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetModuleId function as declared in hgml/hgml.h:3112
-func hgmlDeviceGetModuleId(hgmlDevice hgmlDevice, ModuleId *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cModuleId, cModuleIdAllocMap := (*C.uint)(unsafe.Pointer(ModuleId)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetModuleId(chgmlDevice, cModuleId)
-	runtime.KeepAlive(cModuleIdAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetC2cModeInfoV function as declared in hgml/hgml.h:3127
-func hgmlDeviceGetC2cModeInfoV(hgmlDevice hgmlDevice, C2cModeInfo *C2cModeInfo_v1) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cC2cModeInfo, cC2cModeInfoAllocMap := (*C.hgmlC2cModeInfo_v1_t)(unsafe.Pointer(C2cModeInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetC2cModeInfoV(chgmlDevice, cC2cModeInfo)
-	runtime.KeepAlive(cC2cModeInfoAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMemoryAffinity function as declared in hgml/hgml.h:3173
-func hgmlDeviceGetMemoryAffinity(hgmlDevice hgmlDevice, NodeSetSize uint32, NodeSet *uint32, Scope AffinityScope) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cNodeSetSize, cNodeSetSizeAllocMap := (C.uint)(NodeSetSize), cgoAllocsUnknown
-	cNodeSet, cNodeSetAllocMap := (*C.ulong)(unsafe.Pointer(NodeSet)), cgoAllocsUnknown
-	cScope, cScopeAllocMap := (C.hgmlAffinityScope_t)(Scope), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMemoryAffinity(chgmlDevice, cNodeSetSize, cNodeSet, cScope)
-	runtime.KeepAlive(cScopeAllocMap)
-	runtime.KeepAlive(cNodeSetAllocMap)
-	runtime.KeepAlive(cNodeSetSizeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetCpuAffinityWithinScope function as declared in hgml/hgml.h:3203
-func hgmlDeviceGetCpuAffinityWithinScope(hgmlDevice hgmlDevice, CpuSetSize uint32, CpuSet *uint32, Scope AffinityScope) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCpuSetSize, cCpuSetSizeAllocMap := (C.uint)(CpuSetSize), cgoAllocsUnknown
-	cCpuSet, cCpuSetAllocMap := (*C.ulong)(unsafe.Pointer(CpuSet)), cgoAllocsUnknown
-	cScope, cScopeAllocMap := (C.hgmlAffinityScope_t)(Scope), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCpuAffinityWithinScope(chgmlDevice, cCpuSetSize, cCpuSet, cScope)
-	runtime.KeepAlive(cScopeAllocMap)
-	runtime.KeepAlive(cCpuSetAllocMap)
-	runtime.KeepAlive(cCpuSetSizeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetCpuAffinity function as declared in hgml/hgml.h:3227
-func hgmlDeviceGetCpuAffinity(hgmlDevice hgmlDevice, CpuSetSize uint32, CpuSet *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCpuSetSize, cCpuSetSizeAllocMap := (C.uint)(CpuSetSize), cgoAllocsUnknown
-	cCpuSet, cCpuSetAllocMap := (*C.ulong)(unsafe.Pointer(CpuSet)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCpuAffinity(chgmlDevice, cCpuSetSize, cCpuSet)
-	runtime.KeepAlive(cCpuSetAllocMap)
-	runtime.KeepAlive(cCpuSetSizeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetCpuAffinity function as declared in hgml/hgml.h:3248
-func hgmlDeviceSetCpuAffinity(hgmlDevice hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetCpuAffinity(chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceClearCpuAffinity function as declared in hgml/hgml.h:3265
+// hgmlDeviceClearCpuAffinity function as declared in hgml/hgml.h:3055
 func hgmlDeviceClearCpuAffinity(hgmlDevice hgmlDevice) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	__ret := C.hgmlDeviceClearCpuAffinity(chgmlDevice)
@@ -414,308 +69,201 @@ func hgmlDeviceClearCpuAffinity(hgmlDevice hgmlDevice) Return {
 	return __v
 }
 
-// hgmlDeviceGetTopologyCommonAncestor function as declared in hgml/hgml.h:3284
-func hgmlDeviceGetTopologyCommonAncestor(Device1 hgmlDevice, Device2 hgmlDevice, PathInfo *GpuTopologyLevel) Return {
-	cDevice1, cDevice1AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device1)), cgoAllocsUnknown
-	cDevice2, cDevice2AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device2)), cgoAllocsUnknown
-	cPathInfo, cPathInfoAllocMap := (*C.hgmlGpuTopologyLevel_t)(unsafe.Pointer(PathInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTopologyCommonAncestor(cDevice1, cDevice2, cPathInfo)
-	runtime.KeepAlive(cPathInfoAllocMap)
-	runtime.KeepAlive(cDevice2AllocMap)
-	runtime.KeepAlive(cDevice1AllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetTopologyNearestGpus function as declared in hgml/hgml.h:3304
-func hgmlDeviceGetTopologyNearestGpus(hgmlDevice hgmlDevice, Level GpuTopologyLevel, Count *uint32, DeviceArray *hgmlDevice) Return {
+// hgmlDeviceClearEccErrorCounts function as declared in hgml/hgml.h:3056
+func hgmlDeviceClearEccErrorCounts(hgmlDevice hgmlDevice, CounterType EccCounterType) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLevel, cLevelAllocMap := (C.hgmlGpuTopologyLevel_t)(Level), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	cDeviceArray, cDeviceArrayAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(DeviceArray)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTopologyNearestGpus(chgmlDevice, cLevel, cCount, cDeviceArray)
-	runtime.KeepAlive(cDeviceArrayAllocMap)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cLevelAllocMap)
+	cCounterType, cCounterTypeAllocMap := (C.hgmlEccCounterType_t)(CounterType), cgoAllocsUnknown
+	__ret := C.hgmlDeviceClearEccErrorCounts(chgmlDevice, cCounterType)
+	runtime.KeepAlive(cCounterTypeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetP2PStatus function as declared in hgml/hgml.h:3319
-func hgmlDeviceGetP2PStatus(Device1 hgmlDevice, Device2 hgmlDevice, P2pIndex GpuP2PCapsIndex, P2pStatus *GpuP2PStatus) Return {
-	cDevice1, cDevice1AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device1)), cgoAllocsUnknown
-	cDevice2, cDevice2AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device2)), cgoAllocsUnknown
-	cP2pIndex, cP2pIndexAllocMap := (C.hgmlGpuP2PCapsIndex_t)(P2pIndex), cgoAllocsUnknown
-	cP2pStatus, cP2pStatusAllocMap := (*C.hgmlGpuP2PStatus_t)(unsafe.Pointer(P2pStatus)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetP2PStatus(cDevice1, cDevice2, cP2pIndex, cP2pStatus)
-	runtime.KeepAlive(cP2pStatusAllocMap)
-	runtime.KeepAlive(cP2pIndexAllocMap)
-	runtime.KeepAlive(cDevice2AllocMap)
-	runtime.KeepAlive(cDevice1AllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetUUID function as declared in hgml/hgml.h:3347
-func hgmlDeviceGetUUID(hgmlDevice hgmlDevice, Uuid *byte, Length uint32) Return {
+// hgmlDeviceClearFieldValues function as declared in hgml/hgml.h:3057
+func hgmlDeviceClearFieldValues(hgmlDevice hgmlDevice, ValuesCount int32, Values *FieldValue) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cUuid, cUuidAllocMap := (*C.char)(unsafe.Pointer(Uuid)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetUUID(chgmlDevice, cUuid, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cUuidAllocMap)
+	cValuesCount, cValuesCountAllocMap := (C.int)(ValuesCount), cgoAllocsUnknown
+	cValues, cValuesAllocMap := (*C.hgmlFieldValue_t)(unsafe.Pointer(Values)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceClearFieldValues(chgmlDevice, cValuesCount, cValues)
+	runtime.KeepAlive(cValuesAllocMap)
+	runtime.KeepAlive(cValuesCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMinorNumber function as declared in hgml/hgml.h:3366
-func hgmlDeviceGetMinorNumber(hgmlDevice hgmlDevice, MinorNumber *uint32) Return {
+// hgmlDeviceCreateGpuInstance function as declared in hgml/hgml.h:3058
+func hgmlDeviceCreateGpuInstance(hgmlDevice hgmlDevice, ProfileId uint32, hgmlGpuInstance *hgmlGpuInstance) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinorNumber, cMinorNumberAllocMap := (*C.uint)(unsafe.Pointer(MinorNumber)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMinorNumber(chgmlDevice, cMinorNumber)
-	runtime.KeepAlive(cMinorNumberAllocMap)
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(hgmlGpuInstance)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceCreateGpuInstance(chgmlDevice, cProfileId, chgmlGpuInstance)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetBoardPartNumber function as declared in hgml/hgml.h:3385
-func hgmlDeviceGetBoardPartNumber(hgmlDevice hgmlDevice, PartNumber *byte, Length uint32) Return {
+// hgmlDeviceCreateGpuInstanceWithPlacement function as declared in hgml/hgml.h:3059
+func hgmlDeviceCreateGpuInstanceWithPlacement(hgmlDevice hgmlDevice, ProfileId uint32, Placement *GpuInstancePlacement, hgmlGpuInstance *hgmlGpuInstance) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPartNumber, cPartNumberAllocMap := (*C.char)(unsafe.Pointer(PartNumber)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetBoardPartNumber(chgmlDevice, cPartNumber, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cPartNumberAllocMap)
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cPlacement, cPlacementAllocMap := (*C.hgmlGpuInstancePlacement_t)(unsafe.Pointer(Placement)), cgoAllocsUnknown
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(hgmlGpuInstance)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceCreateGpuInstanceWithPlacement(chgmlDevice, cProfileId, cPlacement, chgmlGpuInstance)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	runtime.KeepAlive(cPlacementAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetInforomVersion function as declared in hgml/hgml.h:3415
-func hgmlDeviceGetInforomVersion(hgmlDevice hgmlDevice, Object InforomObject, Version *byte, Length uint32) Return {
+// hgmlDeviceCreateVgpuInstance function as declared in hgml/hgml.h:3060
+func hgmlDeviceCreateVgpuInstance(hgmlDevice hgmlDevice, VgpuProfileId VgpuProfileId, hgmlVgpuInstance *hgmlVgpuInstance) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cObject, cObjectAllocMap := (C.hgmlInforomObject_t)(Object), cgoAllocsUnknown
-	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetInforomVersion(chgmlDevice, cObject, cVersion, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cVersionAllocMap)
-	runtime.KeepAlive(cObjectAllocMap)
+	cVgpuProfileId, cVgpuProfileIdAllocMap := (C.hgmlVgpuProfileId_t)(VgpuProfileId), cgoAllocsUnknown
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (*C.hgmlVgpuInstance_t)(unsafe.Pointer(hgmlVgpuInstance)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceCreateVgpuInstance(chgmlDevice, cVgpuProfileId, chgmlVgpuInstance)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	runtime.KeepAlive(cVgpuProfileIdAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetInforomImageVersion function as declared in hgml/hgml.h:3442
-func hgmlDeviceGetInforomImageVersion(hgmlDevice hgmlDevice, Version *byte, Length uint32) Return {
+// hgmlDeviceDestroyVgpuInstance function as declared in hgml/hgml.h:3061
+func hgmlDeviceDestroyVgpuInstance(hgmlVgpuInstance hgmlVgpuInstance, Force bool) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cForce, cForceAllocMap := (C.bool)(Force), cgoAllocsUnknown
+	__ret := C.hgmlDeviceDestroyVgpuInstance(chgmlVgpuInstance, cForce)
+	runtime.KeepAlive(cForceAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceDiscoverGpus function as declared in hgml/hgml.h:3062
+func hgmlDeviceDiscoverGpus(PciInfo *PciInfo) Return {
+	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceDiscoverGpus(cPciInfo)
+	runtime.KeepAlive(cPciInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetAPIRestriction function as declared in hgml/hgml.h:3063
+func hgmlDeviceGetAPIRestriction(hgmlDevice hgmlDevice, ApiType RestrictedAPI, IsRestricted *EnableState) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetInforomImageVersion(chgmlDevice, cVersion, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cVersionAllocMap)
+	cApiType, cApiTypeAllocMap := (C.hgmlRestrictedAPI_t)(ApiType), cgoAllocsUnknown
+	cIsRestricted, cIsRestrictedAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsRestricted)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAPIRestriction(chgmlDevice, cApiType, cIsRestricted)
+	runtime.KeepAlive(cIsRestrictedAllocMap)
+	runtime.KeepAlive(cApiTypeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetInforomConfigurationChecksum function as declared in hgml/hgml.h:3465
-func hgmlDeviceGetInforomConfigurationChecksum(hgmlDevice hgmlDevice, Checksum *uint32) Return {
+// hgmlDeviceGetAccountingBufferSize function as declared in hgml/hgml.h:3064
+func hgmlDeviceGetAccountingBufferSize(hgmlDevice hgmlDevice, BufferSize *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cChecksum, cChecksumAllocMap := (*C.uint)(unsafe.Pointer(Checksum)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetInforomConfigurationChecksum(chgmlDevice, cChecksum)
-	runtime.KeepAlive(cChecksumAllocMap)
+	cBufferSize, cBufferSizeAllocMap := (*C.uint)(unsafe.Pointer(BufferSize)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAccountingBufferSize(chgmlDevice, cBufferSize)
+	runtime.KeepAlive(cBufferSizeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceValidateInforom function as declared in hgml/hgml.h:3482
-func hgmlDeviceValidateInforom(hgmlDevice hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceValidateInforom(chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetLastBBXFlushTime function as declared in hgml/hgml.h:3502
-func hgmlDeviceGetLastBBXFlushTime(hgmlDevice hgmlDevice, Timestamp *uint64, DurationUs *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cTimestamp, cTimestampAllocMap := (*C.ulonglong)(unsafe.Pointer(Timestamp)), cgoAllocsUnknown
-	cDurationUs, cDurationUsAllocMap := (*C.ulong)(unsafe.Pointer(DurationUs)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetLastBBXFlushTime(chgmlDevice, cTimestamp, cDurationUs)
-	runtime.KeepAlive(cDurationUsAllocMap)
-	runtime.KeepAlive(cTimestampAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetDisplayMode function as declared in hgml/hgml.h:3526
-func hgmlDeviceGetDisplayMode(hgmlDevice hgmlDevice, Display *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cDisplay, cDisplayAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Display)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDisplayMode(chgmlDevice, cDisplay)
-	runtime.KeepAlive(cDisplayAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetDisplayActive function as declared in hgml/hgml.h:3551
-func hgmlDeviceGetDisplayActive(hgmlDevice hgmlDevice, IsActive *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIsActive, cIsActiveAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsActive)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDisplayActive(chgmlDevice, cIsActive)
-	runtime.KeepAlive(cIsActiveAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPersistenceMode function as declared in hgml/hgml.h:3577
-func hgmlDeviceGetPersistenceMode(hgmlDevice hgmlDevice, Mode *EnableState) Return {
+// hgmlDeviceGetAccountingMode function as declared in hgml/hgml.h:3065
+func hgmlDeviceGetAccountingMode(hgmlDevice hgmlDevice, Mode *EnableState) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPersistenceMode(chgmlDevice, cMode)
+	__ret := C.hgmlDeviceGetAccountingMode(chgmlDevice, cMode)
 	runtime.KeepAlive(cModeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetPciInfo_v3 function as declared in hgml/hgml.h:3596
-func hgmlDeviceGetPciInfo_v3(hgmlDevice hgmlDevice, Pci *PciInfo) Return {
+// hgmlDeviceGetAccountingPids function as declared in hgml/hgml.h:3066
+func hgmlDeviceGetAccountingPids(hgmlDevice hgmlDevice, Count *uint32, Pids *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPciInfo_v3(chgmlDevice, cPci)
-	runtime.KeepAlive(cPciAllocMap)
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	cPids, cPidsAllocMap := (*C.uint)(unsafe.Pointer(Pids)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAccountingPids(chgmlDevice, cCount, cPids)
+	runtime.KeepAlive(cPidsAllocMap)
+	runtime.KeepAlive(cCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMaxPcieLinkGeneration function as declared in hgml/hgml.h:3617
-func hgmlDeviceGetMaxPcieLinkGeneration(hgmlDevice hgmlDevice, MaxLinkGen *uint32) Return {
+// hgmlDeviceGetAccountingStats function as declared in hgml/hgml.h:3067
+func hgmlDeviceGetAccountingStats(hgmlDevice hgmlDevice, Pid uint32, Stats *AccountingStats) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMaxLinkGen, cMaxLinkGenAllocMap := (*C.uint)(unsafe.Pointer(MaxLinkGen)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMaxPcieLinkGeneration(chgmlDevice, cMaxLinkGen)
-	runtime.KeepAlive(cMaxLinkGenAllocMap)
+	cPid, cPidAllocMap := (C.uint)(Pid), cgoAllocsUnknown
+	cStats, cStatsAllocMap := (*C.hgmlAccountingStats_t)(unsafe.Pointer(Stats)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAccountingStats(chgmlDevice, cPid, cStats)
+	runtime.KeepAlive(cStatsAllocMap)
+	runtime.KeepAlive(cPidAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuMaxPcieLinkGeneration function as declared in hgml/hgml.h:3635
-func hgmlDeviceGetGpuMaxPcieLinkGeneration(hgmlDevice hgmlDevice, MaxLinkGenDevice *uint32) Return {
+// hgmlDeviceGetActiveVgpus function as declared in hgml/hgml.h:3068
+func hgmlDeviceGetActiveVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuInstances *hgmlVgpuInstance) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMaxLinkGenDevice, cMaxLinkGenDeviceAllocMap := (*C.uint)(unsafe.Pointer(MaxLinkGenDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuMaxPcieLinkGeneration(chgmlDevice, cMaxLinkGenDevice)
-	runtime.KeepAlive(cMaxLinkGenDeviceAllocMap)
+	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
+	cVgpuInstances, cVgpuInstancesAllocMap := (*C.hgmlVgpuInstance_t)(unsafe.Pointer(VgpuInstances)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetActiveVgpus(chgmlDevice, cVgpuCount, cVgpuInstances)
+	runtime.KeepAlive(cVgpuInstancesAllocMap)
+	runtime.KeepAlive(cVgpuCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMaxPcieLinkWidth function as declared in hgml/hgml.h:3656
-func hgmlDeviceGetMaxPcieLinkWidth(hgmlDevice hgmlDevice, MaxLinkWidth *uint32) Return {
+// hgmlDeviceGetAdaptiveClockInfoStatus function as declared in hgml/hgml.h:3069
+func hgmlDeviceGetAdaptiveClockInfoStatus(hgmlDevice hgmlDevice, AdaptiveClockStatus *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMaxLinkWidth, cMaxLinkWidthAllocMap := (*C.uint)(unsafe.Pointer(MaxLinkWidth)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMaxPcieLinkWidth(chgmlDevice, cMaxLinkWidth)
-	runtime.KeepAlive(cMaxLinkWidthAllocMap)
+	cAdaptiveClockStatus, cAdaptiveClockStatusAllocMap := (*C.uint)(unsafe.Pointer(AdaptiveClockStatus)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAdaptiveClockInfoStatus(chgmlDevice, cAdaptiveClockStatus)
+	runtime.KeepAlive(cAdaptiveClockStatusAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetCurrPcieLinkGeneration function as declared in hgml/hgml.h:3674
-func hgmlDeviceGetCurrPcieLinkGeneration(hgmlDevice hgmlDevice, CurrLinkGen *uint32) Return {
+// hgmlDeviceGetAddressingMode function as declared in hgml/hgml.h:3070
+func hgmlDeviceGetAddressingMode(hgmlDevice hgmlDevice, Mode *DeviceAddressingMode) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCurrLinkGen, cCurrLinkGenAllocMap := (*C.uint)(unsafe.Pointer(CurrLinkGen)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCurrPcieLinkGeneration(chgmlDevice, cCurrLinkGen)
-	runtime.KeepAlive(cCurrLinkGenAllocMap)
+	cMode, cModeAllocMap := (*C.hgmlDeviceAddressingMode_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAddressingMode(chgmlDevice, cMode)
+	runtime.KeepAlive(cModeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetCurrPcieLinkWidth function as declared in hgml/hgml.h:3692
-func hgmlDeviceGetCurrPcieLinkWidth(hgmlDevice hgmlDevice, CurrLinkWidth *uint32) Return {
+// hgmlDeviceGetAliveVgpus function as declared in hgml/hgml.h:3071
+func hgmlDeviceGetAliveVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuInstances *hgmlVgpuInstance) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCurrLinkWidth, cCurrLinkWidthAllocMap := (*C.uint)(unsafe.Pointer(CurrLinkWidth)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCurrPcieLinkWidth(chgmlDevice, cCurrLinkWidth)
-	runtime.KeepAlive(cCurrLinkWidthAllocMap)
+	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
+	cVgpuInstances, cVgpuInstancesAllocMap := (*C.hgmlVgpuInstance_t)(unsafe.Pointer(VgpuInstances)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAliveVgpus(chgmlDevice, cVgpuCount, cVgpuInstances)
+	runtime.KeepAlive(cVgpuInstancesAllocMap)
+	runtime.KeepAlive(cVgpuCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetPcieThroughput function as declared in hgml/hgml.h:3715
-func hgmlDeviceGetPcieThroughput(hgmlDevice hgmlDevice, Counter PcieUtilCounter, Value *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.hgmlPcieUtilCounter_t)(Counter), cgoAllocsUnknown
-	cValue, cValueAllocMap := (*C.uint)(unsafe.Pointer(Value)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPcieThroughput(chgmlDevice, cCounter, cValue)
-	runtime.KeepAlive(cValueAllocMap)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPcieReplayCounter function as declared in hgml/hgml.h:3733
-func hgmlDeviceGetPcieReplayCounter(hgmlDevice hgmlDevice, Value *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cValue, cValueAllocMap := (*C.uint)(unsafe.Pointer(Value)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPcieReplayCounter(chgmlDevice, cValue)
-	runtime.KeepAlive(cValueAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetClockInfo function as declared in hgml/hgml.h:3754
-func hgmlDeviceGetClockInfo(hgmlDevice hgmlDevice, _type ClockType, Clock *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	c_type, c_typeAllocMap := (C.hgmlClockType_t)(_type), cgoAllocsUnknown
-	cClock, cClockAllocMap := (*C.uint)(unsafe.Pointer(Clock)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetClockInfo(chgmlDevice, c_type, cClock)
-	runtime.KeepAlive(cClockAllocMap)
-	runtime.KeepAlive(c_typeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMaxClockInfo function as declared in hgml/hgml.h:3778
-func hgmlDeviceGetMaxClockInfo(hgmlDevice hgmlDevice, _type ClockType, Clock *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	c_type, c_typeAllocMap := (C.hgmlClockType_t)(_type), cgoAllocsUnknown
-	cClock, cClockAllocMap := (*C.uint)(unsafe.Pointer(Clock)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMaxClockInfo(chgmlDevice, c_type, cClock)
-	runtime.KeepAlive(cClockAllocMap)
-	runtime.KeepAlive(c_typeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGpcClkVfOffset function as declared in hgml/hgml.h:3792
-func hgmlDeviceGetGpcClkVfOffset(hgmlDevice hgmlDevice, Offset *int32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cOffset, cOffsetAllocMap := (*C.int)(unsafe.Pointer(Offset)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpcClkVfOffset(chgmlDevice, cOffset)
-	runtime.KeepAlive(cOffsetAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetApplicationsClock function as declared in hgml/hgml.h:3812
+// hgmlDeviceGetApplicationsClock function as declared in hgml/hgml.h:3072
 func hgmlDeviceGetApplicationsClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockMHz *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cClockType, cClockTypeAllocMap := (C.hgmlClockType_t)(ClockType), cgoAllocsUnknown
@@ -728,20 +276,154 @@ func hgmlDeviceGetApplicationsClock(hgmlDevice hgmlDevice, ClockType ClockType, 
 	return __v
 }
 
-// hgmlDeviceGetDefaultApplicationsClock function as declared in hgml/hgml.h:3834
-func hgmlDeviceGetDefaultApplicationsClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockMHz *uint32) Return {
+// hgmlDeviceGetArchitecture function as declared in hgml/hgml.h:3073
+func hgmlDeviceGetArchitecture(hgmlDevice hgmlDevice, Arch *DeviceArchitecture) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cClockType, cClockTypeAllocMap := (C.hgmlClockType_t)(ClockType), cgoAllocsUnknown
-	cClockMHz, cClockMHzAllocMap := (*C.uint)(unsafe.Pointer(ClockMHz)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDefaultApplicationsClock(chgmlDevice, cClockType, cClockMHz)
-	runtime.KeepAlive(cClockMHzAllocMap)
-	runtime.KeepAlive(cClockTypeAllocMap)
+	cArch, cArchAllocMap := (*C.hgmlDeviceArchitecture_t)(unsafe.Pointer(Arch)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetArchitecture(chgmlDevice, cArch)
+	runtime.KeepAlive(cArchAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetClock function as declared in hgml/hgml.h:3854
+// hgmlDeviceGetAttributes function as declared in hgml/hgml.h:3074
+func hgmlDeviceGetAttributes(hgmlDevice hgmlDevice, Attributes *DeviceAttributes) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cAttributes, cAttributesAllocMap := (*C.hgmlDeviceAttributes_t)(unsafe.Pointer(Attributes)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAttributes(chgmlDevice, cAttributes)
+	runtime.KeepAlive(cAttributesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetAttributes_v2 function as declared in hgml/hgml.h:3075
+func hgmlDeviceGetAttributes_v2(hgmlDevice hgmlDevice, Attributes *DeviceAttributes) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cAttributes, cAttributesAllocMap := (*C.hgmlDeviceAttributes_t)(unsafe.Pointer(Attributes)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAttributes_v2(chgmlDevice, cAttributes)
+	runtime.KeepAlive(cAttributesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetAutoBoostedClocksEnabled function as declared in hgml/hgml.h:3076
+func hgmlDeviceGetAutoBoostedClocksEnabled(hgmlDevice hgmlDevice, IsEnabled *EnableState, DefaultIsEnabled *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cIsEnabled, cIsEnabledAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsEnabled)), cgoAllocsUnknown
+	cDefaultIsEnabled, cDefaultIsEnabledAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(DefaultIsEnabled)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetAutoBoostedClocksEnabled(chgmlDevice, cIsEnabled, cDefaultIsEnabled)
+	runtime.KeepAlive(cDefaultIsEnabledAllocMap)
+	runtime.KeepAlive(cIsEnabledAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetBAR1MemoryInfo function as declared in hgml/hgml.h:3077
+func hgmlDeviceGetBAR1MemoryInfo(hgmlDevice hgmlDevice, Bar1Memory *BAR1Memory) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cBar1Memory, cBar1MemoryAllocMap := (*C.hgmlBAR1Memory_t)(unsafe.Pointer(Bar1Memory)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetBAR1MemoryInfo(chgmlDevice, cBar1Memory)
+	runtime.KeepAlive(cBar1MemoryAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetBoardId function as declared in hgml/hgml.h:3078
+func hgmlDeviceGetBoardId(hgmlDevice hgmlDevice, BoardId *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cBoardId, cBoardIdAllocMap := (*C.uint)(unsafe.Pointer(BoardId)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetBoardId(chgmlDevice, cBoardId)
+	runtime.KeepAlive(cBoardIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetBoardPartNumber function as declared in hgml/hgml.h:3079
+func hgmlDeviceGetBoardPartNumber(hgmlDevice hgmlDevice, PartNumber *byte, Length uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPartNumber, cPartNumberAllocMap := (*C.char)(unsafe.Pointer(PartNumber)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetBoardPartNumber(chgmlDevice, cPartNumber, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cPartNumberAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetBrand function as declared in hgml/hgml.h:3080
+func hgmlDeviceGetBrand(hgmlDevice hgmlDevice, _type *BrandType) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	c_type, c_typeAllocMap := (*C.hgmlBrandType_t)(unsafe.Pointer(_type)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetBrand(chgmlDevice, c_type)
+	runtime.KeepAlive(c_typeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetBridgeChipInfo function as declared in hgml/hgml.h:3081
+func hgmlDeviceGetBridgeChipInfo(hgmlDevice hgmlDevice, BridgeHierarchy *BridgeChipHierarchy) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cBridgeHierarchy, cBridgeHierarchyAllocMap := (*C.hgmlBridgeChipHierarchy_t)(unsafe.Pointer(BridgeHierarchy)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetBridgeChipInfo(chgmlDevice, cBridgeHierarchy)
+	runtime.KeepAlive(cBridgeHierarchyAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetBusType function as declared in hgml/hgml.h:3082
+func hgmlDeviceGetBusType(hgmlDevice hgmlDevice, _type *BusType) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	c_type, c_typeAllocMap := (*C.hgmlBusType_t)(unsafe.Pointer(_type)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetBusType(chgmlDevice, c_type)
+	runtime.KeepAlive(c_typeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetC2cModeInfoV function as declared in hgml/hgml.h:3083
+func hgmlDeviceGetC2cModeInfoV(hgmlDevice hgmlDevice, C2cModeInfo *C2cModeInfo_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cC2cModeInfo, cC2cModeInfoAllocMap := (*C.hgmlC2cModeInfo_v1_t)(unsafe.Pointer(C2cModeInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetC2cModeInfoV(chgmlDevice, cC2cModeInfo)
+	runtime.KeepAlive(cC2cModeInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCapabilities function as declared in hgml/hgml.h:3084
+func hgmlDeviceGetCapabilities(hgmlDevice hgmlDevice, Caps *DeviceCapabilities) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCaps, cCapsAllocMap := (*C.hgmlDeviceCapabilities_t)(unsafe.Pointer(Caps)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCapabilities(chgmlDevice, cCaps)
+	runtime.KeepAlive(cCapsAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetClkMonStatus function as declared in hgml/hgml.h:3085
+func hgmlDeviceGetClkMonStatus(hgmlDevice hgmlDevice, Status *ClkMonStatus) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cStatus, cStatusAllocMap := (*C.hgmlClkMonStatus_t)(unsafe.Pointer(Status)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetClkMonStatus(chgmlDevice, cStatus)
+	runtime.KeepAlive(cStatusAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetClock function as declared in hgml/hgml.h:3086
 func hgmlDeviceGetClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockId ClockId, ClockMHz *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cClockType, cClockTypeAllocMap := (C.hgmlClockType_t)(ClockType), cgoAllocsUnknown
@@ -756,408 +438,42 @@ func hgmlDeviceGetClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockId Cloc
 	return __v
 }
 
-// hgmlDeviceGetMaxCustomerBoostClock function as declared in hgml/hgml.h:3873
-func hgmlDeviceGetMaxCustomerBoostClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockMHz *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cClockType, cClockTypeAllocMap := (C.hgmlClockType_t)(ClockType), cgoAllocsUnknown
-	cClockMHz, cClockMHzAllocMap := (*C.uint)(unsafe.Pointer(ClockMHz)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMaxCustomerBoostClock(chgmlDevice, cClockType, cClockMHz)
-	runtime.KeepAlive(cClockMHzAllocMap)
-	runtime.KeepAlive(cClockTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSupportedMemoryClocks function as declared in hgml/hgml.h:3898
-func hgmlDeviceGetSupportedMemoryClocks(hgmlDevice hgmlDevice, Count *uint32, ClocksMHz *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	cClocksMHz, cClocksMHzAllocMap := (*C.uint)(unsafe.Pointer(ClocksMHz)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetSupportedMemoryClocks(chgmlDevice, cCount, cClocksMHz)
-	runtime.KeepAlive(cClocksMHzAllocMap)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSupportedGraphicsClocks function as declared in hgml/hgml.h:3924
-func hgmlDeviceGetSupportedGraphicsClocks(hgmlDevice hgmlDevice, MemoryClockMHz uint32, Count *uint32, ClocksMHz *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMemoryClockMHz, cMemoryClockMHzAllocMap := (C.uint)(MemoryClockMHz), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	cClocksMHz, cClocksMHzAllocMap := (*C.uint)(unsafe.Pointer(ClocksMHz)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetSupportedGraphicsClocks(chgmlDevice, cMemoryClockMHz, cCount, cClocksMHz)
-	runtime.KeepAlive(cClocksMHzAllocMap)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cMemoryClockMHzAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAutoBoostedClocksEnabled function as declared in hgml/hgml.h:3952
-func hgmlDeviceGetAutoBoostedClocksEnabled(hgmlDevice hgmlDevice, IsEnabled *EnableState, DefaultIsEnabled *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIsEnabled, cIsEnabledAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsEnabled)), cgoAllocsUnknown
-	cDefaultIsEnabled, cDefaultIsEnabledAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(DefaultIsEnabled)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAutoBoostedClocksEnabled(chgmlDevice, cIsEnabled, cDefaultIsEnabled)
-	runtime.KeepAlive(cDefaultIsEnabledAllocMap)
-	runtime.KeepAlive(cIsEnabledAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetFanSpeed function as declared in hgml/hgml.h:3976
-func hgmlDeviceGetFanSpeed(hgmlDevice hgmlDevice, Speed *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSpeed, cSpeedAllocMap := (*C.uint)(unsafe.Pointer(Speed)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetFanSpeed(chgmlDevice, cSpeed)
-	runtime.KeepAlive(cSpeedAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetFanSpeed_v2 function as declared in hgml/hgml.h:4002
-func hgmlDeviceGetFanSpeed_v2(hgmlDevice hgmlDevice, Fan uint32, Speed *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
-	cSpeed, cSpeedAllocMap := (*C.uint)(unsafe.Pointer(Speed)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetFanSpeed_v2(chgmlDevice, cFan, cSpeed)
-	runtime.KeepAlive(cSpeedAllocMap)
-	runtime.KeepAlive(cFanAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetTargetFanSpeed function as declared in hgml/hgml.h:4030
-func hgmlDeviceGetTargetFanSpeed(hgmlDevice hgmlDevice, Fan uint32, TargetSpeed *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
-	cTargetSpeed, cTargetSpeedAllocMap := (*C.uint)(unsafe.Pointer(TargetSpeed)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTargetFanSpeed(chgmlDevice, cFan, cTargetSpeed)
-	runtime.KeepAlive(cTargetSpeedAllocMap)
-	runtime.KeepAlive(cFanAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMinMaxFanSpeed function as declared in hgml/hgml.h:4049
-func hgmlDeviceGetMinMaxFanSpeed(hgmlDevice hgmlDevice, MinSpeed *uint32, MaxSpeed *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinSpeed, cMinSpeedAllocMap := (*C.uint)(unsafe.Pointer(MinSpeed)), cgoAllocsUnknown
-	cMaxSpeed, cMaxSpeedAllocMap := (*C.uint)(unsafe.Pointer(MaxSpeed)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMinMaxFanSpeed(chgmlDevice, cMinSpeed, cMaxSpeed)
-	runtime.KeepAlive(cMaxSpeedAllocMap)
-	runtime.KeepAlive(cMinSpeedAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetFanControlPolicy_v2 function as declared in hgml/hgml.h:4070
-func hgmlDeviceGetFanControlPolicy_v2(hgmlDevice hgmlDevice, Fan uint32, Policy *FanControlPolicy) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
-	cPolicy, cPolicyAllocMap := (*C.hgmlFanControlPolicy_t)(unsafe.Pointer(Policy)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetFanControlPolicy_v2(chgmlDevice, cFan, cPolicy)
-	runtime.KeepAlive(cPolicyAllocMap)
-	runtime.KeepAlive(cFanAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetNumFans function as declared in hgml/hgml.h:4089
-func hgmlDeviceGetNumFans(hgmlDevice hgmlDevice, NumFans *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cNumFans, cNumFansAllocMap := (*C.uint)(unsafe.Pointer(NumFans)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetNumFans(chgmlDevice, cNumFans)
-	runtime.KeepAlive(cNumFansAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetTemperature function as declared in hgml/hgml.h:4110
-func hgmlDeviceGetTemperature(hgmlDevice hgmlDevice, SensorType TemperatureSensors, Temp *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSensorType, cSensorTypeAllocMap := (C.hgmlTemperatureSensors_t)(SensorType), cgoAllocsUnknown
-	cTemp, cTempAllocMap := (*C.uint)(unsafe.Pointer(Temp)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTemperature(chgmlDevice, cSensorType, cTemp)
-	runtime.KeepAlive(cTempAllocMap)
-	runtime.KeepAlive(cSensorTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetTemperatureThreshold function as declared in hgml/hgml.h:4138
-func hgmlDeviceGetTemperatureThreshold(hgmlDevice hgmlDevice, ThresholdType TemperatureThresholds, Temp *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cThresholdType, cThresholdTypeAllocMap := (C.hgmlTemperatureThresholds_t)(ThresholdType), cgoAllocsUnknown
-	cTemp, cTempAllocMap := (*C.uint)(unsafe.Pointer(Temp)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTemperatureThreshold(chgmlDevice, cThresholdType, cTemp)
-	runtime.KeepAlive(cTempAllocMap)
-	runtime.KeepAlive(cThresholdTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPerformanceState function as declared in hgml/hgml.h:4175
-func hgmlDeviceGetPerformanceState(hgmlDevice hgmlDevice, PState *Pstates) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPState, cPStateAllocMap := (*C.hgmlPstates_t)(unsafe.Pointer(PState)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPerformanceState(chgmlDevice, cPState)
-	runtime.KeepAlive(cPStateAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetCurrentClocksEventReasons function as declared in hgml/hgml.h:4199
-func hgmlDeviceGetCurrentClocksEventReasons(hgmlDevice hgmlDevice, ClocksEventReasons *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cClocksEventReasons, cClocksEventReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(ClocksEventReasons)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCurrentClocksEventReasons(chgmlDevice, cClocksEventReasons)
-	runtime.KeepAlive(cClocksEventReasonsAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetCurrentClocksThrottleReasons function as declared in hgml/hgml.h:4204
-func hgmlDeviceGetCurrentClocksThrottleReasons(hgmlDevice hgmlDevice, ClocksThrottleReasons *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cClocksThrottleReasons, cClocksThrottleReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(ClocksThrottleReasons)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCurrentClocksThrottleReasons(chgmlDevice, cClocksThrottleReasons)
-	runtime.KeepAlive(cClocksThrottleReasonsAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSupportedClocksEventReasons function as declared in hgml/hgml.h:4228
-func hgmlDeviceGetSupportedClocksEventReasons(hgmlDevice hgmlDevice, SupportedClocksEventReasons *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSupportedClocksEventReasons, cSupportedClocksEventReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(SupportedClocksEventReasons)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetSupportedClocksEventReasons(chgmlDevice, cSupportedClocksEventReasons)
-	runtime.KeepAlive(cSupportedClocksEventReasonsAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSupportedClocksThrottleReasons function as declared in hgml/hgml.h:4233
-func hgmlDeviceGetSupportedClocksThrottleReasons(hgmlDevice hgmlDevice, SupportedClocksThrottleReasons *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSupportedClocksThrottleReasons, cSupportedClocksThrottleReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(SupportedClocksThrottleReasons)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetSupportedClocksThrottleReasons(chgmlDevice, cSupportedClocksThrottleReasons)
-	runtime.KeepAlive(cSupportedClocksThrottleReasonsAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerState function as declared in hgml/hgml.h:4255
-func hgmlDeviceGetPowerState(hgmlDevice hgmlDevice, PState *Pstates) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPState, cPStateAllocMap := (*C.hgmlPstates_t)(unsafe.Pointer(PState)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerState(chgmlDevice, cPState)
-	runtime.KeepAlive(cPStateAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMemClkVfOffset function as declared in hgml/hgml.h:4285
-func hgmlDeviceGetMemClkVfOffset(hgmlDevice hgmlDevice, Offset *int32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cOffset, cOffsetAllocMap := (*C.int)(unsafe.Pointer(Offset)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMemClkVfOffset(chgmlDevice, cOffset)
-	runtime.KeepAlive(cOffsetAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMinMaxClockOfPState function as declared in hgml/hgml.h:4303
-func hgmlDeviceGetMinMaxClockOfPState(hgmlDevice hgmlDevice, _type ClockType, Pstate Pstates, MinClockMHz *uint32, MaxClockMHz *uint32) Return {
+// hgmlDeviceGetClockInfo function as declared in hgml/hgml.h:3087
+func hgmlDeviceGetClockInfo(hgmlDevice hgmlDevice, _type ClockType, Clock *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	c_type, c_typeAllocMap := (C.hgmlClockType_t)(_type), cgoAllocsUnknown
-	cPstate, cPstateAllocMap := (C.hgmlPstates_t)(Pstate), cgoAllocsUnknown
-	cMinClockMHz, cMinClockMHzAllocMap := (*C.uint)(unsafe.Pointer(MinClockMHz)), cgoAllocsUnknown
-	cMaxClockMHz, cMaxClockMHzAllocMap := (*C.uint)(unsafe.Pointer(MaxClockMHz)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMinMaxClockOfPState(chgmlDevice, c_type, cPstate, cMinClockMHz, cMaxClockMHz)
-	runtime.KeepAlive(cMaxClockMHzAllocMap)
-	runtime.KeepAlive(cMinClockMHzAllocMap)
-	runtime.KeepAlive(cPstateAllocMap)
+	cClock, cClockAllocMap := (*C.uint)(unsafe.Pointer(Clock)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetClockInfo(chgmlDevice, c_type, cClock)
+	runtime.KeepAlive(cClockAllocMap)
 	runtime.KeepAlive(c_typeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetSupportedPerformanceStates function as declared in hgml/hgml.h:4329
-func hgmlDeviceGetSupportedPerformanceStates(hgmlDevice hgmlDevice, Pstates *Pstates, Size uint32) Return {
+// hgmlDeviceGetClockOffsets function as declared in hgml/hgml.h:3088
+func hgmlDeviceGetClockOffsets(hgmlDevice hgmlDevice, Info *ClockOffset) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPstates, cPstatesAllocMap := (*C.hgmlPstates_t)(unsafe.Pointer(Pstates)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetSupportedPerformanceStates(chgmlDevice, cPstates, cSize)
-	runtime.KeepAlive(cSizeAllocMap)
-	runtime.KeepAlive(cPstatesAllocMap)
+	cInfo, cInfoAllocMap := (*C.hgmlClockOffset_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetClockOffsets(chgmlDevice, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpcClkMinMaxVfOffset function as declared in hgml/hgml.h:4345
-func hgmlDeviceGetGpcClkMinMaxVfOffset(hgmlDevice hgmlDevice, MinOffset *int32, MaxOffset *int32) Return {
+// hgmlDeviceGetComputeInstanceId function as declared in hgml/hgml.h:3089
+func hgmlDeviceGetComputeInstanceId(hgmlDevice hgmlDevice, Id *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinOffset, cMinOffsetAllocMap := (*C.int)(unsafe.Pointer(MinOffset)), cgoAllocsUnknown
-	cMaxOffset, cMaxOffsetAllocMap := (*C.int)(unsafe.Pointer(MaxOffset)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpcClkMinMaxVfOffset(chgmlDevice, cMinOffset, cMaxOffset)
-	runtime.KeepAlive(cMaxOffsetAllocMap)
-	runtime.KeepAlive(cMinOffsetAllocMap)
+	cId, cIdAllocMap := (*C.uint)(unsafe.Pointer(Id)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetComputeInstanceId(chgmlDevice, cId)
+	runtime.KeepAlive(cIdAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMemClkMinMaxVfOffset function as declared in hgml/hgml.h:4361
-func hgmlDeviceGetMemClkMinMaxVfOffset(hgmlDevice hgmlDevice, MinOffset *int32, MaxOffset *int32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinOffset, cMinOffsetAllocMap := (*C.int)(unsafe.Pointer(MinOffset)), cgoAllocsUnknown
-	cMaxOffset, cMaxOffsetAllocMap := (*C.int)(unsafe.Pointer(MaxOffset)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMemClkMinMaxVfOffset(chgmlDevice, cMinOffset, cMaxOffset)
-	runtime.KeepAlive(cMaxOffsetAllocMap)
-	runtime.KeepAlive(cMinOffsetAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerManagementMode function as declared in hgml/hgml.h:4392
-func hgmlDeviceGetPowerManagementMode(hgmlDevice hgmlDevice, Mode *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerManagementMode(chgmlDevice, cMode)
-	runtime.KeepAlive(cModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerManagementLimit function as declared in hgml/hgml.h:4416
-func hgmlDeviceGetPowerManagementLimit(hgmlDevice hgmlDevice, Limit *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLimit, cLimitAllocMap := (*C.uint)(unsafe.Pointer(Limit)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerManagementLimit(chgmlDevice, cLimit)
-	runtime.KeepAlive(cLimitAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerManagementLimitConstraints function as declared in hgml/hgml.h:4438
-func hgmlDeviceGetPowerManagementLimitConstraints(hgmlDevice hgmlDevice, MinLimit *uint32, MaxLimit *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinLimit, cMinLimitAllocMap := (*C.uint)(unsafe.Pointer(MinLimit)), cgoAllocsUnknown
-	cMaxLimit, cMaxLimitAllocMap := (*C.uint)(unsafe.Pointer(MaxLimit)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerManagementLimitConstraints(chgmlDevice, cMinLimit, cMaxLimit)
-	runtime.KeepAlive(cMaxLimitAllocMap)
-	runtime.KeepAlive(cMinLimitAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerManagementDefaultLimit function as declared in hgml/hgml.h:4457
-func hgmlDeviceGetPowerManagementDefaultLimit(hgmlDevice hgmlDevice, DefaultLimit *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cDefaultLimit, cDefaultLimitAllocMap := (*C.uint)(unsafe.Pointer(DefaultLimit)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerManagementDefaultLimit(chgmlDevice, cDefaultLimit)
-	runtime.KeepAlive(cDefaultLimitAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerUsage function as declared in hgml/hgml.h:4484
-func hgmlDeviceGetPowerUsage(hgmlDevice hgmlDevice, Power *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPower, cPowerAllocMap := (*C.uint)(unsafe.Pointer(Power)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerUsage(chgmlDevice, cPower)
-	runtime.KeepAlive(cPowerAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetTotalEnergyConsumption function as declared in hgml/hgml.h:4502
-func hgmlDeviceGetTotalEnergyConsumption(hgmlDevice hgmlDevice, Energy *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cEnergy, cEnergyAllocMap := (*C.ulonglong)(unsafe.Pointer(Energy)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTotalEnergyConsumption(chgmlDevice, cEnergy)
-	runtime.KeepAlive(cEnergyAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetEnforcedPowerLimit function as declared in hgml/hgml.h:4523
-func hgmlDeviceGetEnforcedPowerLimit(hgmlDevice hgmlDevice, Limit *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLimit, cLimitAllocMap := (*C.uint)(unsafe.Pointer(Limit)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetEnforcedPowerLimit(chgmlDevice, cLimit)
-	runtime.KeepAlive(cLimitAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGpuOperationMode function as declared in hgml/hgml.h:4546
-func hgmlDeviceGetGpuOperationMode(hgmlDevice hgmlDevice, Current *GpuOperationMode, Pending *GpuOperationMode) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCurrent, cCurrentAllocMap := (*C.hgmlGpuOperationMode_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
-	cPending, cPendingAllocMap := (*C.hgmlGpuOperationMode_t)(unsafe.Pointer(Pending)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuOperationMode(chgmlDevice, cCurrent, cPending)
-	runtime.KeepAlive(cPendingAllocMap)
-	runtime.KeepAlive(cCurrentAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMemoryInfo function as declared in hgml/hgml.h:4587
-func hgmlDeviceGetMemoryInfo(hgmlDevice hgmlDevice, Memory *Memory) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMemory, cMemoryAllocMap := (*C.hgmlMemory_t)(unsafe.Pointer(Memory)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMemoryInfo(chgmlDevice, cMemory)
-	runtime.KeepAlive(cMemoryAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMemoryInfo_v2 function as declared in hgml/hgml.h:4588
-func hgmlDeviceGetMemoryInfo_v2(hgmlDevice hgmlDevice, Memory *Memory_v2) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMemory, cMemoryAllocMap := (*C.hgmlMemory_v2_t)(unsafe.Pointer(Memory)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMemoryInfo_v2(chgmlDevice, cMemory)
-	runtime.KeepAlive(cMemoryAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetComputeMode function as declared in hgml/hgml.h:4610
+// hgmlDeviceGetComputeMode function as declared in hgml/hgml.h:3090
 func hgmlDeviceGetComputeMode(hgmlDevice hgmlDevice, Mode *ComputeMode) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cMode, cModeAllocMap := (*C.hgmlComputeMode_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
@@ -1168,20 +484,313 @@ func hgmlDeviceGetComputeMode(hgmlDevice hgmlDevice, Mode *ComputeMode) Return {
 	return __v
 }
 
-// hgmlDeviceGetHggcComputeCapability function as declared in hgml/hgml.h:4634
-func hgmlDeviceGetHggcComputeCapability(hgmlDevice hgmlDevice, Major *int32, Minor *int32) Return {
+// hgmlDeviceGetComputeRunningProcesses function as declared in hgml/hgml.h:3091
+func hgmlDeviceGetComputeRunningProcesses(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v1) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMajor, cMajorAllocMap := (*C.int)(unsafe.Pointer(Major)), cgoAllocsUnknown
-	cMinor, cMinorAllocMap := (*C.int)(unsafe.Pointer(Minor)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHggcComputeCapability(chgmlDevice, cMajor, cMinor)
-	runtime.KeepAlive(cMinorAllocMap)
-	runtime.KeepAlive(cMajorAllocMap)
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v1_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetComputeRunningProcesses(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetEccMode function as declared in hgml/hgml.h:4662
+// hgmlDeviceGetComputeRunningProcesses_v2 function as declared in hgml/hgml.h:3092
+func hgmlDeviceGetComputeRunningProcesses_v2(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v2) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v2_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetComputeRunningProcesses_v2(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetComputeRunningProcesses_v3 function as declared in hgml/hgml.h:3093
+func hgmlDeviceGetComputeRunningProcesses_v3(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetComputeRunningProcesses_v3(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetConfComputeGpuAttestationReport function as declared in hgml/hgml.h:3094
+func hgmlDeviceGetConfComputeGpuAttestationReport(hgmlDevice hgmlDevice, GpuAtstReport *ConfComputeGpuAttestationReport) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cGpuAtstReport, cGpuAtstReportAllocMap := (*C.hgmlConfComputeGpuAttestationReport_t)(unsafe.Pointer(GpuAtstReport)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetConfComputeGpuAttestationReport(chgmlDevice, cGpuAtstReport)
+	runtime.KeepAlive(cGpuAtstReportAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetConfComputeGpuCertificate function as declared in hgml/hgml.h:3095
+func hgmlDeviceGetConfComputeGpuCertificate(hgmlDevice hgmlDevice, GpuCert *ConfComputeGpuCertificate) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cGpuCert, cGpuCertAllocMap := (*C.hgmlConfComputeGpuCertificate_t)(unsafe.Pointer(GpuCert)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetConfComputeGpuCertificate(chgmlDevice, cGpuCert)
+	runtime.KeepAlive(cGpuCertAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetConfComputeMemSizeInfo function as declared in hgml/hgml.h:3096
+func hgmlDeviceGetConfComputeMemSizeInfo(hgmlDevice hgmlDevice, MemInfo *ConfComputeMemSizeInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMemInfo, cMemInfoAllocMap := (*C.hgmlConfComputeMemSizeInfo_t)(unsafe.Pointer(MemInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetConfComputeMemSizeInfo(chgmlDevice, cMemInfo)
+	runtime.KeepAlive(cMemInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetConfComputeProtectedMemoryUsage function as declared in hgml/hgml.h:3097
+func hgmlDeviceGetConfComputeProtectedMemoryUsage(hgmlDevice hgmlDevice, Memory *Memory) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMemory, cMemoryAllocMap := (*C.hgmlMemory_t)(unsafe.Pointer(Memory)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetConfComputeProtectedMemoryUsage(chgmlDevice, cMemory)
+	runtime.KeepAlive(cMemoryAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCoolerInfo function as declared in hgml/hgml.h:3098
+func hgmlDeviceGetCoolerInfo(hgmlDevice hgmlDevice, CoolerInfo *CoolerInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCoolerInfo, cCoolerInfoAllocMap := (*C.hgmlCoolerInfo_t)(unsafe.Pointer(CoolerInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCoolerInfo(chgmlDevice, cCoolerInfo)
+	runtime.KeepAlive(cCoolerInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCount function as declared in hgml/hgml.h:3099
+func hgmlDeviceGetCount(DeviceCount *uint32) Return {
+	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCount(cDeviceCount)
+	runtime.KeepAlive(cDeviceCountAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCount_v2 function as declared in hgml/hgml.h:3100
+func hgmlDeviceGetCount_v2(DeviceCount *uint32) Return {
+	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCount_v2(cDeviceCount)
+	runtime.KeepAlive(cDeviceCountAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCpuAffinity function as declared in hgml/hgml.h:3101
+func hgmlDeviceGetCpuAffinity(hgmlDevice hgmlDevice, CpuSetSize uint32, CpuSet *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCpuSetSize, cCpuSetSizeAllocMap := (C.uint)(CpuSetSize), cgoAllocsUnknown
+	cCpuSet, cCpuSetAllocMap := (*C.ulong)(unsafe.Pointer(CpuSet)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCpuAffinity(chgmlDevice, cCpuSetSize, cCpuSet)
+	runtime.KeepAlive(cCpuSetAllocMap)
+	runtime.KeepAlive(cCpuSetSizeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCpuAffinityWithinScope function as declared in hgml/hgml.h:3102
+func hgmlDeviceGetCpuAffinityWithinScope(hgmlDevice hgmlDevice, CpuSetSize uint32, CpuSet *uint32, Scope AffinityScope) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCpuSetSize, cCpuSetSizeAllocMap := (C.uint)(CpuSetSize), cgoAllocsUnknown
+	cCpuSet, cCpuSetAllocMap := (*C.ulong)(unsafe.Pointer(CpuSet)), cgoAllocsUnknown
+	cScope, cScopeAllocMap := (C.hgmlAffinityScope_t)(Scope), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCpuAffinityWithinScope(chgmlDevice, cCpuSetSize, cCpuSet, cScope)
+	runtime.KeepAlive(cScopeAllocMap)
+	runtime.KeepAlive(cCpuSetAllocMap)
+	runtime.KeepAlive(cCpuSetSizeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCreatableVgpus function as declared in hgml/hgml.h:3103
+func hgmlDeviceGetCreatableVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuTypeIds *hgmlVgpuTypeId) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
+	cVgpuTypeIds, cVgpuTypeIdsAllocMap := (*C.hgmlVgpuTypeId_t)(unsafe.Pointer(VgpuTypeIds)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCreatableVgpus(chgmlDevice, cVgpuCount, cVgpuTypeIds)
+	runtime.KeepAlive(cVgpuTypeIdsAllocMap)
+	runtime.KeepAlive(cVgpuCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCurrPcieLinkGeneration function as declared in hgml/hgml.h:3104
+func hgmlDeviceGetCurrPcieLinkGeneration(hgmlDevice hgmlDevice, CurrLinkGen *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrLinkGen, cCurrLinkGenAllocMap := (*C.uint)(unsafe.Pointer(CurrLinkGen)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCurrPcieLinkGeneration(chgmlDevice, cCurrLinkGen)
+	runtime.KeepAlive(cCurrLinkGenAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCurrPcieLinkWidth function as declared in hgml/hgml.h:3105
+func hgmlDeviceGetCurrPcieLinkWidth(hgmlDevice hgmlDevice, CurrLinkWidth *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrLinkWidth, cCurrLinkWidthAllocMap := (*C.uint)(unsafe.Pointer(CurrLinkWidth)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCurrPcieLinkWidth(chgmlDevice, cCurrLinkWidth)
+	runtime.KeepAlive(cCurrLinkWidthAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCurrentClockFreqs function as declared in hgml/hgml.h:3106
+func hgmlDeviceGetCurrentClockFreqs(hgmlDevice hgmlDevice, CurrentClockFreqs *DeviceCurrentClockFreqs) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrentClockFreqs, cCurrentClockFreqsAllocMap := (*C.hgmlDeviceCurrentClockFreqs_t)(unsafe.Pointer(CurrentClockFreqs)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCurrentClockFreqs(chgmlDevice, cCurrentClockFreqs)
+	runtime.KeepAlive(cCurrentClockFreqsAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetCurrentClocksEventReasons function as declared in hgml/hgml.h:3107
+func hgmlDeviceGetCurrentClocksEventReasons(hgmlDevice hgmlDevice, ClocksEventReasons *uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cClocksEventReasons, cClocksEventReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(ClocksEventReasons)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCurrentClocksEventReasons(chgmlDevice, cClocksEventReasons)
+	runtime.KeepAlive(cClocksEventReasonsAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDecoderUtilization function as declared in hgml/hgml.h:3108
+func hgmlDeviceGetDecoderUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
+	cSamplingPeriodUs, cSamplingPeriodUsAllocMap := (*C.uint)(unsafe.Pointer(SamplingPeriodUs)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDecoderUtilization(chgmlDevice, cUtilization, cSamplingPeriodUs)
+	runtime.KeepAlive(cSamplingPeriodUsAllocMap)
+	runtime.KeepAlive(cUtilizationAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDefaultApplicationsClock function as declared in hgml/hgml.h:3109
+func hgmlDeviceGetDefaultApplicationsClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockMHz *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cClockType, cClockTypeAllocMap := (C.hgmlClockType_t)(ClockType), cgoAllocsUnknown
+	cClockMHz, cClockMHzAllocMap := (*C.uint)(unsafe.Pointer(ClockMHz)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDefaultApplicationsClock(chgmlDevice, cClockType, cClockMHz)
+	runtime.KeepAlive(cClockMHzAllocMap)
+	runtime.KeepAlive(cClockTypeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDefaultEccMode function as declared in hgml/hgml.h:3110
+func hgmlDeviceGetDefaultEccMode(hgmlDevice hgmlDevice, DefaultMode *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cDefaultMode, cDefaultModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(DefaultMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDefaultEccMode(chgmlDevice, cDefaultMode)
+	runtime.KeepAlive(cDefaultModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDeviceHandleFromMigDeviceHandle function as declared in hgml/hgml.h:3111
+func hgmlDeviceGetDeviceHandleFromMigDeviceHandle(MigDevice hgmlDevice, hgmlDevice *hgmlDevice) Return {
+	cMigDevice, cMigDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&MigDevice)), cgoAllocsUnknown
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDeviceHandleFromMigDeviceHandle(cMigDevice, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cMigDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDisplayActive function as declared in hgml/hgml.h:3112
+func hgmlDeviceGetDisplayActive(hgmlDevice hgmlDevice, IsActive *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cIsActive, cIsActiveAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsActive)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDisplayActive(chgmlDevice, cIsActive)
+	runtime.KeepAlive(cIsActiveAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDisplayMode function as declared in hgml/hgml.h:3113
+func hgmlDeviceGetDisplayMode(hgmlDevice hgmlDevice, Display *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cDisplay, cDisplayAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Display)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDisplayMode(chgmlDevice, cDisplay)
+	runtime.KeepAlive(cDisplayAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDramEncryptionMode function as declared in hgml/hgml.h:3114
+func hgmlDeviceGetDramEncryptionMode(hgmlDevice hgmlDevice, Current *DramEncryptionInfo, Pending *DramEncryptionInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrent, cCurrentAllocMap := (*C.hgmlDramEncryptionInfo_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
+	cPending, cPendingAllocMap := (*C.hgmlDramEncryptionInfo_t)(unsafe.Pointer(Pending)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDramEncryptionMode(chgmlDevice, cCurrent, cPending)
+	runtime.KeepAlive(cPendingAllocMap)
+	runtime.KeepAlive(cCurrentAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDriverModel function as declared in hgml/hgml.h:3115
+func hgmlDeviceGetDriverModel(hgmlDevice hgmlDevice, Current *DriverModel, Pending *DriverModel) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrent, cCurrentAllocMap := (*C.hgmlDriverModel_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
+	cPending, cPendingAllocMap := (*C.hgmlDriverModel_t)(unsafe.Pointer(Pending)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDriverModel(chgmlDevice, cCurrent, cPending)
+	runtime.KeepAlive(cPendingAllocMap)
+	runtime.KeepAlive(cCurrentAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetDriverModel_v2 function as declared in hgml/hgml.h:3116
+func hgmlDeviceGetDriverModel_v2(hgmlDevice hgmlDevice, Current *DriverModel, Pending *DriverModel) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrent, cCurrentAllocMap := (*C.hgmlDriverModel_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
+	cPending, cPendingAllocMap := (*C.hgmlDriverModel_t)(unsafe.Pointer(Pending)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDriverModel_v2(chgmlDevice, cCurrent, cPending)
+	runtime.KeepAlive(cPendingAllocMap)
+	runtime.KeepAlive(cCurrentAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetEccMode function as declared in hgml/hgml.h:3118
 func hgmlDeviceGetEccMode(hgmlDevice hgmlDevice, Current *EnableState, Pending *EnableState) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cCurrent, cCurrentAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
@@ -1194,70 +803,851 @@ func hgmlDeviceGetEccMode(hgmlDevice hgmlDevice, Current *EnableState, Pending *
 	return __v
 }
 
-// hgmlDeviceGetDefaultEccMode function as declared in hgml/hgml.h:4686
-func hgmlDeviceGetDefaultEccMode(hgmlDevice hgmlDevice, DefaultMode *EnableState) Return {
+// hgmlDeviceGetEncoderCapacity function as declared in hgml/hgml.h:3119
+func hgmlDeviceGetEncoderCapacity(hgmlDevice hgmlDevice, EncoderQueryType EncoderType, EncoderCapacity *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cDefaultMode, cDefaultModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(DefaultMode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDefaultEccMode(chgmlDevice, cDefaultMode)
-	runtime.KeepAlive(cDefaultModeAllocMap)
+	cEncoderQueryType, cEncoderQueryTypeAllocMap := (C.hgmlEncoderType_t)(EncoderQueryType), cgoAllocsUnknown
+	cEncoderCapacity, cEncoderCapacityAllocMap := (*C.uint)(unsafe.Pointer(EncoderCapacity)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetEncoderCapacity(chgmlDevice, cEncoderQueryType, cEncoderCapacity)
+	runtime.KeepAlive(cEncoderCapacityAllocMap)
+	runtime.KeepAlive(cEncoderQueryTypeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetBoardId function as declared in hgml/hgml.h:4711
-func hgmlDeviceGetBoardId(hgmlDevice hgmlDevice, BoardId *uint32) Return {
+// hgmlDeviceGetEncoderSessions function as declared in hgml/hgml.h:3120
+func hgmlDeviceGetEncoderSessions(hgmlDevice hgmlDevice, SessionCount *uint32, SessionInfos *EncoderSessionInfo) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cBoardId, cBoardIdAllocMap := (*C.uint)(unsafe.Pointer(BoardId)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetBoardId(chgmlDevice, cBoardId)
-	runtime.KeepAlive(cBoardIdAllocMap)
+	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
+	cSessionInfos, cSessionInfosAllocMap := (*C.hgmlEncoderSessionInfo_t)(unsafe.Pointer(SessionInfos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetEncoderSessions(chgmlDevice, cSessionCount, cSessionInfos)
+	runtime.KeepAlive(cSessionInfosAllocMap)
+	runtime.KeepAlive(cSessionCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMultiGpuBoard function as declared in hgml/hgml.h:4731
-func hgmlDeviceGetMultiGpuBoard(hgmlDevice hgmlDevice, MultiGpuBool *uint32) Return {
+// hgmlDeviceGetEncoderStats function as declared in hgml/hgml.h:3121
+func hgmlDeviceGetEncoderStats(hgmlDevice hgmlDevice, SessionCount *uint32, AverageFps *uint32, AverageLatency *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMultiGpuBool, cMultiGpuBoolAllocMap := (*C.uint)(unsafe.Pointer(MultiGpuBool)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMultiGpuBoard(chgmlDevice, cMultiGpuBool)
-	runtime.KeepAlive(cMultiGpuBoolAllocMap)
+	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
+	cAverageFps, cAverageFpsAllocMap := (*C.uint)(unsafe.Pointer(AverageFps)), cgoAllocsUnknown
+	cAverageLatency, cAverageLatencyAllocMap := (*C.uint)(unsafe.Pointer(AverageLatency)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetEncoderStats(chgmlDevice, cSessionCount, cAverageFps, cAverageLatency)
+	runtime.KeepAlive(cAverageLatencyAllocMap)
+	runtime.KeepAlive(cAverageFpsAllocMap)
+	runtime.KeepAlive(cSessionCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetTotalEccErrors function as declared in hgml/hgml.h:4762
-func hgmlDeviceGetTotalEccErrors(hgmlDevice hgmlDevice, ErrorType MemoryErrorType, CounterType EccCounterType, EccCounts *uint64) Return {
+// hgmlDeviceGetEncoderUtilization function as declared in hgml/hgml.h:3122
+func hgmlDeviceGetEncoderUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cErrorType, cErrorTypeAllocMap := (C.hgmlMemoryErrorType_t)(ErrorType), cgoAllocsUnknown
-	cCounterType, cCounterTypeAllocMap := (C.hgmlEccCounterType_t)(CounterType), cgoAllocsUnknown
-	cEccCounts, cEccCountsAllocMap := (*C.ulonglong)(unsafe.Pointer(EccCounts)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetTotalEccErrors(chgmlDevice, cErrorType, cCounterType, cEccCounts)
-	runtime.KeepAlive(cEccCountsAllocMap)
-	runtime.KeepAlive(cCounterTypeAllocMap)
-	runtime.KeepAlive(cErrorTypeAllocMap)
+	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
+	cSamplingPeriodUs, cSamplingPeriodUsAllocMap := (*C.uint)(unsafe.Pointer(SamplingPeriodUs)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetEncoderUtilization(chgmlDevice, cUtilization, cSamplingPeriodUs)
+	runtime.KeepAlive(cSamplingPeriodUsAllocMap)
+	runtime.KeepAlive(cUtilizationAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetDetailedEccErrors function as declared in hgml/hgml.h:4800
-func hgmlDeviceGetDetailedEccErrors(hgmlDevice hgmlDevice, ErrorType MemoryErrorType, CounterType EccCounterType, EccCounts *EccErrorCounts) Return {
+// hgmlDeviceGetEnforcedPowerLimit function as declared in hgml/hgml.h:3123
+func hgmlDeviceGetEnforcedPowerLimit(hgmlDevice hgmlDevice, Limit *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cErrorType, cErrorTypeAllocMap := (C.hgmlMemoryErrorType_t)(ErrorType), cgoAllocsUnknown
-	cCounterType, cCounterTypeAllocMap := (C.hgmlEccCounterType_t)(CounterType), cgoAllocsUnknown
-	cEccCounts, cEccCountsAllocMap := (*C.hgmlEccErrorCounts_t)(unsafe.Pointer(EccCounts)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDetailedEccErrors(chgmlDevice, cErrorType, cCounterType, cEccCounts)
-	runtime.KeepAlive(cEccCountsAllocMap)
-	runtime.KeepAlive(cCounterTypeAllocMap)
-	runtime.KeepAlive(cErrorTypeAllocMap)
+	cLimit, cLimitAllocMap := (*C.uint)(unsafe.Pointer(Limit)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetEnforcedPowerLimit(chgmlDevice, cLimit)
+	runtime.KeepAlive(cLimitAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMemoryErrorCounter function as declared in hgml/hgml.h:4837
+// hgmlDeviceGetFBCSessions function as declared in hgml/hgml.h:3124
+func hgmlDeviceGetFBCSessions(hgmlDevice hgmlDevice, SessionCount *uint32, SessionInfo *FBCSessionInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
+	cSessionInfo, cSessionInfoAllocMap := (*C.hgmlFBCSessionInfo_t)(unsafe.Pointer(SessionInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFBCSessions(chgmlDevice, cSessionCount, cSessionInfo)
+	runtime.KeepAlive(cSessionInfoAllocMap)
+	runtime.KeepAlive(cSessionCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetFBCStats function as declared in hgml/hgml.h:3125
+func hgmlDeviceGetFBCStats(hgmlDevice hgmlDevice, FbcStats *FBCStats) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFbcStats, cFbcStatsAllocMap := (*C.hgmlFBCStats_t)(unsafe.Pointer(FbcStats)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFBCStats(chgmlDevice, cFbcStats)
+	runtime.KeepAlive(cFbcStatsAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetFanControlPolicy_v2 function as declared in hgml/hgml.h:3126
+func hgmlDeviceGetFanControlPolicy_v2(hgmlDevice hgmlDevice, Fan uint32, Policy *FanControlPolicy) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
+	cPolicy, cPolicyAllocMap := (*C.hgmlFanControlPolicy_t)(unsafe.Pointer(Policy)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFanControlPolicy_v2(chgmlDevice, cFan, cPolicy)
+	runtime.KeepAlive(cPolicyAllocMap)
+	runtime.KeepAlive(cFanAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetFanSpeed function as declared in hgml/hgml.h:3127
+func hgmlDeviceGetFanSpeed(hgmlDevice hgmlDevice, Speed *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSpeed, cSpeedAllocMap := (*C.uint)(unsafe.Pointer(Speed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFanSpeed(chgmlDevice, cSpeed)
+	runtime.KeepAlive(cSpeedAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetFanSpeedRPM function as declared in hgml/hgml.h:3128
+func hgmlDeviceGetFanSpeedRPM(hgmlDevice hgmlDevice, FanSpeed *FanSpeedInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFanSpeed, cFanSpeedAllocMap := (*C.hgmlFanSpeedInfo_t)(unsafe.Pointer(FanSpeed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFanSpeedRPM(chgmlDevice, cFanSpeed)
+	runtime.KeepAlive(cFanSpeedAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetFanSpeed_v2 function as declared in hgml/hgml.h:3129
+func hgmlDeviceGetFanSpeed_v2(hgmlDevice hgmlDevice, Fan uint32, Speed *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
+	cSpeed, cSpeedAllocMap := (*C.uint)(unsafe.Pointer(Speed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFanSpeed_v2(chgmlDevice, cFan, cSpeed)
+	runtime.KeepAlive(cSpeedAllocMap)
+	runtime.KeepAlive(cFanAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetFieldValues function as declared in hgml/hgml.h:3130
+func hgmlDeviceGetFieldValues(hgmlDevice hgmlDevice, ValuesCount int32, Values *FieldValue) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cValuesCount, cValuesCountAllocMap := (C.int)(ValuesCount), cgoAllocsUnknown
+	cValues, cValuesAllocMap := (*C.hgmlFieldValue_t)(unsafe.Pointer(Values)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetFieldValues(chgmlDevice, cValuesCount, cValues)
+	runtime.KeepAlive(cValuesAllocMap)
+	runtime.KeepAlive(cValuesCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpcClkMinMaxVfOffset function as declared in hgml/hgml.h:3131
+func hgmlDeviceGetGpcClkMinMaxVfOffset(hgmlDevice hgmlDevice, MinOffset *int32, MaxOffset *int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMinOffset, cMinOffsetAllocMap := (*C.int)(unsafe.Pointer(MinOffset)), cgoAllocsUnknown
+	cMaxOffset, cMaxOffsetAllocMap := (*C.int)(unsafe.Pointer(MaxOffset)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpcClkMinMaxVfOffset(chgmlDevice, cMinOffset, cMaxOffset)
+	runtime.KeepAlive(cMaxOffsetAllocMap)
+	runtime.KeepAlive(cMinOffsetAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpcClkVfOffset function as declared in hgml/hgml.h:3132
+func hgmlDeviceGetGpcClkVfOffset(hgmlDevice hgmlDevice, Offset *int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cOffset, cOffsetAllocMap := (*C.int)(unsafe.Pointer(Offset)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpcClkVfOffset(chgmlDevice, cOffset)
+	runtime.KeepAlive(cOffsetAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuFabricInfoV function as declared in hgml/hgml.h:3133
+func hgmlDeviceGetGpuFabricInfoV(hgmlDevice hgmlDevice, GpuFabricInfo *GpuFabricInfoV) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cGpuFabricInfo, cGpuFabricInfoAllocMap := (*C.hgmlGpuFabricInfoV_t)(unsafe.Pointer(GpuFabricInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuFabricInfoV(chgmlDevice, cGpuFabricInfo)
+	runtime.KeepAlive(cGpuFabricInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstanceById function as declared in hgml/hgml.h:3134
+func hgmlDeviceGetGpuInstanceById(hgmlDevice hgmlDevice, Id uint32, hgmlGpuInstance *hgmlGpuInstance) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cId, cIdAllocMap := (C.uint)(Id), cgoAllocsUnknown
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(hgmlGpuInstance)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstanceById(chgmlDevice, cId, chgmlGpuInstance)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	runtime.KeepAlive(cIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstanceId function as declared in hgml/hgml.h:3135
+func hgmlDeviceGetGpuInstanceId(hgmlDevice hgmlDevice, Id *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cId, cIdAllocMap := (*C.uint)(unsafe.Pointer(Id)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstanceId(chgmlDevice, cId)
+	runtime.KeepAlive(cIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstancePossiblePlacements function as declared in hgml/hgml.h:3136
+func hgmlDeviceGetGpuInstancePossiblePlacements(hgmlDevice hgmlDevice, ProfileId uint32, Placements *GpuInstancePlacement, Count *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cPlacements, cPlacementsAllocMap := (*C.hgmlGpuInstancePlacement_t)(unsafe.Pointer(Placements)), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstancePossiblePlacements(chgmlDevice, cProfileId, cPlacements, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cPlacementsAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstancePossiblePlacements_v2 function as declared in hgml/hgml.h:3137
+func hgmlDeviceGetGpuInstancePossiblePlacements_v2(hgmlDevice hgmlDevice, ProfileId uint32, Placements *GpuInstancePlacement, Count *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cPlacements, cPlacementsAllocMap := (*C.hgmlGpuInstancePlacement_t)(unsafe.Pointer(Placements)), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstancePossiblePlacements_v2(chgmlDevice, cProfileId, cPlacements, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cPlacementsAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstanceProfileInfo function as declared in hgml/hgml.h:3138
+func hgmlDeviceGetGpuInstanceProfileInfo(hgmlDevice hgmlDevice, Profile uint32, Info *GpuInstanceProfileInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceProfileInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstanceProfileInfo(chgmlDevice, cProfile, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(cProfileAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstanceProfileInfoByIdV function as declared in hgml/hgml.h:3139
+func hgmlDeviceGetGpuInstanceProfileInfoByIdV(hgmlDevice hgmlDevice, ProfileId uint32, Info *GpuInstanceProfileInfo_v2) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceProfileInfo_v2_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstanceProfileInfoByIdV(chgmlDevice, cProfileId, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstanceProfileInfoV function as declared in hgml/hgml.h:3140
+func hgmlDeviceGetGpuInstanceProfileInfoV(hgmlDevice hgmlDevice, Profile uint32, Info *GpuInstanceProfileInfo_v2) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceProfileInfo_v2_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstanceProfileInfoV(chgmlDevice, cProfile, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(cProfileAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstanceRemainingCapacity function as declared in hgml/hgml.h:3141
+func hgmlDeviceGetGpuInstanceRemainingCapacity(hgmlDevice hgmlDevice, ProfileId uint32, Count *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstanceRemainingCapacity(chgmlDevice, cProfileId, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuInstances function as declared in hgml/hgml.h:3142
+func hgmlDeviceGetGpuInstances(hgmlDevice hgmlDevice, ProfileId uint32, GpuInstances *hgmlGpuInstance, Count *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cGpuInstances, cGpuInstancesAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(GpuInstances)), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuInstances(chgmlDevice, cProfileId, cGpuInstances, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cGpuInstancesAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuMaxPcieLinkGeneration function as declared in hgml/hgml.h:3143
+func hgmlDeviceGetGpuMaxPcieLinkGeneration(hgmlDevice hgmlDevice, MaxLinkGenDevice *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMaxLinkGenDevice, cMaxLinkGenDeviceAllocMap := (*C.uint)(unsafe.Pointer(MaxLinkGenDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuMaxPcieLinkGeneration(chgmlDevice, cMaxLinkGenDevice)
+	runtime.KeepAlive(cMaxLinkGenDeviceAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGpuOperationMode function as declared in hgml/hgml.h:3144
+func hgmlDeviceGetGpuOperationMode(hgmlDevice hgmlDevice, Current *GpuOperationMode, Pending *GpuOperationMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrent, cCurrentAllocMap := (*C.hgmlGpuOperationMode_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
+	cPending, cPendingAllocMap := (*C.hgmlGpuOperationMode_t)(unsafe.Pointer(Pending)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuOperationMode(chgmlDevice, cCurrent, cPending)
+	runtime.KeepAlive(cPendingAllocMap)
+	runtime.KeepAlive(cCurrentAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGraphicsRunningProcesses function as declared in hgml/hgml.h:3145
+func hgmlDeviceGetGraphicsRunningProcesses(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v1_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGraphicsRunningProcesses(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGraphicsRunningProcesses_v2 function as declared in hgml/hgml.h:3146
+func hgmlDeviceGetGraphicsRunningProcesses_v2(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v2) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v2_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGraphicsRunningProcesses_v2(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetGraphicsRunningProcesses_v3 function as declared in hgml/hgml.h:3147
+func hgmlDeviceGetGraphicsRunningProcesses_v3(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGraphicsRunningProcesses_v3(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHandleByIndex function as declared in hgml/hgml.h:3148
+func hgmlDeviceGetHandleByIndex(Index uint32, hgmlDevice *hgmlDevice) Return {
+	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleByIndex(cIndex, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cIndexAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHandleByIndex_v2 function as declared in hgml/hgml.h:3149
+func hgmlDeviceGetHandleByIndex_v2(Index uint32, hgmlDevice *hgmlDevice) Return {
+	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleByIndex_v2(cIndex, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cIndexAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHandleByPciBusId function as declared in hgml/hgml.h:3150
+func hgmlDeviceGetHandleByPciBusId(PciBusId string, hgmlDevice *hgmlDevice) Return {
+	cPciBusId, cPciBusIdAllocMap := unpackPCharString(PciBusId)
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleByPciBusId(cPciBusId, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cPciBusIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHandleByPciBusId_v2 function as declared in hgml/hgml.h:3151
+func hgmlDeviceGetHandleByPciBusId_v2(PciBusId string, hgmlDevice *hgmlDevice) Return {
+	cPciBusId, cPciBusIdAllocMap := unpackPCharString(PciBusId)
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleByPciBusId_v2(cPciBusId, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cPciBusIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHandleByUUID function as declared in hgml/hgml.h:3152
+func hgmlDeviceGetHandleByUUID(Uuid string, hgmlDevice *hgmlDevice) Return {
+	cUuid, cUuidAllocMap := unpackPCharString(Uuid)
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleByUUID(cUuid, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cUuidAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHandleByUUIDV function as declared in hgml/hgml.h:3153
+func hgmlDeviceGetHandleByUUIDV(Uuid *UUID, hgmlDevice *hgmlDevice) Return {
+	cUuid, cUuidAllocMap := (*C.hgmlUUID_t)(unsafe.Pointer(Uuid)), cgoAllocsUnknown
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleByUUIDV(cUuid, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cUuidAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHggcComputeCapability function as declared in hgml/hgml.h:3154
+func hgmlDeviceGetHggcComputeCapability(hgmlDevice hgmlDevice, Major *int32, Minor *int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMajor, cMajorAllocMap := (*C.int)(unsafe.Pointer(Major)), cgoAllocsUnknown
+	cMinor, cMinorAllocMap := (*C.int)(unsafe.Pointer(Minor)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHggcComputeCapability(chgmlDevice, cMajor, cMinor)
+	runtime.KeepAlive(cMinorAllocMap)
+	runtime.KeepAlive(cMajorAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHostVgpuMode function as declared in hgml/hgml.h:3155
+func hgmlDeviceGetHostVgpuMode(hgmlDevice hgmlDevice, PHostVgpuMode *HostVgpuMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPHostVgpuMode, cPHostVgpuModeAllocMap := (*C.hgmlHostVgpuMode_t)(unsafe.Pointer(PHostVgpuMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHostVgpuMode(chgmlDevice, cPHostVgpuMode)
+	runtime.KeepAlive(cPHostVgpuModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetHostname_v1 function as declared in hgml/hgml.h:3156
+func hgmlDeviceGetHostname_v1(hgmlDevice hgmlDevice, Hostname *Hostname_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cHostname, cHostnameAllocMap := (*C.hgmlHostname_v1_t)(unsafe.Pointer(Hostname)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHostname_v1(chgmlDevice, cHostname)
+	runtime.KeepAlive(cHostnameAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkBwMode function as declared in hgml/hgml.h:3157
+func hgmlDeviceGetIcnLinkBwMode(hgmlDevice hgmlDevice, GetBwMode *IcnLinkGetBwMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cGetBwMode, cGetBwModeAllocMap := (*C.hgmlIcnLinkGetBwMode_t)(unsafe.Pointer(GetBwMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkBwMode(chgmlDevice, cGetBwMode)
+	runtime.KeepAlive(cGetBwModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkCapability function as declared in hgml/hgml.h:3158
+func hgmlDeviceGetIcnLinkCapability(hgmlDevice hgmlDevice, Link uint32, Capability IcnLinkCapability, CapResult *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCapability, cCapabilityAllocMap := (C.hgmlIcnLinkCapability_t)(Capability), cgoAllocsUnknown
+	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkCapability(chgmlDevice, cLink, cCapability, cCapResult)
+	runtime.KeepAlive(cCapResultAllocMap)
+	runtime.KeepAlive(cCapabilityAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkErrorCounter function as declared in hgml/hgml.h:3159
+func hgmlDeviceGetIcnLinkErrorCounter(hgmlDevice hgmlDevice, Link uint32, Counter IcnLinkErrorCounter, CounterValue *uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCounter, cCounterAllocMap := (C.hgmlIcnLinkErrorCounter_t)(Counter), cgoAllocsUnknown
+	cCounterValue, cCounterValueAllocMap := (*C.ulonglong)(unsafe.Pointer(CounterValue)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkErrorCounter(chgmlDevice, cLink, cCounter, cCounterValue)
+	runtime.KeepAlive(cCounterValueAllocMap)
+	runtime.KeepAlive(cCounterAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkInfo function as declared in hgml/hgml.h:3160
+func hgmlDeviceGetIcnLinkInfo(hgmlDevice hgmlDevice, Info *IcnLinkInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlIcnLinkInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkInfo(chgmlDevice, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkRemoteDeviceType function as declared in hgml/hgml.h:3161
+func hgmlDeviceGetIcnLinkRemoteDeviceType(hgmlDevice hgmlDevice, Link uint32, PIcnLinkDeviceType *IntIcnLinkDeviceType) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cPIcnLinkDeviceType, cPIcnLinkDeviceTypeAllocMap := (*C.hgmlIntIcnLinkDeviceType_t)(unsafe.Pointer(PIcnLinkDeviceType)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkRemoteDeviceType(chgmlDevice, cLink, cPIcnLinkDeviceType)
+	runtime.KeepAlive(cPIcnLinkDeviceTypeAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkRemotePciInfo function as declared in hgml/hgml.h:3162
+func hgmlDeviceGetIcnLinkRemotePciInfo(hgmlDevice hgmlDevice, Link uint32, Pci *PciInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkRemotePciInfo(chgmlDevice, cLink, cPci)
+	runtime.KeepAlive(cPciAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkRemotePciInfo_v2 function as declared in hgml/hgml.h:3163
+func hgmlDeviceGetIcnLinkRemotePciInfo_v2(hgmlDevice hgmlDevice, Link uint32, Pci *PciInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkRemotePciInfo_v2(chgmlDevice, cLink, cPci)
+	runtime.KeepAlive(cPciAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkState function as declared in hgml/hgml.h:3164
+func hgmlDeviceGetIcnLinkState(hgmlDevice hgmlDevice, Link uint32, IsActive *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cIsActive, cIsActiveAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsActive)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkState(chgmlDevice, cLink, cIsActive)
+	runtime.KeepAlive(cIsActiveAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkSupportedBwModes function as declared in hgml/hgml.h:3165
+func hgmlDeviceGetIcnLinkSupportedBwModes(hgmlDevice hgmlDevice, SupportedBwMode *IcnLinkSupportedBwModes) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSupportedBwMode, cSupportedBwModeAllocMap := (*C.hgmlIcnLinkSupportedBwModes_t)(unsafe.Pointer(SupportedBwMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkSupportedBwModes(chgmlDevice, cSupportedBwMode)
+	runtime.KeepAlive(cSupportedBwModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkVersion function as declared in hgml/hgml.h:3166
+func hgmlDeviceGetIcnLinkVersion(hgmlDevice hgmlDevice, Link uint32, Version *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cVersion, cVersionAllocMap := (*C.uint)(unsafe.Pointer(Version)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkVersion(chgmlDevice, cLink, cVersion)
+	runtime.KeepAlive(cVersionAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIndex function as declared in hgml/hgml.h:3167
+func hgmlDeviceGetIndex(hgmlDevice hgmlDevice, Index *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cIndex, cIndexAllocMap := (*C.uint)(unsafe.Pointer(Index)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIndex(chgmlDevice, cIndex)
+	runtime.KeepAlive(cIndexAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetInforomConfigurationChecksum function as declared in hgml/hgml.h:3168
+func hgmlDeviceGetInforomConfigurationChecksum(hgmlDevice hgmlDevice, Checksum *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cChecksum, cChecksumAllocMap := (*C.uint)(unsafe.Pointer(Checksum)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetInforomConfigurationChecksum(chgmlDevice, cChecksum)
+	runtime.KeepAlive(cChecksumAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetInforomImageVersion function as declared in hgml/hgml.h:3169
+func hgmlDeviceGetInforomImageVersion(hgmlDevice hgmlDevice, Version *byte, Length uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetInforomImageVersion(chgmlDevice, cVersion, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cVersionAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetInforomVersion function as declared in hgml/hgml.h:3170
+func hgmlDeviceGetInforomVersion(hgmlDevice hgmlDevice, Object InforomObject, Version *byte, Length uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cObject, cObjectAllocMap := (C.hgmlInforomObject_t)(Object), cgoAllocsUnknown
+	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetInforomVersion(chgmlDevice, cObject, cVersion, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cVersionAllocMap)
+	runtime.KeepAlive(cObjectAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIrqNum function as declared in hgml/hgml.h:3171
+func hgmlDeviceGetIrqNum(hgmlDevice hgmlDevice, IrqNum *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cIrqNum, cIrqNumAllocMap := (*C.uint)(unsafe.Pointer(IrqNum)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIrqNum(chgmlDevice, cIrqNum)
+	runtime.KeepAlive(cIrqNumAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetJpgUtilization function as declared in hgml/hgml.h:3172
+func hgmlDeviceGetJpgUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
+	cSamplingPeriodUs, cSamplingPeriodUsAllocMap := (*C.uint)(unsafe.Pointer(SamplingPeriodUs)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetJpgUtilization(chgmlDevice, cUtilization, cSamplingPeriodUs)
+	runtime.KeepAlive(cSamplingPeriodUsAllocMap)
+	runtime.KeepAlive(cUtilizationAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetLastBBXFlushTime function as declared in hgml/hgml.h:3173
+func hgmlDeviceGetLastBBXFlushTime(hgmlDevice hgmlDevice, Timestamp *uint64, DurationUs *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cTimestamp, cTimestampAllocMap := (*C.ulonglong)(unsafe.Pointer(Timestamp)), cgoAllocsUnknown
+	cDurationUs, cDurationUsAllocMap := (*C.ulong)(unsafe.Pointer(DurationUs)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetLastBBXFlushTime(chgmlDevice, cTimestamp, cDurationUs)
+	runtime.KeepAlive(cDurationUsAllocMap)
+	runtime.KeepAlive(cTimestampAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMPSComputeRunningProcesses function as declared in hgml/hgml.h:3174
+func hgmlDeviceGetMPSComputeRunningProcesses(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v1_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMPSComputeRunningProcesses(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMPSComputeRunningProcesses_v2 function as declared in hgml/hgml.h:3175
+func hgmlDeviceGetMPSComputeRunningProcesses_v2(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v2) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v2_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMPSComputeRunningProcesses_v2(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMPSComputeRunningProcesses_v3 function as declared in hgml/hgml.h:3176
+func hgmlDeviceGetMPSComputeRunningProcesses_v3(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
+	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMPSComputeRunningProcesses_v3(chgmlDevice, cInfoCount, cInfos)
+	runtime.KeepAlive(cInfosAllocMap)
+	runtime.KeepAlive(cInfoCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMarginTemperature function as declared in hgml/hgml.h:3177
+func hgmlDeviceGetMarginTemperature(hgmlDevice hgmlDevice, MarginTempInfo *MarginTemperature) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMarginTempInfo, cMarginTempInfoAllocMap := (*C.hgmlMarginTemperature_t)(unsafe.Pointer(MarginTempInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMarginTemperature(chgmlDevice, cMarginTempInfo)
+	runtime.KeepAlive(cMarginTempInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMaxClockInfo function as declared in hgml/hgml.h:3178
+func hgmlDeviceGetMaxClockInfo(hgmlDevice hgmlDevice, _type ClockType, Clock *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	c_type, c_typeAllocMap := (C.hgmlClockType_t)(_type), cgoAllocsUnknown
+	cClock, cClockAllocMap := (*C.uint)(unsafe.Pointer(Clock)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMaxClockInfo(chgmlDevice, c_type, cClock)
+	runtime.KeepAlive(cClockAllocMap)
+	runtime.KeepAlive(c_typeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMaxCustomerBoostClock function as declared in hgml/hgml.h:3179
+func hgmlDeviceGetMaxCustomerBoostClock(hgmlDevice hgmlDevice, ClockType ClockType, ClockMHz *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cClockType, cClockTypeAllocMap := (C.hgmlClockType_t)(ClockType), cgoAllocsUnknown
+	cClockMHz, cClockMHzAllocMap := (*C.uint)(unsafe.Pointer(ClockMHz)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMaxCustomerBoostClock(chgmlDevice, cClockType, cClockMHz)
+	runtime.KeepAlive(cClockMHzAllocMap)
+	runtime.KeepAlive(cClockTypeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMaxMigDeviceCount function as declared in hgml/hgml.h:3180
+func hgmlDeviceGetMaxMigDeviceCount(hgmlDevice hgmlDevice, Count *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMaxMigDeviceCount(chgmlDevice, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMaxPcieLinkGeneration function as declared in hgml/hgml.h:3181
+func hgmlDeviceGetMaxPcieLinkGeneration(hgmlDevice hgmlDevice, MaxLinkGen *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMaxLinkGen, cMaxLinkGenAllocMap := (*C.uint)(unsafe.Pointer(MaxLinkGen)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMaxPcieLinkGeneration(chgmlDevice, cMaxLinkGen)
+	runtime.KeepAlive(cMaxLinkGenAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMaxPcieLinkWidth function as declared in hgml/hgml.h:3182
+func hgmlDeviceGetMaxPcieLinkWidth(hgmlDevice hgmlDevice, MaxLinkWidth *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMaxLinkWidth, cMaxLinkWidthAllocMap := (*C.uint)(unsafe.Pointer(MaxLinkWidth)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMaxPcieLinkWidth(chgmlDevice, cMaxLinkWidth)
+	runtime.KeepAlive(cMaxLinkWidthAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMemClkMinMaxVfOffset function as declared in hgml/hgml.h:3183
+func hgmlDeviceGetMemClkMinMaxVfOffset(hgmlDevice hgmlDevice, MinOffset *int32, MaxOffset *int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMinOffset, cMinOffsetAllocMap := (*C.int)(unsafe.Pointer(MinOffset)), cgoAllocsUnknown
+	cMaxOffset, cMaxOffsetAllocMap := (*C.int)(unsafe.Pointer(MaxOffset)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMemClkMinMaxVfOffset(chgmlDevice, cMinOffset, cMaxOffset)
+	runtime.KeepAlive(cMaxOffsetAllocMap)
+	runtime.KeepAlive(cMinOffsetAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMemClkVfOffset function as declared in hgml/hgml.h:3184
+func hgmlDeviceGetMemClkVfOffset(hgmlDevice hgmlDevice, Offset *int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cOffset, cOffsetAllocMap := (*C.int)(unsafe.Pointer(Offset)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMemClkVfOffset(chgmlDevice, cOffset)
+	runtime.KeepAlive(cOffsetAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMemoryAffinity function as declared in hgml/hgml.h:3185
+func hgmlDeviceGetMemoryAffinity(hgmlDevice hgmlDevice, NodeSetSize uint32, NodeSet *uint32, Scope AffinityScope) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cNodeSetSize, cNodeSetSizeAllocMap := (C.uint)(NodeSetSize), cgoAllocsUnknown
+	cNodeSet, cNodeSetAllocMap := (*C.ulong)(unsafe.Pointer(NodeSet)), cgoAllocsUnknown
+	cScope, cScopeAllocMap := (C.hgmlAffinityScope_t)(Scope), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMemoryAffinity(chgmlDevice, cNodeSetSize, cNodeSet, cScope)
+	runtime.KeepAlive(cScopeAllocMap)
+	runtime.KeepAlive(cNodeSetAllocMap)
+	runtime.KeepAlive(cNodeSetSizeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMemoryBusWidth function as declared in hgml/hgml.h:3186
+func hgmlDeviceGetMemoryBusWidth(hgmlDevice hgmlDevice, BusWidth *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cBusWidth, cBusWidthAllocMap := (*C.uint)(unsafe.Pointer(BusWidth)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMemoryBusWidth(chgmlDevice, cBusWidth)
+	runtime.KeepAlive(cBusWidthAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMemoryErrorCounter function as declared in hgml/hgml.h:3187
 func hgmlDeviceGetMemoryErrorCounter(hgmlDevice hgmlDevice, ErrorType MemoryErrorType, CounterType EccCounterType, LocationType MemoryLocation, Count *uint64) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cErrorType, cErrorTypeAllocMap := (C.hgmlMemoryErrorType_t)(ErrorType), cgoAllocsUnknown
@@ -1274,98 +1664,164 @@ func hgmlDeviceGetMemoryErrorCounter(hgmlDevice hgmlDevice, ErrorType MemoryErro
 	return __v
 }
 
-// hgmlDeviceGetUtilizationRates function as declared in hgml/hgml.h:4864
-func hgmlDeviceGetUtilizationRates(hgmlDevice hgmlDevice, Utilization *Utilization) Return {
+// hgmlDeviceGetMemoryInfo function as declared in hgml/hgml.h:3188
+func hgmlDeviceGetMemoryInfo(hgmlDevice hgmlDevice, Memory *Memory) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cUtilization, cUtilizationAllocMap := (*C.hgmlUtilization_t)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetUtilizationRates(chgmlDevice, cUtilization)
-	runtime.KeepAlive(cUtilizationAllocMap)
+	cMemory, cMemoryAllocMap := (*C.hgmlMemory_t)(unsafe.Pointer(Memory)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMemoryInfo(chgmlDevice, cMemory)
+	runtime.KeepAlive(cMemoryAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetEncoderUtilization function as declared in hgml/hgml.h:4885
-func hgmlDeviceGetEncoderUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
+// hgmlDeviceGetMemoryInfo_v2 function as declared in hgml/hgml.h:3189
+func hgmlDeviceGetMemoryInfo_v2(hgmlDevice hgmlDevice, Memory *Memory_v2) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
-	cSamplingPeriodUs, cSamplingPeriodUsAllocMap := (*C.uint)(unsafe.Pointer(SamplingPeriodUs)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetEncoderUtilization(chgmlDevice, cUtilization, cSamplingPeriodUs)
-	runtime.KeepAlive(cSamplingPeriodUsAllocMap)
-	runtime.KeepAlive(cUtilizationAllocMap)
+	cMemory, cMemoryAllocMap := (*C.hgmlMemory_v2_t)(unsafe.Pointer(Memory)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMemoryInfo_v2(chgmlDevice, cMemory)
+	runtime.KeepAlive(cMemoryAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetEncoderCapacity function as declared in hgml/hgml.h:4905
-func hgmlDeviceGetEncoderCapacity(hgmlDevice hgmlDevice, EncoderQueryType EncoderType, EncoderCapacity *uint32) Return {
+// hgmlDeviceGetMigDeviceHandleByIndex function as declared in hgml/hgml.h:3190
+func hgmlDeviceGetMigDeviceHandleByIndex(hgmlDevice hgmlDevice, Index uint32, MigDevice *hgmlDevice) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cEncoderQueryType, cEncoderQueryTypeAllocMap := (C.hgmlEncoderType_t)(EncoderQueryType), cgoAllocsUnknown
-	cEncoderCapacity, cEncoderCapacityAllocMap := (*C.uint)(unsafe.Pointer(EncoderCapacity)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetEncoderCapacity(chgmlDevice, cEncoderQueryType, cEncoderCapacity)
-	runtime.KeepAlive(cEncoderCapacityAllocMap)
-	runtime.KeepAlive(cEncoderQueryTypeAllocMap)
+	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
+	cMigDevice, cMigDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(MigDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMigDeviceHandleByIndex(chgmlDevice, cIndex, cMigDevice)
+	runtime.KeepAlive(cMigDeviceAllocMap)
+	runtime.KeepAlive(cIndexAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetEncoderStats function as declared in hgml/hgml.h:4925
-func hgmlDeviceGetEncoderStats(hgmlDevice hgmlDevice, SessionCount *uint32, AverageFps *uint32, AverageLatency *uint32) Return {
+// hgmlDeviceGetMigMode function as declared in hgml/hgml.h:3191
+func hgmlDeviceGetMigMode(hgmlDevice hgmlDevice, CurrentMode *uint32, PendingMode *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
-	cAverageFps, cAverageFpsAllocMap := (*C.uint)(unsafe.Pointer(AverageFps)), cgoAllocsUnknown
-	cAverageLatency, cAverageLatencyAllocMap := (*C.uint)(unsafe.Pointer(AverageLatency)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetEncoderStats(chgmlDevice, cSessionCount, cAverageFps, cAverageLatency)
-	runtime.KeepAlive(cAverageLatencyAllocMap)
-	runtime.KeepAlive(cAverageFpsAllocMap)
-	runtime.KeepAlive(cSessionCountAllocMap)
+	cCurrentMode, cCurrentModeAllocMap := (*C.uint)(unsafe.Pointer(CurrentMode)), cgoAllocsUnknown
+	cPendingMode, cPendingModeAllocMap := (*C.uint)(unsafe.Pointer(PendingMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMigMode(chgmlDevice, cCurrentMode, cPendingMode)
+	runtime.KeepAlive(cPendingModeAllocMap)
+	runtime.KeepAlive(cCurrentModeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetEncoderSessions function as declared in hgml/hgml.h:4955
-func hgmlDeviceGetEncoderSessions(hgmlDevice hgmlDevice, SessionCount *uint32, SessionInfos *EncoderSessionInfo) Return {
+// hgmlDeviceGetMinMaxClockOfPState function as declared in hgml/hgml.h:3192
+func hgmlDeviceGetMinMaxClockOfPState(hgmlDevice hgmlDevice, _type ClockType, Pstate Pstates, MinClockMHz *uint32, MaxClockMHz *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
-	cSessionInfos, cSessionInfosAllocMap := (*C.hgmlEncoderSessionInfo_t)(unsafe.Pointer(SessionInfos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetEncoderSessions(chgmlDevice, cSessionCount, cSessionInfos)
-	runtime.KeepAlive(cSessionInfosAllocMap)
-	runtime.KeepAlive(cSessionCountAllocMap)
+	c_type, c_typeAllocMap := (C.hgmlClockType_t)(_type), cgoAllocsUnknown
+	cPstate, cPstateAllocMap := (C.hgmlPstates_t)(Pstate), cgoAllocsUnknown
+	cMinClockMHz, cMinClockMHzAllocMap := (*C.uint)(unsafe.Pointer(MinClockMHz)), cgoAllocsUnknown
+	cMaxClockMHz, cMaxClockMHzAllocMap := (*C.uint)(unsafe.Pointer(MaxClockMHz)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMinMaxClockOfPState(chgmlDevice, c_type, cPstate, cMinClockMHz, cMaxClockMHz)
+	runtime.KeepAlive(cMaxClockMHzAllocMap)
+	runtime.KeepAlive(cMinClockMHzAllocMap)
+	runtime.KeepAlive(cPstateAllocMap)
+	runtime.KeepAlive(c_typeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetDecoderUtilization function as declared in hgml/hgml.h:4976
-func hgmlDeviceGetDecoderUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
+// hgmlDeviceGetMinMaxFanSpeed function as declared in hgml/hgml.h:3193
+func hgmlDeviceGetMinMaxFanSpeed(hgmlDevice hgmlDevice, MinSpeed *uint32, MaxSpeed *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
-	cSamplingPeriodUs, cSamplingPeriodUsAllocMap := (*C.uint)(unsafe.Pointer(SamplingPeriodUs)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDecoderUtilization(chgmlDevice, cUtilization, cSamplingPeriodUs)
-	runtime.KeepAlive(cSamplingPeriodUsAllocMap)
-	runtime.KeepAlive(cUtilizationAllocMap)
+	cMinSpeed, cMinSpeedAllocMap := (*C.uint)(unsafe.Pointer(MinSpeed)), cgoAllocsUnknown
+	cMaxSpeed, cMaxSpeedAllocMap := (*C.uint)(unsafe.Pointer(MaxSpeed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMinMaxFanSpeed(chgmlDevice, cMinSpeed, cMaxSpeed)
+	runtime.KeepAlive(cMaxSpeedAllocMap)
+	runtime.KeepAlive(cMinSpeedAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetJpgUtilization function as declared in hgml/hgml.h:4997
-func hgmlDeviceGetJpgUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
+// hgmlDeviceGetMinorNumber function as declared in hgml/hgml.h:3194
+func hgmlDeviceGetMinorNumber(hgmlDevice hgmlDevice, MinorNumber *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
-	cSamplingPeriodUs, cSamplingPeriodUsAllocMap := (*C.uint)(unsafe.Pointer(SamplingPeriodUs)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetJpgUtilization(chgmlDevice, cUtilization, cSamplingPeriodUs)
-	runtime.KeepAlive(cSamplingPeriodUsAllocMap)
-	runtime.KeepAlive(cUtilizationAllocMap)
+	cMinorNumber, cMinorNumberAllocMap := (*C.uint)(unsafe.Pointer(MinorNumber)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMinorNumber(chgmlDevice, cMinorNumber)
+	runtime.KeepAlive(cMinorNumberAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetOfaUtilization function as declared in hgml/hgml.h:5018
+// hgmlDeviceGetModuleId function as declared in hgml/hgml.h:3195
+func hgmlDeviceGetModuleId(hgmlDevice hgmlDevice, ModuleId *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cModuleId, cModuleIdAllocMap := (*C.uint)(unsafe.Pointer(ModuleId)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetModuleId(chgmlDevice, cModuleId)
+	runtime.KeepAlive(cModuleIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetMultiGpuBoard function as declared in hgml/hgml.h:3196
+func hgmlDeviceGetMultiGpuBoard(hgmlDevice hgmlDevice, MultiGpuBool *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMultiGpuBool, cMultiGpuBoolAllocMap := (*C.uint)(unsafe.Pointer(MultiGpuBool)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetMultiGpuBoard(chgmlDevice, cMultiGpuBool)
+	runtime.KeepAlive(cMultiGpuBoolAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetName function as declared in hgml/hgml.h:3197
+func hgmlDeviceGetName(hgmlDevice hgmlDevice, Name *byte, Length uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cName, cNameAllocMap := (*C.char)(unsafe.Pointer(Name)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetName(chgmlDevice, cName, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cNameAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetNumFans function as declared in hgml/hgml.h:3198
+func hgmlDeviceGetNumFans(hgmlDevice hgmlDevice, NumFans *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cNumFans, cNumFansAllocMap := (*C.uint)(unsafe.Pointer(NumFans)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetNumFans(chgmlDevice, cNumFans)
+	runtime.KeepAlive(cNumFansAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetNumGpuCores function as declared in hgml/hgml.h:3199
+func hgmlDeviceGetNumGpuCores(hgmlDevice hgmlDevice, NumCores *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cNumCores, cNumCoresAllocMap := (*C.uint)(unsafe.Pointer(NumCores)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetNumGpuCores(chgmlDevice, cNumCores)
+	runtime.KeepAlive(cNumCoresAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetNumaNodeId function as declared in hgml/hgml.h:3200
+func hgmlDeviceGetNumaNodeId(hgmlDevice hgmlDevice, Node *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cNode, cNodeAllocMap := (*C.uint)(unsafe.Pointer(Node)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetNumaNodeId(chgmlDevice, cNode)
+	runtime.KeepAlive(cNodeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetOfaUtilization function as declared in hgml/hgml.h:3201
 func hgmlDeviceGetOfaUtilization(hgmlDevice hgmlDevice, Utilization *uint32, SamplingPeriodUs *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cUtilization, cUtilizationAllocMap := (*C.uint)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
@@ -1378,107 +1834,356 @@ func hgmlDeviceGetOfaUtilization(hgmlDevice hgmlDevice, Utilization *uint32, Sam
 	return __v
 }
 
-// hgmlDeviceGetFBCStats function as declared in hgml/hgml.h:5035
-func hgmlDeviceGetFBCStats(hgmlDevice hgmlDevice, FbcStats *FBCStats) Return {
+// hgmlDeviceGetP2PStatus function as declared in hgml/hgml.h:3202
+func hgmlDeviceGetP2PStatus(Device1 hgmlDevice, Device2 hgmlDevice, P2pIndex GpuP2PCapsIndex, P2pStatus *GpuP2PStatus) Return {
+	cDevice1, cDevice1AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device1)), cgoAllocsUnknown
+	cDevice2, cDevice2AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device2)), cgoAllocsUnknown
+	cP2pIndex, cP2pIndexAllocMap := (C.hgmlGpuP2PCapsIndex_t)(P2pIndex), cgoAllocsUnknown
+	cP2pStatus, cP2pStatusAllocMap := (*C.hgmlGpuP2PStatus_t)(unsafe.Pointer(P2pStatus)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetP2PStatus(cDevice1, cDevice2, cP2pIndex, cP2pStatus)
+	runtime.KeepAlive(cP2pStatusAllocMap)
+	runtime.KeepAlive(cP2pIndexAllocMap)
+	runtime.KeepAlive(cDevice2AllocMap)
+	runtime.KeepAlive(cDevice1AllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPciInfo function as declared in hgml/hgml.h:3203
+func hgmlDeviceGetPciInfo(hgmlDevice hgmlDevice, Pci *PciInfo) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFbcStats, cFbcStatsAllocMap := (*C.hgmlFBCStats_t)(unsafe.Pointer(FbcStats)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetFBCStats(chgmlDevice, cFbcStats)
-	runtime.KeepAlive(cFbcStatsAllocMap)
+	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPciInfo(chgmlDevice, cPci)
+	runtime.KeepAlive(cPciAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetFBCSessions function as declared in hgml/hgml.h:5066
-func hgmlDeviceGetFBCSessions(hgmlDevice hgmlDevice, SessionCount *uint32, SessionInfo *FBCSessionInfo) Return {
+// hgmlDeviceGetPciInfoExt function as declared in hgml/hgml.h:3204
+func hgmlDeviceGetPciInfoExt(hgmlDevice hgmlDevice, Pci *PciInfoExt) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
-	cSessionInfo, cSessionInfoAllocMap := (*C.hgmlFBCSessionInfo_t)(unsafe.Pointer(SessionInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetFBCSessions(chgmlDevice, cSessionCount, cSessionInfo)
-	runtime.KeepAlive(cSessionInfoAllocMap)
-	runtime.KeepAlive(cSessionCountAllocMap)
+	cPci, cPciAllocMap := (*C.hgmlPciInfoExt_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPciInfoExt(chgmlDevice, cPci)
+	runtime.KeepAlive(cPciAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetDriverModel function as declared in hgml/hgml.h:5093
-func hgmlDeviceGetDriverModel(hgmlDevice hgmlDevice, Current *DriverModel, Pending *DriverModel) Return {
+// hgmlDeviceGetPciInfo_v2 function as declared in hgml/hgml.h:3205
+func hgmlDeviceGetPciInfo_v2(hgmlDevice hgmlDevice, Pci *PciInfo) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCurrent, cCurrentAllocMap := (*C.hgmlDriverModel_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
-	cPending, cPendingAllocMap := (*C.hgmlDriverModel_t)(unsafe.Pointer(Pending)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDriverModel(chgmlDevice, cCurrent, cPending)
-	runtime.KeepAlive(cPendingAllocMap)
-	runtime.KeepAlive(cCurrentAllocMap)
+	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPciInfo_v2(chgmlDevice, cPci)
+	runtime.KeepAlive(cPciAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetVbiosVersion function as declared in hgml/hgml.h:5115
-func hgmlDeviceGetVbiosVersion(hgmlDevice hgmlDevice, Version *byte, Length uint32) Return {
+// hgmlDeviceGetPciInfo_v3 function as declared in hgml/hgml.h:3206
+func hgmlDeviceGetPciInfo_v3(hgmlDevice hgmlDevice, Pci *PciInfo) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetVbiosVersion(chgmlDevice, cVersion, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cVersionAllocMap)
+	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPciInfo_v3(chgmlDevice, cPci)
+	runtime.KeepAlive(cPciAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetBridgeChipInfo function as declared in hgml/hgml.h:5135
-func hgmlDeviceGetBridgeChipInfo(hgmlDevice hgmlDevice, BridgeHierarchy *BridgeChipHierarchy) Return {
+// hgmlDeviceGetPcieLinkMaxSpeed function as declared in hgml/hgml.h:3207
+func hgmlDeviceGetPcieLinkMaxSpeed(hgmlDevice hgmlDevice, MaxSpeed *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cBridgeHierarchy, cBridgeHierarchyAllocMap := (*C.hgmlBridgeChipHierarchy_t)(unsafe.Pointer(BridgeHierarchy)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetBridgeChipInfo(chgmlDevice, cBridgeHierarchy)
-	runtime.KeepAlive(cBridgeHierarchyAllocMap)
+	cMaxSpeed, cMaxSpeedAllocMap := (*C.uint)(unsafe.Pointer(MaxSpeed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPcieLinkMaxSpeed(chgmlDevice, cMaxSpeed)
+	runtime.KeepAlive(cMaxSpeedAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetComputeRunningProcesses_v3 function as declared in hgml/hgml.h:5178
-func hgmlDeviceGetComputeRunningProcesses_v3(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo) Return {
+// hgmlDeviceGetPcieReplayCounter function as declared in hgml/hgml.h:3208
+func hgmlDeviceGetPcieReplayCounter(hgmlDevice hgmlDevice, Value *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetComputeRunningProcesses_v3(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
+	cValue, cValueAllocMap := (*C.uint)(unsafe.Pointer(Value)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPcieReplayCounter(chgmlDevice, cValue)
+	runtime.KeepAlive(cValueAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGraphicsRunningProcesses_v3 function as declared in hgml/hgml.h:5221
-func hgmlDeviceGetGraphicsRunningProcesses_v3(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo) Return {
+// hgmlDeviceGetPcieSpeed function as declared in hgml/hgml.h:3209
+func hgmlDeviceGetPcieSpeed(hgmlDevice hgmlDevice, PcieSpeed *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGraphicsRunningProcesses_v3(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
+	cPcieSpeed, cPcieSpeedAllocMap := (*C.uint)(unsafe.Pointer(PcieSpeed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPcieSpeed(chgmlDevice, cPcieSpeed)
+	runtime.KeepAlive(cPcieSpeedAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMPSComputeRunningProcesses_v3 function as declared in hgml/hgml.h:5264
-func hgmlDeviceGetMPSComputeRunningProcesses_v3(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo) Return {
+// hgmlDeviceGetPcieThroughput function as declared in hgml/hgml.h:3210
+func hgmlDeviceGetPcieThroughput(hgmlDevice hgmlDevice, Counter PcieUtilCounter, Value *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMPSComputeRunningProcesses_v3(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
+	cCounter, cCounterAllocMap := (C.hgmlPcieUtilCounter_t)(Counter), cgoAllocsUnknown
+	cValue, cValueAllocMap := (*C.uint)(unsafe.Pointer(Value)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPcieThroughput(chgmlDevice, cCounter, cValue)
+	runtime.KeepAlive(cValueAllocMap)
+	runtime.KeepAlive(cCounterAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetRunningProcessDetailList function as declared in hgml/hgml.h:5313
+// hgmlDeviceGetPdi function as declared in hgml/hgml.h:3211
+func hgmlDeviceGetPdi(hgmlDevice hgmlDevice, Pdi *Pdi) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPdi, cPdiAllocMap := (*C.hgmlPdi_t)(unsafe.Pointer(Pdi)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPdi(chgmlDevice, cPdi)
+	runtime.KeepAlive(cPdiAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPerformanceModes function as declared in hgml/hgml.h:3212
+func hgmlDeviceGetPerformanceModes(hgmlDevice hgmlDevice, PerfModes *DevicePerfModes) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPerfModes, cPerfModesAllocMap := (*C.hgmlDevicePerfModes_t)(unsafe.Pointer(PerfModes)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPerformanceModes(chgmlDevice, cPerfModes)
+	runtime.KeepAlive(cPerfModesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPerformanceState function as declared in hgml/hgml.h:3213
+func hgmlDeviceGetPerformanceState(hgmlDevice hgmlDevice, PState *Pstates) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPState, cPStateAllocMap := (*C.hgmlPstates_t)(unsafe.Pointer(PState)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPerformanceState(chgmlDevice, cPState)
+	runtime.KeepAlive(cPStateAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPersistenceMode function as declared in hgml/hgml.h:3214
+func hgmlDeviceGetPersistenceMode(hgmlDevice hgmlDevice, Mode *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPersistenceMode(chgmlDevice, cMode)
+	runtime.KeepAlive(cModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPgpuMetadataString function as declared in hgml/hgml.h:3215
+func hgmlDeviceGetPgpuMetadataString(hgmlDevice hgmlDevice, PgpuMetadata *byte, BufferSize *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPgpuMetadata, cPgpuMetadataAllocMap := (*C.char)(unsafe.Pointer(PgpuMetadata)), cgoAllocsUnknown
+	cBufferSize, cBufferSizeAllocMap := (*C.uint)(unsafe.Pointer(BufferSize)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPgpuMetadataString(chgmlDevice, cPgpuMetadata, cBufferSize)
+	runtime.KeepAlive(cBufferSizeAllocMap)
+	runtime.KeepAlive(cPgpuMetadataAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPlatformInfo function as declared in hgml/hgml.h:3216
+func hgmlDeviceGetPlatformInfo(hgmlDevice hgmlDevice, PlatformInfo *PlatformInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPlatformInfo, cPlatformInfoAllocMap := (*C.hgmlPlatformInfo_t)(unsafe.Pointer(PlatformInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPlatformInfo(chgmlDevice, cPlatformInfo)
+	runtime.KeepAlive(cPlatformInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerManagementDefaultLimit function as declared in hgml/hgml.h:3217
+func hgmlDeviceGetPowerManagementDefaultLimit(hgmlDevice hgmlDevice, DefaultLimit *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cDefaultLimit, cDefaultLimitAllocMap := (*C.uint)(unsafe.Pointer(DefaultLimit)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerManagementDefaultLimit(chgmlDevice, cDefaultLimit)
+	runtime.KeepAlive(cDefaultLimitAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerManagementLimit function as declared in hgml/hgml.h:3218
+func hgmlDeviceGetPowerManagementLimit(hgmlDevice hgmlDevice, Limit *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLimit, cLimitAllocMap := (*C.uint)(unsafe.Pointer(Limit)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerManagementLimit(chgmlDevice, cLimit)
+	runtime.KeepAlive(cLimitAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerManagementLimitConstraints function as declared in hgml/hgml.h:3219
+func hgmlDeviceGetPowerManagementLimitConstraints(hgmlDevice hgmlDevice, MinLimit *uint32, MaxLimit *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMinLimit, cMinLimitAllocMap := (*C.uint)(unsafe.Pointer(MinLimit)), cgoAllocsUnknown
+	cMaxLimit, cMaxLimitAllocMap := (*C.uint)(unsafe.Pointer(MaxLimit)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerManagementLimitConstraints(chgmlDevice, cMinLimit, cMaxLimit)
+	runtime.KeepAlive(cMaxLimitAllocMap)
+	runtime.KeepAlive(cMinLimitAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerMizerMode_v1 function as declared in hgml/hgml.h:3220
+func hgmlDeviceGetPowerMizerMode_v1(hgmlDevice hgmlDevice, PowerMizerMode *DevicePowerMizerModes_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPowerMizerMode, cPowerMizerModeAllocMap := (*C.hgmlDevicePowerMizerModes_v1_t)(unsafe.Pointer(PowerMizerMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerMizerMode_v1(chgmlDevice, cPowerMizerMode)
+	runtime.KeepAlive(cPowerMizerModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerSource function as declared in hgml/hgml.h:3221
+func hgmlDeviceGetPowerSource(hgmlDevice hgmlDevice, PowerSource *PowerSource) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPowerSource, cPowerSourceAllocMap := (*C.hgmlPowerSource_t)(unsafe.Pointer(PowerSource)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerSource(chgmlDevice, cPowerSource)
+	runtime.KeepAlive(cPowerSourceAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerUsage function as declared in hgml/hgml.h:3222
+func hgmlDeviceGetPowerUsage(hgmlDevice hgmlDevice, Power *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPower, cPowerAllocMap := (*C.uint)(unsafe.Pointer(Power)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerUsage(chgmlDevice, cPower)
+	runtime.KeepAlive(cPowerAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetProcessUtilization function as declared in hgml/hgml.h:3223
+func hgmlDeviceGetProcessUtilization(hgmlDevice hgmlDevice, Utilization *ProcessUtilizationSample, ProcessSamplesCount *uint32, LastSeenTimeStamp uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cUtilization, cUtilizationAllocMap := (*C.hgmlProcessUtilizationSample_t)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
+	cProcessSamplesCount, cProcessSamplesCountAllocMap := (*C.uint)(unsafe.Pointer(ProcessSamplesCount)), cgoAllocsUnknown
+	cLastSeenTimeStamp, cLastSeenTimeStampAllocMap := (C.ulonglong)(LastSeenTimeStamp), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetProcessUtilization(chgmlDevice, cUtilization, cProcessSamplesCount, cLastSeenTimeStamp)
+	runtime.KeepAlive(cLastSeenTimeStampAllocMap)
+	runtime.KeepAlive(cProcessSamplesCountAllocMap)
+	runtime.KeepAlive(cUtilizationAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetProcessesUtilizationInfo function as declared in hgml/hgml.h:3224
+func hgmlDeviceGetProcessesUtilizationInfo(hgmlDevice hgmlDevice, ProcesesUtilInfo *ProcessesUtilizationInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProcesesUtilInfo, cProcesesUtilInfoAllocMap := (*C.hgmlProcessesUtilizationInfo_t)(unsafe.Pointer(ProcesesUtilInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetProcessesUtilizationInfo(chgmlDevice, cProcesesUtilInfo)
+	runtime.KeepAlive(cProcesesUtilInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRemappedRows function as declared in hgml/hgml.h:3225
+func hgmlDeviceGetRemappedRows(hgmlDevice hgmlDevice, CorrRows *uint32, UncRows *uint32, IsPending *uint32, FailureOccurred *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCorrRows, cCorrRowsAllocMap := (*C.uint)(unsafe.Pointer(CorrRows)), cgoAllocsUnknown
+	cUncRows, cUncRowsAllocMap := (*C.uint)(unsafe.Pointer(UncRows)), cgoAllocsUnknown
+	cIsPending, cIsPendingAllocMap := (*C.uint)(unsafe.Pointer(IsPending)), cgoAllocsUnknown
+	cFailureOccurred, cFailureOccurredAllocMap := (*C.uint)(unsafe.Pointer(FailureOccurred)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetRemappedRows(chgmlDevice, cCorrRows, cUncRows, cIsPending, cFailureOccurred)
+	runtime.KeepAlive(cFailureOccurredAllocMap)
+	runtime.KeepAlive(cIsPendingAllocMap)
+	runtime.KeepAlive(cUncRowsAllocMap)
+	runtime.KeepAlive(cCorrRowsAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRepairStatus function as declared in hgml/hgml.h:3226
+func hgmlDeviceGetRepairStatus(hgmlDevice hgmlDevice, RepairStatus *RepairStatus) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cRepairStatus, cRepairStatusAllocMap := (*C.hgmlRepairStatus_t)(unsafe.Pointer(RepairStatus)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetRepairStatus(chgmlDevice, cRepairStatus)
+	runtime.KeepAlive(cRepairStatusAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRetiredPages function as declared in hgml/hgml.h:3227
+func hgmlDeviceGetRetiredPages(hgmlDevice hgmlDevice, Cause PageRetirementCause, PageCount *uint32, Addresses *uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCause, cCauseAllocMap := (C.hgmlPageRetirementCause_t)(Cause), cgoAllocsUnknown
+	cPageCount, cPageCountAllocMap := (*C.uint)(unsafe.Pointer(PageCount)), cgoAllocsUnknown
+	cAddresses, cAddressesAllocMap := (*C.ulonglong)(unsafe.Pointer(Addresses)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetRetiredPages(chgmlDevice, cCause, cPageCount, cAddresses)
+	runtime.KeepAlive(cAddressesAllocMap)
+	runtime.KeepAlive(cPageCountAllocMap)
+	runtime.KeepAlive(cCauseAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRetiredPagesPendingStatus function as declared in hgml/hgml.h:3228
+func hgmlDeviceGetRetiredPagesPendingStatus(hgmlDevice hgmlDevice, IsPending *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cIsPending, cIsPendingAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsPending)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetRetiredPagesPendingStatus(chgmlDevice, cIsPending)
+	runtime.KeepAlive(cIsPendingAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRetiredPages_v2 function as declared in hgml/hgml.h:3229
+func hgmlDeviceGetRetiredPages_v2(hgmlDevice hgmlDevice, Cause PageRetirementCause, PageCount *uint32, Addresses *uint64, Timestamps *uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCause, cCauseAllocMap := (C.hgmlPageRetirementCause_t)(Cause), cgoAllocsUnknown
+	cPageCount, cPageCountAllocMap := (*C.uint)(unsafe.Pointer(PageCount)), cgoAllocsUnknown
+	cAddresses, cAddressesAllocMap := (*C.ulonglong)(unsafe.Pointer(Addresses)), cgoAllocsUnknown
+	cTimestamps, cTimestampsAllocMap := (*C.ulonglong)(unsafe.Pointer(Timestamps)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetRetiredPages_v2(chgmlDevice, cCause, cPageCount, cAddresses, cTimestamps)
+	runtime.KeepAlive(cTimestampsAllocMap)
+	runtime.KeepAlive(cAddressesAllocMap)
+	runtime.KeepAlive(cPageCountAllocMap)
+	runtime.KeepAlive(cCauseAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRowRemapperHistogram function as declared in hgml/hgml.h:3230
+func hgmlDeviceGetRowRemapperHistogram(hgmlDevice hgmlDevice, Values *RowRemapperHistogramValues) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cValues, cValuesAllocMap := (*C.hgmlRowRemapperHistogramValues_t)(unsafe.Pointer(Values)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetRowRemapperHistogram(chgmlDevice, cValues)
+	runtime.KeepAlive(cValuesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetRunningProcessDetailList function as declared in hgml/hgml.h:3231
 func hgmlDeviceGetRunningProcessDetailList(hgmlDevice hgmlDevice, Plist *ProcessDetailList) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cPlist, cPlistAllocMap := (*C.hgmlProcessDetailList_t)(unsafe.Pointer(Plist)), cgoAllocsUnknown
@@ -1489,33 +2194,7 @@ func hgmlDeviceGetRunningProcessDetailList(hgmlDevice hgmlDevice, Plist *Process
 	return __v
 }
 
-// hgmlDeviceOnSameBoard function as declared in hgml/hgml.h:5333
-func hgmlDeviceOnSameBoard(Device1 hgmlDevice, Device2 hgmlDevice, OnSameBoard *int32) Return {
-	cDevice1, cDevice1AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device1)), cgoAllocsUnknown
-	cDevice2, cDevice2AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device2)), cgoAllocsUnknown
-	cOnSameBoard, cOnSameBoardAllocMap := (*C.int)(unsafe.Pointer(OnSameBoard)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceOnSameBoard(cDevice1, cDevice2, cOnSameBoard)
-	runtime.KeepAlive(cOnSameBoardAllocMap)
-	runtime.KeepAlive(cDevice2AllocMap)
-	runtime.KeepAlive(cDevice1AllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAPIRestriction function as declared in hgml/hgml.h:5359
-func hgmlDeviceGetAPIRestriction(hgmlDevice hgmlDevice, ApiType RestrictedAPI, IsRestricted *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cApiType, cApiTypeAllocMap := (C.hgmlRestrictedAPI_t)(ApiType), cgoAllocsUnknown
-	cIsRestricted, cIsRestrictedAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsRestricted)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAPIRestriction(chgmlDevice, cApiType, cIsRestricted)
-	runtime.KeepAlive(cIsRestrictedAllocMap)
-	runtime.KeepAlive(cApiTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSamples function as declared in hgml/hgml.h:5403
+// hgmlDeviceGetSamples function as declared in hgml/hgml.h:3232
 func hgmlDeviceGetSamples(hgmlDevice hgmlDevice, _type SamplingType, LastSeenTimeStamp uint64, SampleValType *ValueType, SampleCount *uint32, Samples *Sample) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	c_type, c_typeAllocMap := (C.hgmlSamplingType_t)(_type), cgoAllocsUnknown
@@ -1534,878 +2213,53 @@ func hgmlDeviceGetSamples(hgmlDevice hgmlDevice, _type SamplingType, LastSeenTim
 	return __v
 }
 
-// hgmlDeviceGetBAR1MemoryInfo function as declared in hgml/hgml.h:5431
-func hgmlDeviceGetBAR1MemoryInfo(hgmlDevice hgmlDevice, Bar1Memory *BAR1Memory) Return {
+// hgmlDeviceGetSerial function as declared in hgml/hgml.h:3233
+func hgmlDeviceGetSerial(hgmlDevice hgmlDevice, Serial *byte, Length uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cBar1Memory, cBar1MemoryAllocMap := (*C.hgmlBAR1Memory_t)(unsafe.Pointer(Bar1Memory)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetBAR1MemoryInfo(chgmlDevice, cBar1Memory)
-	runtime.KeepAlive(cBar1MemoryAllocMap)
+	cSerial, cSerialAllocMap := (*C.char)(unsafe.Pointer(Serial)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSerial(chgmlDevice, cSerial, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cSerialAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetViolationStatus function as declared in hgml/hgml.h:5457
-func hgmlDeviceGetViolationStatus(hgmlDevice hgmlDevice, PerfPolicyType PerfPolicyType, ViolTime *ViolationTime) Return {
+// hgmlDeviceGetSramEccErrorStatus function as declared in hgml/hgml.h:3234
+func hgmlDeviceGetSramEccErrorStatus(hgmlDevice hgmlDevice, Status *EccSramErrorStatus) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPerfPolicyType, cPerfPolicyTypeAllocMap := (C.hgmlPerfPolicyType_t)(PerfPolicyType), cgoAllocsUnknown
-	cViolTime, cViolTimeAllocMap := (*C.hgmlViolationTime_t)(unsafe.Pointer(ViolTime)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetViolationStatus(chgmlDevice, cPerfPolicyType, cViolTime)
-	runtime.KeepAlive(cViolTimeAllocMap)
-	runtime.KeepAlive(cPerfPolicyTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIrqNum function as declared in hgml/hgml.h:5473
-func hgmlDeviceGetIrqNum(hgmlDevice hgmlDevice, IrqNum *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIrqNum, cIrqNumAllocMap := (*C.uint)(unsafe.Pointer(IrqNum)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIrqNum(chgmlDevice, cIrqNum)
-	runtime.KeepAlive(cIrqNumAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetNumGpuCores function as declared in hgml/hgml.h:5489
-func hgmlDeviceGetNumGpuCores(hgmlDevice hgmlDevice, NumCores *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cNumCores, cNumCoresAllocMap := (*C.uint)(unsafe.Pointer(NumCores)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetNumGpuCores(chgmlDevice, cNumCores)
-	runtime.KeepAlive(cNumCoresAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPowerSource function as declared in hgml/hgml.h:5505
-func hgmlDeviceGetPowerSource(hgmlDevice hgmlDevice, PowerSource *PowerSource) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPowerSource, cPowerSourceAllocMap := (*C.hgmlPowerSource_t)(unsafe.Pointer(PowerSource)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPowerSource(chgmlDevice, cPowerSource)
-	runtime.KeepAlive(cPowerSourceAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetMemoryBusWidth function as declared in hgml/hgml.h:5521
-func hgmlDeviceGetMemoryBusWidth(hgmlDevice hgmlDevice, BusWidth *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cBusWidth, cBusWidthAllocMap := (*C.uint)(unsafe.Pointer(BusWidth)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMemoryBusWidth(chgmlDevice, cBusWidth)
-	runtime.KeepAlive(cBusWidthAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPcieLinkMaxSpeed function as declared in hgml/hgml.h:5537
-func hgmlDeviceGetPcieLinkMaxSpeed(hgmlDevice hgmlDevice, MaxSpeed *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMaxSpeed, cMaxSpeedAllocMap := (*C.uint)(unsafe.Pointer(MaxSpeed)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPcieLinkMaxSpeed(chgmlDevice, cMaxSpeed)
-	runtime.KeepAlive(cMaxSpeedAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPcieSpeed function as declared in hgml/hgml.h:5552
-func hgmlDeviceGetPcieSpeed(hgmlDevice hgmlDevice, PcieSpeed *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPcieSpeed, cPcieSpeedAllocMap := (*C.uint)(unsafe.Pointer(PcieSpeed)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPcieSpeed(chgmlDevice, cPcieSpeed)
-	runtime.KeepAlive(cPcieSpeedAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAdaptiveClockInfoStatus function as declared in hgml/hgml.h:5570
-func hgmlDeviceGetAdaptiveClockInfoStatus(hgmlDevice hgmlDevice, AdaptiveClockStatus *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cAdaptiveClockStatus, cAdaptiveClockStatusAllocMap := (*C.uint)(unsafe.Pointer(AdaptiveClockStatus)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAdaptiveClockInfoStatus(chgmlDevice, cAdaptiveClockStatus)
-	runtime.KeepAlive(cAdaptiveClockStatusAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetBusType function as declared in hgml/hgml.h:5584
-func hgmlDeviceGetBusType(hgmlDevice hgmlDevice, _type *BusType) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	c_type, c_typeAllocMap := (*C.hgmlBusType_t)(unsafe.Pointer(_type)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetBusType(chgmlDevice, c_type)
-	runtime.KeepAlive(c_typeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGpuFabricInfo function as declared in hgml/hgml.h:5602
-func hgmlDeviceGetGpuFabricInfo(hgmlDevice hgmlDevice, GpuFabricInfo *GpuFabricInfo) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cGpuFabricInfo, cGpuFabricInfoAllocMap := (*C.hgmlGpuFabricInfo_t)(unsafe.Pointer(GpuFabricInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuFabricInfo(chgmlDevice, cGpuFabricInfo)
-	runtime.KeepAlive(cGpuFabricInfoAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetConfComputeCapabilities function as declared in hgml/hgml.h:5618
-func hgmlSystemGetConfComputeCapabilities(Capabilities *ConfComputeSystemCaps) Return {
-	cCapabilities, cCapabilitiesAllocMap := (*C.hgmlConfComputeSystemCaps_t)(unsafe.Pointer(Capabilities)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetConfComputeCapabilities(cCapabilities)
-	runtime.KeepAlive(cCapabilitiesAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetConfComputeState function as declared in hgml/hgml.h:5634
-func hgmlSystemGetConfComputeState(State *ConfComputeSystemState) Return {
-	cState, cStateAllocMap := (*C.hgmlConfComputeSystemState_t)(unsafe.Pointer(State)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetConfComputeState(cState)
-	runtime.KeepAlive(cStateAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetConfComputeMemSizeInfo function as declared in hgml/hgml.h:5651
-func hgmlDeviceGetConfComputeMemSizeInfo(hgmlDevice hgmlDevice, MemInfo *ConfComputeMemSizeInfo) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMemInfo, cMemInfoAllocMap := (*C.hgmlConfComputeMemSizeInfo_t)(unsafe.Pointer(MemInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetConfComputeMemSizeInfo(chgmlDevice, cMemInfo)
-	runtime.KeepAlive(cMemInfoAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetConfComputeGpusReadyState function as declared in hgml/hgml.h:5669
-func hgmlSystemGetConfComputeGpusReadyState(IsAcceptingWork *uint32) Return {
-	cIsAcceptingWork, cIsAcceptingWorkAllocMap := (*C.uint)(unsafe.Pointer(IsAcceptingWork)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetConfComputeGpusReadyState(cIsAcceptingWork)
-	runtime.KeepAlive(cIsAcceptingWorkAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetConfComputeProtectedMemoryUsage function as declared in hgml/hgml.h:5687
-func hgmlDeviceGetConfComputeProtectedMemoryUsage(hgmlDevice hgmlDevice, Memory *Memory) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMemory, cMemoryAllocMap := (*C.hgmlMemory_t)(unsafe.Pointer(Memory)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetConfComputeProtectedMemoryUsage(chgmlDevice, cMemory)
-	runtime.KeepAlive(cMemoryAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetConfComputeGpuCertificate function as declared in hgml/hgml.h:5705
-func hgmlDeviceGetConfComputeGpuCertificate(hgmlDevice hgmlDevice, GpuCert *ConfComputeGpuCertificate) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cGpuCert, cGpuCertAllocMap := (*C.hgmlConfComputeGpuCertificate_t)(unsafe.Pointer(GpuCert)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetConfComputeGpuCertificate(chgmlDevice, cGpuCert)
-	runtime.KeepAlive(cGpuCertAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetConfComputeGpuAttestationReport function as declared in hgml/hgml.h:5724
-func hgmlDeviceGetConfComputeGpuAttestationReport(hgmlDevice hgmlDevice, GpuAtstReport *ConfComputeGpuAttestationReport) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cGpuAtstReport, cGpuAtstReportAllocMap := (*C.hgmlConfComputeGpuAttestationReport_t)(unsafe.Pointer(GpuAtstReport)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetConfComputeGpuAttestationReport(chgmlDevice, cGpuAtstReport)
-	runtime.KeepAlive(cGpuAtstReportAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGspFirmwareVersion function as declared in hgml/hgml.h:5742
-func hgmlDeviceGetGspFirmwareVersion(hgmlDevice hgmlDevice, Version *byte) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGspFirmwareVersion(chgmlDevice, cVersion)
-	runtime.KeepAlive(cVersionAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGspFirmwareMode function as declared in hgml/hgml.h:5759
-func hgmlDeviceGetGspFirmwareMode(hgmlDevice hgmlDevice, IsEnabled *uint32, DefaultMode *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIsEnabled, cIsEnabledAllocMap := (*C.uint)(unsafe.Pointer(IsEnabled)), cgoAllocsUnknown
-	cDefaultMode, cDefaultModeAllocMap := (*C.uint)(unsafe.Pointer(DefaultMode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGspFirmwareMode(chgmlDevice, cIsEnabled, cDefaultMode)
-	runtime.KeepAlive(cDefaultModeAllocMap)
-	runtime.KeepAlive(cIsEnabledAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAccountingMode function as declared in hgml/hgml.h:5787
-func hgmlDeviceGetAccountingMode(hgmlDevice hgmlDevice, Mode *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAccountingMode(chgmlDevice, cMode)
-	runtime.KeepAlive(cModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAccountingStats function as declared in hgml/hgml.h:5826
-func hgmlDeviceGetAccountingStats(hgmlDevice hgmlDevice, Pid uint32, Stats *AccountingStats) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPid, cPidAllocMap := (C.uint)(Pid), cgoAllocsUnknown
-	cStats, cStatsAllocMap := (*C.hgmlAccountingStats_t)(unsafe.Pointer(Stats)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAccountingStats(chgmlDevice, cPid, cStats)
-	runtime.KeepAlive(cStatsAllocMap)
-	runtime.KeepAlive(cPidAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAccountingPids function as declared in hgml/hgml.h:5858
-func hgmlDeviceGetAccountingPids(hgmlDevice hgmlDevice, Count *uint32, Pids *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	cPids, cPidsAllocMap := (*C.uint)(unsafe.Pointer(Pids)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAccountingPids(chgmlDevice, cCount, cPids)
-	runtime.KeepAlive(cPidsAllocMap)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAccountingBufferSize function as declared in hgml/hgml.h:5882
-func hgmlDeviceGetAccountingBufferSize(hgmlDevice hgmlDevice, BufferSize *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cBufferSize, cBufferSizeAllocMap := (*C.uint)(unsafe.Pointer(BufferSize)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAccountingBufferSize(chgmlDevice, cBufferSize)
-	runtime.KeepAlive(cBufferSizeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetRetiredPages function as declared in hgml/hgml.h:5915
-func hgmlDeviceGetRetiredPages(hgmlDevice hgmlDevice, Cause PageRetirementCause, PageCount *uint32, Addresses *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCause, cCauseAllocMap := (C.hgmlPageRetirementCause_t)(Cause), cgoAllocsUnknown
-	cPageCount, cPageCountAllocMap := (*C.uint)(unsafe.Pointer(PageCount)), cgoAllocsUnknown
-	cAddresses, cAddressesAllocMap := (*C.ulonglong)(unsafe.Pointer(Addresses)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetRetiredPages(chgmlDevice, cCause, cPageCount, cAddresses)
-	runtime.KeepAlive(cAddressesAllocMap)
-	runtime.KeepAlive(cPageCountAllocMap)
-	runtime.KeepAlive(cCauseAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetRetiredPages_v2 function as declared in hgml/hgml.h:5948
-func hgmlDeviceGetRetiredPages_v2(hgmlDevice hgmlDevice, Cause PageRetirementCause, PageCount *uint32, Addresses *uint64, Timestamps *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCause, cCauseAllocMap := (C.hgmlPageRetirementCause_t)(Cause), cgoAllocsUnknown
-	cPageCount, cPageCountAllocMap := (*C.uint)(unsafe.Pointer(PageCount)), cgoAllocsUnknown
-	cAddresses, cAddressesAllocMap := (*C.ulonglong)(unsafe.Pointer(Addresses)), cgoAllocsUnknown
-	cTimestamps, cTimestampsAllocMap := (*C.ulonglong)(unsafe.Pointer(Timestamps)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetRetiredPages_v2(chgmlDevice, cCause, cPageCount, cAddresses, cTimestamps)
-	runtime.KeepAlive(cTimestampsAllocMap)
-	runtime.KeepAlive(cAddressesAllocMap)
-	runtime.KeepAlive(cPageCountAllocMap)
-	runtime.KeepAlive(cCauseAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetRetiredPagesPendingStatus function as declared in hgml/hgml.h:5967
-func hgmlDeviceGetRetiredPagesPendingStatus(hgmlDevice hgmlDevice, IsPending *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIsPending, cIsPendingAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsPending)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetRetiredPagesPendingStatus(chgmlDevice, cIsPending)
-	runtime.KeepAlive(cIsPendingAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetRemappedRows function as declared in hgml/hgml.h:5994
-func hgmlDeviceGetRemappedRows(hgmlDevice hgmlDevice, CorrRows *uint32, UncRows *uint32, IsPending *uint32, FailureOccurred *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCorrRows, cCorrRowsAllocMap := (*C.uint)(unsafe.Pointer(CorrRows)), cgoAllocsUnknown
-	cUncRows, cUncRowsAllocMap := (*C.uint)(unsafe.Pointer(UncRows)), cgoAllocsUnknown
-	cIsPending, cIsPendingAllocMap := (*C.uint)(unsafe.Pointer(IsPending)), cgoAllocsUnknown
-	cFailureOccurred, cFailureOccurredAllocMap := (*C.uint)(unsafe.Pointer(FailureOccurred)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetRemappedRows(chgmlDevice, cCorrRows, cUncRows, cIsPending, cFailureOccurred)
-	runtime.KeepAlive(cFailureOccurredAllocMap)
-	runtime.KeepAlive(cIsPendingAllocMap)
-	runtime.KeepAlive(cUncRowsAllocMap)
-	runtime.KeepAlive(cCorrRowsAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetRowRemapperHistogram function as declared in hgml/hgml.h:6008
-func hgmlDeviceGetRowRemapperHistogram(hgmlDevice hgmlDevice, Values *RowRemapperHistogramValues) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cValues, cValuesAllocMap := (*C.hgmlRowRemapperHistogramValues_t)(unsafe.Pointer(Values)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetRowRemapperHistogram(chgmlDevice, cValues)
-	runtime.KeepAlive(cValuesAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetArchitecture function as declared in hgml/hgml.h:6022
-func hgmlDeviceGetArchitecture(hgmlDevice hgmlDevice, Arch *DeviceArchitecture) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cArch, cArchAllocMap := (*C.hgmlDeviceArchitecture_t)(unsafe.Pointer(Arch)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetArchitecture(chgmlDevice, cArch)
-	runtime.KeepAlive(cArchAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetClkMonStatus function as declared in hgml/hgml.h:6045
-func hgmlDeviceGetClkMonStatus(hgmlDevice hgmlDevice, Status *ClkMonStatus) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cStatus, cStatusAllocMap := (*C.hgmlClkMonStatus_t)(unsafe.Pointer(Status)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetClkMonStatus(chgmlDevice, cStatus)
+	cStatus, cStatusAllocMap := (*C.hgmlEccSramErrorStatus_t)(unsafe.Pointer(Status)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSramEccErrorStatus(chgmlDevice, cStatus)
 	runtime.KeepAlive(cStatusAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetProcessUtilization function as declared in hgml/hgml.h:6088
-func hgmlDeviceGetProcessUtilization(hgmlDevice hgmlDevice, Utilization *ProcessUtilizationSample, ProcessSamplesCount *uint32, LastSeenTimeStamp uint64) Return {
+// hgmlDeviceGetSramUniqueUncorrectedEccErrorCounts function as declared in hgml/hgml.h:3235
+func hgmlDeviceGetSramUniqueUncorrectedEccErrorCounts(hgmlDevice hgmlDevice, ErrorCounts *EccSramUniqueUncorrectedErrorCounts) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cUtilization, cUtilizationAllocMap := (*C.hgmlProcessUtilizationSample_t)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
-	cProcessSamplesCount, cProcessSamplesCountAllocMap := (*C.uint)(unsafe.Pointer(ProcessSamplesCount)), cgoAllocsUnknown
-	cLastSeenTimeStamp, cLastSeenTimeStampAllocMap := (C.ulonglong)(LastSeenTimeStamp), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetProcessUtilization(chgmlDevice, cUtilization, cProcessSamplesCount, cLastSeenTimeStamp)
-	runtime.KeepAlive(cLastSeenTimeStampAllocMap)
-	runtime.KeepAlive(cProcessSamplesCountAllocMap)
-	runtime.KeepAlive(cUtilizationAllocMap)
+	cErrorCounts, cErrorCountsAllocMap := (*C.hgmlEccSramUniqueUncorrectedErrorCounts_t)(unsafe.Pointer(ErrorCounts)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSramUniqueUncorrectedEccErrorCounts(chgmlDevice, cErrorCounts)
+	runtime.KeepAlive(cErrorCountsAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlUnitSetLedState function as declared in hgml/hgml.h:6132
-func hgmlUnitSetLedState(hgmlUnit hgmlUnit, Color LedColor) Return {
-	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
-	cColor, cColorAllocMap := (C.hgmlLedColor_t)(Color), cgoAllocsUnknown
-	__ret := C.hgmlUnitSetLedState(chgmlUnit, cColor)
-	runtime.KeepAlive(cColorAllocMap)
-	runtime.KeepAlive(chgmlUnitAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetPersistenceMode function as declared in hgml/hgml.h:6180
-func hgmlDeviceSetPersistenceMode(hgmlDevice hgmlDevice, Mode EnableState) Return {
+// hgmlDeviceGetSupportedClocksEventReasons function as declared in hgml/hgml.h:3236
+func hgmlDeviceGetSupportedClocksEventReasons(hgmlDevice hgmlDevice, SupportedClocksEventReasons *uint64) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMode, cModeAllocMap := (C.hgmlEnableState_t)(Mode), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetPersistenceMode(chgmlDevice, cMode)
-	runtime.KeepAlive(cModeAllocMap)
+	cSupportedClocksEventReasons, cSupportedClocksEventReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(SupportedClocksEventReasons)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSupportedClocksEventReasons(chgmlDevice, cSupportedClocksEventReasons)
+	runtime.KeepAlive(cSupportedClocksEventReasonsAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceSetComputeMode function as declared in hgml/hgml.h:6214
-func hgmlDeviceSetComputeMode(hgmlDevice hgmlDevice, Mode ComputeMode) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMode, cModeAllocMap := (C.hgmlComputeMode_t)(Mode), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetComputeMode(chgmlDevice, cMode)
-	runtime.KeepAlive(cModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetEccMode function as declared in hgml/hgml.h:6244
-func hgmlDeviceSetEccMode(hgmlDevice hgmlDevice, Ecc EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cEcc, cEccAllocMap := (C.hgmlEnableState_t)(Ecc), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetEccMode(chgmlDevice, cEcc)
-	runtime.KeepAlive(cEccAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceClearEccErrorCounts function as declared in hgml/hgml.h:6278
-func hgmlDeviceClearEccErrorCounts(hgmlDevice hgmlDevice, CounterType EccCounterType) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCounterType, cCounterTypeAllocMap := (C.hgmlEccCounterType_t)(CounterType), cgoAllocsUnknown
-	__ret := C.hgmlDeviceClearEccErrorCounts(chgmlDevice, cCounterType)
-	runtime.KeepAlive(cCounterTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetDriverModel function as declared in hgml/hgml.h:6319
-func hgmlDeviceSetDriverModel(hgmlDevice hgmlDevice, DriverModel DriverModel, Flags uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cDriverModel, cDriverModelAllocMap := (C.hgmlDriverModel_t)(DriverModel), cgoAllocsUnknown
-	cFlags, cFlagsAllocMap := (C.uint)(Flags), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetDriverModel(chgmlDevice, cDriverModel, cFlags)
-	runtime.KeepAlive(cFlagsAllocMap)
-	runtime.KeepAlive(cDriverModelAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetGpuLockedClocks function as declared in hgml/hgml.h:6370
-func hgmlDeviceSetGpuLockedClocks(hgmlDevice hgmlDevice, MinGpuClockMHz uint32, MaxGpuClockMHz uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinGpuClockMHz, cMinGpuClockMHzAllocMap := (C.uint)(MinGpuClockMHz), cgoAllocsUnknown
-	cMaxGpuClockMHz, cMaxGpuClockMHzAllocMap := (C.uint)(MaxGpuClockMHz), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetGpuLockedClocks(chgmlDevice, cMinGpuClockMHz, cMaxGpuClockMHz)
-	runtime.KeepAlive(cMaxGpuClockMHzAllocMap)
-	runtime.KeepAlive(cMinGpuClockMHzAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceResetGpuLockedClocks function as declared in hgml/hgml.h:6392
-func hgmlDeviceResetGpuLockedClocks(hgmlDevice hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceResetGpuLockedClocks(chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetMemoryLockedClocks function as declared in hgml/hgml.h:6424
-func hgmlDeviceSetMemoryLockedClocks(hgmlDevice hgmlDevice, MinMemClockMHz uint32, MaxMemClockMHz uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMinMemClockMHz, cMinMemClockMHzAllocMap := (C.uint)(MinMemClockMHz), cgoAllocsUnknown
-	cMaxMemClockMHz, cMaxMemClockMHzAllocMap := (C.uint)(MaxMemClockMHz), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetMemoryLockedClocks(chgmlDevice, cMinMemClockMHz, cMaxMemClockMHz)
-	runtime.KeepAlive(cMaxMemClockMHzAllocMap)
-	runtime.KeepAlive(cMinMemClockMHzAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceResetMemoryLockedClocks function as declared in hgml/hgml.h:6446
-func hgmlDeviceResetMemoryLockedClocks(hgmlDevice hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceResetMemoryLockedClocks(chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetApplicationsClocks function as declared in hgml/hgml.h:6487
-func hgmlDeviceSetApplicationsClocks(hgmlDevice hgmlDevice, MemClockMHz uint32, GraphicsClockMHz uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMemClockMHz, cMemClockMHzAllocMap := (C.uint)(MemClockMHz), cgoAllocsUnknown
-	cGraphicsClockMHz, cGraphicsClockMHzAllocMap := (C.uint)(GraphicsClockMHz), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetApplicationsClocks(chgmlDevice, cMemClockMHz, cGraphicsClockMHz)
-	runtime.KeepAlive(cGraphicsClockMHzAllocMap)
-	runtime.KeepAlive(cMemClockMHzAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceResetApplicationsClocks function as declared in hgml/hgml.h:6514
-func hgmlDeviceResetApplicationsClocks(hgmlDevice hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceResetApplicationsClocks(chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetAutoBoostedClocksEnabled function as declared in hgml/hgml.h:6545
-func hgmlDeviceSetAutoBoostedClocksEnabled(hgmlDevice hgmlDevice, Enabled EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cEnabled, cEnabledAllocMap := (C.hgmlEnableState_t)(Enabled), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetAutoBoostedClocksEnabled(chgmlDevice, cEnabled)
-	runtime.KeepAlive(cEnabledAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetDefaultAutoBoostedClocksEnabled function as declared in hgml/hgml.h:6576
-func hgmlDeviceSetDefaultAutoBoostedClocksEnabled(hgmlDevice hgmlDevice, Enabled EnableState, Flags uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cEnabled, cEnabledAllocMap := (C.hgmlEnableState_t)(Enabled), cgoAllocsUnknown
-	cFlags, cFlagsAllocMap := (C.uint)(Flags), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetDefaultAutoBoostedClocksEnabled(chgmlDevice, cEnabled, cFlags)
-	runtime.KeepAlive(cFlagsAllocMap)
-	runtime.KeepAlive(cEnabledAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetDefaultFanSpeed_v2 function as declared in hgml/hgml.h:6594
-func hgmlDeviceSetDefaultFanSpeed_v2(hgmlDevice hgmlDevice, Fan uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetDefaultFanSpeed_v2(chgmlDevice, cFan)
-	runtime.KeepAlive(cFanAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetFanControlPolicy function as declared in hgml/hgml.h:6616
-func hgmlDeviceSetFanControlPolicy(hgmlDevice hgmlDevice, Fan uint32, Policy FanControlPolicy) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
-	cPolicy, cPolicyAllocMap := (C.hgmlFanControlPolicy_t)(Policy), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetFanControlPolicy(chgmlDevice, cFan, cPolicy)
-	runtime.KeepAlive(cPolicyAllocMap)
-	runtime.KeepAlive(cFanAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetTemperatureThreshold function as declared in hgml/hgml.h:6637
-func hgmlDeviceSetTemperatureThreshold(hgmlDevice hgmlDevice, ThresholdType TemperatureThresholds, Temp *int32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cThresholdType, cThresholdTypeAllocMap := (C.hgmlTemperatureThresholds_t)(ThresholdType), cgoAllocsUnknown
-	cTemp, cTempAllocMap := (*C.int)(unsafe.Pointer(Temp)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetTemperatureThreshold(chgmlDevice, cThresholdType, cTemp)
-	runtime.KeepAlive(cTempAllocMap)
-	runtime.KeepAlive(cThresholdTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetPowerManagementLimit function as declared in hgml/hgml.h:6664
-func hgmlDeviceSetPowerManagementLimit(hgmlDevice hgmlDevice, Limit uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLimit, cLimitAllocMap := (C.uint)(Limit), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetPowerManagementLimit(chgmlDevice, cLimit)
-	runtime.KeepAlive(cLimitAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetGpuOperationMode function as declared in hgml/hgml.h:6693
-func hgmlDeviceSetGpuOperationMode(hgmlDevice hgmlDevice, Mode GpuOperationMode) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMode, cModeAllocMap := (C.hgmlGpuOperationMode_t)(Mode), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetGpuOperationMode(chgmlDevice, cMode)
-	runtime.KeepAlive(cModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetAPIRestriction function as declared in hgml/hgml.h:6721
-func hgmlDeviceSetAPIRestriction(hgmlDevice hgmlDevice, ApiType RestrictedAPI, IsRestricted EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cApiType, cApiTypeAllocMap := (C.hgmlRestrictedAPI_t)(ApiType), cgoAllocsUnknown
-	cIsRestricted, cIsRestrictedAllocMap := (C.hgmlEnableState_t)(IsRestricted), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetAPIRestriction(chgmlDevice, cApiType, cIsRestricted)
-	runtime.KeepAlive(cIsRestrictedAllocMap)
-	runtime.KeepAlive(cApiTypeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetFanSpeed_v2 function as declared in hgml/hgml.h:6745
-func hgmlDeviceSetFanSpeed_v2(hgmlDevice hgmlDevice, Fan uint32, Speed uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
-	cSpeed, cSpeedAllocMap := (C.uint)(Speed), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetFanSpeed_v2(chgmlDevice, cFan, cSpeed)
-	runtime.KeepAlive(cSpeedAllocMap)
-	runtime.KeepAlive(cFanAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetGpcClkVfOffset function as declared in hgml/hgml.h:6760
-func hgmlDeviceSetGpcClkVfOffset(hgmlDevice hgmlDevice, Offset int32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cOffset, cOffsetAllocMap := (C.int)(Offset), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetGpcClkVfOffset(chgmlDevice, cOffset)
-	runtime.KeepAlive(cOffsetAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetMemClkVfOffset function as declared in hgml/hgml.h:6775
-func hgmlDeviceSetMemClkVfOffset(hgmlDevice hgmlDevice, Offset int32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cOffset, cOffsetAllocMap := (C.int)(Offset), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetMemClkVfOffset(chgmlDevice, cOffset)
-	runtime.KeepAlive(cOffsetAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetConfComputeUnprotectedMemSize function as declared in hgml/hgml.h:6792
-func hgmlDeviceSetConfComputeUnprotectedMemSize(hgmlDevice hgmlDevice, SizeKiB uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cSizeKiB, cSizeKiBAllocMap := (C.ulonglong)(SizeKiB), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetConfComputeUnprotectedMemSize(chgmlDevice, cSizeKiB)
-	runtime.KeepAlive(cSizeKiBAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemSetConfComputeGpusReadyState function as declared in hgml/hgml.h:6809
-func hgmlSystemSetConfComputeGpusReadyState(IsAcceptingWork uint32) Return {
-	cIsAcceptingWork, cIsAcceptingWorkAllocMap := (C.uint)(IsAcceptingWork), cgoAllocsUnknown
-	__ret := C.hgmlSystemSetConfComputeGpusReadyState(cIsAcceptingWork)
-	runtime.KeepAlive(cIsAcceptingWorkAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetAccountingMode function as declared in hgml/hgml.h:6849
-func hgmlDeviceSetAccountingMode(hgmlDevice hgmlDevice, Mode EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cMode, cModeAllocMap := (C.hgmlEnableState_t)(Mode), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetAccountingMode(chgmlDevice, cMode)
-	runtime.KeepAlive(cModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceClearAccountingPids function as declared in hgml/hgml.h:6871
-func hgmlDeviceClearAccountingPids(hgmlDevice hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceClearAccountingPids(chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkState function as declared in hgml/hgml.h:6900
-func hgmlDeviceGetIcnLinkState(hgmlDevice hgmlDevice, Link uint32, IsActive *EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cIsActive, cIsActiveAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(IsActive)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkState(chgmlDevice, cLink, cIsActive)
-	runtime.KeepAlive(cIsActiveAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkVersion function as declared in hgml/hgml.h:6918
-func hgmlDeviceGetIcnLinkVersion(hgmlDevice hgmlDevice, Link uint32, Version *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cVersion, cVersionAllocMap := (*C.uint)(unsafe.Pointer(Version)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkVersion(chgmlDevice, cLink, cVersion)
-	runtime.KeepAlive(cVersionAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkCapability function as declared in hgml/hgml.h:6939
-func hgmlDeviceGetIcnLinkCapability(hgmlDevice hgmlDevice, Link uint32, Capability IcnLinkCapability, CapResult *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCapability, cCapabilityAllocMap := (C.hgmlIcnLinkCapability_t)(Capability), cgoAllocsUnknown
-	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkCapability(chgmlDevice, cLink, cCapability, cCapResult)
-	runtime.KeepAlive(cCapResultAllocMap)
-	runtime.KeepAlive(cCapabilityAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkRemotePciInfo_v2 function as declared in hgml/hgml.h:6959
-func hgmlDeviceGetIcnLinkRemotePciInfo_v2(hgmlDevice hgmlDevice, Link uint32, Pci *PciInfo) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkRemotePciInfo_v2(chgmlDevice, cLink, cPci)
-	runtime.KeepAlive(cPciAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkErrorCounter function as declared in hgml/hgml.h:6979
-func hgmlDeviceGetIcnLinkErrorCounter(hgmlDevice hgmlDevice, Link uint32, Counter IcnLinkErrorCounter, CounterValue *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.hgmlIcnLinkErrorCounter_t)(Counter), cgoAllocsUnknown
-	cCounterValue, cCounterValueAllocMap := (*C.ulonglong)(unsafe.Pointer(CounterValue)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkErrorCounter(chgmlDevice, cLink, cCounter, cCounterValue)
-	runtime.KeepAlive(cCounterValueAllocMap)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceResetIcnLinkErrorCounters function as declared in hgml/hgml.h:6998
-func hgmlDeviceResetIcnLinkErrorCounters(hgmlDevice hgmlDevice, Link uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	__ret := C.hgmlDeviceResetIcnLinkErrorCounters(chgmlDevice, cLink)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetIcnLinkUtilizationControl function as declared in hgml/hgml.h:7022
-func hgmlDeviceSetIcnLinkUtilizationControl(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Control *IcnLinkUtilizationControl, Reset uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
-	cControl, cControlAllocMap := (*C.hgmlIcnLinkUtilizationControl_t)(unsafe.Pointer(Control)), cgoAllocsUnknown
-	cReset, cResetAllocMap := (C.uint)(Reset), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetIcnLinkUtilizationControl(chgmlDevice, cLink, cCounter, cControl, cReset)
-	runtime.KeepAlive(cResetAllocMap)
-	runtime.KeepAlive(cControlAllocMap)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkUtilizationControl function as declared in hgml/hgml.h:7045
-func hgmlDeviceGetIcnLinkUtilizationControl(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Control *IcnLinkUtilizationControl) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
-	cControl, cControlAllocMap := (*C.hgmlIcnLinkUtilizationControl_t)(unsafe.Pointer(Control)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkUtilizationControl(chgmlDevice, cLink, cCounter, cControl)
-	runtime.KeepAlive(cControlAllocMap)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkUtilizationCounter function as declared in hgml/hgml.h:7071
-func hgmlDeviceGetIcnLinkUtilizationCounter(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Rxcounter *uint64, Txcounter *uint64) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
-	cRxcounter, cRxcounterAllocMap := (*C.ulonglong)(unsafe.Pointer(Rxcounter)), cgoAllocsUnknown
-	cTxcounter, cTxcounterAllocMap := (*C.ulonglong)(unsafe.Pointer(Txcounter)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkUtilizationCounter(chgmlDevice, cLink, cCounter, cRxcounter, cTxcounter)
-	runtime.KeepAlive(cTxcounterAllocMap)
-	runtime.KeepAlive(cRxcounterAllocMap)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceFreezeIcnLinkUtilizationCounter function as declared in hgml/hgml.h:7095
-func hgmlDeviceFreezeIcnLinkUtilizationCounter(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Freeze EnableState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
-	cFreeze, cFreezeAllocMap := (C.hgmlEnableState_t)(Freeze), cgoAllocsUnknown
-	__ret := C.hgmlDeviceFreezeIcnLinkUtilizationCounter(chgmlDevice, cLink, cCounter, cFreeze)
-	runtime.KeepAlive(cFreezeAllocMap)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceResetIcnLinkUtilizationCounter function as declared in hgml/hgml.h:7117
-func hgmlDeviceResetIcnLinkUtilizationCounter(hgmlDevice hgmlDevice, Link uint32, Counter uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
-	__ret := C.hgmlDeviceResetIcnLinkUtilizationCounter(chgmlDevice, cLink, cCounter)
-	runtime.KeepAlive(cCounterAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetIcnLinkRemoteDeviceType function as declared in hgml/hgml.h:7137
-func hgmlDeviceGetIcnLinkRemoteDeviceType(hgmlDevice hgmlDevice, Link uint32, PIcnLinkDeviceType *IntIcnLinkDeviceType) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cPIcnLinkDeviceType, cPIcnLinkDeviceTypeAllocMap := (*C.hgmlIntIcnLinkDeviceType_t)(unsafe.Pointer(PIcnLinkDeviceType)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkRemoteDeviceType(chgmlDevice, cLink, cPIcnLinkDeviceType)
-	runtime.KeepAlive(cPIcnLinkDeviceTypeAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlEventSetCreate function as declared in hgml/hgml.h:7164
-func hgmlEventSetCreate(Set *hgmlEventSet) Return {
-	cSet, cSetAllocMap := (*C.hgmlEventSet_t)(unsafe.Pointer(Set)), cgoAllocsUnknown
-	__ret := C.hgmlEventSetCreate(cSet)
-	runtime.KeepAlive(cSetAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceRegisterEvents function as declared in hgml/hgml.h:7202
-func hgmlDeviceRegisterEvents(hgmlDevice hgmlDevice, EventTypes uint64, Set hgmlEventSet) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cEventTypes, cEventTypesAllocMap := (C.ulonglong)(EventTypes), cgoAllocsUnknown
-	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceRegisterEvents(chgmlDevice, cEventTypes, cSet)
-	runtime.KeepAlive(cSetAllocMap)
-	runtime.KeepAlive(cEventTypesAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSupportedEventTypes function as declared in hgml/hgml.h:7224
+// hgmlDeviceGetSupportedEventTypes function as declared in hgml/hgml.h:3237
 func hgmlDeviceGetSupportedEventTypes(hgmlDevice hgmlDevice, EventTypes *uint64) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cEventTypes, cEventTypesAllocMap := (*C.ulonglong)(unsafe.Pointer(EventTypes)), cgoAllocsUnknown
@@ -2416,167 +2270,48 @@ func hgmlDeviceGetSupportedEventTypes(hgmlDevice hgmlDevice, EventTypes *uint64)
 	return __v
 }
 
-// hgmlEventSetWait_v2 function as declared in hgml/hgml.h:7263
-func hgmlEventSetWait_v2(Set hgmlEventSet, Data *hgmlEventData, Timeoutms uint32) Return {
-	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
-	cData, cDataAllocMap := (*C.hgmlEventData_t)(unsafe.Pointer(Data)), cgoAllocsUnknown
-	cTimeoutms, cTimeoutmsAllocMap := (C.uint)(Timeoutms), cgoAllocsUnknown
-	__ret := C.hgmlEventSetWait_v2(cSet, cData, cTimeoutms)
-	runtime.KeepAlive(cTimeoutmsAllocMap)
-	runtime.KeepAlive(cDataAllocMap)
-	runtime.KeepAlive(cSetAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlEventSetFree function as declared in hgml/hgml.h:7279
-func hgmlEventSetFree(Set hgmlEventSet) Return {
-	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
-	__ret := C.hgmlEventSetFree(cSet)
-	runtime.KeepAlive(cSetAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceModifyDrainState function as declared in hgml/hgml.h:7314
-func hgmlDeviceModifyDrainState(PciInfo *PciInfo, NewState EnableState) Return {
-	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
-	cNewState, cNewStateAllocMap := (C.hgmlEnableState_t)(NewState), cgoAllocsUnknown
-	__ret := C.hgmlDeviceModifyDrainState(cPciInfo, cNewState)
-	runtime.KeepAlive(cNewStateAllocMap)
-	runtime.KeepAlive(cPciInfoAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceQueryDrainState function as declared in hgml/hgml.h:7334
-func hgmlDeviceQueryDrainState(PciInfo *PciInfo, CurrentState *EnableState) Return {
-	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
-	cCurrentState, cCurrentStateAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(CurrentState)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceQueryDrainState(cPciInfo, cCurrentState)
-	runtime.KeepAlive(cCurrentStateAllocMap)
-	runtime.KeepAlive(cPciInfoAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceRemoveGpu_v2 function as declared in hgml/hgml.h:7366
-func hgmlDeviceRemoveGpu_v2(PciInfo *PciInfo, GpuState DetachGpuState, LinkState PcieLinkState) Return {
-	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
-	cGpuState, cGpuStateAllocMap := (C.hgmlDetachGpuState_t)(GpuState), cgoAllocsUnknown
-	cLinkState, cLinkStateAllocMap := (C.hgmlPcieLinkState_t)(LinkState), cgoAllocsUnknown
-	__ret := C.hgmlDeviceRemoveGpu_v2(cPciInfo, cGpuState, cLinkState)
-	runtime.KeepAlive(cLinkStateAllocMap)
-	runtime.KeepAlive(cGpuStateAllocMap)
-	runtime.KeepAlive(cPciInfoAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceDiscoverGpus function as declared in hgml/hgml.h:7395
-func hgmlDeviceDiscoverGpus(PciInfo *PciInfo) Return {
-	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceDiscoverGpus(cPciInfo)
-	runtime.KeepAlive(cPciInfoAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetFieldValues function as declared in hgml/hgml.h:7422
-func hgmlDeviceGetFieldValues(hgmlDevice hgmlDevice, ValuesCount int32, Values *FieldValue) Return {
+// hgmlDeviceGetSupportedGraphicsClocks function as declared in hgml/hgml.h:3238
+func hgmlDeviceGetSupportedGraphicsClocks(hgmlDevice hgmlDevice, MemoryClockMHz uint32, Count *uint32, ClocksMHz *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cValuesCount, cValuesCountAllocMap := (C.int)(ValuesCount), cgoAllocsUnknown
-	cValues, cValuesAllocMap := (*C.hgmlFieldValue_t)(unsafe.Pointer(Values)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetFieldValues(chgmlDevice, cValuesCount, cValues)
-	runtime.KeepAlive(cValuesAllocMap)
-	runtime.KeepAlive(cValuesCountAllocMap)
+	cMemoryClockMHz, cMemoryClockMHzAllocMap := (C.uint)(MemoryClockMHz), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	cClocksMHz, cClocksMHzAllocMap := (*C.uint)(unsafe.Pointer(ClocksMHz)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSupportedGraphicsClocks(chgmlDevice, cMemoryClockMHz, cCount, cClocksMHz)
+	runtime.KeepAlive(cClocksMHzAllocMap)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cMemoryClockMHzAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceClearFieldValues function as declared in hgml/hgml.h:7438
-func hgmlDeviceClearFieldValues(hgmlDevice hgmlDevice, ValuesCount int32, Values *FieldValue) Return {
+// hgmlDeviceGetSupportedMemoryClocks function as declared in hgml/hgml.h:3239
+func hgmlDeviceGetSupportedMemoryClocks(hgmlDevice hgmlDevice, Count *uint32, ClocksMHz *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cValuesCount, cValuesCountAllocMap := (C.int)(ValuesCount), cgoAllocsUnknown
-	cValues, cValuesAllocMap := (*C.hgmlFieldValue_t)(unsafe.Pointer(Values)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceClearFieldValues(chgmlDevice, cValuesCount, cValues)
-	runtime.KeepAlive(cValuesAllocMap)
-	runtime.KeepAlive(cValuesCountAllocMap)
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	cClocksMHz, cClocksMHzAllocMap := (*C.uint)(unsafe.Pointer(ClocksMHz)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSupportedMemoryClocks(chgmlDevice, cCount, cClocksMHz)
+	runtime.KeepAlive(cClocksMHzAllocMap)
+	runtime.KeepAlive(cCountAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetVirtualizationMode function as declared in hgml/hgml.h:7471
-func hgmlDeviceGetVirtualizationMode(hgmlDevice hgmlDevice, PVirtualMode *GpuVirtualizationMode) Return {
+// hgmlDeviceGetSupportedPerformanceStates function as declared in hgml/hgml.h:3240
+func hgmlDeviceGetSupportedPerformanceStates(hgmlDevice hgmlDevice, Pstates *Pstates, Size uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPVirtualMode, cPVirtualModeAllocMap := (*C.hgmlGpuVirtualizationMode_t)(unsafe.Pointer(PVirtualMode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetVirtualizationMode(chgmlDevice, cPVirtualMode)
-	runtime.KeepAlive(cPVirtualModeAllocMap)
+	cPstates, cPstatesAllocMap := (*C.hgmlPstates_t)(unsafe.Pointer(Pstates)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSupportedPerformanceStates(chgmlDevice, cPstates, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cPstatesAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetHostVgpuMode function as declared in hgml/hgml.h:7489
-func hgmlDeviceGetHostVgpuMode(hgmlDevice hgmlDevice, PHostVgpuMode *HostVgpuMode) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPHostVgpuMode, cPHostVgpuModeAllocMap := (*C.hgmlHostVgpuMode_t)(unsafe.Pointer(PHostVgpuMode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHostVgpuMode(chgmlDevice, cPHostVgpuMode)
-	runtime.KeepAlive(cPHostVgpuModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetVirtualizationMode function as declared in hgml/hgml.h:7507
-func hgmlDeviceSetVirtualizationMode(hgmlDevice hgmlDevice, VirtualMode GpuVirtualizationMode) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVirtualMode, cVirtualModeAllocMap := (C.hgmlGpuVirtualizationMode_t)(VirtualMode), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetVirtualizationMode(chgmlDevice, cVirtualMode)
-	runtime.KeepAlive(cVirtualModeAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGridLicensableFeatures_v4 function as declared in hgml/hgml.h:7523
-func hgmlDeviceGetGridLicensableFeatures_v4(hgmlDevice hgmlDevice, PGridLicensableFeatures *GridLicensableFeatures) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPGridLicensableFeatures, cPGridLicensableFeaturesAllocMap := (*C.hgmlGridLicensableFeatures_t)(unsafe.Pointer(PGridLicensableFeatures)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGridLicensableFeatures_v4(chgmlDevice, cPGridLicensableFeatures)
-	runtime.KeepAlive(cPGridLicensableFeaturesAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGetVgpuDriverCapabilities function as declared in hgml/hgml.h:7556
-func hgmlGetVgpuDriverCapabilities(Capability VgpuDriverCapability, CapResult *uint32) Return {
-	cCapability, cCapabilityAllocMap := (C.hgmlVgpuDriverCapability_t)(Capability), cgoAllocsUnknown
-	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
-	__ret := C.hgmlGetVgpuDriverCapabilities(cCapability, cCapResult)
-	runtime.KeepAlive(cCapResultAllocMap)
-	runtime.KeepAlive(cCapabilityAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetVgpuCapabilities function as declared in hgml/hgml.h:7578
-func hgmlDeviceGetVgpuCapabilities(hgmlDevice hgmlDevice, Capability DeviceVgpuCapability, CapResult *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCapability, cCapabilityAllocMap := (C.hgmlDeviceVgpuCapability_t)(Capability), cgoAllocsUnknown
-	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetVgpuCapabilities(chgmlDevice, cCapability, cCapResult)
-	runtime.KeepAlive(cCapResultAllocMap)
-	runtime.KeepAlive(cCapabilityAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetSupportedVgpus function as declared in hgml/hgml.h:7603
+// hgmlDeviceGetSupportedVgpus function as declared in hgml/hgml.h:3241
 func hgmlDeviceGetSupportedVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuTypeIds *hgmlVgpuTypeId) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
@@ -2589,471 +2324,170 @@ func hgmlDeviceGetSupportedVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuT
 	return __v
 }
 
-// hgmlDeviceGetCreatableVgpus function as declared in hgml/hgml.h:7632
-func hgmlDeviceGetCreatableVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuTypeIds *hgmlVgpuTypeId) Return {
+// hgmlDeviceGetTargetFanSpeed function as declared in hgml/hgml.h:3242
+func hgmlDeviceGetTargetFanSpeed(hgmlDevice hgmlDevice, Fan uint32, TargetSpeed *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
-	cVgpuTypeIds, cVgpuTypeIdsAllocMap := (*C.hgmlVgpuTypeId_t)(unsafe.Pointer(VgpuTypeIds)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCreatableVgpus(chgmlDevice, cVgpuCount, cVgpuTypeIds)
-	runtime.KeepAlive(cVgpuTypeIdsAllocMap)
-	runtime.KeepAlive(cVgpuCountAllocMap)
+	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
+	cTargetSpeed, cTargetSpeedAllocMap := (*C.uint)(unsafe.Pointer(TargetSpeed)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTargetFanSpeed(chgmlDevice, cFan, cTargetSpeed)
+	runtime.KeepAlive(cTargetSpeedAllocMap)
+	runtime.KeepAlive(cFanAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceCreateVgpuInstance function as declared in hgml/hgml.h:7650
-func hgmlDeviceCreateVgpuInstance(hgmlDevice hgmlDevice, VgpuProfileId VgpuProfileId, hgmlVgpuInstance *hgmlVgpuInstance) Return {
+// hgmlDeviceGetTemperatureThreshold function as declared in hgml/hgml.h:3243
+func hgmlDeviceGetTemperatureThreshold(hgmlDevice hgmlDevice, ThresholdType TemperatureThresholds, Temp *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVgpuProfileId, cVgpuProfileIdAllocMap := (C.hgmlVgpuProfileId_t)(VgpuProfileId), cgoAllocsUnknown
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (*C.hgmlVgpuInstance_t)(unsafe.Pointer(hgmlVgpuInstance)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceCreateVgpuInstance(chgmlDevice, cVgpuProfileId, chgmlVgpuInstance)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	runtime.KeepAlive(cVgpuProfileIdAllocMap)
+	cThresholdType, cThresholdTypeAllocMap := (C.hgmlTemperatureThresholds_t)(ThresholdType), cgoAllocsUnknown
+	cTemp, cTempAllocMap := (*C.uint)(unsafe.Pointer(Temp)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTemperatureThreshold(chgmlDevice, cThresholdType, cTemp)
+	runtime.KeepAlive(cTempAllocMap)
+	runtime.KeepAlive(cThresholdTypeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceDestroyVgpuInstance function as declared in hgml/hgml.h:7668
-func hgmlDeviceDestroyVgpuInstance(hgmlVgpuInstance hgmlVgpuInstance, Force uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cForce, cForceAllocMap := (C.uint)(Force), cgoAllocsUnknown
-	__ret := C.hgmlDeviceDestroyVgpuInstance(chgmlVgpuInstance, cForce)
-	runtime.KeepAlive(cForceAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+// hgmlDeviceGetTemperatureV function as declared in hgml/hgml.h:3244
+func hgmlDeviceGetTemperatureV(hgmlDevice hgmlDevice, Temperature *Temperature) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cTemperature, cTemperatureAllocMap := (*C.hgmlTemperature_t)(unsafe.Pointer(Temperature)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTemperatureV(chgmlDevice, cTemperature)
+	runtime.KeepAlive(cTemperatureAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuTypeGetVgpuProfileId function as declared in hgml/hgml.h:7680
-func hgmlVgpuTypeGetVgpuProfileId(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuProfileId *VgpuProfileId) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cVgpuProfileId, cVgpuProfileIdAllocMap := (*C.hgmlVgpuProfileId_t)(unsafe.Pointer(VgpuProfileId)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetVgpuProfileId(chgmlVgpuTypeId, cVgpuProfileId)
-	runtime.KeepAlive(cVgpuProfileIdAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+// hgmlDeviceGetTopologyCommonAncestor function as declared in hgml/hgml.h:3246
+func hgmlDeviceGetTopologyCommonAncestor(Device1 hgmlDevice, Device2 hgmlDevice, PathInfo *GpuTopologyLevel) Return {
+	cDevice1, cDevice1AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device1)), cgoAllocsUnknown
+	cDevice2, cDevice2AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device2)), cgoAllocsUnknown
+	cPathInfo, cPathInfoAllocMap := (*C.hgmlGpuTopologyLevel_t)(unsafe.Pointer(PathInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTopologyCommonAncestor(cDevice1, cDevice2, cPathInfo)
+	runtime.KeepAlive(cPathInfoAllocMap)
+	runtime.KeepAlive(cDevice2AllocMap)
+	runtime.KeepAlive(cDevice1AllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuTypeGetRemainingCapacity function as declared in hgml/hgml.h:7692
-func hgmlVgpuTypeGetRemainingCapacity(hgmlVgpuTypeId hgmlVgpuTypeId, Count *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+// hgmlDeviceGetTopologyNearestGpus function as declared in hgml/hgml.h:3247
+func hgmlDeviceGetTopologyNearestGpus(hgmlDevice hgmlDevice, Level GpuTopologyLevel, Count *uint32, DeviceArray *hgmlDevice) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLevel, cLevelAllocMap := (C.hgmlGpuTopologyLevel_t)(Level), cgoAllocsUnknown
 	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetRemainingCapacity(chgmlVgpuTypeId, cCount)
+	cDeviceArray, cDeviceArrayAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(DeviceArray)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTopologyNearestGpus(chgmlDevice, cLevel, cCount, cDeviceArray)
+	runtime.KeepAlive(cDeviceArrayAllocMap)
 	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetPciInfo function as declared in hgml/hgml.h:7704
-func hgmlVgpuInstanceGetPciInfo(hgmlVgpuInstance hgmlVgpuInstance, Pci *PciInfo) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetPciInfo(chgmlVgpuInstance, cPci)
-	runtime.KeepAlive(cPciAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetClass function as declared in hgml/hgml.h:7722
-func hgmlVgpuTypeGetClass(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuTypeClass *byte, Size *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cVgpuTypeClass, cVgpuTypeClassAllocMap := (*C.char)(unsafe.Pointer(VgpuTypeClass)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (*C.uint)(unsafe.Pointer(Size)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetClass(chgmlVgpuTypeId, cVgpuTypeClass, cSize)
-	runtime.KeepAlive(cSizeAllocMap)
-	runtime.KeepAlive(cVgpuTypeClassAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetName function as declared in hgml/hgml.h:7743
-func hgmlVgpuTypeGetName(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuTypeName *byte, Size *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cVgpuTypeName, cVgpuTypeNameAllocMap := (*C.char)(unsafe.Pointer(VgpuTypeName)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (*C.uint)(unsafe.Pointer(Size)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetName(chgmlVgpuTypeId, cVgpuTypeName, cSize)
-	runtime.KeepAlive(cSizeAllocMap)
-	runtime.KeepAlive(cVgpuTypeNameAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetGpuInstanceProfileId function as declared in hgml/hgml.h:7761
-func hgmlVgpuTypeGetGpuInstanceProfileId(hgmlVgpuTypeId hgmlVgpuTypeId, GpuInstanceProfileId *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cGpuInstanceProfileId, cGpuInstanceProfileIdAllocMap := (*C.uint)(unsafe.Pointer(GpuInstanceProfileId)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetGpuInstanceProfileId(chgmlVgpuTypeId, cGpuInstanceProfileId)
-	runtime.KeepAlive(cGpuInstanceProfileIdAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetDeviceID function as declared in hgml/hgml.h:7778
-func hgmlVgpuTypeGetDeviceID(hgmlVgpuTypeId hgmlVgpuTypeId, DeviceID *uint64, SubsystemID *uint64) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cDeviceID, cDeviceIDAllocMap := (*C.ulonglong)(unsafe.Pointer(DeviceID)), cgoAllocsUnknown
-	cSubsystemID, cSubsystemIDAllocMap := (*C.ulonglong)(unsafe.Pointer(SubsystemID)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetDeviceID(chgmlVgpuTypeId, cDeviceID, cSubsystemID)
-	runtime.KeepAlive(cSubsystemIDAllocMap)
-	runtime.KeepAlive(cDeviceIDAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetFramebufferSize function as declared in hgml/hgml.h:7794
-func hgmlVgpuTypeGetFramebufferSize(hgmlVgpuTypeId hgmlVgpuTypeId, FbSize *uint64) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cFbSize, cFbSizeAllocMap := (*C.ulonglong)(unsafe.Pointer(FbSize)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetFramebufferSize(chgmlVgpuTypeId, cFbSize)
-	runtime.KeepAlive(cFbSizeAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetNumDisplayHeads function as declared in hgml/hgml.h:7810
-func hgmlVgpuTypeGetNumDisplayHeads(hgmlVgpuTypeId hgmlVgpuTypeId, NumDisplayHeads *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cNumDisplayHeads, cNumDisplayHeadsAllocMap := (*C.uint)(unsafe.Pointer(NumDisplayHeads)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetNumDisplayHeads(chgmlVgpuTypeId, cNumDisplayHeads)
-	runtime.KeepAlive(cNumDisplayHeadsAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetResolution function as declared in hgml/hgml.h:7829
-func hgmlVgpuTypeGetResolution(hgmlVgpuTypeId hgmlVgpuTypeId, DisplayIndex uint32, Xdim *uint32, Ydim *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cDisplayIndex, cDisplayIndexAllocMap := (C.uint)(DisplayIndex), cgoAllocsUnknown
-	cXdim, cXdimAllocMap := (*C.uint)(unsafe.Pointer(Xdim)), cgoAllocsUnknown
-	cYdim, cYdimAllocMap := (*C.uint)(unsafe.Pointer(Ydim)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetResolution(chgmlVgpuTypeId, cDisplayIndex, cXdim, cYdim)
-	runtime.KeepAlive(cYdimAllocMap)
-	runtime.KeepAlive(cXdimAllocMap)
-	runtime.KeepAlive(cDisplayIndexAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetLicense function as declared in hgml/hgml.h:7854
-func hgmlVgpuTypeGetLicense(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuTypeLicenseString *byte, Size uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cVgpuTypeLicenseString, cVgpuTypeLicenseStringAllocMap := (*C.char)(unsafe.Pointer(VgpuTypeLicenseString)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetLicense(chgmlVgpuTypeId, cVgpuTypeLicenseString, cSize)
-	runtime.KeepAlive(cSizeAllocMap)
-	runtime.KeepAlive(cVgpuTypeLicenseStringAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetFrameRateLimit function as declared in hgml/hgml.h:7870
-func hgmlVgpuTypeGetFrameRateLimit(hgmlVgpuTypeId hgmlVgpuTypeId, FrameRateLimit *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cFrameRateLimit, cFrameRateLimitAllocMap := (*C.uint)(unsafe.Pointer(FrameRateLimit)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetFrameRateLimit(chgmlVgpuTypeId, cFrameRateLimit)
-	runtime.KeepAlive(cFrameRateLimitAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetMaxInstances function as declared in hgml/hgml.h:7888
-func hgmlVgpuTypeGetMaxInstances(hgmlDevice hgmlDevice, hgmlVgpuTypeId hgmlVgpuTypeId, VgpuInstanceCount *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cVgpuInstanceCount, cVgpuInstanceCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuInstanceCount)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetMaxInstances(chgmlDevice, chgmlVgpuTypeId, cVgpuInstanceCount)
-	runtime.KeepAlive(cVgpuInstanceCountAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	runtime.KeepAlive(cLevelAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuTypeGetMaxInstancesPerVm function as declared in hgml/hgml.h:7903
-func hgmlVgpuTypeGetMaxInstancesPerVm(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuInstanceCountPerVm *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cVgpuInstanceCountPerVm, cVgpuInstanceCountPerVmAllocMap := (*C.uint)(unsafe.Pointer(VgpuInstanceCountPerVm)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetMaxInstancesPerVm(chgmlVgpuTypeId, cVgpuInstanceCountPerVm)
-	runtime.KeepAlive(cVgpuInstanceCountPerVmAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAliveVgpus function as declared in hgml/hgml.h:7933
-func hgmlDeviceGetAliveVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuInstances *hgmlVgpuInstance) Return {
+// hgmlDeviceGetTotalEccErrors function as declared in hgml/hgml.h:3248
+func hgmlDeviceGetTotalEccErrors(hgmlDevice hgmlDevice, ErrorType MemoryErrorType, CounterType EccCounterType, EccCounts *uint64) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
-	cVgpuInstances, cVgpuInstancesAllocMap := (*C.hgmlVgpuInstance_t)(unsafe.Pointer(VgpuInstances)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAliveVgpus(chgmlDevice, cVgpuCount, cVgpuInstances)
-	runtime.KeepAlive(cVgpuInstancesAllocMap)
-	runtime.KeepAlive(cVgpuCountAllocMap)
+	cErrorType, cErrorTypeAllocMap := (C.hgmlMemoryErrorType_t)(ErrorType), cgoAllocsUnknown
+	cCounterType, cCounterTypeAllocMap := (C.hgmlEccCounterType_t)(CounterType), cgoAllocsUnknown
+	cEccCounts, cEccCountsAllocMap := (*C.ulonglong)(unsafe.Pointer(EccCounts)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTotalEccErrors(chgmlDevice, cErrorType, cCounterType, cEccCounts)
+	runtime.KeepAlive(cEccCountsAllocMap)
+	runtime.KeepAlive(cCounterTypeAllocMap)
+	runtime.KeepAlive(cErrorTypeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetActiveVgpus function as declared in hgml/hgml.h:7962
-func hgmlDeviceGetActiveVgpus(hgmlDevice hgmlDevice, VgpuCount *uint32, VgpuInstances *hgmlVgpuInstance) Return {
+// hgmlDeviceGetTotalEnergyConsumption function as declared in hgml/hgml.h:3249
+func hgmlDeviceGetTotalEnergyConsumption(hgmlDevice hgmlDevice, Energy *uint64) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cVgpuCount, cVgpuCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuCount)), cgoAllocsUnknown
-	cVgpuInstances, cVgpuInstancesAllocMap := (*C.hgmlVgpuInstance_t)(unsafe.Pointer(VgpuInstances)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetActiveVgpus(chgmlDevice, cVgpuCount, cVgpuInstances)
-	runtime.KeepAlive(cVgpuInstancesAllocMap)
-	runtime.KeepAlive(cVgpuCountAllocMap)
+	cEnergy, cEnergyAllocMap := (*C.ulonglong)(unsafe.Pointer(Energy)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTotalEnergyConsumption(chgmlDevice, cEnergy)
+	runtime.KeepAlive(cEnergyAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetVmID function as declared in hgml/hgml.h:7987
-func hgmlVgpuInstanceGetVmID(hgmlVgpuInstance hgmlVgpuInstance, VmId *byte, Size uint32, VmIdType *VgpuVmIdType) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cVmId, cVmIdAllocMap := (*C.char)(unsafe.Pointer(VmId)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
-	cVmIdType, cVmIdTypeAllocMap := (*C.hgmlVgpuVmIdType_t)(unsafe.Pointer(VmIdType)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetVmID(chgmlVgpuInstance, cVmId, cSize, cVmIdType)
-	runtime.KeepAlive(cVmIdTypeAllocMap)
-	runtime.KeepAlive(cSizeAllocMap)
-	runtime.KeepAlive(cVmIdAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetUUID function as declared in hgml/hgml.h:8010
-func hgmlVgpuInstanceGetUUID(hgmlVgpuInstance hgmlVgpuInstance, Uuid *byte, Size uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+// hgmlDeviceGetUUID function as declared in hgml/hgml.h:3250
+func hgmlDeviceGetUUID(hgmlDevice hgmlDevice, Uuid *byte, Length uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cUuid, cUuidAllocMap := (*C.char)(unsafe.Pointer(Uuid)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetUUID(chgmlVgpuInstance, cUuid, cSize)
-	runtime.KeepAlive(cSizeAllocMap)
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetUUID(chgmlDevice, cUuid, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
 	runtime.KeepAlive(cUuidAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetVmDriverVersion function as declared in hgml/hgml.h:8037
-func hgmlVgpuInstanceGetVmDriverVersion(hgmlVgpuInstance hgmlVgpuInstance, Version *byte, Length uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+// hgmlDeviceGetUtilizationRates function as declared in hgml/hgml.h:3251
+func hgmlDeviceGetUtilizationRates(hgmlDevice hgmlDevice, Utilization *Utilization) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cUtilization, cUtilizationAllocMap := (*C.hgmlUtilization_t)(unsafe.Pointer(Utilization)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetUtilizationRates(chgmlDevice, cUtilization)
+	runtime.KeepAlive(cUtilizationAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetVbiosVersion function as declared in hgml/hgml.h:3252
+func hgmlDeviceGetVbiosVersion(hgmlDevice hgmlDevice, Version *byte, Length uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
 	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetVmDriverVersion(chgmlVgpuInstance, cVersion, cLength)
+	__ret := C.hgmlDeviceGetVbiosVersion(chgmlDevice, cVersion, cLength)
 	runtime.KeepAlive(cLengthAllocMap)
 	runtime.KeepAlive(cVersionAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetFbUsage function as declared in hgml/hgml.h:8056
-func hgmlVgpuInstanceGetFbUsage(hgmlVgpuInstance hgmlVgpuInstance, FbUsage *uint64) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cFbUsage, cFbUsageAllocMap := (*C.ulonglong)(unsafe.Pointer(FbUsage)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetFbUsage(chgmlVgpuInstance, cFbUsage)
-	runtime.KeepAlive(cFbUsageAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetLicenseStatus function as declared in hgml/hgml.h:8077
-func hgmlVgpuInstanceGetLicenseStatus(hgmlVgpuInstance hgmlVgpuInstance, Licensed *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cLicensed, cLicensedAllocMap := (*C.uint)(unsafe.Pointer(Licensed)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetLicenseStatus(chgmlVgpuInstance, cLicensed)
-	runtime.KeepAlive(cLicensedAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetType function as declared in hgml/hgml.h:8096
-func hgmlVgpuInstanceGetType(hgmlVgpuInstance hgmlVgpuInstance, hgmlVgpuTypeId *hgmlVgpuTypeId) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (*C.hgmlVgpuTypeId_t)(unsafe.Pointer(hgmlVgpuTypeId)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetType(chgmlVgpuInstance, chgmlVgpuTypeId)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetFrameRateLimit function as declared in hgml/hgml.h:8116
-func hgmlVgpuInstanceGetFrameRateLimit(hgmlVgpuInstance hgmlVgpuInstance, FrameRateLimit *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cFrameRateLimit, cFrameRateLimitAllocMap := (*C.uint)(unsafe.Pointer(FrameRateLimit)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetFrameRateLimit(chgmlVgpuInstance, cFrameRateLimit)
-	runtime.KeepAlive(cFrameRateLimitAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetEccMode function as declared in hgml/hgml.h:8132
-func hgmlVgpuInstanceGetEccMode(hgmlVgpuInstance hgmlVgpuInstance, EccMode *EnableState) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cEccMode, cEccModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(EccMode)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetEccMode(chgmlVgpuInstance, cEccMode)
-	runtime.KeepAlive(cEccModeAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetEncoderCapacity function as declared in hgml/hgml.h:8149
-func hgmlVgpuInstanceGetEncoderCapacity(hgmlVgpuInstance hgmlVgpuInstance, EncoderCapacity *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cEncoderCapacity, cEncoderCapacityAllocMap := (*C.uint)(unsafe.Pointer(EncoderCapacity)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetEncoderCapacity(chgmlVgpuInstance, cEncoderCapacity)
-	runtime.KeepAlive(cEncoderCapacityAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceSetEncoderCapacity function as declared in hgml/hgml.h:8166
-func hgmlVgpuInstanceSetEncoderCapacity(hgmlVgpuInstance hgmlVgpuInstance, EncoderCapacity uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cEncoderCapacity, cEncoderCapacityAllocMap := (C.uint)(EncoderCapacity), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceSetEncoderCapacity(chgmlVgpuInstance, cEncoderCapacity)
-	runtime.KeepAlive(cEncoderCapacityAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetEncoderStats function as declared in hgml/hgml.h:8186
-func hgmlVgpuInstanceGetEncoderStats(hgmlVgpuInstance hgmlVgpuInstance, SessionCount *uint32, AverageFps *uint32, AverageLatency *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
-	cAverageFps, cAverageFpsAllocMap := (*C.uint)(unsafe.Pointer(AverageFps)), cgoAllocsUnknown
-	cAverageLatency, cAverageLatencyAllocMap := (*C.uint)(unsafe.Pointer(AverageLatency)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetEncoderStats(chgmlVgpuInstance, cSessionCount, cAverageFps, cAverageLatency)
-	runtime.KeepAlive(cAverageLatencyAllocMap)
-	runtime.KeepAlive(cAverageFpsAllocMap)
-	runtime.KeepAlive(cSessionCountAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetEncoderSessions function as declared in hgml/hgml.h:8218
-func hgmlVgpuInstanceGetEncoderSessions(hgmlVgpuInstance hgmlVgpuInstance, SessionCount *uint32, SessionInfo *EncoderSessionInfo) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
-	cSessionInfo, cSessionInfoAllocMap := (*C.hgmlEncoderSessionInfo_t)(unsafe.Pointer(SessionInfo)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetEncoderSessions(chgmlVgpuInstance, cSessionCount, cSessionInfo)
-	runtime.KeepAlive(cSessionInfoAllocMap)
-	runtime.KeepAlive(cSessionCountAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetFBCStats function as declared in hgml/hgml.h:8235
-func hgmlVgpuInstanceGetFBCStats(hgmlVgpuInstance hgmlVgpuInstance, FbcStats *FBCStats) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cFbcStats, cFbcStatsAllocMap := (*C.hgmlFBCStats_t)(unsafe.Pointer(FbcStats)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetFBCStats(chgmlVgpuInstance, cFbcStats)
-	runtime.KeepAlive(cFbcStatsAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetFBCSessions function as declared in hgml/hgml.h:8266
-func hgmlVgpuInstanceGetFBCSessions(hgmlVgpuInstance hgmlVgpuInstance, SessionCount *uint32, SessionInfo *FBCSessionInfo) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
-	cSessionInfo, cSessionInfoAllocMap := (*C.hgmlFBCSessionInfo_t)(unsafe.Pointer(SessionInfo)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetFBCSessions(chgmlVgpuInstance, cSessionCount, cSessionInfo)
-	runtime.KeepAlive(cSessionInfoAllocMap)
-	runtime.KeepAlive(cSessionCountAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetGpuInstanceId function as declared in hgml/hgml.h:8284
-func hgmlVgpuInstanceGetGpuInstanceId(hgmlVgpuInstance hgmlVgpuInstance, GpuInstanceId *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cGpuInstanceId, cGpuInstanceIdAllocMap := (*C.uint)(unsafe.Pointer(GpuInstanceId)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetGpuInstanceId(chgmlVgpuInstance, cGpuInstanceId)
-	runtime.KeepAlive(cGpuInstanceIdAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetGpuPciId function as declared in hgml/hgml.h:8304
-func hgmlVgpuInstanceGetGpuPciId(hgmlVgpuInstance hgmlVgpuInstance, VgpuPciId *byte, Length *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cVgpuPciId, cVgpuPciIdAllocMap := (*C.char)(unsafe.Pointer(VgpuPciId)), cgoAllocsUnknown
-	cLength, cLengthAllocMap := (*C.uint)(unsafe.Pointer(Length)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetGpuPciId(chgmlVgpuInstance, cVgpuPciId, cLength)
-	runtime.KeepAlive(cLengthAllocMap)
-	runtime.KeepAlive(cVgpuPciIdAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuTypeGetCapabilities function as declared in hgml/hgml.h:8323
-func hgmlVgpuTypeGetCapabilities(hgmlVgpuTypeId hgmlVgpuTypeId, Capability VgpuCapability, CapResult *uint32) Return {
-	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
-	cCapability, cCapabilityAllocMap := (C.hgmlVgpuCapability_t)(Capability), cgoAllocsUnknown
+// hgmlDeviceGetVgpuCapabilities function as declared in hgml/hgml.h:3253
+func hgmlDeviceGetVgpuCapabilities(hgmlDevice hgmlDevice, Capability DeviceVgpuCapability, CapResult *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCapability, cCapabilityAllocMap := (C.hgmlDeviceVgpuCapability_t)(Capability), cgoAllocsUnknown
 	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuTypeGetCapabilities(chgmlVgpuTypeId, cCapability, cCapResult)
+	__ret := C.hgmlDeviceGetVgpuCapabilities(chgmlDevice, cCapability, cCapResult)
 	runtime.KeepAlive(cCapResultAllocMap)
 	runtime.KeepAlive(cCapabilityAllocMap)
-	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetMdevUUID function as declared in hgml/hgml.h:8348
-func hgmlVgpuInstanceGetMdevUUID(hgmlVgpuInstance hgmlVgpuInstance, MdevUuid *byte, Size uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cMdevUuid, cMdevUuidAllocMap := (*C.char)(unsafe.Pointer(MdevUuid)), cgoAllocsUnknown
-	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetMdevUUID(chgmlVgpuInstance, cMdevUuid, cSize)
-	runtime.KeepAlive(cSizeAllocMap)
-	runtime.KeepAlive(cMdevUuidAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+// hgmlDeviceGetVgpuHeterogeneousMode function as declared in hgml/hgml.h:3254
+func hgmlDeviceGetVgpuHeterogeneousMode(hgmlDevice hgmlDevice, PHeterogeneousMode *VgpuHeterogeneousMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPHeterogeneousMode, cPHeterogeneousModeAllocMap := (*C.hgmlVgpuHeterogeneousMode_t)(unsafe.Pointer(PHeterogeneousMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuHeterogeneousMode(chgmlDevice, cPHeterogeneousMode)
+	runtime.KeepAlive(cPHeterogeneousModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetMetadata function as declared in hgml/hgml.h:8460
-func hgmlVgpuInstanceGetMetadata(hgmlVgpuInstance hgmlVgpuInstance, hgmlVgpuMetadata *hgmlVgpuMetadata, BufferSize *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	chgmlVgpuMetadata, chgmlVgpuMetadataAllocMap := (*C.hgmlVgpuMetadata_t)(unsafe.Pointer(hgmlVgpuMetadata)), cgoAllocsUnknown
-	cBufferSize, cBufferSizeAllocMap := (*C.uint)(unsafe.Pointer(BufferSize)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetMetadata(chgmlVgpuInstance, chgmlVgpuMetadata, cBufferSize)
-	runtime.KeepAlive(cBufferSizeAllocMap)
-	runtime.KeepAlive(chgmlVgpuMetadataAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+// hgmlDeviceGetVgpuInstancesUtilizationInfo function as declared in hgml/hgml.h:3255
+func hgmlDeviceGetVgpuInstancesUtilizationInfo(hgmlDevice hgmlDevice, VgpuUtilInfo *VgpuInstancesUtilizationInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cVgpuUtilInfo, cVgpuUtilInfoAllocMap := (*C.hgmlVgpuInstancesUtilizationInfo_t)(unsafe.Pointer(VgpuUtilInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuInstancesUtilizationInfo(chgmlDevice, cVgpuUtilInfo)
+	runtime.KeepAlive(cVgpuUtilInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetVgpuMetadata function as declared in hgml/hgml.h:8482
+// hgmlDeviceGetVgpuMetadata function as declared in hgml/hgml.h:3256
 func hgmlDeviceGetVgpuMetadata(hgmlDevice hgmlDevice, PgpuMetadata *hgmlVgpuPgpuMetadata, BufferSize *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cPgpuMetadata, cPgpuMetadataAllocMap := (*C.hgmlVgpuPgpuMetadata_t)(unsafe.Pointer(PgpuMetadata)), cgoAllocsUnknown
@@ -3066,55 +2500,33 @@ func hgmlDeviceGetVgpuMetadata(hgmlDevice hgmlDevice, PgpuMetadata *hgmlVgpuPgpu
 	return __v
 }
 
-// hgmlGetVgpuCompatibility function as declared in hgml/hgml.h:8506
-func hgmlGetVgpuCompatibility(hgmlVgpuMetadata *hgmlVgpuMetadata, PgpuMetadata *hgmlVgpuPgpuMetadata, CompatibilityInfo *VgpuPgpuCompatibility) Return {
-	chgmlVgpuMetadata, chgmlVgpuMetadataAllocMap := (*C.hgmlVgpuMetadata_t)(unsafe.Pointer(hgmlVgpuMetadata)), cgoAllocsUnknown
-	cPgpuMetadata, cPgpuMetadataAllocMap := (*C.hgmlVgpuPgpuMetadata_t)(unsafe.Pointer(PgpuMetadata)), cgoAllocsUnknown
-	cCompatibilityInfo, cCompatibilityInfoAllocMap := (*C.hgmlVgpuPgpuCompatibility_t)(unsafe.Pointer(CompatibilityInfo)), cgoAllocsUnknown
-	__ret := C.hgmlGetVgpuCompatibility(chgmlVgpuMetadata, cPgpuMetadata, cCompatibilityInfo)
-	runtime.KeepAlive(cCompatibilityInfoAllocMap)
-	runtime.KeepAlive(cPgpuMetadataAllocMap)
-	runtime.KeepAlive(chgmlVgpuMetadataAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetPgpuMetadataString function as declared in hgml/hgml.h:8526
-func hgmlDeviceGetPgpuMetadataString(hgmlDevice hgmlDevice, PgpuMetadata *byte, BufferSize *uint32) Return {
+// hgmlDeviceGetVgpuProcessUtilization function as declared in hgml/hgml.h:3257
+func hgmlDeviceGetVgpuProcessUtilization(hgmlDevice hgmlDevice, LastSeenTimeStamp uint64, VgpuProcessSamplesCount *uint32, UtilizationSamples *VgpuProcessUtilizationSample) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPgpuMetadata, cPgpuMetadataAllocMap := (*C.char)(unsafe.Pointer(PgpuMetadata)), cgoAllocsUnknown
-	cBufferSize, cBufferSizeAllocMap := (*C.uint)(unsafe.Pointer(BufferSize)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPgpuMetadataString(chgmlDevice, cPgpuMetadata, cBufferSize)
-	runtime.KeepAlive(cBufferSizeAllocMap)
-	runtime.KeepAlive(cPgpuMetadataAllocMap)
+	cLastSeenTimeStamp, cLastSeenTimeStampAllocMap := (C.ulonglong)(LastSeenTimeStamp), cgoAllocsUnknown
+	cVgpuProcessSamplesCount, cVgpuProcessSamplesCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuProcessSamplesCount)), cgoAllocsUnknown
+	cUtilizationSamples, cUtilizationSamplesAllocMap := (*C.hgmlVgpuProcessUtilizationSample_t)(unsafe.Pointer(UtilizationSamples)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuProcessUtilization(chgmlDevice, cLastSeenTimeStamp, cVgpuProcessSamplesCount, cUtilizationSamples)
+	runtime.KeepAlive(cUtilizationSamplesAllocMap)
+	runtime.KeepAlive(cVgpuProcessSamplesCountAllocMap)
+	runtime.KeepAlive(cLastSeenTimeStampAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetVgpuSchedulerLog function as declared in hgml/hgml.h:8546
-func hgmlDeviceGetVgpuSchedulerLog(hgmlDevice hgmlDevice, PSchedulerLog *VgpuSchedulerLog) Return {
+// hgmlDeviceGetVgpuProcessesUtilizationInfo function as declared in hgml/hgml.h:3258
+func hgmlDeviceGetVgpuProcessesUtilizationInfo(hgmlDevice hgmlDevice, VgpuProcUtilInfo *VgpuProcessesUtilizationInfo) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPSchedulerLog, cPSchedulerLogAllocMap := (*C.hgmlVgpuSchedulerLog_t)(unsafe.Pointer(PSchedulerLog)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetVgpuSchedulerLog(chgmlDevice, cPSchedulerLog)
-	runtime.KeepAlive(cPSchedulerLogAllocMap)
+	cVgpuProcUtilInfo, cVgpuProcUtilInfoAllocMap := (*C.hgmlVgpuProcessesUtilizationInfo_t)(unsafe.Pointer(VgpuProcUtilInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuProcessesUtilizationInfo(chgmlDevice, cVgpuProcUtilInfo)
+	runtime.KeepAlive(cVgpuProcUtilInfoAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetVgpuSchedulerState function as declared in hgml/hgml.h:8563
-func hgmlDeviceGetVgpuSchedulerState(hgmlDevice hgmlDevice, PSchedulerState *VgpuSchedulerGetState) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPSchedulerState, cPSchedulerStateAllocMap := (*C.hgmlVgpuSchedulerGetState_t)(unsafe.Pointer(PSchedulerState)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetVgpuSchedulerState(chgmlDevice, cPSchedulerState)
-	runtime.KeepAlive(cPSchedulerStateAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetVgpuSchedulerCapabilities function as declared in hgml/hgml.h:8586
+// hgmlDeviceGetVgpuSchedulerCapabilities function as declared in hgml/hgml.h:3259
 func hgmlDeviceGetVgpuSchedulerCapabilities(hgmlDevice hgmlDevice, PCapabilities *VgpuSchedulerCapabilities) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cPCapabilities, cPCapabilitiesAllocMap := (*C.hgmlVgpuSchedulerCapabilities_t)(unsafe.Pointer(PCapabilities)), cgoAllocsUnknown
@@ -3125,38 +2537,55 @@ func hgmlDeviceGetVgpuSchedulerCapabilities(hgmlDevice hgmlDevice, PCapabilities
 	return __v
 }
 
-// hgmlDeviceSetVgpuSchedulerState function as declared in hgml/hgml.h:8611
-func hgmlDeviceSetVgpuSchedulerState(hgmlDevice hgmlDevice, PSchedulerState *VgpuSchedulerSetState) Return {
+// hgmlDeviceGetVgpuSchedulerLog function as declared in hgml/hgml.h:3260
+func hgmlDeviceGetVgpuSchedulerLog(hgmlDevice hgmlDevice, PSchedulerLog *VgpuSchedulerLog) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPSchedulerState, cPSchedulerStateAllocMap := (*C.hgmlVgpuSchedulerSetState_t)(unsafe.Pointer(PSchedulerState)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetVgpuSchedulerState(chgmlDevice, cPSchedulerState)
+	cPSchedulerLog, cPSchedulerLogAllocMap := (*C.hgmlVgpuSchedulerLog_t)(unsafe.Pointer(PSchedulerLog)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuSchedulerLog(chgmlDevice, cPSchedulerLog)
+	runtime.KeepAlive(cPSchedulerLogAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetVgpuSchedulerState function as declared in hgml/hgml.h:3261
+func hgmlDeviceGetVgpuSchedulerState(hgmlDevice hgmlDevice, PSchedulerState *VgpuSchedulerGetState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPSchedulerState, cPSchedulerStateAllocMap := (*C.hgmlVgpuSchedulerGetState_t)(unsafe.Pointer(PSchedulerState)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuSchedulerState(chgmlDevice, cPSchedulerState)
 	runtime.KeepAlive(cPSchedulerStateAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlGetVgpuVersion function as declared in hgml/hgml.h:8643
-func hgmlGetVgpuVersion(Supported *VgpuVersion, Current *VgpuVersion) Return {
-	cSupported, cSupportedAllocMap := (*C.hgmlVgpuVersion_t)(unsafe.Pointer(Supported)), cgoAllocsUnknown
-	cCurrent, cCurrentAllocMap := (*C.hgmlVgpuVersion_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
-	__ret := C.hgmlGetVgpuVersion(cSupported, cCurrent)
-	runtime.KeepAlive(cCurrentAllocMap)
-	runtime.KeepAlive(cSupportedAllocMap)
+// hgmlDeviceGetVgpuTypeCreatablePlacements function as declared in hgml/hgml.h:3262
+func hgmlDeviceGetVgpuTypeCreatablePlacements(hgmlDevice hgmlDevice, hgmlVgpuTypeId hgmlVgpuTypeId, PPlacementList *VgpuPlacementList) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cPPlacementList, cPPlacementListAllocMap := (*C.hgmlVgpuPlacementList_t)(unsafe.Pointer(PPlacementList)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuTypeCreatablePlacements(chgmlDevice, chgmlVgpuTypeId, cPPlacementList)
+	runtime.KeepAlive(cPPlacementListAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlSetVgpuVersion function as declared in hgml/hgml.h:8670
-func hgmlSetVgpuVersion(VgpuVersion *VgpuVersion) Return {
-	cVgpuVersion, cVgpuVersionAllocMap := (*C.hgmlVgpuVersion_t)(unsafe.Pointer(VgpuVersion)), cgoAllocsUnknown
-	__ret := C.hgmlSetVgpuVersion(cVgpuVersion)
-	runtime.KeepAlive(cVgpuVersionAllocMap)
+// hgmlDeviceGetVgpuTypeSupportedPlacements function as declared in hgml/hgml.h:3263
+func hgmlDeviceGetVgpuTypeSupportedPlacements(hgmlDevice hgmlDevice, hgmlVgpuTypeId hgmlVgpuTypeId, PPlacementList *VgpuPlacementList) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cPPlacementList, cPPlacementListAllocMap := (*C.hgmlVgpuPlacementList_t)(unsafe.Pointer(PPlacementList)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVgpuTypeSupportedPlacements(chgmlDevice, chgmlVgpuTypeId, cPPlacementList)
+	runtime.KeepAlive(cPPlacementListAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetVgpuUtilization function as declared in hgml/hgml.h:8726
+// hgmlDeviceGetVgpuUtilization function as declared in hgml/hgml.h:3264
 func hgmlDeviceGetVgpuUtilization(hgmlDevice hgmlDevice, LastSeenTimeStamp uint64, SampleValType *ValueType, VgpuInstanceSamplesCount *uint32, UtilizationSamples *VgpuInstanceUtilizationSample) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cLastSeenTimeStamp, cLastSeenTimeStampAllocMap := (C.ulonglong)(LastSeenTimeStamp), cgoAllocsUnknown
@@ -3173,99 +2602,404 @@ func hgmlDeviceGetVgpuUtilization(hgmlDevice hgmlDevice, LastSeenTimeStamp uint6
 	return __v
 }
 
-// hgmlDeviceGetVgpuProcessUtilization function as declared in hgml/hgml.h:8773
-func hgmlDeviceGetVgpuProcessUtilization(hgmlDevice hgmlDevice, LastSeenTimeStamp uint64, VgpuProcessSamplesCount *uint32, UtilizationSamples *VgpuProcessUtilizationSample) Return {
+// hgmlDeviceGetVirtualizationMode function as declared in hgml/hgml.h:3265
+func hgmlDeviceGetVirtualizationMode(hgmlDevice hgmlDevice, PVirtualMode *GpuVirtualizationMode) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLastSeenTimeStamp, cLastSeenTimeStampAllocMap := (C.ulonglong)(LastSeenTimeStamp), cgoAllocsUnknown
-	cVgpuProcessSamplesCount, cVgpuProcessSamplesCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuProcessSamplesCount)), cgoAllocsUnknown
-	cUtilizationSamples, cUtilizationSamplesAllocMap := (*C.hgmlVgpuProcessUtilizationSample_t)(unsafe.Pointer(UtilizationSamples)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetVgpuProcessUtilization(chgmlDevice, cLastSeenTimeStamp, cVgpuProcessSamplesCount, cUtilizationSamples)
-	runtime.KeepAlive(cUtilizationSamplesAllocMap)
-	runtime.KeepAlive(cVgpuProcessSamplesCountAllocMap)
-	runtime.KeepAlive(cLastSeenTimeStampAllocMap)
+	cPVirtualMode, cPVirtualModeAllocMap := (*C.hgmlGpuVirtualizationMode_t)(unsafe.Pointer(PVirtualMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetVirtualizationMode(chgmlDevice, cPVirtualMode)
+	runtime.KeepAlive(cPVirtualModeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetAccountingMode function as declared in hgml/hgml.h:8793
-func hgmlVgpuInstanceGetAccountingMode(hgmlVgpuInstance hgmlVgpuInstance, Mode *EnableState) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetAccountingMode(chgmlVgpuInstance, cMode)
+// hgmlDeviceIsMigDeviceHandle function as declared in hgml/hgml.h:3266
+func hgmlDeviceIsMigDeviceHandle(hgmlDevice hgmlDevice, IsMigDevice *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cIsMigDevice, cIsMigDeviceAllocMap := (*C.uint)(unsafe.Pointer(IsMigDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceIsMigDeviceHandle(chgmlDevice, cIsMigDevice)
+	runtime.KeepAlive(cIsMigDeviceAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceModifyDrainState function as declared in hgml/hgml.h:3267
+func hgmlDeviceModifyDrainState(PciInfo *PciInfo, NewState EnableState) Return {
+	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
+	cNewState, cNewStateAllocMap := (C.hgmlEnableState_t)(NewState), cgoAllocsUnknown
+	__ret := C.hgmlDeviceModifyDrainState(cPciInfo, cNewState)
+	runtime.KeepAlive(cNewStateAllocMap)
+	runtime.KeepAlive(cPciInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceOnSameBoard function as declared in hgml/hgml.h:3268
+func hgmlDeviceOnSameBoard(Device1 hgmlDevice, Device2 hgmlDevice, OnSameBoard *int32) Return {
+	cDevice1, cDevice1AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device1)), cgoAllocsUnknown
+	cDevice2, cDevice2AllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&Device2)), cgoAllocsUnknown
+	cOnSameBoard, cOnSameBoardAllocMap := (*C.int)(unsafe.Pointer(OnSameBoard)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceOnSameBoard(cDevice1, cDevice2, cOnSameBoard)
+	runtime.KeepAlive(cOnSameBoardAllocMap)
+	runtime.KeepAlive(cDevice2AllocMap)
+	runtime.KeepAlive(cDevice1AllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDevicePowerSmoothingActivatePresetProfile function as declared in hgml/hgml.h:3269
+func hgmlDevicePowerSmoothingActivatePresetProfile(hgmlDevice hgmlDevice, Profile *PowerSmoothingProfile) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfile, cProfileAllocMap := (*C.hgmlPowerSmoothingProfile_t)(unsafe.Pointer(Profile)), cgoAllocsUnknown
+	__ret := C.hgmlDevicePowerSmoothingActivatePresetProfile(chgmlDevice, cProfile)
+	runtime.KeepAlive(cProfileAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDevicePowerSmoothingSetState function as declared in hgml/hgml.h:3270
+func hgmlDevicePowerSmoothingSetState(hgmlDevice hgmlDevice, State *PowerSmoothingState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cState, cStateAllocMap := (*C.hgmlPowerSmoothingState_t)(unsafe.Pointer(State)), cgoAllocsUnknown
+	__ret := C.hgmlDevicePowerSmoothingSetState(chgmlDevice, cState)
+	runtime.KeepAlive(cStateAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDevicePowerSmoothingUpdatePresetProfileParam function as declared in hgml/hgml.h:3271
+func hgmlDevicePowerSmoothingUpdatePresetProfileParam(hgmlDevice hgmlDevice, Profile *PowerSmoothingProfile) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfile, cProfileAllocMap := (*C.hgmlPowerSmoothingProfile_t)(unsafe.Pointer(Profile)), cgoAllocsUnknown
+	__ret := C.hgmlDevicePowerSmoothingUpdatePresetProfileParam(chgmlDevice, cProfile)
+	runtime.KeepAlive(cProfileAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceQueryDrainState function as declared in hgml/hgml.h:3272
+func hgmlDeviceQueryDrainState(PciInfo *PciInfo, CurrentState *EnableState) Return {
+	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
+	cCurrentState, cCurrentStateAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(CurrentState)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceQueryDrainState(cPciInfo, cCurrentState)
+	runtime.KeepAlive(cCurrentStateAllocMap)
+	runtime.KeepAlive(cPciInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceReadWritePRM_v1 function as declared in hgml/hgml.h:3273
+func hgmlDeviceReadWritePRM_v1(hgmlDevice hgmlDevice, Buffer *PRMTLV_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cBuffer, cBufferAllocMap := (*C.hgmlPRMTLV_v1_t)(unsafe.Pointer(Buffer)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceReadWritePRM_v1(chgmlDevice, cBuffer)
+	runtime.KeepAlive(cBufferAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceRegisterEvents function as declared in hgml/hgml.h:3274
+func hgmlDeviceRegisterEvents(hgmlDevice hgmlDevice, EventTypes uint64, Set hgmlEventSet) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cEventTypes, cEventTypesAllocMap := (C.ulonglong)(EventTypes), cgoAllocsUnknown
+	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceRegisterEvents(chgmlDevice, cEventTypes, cSet)
+	runtime.KeepAlive(cSetAllocMap)
+	runtime.KeepAlive(cEventTypesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceRemoveGpu function as declared in hgml/hgml.h:3275
+func hgmlDeviceRemoveGpu(PciInfo *PciInfo) Return {
+	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceRemoveGpu(cPciInfo)
+	runtime.KeepAlive(cPciInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceRemoveGpu_v2 function as declared in hgml/hgml.h:3276
+func hgmlDeviceRemoveGpu_v2(PciInfo *PciInfo, GpuState DetachGpuState, LinkState PcieLinkState) Return {
+	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
+	cGpuState, cGpuStateAllocMap := (C.hgmlDetachGpuState_t)(GpuState), cgoAllocsUnknown
+	cLinkState, cLinkStateAllocMap := (C.hgmlPcieLinkState_t)(LinkState), cgoAllocsUnknown
+	__ret := C.hgmlDeviceRemoveGpu_v2(cPciInfo, cGpuState, cLinkState)
+	runtime.KeepAlive(cLinkStateAllocMap)
+	runtime.KeepAlive(cGpuStateAllocMap)
+	runtime.KeepAlive(cPciInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceResetGpuLockedClocks function as declared in hgml/hgml.h:3277
+func hgmlDeviceResetGpuLockedClocks(hgmlDevice hgmlDevice) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceResetGpuLockedClocks(chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceResetIcnLinkErrorCounters function as declared in hgml/hgml.h:3278
+func hgmlDeviceResetIcnLinkErrorCounters(hgmlDevice hgmlDevice, Link uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	__ret := C.hgmlDeviceResetIcnLinkErrorCounters(chgmlDevice, cLink)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceResetMemoryLockedClocks function as declared in hgml/hgml.h:3279
+func hgmlDeviceResetMemoryLockedClocks(hgmlDevice hgmlDevice) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceResetMemoryLockedClocks(chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetAPIRestriction function as declared in hgml/hgml.h:3280
+func hgmlDeviceSetAPIRestriction(hgmlDevice hgmlDevice, ApiType RestrictedAPI, IsRestricted EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cApiType, cApiTypeAllocMap := (C.hgmlRestrictedAPI_t)(ApiType), cgoAllocsUnknown
+	cIsRestricted, cIsRestrictedAllocMap := (C.hgmlEnableState_t)(IsRestricted), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetAPIRestriction(chgmlDevice, cApiType, cIsRestricted)
+	runtime.KeepAlive(cIsRestrictedAllocMap)
+	runtime.KeepAlive(cApiTypeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetAccountingMode function as declared in hgml/hgml.h:3281
+func hgmlDeviceSetAccountingMode(hgmlDevice hgmlDevice, Mode EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMode, cModeAllocMap := (C.hgmlEnableState_t)(Mode), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetAccountingMode(chgmlDevice, cMode)
 	runtime.KeepAlive(cModeAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetAccountingPids function as declared in hgml/hgml.h:8824
-func hgmlVgpuInstanceGetAccountingPids(hgmlVgpuInstance hgmlVgpuInstance, Count *uint32, Pids *uint32) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	cPids, cPidsAllocMap := (*C.uint)(unsafe.Pointer(Pids)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetAccountingPids(chgmlVgpuInstance, cCount, cPids)
-	runtime.KeepAlive(cPidsAllocMap)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+// hgmlDeviceSetAutoBoostedClocksEnabled function as declared in hgml/hgml.h:3282
+func hgmlDeviceSetAutoBoostedClocksEnabled(hgmlDevice hgmlDevice, Enabled EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cEnabled, cEnabledAllocMap := (C.hgmlEnableState_t)(Enabled), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetAutoBoostedClocksEnabled(chgmlDevice, cEnabled)
+	runtime.KeepAlive(cEnabledAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetAccountingStats function as declared in hgml/hgml.h:8859
-func hgmlVgpuInstanceGetAccountingStats(hgmlVgpuInstance hgmlVgpuInstance, Pid uint32, Stats *AccountingStats) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cPid, cPidAllocMap := (C.uint)(Pid), cgoAllocsUnknown
-	cStats, cStatsAllocMap := (*C.hgmlAccountingStats_t)(unsafe.Pointer(Stats)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetAccountingStats(chgmlVgpuInstance, cPid, cStats)
-	runtime.KeepAlive(cStatsAllocMap)
-	runtime.KeepAlive(cPidAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceClearAccountingPids function as declared in hgml/hgml.h:8881
-func hgmlVgpuInstanceClearAccountingPids(hgmlVgpuInstance hgmlVgpuInstance) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceClearAccountingPids(chgmlVgpuInstance)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlVgpuInstanceGetLicenseInfo_v2 function as declared in hgml/hgml.h:8898
-func hgmlVgpuInstanceGetLicenseInfo_v2(hgmlVgpuInstance hgmlVgpuInstance, LicenseInfo *VgpuLicenseInfo) Return {
-	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
-	cLicenseInfo, cLicenseInfoAllocMap := (*C.hgmlVgpuLicenseInfo_t)(unsafe.Pointer(LicenseInfo)), cgoAllocsUnknown
-	__ret := C.hgmlVgpuInstanceGetLicenseInfo_v2(chgmlVgpuInstance, cLicenseInfo)
-	runtime.KeepAlive(cLicenseInfoAllocMap)
-	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGetExcludedDeviceCount function as declared in hgml/hgml.h:8934
-func hgmlGetExcludedDeviceCount(DeviceCount *uint32) Return {
-	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
-	__ret := C.hgmlGetExcludedDeviceCount(cDeviceCount)
-	runtime.KeepAlive(cDeviceCountAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGetExcludedDeviceInfoByIndex function as declared in hgml/hgml.h:8954
-func hgmlGetExcludedDeviceInfoByIndex(Index uint32, Info *ExcludedDeviceInfo) Return {
-	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlExcludedDeviceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlGetExcludedDeviceInfoByIndex(cIndex, cInfo)
+// hgmlDeviceSetClockOffsets function as declared in hgml/hgml.h:3283
+func hgmlDeviceSetClockOffsets(hgmlDevice hgmlDevice, Info *ClockOffset) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlClockOffset_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetClockOffsets(chgmlDevice, cInfo)
 	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(cIndexAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceSetMigMode function as declared in hgml/hgml.h:9277
+// hgmlDeviceSetComputeMode function as declared in hgml/hgml.h:3284
+func hgmlDeviceSetComputeMode(hgmlDevice hgmlDevice, Mode ComputeMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMode, cModeAllocMap := (C.hgmlComputeMode_t)(Mode), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetComputeMode(chgmlDevice, cMode)
+	runtime.KeepAlive(cModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetConfComputeUnprotectedMemSize function as declared in hgml/hgml.h:3285
+func hgmlDeviceSetConfComputeUnprotectedMemSize(hgmlDevice hgmlDevice, SizeKiB uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSizeKiB, cSizeKiBAllocMap := (C.ulonglong)(SizeKiB), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetConfComputeUnprotectedMemSize(chgmlDevice, cSizeKiB)
+	runtime.KeepAlive(cSizeKiBAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetCpuAffinity function as declared in hgml/hgml.h:3286
+func hgmlDeviceSetCpuAffinity(hgmlDevice hgmlDevice) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetCpuAffinity(chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetDefaultAutoBoostedClocksEnabled function as declared in hgml/hgml.h:3287
+func hgmlDeviceSetDefaultAutoBoostedClocksEnabled(hgmlDevice hgmlDevice, Enabled EnableState, Flags uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cEnabled, cEnabledAllocMap := (C.hgmlEnableState_t)(Enabled), cgoAllocsUnknown
+	cFlags, cFlagsAllocMap := (C.uint)(Flags), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetDefaultAutoBoostedClocksEnabled(chgmlDevice, cEnabled, cFlags)
+	runtime.KeepAlive(cFlagsAllocMap)
+	runtime.KeepAlive(cEnabledAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetDefaultFanSpeed_v2 function as declared in hgml/hgml.h:3288
+func hgmlDeviceSetDefaultFanSpeed_v2(hgmlDevice hgmlDevice, Fan uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetDefaultFanSpeed_v2(chgmlDevice, cFan)
+	runtime.KeepAlive(cFanAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetDramEncryptionMode function as declared in hgml/hgml.h:3289
+func hgmlDeviceSetDramEncryptionMode(hgmlDevice hgmlDevice, DramEncryption *DramEncryptionInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cDramEncryption, cDramEncryptionAllocMap := (*C.hgmlDramEncryptionInfo_t)(unsafe.Pointer(DramEncryption)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetDramEncryptionMode(chgmlDevice, cDramEncryption)
+	runtime.KeepAlive(cDramEncryptionAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetDriverModel function as declared in hgml/hgml.h:3290
+func hgmlDeviceSetDriverModel(hgmlDevice hgmlDevice, DriverModel DriverModel, Flags uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cDriverModel, cDriverModelAllocMap := (C.hgmlDriverModel_t)(DriverModel), cgoAllocsUnknown
+	cFlags, cFlagsAllocMap := (C.uint)(Flags), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetDriverModel(chgmlDevice, cDriverModel, cFlags)
+	runtime.KeepAlive(cFlagsAllocMap)
+	runtime.KeepAlive(cDriverModelAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetEccMode function as declared in hgml/hgml.h:3291
+func hgmlDeviceSetEccMode(hgmlDevice hgmlDevice, Ecc EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cEcc, cEccAllocMap := (C.hgmlEnableState_t)(Ecc), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetEccMode(chgmlDevice, cEcc)
+	runtime.KeepAlive(cEccAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetFanControlPolicy function as declared in hgml/hgml.h:3292
+func hgmlDeviceSetFanControlPolicy(hgmlDevice hgmlDevice, Fan uint32, Policy FanControlPolicy) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
+	cPolicy, cPolicyAllocMap := (C.hgmlFanControlPolicy_t)(Policy), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetFanControlPolicy(chgmlDevice, cFan, cPolicy)
+	runtime.KeepAlive(cPolicyAllocMap)
+	runtime.KeepAlive(cFanAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetFanSpeed_v2 function as declared in hgml/hgml.h:3293
+func hgmlDeviceSetFanSpeed_v2(hgmlDevice hgmlDevice, Fan uint32, Speed uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cFan, cFanAllocMap := (C.uint)(Fan), cgoAllocsUnknown
+	cSpeed, cSpeedAllocMap := (C.uint)(Speed), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetFanSpeed_v2(chgmlDevice, cFan, cSpeed)
+	runtime.KeepAlive(cSpeedAllocMap)
+	runtime.KeepAlive(cFanAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetGpuLockedClocks function as declared in hgml/hgml.h:3294
+func hgmlDeviceSetGpuLockedClocks(hgmlDevice hgmlDevice, MinGpuClockMHz uint32, MaxGpuClockMHz uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMinGpuClockMHz, cMinGpuClockMHzAllocMap := (C.uint)(MinGpuClockMHz), cgoAllocsUnknown
+	cMaxGpuClockMHz, cMaxGpuClockMHzAllocMap := (C.uint)(MaxGpuClockMHz), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetGpuLockedClocks(chgmlDevice, cMinGpuClockMHz, cMaxGpuClockMHz)
+	runtime.KeepAlive(cMaxGpuClockMHzAllocMap)
+	runtime.KeepAlive(cMinGpuClockMHzAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetGpuOperationMode function as declared in hgml/hgml.h:3295
+func hgmlDeviceSetGpuOperationMode(hgmlDevice hgmlDevice, Mode GpuOperationMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMode, cModeAllocMap := (C.hgmlGpuOperationMode_t)(Mode), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetGpuOperationMode(chgmlDevice, cMode)
+	runtime.KeepAlive(cModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetHostname_v1 function as declared in hgml/hgml.h:3296
+func hgmlDeviceSetHostname_v1(hgmlDevice hgmlDevice, Hostname *Hostname_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cHostname, cHostnameAllocMap := (*C.hgmlHostname_v1_t)(unsafe.Pointer(Hostname)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetHostname_v1(chgmlDevice, cHostname)
+	runtime.KeepAlive(cHostnameAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetIcnLinkBwMode function as declared in hgml/hgml.h:3297
+func hgmlDeviceSetIcnLinkBwMode(hgmlDevice hgmlDevice, SetBwMode *IcnLinkSetBwMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSetBwMode, cSetBwModeAllocMap := (*C.hgmlIcnLinkSetBwMode_t)(unsafe.Pointer(SetBwMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetIcnLinkBwMode(chgmlDevice, cSetBwMode)
+	runtime.KeepAlive(cSetBwModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetIcnLinkDeviceLowPowerThreshold function as declared in hgml/hgml.h:3298
+func hgmlDeviceSetIcnLinkDeviceLowPowerThreshold(hgmlDevice hgmlDevice, Info *IcnLinkPowerThres) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlIcnLinkPowerThres_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetIcnLinkDeviceLowPowerThreshold(chgmlDevice, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetMemoryLockedClocks function as declared in hgml/hgml.h:3299
+func hgmlDeviceSetMemoryLockedClocks(hgmlDevice hgmlDevice, MinMemClockMHz uint32, MaxMemClockMHz uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMinMemClockMHz, cMinMemClockMHzAllocMap := (C.uint)(MinMemClockMHz), cgoAllocsUnknown
+	cMaxMemClockMHz, cMaxMemClockMHzAllocMap := (C.uint)(MaxMemClockMHz), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetMemoryLockedClocks(chgmlDevice, cMinMemClockMHz, cMaxMemClockMHz)
+	runtime.KeepAlive(cMaxMemClockMHzAllocMap)
+	runtime.KeepAlive(cMinMemClockMHzAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetMigMode function as declared in hgml/hgml.h:3300
 func hgmlDeviceSetMigMode(hgmlDevice hgmlDevice, Mode uint32, ActivationStatus *Return) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
 	cMode, cModeAllocMap := (C.uint)(Mode), cgoAllocsUnknown
@@ -3278,223 +3012,366 @@ func hgmlDeviceSetMigMode(hgmlDevice hgmlDevice, Mode uint32, ActivationStatus *
 	return __v
 }
 
-// hgmlDeviceGetMigMode function as declared in hgml/hgml.h:9299
-func hgmlDeviceGetMigMode(hgmlDevice hgmlDevice, CurrentMode *uint32, PendingMode *uint32) Return {
+// hgmlDeviceSetPersistenceMode function as declared in hgml/hgml.h:3301
+func hgmlDeviceSetPersistenceMode(hgmlDevice hgmlDevice, Mode EnableState) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCurrentMode, cCurrentModeAllocMap := (*C.uint)(unsafe.Pointer(CurrentMode)), cgoAllocsUnknown
-	cPendingMode, cPendingModeAllocMap := (*C.uint)(unsafe.Pointer(PendingMode)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMigMode(chgmlDevice, cCurrentMode, cPendingMode)
-	runtime.KeepAlive(cPendingModeAllocMap)
-	runtime.KeepAlive(cCurrentModeAllocMap)
+	cMode, cModeAllocMap := (C.hgmlEnableState_t)(Mode), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetPersistenceMode(chgmlDevice, cMode)
+	runtime.KeepAlive(cModeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstanceProfileInfo function as declared in hgml/hgml.h:9320
-func hgmlDeviceGetGpuInstanceProfileInfo(hgmlDevice hgmlDevice, Profile uint32, Info *GpuInstanceProfileInfo) Return {
+// hgmlDeviceSetPowerManagementLimit function as declared in hgml/hgml.h:3302
+func hgmlDeviceSetPowerManagementLimit(hgmlDevice hgmlDevice, Limit uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceProfileInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstanceProfileInfo(chgmlDevice, cProfile, cInfo)
+	cLimit, cLimitAllocMap := (C.uint)(Limit), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetPowerManagementLimit(chgmlDevice, cLimit)
+	runtime.KeepAlive(cLimitAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetPowerManagementLimit_v2 function as declared in hgml/hgml.h:3303
+func hgmlDeviceSetPowerManagementLimit_v2(hgmlDevice hgmlDevice, PowerValue *PowerValue_v2) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPowerValue, cPowerValueAllocMap := (*C.hgmlPowerValue_v2_t)(unsafe.Pointer(PowerValue)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetPowerManagementLimit_v2(chgmlDevice, cPowerValue)
+	runtime.KeepAlive(cPowerValueAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetPowerMizerMode_v1 function as declared in hgml/hgml.h:3304
+func hgmlDeviceSetPowerMizerMode_v1(hgmlDevice hgmlDevice, PowerMizerMode *DevicePowerMizerModes_v1) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPowerMizerMode, cPowerMizerModeAllocMap := (*C.hgmlDevicePowerMizerModes_v1_t)(unsafe.Pointer(PowerMizerMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetPowerMizerMode_v1(chgmlDevice, cPowerMizerMode)
+	runtime.KeepAlive(cPowerMizerModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetTemperatureThreshold function as declared in hgml/hgml.h:3305
+func hgmlDeviceSetTemperatureThreshold(hgmlDevice hgmlDevice, ThresholdType TemperatureThresholds, Temp *int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cThresholdType, cThresholdTypeAllocMap := (C.hgmlTemperatureThresholds_t)(ThresholdType), cgoAllocsUnknown
+	cTemp, cTempAllocMap := (*C.int)(unsafe.Pointer(Temp)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetTemperatureThreshold(chgmlDevice, cThresholdType, cTemp)
+	runtime.KeepAlive(cTempAllocMap)
+	runtime.KeepAlive(cThresholdTypeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetVgpuCapabilities function as declared in hgml/hgml.h:3306
+func hgmlDeviceSetVgpuCapabilities(hgmlDevice hgmlDevice, Capability DeviceVgpuCapability, State EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCapability, cCapabilityAllocMap := (C.hgmlDeviceVgpuCapability_t)(Capability), cgoAllocsUnknown
+	cState, cStateAllocMap := (C.hgmlEnableState_t)(State), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetVgpuCapabilities(chgmlDevice, cCapability, cState)
+	runtime.KeepAlive(cStateAllocMap)
+	runtime.KeepAlive(cCapabilityAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetVgpuHeterogeneousMode function as declared in hgml/hgml.h:3307
+func hgmlDeviceSetVgpuHeterogeneousMode(hgmlDevice hgmlDevice, PHeterogeneousMode *VgpuHeterogeneousMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPHeterogeneousMode, cPHeterogeneousModeAllocMap := (*C.hgmlVgpuHeterogeneousMode_t)(unsafe.Pointer(PHeterogeneousMode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetVgpuHeterogeneousMode(chgmlDevice, cPHeterogeneousMode)
+	runtime.KeepAlive(cPHeterogeneousModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetVgpuSchedulerState function as declared in hgml/hgml.h:3308
+func hgmlDeviceSetVgpuSchedulerState(hgmlDevice hgmlDevice, PSchedulerState *VgpuSchedulerSetState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPSchedulerState, cPSchedulerStateAllocMap := (*C.hgmlVgpuSchedulerSetState_t)(unsafe.Pointer(PSchedulerState)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetVgpuSchedulerState(chgmlDevice, cPSchedulerState)
+	runtime.KeepAlive(cPSchedulerStateAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetVirtualizationMode function as declared in hgml/hgml.h:3309
+func hgmlDeviceSetVirtualizationMode(hgmlDevice hgmlDevice, VirtualMode GpuVirtualizationMode) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cVirtualMode, cVirtualModeAllocMap := (C.hgmlGpuVirtualizationMode_t)(VirtualMode), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetVirtualizationMode(chgmlDevice, cVirtualMode)
+	runtime.KeepAlive(cVirtualModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceValidateInforom function as declared in hgml/hgml.h:3310
+func hgmlDeviceValidateInforom(hgmlDevice hgmlDevice) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceValidateInforom(chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceWorkloadPowerProfileClearRequestedProfiles function as declared in hgml/hgml.h:3311
+func hgmlDeviceWorkloadPowerProfileClearRequestedProfiles(hgmlDevice hgmlDevice, RequestedProfiles *WorkloadPowerProfileRequestedProfiles) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cRequestedProfiles, cRequestedProfilesAllocMap := (*C.hgmlWorkloadPowerProfileRequestedProfiles_t)(unsafe.Pointer(RequestedProfiles)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceWorkloadPowerProfileClearRequestedProfiles(chgmlDevice, cRequestedProfiles)
+	runtime.KeepAlive(cRequestedProfilesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceWorkloadPowerProfileGetCurrentProfiles function as declared in hgml/hgml.h:3312
+func hgmlDeviceWorkloadPowerProfileGetCurrentProfiles(hgmlDevice hgmlDevice, CurrentProfiles *WorkloadPowerProfileCurrentProfiles) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cCurrentProfiles, cCurrentProfilesAllocMap := (*C.hgmlWorkloadPowerProfileCurrentProfiles_t)(unsafe.Pointer(CurrentProfiles)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceWorkloadPowerProfileGetCurrentProfiles(chgmlDevice, cCurrentProfiles)
+	runtime.KeepAlive(cCurrentProfilesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceWorkloadPowerProfileGetProfilesInfo function as declared in hgml/hgml.h:3313
+func hgmlDeviceWorkloadPowerProfileGetProfilesInfo(hgmlDevice hgmlDevice, ProfilesInfo *WorkloadPowerProfileProfilesInfo) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cProfilesInfo, cProfilesInfoAllocMap := (*C.hgmlWorkloadPowerProfileProfilesInfo_t)(unsafe.Pointer(ProfilesInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceWorkloadPowerProfileGetProfilesInfo(chgmlDevice, cProfilesInfo)
+	runtime.KeepAlive(cProfilesInfoAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceWorkloadPowerProfileSetRequestedProfiles function as declared in hgml/hgml.h:3314
+func hgmlDeviceWorkloadPowerProfileSetRequestedProfiles(hgmlDevice hgmlDevice, RequestedProfiles *WorkloadPowerProfileRequestedProfiles) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cRequestedProfiles, cRequestedProfilesAllocMap := (*C.hgmlWorkloadPowerProfileRequestedProfiles_t)(unsafe.Pointer(RequestedProfiles)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceWorkloadPowerProfileSetRequestedProfiles(chgmlDevice, cRequestedProfiles)
+	runtime.KeepAlive(cRequestedProfilesAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlEventSetCreate function as declared in hgml/hgml.h:3315
+func hgmlEventSetCreate(Set *hgmlEventSet) Return {
+	cSet, cSetAllocMap := (*C.hgmlEventSet_t)(unsafe.Pointer(Set)), cgoAllocsUnknown
+	__ret := C.hgmlEventSetCreate(cSet)
+	runtime.KeepAlive(cSetAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlEventSetFree function as declared in hgml/hgml.h:3316
+func hgmlEventSetFree(Set hgmlEventSet) Return {
+	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
+	__ret := C.hgmlEventSetFree(cSet)
+	runtime.KeepAlive(cSetAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlEventSetWait function as declared in hgml/hgml.h:3317
+func hgmlEventSetWait(Set hgmlEventSet, Data *hgmlEventData, Timeoutms uint32) Return {
+	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
+	cData, cDataAllocMap := (*C.hgmlEventData_t)(unsafe.Pointer(Data)), cgoAllocsUnknown
+	cTimeoutms, cTimeoutmsAllocMap := (C.uint)(Timeoutms), cgoAllocsUnknown
+	__ret := C.hgmlEventSetWait(cSet, cData, cTimeoutms)
+	runtime.KeepAlive(cTimeoutmsAllocMap)
+	runtime.KeepAlive(cDataAllocMap)
+	runtime.KeepAlive(cSetAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlEventSetWait_v2 function as declared in hgml/hgml.h:3318
+func hgmlEventSetWait_v2(Set hgmlEventSet, Data *hgmlEventData, Timeoutms uint32) Return {
+	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
+	cData, cDataAllocMap := (*C.hgmlEventData_t)(unsafe.Pointer(Data)), cgoAllocsUnknown
+	cTimeoutms, cTimeoutmsAllocMap := (C.uint)(Timeoutms), cgoAllocsUnknown
+	__ret := C.hgmlEventSetWait_v2(cSet, cData, cTimeoutms)
+	runtime.KeepAlive(cTimeoutmsAllocMap)
+	runtime.KeepAlive(cDataAllocMap)
+	runtime.KeepAlive(cSetAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGetBlacklistDeviceCount function as declared in hgml/hgml.h:3319
+func hgmlGetBlacklistDeviceCount(DeviceCount *uint32) Return {
+	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
+	__ret := C.hgmlGetBlacklistDeviceCount(cDeviceCount)
+	runtime.KeepAlive(cDeviceCountAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGetBlacklistDeviceInfoByIndex function as declared in hgml/hgml.h:3320
+func hgmlGetBlacklistDeviceInfoByIndex(Index uint32, Info *ExcludedDeviceInfo) Return {
+	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlExcludedDeviceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlGetBlacklistDeviceInfoByIndex(cIndex, cInfo)
 	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(cProfileAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cIndexAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstancePossiblePlacements function as declared in hgml/hgml.h:9347
-func hgmlDeviceGetGpuInstancePossiblePlacements(hgmlDevice hgmlDevice, ProfileId uint32, Placements *GpuInstancePlacement, Count *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cPlacements, cPlacementsAllocMap := (*C.hgmlGpuInstancePlacement_t)(unsafe.Pointer(Placements)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstancePossiblePlacements(chgmlDevice, cProfileId, cPlacements, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cPlacementsAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlGetExcludedDeviceCount function as declared in hgml/hgml.h:3321
+func hgmlGetExcludedDeviceCount(DeviceCount *uint32) Return {
+	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
+	__ret := C.hgmlGetExcludedDeviceCount(cDeviceCount)
+	runtime.KeepAlive(cDeviceCountAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstanceProfileInfoV function as declared in hgml/hgml.h:9380
-func hgmlDeviceGetGpuInstanceProfileInfoV(hgmlDevice hgmlDevice, Profile uint32, Info *GpuInstanceProfileInfo_v2) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceProfileInfo_v2_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstanceProfileInfoV(chgmlDevice, cProfile, cInfo)
+// hgmlGetExcludedDeviceInfoByIndex function as declared in hgml/hgml.h:3322
+func hgmlGetExcludedDeviceInfoByIndex(Index uint32, Info *ExcludedDeviceInfo) Return {
+	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlExcludedDeviceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlGetExcludedDeviceInfoByIndex(cIndex, cInfo)
 	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(cProfileAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cIndexAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstancePossiblePlacements_v2 function as declared in hgml/hgml.h:9409
-func hgmlDeviceGetGpuInstancePossiblePlacements_v2(hgmlDevice hgmlDevice, ProfileId uint32, Placements *GpuInstancePlacement, Count *uint32) Return {
+// hgmlGetVgpuCompatibility function as declared in hgml/hgml.h:3323
+func hgmlGetVgpuCompatibility(hgmlVgpuMetadata *hgmlVgpuMetadata, PgpuMetadata *hgmlVgpuPgpuMetadata, CompatibilityInfo *VgpuPgpuCompatibility) Return {
+	chgmlVgpuMetadata, chgmlVgpuMetadataAllocMap := (*C.hgmlVgpuMetadata_t)(unsafe.Pointer(hgmlVgpuMetadata)), cgoAllocsUnknown
+	cPgpuMetadata, cPgpuMetadataAllocMap := (*C.hgmlVgpuPgpuMetadata_t)(unsafe.Pointer(PgpuMetadata)), cgoAllocsUnknown
+	cCompatibilityInfo, cCompatibilityInfoAllocMap := (*C.hgmlVgpuPgpuCompatibility_t)(unsafe.Pointer(CompatibilityInfo)), cgoAllocsUnknown
+	__ret := C.hgmlGetVgpuCompatibility(chgmlVgpuMetadata, cPgpuMetadata, cCompatibilityInfo)
+	runtime.KeepAlive(cCompatibilityInfoAllocMap)
+	runtime.KeepAlive(cPgpuMetadataAllocMap)
+	runtime.KeepAlive(chgmlVgpuMetadataAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGetVgpuDriverCapabilities function as declared in hgml/hgml.h:3324
+func hgmlGetVgpuDriverCapabilities(Capability VgpuDriverCapability, CapResult *uint32) Return {
+	cCapability, cCapabilityAllocMap := (C.hgmlVgpuDriverCapability_t)(Capability), cgoAllocsUnknown
+	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
+	__ret := C.hgmlGetVgpuDriverCapabilities(cCapability, cCapResult)
+	runtime.KeepAlive(cCapResultAllocMap)
+	runtime.KeepAlive(cCapabilityAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGetVgpuVersion function as declared in hgml/hgml.h:3325
+func hgmlGetVgpuVersion(Supported *VgpuVersion, Current *VgpuVersion) Return {
+	cSupported, cSupportedAllocMap := (*C.hgmlVgpuVersion_t)(unsafe.Pointer(Supported)), cgoAllocsUnknown
+	cCurrent, cCurrentAllocMap := (*C.hgmlVgpuVersion_t)(unsafe.Pointer(Current)), cgoAllocsUnknown
+	__ret := C.hgmlGetVgpuVersion(cSupported, cCurrent)
+	runtime.KeepAlive(cCurrentAllocMap)
+	runtime.KeepAlive(cSupportedAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpmMetricsGet function as declared in hgml/hgml.h:3326
+func hgmlGpmMetricsGet(MetricsGet *hgmlGpmMetricsGetType) Return {
+	cMetricsGet, cMetricsGetAllocMap := (*C.hgmlGpmMetricsGet_t)(unsafe.Pointer(MetricsGet)), cgoAllocsUnknown
+	__ret := C.hgmlGpmMetricsGet(cMetricsGet)
+	runtime.KeepAlive(cMetricsGetAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpmMigSampleGet function as declared in hgml/hgml.h:3327
+func hgmlGpmMigSampleGet(hgmlDevice hgmlDevice, GpuInstanceId uint32, hgmlGpmSample hgmlGpmSample) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cPlacements, cPlacementsAllocMap := (*C.hgmlGpuInstancePlacement_t)(unsafe.Pointer(Placements)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstancePossiblePlacements_v2(chgmlDevice, cProfileId, cPlacements, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cPlacementsAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
+	cGpuInstanceId, cGpuInstanceIdAllocMap := (C.uint)(GpuInstanceId), cgoAllocsUnknown
+	chgmlGpmSample, chgmlGpmSampleAllocMap := *(*C.hgmlGpmSample_t)(unsafe.Pointer(&hgmlGpmSample)), cgoAllocsUnknown
+	__ret := C.hgmlGpmMigSampleGet(chgmlDevice, cGpuInstanceId, chgmlGpmSample)
+	runtime.KeepAlive(chgmlGpmSampleAllocMap)
+	runtime.KeepAlive(cGpuInstanceIdAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstanceRemainingCapacity function as declared in hgml/hgml.h:9431
-func hgmlDeviceGetGpuInstanceRemainingCapacity(hgmlDevice hgmlDevice, ProfileId uint32, Count *uint32) Return {
+// hgmlGpmQueryDeviceSupport function as declared in hgml/hgml.h:3328
+func hgmlGpmQueryDeviceSupport(hgmlDevice hgmlDevice, GpmSupport *GpmSupport) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstanceRemainingCapacity(chgmlDevice, cProfileId, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
+	cGpmSupport, cGpmSupportAllocMap := (*C.hgmlGpmSupport_t)(unsafe.Pointer(GpmSupport)), cgoAllocsUnknown
+	__ret := C.hgmlGpmQueryDeviceSupport(chgmlDevice, cGpmSupport)
+	runtime.KeepAlive(cGpmSupportAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceCreateGpuInstance function as declared in hgml/hgml.h:9456
-func hgmlDeviceCreateGpuInstance(hgmlDevice hgmlDevice, ProfileId uint32, hgmlGpuInstance *hgmlGpuInstance) Return {
+// hgmlGpmQueryIfStreamingEnabled function as declared in hgml/hgml.h:3329
+func hgmlGpmQueryIfStreamingEnabled(hgmlDevice hgmlDevice, State *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(hgmlGpuInstance)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceCreateGpuInstance(chgmlDevice, cProfileId, chgmlGpuInstance)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
+	cState, cStateAllocMap := (*C.uint)(unsafe.Pointer(State)), cgoAllocsUnknown
+	__ret := C.hgmlGpmQueryIfStreamingEnabled(chgmlDevice, cState)
+	runtime.KeepAlive(cStateAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceCreateGpuInstanceWithPlacement function as declared in hgml/hgml.h:9483
-func hgmlDeviceCreateGpuInstanceWithPlacement(hgmlDevice hgmlDevice, ProfileId uint32, Placement *GpuInstancePlacement, hgmlGpuInstance *hgmlGpuInstance) Return {
+// hgmlGpmSampleAlloc function as declared in hgml/hgml.h:3330
+func hgmlGpmSampleAlloc(hgmlGpmSample *hgmlGpmSample) Return {
+	chgmlGpmSample, chgmlGpmSampleAllocMap := (*C.hgmlGpmSample_t)(unsafe.Pointer(hgmlGpmSample)), cgoAllocsUnknown
+	__ret := C.hgmlGpmSampleAlloc(chgmlGpmSample)
+	runtime.KeepAlive(chgmlGpmSampleAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpmSampleFree function as declared in hgml/hgml.h:3331
+func hgmlGpmSampleFree(hgmlGpmSample hgmlGpmSample) Return {
+	chgmlGpmSample, chgmlGpmSampleAllocMap := *(*C.hgmlGpmSample_t)(unsafe.Pointer(&hgmlGpmSample)), cgoAllocsUnknown
+	__ret := C.hgmlGpmSampleFree(chgmlGpmSample)
+	runtime.KeepAlive(chgmlGpmSampleAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpmSampleGet function as declared in hgml/hgml.h:3332
+func hgmlGpmSampleGet(hgmlDevice hgmlDevice, hgmlGpmSample hgmlGpmSample) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cPlacement, cPlacementAllocMap := (*C.hgmlGpuInstancePlacement_t)(unsafe.Pointer(Placement)), cgoAllocsUnknown
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(hgmlGpuInstance)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceCreateGpuInstanceWithPlacement(chgmlDevice, cProfileId, cPlacement, chgmlGpuInstance)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	runtime.KeepAlive(cPlacementAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
+	chgmlGpmSample, chgmlGpmSampleAllocMap := *(*C.hgmlGpmSample_t)(unsafe.Pointer(&hgmlGpmSample)), cgoAllocsUnknown
+	__ret := C.hgmlGpmSampleGet(chgmlDevice, chgmlGpmSample)
+	runtime.KeepAlive(chgmlGpmSampleAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlGpuInstanceDestroy function as declared in hgml/hgml.h:9505
-func hgmlGpuInstanceDestroy(hgmlGpuInstance hgmlGpuInstance) Return {
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceDestroy(chgmlGpuInstance)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetGpuInstances function as declared in hgml/hgml.h:9528
-func hgmlDeviceGetGpuInstances(hgmlDevice hgmlDevice, ProfileId uint32, GpuInstances *hgmlGpuInstance, Count *uint32) Return {
+// hgmlGpmSetStreamingEnabled function as declared in hgml/hgml.h:3333
+func hgmlGpmSetStreamingEnabled(hgmlDevice hgmlDevice, State uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cGpuInstances, cGpuInstancesAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(GpuInstances)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstances(chgmlDevice, cProfileId, cGpuInstances, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cGpuInstancesAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
+	cState, cStateAllocMap := (C.uint)(State), cgoAllocsUnknown
+	__ret := C.hgmlGpmSetStreamingEnabled(chgmlDevice, cState)
+	runtime.KeepAlive(cStateAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstanceById function as declared in hgml/hgml.h:9550
-func hgmlDeviceGetGpuInstanceById(hgmlDevice hgmlDevice, Id uint32, hgmlGpuInstance *hgmlGpuInstance) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cId, cIdAllocMap := (C.uint)(Id), cgoAllocsUnknown
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := (*C.hgmlGpuInstance_t)(unsafe.Pointer(hgmlGpuInstance)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstanceById(chgmlDevice, cId, chgmlGpuInstance)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	runtime.KeepAlive(cIdAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpuInstanceGetInfo function as declared in hgml/hgml.h:9567
-func hgmlGpuInstanceGetInfo(hgmlGpuInstance hgmlGpuInstance, Info *hgmlGpuInstanceInfo) Return {
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceGetInfo(chgmlGpuInstance, cInfo)
-	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpuInstanceGetComputeInstanceProfileInfo function as declared in hgml/hgml.h:9589
-func hgmlGpuInstanceGetComputeInstanceProfileInfo(hgmlGpuInstance hgmlGpuInstance, Profile uint32, EngProfile uint32, Info *ComputeInstanceProfileInfo) Return {
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
-	cEngProfile, cEngProfileAllocMap := (C.uint)(EngProfile), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceProfileInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceGetComputeInstanceProfileInfo(chgmlGpuInstance, cProfile, cEngProfile, cInfo)
-	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(cEngProfileAllocMap)
-	runtime.KeepAlive(cProfileAllocMap)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpuInstanceGetComputeInstanceProfileInfoV function as declared in hgml/hgml.h:9623
-func hgmlGpuInstanceGetComputeInstanceProfileInfoV(hgmlGpuInstance hgmlGpuInstance, Profile uint32, EngProfile uint32, Info *ComputeInstanceProfileInfo_v2) Return {
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
-	cEngProfile, cEngProfileAllocMap := (C.uint)(EngProfile), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceProfileInfo_v2_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceGetComputeInstanceProfileInfoV(chgmlGpuInstance, cProfile, cEngProfile, cInfo)
-	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(cEngProfileAllocMap)
-	runtime.KeepAlive(cProfileAllocMap)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpuInstanceGetComputeInstanceRemainingCapacity function as declared in hgml/hgml.h:9646
-func hgmlGpuInstanceGetComputeInstanceRemainingCapacity(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, Count *uint32) Return {
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceGetComputeInstanceRemainingCapacity(chgmlGpuInstance, cProfileId, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpuInstanceGetComputeInstancePossiblePlacements function as declared in hgml/hgml.h:9675
-func hgmlGpuInstanceGetComputeInstancePossiblePlacements(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, Placements *ComputeInstancePlacement, Count *uint32) Return {
-	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
-	cPlacements, cPlacementsAllocMap := (*C.hgmlComputeInstancePlacement_t)(unsafe.Pointer(Placements)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceGetComputeInstancePossiblePlacements(chgmlGpuInstance, cProfileId, cPlacements, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(cPlacementsAllocMap)
-	runtime.KeepAlive(cProfileIdAllocMap)
-	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpuInstanceCreateComputeInstance function as declared in hgml/hgml.h:9705
+// hgmlGpuInstanceCreateComputeInstance function as declared in hgml/hgml.h:3334
 func hgmlGpuInstanceCreateComputeInstance(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, hgmlComputeInstance *hgmlComputeInstance) Return {
 	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
 	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
@@ -3507,7 +3384,7 @@ func hgmlGpuInstanceCreateComputeInstance(hgmlGpuInstance hgmlGpuInstance, Profi
 	return __v
 }
 
-// hgmlGpuInstanceCreateComputeInstanceWithPlacement function as declared in hgml/hgml.h:9734
+// hgmlGpuInstanceCreateComputeInstanceWithPlacement function as declared in hgml/hgml.h:3335
 func hgmlGpuInstanceCreateComputeInstanceWithPlacement(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, Placement *ComputeInstancePlacement, hgmlComputeInstance *hgmlComputeInstance) Return {
 	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
 	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
@@ -3522,16 +3399,98 @@ func hgmlGpuInstanceCreateComputeInstanceWithPlacement(hgmlGpuInstance hgmlGpuIn
 	return __v
 }
 
-// hgmlComputeInstanceDestroy function as declared in hgml/hgml.h:9755
-func hgmlComputeInstanceDestroy(hgmlComputeInstance hgmlComputeInstance) Return {
-	chgmlComputeInstance, chgmlComputeInstanceAllocMap := *(*C.hgmlComputeInstance_t)(unsafe.Pointer(&hgmlComputeInstance)), cgoAllocsUnknown
-	__ret := C.hgmlComputeInstanceDestroy(chgmlComputeInstance)
-	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
+// hgmlGpuInstanceDestroy function as declared in hgml/hgml.h:3336
+func hgmlGpuInstanceDestroy(hgmlGpuInstance hgmlGpuInstance) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceDestroy(chgmlGpuInstance)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlGpuInstanceGetComputeInstances function as declared in hgml/hgml.h:9780
+// hgmlGpuInstanceGetActiveVgpus function as declared in hgml/hgml.h:3337
+func hgmlGpuInstanceGetActiveVgpus(hgmlGpuInstance hgmlGpuInstance, PVgpuInstanceInfo *ActiveVgpuInstanceInfo) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPVgpuInstanceInfo, cPVgpuInstanceInfoAllocMap := (*C.hgmlActiveVgpuInstanceInfo_t)(unsafe.Pointer(PVgpuInstanceInfo)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetActiveVgpus(chgmlGpuInstance, cPVgpuInstanceInfo)
+	runtime.KeepAlive(cPVgpuInstanceInfoAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpuInstanceGetComputeInstanceById function as declared in hgml/hgml.h:3338
+func hgmlGpuInstanceGetComputeInstanceById(hgmlGpuInstance hgmlGpuInstance, Id uint32, hgmlComputeInstance *hgmlComputeInstance) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cId, cIdAllocMap := (C.uint)(Id), cgoAllocsUnknown
+	chgmlComputeInstance, chgmlComputeInstanceAllocMap := (*C.hgmlComputeInstance_t)(unsafe.Pointer(hgmlComputeInstance)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetComputeInstanceById(chgmlGpuInstance, cId, chgmlComputeInstance)
+	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
+	runtime.KeepAlive(cIdAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpuInstanceGetComputeInstancePossiblePlacements function as declared in hgml/hgml.h:3339
+func hgmlGpuInstanceGetComputeInstancePossiblePlacements(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, Placements *ComputeInstancePlacement, Count *uint32) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cPlacements, cPlacementsAllocMap := (*C.hgmlComputeInstancePlacement_t)(unsafe.Pointer(Placements)), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetComputeInstancePossiblePlacements(chgmlGpuInstance, cProfileId, cPlacements, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cPlacementsAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpuInstanceGetComputeInstanceProfileInfo function as declared in hgml/hgml.h:3340
+func hgmlGpuInstanceGetComputeInstanceProfileInfo(hgmlGpuInstance hgmlGpuInstance, Profile uint32, EngProfile uint32, Info *ComputeInstanceProfileInfo) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
+	cEngProfile, cEngProfileAllocMap := (C.uint)(EngProfile), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceProfileInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetComputeInstanceProfileInfo(chgmlGpuInstance, cProfile, cEngProfile, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(cEngProfileAllocMap)
+	runtime.KeepAlive(cProfileAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpuInstanceGetComputeInstanceProfileInfoV function as declared in hgml/hgml.h:3341
+func hgmlGpuInstanceGetComputeInstanceProfileInfoV(hgmlGpuInstance hgmlGpuInstance, Profile uint32, EngProfile uint32, Info *ComputeInstanceProfileInfo_v2) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cProfile, cProfileAllocMap := (C.uint)(Profile), cgoAllocsUnknown
+	cEngProfile, cEngProfileAllocMap := (C.uint)(EngProfile), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceProfileInfo_v2_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetComputeInstanceProfileInfoV(chgmlGpuInstance, cProfile, cEngProfile, cInfo)
+	runtime.KeepAlive(cInfoAllocMap)
+	runtime.KeepAlive(cEngProfileAllocMap)
+	runtime.KeepAlive(cProfileAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpuInstanceGetComputeInstanceRemainingCapacity function as declared in hgml/hgml.h:3342
+func hgmlGpuInstanceGetComputeInstanceRemainingCapacity(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, Count *uint32) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetComputeInstanceRemainingCapacity(chgmlGpuInstance, cProfileId, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cProfileIdAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlGpuInstanceGetComputeInstances function as declared in hgml/hgml.h:3343
 func hgmlGpuInstanceGetComputeInstances(hgmlGpuInstance hgmlGpuInstance, ProfileId uint32, ComputeInstances *hgmlComputeInstance, Count *uint32) Return {
 	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
 	cProfileId, cProfileIdAllocMap := (C.uint)(ProfileId), cgoAllocsUnknown
@@ -3546,379 +3505,606 @@ func hgmlGpuInstanceGetComputeInstances(hgmlGpuInstance hgmlGpuInstance, Profile
 	return __v
 }
 
-// hgmlGpuInstanceGetComputeInstanceById function as declared in hgml/hgml.h:9802
-func hgmlGpuInstanceGetComputeInstanceById(hgmlGpuInstance hgmlGpuInstance, Id uint32, hgmlComputeInstance *hgmlComputeInstance) Return {
+// hgmlGpuInstanceGetCreatableVgpus function as declared in hgml/hgml.h:3344
+func hgmlGpuInstanceGetCreatableVgpus(hgmlGpuInstance hgmlGpuInstance, PVgpus *VgpuTypeIdInfo) Return {
 	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
-	cId, cIdAllocMap := (C.uint)(Id), cgoAllocsUnknown
-	chgmlComputeInstance, chgmlComputeInstanceAllocMap := (*C.hgmlComputeInstance_t)(unsafe.Pointer(hgmlComputeInstance)), cgoAllocsUnknown
-	__ret := C.hgmlGpuInstanceGetComputeInstanceById(chgmlGpuInstance, cId, chgmlComputeInstance)
-	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
-	runtime.KeepAlive(cIdAllocMap)
+	cPVgpus, cPVgpusAllocMap := (*C.hgmlVgpuTypeIdInfo_t)(unsafe.Pointer(PVgpus)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetCreatableVgpus(chgmlGpuInstance, cPVgpus)
+	runtime.KeepAlive(cPVgpusAllocMap)
 	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlComputeInstanceGetInfo_v2 function as declared in hgml/hgml.h:9820
-func hgmlComputeInstanceGetInfo_v2(hgmlComputeInstance hgmlComputeInstance, Info *hgmlComputeInstanceInfo) Return {
-	chgmlComputeInstance, chgmlComputeInstanceAllocMap := *(*C.hgmlComputeInstance_t)(unsafe.Pointer(&hgmlComputeInstance)), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlComputeInstanceGetInfo_v2(chgmlComputeInstance, cInfo)
+// hgmlGpuInstanceGetInfo function as declared in hgml/hgml.h:3345
+func hgmlGpuInstanceGetInfo(hgmlGpuInstance hgmlGpuInstance, Info *hgmlGpuInstanceInfo) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlGpuInstanceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetInfo(chgmlGpuInstance, cInfo)
 	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceIsMigDeviceHandle function as declared in hgml/hgml.h:9842
-func hgmlDeviceIsMigDeviceHandle(hgmlDevice hgmlDevice, IsMigDevice *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIsMigDevice, cIsMigDeviceAllocMap := (*C.uint)(unsafe.Pointer(IsMigDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceIsMigDeviceHandle(chgmlDevice, cIsMigDevice)
-	runtime.KeepAlive(cIsMigDeviceAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlGpuInstanceGetVgpuHeterogeneousMode function as declared in hgml/hgml.h:3346
+func hgmlGpuInstanceGetVgpuHeterogeneousMode(hgmlGpuInstance hgmlGpuInstance, PHeterogeneousMode *VgpuHeterogeneousMode) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPHeterogeneousMode, cPHeterogeneousModeAllocMap := (*C.hgmlVgpuHeterogeneousMode_t)(unsafe.Pointer(PHeterogeneousMode)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetVgpuHeterogeneousMode(chgmlGpuInstance, cPHeterogeneousMode)
+	runtime.KeepAlive(cPHeterogeneousModeAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGpuInstanceId function as declared in hgml/hgml.h:9862
-func hgmlDeviceGetGpuInstanceId(hgmlDevice hgmlDevice, Id *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cId, cIdAllocMap := (*C.uint)(unsafe.Pointer(Id)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGpuInstanceId(chgmlDevice, cId)
-	runtime.KeepAlive(cIdAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlGpuInstanceGetVgpuSchedulerLog function as declared in hgml/hgml.h:3347
+func hgmlGpuInstanceGetVgpuSchedulerLog(hgmlGpuInstance hgmlGpuInstance, PSchedulerLogInfo *VgpuSchedulerLogInfo) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPSchedulerLogInfo, cPSchedulerLogInfoAllocMap := (*C.hgmlVgpuSchedulerLogInfo_t)(unsafe.Pointer(PSchedulerLogInfo)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetVgpuSchedulerLog(chgmlGpuInstance, cPSchedulerLogInfo)
+	runtime.KeepAlive(cPSchedulerLogInfoAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetComputeInstanceId function as declared in hgml/hgml.h:9883
-func hgmlDeviceGetComputeInstanceId(hgmlDevice hgmlDevice, Id *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cId, cIdAllocMap := (*C.uint)(unsafe.Pointer(Id)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetComputeInstanceId(chgmlDevice, cId)
-	runtime.KeepAlive(cIdAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlGpuInstanceGetVgpuSchedulerState function as declared in hgml/hgml.h:3348
+func hgmlGpuInstanceGetVgpuSchedulerState(hgmlGpuInstance hgmlGpuInstance, PSchedulerStateInfo *VgpuSchedulerStateInfo) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPSchedulerStateInfo, cPSchedulerStateInfoAllocMap := (*C.hgmlVgpuSchedulerStateInfo_t)(unsafe.Pointer(PSchedulerStateInfo)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetVgpuSchedulerState(chgmlGpuInstance, cPSchedulerStateInfo)
+	runtime.KeepAlive(cPSchedulerStateInfoAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMaxMigDeviceCount function as declared in hgml/hgml.h:9902
-func hgmlDeviceGetMaxMigDeviceCount(hgmlDevice hgmlDevice, Count *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMaxMigDeviceCount(chgmlDevice, cCount)
-	runtime.KeepAlive(cCountAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlGpuInstanceGetVgpuTypeCreatablePlacements function as declared in hgml/hgml.h:3349
+func hgmlGpuInstanceGetVgpuTypeCreatablePlacements(hgmlGpuInstance hgmlGpuInstance, PCreatablePlacementInfo *VgpuCreatablePlacementInfo) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPCreatablePlacementInfo, cPCreatablePlacementInfoAllocMap := (*C.hgmlVgpuCreatablePlacementInfo_t)(unsafe.Pointer(PCreatablePlacementInfo)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceGetVgpuTypeCreatablePlacements(chgmlGpuInstance, cPCreatablePlacementInfo)
+	runtime.KeepAlive(cPCreatablePlacementInfoAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMigDeviceHandleByIndex function as declared in hgml/hgml.h:9928
-func hgmlDeviceGetMigDeviceHandleByIndex(hgmlDevice hgmlDevice, Index uint32, MigDevice *hgmlDevice) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
-	cMigDevice, cMigDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(MigDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMigDeviceHandleByIndex(chgmlDevice, cIndex, cMigDevice)
-	runtime.KeepAlive(cMigDeviceAllocMap)
-	runtime.KeepAlive(cIndexAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlGpuInstanceSetVgpuHeterogeneousMode function as declared in hgml/hgml.h:3350
+func hgmlGpuInstanceSetVgpuHeterogeneousMode(hgmlGpuInstance hgmlGpuInstance, PHeterogeneousMode *VgpuHeterogeneousMode) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPHeterogeneousMode, cPHeterogeneousModeAllocMap := (*C.hgmlVgpuHeterogeneousMode_t)(unsafe.Pointer(PHeterogeneousMode)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceSetVgpuHeterogeneousMode(chgmlGpuInstance, cPHeterogeneousMode)
+	runtime.KeepAlive(cPHeterogeneousModeAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetDeviceHandleFromMigDeviceHandle function as declared in hgml/hgml.h:9947
-func hgmlDeviceGetDeviceHandleFromMigDeviceHandle(MigDevice hgmlDevice, hgmlDevice *hgmlDevice) Return {
-	cMigDevice, cMigDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&MigDevice)), cgoAllocsUnknown
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetDeviceHandleFromMigDeviceHandle(cMigDevice, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	runtime.KeepAlive(cMigDeviceAllocMap)
+// hgmlGpuInstanceSetVgpuSchedulerState function as declared in hgml/hgml.h:3351
+func hgmlGpuInstanceSetVgpuSchedulerState(hgmlGpuInstance hgmlGpuInstance, PScheduler *VgpuSchedulerState) Return {
+	chgmlGpuInstance, chgmlGpuInstanceAllocMap := *(*C.hgmlGpuInstance_t)(unsafe.Pointer(&hgmlGpuInstance)), cgoAllocsUnknown
+	cPScheduler, cPSchedulerAllocMap := (*C.hgmlVgpuSchedulerState_t)(unsafe.Pointer(PScheduler)), cgoAllocsUnknown
+	__ret := C.hgmlGpuInstanceSetVgpuSchedulerState(chgmlGpuInstance, cPScheduler)
+	runtime.KeepAlive(cPSchedulerAllocMap)
+	runtime.KeepAlive(chgmlGpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlGpmMetricsGet function as declared in hgml/hgml.h:10123
-func hgmlGpmMetricsGet(MetricsGet *hgmlGpmMetricsGetType) Return {
-	cMetricsGet, cMetricsGetAllocMap := (*C.hgmlGpmMetricsGet_t)(unsafe.Pointer(MetricsGet)), cgoAllocsUnknown
-	__ret := C.hgmlGpmMetricsGet(cMetricsGet)
-	runtime.KeepAlive(cMetricsGetAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmSampleFree function as declared in hgml/hgml.h:10137
-func hgmlGpmSampleFree(hgmlGpmSample hgmlGpmSample) Return {
-	chgmlGpmSample, chgmlGpmSampleAllocMap := *(*C.hgmlGpmSample_t)(unsafe.Pointer(&hgmlGpmSample)), cgoAllocsUnknown
-	__ret := C.hgmlGpmSampleFree(chgmlGpmSample)
-	runtime.KeepAlive(chgmlGpmSampleAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmSampleAlloc function as declared in hgml/hgml.h:10153
-func hgmlGpmSampleAlloc(hgmlGpmSample *hgmlGpmSample) Return {
-	chgmlGpmSample, chgmlGpmSampleAllocMap := (*C.hgmlGpmSample_t)(unsafe.Pointer(hgmlGpmSample)), cgoAllocsUnknown
-	__ret := C.hgmlGpmSampleAlloc(chgmlGpmSample)
-	runtime.KeepAlive(chgmlGpmSampleAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmSampleGet function as declared in hgml/hgml.h:10169
-func hgmlGpmSampleGet(hgmlDevice hgmlDevice, hgmlGpmSample hgmlGpmSample) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	chgmlGpmSample, chgmlGpmSampleAllocMap := *(*C.hgmlGpmSample_t)(unsafe.Pointer(&hgmlGpmSample)), cgoAllocsUnknown
-	__ret := C.hgmlGpmSampleGet(chgmlDevice, chgmlGpmSample)
-	runtime.KeepAlive(chgmlGpmSampleAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmMigSampleGet function as declared in hgml/hgml.h:10187
-func hgmlGpmMigSampleGet(hgmlDevice hgmlDevice, GpuInstanceId uint32, hgmlGpmSample hgmlGpmSample) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cGpuInstanceId, cGpuInstanceIdAllocMap := (C.uint)(GpuInstanceId), cgoAllocsUnknown
-	chgmlGpmSample, chgmlGpmSampleAllocMap := *(*C.hgmlGpmSample_t)(unsafe.Pointer(&hgmlGpmSample)), cgoAllocsUnknown
-	__ret := C.hgmlGpmMigSampleGet(chgmlDevice, cGpuInstanceId, chgmlGpmSample)
-	runtime.KeepAlive(chgmlGpmSampleAllocMap)
-	runtime.KeepAlive(cGpuInstanceIdAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmQueryDeviceSupport function as declared in hgml/hgml.h:10200
-func hgmlGpmQueryDeviceSupport(hgmlDevice hgmlDevice, GpmSupport *GpmSupport) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cGpmSupport, cGpmSupportAllocMap := (*C.hgmlGpmSupport_t)(unsafe.Pointer(GpmSupport)), cgoAllocsUnknown
-	__ret := C.hgmlGpmQueryDeviceSupport(chgmlDevice, cGpmSupport)
-	runtime.KeepAlive(cGpmSupportAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmQueryIfStreamingEnabled function as declared in hgml/hgml.h:10218
-func hgmlGpmQueryIfStreamingEnabled(hgmlDevice hgmlDevice, State *uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cState, cStateAllocMap := (*C.uint)(unsafe.Pointer(State)), cgoAllocsUnknown
-	__ret := C.hgmlGpmQueryIfStreamingEnabled(chgmlDevice, cState)
-	runtime.KeepAlive(cStateAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlGpmSetStreamingEnabled function as declared in hgml/hgml.h:10235
-func hgmlGpmSetStreamingEnabled(hgmlDevice hgmlDevice, State uint32) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cState, cStateAllocMap := (C.uint)(State), cgoAllocsUnknown
-	__ret := C.hgmlGpmSetStreamingEnabled(chgmlDevice, cState)
-	runtime.KeepAlive(cStateAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetIcnLinkDeviceLowPowerThreshold function as declared in hgml/hgml.h:10267
-func hgmlDeviceSetIcnLinkDeviceLowPowerThreshold(hgmlDevice hgmlDevice, Info *IcnLinkPowerThres) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlIcnLinkPowerThres_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetIcnLinkDeviceLowPowerThreshold(chgmlDevice, cInfo)
-	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemSetIcnLinkBwMode function as declared in hgml/hgml.h:10280
-func hgmlSystemSetIcnLinkBwMode(NvlinkBwMode uint32) Return {
-	cNvlinkBwMode, cNvlinkBwModeAllocMap := (C.uint)(NvlinkBwMode), cgoAllocsUnknown
-	__ret := C.hgmlSystemSetIcnLinkBwMode(cNvlinkBwMode)
-	runtime.KeepAlive(cNvlinkBwModeAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlSystemGetIcnLinkBwMode function as declared in hgml/hgml.h:10292
-func hgmlSystemGetIcnLinkBwMode(NvlinkBwMode *uint32) Return {
-	cNvlinkBwMode, cNvlinkBwModeAllocMap := (*C.uint)(unsafe.Pointer(NvlinkBwMode)), cgoAllocsUnknown
-	__ret := C.hgmlSystemGetIcnLinkBwMode(cNvlinkBwMode)
-	runtime.KeepAlive(cNvlinkBwModeAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceSetPowerManagementLimit_v2 function as declared in hgml/hgml.h:10326
-func hgmlDeviceSetPowerManagementLimit_v2(hgmlDevice hgmlDevice, PowerValue *PowerValue_v2) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPowerValue, cPowerValueAllocMap := (*C.hgmlPowerValue_v2_t)(unsafe.Pointer(PowerValue)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceSetPowerManagementLimit_v2(chgmlDevice, cPowerValue)
-	runtime.KeepAlive(cPowerValueAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlInit function as declared in hgml/hgml.h:10332
+// hgmlInit function as declared in hgml/hgml.h:3352
 func hgmlInit() Return {
 	__ret := C.hgmlInit()
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetCount function as declared in hgml/hgml.h:10333
-func hgmlDeviceGetCount(DeviceCount *uint32) Return {
-	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetCount(cDeviceCount)
-	runtime.KeepAlive(cDeviceCountAllocMap)
+// hgmlInitWithFlags function as declared in hgml/hgml.h:3353
+func hgmlInitWithFlags(Flags uint32) Return {
+	cFlags, cFlagsAllocMap := (C.uint)(Flags), cgoAllocsUnknown
+	__ret := C.hgmlInitWithFlags(cFlags)
+	runtime.KeepAlive(cFlagsAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetHandleByIndex function as declared in hgml/hgml.h:10334
-func hgmlDeviceGetHandleByIndex(Index uint32, hgmlDevice *hgmlDevice) Return {
+// hgmlInit_v2 function as declared in hgml/hgml.h:3354
+func hgmlInit_v2() Return {
+	__ret := C.hgmlInit_v2()
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSetVgpuVersion function as declared in hgml/hgml.h:3355
+func hgmlSetVgpuVersion(VgpuVersion *VgpuVersion) Return {
+	cVgpuVersion, cVgpuVersionAllocMap := (*C.hgmlVgpuVersion_t)(unsafe.Pointer(VgpuVersion)), cgoAllocsUnknown
+	__ret := C.hgmlSetVgpuVersion(cVgpuVersion)
+	runtime.KeepAlive(cVgpuVersionAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlShutdown function as declared in hgml/hgml.h:3356
+func hgmlShutdown() Return {
+	__ret := C.hgmlShutdown()
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemEventSetCreate function as declared in hgml/hgml.h:3357
+func hgmlSystemEventSetCreate(Request *SystemEventSetCreateRequest) Return {
+	cRequest, cRequestAllocMap := (*C.hgmlSystemEventSetCreateRequest_t)(unsafe.Pointer(Request)), cgoAllocsUnknown
+	__ret := C.hgmlSystemEventSetCreate(cRequest)
+	runtime.KeepAlive(cRequestAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemEventSetFree function as declared in hgml/hgml.h:3358
+func hgmlSystemEventSetFree(Request *SystemEventSetFreeRequest) Return {
+	cRequest, cRequestAllocMap := (*C.hgmlSystemEventSetFreeRequest_t)(unsafe.Pointer(Request)), cgoAllocsUnknown
+	__ret := C.hgmlSystemEventSetFree(cRequest)
+	runtime.KeepAlive(cRequestAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemEventSetWait function as declared in hgml/hgml.h:3359
+func hgmlSystemEventSetWait(Request *SystemEventSetWaitRequest) Return {
+	cRequest, cRequestAllocMap := (*C.hgmlSystemEventSetWaitRequest_t)(unsafe.Pointer(Request)), cgoAllocsUnknown
+	__ret := C.hgmlSystemEventSetWait(cRequest)
+	runtime.KeepAlive(cRequestAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetConfComputeCapabilities function as declared in hgml/hgml.h:3360
+func hgmlSystemGetConfComputeCapabilities(Capabilities *ConfComputeSystemCaps) Return {
+	cCapabilities, cCapabilitiesAllocMap := (*C.hgmlConfComputeSystemCaps_t)(unsafe.Pointer(Capabilities)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetConfComputeCapabilities(cCapabilities)
+	runtime.KeepAlive(cCapabilitiesAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetConfComputeGpusReadyState function as declared in hgml/hgml.h:3361
+func hgmlSystemGetConfComputeGpusReadyState(IsAcceptingWork *uint32) Return {
+	cIsAcceptingWork, cIsAcceptingWorkAllocMap := (*C.uint)(unsafe.Pointer(IsAcceptingWork)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetConfComputeGpusReadyState(cIsAcceptingWork)
+	runtime.KeepAlive(cIsAcceptingWorkAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetConfComputeKeyRotationThresholdInfo function as declared in hgml/hgml.h:3362
+func hgmlSystemGetConfComputeKeyRotationThresholdInfo(PKeyRotationThrInfo *ConfComputeGetKeyRotationThresholdInfo) Return {
+	cPKeyRotationThrInfo, cPKeyRotationThrInfoAllocMap := (*C.hgmlConfComputeGetKeyRotationThresholdInfo_t)(unsafe.Pointer(PKeyRotationThrInfo)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetConfComputeKeyRotationThresholdInfo(cPKeyRotationThrInfo)
+	runtime.KeepAlive(cPKeyRotationThrInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetConfComputeSettings function as declared in hgml/hgml.h:3363
+func hgmlSystemGetConfComputeSettings(Settings *SystemConfComputeSettings) Return {
+	cSettings, cSettingsAllocMap := (*C.hgmlSystemConfComputeSettings_t)(unsafe.Pointer(Settings)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetConfComputeSettings(cSettings)
+	runtime.KeepAlive(cSettingsAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetConfComputeState function as declared in hgml/hgml.h:3364
+func hgmlSystemGetConfComputeState(State *ConfComputeSystemState) Return {
+	cState, cStateAllocMap := (*C.hgmlConfComputeSystemState_t)(unsafe.Pointer(State)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetConfComputeState(cState)
+	runtime.KeepAlive(cStateAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetDriverBranch function as declared in hgml/hgml.h:3365
+func hgmlSystemGetDriverBranch(BranchInfo *SystemDriverBranchInfo, Length uint32) Return {
+	cBranchInfo, cBranchInfoAllocMap := (*C.hgmlSystemDriverBranchInfo_t)(unsafe.Pointer(BranchInfo)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetDriverBranch(cBranchInfo, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cBranchInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetDriverVersion function as declared in hgml/hgml.h:3366
+func hgmlSystemGetDriverVersion(Version *byte, Length uint32) Return {
+	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetDriverVersion(cVersion, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cVersionAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetHGMLVersion function as declared in hgml/hgml.h:3367
+func hgmlSystemGetHGMLVersion(Version *byte, Length uint32) Return {
+	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetHGMLVersion(cVersion, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cVersionAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetHggcDriverVersion function as declared in hgml/hgml.h:3368
+func hgmlSystemGetHggcDriverVersion(HggcDriverVersion *int32) Return {
+	cHggcDriverVersion, cHggcDriverVersionAllocMap := (*C.int)(unsafe.Pointer(HggcDriverVersion)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetHggcDriverVersion(cHggcDriverVersion)
+	runtime.KeepAlive(cHggcDriverVersionAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetHggcDriverVersion_v2 function as declared in hgml/hgml.h:3369
+func hgmlSystemGetHggcDriverVersion_v2(HggcDriverVersion *int32) Return {
+	cHggcDriverVersion, cHggcDriverVersionAllocMap := (*C.int)(unsafe.Pointer(HggcDriverVersion)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetHggcDriverVersion_v2(cHggcDriverVersion)
+	runtime.KeepAlive(cHggcDriverVersionAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetHicVersion function as declared in hgml/hgml.h:3370
+func hgmlSystemGetHicVersion(HwbcCount *uint32, HwbcEntries *HwbcEntry) Return {
+	cHwbcCount, cHwbcCountAllocMap := (*C.uint)(unsafe.Pointer(HwbcCount)), cgoAllocsUnknown
+	cHwbcEntries, cHwbcEntriesAllocMap := (*C.hgmlHwbcEntry_t)(unsafe.Pointer(HwbcEntries)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetHicVersion(cHwbcCount, cHwbcEntries)
+	runtime.KeepAlive(cHwbcEntriesAllocMap)
+	runtime.KeepAlive(cHwbcCountAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetIcnLinkBwMode function as declared in hgml/hgml.h:3371
+func hgmlSystemGetIcnLinkBwMode(IcnlinkBwMode *uint32) Return {
+	cIcnlinkBwMode, cIcnlinkBwModeAllocMap := (*C.uint)(unsafe.Pointer(IcnlinkBwMode)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetIcnLinkBwMode(cIcnlinkBwMode)
+	runtime.KeepAlive(cIcnlinkBwModeAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetProcessName function as declared in hgml/hgml.h:3372
+func hgmlSystemGetProcessName(Pid uint32, Name *byte, Length uint32) Return {
+	cPid, cPidAllocMap := (C.uint)(Pid), cgoAllocsUnknown
+	cName, cNameAllocMap := (*C.char)(unsafe.Pointer(Name)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetProcessName(cPid, cName, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cNameAllocMap)
+	runtime.KeepAlive(cPidAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemGetTopologyGpuSet function as declared in hgml/hgml.h:3373
+func hgmlSystemGetTopologyGpuSet(CpuNumber uint32, Count *uint32, DeviceArray *hgmlDevice) Return {
+	cCpuNumber, cCpuNumberAllocMap := (C.uint)(CpuNumber), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	cDeviceArray, cDeviceArrayAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(DeviceArray)), cgoAllocsUnknown
+	__ret := C.hgmlSystemGetTopologyGpuSet(cCpuNumber, cCount, cDeviceArray)
+	runtime.KeepAlive(cDeviceArrayAllocMap)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(cCpuNumberAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemRegisterEvents function as declared in hgml/hgml.h:3374
+func hgmlSystemRegisterEvents(Request *SystemRegisterEventRequest) Return {
+	cRequest, cRequestAllocMap := (*C.hgmlSystemRegisterEventRequest_t)(unsafe.Pointer(Request)), cgoAllocsUnknown
+	__ret := C.hgmlSystemRegisterEvents(cRequest)
+	runtime.KeepAlive(cRequestAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemSetConfComputeGpusReadyState function as declared in hgml/hgml.h:3375
+func hgmlSystemSetConfComputeGpusReadyState(IsAcceptingWork uint32) Return {
+	cIsAcceptingWork, cIsAcceptingWorkAllocMap := (C.uint)(IsAcceptingWork), cgoAllocsUnknown
+	__ret := C.hgmlSystemSetConfComputeGpusReadyState(cIsAcceptingWork)
+	runtime.KeepAlive(cIsAcceptingWorkAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemSetConfComputeKeyRotationThresholdInfo function as declared in hgml/hgml.h:3376
+func hgmlSystemSetConfComputeKeyRotationThresholdInfo(PKeyRotationThrInfo *ConfComputeSetKeyRotationThresholdInfo) Return {
+	cPKeyRotationThrInfo, cPKeyRotationThrInfoAllocMap := (*C.hgmlConfComputeSetKeyRotationThresholdInfo_t)(unsafe.Pointer(PKeyRotationThrInfo)), cgoAllocsUnknown
+	__ret := C.hgmlSystemSetConfComputeKeyRotationThresholdInfo(cPKeyRotationThrInfo)
+	runtime.KeepAlive(cPKeyRotationThrInfoAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlSystemSetIcnLinkBwMode function as declared in hgml/hgml.h:3377
+func hgmlSystemSetIcnLinkBwMode(IcnlinkBwMode uint32) Return {
+	cIcnlinkBwMode, cIcnlinkBwModeAllocMap := (C.uint)(IcnlinkBwMode), cgoAllocsUnknown
+	__ret := C.hgmlSystemSetIcnLinkBwMode(cIcnlinkBwMode)
+	runtime.KeepAlive(cIcnlinkBwModeAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlUnitGetCount function as declared in hgml/hgml.h:3378
+func hgmlUnitGetCount(UnitCount *uint32) Return {
+	cUnitCount, cUnitCountAllocMap := (*C.uint)(unsafe.Pointer(UnitCount)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetCount(cUnitCount)
+	runtime.KeepAlive(cUnitCountAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlUnitGetDevices function as declared in hgml/hgml.h:3379
+func hgmlUnitGetDevices(hgmlUnit hgmlUnit, DeviceCount *uint32, Devices *hgmlDevice) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
+	cDevices, cDevicesAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(Devices)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetDevices(chgmlUnit, cDeviceCount, cDevices)
+	runtime.KeepAlive(cDevicesAllocMap)
+	runtime.KeepAlive(cDeviceCountAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlUnitGetFanSpeedInfo function as declared in hgml/hgml.h:3380
+func hgmlUnitGetFanSpeedInfo(hgmlUnit hgmlUnit, FanSpeeds *UnitFanSpeeds) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	cFanSpeeds, cFanSpeedsAllocMap := (*C.hgmlUnitFanSpeeds_t)(unsafe.Pointer(FanSpeeds)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetFanSpeedInfo(chgmlUnit, cFanSpeeds)
+	runtime.KeepAlive(cFanSpeedsAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlUnitGetHandleByIndex function as declared in hgml/hgml.h:3381
+func hgmlUnitGetHandleByIndex(Index uint32, hgmlUnit *hgmlUnit) Return {
 	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHandleByIndex(cIndex, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+	chgmlUnit, chgmlUnitAllocMap := (*C.hgmlUnit_t)(unsafe.Pointer(hgmlUnit)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetHandleByIndex(cIndex, chgmlUnit)
+	runtime.KeepAlive(chgmlUnitAllocMap)
 	runtime.KeepAlive(cIndexAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetHandleByPciBusId function as declared in hgml/hgml.h:10335
-func hgmlDeviceGetHandleByPciBusId(PciBusId string, hgmlDevice *hgmlDevice) Return {
-	cPciBusId, cPciBusIdAllocMap := unpackPCharString(PciBusId)
-	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetHandleByPciBusId(cPciBusId, chgmlDevice)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	runtime.KeepAlive(cPciBusIdAllocMap)
+// hgmlUnitGetLedState function as declared in hgml/hgml.h:3382
+func hgmlUnitGetLedState(hgmlUnit hgmlUnit, State *LedState) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	cState, cStateAllocMap := (*C.hgmlLedState_t)(unsafe.Pointer(State)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetLedState(chgmlUnit, cState)
+	runtime.KeepAlive(cStateAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetPciInfo function as declared in hgml/hgml.h:10336
-func hgmlDeviceGetPciInfo(hgmlDevice hgmlDevice, Pci *PciInfo) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPciInfo(chgmlDevice, cPci)
-	runtime.KeepAlive(cPciAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlUnitGetPsuInfo function as declared in hgml/hgml.h:3383
+func hgmlUnitGetPsuInfo(hgmlUnit hgmlUnit, Psu *PSUInfo) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	cPsu, cPsuAllocMap := (*C.hgmlPSUInfo_t)(unsafe.Pointer(Psu)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetPsuInfo(chgmlUnit, cPsu)
+	runtime.KeepAlive(cPsuAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetIcnLinkRemotePciInfo function as declared in hgml/hgml.h:10337
-func hgmlDeviceGetIcnLinkRemotePciInfo(hgmlDevice hgmlDevice, Link uint32, Pci *PciInfo) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
-	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetIcnLinkRemotePciInfo(chgmlDevice, cLink, cPci)
-	runtime.KeepAlive(cPciAllocMap)
-	runtime.KeepAlive(cLinkAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlUnitGetTemperature function as declared in hgml/hgml.h:3384
+func hgmlUnitGetTemperature(hgmlUnit hgmlUnit, _type uint32, Temp *uint32) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	c_type, c_typeAllocMap := (C.uint)(_type), cgoAllocsUnknown
+	cTemp, cTempAllocMap := (*C.uint)(unsafe.Pointer(Temp)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetTemperature(chgmlUnit, c_type, cTemp)
+	runtime.KeepAlive(cTempAllocMap)
+	runtime.KeepAlive(c_typeAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGridLicensableFeatures function as declared in hgml/hgml.h:10338
-func hgmlDeviceGetGridLicensableFeatures(hgmlDevice hgmlDevice, PGridLicensableFeatures *GridLicensableFeatures) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPGridLicensableFeatures, cPGridLicensableFeaturesAllocMap := (*C.hgmlGridLicensableFeatures_t)(unsafe.Pointer(PGridLicensableFeatures)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGridLicensableFeatures(chgmlDevice, cPGridLicensableFeatures)
-	runtime.KeepAlive(cPGridLicensableFeaturesAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceRemoveGpu function as declared in hgml/hgml.h:10339
-func hgmlDeviceRemoveGpu(PciInfo *PciInfo) Return {
-	cPciInfo, cPciInfoAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(PciInfo)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceRemoveGpu(cPciInfo)
-	runtime.KeepAlive(cPciInfoAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlEventSetWait function as declared in hgml/hgml.h:10340
-func hgmlEventSetWait(Set hgmlEventSet, Data *hgmlEventData, Timeoutms uint32) Return {
-	cSet, cSetAllocMap := *(*C.hgmlEventSet_t)(unsafe.Pointer(&Set)), cgoAllocsUnknown
-	cData, cDataAllocMap := (*C.hgmlEventData_t)(unsafe.Pointer(Data)), cgoAllocsUnknown
-	cTimeoutms, cTimeoutmsAllocMap := (C.uint)(Timeoutms), cgoAllocsUnknown
-	__ret := C.hgmlEventSetWait(cSet, cData, cTimeoutms)
-	runtime.KeepAlive(cTimeoutmsAllocMap)
-	runtime.KeepAlive(cDataAllocMap)
-	runtime.KeepAlive(cSetAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlDeviceGetAttributes function as declared in hgml/hgml.h:10341
-func hgmlDeviceGetAttributes(hgmlDevice hgmlDevice, Attributes *DeviceAttributes) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cAttributes, cAttributesAllocMap := (*C.hgmlDeviceAttributes_t)(unsafe.Pointer(Attributes)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetAttributes(chgmlDevice, cAttributes)
-	runtime.KeepAlive(cAttributesAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
-	__v := (Return)(__ret)
-	return __v
-}
-
-// hgmlComputeInstanceGetInfo function as declared in hgml/hgml.h:10342
-func hgmlComputeInstanceGetInfo(hgmlComputeInstance hgmlComputeInstance, Info *hgmlComputeInstanceInfo) Return {
-	chgmlComputeInstance, chgmlComputeInstanceAllocMap := *(*C.hgmlComputeInstance_t)(unsafe.Pointer(&hgmlComputeInstance)), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlComputeInstanceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlComputeInstanceGetInfo(chgmlComputeInstance, cInfo)
+// hgmlUnitGetUnitInfo function as declared in hgml/hgml.h:3385
+func hgmlUnitGetUnitInfo(hgmlUnit hgmlUnit, Info *UnitInfo) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	cInfo, cInfoAllocMap := (*C.hgmlUnitInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
+	__ret := C.hgmlUnitGetUnitInfo(chgmlUnit, cInfo)
 	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(chgmlComputeInstanceAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetComputeRunningProcesses function as declared in hgml/hgml.h:10343
-func hgmlDeviceGetComputeRunningProcesses(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v1) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v1_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetComputeRunningProcesses(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlUnitSetLedState function as declared in hgml/hgml.h:3386
+func hgmlUnitSetLedState(hgmlUnit hgmlUnit, Color LedColor) Return {
+	chgmlUnit, chgmlUnitAllocMap := *(*C.hgmlUnit_t)(unsafe.Pointer(&hgmlUnit)), cgoAllocsUnknown
+	cColor, cColorAllocMap := (C.hgmlLedColor_t)(Color), cgoAllocsUnknown
+	__ret := C.hgmlUnitSetLedState(chgmlUnit, cColor)
+	runtime.KeepAlive(cColorAllocMap)
+	runtime.KeepAlive(chgmlUnitAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGraphicsRunningProcesses function as declared in hgml/hgml.h:10344
-func hgmlDeviceGetGraphicsRunningProcesses(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v1) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v1_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGraphicsRunningProcesses(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlVgpuInstanceClearAccountingPids function as declared in hgml/hgml.h:3387
+func hgmlVgpuInstanceClearAccountingPids(hgmlVgpuInstance hgmlVgpuInstance) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceClearAccountingPids(chgmlVgpuInstance)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMPSComputeRunningProcesses function as declared in hgml/hgml.h:10345
-func hgmlDeviceGetMPSComputeRunningProcesses(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v1) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v1_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMPSComputeRunningProcesses(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+// hgmlVgpuInstanceGetAccountingMode function as declared in hgml/hgml.h:3388
+func hgmlVgpuInstanceGetAccountingMode(hgmlVgpuInstance hgmlVgpuInstance, Mode *EnableState) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetAccountingMode(chgmlVgpuInstance, cMode)
+	runtime.KeepAlive(cModeAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlVgpuInstanceGetLicenseInfo function as declared in hgml/hgml.h:10347
+// hgmlVgpuInstanceGetAccountingPids function as declared in hgml/hgml.h:3389
+func hgmlVgpuInstanceGetAccountingPids(hgmlVgpuInstance hgmlVgpuInstance, Count *uint32, Pids *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	cPids, cPidsAllocMap := (*C.uint)(unsafe.Pointer(Pids)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetAccountingPids(chgmlVgpuInstance, cCount, cPids)
+	runtime.KeepAlive(cPidsAllocMap)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetAccountingStats function as declared in hgml/hgml.h:3390
+func hgmlVgpuInstanceGetAccountingStats(hgmlVgpuInstance hgmlVgpuInstance, Pid uint32, Stats *AccountingStats) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cPid, cPidAllocMap := (C.uint)(Pid), cgoAllocsUnknown
+	cStats, cStatsAllocMap := (*C.hgmlAccountingStats_t)(unsafe.Pointer(Stats)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetAccountingStats(chgmlVgpuInstance, cPid, cStats)
+	runtime.KeepAlive(cStatsAllocMap)
+	runtime.KeepAlive(cPidAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetEccMode function as declared in hgml/hgml.h:3391
+func hgmlVgpuInstanceGetEccMode(hgmlVgpuInstance hgmlVgpuInstance, EccMode *EnableState) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cEccMode, cEccModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(EccMode)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetEccMode(chgmlVgpuInstance, cEccMode)
+	runtime.KeepAlive(cEccModeAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetEncoderCapacity function as declared in hgml/hgml.h:3392
+func hgmlVgpuInstanceGetEncoderCapacity(hgmlVgpuInstance hgmlVgpuInstance, EncoderCapacity *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cEncoderCapacity, cEncoderCapacityAllocMap := (*C.uint)(unsafe.Pointer(EncoderCapacity)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetEncoderCapacity(chgmlVgpuInstance, cEncoderCapacity)
+	runtime.KeepAlive(cEncoderCapacityAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetEncoderSessions function as declared in hgml/hgml.h:3393
+func hgmlVgpuInstanceGetEncoderSessions(hgmlVgpuInstance hgmlVgpuInstance, SessionCount *uint32, SessionInfo *EncoderSessionInfo) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
+	cSessionInfo, cSessionInfoAllocMap := (*C.hgmlEncoderSessionInfo_t)(unsafe.Pointer(SessionInfo)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetEncoderSessions(chgmlVgpuInstance, cSessionCount, cSessionInfo)
+	runtime.KeepAlive(cSessionInfoAllocMap)
+	runtime.KeepAlive(cSessionCountAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetEncoderStats function as declared in hgml/hgml.h:3394
+func hgmlVgpuInstanceGetEncoderStats(hgmlVgpuInstance hgmlVgpuInstance, SessionCount *uint32, AverageFps *uint32, AverageLatency *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
+	cAverageFps, cAverageFpsAllocMap := (*C.uint)(unsafe.Pointer(AverageFps)), cgoAllocsUnknown
+	cAverageLatency, cAverageLatencyAllocMap := (*C.uint)(unsafe.Pointer(AverageLatency)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetEncoderStats(chgmlVgpuInstance, cSessionCount, cAverageFps, cAverageLatency)
+	runtime.KeepAlive(cAverageLatencyAllocMap)
+	runtime.KeepAlive(cAverageFpsAllocMap)
+	runtime.KeepAlive(cSessionCountAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetFBCSessions function as declared in hgml/hgml.h:3395
+func hgmlVgpuInstanceGetFBCSessions(hgmlVgpuInstance hgmlVgpuInstance, SessionCount *uint32, SessionInfo *FBCSessionInfo) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cSessionCount, cSessionCountAllocMap := (*C.uint)(unsafe.Pointer(SessionCount)), cgoAllocsUnknown
+	cSessionInfo, cSessionInfoAllocMap := (*C.hgmlFBCSessionInfo_t)(unsafe.Pointer(SessionInfo)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetFBCSessions(chgmlVgpuInstance, cSessionCount, cSessionInfo)
+	runtime.KeepAlive(cSessionInfoAllocMap)
+	runtime.KeepAlive(cSessionCountAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetFBCStats function as declared in hgml/hgml.h:3396
+func hgmlVgpuInstanceGetFBCStats(hgmlVgpuInstance hgmlVgpuInstance, FbcStats *FBCStats) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cFbcStats, cFbcStatsAllocMap := (*C.hgmlFBCStats_t)(unsafe.Pointer(FbcStats)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetFBCStats(chgmlVgpuInstance, cFbcStats)
+	runtime.KeepAlive(cFbcStatsAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetFbUsage function as declared in hgml/hgml.h:3397
+func hgmlVgpuInstanceGetFbUsage(hgmlVgpuInstance hgmlVgpuInstance, FbUsage *uint64) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cFbUsage, cFbUsageAllocMap := (*C.ulonglong)(unsafe.Pointer(FbUsage)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetFbUsage(chgmlVgpuInstance, cFbUsage)
+	runtime.KeepAlive(cFbUsageAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetFrameRateLimit function as declared in hgml/hgml.h:3398
+func hgmlVgpuInstanceGetFrameRateLimit(hgmlVgpuInstance hgmlVgpuInstance, FrameRateLimit *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cFrameRateLimit, cFrameRateLimitAllocMap := (*C.uint)(unsafe.Pointer(FrameRateLimit)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetFrameRateLimit(chgmlVgpuInstance, cFrameRateLimit)
+	runtime.KeepAlive(cFrameRateLimitAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetGpuInstanceId function as declared in hgml/hgml.h:3399
+func hgmlVgpuInstanceGetGpuInstanceId(hgmlVgpuInstance hgmlVgpuInstance, GpuInstanceId *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cGpuInstanceId, cGpuInstanceIdAllocMap := (*C.uint)(unsafe.Pointer(GpuInstanceId)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetGpuInstanceId(chgmlVgpuInstance, cGpuInstanceId)
+	runtime.KeepAlive(cGpuInstanceIdAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetGpuPciId function as declared in hgml/hgml.h:3400
+func hgmlVgpuInstanceGetGpuPciId(hgmlVgpuInstance hgmlVgpuInstance, VgpuPciId *byte, Length *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cVgpuPciId, cVgpuPciIdAllocMap := (*C.char)(unsafe.Pointer(VgpuPciId)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (*C.uint)(unsafe.Pointer(Length)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetGpuPciId(chgmlVgpuInstance, cVgpuPciId, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cVgpuPciIdAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetLicenseInfo function as declared in hgml/hgml.h:3401
 func hgmlVgpuInstanceGetLicenseInfo(hgmlVgpuInstance hgmlVgpuInstance, LicenseInfo *VgpuLicenseInfo) Return {
 	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
 	cLicenseInfo, cLicenseInfoAllocMap := (*C.hgmlVgpuLicenseInfo_t)(unsafe.Pointer(LicenseInfo)), cgoAllocsUnknown
@@ -3929,94 +4115,595 @@ func hgmlVgpuInstanceGetLicenseInfo(hgmlVgpuInstance hgmlVgpuInstance, LicenseIn
 	return __v
 }
 
-// hgmlDeviceGetPciInfo_v2 function as declared in hgml/hgml.h:10348
-func hgmlDeviceGetPciInfo_v2(hgmlDevice hgmlDevice, Pci *PciInfo) Return {
-	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+// hgmlVgpuInstanceGetLicenseInfo_v2 function as declared in hgml/hgml.h:3402
+func hgmlVgpuInstanceGetLicenseInfo_v2(hgmlVgpuInstance hgmlVgpuInstance, LicenseInfo *VgpuLicenseInfo) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cLicenseInfo, cLicenseInfoAllocMap := (*C.hgmlVgpuLicenseInfo_t)(unsafe.Pointer(LicenseInfo)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetLicenseInfo_v2(chgmlVgpuInstance, cLicenseInfo)
+	runtime.KeepAlive(cLicenseInfoAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetMdevUUID function as declared in hgml/hgml.h:3403
+func hgmlVgpuInstanceGetMdevUUID(hgmlVgpuInstance hgmlVgpuInstance, MdevUuid *byte, Size uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cMdevUuid, cMdevUuidAllocMap := (*C.char)(unsafe.Pointer(MdevUuid)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetMdevUUID(chgmlVgpuInstance, cMdevUuid, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cMdevUuidAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetMetadata function as declared in hgml/hgml.h:3404
+func hgmlVgpuInstanceGetMetadata(hgmlVgpuInstance hgmlVgpuInstance, hgmlVgpuMetadata *hgmlVgpuMetadata, BufferSize *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	chgmlVgpuMetadata, chgmlVgpuMetadataAllocMap := (*C.hgmlVgpuMetadata_t)(unsafe.Pointer(hgmlVgpuMetadata)), cgoAllocsUnknown
+	cBufferSize, cBufferSizeAllocMap := (*C.uint)(unsafe.Pointer(BufferSize)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetMetadata(chgmlVgpuInstance, chgmlVgpuMetadata, cBufferSize)
+	runtime.KeepAlive(cBufferSizeAllocMap)
+	runtime.KeepAlive(chgmlVgpuMetadataAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetPciInfo function as declared in hgml/hgml.h:3405
+func hgmlVgpuInstanceGetPciInfo(hgmlVgpuInstance hgmlVgpuInstance, Pci *PciInfo) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
 	cPci, cPciAllocMap := (*C.hgmlPciInfo_t)(unsafe.Pointer(Pci)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetPciInfo_v2(chgmlDevice, cPci)
+	__ret := C.hgmlVgpuInstanceGetPciInfo(chgmlVgpuInstance, cPci)
 	runtime.KeepAlive(cPciAllocMap)
-	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGridLicensableFeatures_v2 function as declared in hgml/hgml.h:10349
-func hgmlDeviceGetGridLicensableFeatures_v2(hgmlDevice hgmlDevice, PGridLicensableFeatures *GridLicensableFeatures) Return {
+// hgmlVgpuInstanceGetPlacementId function as declared in hgml/hgml.h:3406
+func hgmlVgpuInstanceGetPlacementId(hgmlVgpuInstance hgmlVgpuInstance, PPlacement *VgpuPlacementId) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cPPlacement, cPPlacementAllocMap := (*C.hgmlVgpuPlacementId_t)(unsafe.Pointer(PPlacement)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetPlacementId(chgmlVgpuInstance, cPPlacement)
+	runtime.KeepAlive(cPPlacementAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetRuntimeStateSize function as declared in hgml/hgml.h:3407
+func hgmlVgpuInstanceGetRuntimeStateSize(hgmlVgpuInstance hgmlVgpuInstance, PState *VgpuRuntimeState) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cPState, cPStateAllocMap := (*C.hgmlVgpuRuntimeState_t)(unsafe.Pointer(PState)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetRuntimeStateSize(chgmlVgpuInstance, cPState)
+	runtime.KeepAlive(cPStateAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetType function as declared in hgml/hgml.h:3408
+func hgmlVgpuInstanceGetType(hgmlVgpuInstance hgmlVgpuInstance, hgmlVgpuTypeId *hgmlVgpuTypeId) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (*C.hgmlVgpuTypeId_t)(unsafe.Pointer(hgmlVgpuTypeId)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetType(chgmlVgpuInstance, chgmlVgpuTypeId)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetUUID function as declared in hgml/hgml.h:3409
+func hgmlVgpuInstanceGetUUID(hgmlVgpuInstance hgmlVgpuInstance, Uuid *byte, Size uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cUuid, cUuidAllocMap := (*C.char)(unsafe.Pointer(Uuid)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetUUID(chgmlVgpuInstance, cUuid, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cUuidAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetVmDriverVersion function as declared in hgml/hgml.h:3410
+func hgmlVgpuInstanceGetVmDriverVersion(hgmlVgpuInstance hgmlVgpuInstance, Version *byte, Length uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cVersion, cVersionAllocMap := (*C.char)(unsafe.Pointer(Version)), cgoAllocsUnknown
+	cLength, cLengthAllocMap := (C.uint)(Length), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetVmDriverVersion(chgmlVgpuInstance, cVersion, cLength)
+	runtime.KeepAlive(cLengthAllocMap)
+	runtime.KeepAlive(cVersionAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetVmID function as declared in hgml/hgml.h:3411
+func hgmlVgpuInstanceGetVmID(hgmlVgpuInstance hgmlVgpuInstance, VmId *byte, Size uint32, VmIdType *VgpuVmIdType) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cVmId, cVmIdAllocMap := (*C.char)(unsafe.Pointer(VmId)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
+	cVmIdType, cVmIdTypeAllocMap := (*C.hgmlVgpuVmIdType_t)(unsafe.Pointer(VmIdType)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetVmID(chgmlVgpuInstance, cVmId, cSize, cVmIdType)
+	runtime.KeepAlive(cVmIdTypeAllocMap)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cVmIdAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceSetEncoderCapacity function as declared in hgml/hgml.h:3412
+func hgmlVgpuInstanceSetEncoderCapacity(hgmlVgpuInstance hgmlVgpuInstance, EncoderCapacity uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cEncoderCapacity, cEncoderCapacityAllocMap := (C.uint)(EncoderCapacity), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceSetEncoderCapacity(chgmlVgpuInstance, cEncoderCapacity)
+	runtime.KeepAlive(cEncoderCapacityAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetBAR1Info function as declared in hgml/hgml.h:3413
+func hgmlVgpuTypeGetBAR1Info(hgmlVgpuTypeId hgmlVgpuTypeId, Bar1Info *VgpuTypeBar1Info) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cBar1Info, cBar1InfoAllocMap := (*C.hgmlVgpuTypeBar1Info_t)(unsafe.Pointer(Bar1Info)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetBAR1Info(chgmlVgpuTypeId, cBar1Info)
+	runtime.KeepAlive(cBar1InfoAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetCapabilities function as declared in hgml/hgml.h:3414
+func hgmlVgpuTypeGetCapabilities(hgmlVgpuTypeId hgmlVgpuTypeId, Capability VgpuCapability, CapResult *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cCapability, cCapabilityAllocMap := (C.hgmlVgpuCapability_t)(Capability), cgoAllocsUnknown
+	cCapResult, cCapResultAllocMap := (*C.uint)(unsafe.Pointer(CapResult)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetCapabilities(chgmlVgpuTypeId, cCapability, cCapResult)
+	runtime.KeepAlive(cCapResultAllocMap)
+	runtime.KeepAlive(cCapabilityAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetClass function as declared in hgml/hgml.h:3415
+func hgmlVgpuTypeGetClass(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuTypeClass *byte, Size *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cVgpuTypeClass, cVgpuTypeClassAllocMap := (*C.char)(unsafe.Pointer(VgpuTypeClass)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (*C.uint)(unsafe.Pointer(Size)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetClass(chgmlVgpuTypeId, cVgpuTypeClass, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cVgpuTypeClassAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetDeviceID function as declared in hgml/hgml.h:3416
+func hgmlVgpuTypeGetDeviceID(hgmlVgpuTypeId hgmlVgpuTypeId, DeviceID *uint64, SubsystemID *uint64) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cDeviceID, cDeviceIDAllocMap := (*C.ulonglong)(unsafe.Pointer(DeviceID)), cgoAllocsUnknown
+	cSubsystemID, cSubsystemIDAllocMap := (*C.ulonglong)(unsafe.Pointer(SubsystemID)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetDeviceID(chgmlVgpuTypeId, cDeviceID, cSubsystemID)
+	runtime.KeepAlive(cSubsystemIDAllocMap)
+	runtime.KeepAlive(cDeviceIDAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetFbReservation function as declared in hgml/hgml.h:3417
+func hgmlVgpuTypeGetFbReservation(hgmlVgpuTypeId hgmlVgpuTypeId, FbReservation *uint64) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cFbReservation, cFbReservationAllocMap := (*C.ulonglong)(unsafe.Pointer(FbReservation)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetFbReservation(chgmlVgpuTypeId, cFbReservation)
+	runtime.KeepAlive(cFbReservationAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetFrameRateLimit function as declared in hgml/hgml.h:3418
+func hgmlVgpuTypeGetFrameRateLimit(hgmlVgpuTypeId hgmlVgpuTypeId, FrameRateLimit *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cFrameRateLimit, cFrameRateLimitAllocMap := (*C.uint)(unsafe.Pointer(FrameRateLimit)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetFrameRateLimit(chgmlVgpuTypeId, cFrameRateLimit)
+	runtime.KeepAlive(cFrameRateLimitAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetFramebufferSize function as declared in hgml/hgml.h:3419
+func hgmlVgpuTypeGetFramebufferSize(hgmlVgpuTypeId hgmlVgpuTypeId, FbSize *uint64) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cFbSize, cFbSizeAllocMap := (*C.ulonglong)(unsafe.Pointer(FbSize)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetFramebufferSize(chgmlVgpuTypeId, cFbSize)
+	runtime.KeepAlive(cFbSizeAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetGpuInstanceProfileId function as declared in hgml/hgml.h:3420
+func hgmlVgpuTypeGetGpuInstanceProfileId(hgmlVgpuTypeId hgmlVgpuTypeId, GpuInstanceProfileId *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cGpuInstanceProfileId, cGpuInstanceProfileIdAllocMap := (*C.uint)(unsafe.Pointer(GpuInstanceProfileId)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetGpuInstanceProfileId(chgmlVgpuTypeId, cGpuInstanceProfileId)
+	runtime.KeepAlive(cGpuInstanceProfileIdAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetGspHeapSize function as declared in hgml/hgml.h:3421
+func hgmlVgpuTypeGetGspHeapSize(hgmlVgpuTypeId hgmlVgpuTypeId, GspHeapSize *uint64) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cGspHeapSize, cGspHeapSizeAllocMap := (*C.ulonglong)(unsafe.Pointer(GspHeapSize)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetGspHeapSize(chgmlVgpuTypeId, cGspHeapSize)
+	runtime.KeepAlive(cGspHeapSizeAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetLicense function as declared in hgml/hgml.h:3422
+func hgmlVgpuTypeGetLicense(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuTypeLicenseString *byte, Size uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cVgpuTypeLicenseString, cVgpuTypeLicenseStringAllocMap := (*C.char)(unsafe.Pointer(VgpuTypeLicenseString)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (C.uint)(Size), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetLicense(chgmlVgpuTypeId, cVgpuTypeLicenseString, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cVgpuTypeLicenseStringAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetMaxInstances function as declared in hgml/hgml.h:3423
+func hgmlVgpuTypeGetMaxInstances(hgmlDevice hgmlDevice, hgmlVgpuTypeId hgmlVgpuTypeId, VgpuInstanceCount *uint32) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPGridLicensableFeatures, cPGridLicensableFeaturesAllocMap := (*C.hgmlGridLicensableFeatures_t)(unsafe.Pointer(PGridLicensableFeatures)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGridLicensableFeatures_v2(chgmlDevice, cPGridLicensableFeatures)
-	runtime.KeepAlive(cPGridLicensableFeaturesAllocMap)
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cVgpuInstanceCount, cVgpuInstanceCountAllocMap := (*C.uint)(unsafe.Pointer(VgpuInstanceCount)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetMaxInstances(chgmlDevice, chgmlVgpuTypeId, cVgpuInstanceCount)
+	runtime.KeepAlive(cVgpuInstanceCountAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGridLicensableFeatures_v3 function as declared in hgml/hgml.h:10350
-func hgmlDeviceGetGridLicensableFeatures_v3(hgmlDevice hgmlDevice, PGridLicensableFeatures *GridLicensableFeatures) Return {
+// hgmlVgpuTypeGetMaxInstancesPerGpuInstance function as declared in hgml/hgml.h:3424
+func hgmlVgpuTypeGetMaxInstancesPerGpuInstance(PMaxInstance *VgpuTypeMaxInstance) Return {
+	cPMaxInstance, cPMaxInstanceAllocMap := (*C.hgmlVgpuTypeMaxInstance_t)(unsafe.Pointer(PMaxInstance)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetMaxInstancesPerGpuInstance(cPMaxInstance)
+	runtime.KeepAlive(cPMaxInstanceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetMaxInstancesPerVm function as declared in hgml/hgml.h:3425
+func hgmlVgpuTypeGetMaxInstancesPerVm(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuInstanceCountPerVm *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cVgpuInstanceCountPerVm, cVgpuInstanceCountPerVmAllocMap := (*C.uint)(unsafe.Pointer(VgpuInstanceCountPerVm)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetMaxInstancesPerVm(chgmlVgpuTypeId, cVgpuInstanceCountPerVm)
+	runtime.KeepAlive(cVgpuInstanceCountPerVmAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetName function as declared in hgml/hgml.h:3426
+func hgmlVgpuTypeGetName(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuTypeName *byte, Size *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cVgpuTypeName, cVgpuTypeNameAllocMap := (*C.char)(unsafe.Pointer(VgpuTypeName)), cgoAllocsUnknown
+	cSize, cSizeAllocMap := (*C.uint)(unsafe.Pointer(Size)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetName(chgmlVgpuTypeId, cVgpuTypeName, cSize)
+	runtime.KeepAlive(cSizeAllocMap)
+	runtime.KeepAlive(cVgpuTypeNameAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetNumDisplayHeads function as declared in hgml/hgml.h:3427
+func hgmlVgpuTypeGetNumDisplayHeads(hgmlVgpuTypeId hgmlVgpuTypeId, NumDisplayHeads *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cNumDisplayHeads, cNumDisplayHeadsAllocMap := (*C.uint)(unsafe.Pointer(NumDisplayHeads)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetNumDisplayHeads(chgmlVgpuTypeId, cNumDisplayHeads)
+	runtime.KeepAlive(cNumDisplayHeadsAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetRemainingCapacity function as declared in hgml/hgml.h:3428
+func hgmlVgpuTypeGetRemainingCapacity(hgmlVgpuTypeId hgmlVgpuTypeId, Count *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cCount, cCountAllocMap := (*C.uint)(unsafe.Pointer(Count)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetRemainingCapacity(chgmlVgpuTypeId, cCount)
+	runtime.KeepAlive(cCountAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetResolution function as declared in hgml/hgml.h:3429
+func hgmlVgpuTypeGetResolution(hgmlVgpuTypeId hgmlVgpuTypeId, DisplayIndex uint32, Xdim *uint32, Ydim *uint32) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cDisplayIndex, cDisplayIndexAllocMap := (C.uint)(DisplayIndex), cgoAllocsUnknown
+	cXdim, cXdimAllocMap := (*C.uint)(unsafe.Pointer(Xdim)), cgoAllocsUnknown
+	cYdim, cYdimAllocMap := (*C.uint)(unsafe.Pointer(Ydim)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetResolution(chgmlVgpuTypeId, cDisplayIndex, cXdim, cYdim)
+	runtime.KeepAlive(cYdimAllocMap)
+	runtime.KeepAlive(cXdimAllocMap)
+	runtime.KeepAlive(cDisplayIndexAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuTypeGetVgpuProfileId function as declared in hgml/hgml.h:3430
+func hgmlVgpuTypeGetVgpuProfileId(hgmlVgpuTypeId hgmlVgpuTypeId, VgpuProfileId *VgpuProfileId) Return {
+	chgmlVgpuTypeId, chgmlVgpuTypeIdAllocMap := (C.hgmlVgpuTypeId_t)(hgmlVgpuTypeId), cgoAllocsUnknown
+	cVgpuProfileId, cVgpuProfileIdAllocMap := (*C.hgmlVgpuProfileId_t)(unsafe.Pointer(VgpuProfileId)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuTypeGetVgpuProfileId(chgmlVgpuTypeId, cVgpuProfileId)
+	runtime.KeepAlive(cVgpuProfileIdAllocMap)
+	runtime.KeepAlive(chgmlVgpuTypeIdAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlErrorString function as declared in hgml/hgml.h:3431
+func hgmlErrorString(Result Return) string {
+	cResult, cResultAllocMap := (C.hgmlReturn_t)(Result), cgoAllocsUnknown
+	__ret := C.hgmlErrorString(cResult)
+	runtime.KeepAlive(cResultAllocMap)
+	__v := packPCharString(__ret)
+	return __v
+}
+
+// hgmlDeviceFreezeIcnLinkUtilizationCounter function as declared in hgml/hgml.h:3432
+func hgmlDeviceFreezeIcnLinkUtilizationCounter(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Freeze EnableState) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cPGridLicensableFeatures, cPGridLicensableFeaturesAllocMap := (*C.hgmlGridLicensableFeatures_t)(unsafe.Pointer(PGridLicensableFeatures)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGridLicensableFeatures_v3(chgmlDevice, cPGridLicensableFeatures)
-	runtime.KeepAlive(cPGridLicensableFeaturesAllocMap)
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
+	cFreeze, cFreezeAllocMap := (C.hgmlEnableState_t)(Freeze), cgoAllocsUnknown
+	__ret := C.hgmlDeviceFreezeIcnLinkUtilizationCounter(chgmlDevice, cLink, cCounter, cFreeze)
+	runtime.KeepAlive(cFreezeAllocMap)
+	runtime.KeepAlive(cCounterAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetComputeRunningProcesses_v2 function as declared in hgml/hgml.h:10351
-func hgmlDeviceGetComputeRunningProcesses_v2(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v2) Return {
+// hgmlDeviceGetCurrentClocksThrottleReasons function as declared in hgml/hgml.h:3433
+func hgmlDeviceGetCurrentClocksThrottleReasons(hgmlDevice hgmlDevice, ClocksThrottleReasons *uint64) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v2_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetComputeRunningProcesses_v2(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
+	cClocksThrottleReasons, cClocksThrottleReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(ClocksThrottleReasons)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetCurrentClocksThrottleReasons(chgmlDevice, cClocksThrottleReasons)
+	runtime.KeepAlive(cClocksThrottleReasonsAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetGraphicsRunningProcesses_v2 function as declared in hgml/hgml.h:10352
-func hgmlDeviceGetGraphicsRunningProcesses_v2(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v2) Return {
+// hgmlDeviceGetDetailedEccErrors function as declared in hgml/hgml.h:3434
+func hgmlDeviceGetDetailedEccErrors(hgmlDevice hgmlDevice, ErrorType MemoryErrorType, CounterType EccCounterType, EccCounts *EccErrorCounts) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v2_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetGraphicsRunningProcesses_v2(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
+	cErrorType, cErrorTypeAllocMap := (C.hgmlMemoryErrorType_t)(ErrorType), cgoAllocsUnknown
+	cCounterType, cCounterTypeAllocMap := (C.hgmlEccCounterType_t)(CounterType), cgoAllocsUnknown
+	cEccCounts, cEccCountsAllocMap := (*C.hgmlEccErrorCounts_t)(unsafe.Pointer(EccCounts)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetDetailedEccErrors(chgmlDevice, cErrorType, cCounterType, cEccCounts)
+	runtime.KeepAlive(cEccCountsAllocMap)
+	runtime.KeepAlive(cCounterTypeAllocMap)
+	runtime.KeepAlive(cErrorTypeAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlDeviceGetMPSComputeRunningProcesses_v2 function as declared in hgml/hgml.h:10353
-func hgmlDeviceGetMPSComputeRunningProcesses_v2(hgmlDevice hgmlDevice, InfoCount *uint32, Infos *ProcessInfo_v2) Return {
+// hgmlDeviceGetGpuFabricInfo function as declared in hgml/hgml.h:3435
+func hgmlDeviceGetGpuFabricInfo(hgmlDevice hgmlDevice, GpuFabricInfo *GpuFabricInfo) Return {
 	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
-	cInfoCount, cInfoCountAllocMap := (*C.uint)(unsafe.Pointer(InfoCount)), cgoAllocsUnknown
-	cInfos, cInfosAllocMap := (*C.hgmlProcessInfo_v2_t)(unsafe.Pointer(Infos)), cgoAllocsUnknown
-	__ret := C.hgmlDeviceGetMPSComputeRunningProcesses_v2(chgmlDevice, cInfoCount, cInfos)
-	runtime.KeepAlive(cInfosAllocMap)
-	runtime.KeepAlive(cInfoCountAllocMap)
+	cGpuFabricInfo, cGpuFabricInfoAllocMap := (*C.hgmlGpuFabricInfo_t)(unsafe.Pointer(GpuFabricInfo)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetGpuFabricInfo(chgmlDevice, cGpuFabricInfo)
+	runtime.KeepAlive(cGpuFabricInfoAllocMap)
 	runtime.KeepAlive(chgmlDeviceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlGetBlacklistDeviceCount function as declared in hgml/hgml.h:10354
-func hgmlGetBlacklistDeviceCount(DeviceCount *uint32) Return {
-	cDeviceCount, cDeviceCountAllocMap := (*C.uint)(unsafe.Pointer(DeviceCount)), cgoAllocsUnknown
-	__ret := C.hgmlGetBlacklistDeviceCount(cDeviceCount)
-	runtime.KeepAlive(cDeviceCountAllocMap)
+// hgmlDeviceGetHandleBySerial function as declared in hgml/hgml.h:3436
+func hgmlDeviceGetHandleBySerial(Serial string, hgmlDevice *hgmlDevice) Return {
+	cSerial, cSerialAllocMap := unpackPCharString(Serial)
+	chgmlDevice, chgmlDeviceAllocMap := (*C.hgmlDevice_t)(unsafe.Pointer(hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetHandleBySerial(cSerial, chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	runtime.KeepAlive(cSerialAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }
 
-// hgmlGetBlacklistDeviceInfoByIndex function as declared in hgml/hgml.h:10355
-func hgmlGetBlacklistDeviceInfoByIndex(Index uint32, Info *BlacklistDeviceInfo) Return {
-	cIndex, cIndexAllocMap := (C.uint)(Index), cgoAllocsUnknown
-	cInfo, cInfoAllocMap := (*C.hgmlBlacklistDeviceInfo_t)(unsafe.Pointer(Info)), cgoAllocsUnknown
-	__ret := C.hgmlGetBlacklistDeviceInfoByIndex(cIndex, cInfo)
-	runtime.KeepAlive(cInfoAllocMap)
-	runtime.KeepAlive(cIndexAllocMap)
+// hgmlDeviceGetIcnLinkUtilizationControl function as declared in hgml/hgml.h:3437
+func hgmlDeviceGetIcnLinkUtilizationControl(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Control *IcnLinkUtilizationControl) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
+	cControl, cControlAllocMap := (*C.hgmlIcnLinkUtilizationControl_t)(unsafe.Pointer(Control)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkUtilizationControl(chgmlDevice, cLink, cCounter, cControl)
+	runtime.KeepAlive(cControlAllocMap)
+	runtime.KeepAlive(cCounterAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetIcnLinkUtilizationCounter function as declared in hgml/hgml.h:3438
+func hgmlDeviceGetIcnLinkUtilizationCounter(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Rxcounter *uint64, Txcounter *uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
+	cRxcounter, cRxcounterAllocMap := (*C.ulonglong)(unsafe.Pointer(Rxcounter)), cgoAllocsUnknown
+	cTxcounter, cTxcounterAllocMap := (*C.ulonglong)(unsafe.Pointer(Txcounter)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetIcnLinkUtilizationCounter(chgmlDevice, cLink, cCounter, cRxcounter, cTxcounter)
+	runtime.KeepAlive(cTxcounterAllocMap)
+	runtime.KeepAlive(cRxcounterAllocMap)
+	runtime.KeepAlive(cCounterAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerManagementMode function as declared in hgml/hgml.h:3439
+func hgmlDeviceGetPowerManagementMode(hgmlDevice hgmlDevice, Mode *EnableState) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMode, cModeAllocMap := (*C.hgmlEnableState_t)(unsafe.Pointer(Mode)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerManagementMode(chgmlDevice, cMode)
+	runtime.KeepAlive(cModeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetPowerState function as declared in hgml/hgml.h:3440
+func hgmlDeviceGetPowerState(hgmlDevice hgmlDevice, PState *Pstates) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPState, cPStateAllocMap := (*C.hgmlPstates_t)(unsafe.Pointer(PState)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetPowerState(chgmlDevice, cPState)
+	runtime.KeepAlive(cPStateAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetSupportedClocksThrottleReasons function as declared in hgml/hgml.h:3441
+func hgmlDeviceGetSupportedClocksThrottleReasons(hgmlDevice hgmlDevice, SupportedClocksThrottleReasons *uint64) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSupportedClocksThrottleReasons, cSupportedClocksThrottleReasonsAllocMap := (*C.ulonglong)(unsafe.Pointer(SupportedClocksThrottleReasons)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetSupportedClocksThrottleReasons(chgmlDevice, cSupportedClocksThrottleReasons)
+	runtime.KeepAlive(cSupportedClocksThrottleReasonsAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetTemperature function as declared in hgml/hgml.h:3442
+func hgmlDeviceGetTemperature(hgmlDevice hgmlDevice, SensorType TemperatureSensors, Temp *uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cSensorType, cSensorTypeAllocMap := (C.hgmlTemperatureSensors_t)(SensorType), cgoAllocsUnknown
+	cTemp, cTempAllocMap := (*C.uint)(unsafe.Pointer(Temp)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetTemperature(chgmlDevice, cSensorType, cTemp)
+	runtime.KeepAlive(cTempAllocMap)
+	runtime.KeepAlive(cSensorTypeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceGetViolationStatus function as declared in hgml/hgml.h:3443
+func hgmlDeviceGetViolationStatus(hgmlDevice hgmlDevice, PerfPolicyType PerfPolicyType, ViolTime *ViolationTime) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cPerfPolicyType, cPerfPolicyTypeAllocMap := (C.hgmlPerfPolicyType_t)(PerfPolicyType), cgoAllocsUnknown
+	cViolTime, cViolTimeAllocMap := (*C.hgmlViolationTime_t)(unsafe.Pointer(ViolTime)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceGetViolationStatus(chgmlDevice, cPerfPolicyType, cViolTime)
+	runtime.KeepAlive(cViolTimeAllocMap)
+	runtime.KeepAlive(cPerfPolicyTypeAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceResetApplicationsClocks function as declared in hgml/hgml.h:3444
+func hgmlDeviceResetApplicationsClocks(hgmlDevice hgmlDevice) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	__ret := C.hgmlDeviceResetApplicationsClocks(chgmlDevice)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceResetIcnLinkUtilizationCounter function as declared in hgml/hgml.h:3445
+func hgmlDeviceResetIcnLinkUtilizationCounter(hgmlDevice hgmlDevice, Link uint32, Counter uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
+	__ret := C.hgmlDeviceResetIcnLinkUtilizationCounter(chgmlDevice, cLink, cCounter)
+	runtime.KeepAlive(cCounterAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetApplicationsClocks function as declared in hgml/hgml.h:3446
+func hgmlDeviceSetApplicationsClocks(hgmlDevice hgmlDevice, MemClockMHz uint32, GraphicsClockMHz uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cMemClockMHz, cMemClockMHzAllocMap := (C.uint)(MemClockMHz), cgoAllocsUnknown
+	cGraphicsClockMHz, cGraphicsClockMHzAllocMap := (C.uint)(GraphicsClockMHz), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetApplicationsClocks(chgmlDevice, cMemClockMHz, cGraphicsClockMHz)
+	runtime.KeepAlive(cGraphicsClockMHzAllocMap)
+	runtime.KeepAlive(cMemClockMHzAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetGpcClkVfOffset function as declared in hgml/hgml.h:3447
+func hgmlDeviceSetGpcClkVfOffset(hgmlDevice hgmlDevice, Offset int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cOffset, cOffsetAllocMap := (C.int)(Offset), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetGpcClkVfOffset(chgmlDevice, cOffset)
+	runtime.KeepAlive(cOffsetAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetIcnLinkUtilizationControl function as declared in hgml/hgml.h:3448
+func hgmlDeviceSetIcnLinkUtilizationControl(hgmlDevice hgmlDevice, Link uint32, Counter uint32, Control *IcnLinkUtilizationControl, Reset uint32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cLink, cLinkAllocMap := (C.uint)(Link), cgoAllocsUnknown
+	cCounter, cCounterAllocMap := (C.uint)(Counter), cgoAllocsUnknown
+	cControl, cControlAllocMap := (*C.hgmlIcnLinkUtilizationControl_t)(unsafe.Pointer(Control)), cgoAllocsUnknown
+	cReset, cResetAllocMap := (C.uint)(Reset), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetIcnLinkUtilizationControl(chgmlDevice, cLink, cCounter, cControl, cReset)
+	runtime.KeepAlive(cResetAllocMap)
+	runtime.KeepAlive(cControlAllocMap)
+	runtime.KeepAlive(cCounterAllocMap)
+	runtime.KeepAlive(cLinkAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlDeviceSetMemClkVfOffset function as declared in hgml/hgml.h:3449
+func hgmlDeviceSetMemClkVfOffset(hgmlDevice hgmlDevice, Offset int32) Return {
+	chgmlDevice, chgmlDeviceAllocMap := *(*C.hgmlDevice_t)(unsafe.Pointer(&hgmlDevice)), cgoAllocsUnknown
+	cOffset, cOffsetAllocMap := (C.int)(Offset), cgoAllocsUnknown
+	__ret := C.hgmlDeviceSetMemClkVfOffset(chgmlDevice, cOffset)
+	runtime.KeepAlive(cOffsetAllocMap)
+	runtime.KeepAlive(chgmlDeviceAllocMap)
+	__v := (Return)(__ret)
+	return __v
+}
+
+// hgmlVgpuInstanceGetLicenseStatus function as declared in hgml/hgml.h:3450
+func hgmlVgpuInstanceGetLicenseStatus(hgmlVgpuInstance hgmlVgpuInstance, Licensed *uint32) Return {
+	chgmlVgpuInstance, chgmlVgpuInstanceAllocMap := (C.hgmlVgpuInstance_t)(hgmlVgpuInstance), cgoAllocsUnknown
+	cLicensed, cLicensedAllocMap := (*C.uint)(unsafe.Pointer(Licensed)), cgoAllocsUnknown
+	__ret := C.hgmlVgpuInstanceGetLicenseStatus(chgmlVgpuInstance, cLicensed)
+	runtime.KeepAlive(cLicensedAllocMap)
+	runtime.KeepAlive(chgmlVgpuInstanceAllocMap)
 	__v := (Return)(__ret)
 	return __v
 }

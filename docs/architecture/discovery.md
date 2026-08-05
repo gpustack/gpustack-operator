@@ -226,9 +226,11 @@ The injection is just the device-visibility env (`NVIDIA_VISIBLE_DEVICES` / `ASC
 
 ### Partitioned
 
-It materializes the requested hardware instance (NVIDIA MIG) on a card it selects itself and injects
-only that instance; see [Accelerator Requests](../accelerator-requests.md) and [NVIDIA MIG
-Operations](../operation/nvidia-mig.md).
+It materializes the requested hardware instance (NVIDIA MIG, or T-Head's own MIG-named partitioning) on
+a card it selects itself and injects only that instance — as device nodes rather than an environment
+variable for T-Head, which has no container-runtime hook; see [Accelerator
+Requests](../accelerator-requests.md), [NVIDIA MIG Operations](../operation/nvidia-mig.md) and [T-Head
+PPU Partitioning Operations](../operation/thead-mig.md).
 
 ### Sliced (logical slicing)
 
@@ -324,9 +326,10 @@ environment, so it needs no injection of its own). The trigger is the owner cont
 from the vendor responder's partition capability (`PhysicalSlicedResponder` — the same interface that
 materializes a partition, so a responder able to carve one can always name it), which reads the
 owner's durable node-local ownership record and proves the recorded instance still live before naming
-it (see [NVIDIA MIG Operations](../operation/nvidia-mig.md#requesting-a-mig-instance)). A responder
-without that capability, or one that cannot substantiate the identity, fails the admission closed
-rather than widening the grant back to the card.
+it (see [NVIDIA MIG Operations](../operation/nvidia-mig.md#requesting-a-mig-instance) and [T-Head PPU
+Partitioning Operations](../operation/thead-mig.md#requesting-a-partition)). A responder without that
+capability, or one that cannot substantiate the identity, fails the admission closed rather than
+widening the grant back to the card.
 
 The visibility resource is advertised per card as a pool of `SlicedResourceMaxSize` tokens outside the
 known-acceleratable families, so it never gates scheduling and admission never reads it as a second
@@ -444,7 +447,8 @@ vcann-rt's `npu_info.config` models a single physical NPU), so any future regres
 ---
 
 **See also** — [Accelerator Requests](../accelerator-requests.md) (the resource keys these families
-serve) · [NVIDIA MIG Operations](../operation/nvidia-mig.md) · [Settings](../settings.md)
+serve) · [NVIDIA MIG Operations](../operation/nvidia-mig.md) · [T-Head PPU Partitioning
+Operations](../operation/thead-mig.md) · [Settings](../settings.md)
 
 **Next** → [Scheduling Chain](scheduling-chain.md) — how these labels and the ledger become Kueue
 objects.

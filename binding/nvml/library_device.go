@@ -643,36 +643,71 @@ func (l GpuInstanceProfileInfoHandler) V3() (GpuInstanceProfileInfo_v3, Return) 
 }
 
 // GetGpuInstanceProfileInfo probes the GPU instance profile identified by profileId
-// directly from the device, without requiring an existing GPU instance. It prefers the
-// versioned NVML calls (which carry the profile Name) and falls back to the legacy call
-// (no Name) on older drivers, returning the first successful result or the last error.
-// An unsupported profile id surfaces as a non-success Return, which the caller skips.
+// directly from the device, without requiring an existing GPU instance. An unsupported
+// profile id surfaces as a non-success Return, which the caller skips.
 //
-// The V3 result is accepted only when it actually carries a Name: some drivers dispatch
-// the versioned call purely on the (v2==v3) struct size and write the v2 layout, leaving
-// the v3-offset Name empty; in that case V2 is queried, which returns the same profile
-// with its Name populated.
+// The versioned read is taken as V2, because it is the only one whose layout the driver
+// cannot mislay. Both versioned reads go through ONE NVML symbol and are told apart only by
+// the struct version the caller writes into the buffer it passes — and v2 and v3 are
+// exactly the SAME SIZE (152 bytes) while differing from their third field onward, v2
+// carrying an IsP2pSupported that v3 dropped and v3 a Capabilities that v2 lacks. A driver
+// that dispatches on the size encoded in that version word instead of on the version itself
+// therefore fills a v3-typed buffer with the v2 layout and reports success, and every field
+// from the third on is then read from the wrong offset: the name comes out of MemorySizeMB's
+// bytes, which reads as empty only for the memory sizes whose low byte happens to be zero.
+// That is the driver behavior observed on an H100 under the 570 series, and reading V2 into
+// a v2-typed buffer and copying field by field leaves no offset to get wrong.
+//
+// v3 adds exactly one field any caller here consumes — Capabilities, which marks a media or
+// graphics variant — so it is read separately and kept only when that read describes the
+// same profile V2 just described. Where the two disagree the capability is left unset and
+// the callers testing it fall back to the '+' in the profile name, which is the tell they
+// already treat as primary.
+//
+// A driver too old for the versioned symbol falls back to V1, which carries no name. So does
+// one that rejects the v2 struct while accepting the v3 one: there the v3 read is the only
+// one carrying a name, and a driver refusing v2 is by construction not the size-dispatching
+// kind this guards against.
 func (l Device) GetGpuInstanceProfileInfo(profileId uint32) (GpuInstanceProfileInfo_v3, Return) {
 	h := GpuInstanceProfileInfoHandler{
 		device:               l.handle,
 		gpuInstanceProfileId: profileId,
 		so:                   l.so,
 	}
-	if info, ret := h.V3(); ret.IsSuccess() && info.GetName() != "" {
+	if info, ret := h.V2(); ret.IsSuccess() {
+		if v3, v3ret := h.V3(); v3ret.IsSuccess() && describesSameProfile(info, v3) {
+			info.Capabilities = v3.Capabilities
+		}
 		return info, ret
 	}
-	if info, ret := h.V2(); ret.IsSuccess() {
+	if info, ret := h.V3(); ret.IsSuccess() {
 		return info, ret
 	}
 	return h.V1()
 }
 
-// GetName returns the canonical profile name (e.g. "1g.5gb") from the NUL-terminated C
-// char array. NVML reports it with a "MIG " prefix (e.g. "MIG 1g.5gb"), which is stripped
-// so the name matches the profile identifiers used in resource keys and user requests. It
-// is empty on the legacy (V1) path, which carries no name.
+// describesSameProfile reports whether two reads of one profile agree on everything both struct
+// versions carry. It is what makes a v3 read usable: a v3 buffer the driver filled with the v2 layout
+// reads its slice count out of IsP2pSupported, its memory size out of the field before it and its
+// name out of the memory size, so a read agreeing on all of those was laid out as asked for.
+//
+// The name is compared as a name rather than as the raw array, so trailing bytes the driver did or
+// did not write past the terminator cannot decide the answer.
+func describesSameProfile(a, b GpuInstanceProfileInfo_v3) bool {
+	return a.Id == b.Id &&
+		a.SliceCount == b.SliceCount &&
+		a.InstanceCount == b.InstanceCount &&
+		a.MemorySizeMB == b.MemorySizeMB &&
+		a.GetName() == b.GetName()
+}
+
+// GetName returns the canonical profile name (e.g. "1g.5gb") from the C char array, read no
+// further than the array itself: a library that fills every byte without terminating must not
+// be able to make this read past it. NVML reports the name with a "MIG " prefix (e.g.
+// "MIG 1g.5gb"), which is stripped so the name matches the profile identifiers used in resource
+// keys and user requests. It is empty on the legacy (V1) path, which carries no name.
 func (info *GpuInstanceProfileInfo_v3) GetName() string {
-	return strings.TrimPrefix(C.GoString((*C.char)(unsafe.Pointer(&info.Name[0]))), "MIG ")
+	return strings.TrimPrefix(binding.GoStringN(info.Name[:]), "MIG ")
 }
 
 // CreateComputeInstance creates a compute instance associated with the GPU instance using the specified profile information.
@@ -917,8 +952,14 @@ func (l Device) gpuInstancePossiblePlacements(symbol string, call gpuInstancePos
 		return nil, SUCCESS
 	}
 	placements := make([]GpuInstancePlacement, count)
-	ret := call(l.handle, profileId, &placements[0], &count)
-	return placements[:count], ret
+	if ret := call(l.handle, profileId, &placements[0], &count); !ret.IsSuccess() {
+		return nil, ret
+	}
+	// The out-count is the library's, and the buffer's length is ours: bound one by the other
+	// before slicing, as every other enumeration here does. A library reporting more than it was
+	// given must not be able to index past the buffer, and a failed fill must not be sliced at all.
+	count = min(count, uint32(len(placements)))
+	return placements[:count], SUCCESS
 }
 
 // GetGpuInstancePossiblePlacements returns the legal placements (start:size in
@@ -947,6 +988,17 @@ func (l Device) GetGpuInstancePossiblePlacements(profileId uint32) ([]GpuInstanc
 // the enum count is 17), so passing the creation Id there fails and drops every live
 // instance — silently emptying the occupancy ledger, which double-books placement slots
 // on allocation and hides instances from reclaim.
+//
+// That sizing is a ceiling, not a guess: NVML documents the possible-placements query as
+// returning all the placements legal for the profile regardless of whether MIG is enabled, not
+// the currently free ones, and two live instances of one profile cannot share a memory-slice
+// placement — so the live count can never exceed the placement count. An out-count equal to the
+// buffer is therefore a fully partitioned card, not a truncated read, which is why it is not
+// treated as an error.
+//
+// No legal placement means no instance can exist, so an empty placement list reports an empty
+// live set rather than probing further. A failed placement query is propagated as a failure and
+// never reaches that conclusion.
 func (l Device) GetGpuInstances(profileId uint32) ([]GpuInstance, Return) {
 	if l.so.Lookup("nvmlDeviceGetGpuInstances") != nil {
 		return nil, ERROR_FUNCTION_NOT_FOUND
@@ -970,6 +1022,9 @@ func (l Device) GetGpuInstances(profileId uint32) ([]GpuInstance, Return) {
 	if ret := nvmlDeviceGetGpuInstances(l.handle, profileId, &handles[0], &count); !ret.IsSuccess() {
 		return nil, ret
 	}
+	// Bound NVML's out-count by the buffer it was given: a driver reporting success with a larger
+	// count would otherwise index past the allocated handles and abort the process.
+	count = min(count, uint32(len(handles)))
 	instances := make([]GpuInstance, 0, count)
 	for i := uint32(0); i < count; i++ {
 		var info nvmlGpuInstanceInfo
@@ -988,31 +1043,42 @@ func (l Device) GetGpuInstances(profileId uint32) ([]GpuInstance, Return) {
 	return instances, SUCCESS
 }
 
-// GetComputeInstanceProfileInfo probes the compute-instance profile identified by
-// ciProfileId and ciEngProfileId on this GPU instance, without requiring an existing
-// compute instance. It is called before CreateComputeInstance to obtain the profile
-// info a compute instance is built from; for the kept "<C>g.<M>gb" profiles the
-// compute instance spans the whole GPU instance (slice-count-matched CI profile,
-// SHARED engine profile).
-func (l GpuInstance) GetComputeInstanceProfileInfo(ciProfileId, ciEngProfileId uint32) (ComputeInstanceProfileInfo, Return) {
+// GetComputeInstanceProfileInfo probes the compute-instance profile identified by the profile
+// ENUM INDEX ciProfileIndex (0..COMPUTE_INSTANCE_PROFILE_COUNT-1) and ciEngProfileId on this GPU
+// instance, without requiring an existing compute instance. It is called before
+// CreateComputeInstance to obtain the profile info a compute instance is built from — whose Id is
+// the creation id every other compute-instance call takes; for the kept "<C>g.<M>gb" profiles the
+// compute instance spans the whole GPU instance (slice-count-matched CI profile, SHARED engine
+// profile).
+func (l GpuInstance) GetComputeInstanceProfileInfo(ciProfileIndex, ciEngProfileId uint32) (ComputeInstanceProfileInfo, Return) {
 	if l.so.Lookup("nvmlGpuInstanceGetComputeInstanceProfileInfo") != nil {
 		return ComputeInstanceProfileInfo{}, ERROR_FUNCTION_NOT_FOUND
 	}
 	var info ComputeInstanceProfileInfo
-	ret := nvmlGpuInstanceGetComputeInstanceProfileInfo(l.gpuInstance, ciProfileId, ciEngProfileId, &info)
+	ret := nvmlGpuInstanceGetComputeInstanceProfileInfo(l.gpuInstance, ciProfileIndex, ciEngProfileId, &info)
 	return info, ret
 }
 
-// GetComputeInstances returns the live compute instances of the given profile on
-// this GPU instance. The buffer is sized from the profile's InstanceCount, queried
-// with the SHARED engine profile — the only engine profile GPUStack creates — and
-// each handle's info is read to populate the returned ComputeInstance values. Reclaim
-// uses this to destroy a GPU instance's compute instances before the instance itself.
-func (l GpuInstance) GetComputeInstances(ciProfileId uint32) ([]ComputeInstance, Return) {
+// GetComputeInstances returns the live compute instances of one compute-instance profile on this
+// GPU instance, and each handle's info is read to populate the returned ComputeInstance values.
+// Reclaim uses this to destroy a GPU instance's compute instances before the instance itself.
+//
+// ciProfileIndex is a profile ENUM INDEX (0..COMPUTE_INSTANCE_PROFILE_COUNT-1), the space the
+// profile-info probe takes. NVML's own enumeration call takes the creation Id the probe reports in
+// the profile record, which is a different space — the header names the two parameters apart — so
+// the looked-up Id is forwarded rather than the index. The two coincide for NVML's compute-instance
+// profiles, so this is the same value the enumeration has always been given here; it is forwarded
+// from the lookup so the call is right by construction rather than by that coincidence.
+//
+// The buffer is sized from the profile's InstanceCount, queried with the SHARED engine profile —
+// the only engine profile that exists — NVML_COMPUTE_INSTANCE_ENGINE_PROFILE_COUNT is 1 — so this
+// enumeration misses no compute instance, whoever created it. An out-count equal to that buffer is a GPU instance
+// filled to its profile's ceiling, not a truncated read.
+func (l GpuInstance) GetComputeInstances(ciProfileIndex uint32) ([]ComputeInstance, Return) {
 	if l.so.Lookup("nvmlGpuInstanceGetComputeInstances") != nil {
 		return nil, ERROR_FUNCTION_NOT_FOUND
 	}
-	profileInfo, ret := l.GetComputeInstanceProfileInfo(ciProfileId, COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED)
+	profileInfo, ret := l.GetComputeInstanceProfileInfo(ciProfileIndex, COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED)
 	if !ret.IsSuccess() {
 		return nil, ret
 	}
@@ -1024,9 +1090,12 @@ func (l GpuInstance) GetComputeInstances(ciProfileId uint32) ([]ComputeInstance,
 	// count is the in/out buffer-capacity argument; initialize it to the allocated handle count
 	// (see GetGpuInstances) so NVML is never handed a zero-capacity buffer.
 	count := uint32(len(handles))
-	if ret := nvmlGpuInstanceGetComputeInstances(l.gpuInstance, ciProfileId, &handles[0], &count); !ret.IsSuccess() {
+	if ret := nvmlGpuInstanceGetComputeInstances(
+		l.gpuInstance, profileInfo.Id, &handles[0], &count); !ret.IsSuccess() {
 		return nil, ret
 	}
+	// Bound NVML's out-count by the buffer it was given (see GetGpuInstances).
+	count = min(count, uint32(len(handles)))
 	instances := make([]ComputeInstance, 0, count)
 	for i := uint32(0); i < count; i++ {
 		var info nvmlComputeInstanceInfo

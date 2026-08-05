@@ -28,6 +28,7 @@ TRANSLATOR:
       - { action: ignore, from: "^__" }
       - { action: accept, from: "^HGML_" }
       - { action: accept, from: "^hgml" }
+      - { action: ignore, from: "^HGML_255_" }
       - { action: ignore, from: "HGML_VGPU_VIRTUALIZATION_CAP_MIGRATION" }
       - { action: ignore, from: "HGML_VGPU_PGPU_VIRTUALIZATION_CAP_MIGRATION" }
       - { action: ignore, from: "hgmlEccBitType_t" }

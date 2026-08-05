@@ -2,7 +2,7 @@
 # touch chart-related files, and publishes it to the gh-pages Helm repository
 # on version tags.
 
-name: ci-chart
+name: Chart
 
 permissions:
   contents: read
@@ -21,7 +21,7 @@ on:
       - "v*"
     paths:
       - "deploy/gpustack-operator/chart/**"
-      - ".github/workflows/ci-chart.yml"
+      - ".github/workflows/chart.yml"
       - ".github/configs/**"
       - "hack/**"
   pull_request:
@@ -30,7 +30,7 @@ on:
       - "v*-dev"
     paths:
       - "deploy/gpustack-operator/chart/**"
-      - ".github/workflows/ci-chart.yml"
+      - ".github/workflows/chart.yml"
       - ".github/configs/**"
       - "hack/**"
 
@@ -139,7 +139,7 @@ jobs:
             exit 1
           fi
 
-  pack:
+  publish:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     timeout-minutes: 30
     runs-on: ubuntu-24.04
@@ -175,7 +175,7 @@ jobs:
   release:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs:
-      - pack
+      - publish
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:

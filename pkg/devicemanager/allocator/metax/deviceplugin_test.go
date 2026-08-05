@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/go-logr/logr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
@@ -67,6 +68,40 @@ func newSlicedServer(mgr sgpuManager) *server {
 
 func allocateGPU0() map[deviceplugin.Resource]int32 {
 	return map[deviceplugin.Resource]int32{{Group: "c500", Device: "GPU-0"}: 1}
+}
+
+// A card whose drm indexes the detector could not read must not take the device plugin down with
+// it. The detector reads them from sysfs and records both numbers, the card number alone, or
+// nothing; this handler has no panic recovery, so indexing an absent one killed the process that
+// serves every allocation on the node — for every manufacturer — over one unreadable directory.
+// The nodes that cannot be named are left out instead.
+func TestGetContainerAllocateResponseWithoutDrmIndexes(t *testing.T) {
+	devs := metaxDevicesFixture()
+	// Neither number readable, and only the card number readable: the two shapes sysfs yields
+	// besides the full pair.
+	devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+	devs.Spec.Groups[0].Accelerators[1].PhysicalIndexes = []uint32{1}
+
+	s := &server{
+		ResourceServer: deviceplugin.ResourceServer{
+			Logger:         logr.Discard(),
+			Manufacturer:   Manufacturer,
+			AllocationMode: workercore.DeviceAllocationModeExclusive,
+		},
+	}
+	pod, ctr := slicedPod("pod-uid-no-drm", "ctr", 0, 0)
+	allocated := map[deviceplugin.Resource]int32{
+		{Group: "c500", Device: "GPU-0"}: 1,
+		{Group: "c500", Device: "GPU-1"}: 1,
+	}
+
+	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, ctr, devs, allocated)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	for _, d := range resp.Devices {
+		assert.NotContains(t, d.HostPath, "/dev/dri/renderD",
+			"a renderD index the detector never recorded names no node")
+	}
 }
 
 // A partial slice creates one sgpu subdevice and injects METAX_SGPUS with the hard

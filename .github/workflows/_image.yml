@@ -1,80 +1,85 @@
-# This workflow packs for dependent container images of the project.
+# This reusable workflow builds one container image under pack/ for a set of platforms and
+# assembles the multi-arch manifest.
+#
+# It exists because the caller workflows differ only in what they build and when — the event
+# model, the tag policy, and which changes count as "heavy" — while the build itself is the
+# same nine steps every time. Keeping those steps here means a new image needs only a thin
+# entrypoint, and a fix to the build applies to every image at once.
+#
+# The caller owns: its own "on:" triggers, the runner matrix (so it decides platform coverage
+# and whether the build is heavy), and the tag policy. This workflow owns everything from
+# checkout to manifest push.
 
-name: pack
+name: Image
 
 permissions:
   actions: read
-  contents: write
-  pull-requests: write
+  contents: read
 
 defaults:
   run:
     shell: bash
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       repository:
-        description: 'Repository of packed image.'
-        required: true
-        type: choice
-        options:
-          - ssh-server
-          - thead-ppu-devel
-      tag:
-        description: 'Tag of packed image.'
+        description: 'Image name under pack/, which is also the Docker Hub repository.'
         required: true
         type: string
-      # Allow passing build arguments at pack time, for an image input that must not be
-      # committed. Required by thead-ppu-devel: "PPU_SDK_URL=<presigned url>".
-      args:
-        description: 'Build arguments (space-separated KEY=VALUE), e.g. PPU_SDK_URL=<presigned url>.'
+      matrix:
+        description: 'JSON array of {"runner","platform"} objects, one per platform to build.'
+        required: true
+        type: string
+      tags:
+        description: 'docker/metadata-action "tags" block.'
+        required: true
+        type: string
+      flavor:
+        description: 'docker/metadata-action "flavor" block, minus the per-platform suffix this workflow adds itself.'
+        required: false
+        type: string
+        default: "latest=false"
+      suffix-on-latest:
+        description: 'Apply the per-platform suffix to the "latest" tag as well.'
+        required: false
+        type: boolean
+        default: false
+      push:
+        description: 'Push the images, and write the registry build cache. False builds only, which is what a pull request wants.'
+        required: false
+        type: boolean
+        default: false
+      build-args:
+        description: 'Build arguments, one KEY=VALUE per line. For values that are safe to render in the run log.'
         required: false
         type: string
         default: ""
+      build-args-secret:
+        description: 'Build arguments as a single space-separated "KEY=VALUE ..." string, expanded without ever echoing the values. For an input carrying a credential, such as a presigned URL.'
+        required: false
+        type: string
+        default: ""
+      go-cache:
+        description: 'Carry the Go build/module cache across runs. Only an image that compiles this repository needs it.'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      dockerhub-password:
+        required: true
 
 env:
-  INPUT_PASSWORD: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
+  INPUT_PASSWORD: ${{ secrets.dockerhub-password }}
   INPUT_REPOSITORY: ${{ inputs.repository }}
-  INPUT_TAG: ${{ inputs.tag }}
 
 jobs:
-  expand-matrix:
-    runs-on: ubuntu-24.04
-    outputs:
-      matrix: ${{ steps.expand-matrix.outputs.matrix }}
-    steps:
-      - name: Set Matrix
-        id: expand-matrix
-        run: |
-          #
-          # Platform coverage is per image: an image whose upstream ships only one
-          # architecture must not be built for the others, otherwise that leg fails and
-          # the manifest job cannot assemble a complete list.
-          #
-          #   - thead-ppu-devel: the T-Head PPU SDK ships targets/x86_64-linux only.
-          #
-          # The manifest job derives its platform list from this output, so it follows
-          # automatically.
-          #
-          AMD64='{"runner":"ubuntu-24.04","platform":"linux/amd64"}'
-          ARM64='{"runner":"ubuntu-24.04-arm","platform":"linux/arm64"}'
-          case "${INPUT_REPOSITORY}" in
-            thead-ppu-devel) ENTRIES="${AMD64}" ;;
-            *) ENTRIES="${AMD64},${ARM64}" ;;
-          esac
-          MATRIX="$(jq -cr . <<<"[${ENTRIES}]")"
-          echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
-          echo "DEBUG: matrix=${MATRIX}"
-
-  pack:
+  build:
     timeout-minutes: 360
-    needs:
-      - expand-matrix
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJson(needs.expand-matrix.outputs.matrix) }}
+        include: ${{ fromJson(inputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Prepare Env
@@ -97,6 +102,18 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      - name: Maximize Docker Build Space
+        # A caller's heavy detection sees only its own event's diff, so it cannot know the registry
+        # cache went stale in an earlier commit — and whichever build inherits that miss rebuilds
+        # every vendor SDK stage, overruns a standard runner's disk, and dies before it can write
+        # any job log at all, leaving nothing to read. This reclaim folds the idle /mnt temp disk
+        # into Docker's storage, on top of removing preinstalled toolchains. The "-8x" variant a
+        # heavy build targets has the room already, so it skips the reclaim.
+        if: ${{ !contains(matrix.runner, '-8x') }}
+        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
+        with:
+          deep-clean: true
+          root-reserve-mb: 40960
       - name: Setup BuildX
         id: setup-buildx
         uses: docker/setup-buildx-action@v3
@@ -110,7 +127,38 @@ jobs:
             --allow-insecure-entitlement=security.insecure
             --oci-worker-net=host
             --oci-worker-gc-keepstorage=204800
+            --oci-max-parallelism=1
+      - name: Setup BuildX Cache
+        id: setup-buildx-cache
+        if: ${{ inputs.go-cache }}
+        uses: actions/cache@v4
+        with:
+          path: |-
+            ${{ github.workspace }}/.cache/go-build
+            ${{ github.workspace }}/.cache/go-mod
+            ${{ github.workspace }}/.sbin
+          key: ci-${{ matrix.platform }}-${{ hashFiles('go.sum') }}
+      - name: Restore BuildX Cache
+        if: ${{ inputs.go-cache }}
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-map: |-
+            {
+              "${{ github.workspace }}/.cache/go-build": {
+                "target": "/root/.cache/go-build"
+              },
+              "${{ github.workspace }}/.cache/go-mod": {
+                "target": "/go/pkg/mod"
+              },
+              "${{ github.workspace }}/.sbin": {
+                "target": "/usr/local/go/src/gpustack.ai/gpustack/.sbin"
+              }
+            }
+          dockerfile: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
+          skip-extraction: ${{ steps.setup-buildx-cache.outputs.cache-hit }}
       - name: Login DockerHub
+        if: ${{ inputs.push }}
         uses: docker/login-action@v3
         with:
           username: ${{ env.INPUT_USERNAME }}
@@ -121,9 +169,12 @@ jobs:
         with:
           images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
           tags: |
-            type=raw,value=${{ env.INPUT_TAG }}
+            ${{ inputs.tags }}
+          # The per-platform suffix is this workflow's own: the matrix builds one image per
+          # platform and the manifest job below assembles them under the unsuffixed tag.
           flavor: |
-            suffix=-${{ env.INPUT_PLATFORM }},onlatest=true
+            ${{ inputs.flavor }}
+            suffix=-${{ env.INPUT_PLATFORM }}${{ inputs.suffix-on-latest && ',onlatest=true' || '' }}
       - name: Get Build Cache Ref
         run: |
           #
@@ -192,8 +243,9 @@ jobs:
           echo "DEBUG: CACHE_FROM_REFS=${CACHE_FROM_REFS}"
           echo "DEBUG: CACHE_TO_REF=${CACHE_TO_REF}"
       - name: Get Build Args
+        if: ${{ inputs.build-args-secret != '' }}
         env:
-          INPUT_ARGS: ${{ inputs.args }}
+          INPUT_ARGS: ${{ inputs.build-args-secret }}
         run: |
           #
           # Expand the space-separated "KEY=VALUE ..." input into one build argument per
@@ -227,11 +279,12 @@ jobs:
           shm-size: "16G"
           provenance: false
           sbom: false
-          push: true
+          push: ${{ inputs.push }}
           file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
           context: ${{ github.workspace }}
           platforms: ${{ matrix.platform }}
           build-args: |
+            ${{ inputs.build-args }}
             ${{ env.BUILD_ARGS }}
           tags: |
             ${{ steps.metadata.outputs.tags }}
@@ -239,13 +292,18 @@ jobs:
             ${{ steps.metadata.outputs.labels }}
           cache-from: |
             ${{ env.CACHE_FROM_REFS }}
+          # Writing the cache needs the same credentials pushing does, so it follows "push".
+          # This is what keeps the cache fresh for later runs: a build that cannot write it
+          # leaves the next one to redo whatever it had to rebuild.
           cache-to: |
-            type=registry,mode=max,compression=gzip,ref=${{ env.CACHE_TO_REF }},ignore-error=true
+            ${{ inputs.push && format('type=registry,mode=max,compression=gzip,ref={0},ignore-error=true', env.CACHE_TO_REF) || '' }}
 
   manifest:
+    # Nothing was pushed to assemble otherwise.
+    if: ${{ inputs.push }}
     needs:
-      - expand-matrix
-      - pack
+      - build
+    timeout-minutes: 30
     runs-on: ubuntu-24.04
     steps:
       - name: Prepare Env
@@ -262,12 +320,25 @@ jobs:
         with:
           username: ${{ env.INPUT_USERNAME }}
           password: ${{ env.INPUT_PASSWORD }}
+      - name: Get Metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        # The same tags as the pack job, without the per-platform suffix: these are the names
+        # the assembled manifests take, and the suffixed ones are their entries.
+        with:
+          images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
+          tags: |
+            ${{ inputs.tags }}
+          flavor: |
+            ${{ inputs.flavor }}
       - name: Create
         env:
-          INPUT_MATRIX: ${{ needs.expand-matrix.outputs.matrix }}
+          INPUT_MATRIX: ${{ inputs.matrix }}
+          INPUT_MANIFEST_IMAGES: ${{ toJson(fromJson(steps.metadata.outputs.json).tags) }}
         run: |
-          MANIFEST_IMAGE="${INPUT_NAMESPACE}/${INPUT_REPOSITORY}:${INPUT_TAG}"
-          docker manifest create --amend "${MANIFEST_IMAGE}" \
-            $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
-          docker manifest inspect "${MANIFEST_IMAGE}"
-          docker manifest push --purge "${MANIFEST_IMAGE}"
+          for MANIFEST_IMAGE in $(echo "${INPUT_MANIFEST_IMAGES}" | jq -r '.[]'); do
+            docker manifest create --amend "${MANIFEST_IMAGE}" \
+              $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
+            docker manifest inspect "${MANIFEST_IMAGE}"
+            docker manifest push --purge "${MANIFEST_IMAGE}"
+          done

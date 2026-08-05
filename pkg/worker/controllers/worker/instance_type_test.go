@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -646,6 +647,82 @@ func TestAcceleratorViews_PartitionProfileLedgerMultiNode(t *testing.T) {
 		profileCount("1g.10gb", 12), profileCount("1g.20gb", 0), profileCount("2g.20gb", 0),
 		profileCount("3g.40gb", 2), profileCount("4g.40gb", 0), profileCount("7g.80gb", 0),
 	}, partitioned.RemainingProfiles, "remainingProfiles")
+}
+
+// TestPublishPartitionProfileNames pins the profile-name boundary on the user-facing side of
+// the status. All three partition views are assembled from the Devices ledger, which carries
+// the manufacturer's own spelling, but they are the menu a user reads to pick a profile — and
+// the name picked has to read the same way as the resource key it becomes.
+func TestPublishPartitionProfileNames(t *testing.T) {
+	cases := []struct {
+		name         string
+		manufacturer string
+		// vendorNames are the profile names as the ledger carries them; every view is seeded
+		// with all of them, since they cross the boundary together or not at all.
+		vendorNames []string
+		wantNames   []string
+	}{
+		{
+			name:         "a separator-less manufacturer publishes the separator",
+			manufacturer: nodefeature.ManufacturerTHead,
+			vendorNames:  []string{"4g48gb", "8g96gb"},
+			wantNames:    []string{"4g.48gb", "8g.96gb"},
+		},
+		{
+			name:         "a manufacturer writing the separator is untouched",
+			manufacturer: nodefeature.ManufacturerNVIDIA,
+			vendorNames:  []string{"1g.10gb", "3g.40gb"},
+			wantNames:    []string{"1g.10gb", "3g.40gb"},
+		},
+		{
+			name:         "a profile of another shape is untouched",
+			manufacturer: nodefeature.ManufacturerTHead,
+			vendorNames:  []string{"1c.12g"},
+			wantNames:    []string{"1c.12g"},
+		},
+		{
+			// No matching flavor yet, so nothing names the manufacturer. Leave the names alone
+			// and converge on a later reconcile rather than publish a guess.
+			name:         "a status with no detail yet is left alone",
+			manufacturer: "",
+			vendorNames:  []string{"4g48gb"},
+			wantNames:    []string{"4g48gb"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var st workercore.InstanceTypeStatus
+			st.Detail.Manufacturer = c.manufacturer
+			for i, n := range c.vendorNames {
+				st.Detail.SlicedDetail.Physical.Profiles = append(st.Detail.SlicedDetail.Physical.Profiles,
+					workercore.AcceleratorSlicedPhysicalDetailProfile{Name: n, Count: int32(i + 1)})
+				st.AcceleratorPartitioned.AllocatedProfiles = append(
+					st.AcceleratorPartitioned.AllocatedProfiles, profileCount(n, int32(i+1)))
+				st.AcceleratorPartitioned.RemainingProfiles = append(
+					st.AcceleratorPartitioned.RemainingProfiles, profileCount(n, int32(i+1)))
+			}
+
+			publishPartitionProfileNames(&st)
+
+			offered := make([]string, 0, len(st.Detail.SlicedDetail.Physical.Profiles))
+			for _, p := range st.Detail.SlicedDetail.Physical.Profiles {
+				offered = append(offered, p.Name)
+			}
+			assert.Equal(t, c.wantNames, offered, "the offered inventory")
+
+			for view, counts := range map[string][]workercore.AcceleratorProfileCount{
+				"allocatedProfiles": st.AcceleratorPartitioned.AllocatedProfiles,
+				"remainingProfiles": st.AcceleratorPartitioned.RemainingProfiles,
+			} {
+				names := make([]string, 0, len(counts))
+				for _, p := range counts {
+					names = append(names, p.Name)
+				}
+				assert.Equal(t, c.wantNames, names, view)
+				assert.True(t, slices.IsSorted(names), "%s stays name-sorted after publishing", view)
+			}
+		})
+	}
 }
 
 // TestClusterQueueCPUResource pins the non-accelerated CPU view: capacity is the

@@ -231,6 +231,14 @@ type physicalCard struct {
 // Status-side allocation (mode + scalar remaining + RemainingProfiles) — matched by accelerator
 // ID, the shape collectCards joins.
 func physicalDevices(cards ...physicalCard) workercore.Devices {
+	return physicalDevicesOf("nvidia", cards...)
+}
+
+// physicalDevicesOf is physicalDevices for a named manufacturer, which the profile-name
+// boundary depends on: a card's per-profile ledger is keyed as its own manufacturer's library
+// spells a profile, so the manufacturer is what decides whether a published demand has to be
+// converted before the lookup.
+func physicalDevicesOf(manufacturer string, cards ...physicalCard) workercore.Devices {
 	specAccels := make([]workercore.Accelerator, len(cards))
 	statusAccels := make([]workercore.AcceleratorAllocation, len(cards))
 	for i, c := range cards {
@@ -257,10 +265,10 @@ func physicalDevices(cards ...physicalCard) workercore.Devices {
 	}
 	return workercore.Devices{
 		Spec: workercore.DevicesSpec{
-			Groups: []workercore.DevicesGroup{{ID: "g0", Manufacturer: "nvidia", Accelerators: specAccels}},
+			Groups: []workercore.DevicesGroup{{ID: "g0", Manufacturer: manufacturer, Accelerators: specAccels}},
 		},
 		Status: workercore.DevicesStatus{
-			Groups: []workercore.DevicesAllocationGroup{{ID: "g0", Manufacturer: "nvidia", Accelerators: statusAccels}},
+			Groups: []workercore.DevicesAllocationGroup{{ID: "g0", Manufacturer: manufacturer, Accelerators: statusAccels}},
 		},
 	}
 }
@@ -324,6 +332,31 @@ func TestNodeDevicesFeasibilityPartitioned(t *testing.T) {
 			assert.Equal(t, c.want, got)
 		})
 	}
+}
+
+// TestNodeDevicesFeasibilityPartitionedVendorSpelledLedger pins the profile-name boundary at
+// the feasibility check. The demand names the profile as its published resource key spells it,
+// while the card's per-profile ledger is keyed as the manufacturer's own library spells it —
+// comparing the two verbatim matches no row, reads as a full card, and would leave every
+// request for a published profile in Retry forever on a pool with room for it. The verdict
+// still quotes the published name, since that is the name the user wrote.
+func TestNodeDevicesFeasibilityPartitionedVendorSpelledLedger(t *testing.T) {
+	roomyCard := []workercore.Devices{physicalDevicesOf(nodefeature.ManufacturerTHead, physicalCard{
+		id: "p0", mode: workercore.DeviceAllocationModeNone,
+		remainingProfiles: map[string]int32{"4g48gb": 2}, placementsCached: true,
+	})}
+
+	got, msg := nodeDevicesFeasibility(roomyCard, []familyDemand{
+		{family: nodefeature.ResourceFamilyPartitioned, cards: 1, profile: "4g.48gb"},
+	})
+	assert.Equal(t, kueue.CheckStateReady, got, "a published profile name against a vendor-spelled ledger")
+	assert.Contains(t, msg, `"4g.48gb"`, "the verdict quotes the name the user wrote")
+
+	// The conversion resolves one spelling to the other, it does not make every name match.
+	got, _ = nodeDevicesFeasibility(roomyCard, []familyDemand{
+		{family: nodefeature.ResourceFamilyPartitioned, cards: 1, profile: "8g.96gb"},
+	})
+	assert.Equal(t, kueue.CheckStateRetry, got, "a profile the card does not offer")
 }
 
 // TestNodeDevicesFeasibilityPartitionedCountsPlacements pins that a partition demand is counted

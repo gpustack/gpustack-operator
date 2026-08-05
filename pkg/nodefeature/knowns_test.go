@@ -91,6 +91,183 @@ func TestGetAcceleratablePartitionedProfileResourceName(t *testing.T) {
 	}
 }
 
+func TestNormalizePartitionedProfileName(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"bare geometry passes through", "1c.12g", "1c.12g"},
+		{"vendor feature prefix is dropped", "MIG 1c.12g", "1c.12g"},
+		{"several prefix words are dropped", "PPU MIG 1c.12g", "1c.12g"},
+		{"surrounding whitespace is trimmed", "  1c.12g\t", "1c.12g"},
+		{"inner whitespace runs are one separator", "mig \t 1c.12g", "1c.12g"},
+		{"case is folded", "1C.12G", "1c.12g"},
+		// A lone field is taken as the geometry: nothing here knows a vendor's prefix
+		// words, so a prefix with no geometry behind it is indistinguishable from a
+		// geometry. It normalizes consistently on both ends of the round trip, which is
+		// what the transform owes its callers.
+		{"a lone prefix word is taken as the geometry", "MIG ", "mig"},
+		{"whitespace only normalizes to empty", " \t ", ""},
+		{"empty stays empty", "", ""},
+		// Characters are never rewritten to make a name key-safe: an unusable name is
+		// rejected by the caller instead, so a key always maps back to its profile.
+		{"invalid characters are kept, not rewritten", "1c.12g+me", "1c.12g+me"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, NormalizePartitionedProfileName(c.in))
+		})
+	}
+}
+
+func TestNormalizePartitionedProfileNameRoundTrip(t *testing.T) {
+	// The published key carries the normalized name, and PartitionedProfileOf must
+	// return exactly what a driver-name match is performed against.
+	profile := NormalizePartitionedProfileName("MIG 3G.40GB")
+	key := GetAcceleratablePartitionedProfileResourceName(ManufacturerNVIDIA, profile)
+	assert.Equal(t, core.ResourceName("nvidia.com/gpu.partitioned.mig-3g.40gb"), key)
+
+	got, ok := PartitionedProfileOf(key)
+	assert.True(t, ok)
+	assert.Equal(t, profile, got)
+	assert.Equal(t, profile, NormalizePartitionedProfileName(got))
+}
+
+func TestPublishPartitionedProfileName(t *testing.T) {
+	cases := []struct {
+		name         string
+		manufacturer string
+		in           string
+		want         string
+	}{
+		{"a separator-less geometry gains the separator", ManufacturerTHead, "4g48gb", "4g.48gb"},
+		{"a whole-card geometry gains it too", ManufacturerTHead, "8g96gb", "8g.96gb"},
+		{"multi-digit numbers stay whole", ManufacturerTHead, "16g192gb", "16g.192gb"},
+		// Idempotent, so a caller holding either spelling gets the published one.
+		{"an already published name is unchanged", ManufacturerTHead, "4g.48gb", "4g.48gb"},
+		// Another shape is published as written rather than guessed at.
+		{"a compute-slice geometry is untouched", ManufacturerTHead, "1c.12g", "1c.12g"},
+		{"a memory-engine suffix is untouched", ManufacturerTHead, "4g48gb+me", "4g48gb+me"},
+		{"a nameless profile stays empty", ManufacturerTHead, "", ""},
+		// NVIDIA writes the separator itself, so its published keys must not move a byte.
+		{"a manufacturer writing the separator is never touched", ManufacturerNVIDIA, "3g.40gb", "3g.40gb"},
+		{"nor is one of its names in the other shape", ManufacturerNVIDIA, "4g48gb", "4g48gb"},
+		{"an unresolved manufacturer is a pass-through", "", "4g48gb", "4g48gb"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, PublishPartitionedProfileName(c.manufacturer, c.in))
+		})
+	}
+}
+
+func TestVendorPartitionedProfileName(t *testing.T) {
+	cases := []struct {
+		name         string
+		manufacturer string
+		in           string
+		want         string
+	}{
+		{"a published geometry loses the separator", ManufacturerTHead, "4g.48gb", "4g48gb"},
+		{"a whole-card geometry loses it too", ManufacturerTHead, "8g.96gb", "8g96gb"},
+		{"multi-digit numbers stay whole", ManufacturerTHead, "16g.192gb", "16g192gb"},
+		{"an already vendor-spelled name is unchanged", ManufacturerTHead, "4g48gb", "4g48gb"},
+		{"a compute-slice geometry is untouched", ManufacturerTHead, "1c.12g", "1c.12g"},
+		{"a nameless profile stays empty", ManufacturerTHead, "", ""},
+		// The reverse must leave NVIDIA alone above all: stripping its separator would
+		// produce a name its own driver never reports, so no partition could be created.
+		{"a manufacturer writing the separator keeps it", ManufacturerNVIDIA, "3g.40gb", "3g.40gb"},
+		{"an unresolved manufacturer is a pass-through", "", "4g.48gb", "4g.48gb"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, VendorPartitionedProfileName(c.manufacturer, c.in))
+		})
+	}
+}
+
+func TestPartitionedProfileNameBoundaryRoundTrip(t *testing.T) {
+	// What the detector normalizes out of the vendor library, per manufacturer, and the key
+	// each one must publish. The round trip below is the contract the whole boundary rests
+	// on: a name that cannot come back is a key that admits a request allocation can never
+	// match.
+	cases := []struct {
+		name         string
+		manufacturer string
+		vendorName   string
+		key          core.ResourceName
+	}{
+		{
+			name:         "a separator-less vendor publishes the separator",
+			manufacturer: ManufacturerTHead,
+			vendorName:   NormalizePartitionedProfileName("MIG 4g48gb"),
+			key:          "alibabacloud.com/ppu.partitioned.mig-4g.48gb",
+		},
+		{
+			name:         "its whole-card profile too",
+			manufacturer: ManufacturerTHead,
+			vendorName:   NormalizePartitionedProfileName("MIG 8g96gb"),
+			key:          "alibabacloud.com/ppu.partitioned.mig-8g.96gb",
+		},
+		{
+			name:         "a manufacturer writing the separator keeps its key byte-identical",
+			manufacturer: ManufacturerNVIDIA,
+			vendorName:   "3g.40gb",
+			key:          "nvidia.com/gpu.partitioned.mig-3g.40gb",
+		},
+		{
+			name:         "a profile of another shape survives untouched",
+			manufacturer: ManufacturerTHead,
+			vendorName:   NormalizePartitionedProfileName("MIG 1c.12g"),
+			key:          "alibabacloud.com/ppu.partitioned.mig-1c.12g",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.key, GetAcceleratablePartitionedProfileResourceName(c.manufacturer, c.vendorName),
+				"the key a detector publishes from the vendor's own name")
+
+			// A request written with the published name yields the same key, so the two ends
+			// of the boundary cannot address different resources.
+			published, ok := PartitionedProfileOf(c.key)
+			assert.True(t, ok)
+			assert.Equal(t, c.key, GetAcceleratablePartitionedProfileResourceName(c.manufacturer, published),
+				"the key rebuilt from the published name")
+
+			// And the key resolves back to exactly the vendor's name, which is what the
+			// Devices ledger, the ownership marker and the driver seam are keyed by.
+			vendor, ok := VendorPartitionedProfileOf(c.key)
+			assert.True(t, ok)
+			assert.Equal(t, c.vendorName, vendor)
+		})
+	}
+}
+
+func TestVendorPartitionedProfileOf(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      core.ResourceName
+		profile string
+		ok      bool
+	}{
+		{"a published thead key resolves to the vendor name", "alibabacloud.com/ppu.partitioned.mig-4g.48gb", "4g48gb", true},
+		{"a key already carrying the vendor name resolves to itself", "alibabacloud.com/ppu.partitioned.mig-4g48gb", "4g48gb", true},
+		{"an nvidia key keeps its separator", "nvidia.com/gpu.partitioned.mig-3g.40gb", "3g.40gb", true},
+		{"a profile of another shape is untouched", "alibabacloud.com/ppu.partitioned.mig-1c.12g", "1c.12g", true},
+		{"the counting key is not a profile", "alibabacloud.com/ppu.partitioned.units", "", false},
+		{"the coarse token key is not a profile", "alibabacloud.com/ppu.partitioned", "", false},
+		{"an unknown base is not a profile", "example.com/foo.partitioned.mig-4g.48gb", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			profile, ok := VendorPartitionedProfileOf(c.in)
+			assert.Equal(t, c.ok, ok)
+			assert.Equal(t, c.profile, profile)
+		})
+	}
+}
+
 func TestPartitionedProfileOf(t *testing.T) {
 	cases := []struct {
 		name    string

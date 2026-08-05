@@ -153,6 +153,27 @@ func MapNumaNodeStrToCPUAffinity(node string) string {
 	return ListToStrRange(list)
 }
 
+// GoStringN converts a fixed-size C character array to a Go string, stopping at the first NUL byte
+// or at the end of the array, whichever comes first.
+//
+// It is the bounded counterpart of C.GoString, which stops only at a NUL: given an array a library
+// filled to its last byte without terminating, C.GoString keeps reading past the array — through
+// whatever follows it in memory and, at worst, past the allocation. The array's own length is the
+// only bound that does not depend on the library behaving, so it is the one used here.
+//
+// The type parameter covers both mappings of C's char: signed on the platforms where the generated
+// types say int8, unsigned where they say uint8.
+func GoStringN[C ~int8 | ~uint8](chars []C) string {
+	buf := make([]byte, 0, len(chars))
+	for i := range chars {
+		if chars[i] == 0 {
+			break
+		}
+		buf = append(buf, byte(chars[i]))
+	}
+	return string(buf)
+}
+
 // BitmaskToStr converts a slice of integer bitmasks to a string representation of the set bits.
 //
 // The input is a slice of integer bitmasks, where each bitmask represents a set of integers (e.g., CPU cores or NUMA nodes).

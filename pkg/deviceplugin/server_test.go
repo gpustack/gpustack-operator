@@ -994,6 +994,49 @@ func TestDevicesReconciler_GetAllocatingPod_Feasibility(t *testing.T) {
 // indistinguishable to it. A partition's demand is its geometry, and the offered tokens name no
 // card the allocation will use, so the test is against the whole node — the candidate whose
 // profile the node can still host wins over an older one it cannot.
+// TestPartitionProfileOf pins the reverse half of the profile-name boundary at the device
+// plugin: a container's request is read back in the manufacturer's own spelling, because every
+// consumer here matches it against the Devices ledger, records it in the allocation and the
+// ownership marker, or hands it to the vendor library — a name the library never reports cannot
+// create a partition.
+func TestPartitionProfileOf(t *testing.T) {
+	cases := []struct {
+		name    string
+		key     core.ResourceName
+		profile string
+		ok      bool
+	}{
+		{
+			name: "a published key reads back as its manufacturer spells it",
+			key: nodefeature.GetAcceleratablePartitionedProfileResourceName(
+				nodefeature.ManufacturerTHead, "4g48gb"),
+			profile: "4g48gb", ok: true,
+		},
+		{
+			name: "a manufacturer writing the separator keeps it",
+			key: nodefeature.GetAcceleratablePartitionedProfileResourceName(
+				nodefeature.ManufacturerNVIDIA, "3g.40gb"),
+			profile: "3g.40gb", ok: true,
+		},
+		{
+			name: "the counting key is not a profile request",
+			key:  nodefeature.GetAcceleratablePartitionedUnitsResourceName(nodefeature.ManufacturerTHead),
+		},
+		{name: "a container requesting no partition", key: core.ResourceCPU},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			require.NotEmpty(t, c.key, "the fixture's resource key")
+			ctr := &core.Container{Resources: core.ResourceRequirements{
+				Limits: core.ResourceList{c.key: resource.MustParse("1")},
+			}}
+			profile, ok := partitionProfileOf(ctr)
+			assert.Equal(t, c.ok, ok)
+			assert.Equal(t, c.profile, profile)
+		})
+	}
+}
+
 func TestResourceServer_CandidateFeasible_Partitioned(t *testing.T) {
 	const nodeName = "node-feasible-partition"
 	partitionRes := nodefeature.GetAcceleratableResourceName(nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModePartitioned)
@@ -1679,6 +1722,78 @@ func TestResourceServer_Allocate_PartitionedIgnoresOfferedCard(t *testing.T) {
 	require.Len(t, reserved.Groups[0].Accelerators, 1)
 	assert.Equal(t, "dev-1", reserved.Groups[0].Accelerators[0].ID,
 		"the plugin must place on the card that can host the profile, not the one kubelet named")
+}
+
+// TestResourceServer_Allocate_PartitionedUnshapedChargesTheProfile covers the partition Pod the
+// webhook never saw: its object selector is scoped to queued Pods, so a partition submitted
+// outside the scheduling chain reaches the plugin with no units key. The token count is not a
+// usable stand-in for this family — one token is one whole card — so the plugin folds the
+// profile's own memory instead, and charges the same as it would have for a shaped request.
+func TestResourceServer_Allocate_PartitionedUnshapedChargesTheProfile(t *testing.T) {
+	const cardMib = 8 * 1024
+
+	cases := []struct {
+		name string
+		// profileMib is the profile's published per-instance memory; 0 is the capability
+		// published before its memory detail was.
+		profileMib int64
+		want       int32
+	}{
+		{
+			name:       "a quarter-card profile charges a quarter of the card",
+			profileMib: cardMib / 4,
+			want:       nodefeature.ResourceMaxUnits / 4,
+		},
+		{
+			name:       "a whole-card profile charges the whole card",
+			profileMib: cardMib,
+			want:       nodefeature.ResourceMaxUnits,
+		},
+		{
+			// Fail soft rather than charge a figure it could not derive: a partition whose
+			// memory the capability does not carry keeps the token count it came with.
+			name:       "a profile with no memory detail keeps the token count",
+			profileMib: 0,
+			want:       1,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			const nodeName = "node-partition-unshaped"
+			const profile = "1g.10gb"
+
+			devs := partitionedDevices(nodeName,
+				partitionedCard("dev-0", 0, profile,
+					workercore.AcceleratorPhysicalPlacement{Start: 0, Length: 2}))
+			devs.Spec.Groups[0].Memory = cardMib
+			devs.Spec.Groups[0].Accelerators[0].Status.PhysicalSliced.Profiles[0].MemoryMib = c.profileMib
+
+			// units = 0: the Pod carries the card key and the profile key, and nothing folded
+			// a per-card budget into it.
+			pod := partitionPod(nodeName, "p", "pod-unshaped", profile, 0)
+			cli := nodeFixture(devs, pod)
+
+			rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+			s := partitionServer(rec, physicalActuatorResponder{
+				placements: map[Resource][]workercore.AcceleratorPhysicalPlacement{
+					{Group: "grp-0", Device: "dev-0"}: {{Start: 0, Length: 2}},
+				},
+			})
+
+			_, err := s.Allocate(context.Background(), &AllocateRequest{
+				ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+			})
+			require.NoError(t, err)
+
+			reserved, ok := reservedWorkload(rec, "pod-unshaped")
+			require.True(t, ok)
+			require.Len(t, reserved.Groups, 1)
+			require.Len(t, reserved.Groups[0].Accelerators, 1)
+			assert.Equal(t, c.want, reserved.Groups[0].Accelerators[0].Allocated)
+		})
+	}
 }
 
 // TestResourceServer_Allocate_PartitionedPublishesSelection pins the mutex-window guarantee: the

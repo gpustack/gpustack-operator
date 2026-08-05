@@ -695,6 +695,37 @@ func (s *ResourceServer) partitionCandidates(
 	return candidates, byID
 }
 
+// partitionProfileUnits folds a partition profile into the per-card counting units one instance
+// of it commits, from the capability the detector published: the profile's own per-instance
+// memory as a share of one whole card's. It is the same VRAM-anchored fold the Pod webhook
+// performs, so a partition costs the same whether or not the webhook shaped the request.
+//
+// The profile is a property of the product, so the first card offering it answers for the group.
+// Zero means the group cannot answer — an unknown profile, or a capability published before its
+// memory detail was — and the caller keeps whatever budget it already had rather than charging a
+// figure it could not derive.
+func (s *ResourceServer) partitionProfileUnits(devs *workercore.Devices, profile string) int64 {
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		if grp.Manufacturer != s.Manufacturer || grp.Memory == 0 {
+			continue
+		}
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if !device.IsPartitioned(acc.Status) {
+				continue
+			}
+			for k := range acc.Status.PhysicalSliced.Profiles {
+				prof := &acc.Status.PhysicalSliced.Profiles[k]
+				if prof.Name == profile && prof.MemoryMib > 0 {
+					return nodefeature.MemoryMibToUnits(prof.MemoryMib, int64(grp.Memory))
+				}
+			}
+		}
+	}
+	return 0
+}
+
 // profilePlacements returns a card's legal placements for one partition profile, or nil when
 // the card does not offer it (or has not published its placement ledger yet).
 func profilePlacements(
@@ -824,10 +855,10 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		// check refuses a card whose committed units would exceed capacity and the InstanceType
 		// views report the true remaining. Fall back to the token count when the units request
 		// is absent (a Pod the webhook did not shape).
-		unitsPerToken := int64(1)
+		unitsPerToken, unitsRequested := int64(1), false
 		if unitsResName := s.unitsResourceName(); unitsResName != "" {
 			if q, ok := ctr.Resources.Limits[unitsResName]; ok && q.Value() > 0 {
-				unitsPerToken = q.Value()
+				unitsPerToken, unitsRequested = q.Value(), true
 			}
 		}
 
@@ -849,6 +880,18 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 				return grpcstatus.Errorf(grpccodes.FailedPrecondition,
 					"container %q of pod %s requests %s but names no partition profile",
 					ctr.Name, kubemeta.GetNamespacedNameKey(pod), resName)
+			}
+			// A partition names its own cost even when nothing shaped the request. The Pod
+			// webhook is scoped to queued Pods, so a partition Pod submitted outside the
+			// scheduling chain carries no units key — and for this family the token count is
+			// not a usable stand-in: one token is one whole card, which would charge a single
+			// unit for a partition that occupies half the card or all of it, leaving a card
+			// carved to capacity reading as untouched in the scalar ledger. The profile is the
+			// missing budget, so fold it here the way the webhook would have.
+			if !unitsRequested {
+				if units := s.partitionProfileUnits(devs, profile); units > 0 {
+					unitsPerToken = units
+				}
 			}
 			// A retried Allocate must land back on the card it already used. The kubelet
 			// re-runs Allocate for a container whose checkpoint it lost — a restart while the
@@ -1031,9 +1074,14 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 // partitionProfileOf returns the single "<base>.partitioned.<kind>-<profile>" profile a
 // container requests, and whether it requests one. The Pod webhook guarantees at most one
 // distinct profile per container, so the first match is authoritative.
+//
+// The name comes back in the manufacturer's own spelling, not the key's published one: every
+// consumer here matches it against the Devices record, records it in the allocation and the
+// ownership marker, or hands it to the vendor library, and a name the library does not
+// recognize cannot create a partition.
 func partitionProfileOf(ctr *core.Container) (string, bool) {
 	for name := range ctr.Resources.Limits {
-		if profile, ok := nodefeature.PartitionedProfileOf(name); ok {
+		if profile, ok := nodefeature.VendorPartitionedProfileOf(name); ok {
 			return profile, true
 		}
 	}

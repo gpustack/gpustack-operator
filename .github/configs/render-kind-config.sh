@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Renders kind-config.yaml.tmpl for a given kindest/node image into a real file that
-# `kind create cluster --config` can consume directly. ci-chart.yml's matrix calls this
+# `kind create cluster --config` can consume directly. chart.yml's matrix calls this
 # same script (into $RUNNER_TEMP) so a developer reproducing a matrix leg locally gets an
 # identically rendered cluster, not a re-implementation of the substitution.
 #

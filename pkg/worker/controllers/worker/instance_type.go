@@ -1,7 +1,9 @@
 package worker
 
 import (
+	"cmp"
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -366,9 +368,44 @@ func (r *InstanceTypeReconciler) computeStatus(
 		}
 	}
 	st.Detail = r.computeDetail(ctx, it, devices)
+	publishPartitionProfileNames(&st)
 	st.Entrance = nodefeature.FormatLocalQueueName(cq.Name)
 	st.Phase, st.PhaseMessage = apistatus.GetSummaryOfClusterQueue(cq)
 	return st
+}
+
+// publishPartitionProfileNames rewrites every partition profile name the status exposes into
+// the published spelling. The three views are assembled from the Devices ledger, which carries
+// the manufacturer's own spelling, but they are what a user reads to pick a profile — and the
+// name they pick has to read the same way as the resource key it becomes, so the boundary is
+// crossed here, once, for the whole status.
+//
+// It runs after Detail is computed because Detail is what names the manufacturer; a status with
+// no Detail yet (no matching flavor) leaves the names alone and converges on a later reconcile,
+// and requesting either spelling is admitted meanwhile since the key builder publishes both.
+// The two per-profile ledgers are re-sorted, so the published order stays the name order a
+// reader (and the diff against the stored status) expects.
+func publishPartitionProfileNames(st *workercore.InstanceTypeStatus) {
+	manufacturer := st.Detail.Manufacturer
+	if manufacturer == "" {
+		return
+	}
+
+	profiles := st.Detail.SlicedDetail.Physical.Profiles
+	for i := range profiles {
+		profiles[i].Name = nodefeature.PublishPartitionedProfileName(manufacturer, profiles[i].Name)
+	}
+	for _, counts := range [][]workercore.AcceleratorProfileCount{
+		st.AcceleratorPartitioned.AllocatedProfiles,
+		st.AcceleratorPartitioned.RemainingProfiles,
+	} {
+		for i := range counts {
+			counts[i].Name = nodefeature.PublishPartitionedProfileName(manufacturer, counts[i].Name)
+		}
+		slices.SortFunc(counts, func(a, b workercore.AcceleratorProfileCount) int {
+			return cmp.Compare(a.Name, b.Name)
+		})
+	}
 }
 
 // isGenericCollapsedPool reports whether the InstanceType is the CPU-manufacturer-agnostic

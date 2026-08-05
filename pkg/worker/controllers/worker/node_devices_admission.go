@@ -61,7 +61,11 @@ type familyDemand struct {
 	family       nodefeature.ResourceFamily
 	cards        int32
 	unitsPerCard int32
-	profile      string
+	// profile is the requested partition profile in the published spelling its resource key
+	// carries — the spelling every verdict message quotes back to the user. A card's own
+	// ledger is keyed by its manufacturer's spelling, so the feasibility check converts per
+	// card rather than carrying a second copy here.
+	profile string
 }
 
 // parseFamilyDemands reads the accelerator demands off a Workload's pod templates, one
@@ -254,6 +258,10 @@ func unitsPerCardFor(d familyDemand) int32 {
 // Status-side allocation (mode, scalar remaining, and the per-profile remaining ledger),
 // matched by accelerator ID.
 type cardLedger struct {
+	// manufacturer is the card's own manufacturer, carried because the per-profile ledger
+	// below is keyed by that manufacturer's spelling of a profile name while a demand names
+	// the published one.
+	manufacturer      string
 	capability        workercore.AcceleratorStatus
 	mode              workercore.DeviceAllocationMode
 	remaining         int32
@@ -277,6 +285,7 @@ func collectCards(devices []workercore.Devices) []cardLedger {
 			accs := d.Status.Groups[gi].Accelerators
 			for ai := range accs {
 				cards = append(cards, cardLedger{
+					manufacturer:      d.Status.Groups[gi].Manufacturer,
 					capability:        capByID[accs[ai].ID],
 					mode:              accs[ai].Mode,
 					remaining:         accs[ai].Remaining,
@@ -394,7 +403,10 @@ func fitPartitionDemand(cards []cardLedger, budgets []cardBudget, d familyDemand
 		// Every profile is charged one placement, whatever its size: the ledger reports
 		// remaining per profile, and profiles of one card overlap physically, so a finer
 		// account would need the placement intervals the plugin resolves at Allocate time.
-		free := remainingProfileCount(c.remainingProfiles, d.profile) - budgets[i].placements
+		// The demand names the profile as the published key spells it; this card's ledger is
+		// keyed as its own manufacturer spells it.
+		vendorProfile := nodefeature.VendorPartitionedProfileName(c.manufacturer, d.profile)
+		free := remainingProfileCount(c.remainingProfiles, vendorProfile) - budgets[i].placements
 		if free <= 0 {
 			continue
 		}
@@ -425,7 +437,9 @@ func partitionProfilesHavePlacements(profiles []workercore.AcceleratorPhysicalSl
 }
 
 // remainingProfileCount returns how many more instances of profile the card can still build,
-// from its RemainingProfiles ledger (zero when the profile is absent).
+// from its RemainingProfiles ledger (zero when the profile is absent). The ledger is keyed by
+// the manufacturer's own profile spelling, so profile must be that spelling — a published name
+// would silently miss every row and read as a full card.
 func remainingProfileCount(profiles []workercore.AcceleratorProfileCount, profile string) int32 {
 	for i := range profiles {
 		if profiles[i].Name == profile {

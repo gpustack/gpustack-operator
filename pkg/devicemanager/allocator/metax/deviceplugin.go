@@ -160,15 +160,29 @@ func (s *server) GetContainerAllocateResponse(
 				continue
 			}
 
-			if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
-				ctrResp.Devices = append(ctrResp.Devices, pDev)
+			// Each recorded index is guarded by its own length, as the sliced path below already
+			// does. The detector reads them from this vendor's sysfs drm directory, which yields
+			// both numbers, the card number alone, or nothing at all — so a pair is not something
+			// this can assume. Indexing an absent one panics, and no interceptor recovers a panic
+			// in this handler: the process that serves every allocation on the node dies with it,
+			// for every manufacturer, over one card whose drm directory could not be read.
+			if len(devsAccelerator.PhysicalIndexes) > 0 {
+				if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
+					ctrResp.Devices = append(ctrResp.Devices, pDev)
+				}
+			} else {
+				s.Logger.Info("no recorded drm index for an allocated card; its device nodes cannot be "+
+					"named and are not injected",
+					"card", devsAccelerator.ID)
 			}
 			if len(ctrResp.Devices) == 1 {
 				continue
 			}
 
-			if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
-				ctrResp.Devices = append(ctrResp.Devices, pDev)
+			if len(devsAccelerator.PhysicalIndexes) > 1 {
+				if pDev := deviceplugin.NewRWDevicef("/dev/dri/renderD%d", devsAccelerator.PhysicalIndexes[1]); pDev != nil {
+					ctrResp.Devices = append(ctrResp.Devices, pDev)
+				}
 			}
 		}
 	}

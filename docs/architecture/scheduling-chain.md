@@ -59,6 +59,16 @@ The per-profile key is **geometry-aware and ledger-derived**, not a static ceili
 carved on an 80 GB card, `…partitioned.mig-7g.80gb` reads 0 while `…partitioned.mig-3g.40gb` still
 reads 1 free instance.
 
+`<profile>` is the **published** profile name, which is not always the one the vendor's own CLI prints.
+A vendor that spells the geometry with no separator between its two numbers (T-Head writes `4g48gb`
+where NVIDIA writes `3g.40gb`) has the separator added on publication, so a partition of either vendor
+reads the same way in a Pod spec, and so does the `InstanceType`'s offered inventory and per-profile
+ledgers. Below that boundary the vendor's own spelling is kept everywhere — the `Devices` record, the
+device manager's on-disk ownership markers and every call into the vendor library — because a name the
+library does not report cannot create a partition. A name outside that two-number shape is published
+exactly as the driver reports it. See [T-Head PPU Partitioning
+Operations](../operation/thead-mig.md#how-partition-profiles-are-discovered).
+
 > **Why both terms** — the scheduler fits a Pod by subtracting the requests of the Pods already on the
 > node, so publishing bare `remaining` would subtract every live instance twice. A card whose ledger
 > has not been published yet falls back to its static per-profile ceiling rather than to zero, so a
@@ -91,12 +101,13 @@ partitioned card gets no `.partitioned.*` key.
 > saturated, which would delete the keys while instances are live.
 
 Stale cleanup covers all four `.sliced.*` suffixes, `.partitioned.units` and every per-profile
-partition key. Enabling or disabling NVIDIA MIG on a card is a manual `nvidia-smi` operation the
-operator only observes on the next Device Manager detection — see [NVIDIA MIG
-Operations](../operation/nvidia-mig.md), whose [three-configuration
+partition key. Enabling or disabling hardware partitioning on a card is a manual vendor-CLI operation
+(`nvidia-smi` for NVIDIA, `ppu-smi mig` for T-Head) the operator only observes on the next Device Manager
+detection — see [NVIDIA MIG Operations](../operation/nvidia-mig.md), whose [three-configuration
 walkthrough](../operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node) shows the
 disjoint populations on a recorded 8-card node, including a **mixed** one where both families are
-advertised at once.
+advertised at once, and [T-Head PPU Partitioning Operations](../operation/thead-mig.md) for the same
+procedure on T-Head.
 
 ## The unit spec is not derived from node capacity
 

@@ -426,10 +426,14 @@ func partitionProfile(
 // partitionContainerUnits validates a container's partition profile request against the fronting
 // InstanceType's observed inventory and returns the .partitioned.units it folds to. A
 // not-yet-computed Detail is a retryable rejection; a profile the pool does not offer, or a card
-// count above the pool's per-profile instance ceiling, is a permanent rejection. The fold is
-// MemoryMibToUnits(profile.MemoryMib, cardVRAM) — the same VRAM-anchored fold the logical
-// .sliced.memory-mib path uses, so a partition instance and a logical slice of the same VRAM
-// charge identical credits.
+// count above the pool's per-profile instance ceiling, is a permanent rejection.
+//
+// The fold is VRAM-anchored: a profile charges the share of one whole card its own per-instance
+// memory occupies — the profile's memory over the card's, as a percentage, times the units one
+// percent of a card is worth. On a 96 GiB card a profile of 48 GiB therefore folds to
+// 50 x 16000 = 800000 units, and one of 96 GiB to 100 x 16000 = 1600000, the full per-card
+// basis. It is the same fold the logical .sliced.memory-mib path uses, so a partition instance
+// and a logical slice of the same VRAM charge identical credits.
 func (r *PodWebhook) partitionContainerUnits(
 	ctx context.Context, pod *core.Pod, ctr *core.Container, base core.ResourceName, profile string,
 ) (int64, error) {

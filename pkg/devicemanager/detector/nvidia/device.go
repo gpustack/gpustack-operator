@@ -189,14 +189,19 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			grpIndex = len(grpList) - 1
 		}
 
+		// The recorded minor number is what a card's device node is NAMED after on the vendors that
+		// build one from it (/dev/dri/card<minor> and friends), so it is left ABSENT when the driver
+		// cannot answer for it rather than substituted by the enumeration index: a substituted value is
+		// indistinguishable from a real minor at every later consumer, which would then build a device
+		// path out of a guess. No allocator of this vendor reads the field today; publishing a number
+		// the driver never gave is what the next consumer would inherit.
 		var physicalIndexes []uint32
-		{
-			minorNum, ret := dev.GetMinorNumber()
-			if ret.IsSuccess() {
-				physicalIndexes = []uint32{minorNum}
-			} else {
-				physicalIndexes = []uint32{uint32(i)}
-			}
+		if minorNum, ret := dev.GetMinorNumber(); ret.IsSuccess() {
+			physicalIndexes = []uint32{minorNum}
+		} else {
+			logger.V(3).Info("recorded no minor number for a card whose driver could not answer for it; "+
+				"a consumer that names a device node after that number cannot address this card",
+				"card", uuid, "reason", ret.Error())
 		}
 
 		topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
@@ -213,8 +218,21 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			// transition is not partitioned yet and is re-detected after the administrator's
 			// reset + DeviceManager restart. This runs per card, fixing the old placeholder's
 			// first-card-only-seed defect.
-			if migCurrent, _, _ := dev.GetMigMode(); migCurrent == nvml.DEVICE_MIG_ENABLE {
-				profiles := detectMigProfiles(dev, memory)
+			//
+			// A mode the driver could not read is treated as MIG off, as it always has been, but
+			// it is no longer treated in silence: since a card in the mode reports ONLY its MIG
+			// profiles, an administrator who enabled MIG would otherwise see a card quietly
+			// advertising the logical-slice capability it cannot serve. A driver answering that
+			// the mode is unsupported is not a failure — that is a card which does not do MIG.
+			migCurrent, _, migRet := dev.GetMigMode()
+			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
+				uuid, _ := dev.GetUUID()
+				klog.Background().Error(migRet, "Could not read a card's MIG mode, so it is reported as "+
+					"MIG off; if MIG is in fact enabled, the card advertises logical slicing it cannot serve",
+					"device", uuid)
+			}
+			if migCurrent == nvml.DEVICE_MIG_ENABLE {
+				profiles := detectMigProfiles(dev)
 				status.PhysicalSliced = device.AcceleratorPhysicalSliced{
 					Profiles: profiles,
 					Count:    maxProfileCount(profiles),

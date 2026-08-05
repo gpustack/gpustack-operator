@@ -159,8 +159,8 @@ func parseMarker(path string) (sgpuMarker, error) {
 	return m, nil
 }
 
-// writeMarker publishes a marker via a temp file + atomic rename, so a concurrent
-// scanner never reads a partially written record.
+// writeMarker publishes a marker durably: a concurrent scanner never reads a partial record,
+// and a record that has been written survives an unclean shutdown.
 func writeMarker(path string, m sgpuMarker) error {
 	dir := filepath.Dir(path)
 	if err := osx.MkdirAll(dir, 0o777); err != nil {
@@ -170,27 +170,8 @@ func writeMarker(path string, m sgpuMarker) error {
 	if err != nil {
 		return fmt.Errorf("marshal marker: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".metax-sgpu-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp marker: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("write temp marker: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("close temp marker: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("chmod temp marker: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("rename marker into place: %w", err)
+	if err := osx.DurableWrite(path, data, 0o644); err != nil {
+		return fmt.Errorf("write marker %q: %w", path, err)
 	}
 	return nil
 }

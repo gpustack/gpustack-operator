@@ -253,6 +253,12 @@ same card are unaffected.
   scheduled onto a node that can host only one of them — the second fails its allocation closed and is retried.
 - The `+me` / `+me.all` / `+gfx` profile variants are excluded from the inventory (see
   [Supported profiles](#supported-profiles)).
+- **A profile the driver enumerates no legal placement for is excluded too**, along with one whose
+  placement query failed. A profile's memory-slice span is read from its placement records and has no
+  other source, so without them the span could only be guessed — and the span is what an instance's
+  identity is matched by. Nothing is lost: the per-profile ledger is placement-aware, so such a profile
+  would be a requestable key whose allocation could never succeed. The card and profile ids are named in
+  a warning.
 - **The old per-profile key is gone.** A MIG profile used to be requested through the *logical* slicing
   family, as a `mig-<profile>` segment on `nvidia.com/gpu.sliced`; it is now
   `nvidia.com/gpu.partitioned.mig-<profile>`, with no translation and not even a rejection by name — a Pod

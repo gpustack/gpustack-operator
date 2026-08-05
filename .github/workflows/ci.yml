@@ -1,6 +1,6 @@
 # This workflow runs for continuous integration (CI) of the project.
 
-name: ci
+name: CI
 
 permissions:
   actions: read
@@ -12,18 +12,30 @@ defaults:
     shell: bash
 
 on:
-  workflow_dispatch: { }
+  workflow_dispatch:
+    inputs:
+      heavy:
+        description: 'Build on the larger "-8x" runners: "auto" decides from the changed files, "true" forces them, "false" keeps the standard runners.'
+        required: false
+        type: choice
+        options:
+          - "auto"
+          - "true"
+          - "false"
+        default: "auto"
   push:
     branches:
       - "main"
       - "v*-dev"
     tags:
       - "v*"
+    # NB(thxCode): pack/ is deliberately absent. pack/gpustack-operator/ holds the Dockerfile
+    # this workflow builds, so ignoring it meant a change there never built the image it
+    # defines, and never refreshed the registry build cache either — leaving the next
+    # unrelated commit to absorb a full rebuild of every vendor SDK stage.
     paths-ignore:
-      - "!.github/workflows/ci.yml"
       - "deploy/**"
       - "docs/**"
-      - "pack/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
@@ -36,10 +48,8 @@ on:
       - "main"
       - "v*-dev"
     paths-ignore:
-      - "!.github/workflows/ci.yml"
       - "deploy/**"
       - "docs/**"
-      - "pack/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
@@ -47,10 +57,6 @@ on:
       - "**.jpeg"
       - "**.gif"
       - "**.webp"
-
-env:
-  INPUT_PASSWORD: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
-  INPUT_REPOSITORY: gpustack-operator
 
 jobs:
   expand-matrix:
@@ -69,6 +75,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAVY_INPUT: ${{ github.event.inputs.heavy || 'auto' }}
         run: |
           #
           # A change to the operator Dockerfile, go.sum, or this CI workflow either
@@ -77,6 +84,16 @@ jobs:
           # changed files against its base, and when present mark the build "heavy" so
           # the matrix targets the "-8x" runner variant.
           #
+          # An explicit "heavy" input overrides that, because the detection can only see
+          # this repository: a vendor base image moving under a mutable tag voids the
+          # registry cache without changing a single file here, and then only the person
+          # dispatching the run knows the build is about to be a full one.
+          #
+          if [[ "${HEAVY_INPUT}" != "auto" ]]; then
+            echo "heavy=${HEAVY_INPUT}" >>"$GITHUB_OUTPUT"
+            echo "DEBUG: heavy=${HEAVY_INPUT} (forced by input)"
+            exit 0
+          fi
           HEAVY="false"
           BASE=""
           case "${EVENT_NAME}" in
@@ -92,7 +109,7 @@ jobs:
           else
             CHANGED="$(git show --name-only --format='' HEAD)"
           fi
-          if grep -qxE 'pack/gpustack-operator/Dockerfile|go\.sum|\.github/workflows/ci\.yml' <<<"${CHANGED}"; then
+          if grep -qxE 'pack/gpustack-operator/Dockerfile|go\.sum|\.github/workflows/(ci|_image)\.yml' <<<"${CHANGED}"; then
             HEAVY="true"
           fi
           echo "heavy=${HEAVY}" >>"$GITHUB_OUTPUT"
@@ -123,251 +140,38 @@ jobs:
           EOF
           MATRIX="$(jq -cr . matrix.json)"
           echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
-          echo "DEBUG: matrix=${MATRIX}"
+          echo "DEBUG: MATRIX=${MATRIX}"
 
-  pack:
-    timeout-minutes: 360
+  image:
     needs:
       - expand-matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.expand-matrix.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Prepare Env
-        env:
-          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          INPUT_PLATFORM: ${{ matrix.platform }}
-        run: |
-          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          INPUT_PLATFORM=$(echo "${INPUT_PLATFORM}" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
-          echo "INPUT_NAMESPACE=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "INPUT_PLATFORM=${INPUT_PLATFORM}" >> $GITHUB_ENV
-          echo "DEBUG: INPUT_NAMESPACE=${INPUT_NAMESPACE}"
-          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
-          echo "DEBUG: INPUT_PLATFORM=${INPUT_PLATFORM}"
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - name: Setup BuildX
-        id: setup-buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=-1
-            env.BUILDKIT_STEP_LOG_MAX_SPEED=-1
-          buildkitd-flags: |
-            --allow-insecure-entitlement=network.host
-            --allow-insecure-entitlement=security.insecure
-            --oci-worker-net=host
-            --oci-worker-gc-keepstorage=204800
-            --oci-max-parallelism=1
-      - name: Setup BuildX Cache
-        id: setup-buildx-cache
-        uses: actions/cache@v4
-        with:
-          path: |-
-            ${{ github.workspace }}/.cache/go-build
-            ${{ github.workspace }}/.cache/go-mod
-            ${{ github.workspace }}/.sbin
-          key: ci-${{ matrix.platform }}-${{ hashFiles('go.sum') }}
-      - name: Restore BuildX Cache
-        uses: reproducible-containers/buildkit-cache-dance@v3
-        with:
-          builder: ${{ steps.setup-buildx.outputs.name }}
-          cache-map: |-
-            {
-              "${{ github.workspace }}/.cache/go-build": {
-                "target": "/root/.cache/go-build"
-              },
-              "${{ github.workspace }}/.cache/go-mod": {
-                "target": "/go/pkg/mod"
-              },
-              "${{ github.workspace }}/.sbin": {
-                "target": "/usr/local/go/src/gpustack.ai/gpustack/.sbin"
-              }
-            }
-          dockerfile: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
-          skip-extraction: ${{ steps.setup-buildx-cache.outputs.cache-hit }}
-      - name: Login DockerHub
-        if: ${{ github.event_name != 'pull_request' }}
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.INPUT_USERNAME }}
-          password: ${{ env.INPUT_PASSWORD }}
-      - name: Get Metadata
-        id: metadata
-        uses: docker/metadata-action@v5
-        # NB(thxCode): Don't forget to update the Get Metadata step in the manifest job if you change the tags format here.
-        with:
-          images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
-          tags: |
-            type=ref,event=pr
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,prefix=dev-,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=branch,enable=${{ contains(github.ref, 'refs/heads/v') && endsWith(github.ref, '-dev') }}
-            type=sha,prefix={{branch}}-,enable=${{ contains(github.ref, 'refs/heads/v') && endsWith(github.ref, '-dev') }}
-            type=pep440,pattern={{raw}}
-            type=pep440,pattern=v{{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-          flavor: |
-            latest=false
-            suffix=-${{ env.INPUT_PLATFORM }}
-      - name: Get Build Cache Ref
-        run: |
-          #
-          # Use different cache ref for different branches.
-          #
-          # Examples:
-          # CACHE_FROM_REFS
-          #   - vX.Y.Z                 -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}" + "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}"
-          #   - PR/PUSH to branch      -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}" + "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}"
-          # CACHE_TO_REF
-          #   - vX.Y.Z                 -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}"
-          #   - PUSH to branch         -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}"
-          #
-          # Stories:
-          # CACHE_FROM_REFS
-          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          # CACHE_TO_REF
-          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #
-          # A version/branch-specific cache ref only gets refreshed by builds on that
-          # exact ref (e.g. a release tag), so it goes stale against the default
-          # branch's cache between releases. Always cache-from the default branch
-          # ref too, in addition to the version/branch-specific one, so a release
-          # build still hits the layers the default branch kept warm meanwhile. A
-          # nonexistent registry cache ref is a no-op for buildx, not a failure, so
-          # no existence check is needed.
-          #
-          DEFAULT_BRANCH="main"
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            REF="${GITHUB_REF#refs/tags/}"
-            IFS="." read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${REF}"
-            VERSION="${VERSION_MAJOR}.${VERSION_MINOR}"
-            CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}-${INPUT_PLATFORM}"
-            CACHE_TO_REF="${CACHE_FROM_REF}"
-          else
-            REF="${GITHUB_BASE_REF:-${GITHUB_REF}}"
-            BRANCH="${REF#refs/heads/}"
-            BRANCH="${BRANCH%-dev}"
-            CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}-${INPUT_PLATFORM}"
-            CACHE_TO_REF="${CACHE_FROM_REF}"
-          fi
-          CACHE_FROM_DEFAULT_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}-${INPUT_PLATFORM}"
-          CACHE_FROM_REFS="type=registry,ref=${CACHE_FROM_REF}"
-          if [[ "${CACHE_FROM_REF}" != "${CACHE_FROM_DEFAULT_REF}" ]]; then
-            CACHE_FROM_REFS="${CACHE_FROM_REFS}
-          type=registry,ref=${CACHE_FROM_DEFAULT_REF}"
-          fi
-          {
-            echo "CACHE_FROM_REFS<<CACHE_FROM_REFS_EOF"
-            echo "${CACHE_FROM_REFS}"
-            echo "CACHE_FROM_REFS_EOF"
-          } >> $GITHUB_ENV
-          echo "CACHE_TO_REF=${CACHE_TO_REF}" >> $GITHUB_ENV
-          echo "DEBUG: GITHUB_BASE_REF=${GITHUB_BASE_REF}"
-          echo "DEBUG: GITHUB_REF=${GITHUB_REF}"
-          echo "DEBUG: CACHE_FROM_REFS=${CACHE_FROM_REFS}"
-          echo "DEBUG: CACHE_TO_REF=${CACHE_TO_REF}"
-      - name: Package
-        uses: docker/build-push-action@v6
-        with:
-          allow: |
-            network.host
-            security.insecure
-          ulimit: |
-            nofile=65536:65536
-          shm-size: "16G"
-          provenance: false
-          sbom: false
-          push: ${{ github.event_name != 'pull_request' }}
-          file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
-          context: ${{ github.workspace }}
-          platforms: ${{ matrix.platform }}
-          build-args: |
-            GPUSTACK_GIT_COMMIT=${{ github.sha }}
-            GPUSTACK_GIT_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          tags: |
-            ${{ steps.metadata.outputs.tags }}
-          labels: |
-            ${{ steps.metadata.outputs.labels }}
-          cache-from: |
-            ${{ env.CACHE_FROM_REFS }}
-          cache-to: |
-            ${{ github.event_name != 'pull_request' && format('type=registry,mode=max,compression=gzip,ref={0},ignore-error=true', env.CACHE_TO_REF) || '' }}
-
-  manifest:
-    if: ${{ github.event_name != 'pull_request' }}
-    needs:
-      - expand-matrix
-      - pack
-    timeout-minutes: 30
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Prepare Env
-        env:
-          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
-        run: |
-          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          echo "INPUT_NAMESPACE=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "DEBUG: INPUT_NAMESPACE=${INPUT_NAMESPACE}"
-          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
-      - name: Login DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.INPUT_USERNAME }}
-          password: ${{ env.INPUT_PASSWORD }}
-      - name: Get Metadata
-        id: metadata
-        uses: docker/metadata-action@v5
-        # NB(thxCode): Don't forget to update the Get Metadata step in the pack job if you change the tags format here.
-        with:
-          images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
-          tags: |
-            type=ref,event=pr
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,prefix=dev-,enable=${{ github.ref == 'refs/heads/main' }}
-            type=ref,event=branch,enable=${{ contains(github.ref, 'refs/heads/v') && endsWith(github.ref, '-dev') }}
-            type=sha,prefix={{branch}}-,enable=${{ contains(github.ref, 'refs/heads/v') && endsWith(github.ref, '-dev') }}
-            type=pep440,pattern={{raw}}
-            type=pep440,pattern=v{{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
-          flavor: |
-            latest=false
-      - name: Create
-        env:
-          INPUT_MATRIX: ${{ needs.expand-matrix.outputs.matrix }}
-          INPUT_MANIFEST_IMAGES: ${{ toJson(fromJson(steps.metadata.outputs.json).tags) }}
-        run: |
-          for MANIFEST_IMAGE in $(echo "${INPUT_MANIFEST_IMAGES}" | jq -r '.[]'); do
-            docker manifest create --amend "${MANIFEST_IMAGE}" \
-              $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
-            docker manifest inspect "${MANIFEST_IMAGE}"
-            docker manifest push --purge "${MANIFEST_IMAGE}"
-          done
-
+    uses: ./.github/workflows/_image.yml
+    with:
+      repository: gpustack-operator
+      matrix: ${{ needs.expand-matrix.outputs.matrix }}
+      # A pull request builds without pushing, so it also writes no registry cache.
+      push: ${{ github.event_name != 'pull_request' }}
+      go-cache: true
+      tags: |
+        type=ref,event=pr
+        type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+        type=sha,prefix=dev-,enable=${{ github.ref == 'refs/heads/main' }}
+        type=ref,event=branch,enable=${{ contains(github.ref, 'refs/heads/v') && endsWith(github.ref, '-dev') }}
+        type=sha,prefix={{branch}}-,enable=${{ contains(github.ref, 'refs/heads/v') && endsWith(github.ref, '-dev') }}
+        type=pep440,pattern={{raw}}
+        type=pep440,pattern=v{{major}}.{{minor}},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+      flavor: |
+        latest=false
+      build-args: |
+        GPUSTACK_GIT_COMMIT=${{ github.sha }}
+        GPUSTACK_GIT_VERSION=${{ github.ref_type == 'tag' && github.ref_name || '' }}
+    secrets:
+      dockerhub-password: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
 
   release:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     needs:
-      - manifest
+      - image
     timeout-minutes: 30
     runs-on: ubuntu-24.04
     permissions:

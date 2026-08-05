@@ -22,10 +22,12 @@ variable "name_prefix" {
 
 variable "release" {
   # Named "release" to match clusters/k3s and clusters/eks. Only "<major>.<minor>" is accepted
-  # (e.g. "1.31"); 1.31+ is required for the cuda12.8/ubuntu24.04 GPU driver preset.
-  description = "Kubernetes version for the cluster control plane and node groups, e.g. '1.31'."
+  # (e.g. "1.33"). Nebius refuses a version within a month of its end of life -- the create call
+  # fails with "k8s version <x> is deprecated and cannot be used" -- so this default tracks a
+  # version that is still current, not the oldest one that works.
+  description = "Kubernetes version for the cluster control plane and node groups, e.g. '1.33'."
   type        = string
-  default     = "1.31"
+  default     = "1.33"
 }
 
 variable "ssh_public_key" {

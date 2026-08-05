@@ -555,6 +555,30 @@ func TestDesiredAcceleratorCapacityNewFormat(t *testing.T) {
 	}
 }
 
+// TestDesiredAcceleratorCapacityPublishesPartitionProfileName pins the forward half of the
+// profile-name boundary where it is observable: the Devices record carries the manufacturer's
+// own spelling of a profile, and the node must advertise the published one — so a partition of
+// this vendor reads the same way as NVIDIA's in a Pod spec. The counts are untouched by the
+// rename, and a profile of another shape is advertised as written.
+func TestDesiredAcceleratorCapacityPublishesPartitionProfileName(t *testing.T) {
+	const node = "node-thead-profile"
+	nd := withPartitionedPool(acceleratableNode(node, "thead-ppu-zw810e", "1", "96Gi", true),
+		nodefeature.ManufacturerTHead, 2)
+	devs := devicesWithGroups(node, slicedGroup(nodefeature.ManufacturerTHead, "ppu-zw810e",
+		migCardWithProfiles("0", map[string]int32{"4g48gb": 2, "8g96gb": 1, "1c.12g": 4})))
+
+	got := desiredAcceleratorCapacity(nd, devs)
+	for profile, want := range map[string]int64{"4g.48gb": 2, "8g.96gb": 1, "1c.12g": 4} {
+		key := nodefeature.GetAcceleratablePartitionedProfileResourceName(nodefeature.ManufacturerTHead, profile)
+		q, ok := got[key]
+		require.Truef(t, ok, "missing %s", key)
+		assert.Equalf(t, want, q.Value(), "%s value", key)
+	}
+	// The vendor's own spelling is never advertised beside the published one.
+	_, ok := got["alibabacloud.com/ppu.partitioned.mig-4g48gb"]
+	assert.False(t, ok, "the vendor spelling must not be advertised")
+}
+
 // TestPartitionLedgerIsManufacturerQualified pins that the runtime ledger is looked up by
 // manufacturer AND group ID. ConstructGroupID strips the vendor prefix, so two manufacturers can
 // carry the same bare group ID on one node; keyed by ID alone one vendor's ledger would be read

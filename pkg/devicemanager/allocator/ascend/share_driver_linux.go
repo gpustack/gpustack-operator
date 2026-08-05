@@ -60,7 +60,7 @@ func (d *dcmiShareDriver) ready() error {
 		return nil
 	}
 	if d.initRet = d.lib.Init(d.logger); !d.initRet.IsSuccess() {
-		return fmt.Errorf("dcmi init failed: %s", d.initRet)
+		return fmt.Errorf("dcmi init failed: %w", d.initRet)
 	}
 	return nil
 }
@@ -72,7 +72,7 @@ func (d *dcmiShareDriver) GetShareEnabled(cardID, deviceID int32) (bool, error) 
 	}
 	enabled, ret := dev.GetShareEnabled()
 	if !ret.IsSuccess() {
-		return false, fmt.Errorf("dcmi get device share enable: %s", ret)
+		return false, fmt.Errorf("dcmi get device share enable: %w", ret)
 	}
 	return enabled, nil
 }
@@ -83,7 +83,7 @@ func (d *dcmiShareDriver) SetShareEnabled(cardID, deviceID int32, enabled bool) 
 		return err
 	}
 	if ret := dev.SetShareEnabled(enabled); !ret.IsSuccess() {
-		return fmt.Errorf("dcmi set device share enable: %s", ret)
+		return fmt.Errorf("dcmi set device share enable: %w", ret)
 	}
 	return nil
 }

@@ -14,8 +14,6 @@ import (
 	"sync"
 
 	core "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
-	klog "k8s.io/klog/v2"
 
 	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/deviceplugin"
@@ -91,6 +89,12 @@ type migDriver interface {
 	// carrying its card UUID, so reclaim's orphan GC can find a marker-less GI on a drained
 	// card. A MIG GI carries no operator tag, so this is the only way to see an untracked one.
 	ListInstances() ([]migLiveInstance, error)
+	// CardInstances enumerates one card's live GPU instances, for the callers that already know
+	// which card they are deciding about. It exists so the reclaim loop's verification re-read does
+	// not have to walk the node: that read happens with the card's lock held, and the node-wide walk
+	// is hundreds of NVML calls per card, every one of which would block every allocation on the card
+	// meanwhile. It errors on the same terms as ListInstances.
+	CardInstances(cardUUID string) ([]migInstance, error)
 }
 
 // cardLocks holds a per-card mutex guarding the create+marker-write (and reclaim destroy)
@@ -155,6 +159,15 @@ func markerPath(podUID, container, cardUUID string) string {
 
 // parseMarker reads a marker fail-closed: a missing/malformed/incomplete record is an error,
 // so the self-marker reuse and reclaim never silently mis-read a live partition.
+//
+// The recorded card must be the card the file's own NAME encodes. A record that disagrees with its
+// name is internally inconsistent, and either reading of it is unsafe: the ownership set is grouped
+// by the recorded card, so the GI the record owns would look unowned on the card the file belongs
+// to and a second Pod could adopt a partition another Pod is using; while the self-marker rebind
+// reads the record's ids against the card its path names, so it would rebind one card's GI id onto
+// another card. It is therefore refused here, which reports it to the scan as a corrupt path —
+// attributable to the card its name encodes, held closed on that card alone, and retired once its
+// Pod is gone, the same as any other unreadable record.
 func parseMarker(path string) (migMarker, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -167,11 +180,21 @@ func parseMarker(path string) (migMarker, error) {
 	if m.PodUID == "" || m.Card == "" || m.Profile == "" || m.MigUUID == "" {
 		return migMarker{}, fmt.Errorf("marker %q: incomplete record", path)
 	}
+	if card, ok := cardFromMarkerPath(path); !ok || card != m.Card {
+		return migMarker{}, fmt.Errorf(
+			"marker %q records card %q, not the card its file name names: fail closed", path, m.Card)
+	}
 	return m, nil
 }
 
-// writeMarker publishes a marker via a temp file + atomic rename, so a concurrent scanner
-// never reads a partially written record.
+// writeMarker publishes a marker durably: a concurrent scanner never reads a partial record,
+// and a record that has been written survives an unclean shutdown.
+//
+// The two modes are deliberately different. The directory is the shared per-container work
+// directory every allocator writes its artifacts into, and it is wide because the logical-slicing
+// artifacts living beside it are read by a container running as whatever user its image chose. The
+// record itself is read by nothing outside this process — not by the container, not by NVML — so it
+// is written for its writer alone, as the cambricon allocator's own record is.
 func writeMarker(path string, m migMarker) error {
 	dir := filepath.Dir(path)
 	if err := osx.MkdirAll(dir, 0o777); err != nil {
@@ -181,35 +204,27 @@ func writeMarker(path string, m migMarker) error {
 	if err != nil {
 		return fmt.Errorf("marshal marker: %w", err)
 	}
-	tmp, err := os.CreateTemp(dir, ".nvidia-mig-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temp marker: %w", err)
-	}
-	tmpName := tmp.Name()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("write temp marker: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("close temp marker: %w", err)
-	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("chmod temp marker: %w", err)
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return fmt.Errorf("rename marker into place: %w", err)
+	if err := osx.DurableWrite(path, data, 0o600); err != nil {
+		return fmt.Errorf("write marker %q: %w", path, err)
 	}
 	return nil
 }
 
 // scanMarkers parses every MIG marker under podsDir. Like MetaX it is lenient: an
-// unparseable marker is collected as a corrupt path (for the caller to log) rather than
-// failing the whole scan; the fail-closed guard lives at the self-marker reuse check, scoped
-// to the owning pod's allocation on that card.
+// unparseable marker is collected as a corrupt path rather than failing the whole scan, so one
+// truncated file (an unclean node shutdown is enough) never aborts a pass.
+//
+// The corrupt list is load-bearing, not log fodder, and every caller must honor it. A corrupt
+// file's contents are unreadable, but its PATH still names the card (markerFileName) and the Pod
+// (deviceplugin.PodWorkDir) the record belonged to, and that is enough to fail closed on exactly
+// the two decisions the missing record would corrupt, on that card alone:
+//   - adoption of an unmarked leftover (reserveMigInstance) — the corrupt file may be the very
+//     record owning it, so adopting would hand one partition to a second Pod;
+//   - the drained-card verdict the orphan collector destroys on (reclaimer.reconcile and
+//     destroyOrphans) — a card whose only ownership record is corrupt is not provably drained.
+//
+// The self-marker reuse check in reserveMigInstance is a separate, narrower guard: it protects
+// only the owning Pod's own re-reservation, never another Pod's adoption or reclaim's sweep.
 func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 	_ = filepath.WalkDir(podsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -249,6 +264,71 @@ func ownedGiIDsOnCard(entries []markerEntry, cardUUID string) map[uint32]bool {
 		}
 	}
 	return owned
+}
+
+// cardFromMarkerPath returns the card UUID a marker file's NAME encodes
+// (nvidia-mig-<card>.json), which parses even when the file's contents do not — the property
+// that keeps a corrupt marker's blast radius down to one card. It reports ok=false when the base
+// name is not a marker name at all (a path a walk error collected, e.g. an unreadable directory)
+// or encodes an empty card, because such a path cannot be attributed to any one card.
+func cardFromMarkerPath(path string) (string, bool) {
+	name := filepath.Base(path)
+	if !isMarkerFile(name) {
+		return "", false
+	}
+	card := strings.TrimSuffix(strings.TrimPrefix(name, strings.TrimSuffix(markerName, ".json")+"-"), ".json")
+	if card == "" {
+		return "", false
+	}
+	return card, true
+}
+
+// podUIDFromMarkerPath returns the Pod UID a marker path encodes — markers live at
+// <podsDir>/<podUID>/c-<container>/<marker>, so the owner parses from the path even when the
+// record inside is truncated. That is what lets the reclaim loop retire a corrupt marker on
+// liveness evidence alone. It reports ok=false for a path that is not a marker file at that
+// depth, whose owner is therefore unknowable.
+func podUIDFromMarkerPath(podsDir, path string) (string, bool) {
+	if !isMarkerFile(filepath.Base(path)) {
+		return "", false
+	}
+	rel, err := filepath.Rel(podsDir, path)
+	if err != nil {
+		return "", false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 3 || parts[0] == "" || parts[0] == ".." {
+		return "", false
+	}
+	return parts[0], true
+}
+
+// ownershipUnknownOnCard reports whether any corrupt marker path leaves cardUUID's ownership set
+// unknowable, in which case an unmarked leftover on that card cannot be proven unbound and every
+// decision resting on that proof must fail closed. Scoping is by the card the corrupt file's name
+// encodes, so one bad file never darkens a sibling card: failing closed node-wide would let a
+// single truncated file deny a whole node's partition capacity, while failing closed on the one
+// card it names cannot.
+//
+// A corrupt path that names no card darkens every card, because the scope of what is unknown is
+// itself unknown — it may stand for markers of any card. Refusing adoption is not refusing
+// capacity (occupancy comes from the driver's live set, so a fresh create in a free slot still
+// succeeds), and a corrupt MARKER clears by itself: the reclaim loop retires it once the Pod its
+// path names is gone. A corrupt path that names no card, however, names no Pod either — a walk
+// error over a pod directory is the reachable case — so there is no liveness evidence to retire it
+// on and the loop deliberately keeps it. That hold is therefore permanent, not transient: no
+// adoption anywhere on the node and no orphan GC'd on any card, for as long as the path stays
+// unreadable. It is a filesystem fault an operator can repair, and the reclaim loop says so out
+// loud at a retry bound (reclaimMaxCorruptHoldMisses) rather than letting the node degrade
+// silently.
+func ownershipUnknownOnCard(corrupt []string, cardUUID string) bool {
+	for _, p := range corrupt {
+		card, ok := cardFromMarkerPath(p)
+		if !ok || card == cardUUID {
+			return true
+		}
+	}
+	return false
 }
 
 // reuseUnboundInstance returns a live instance on the card whose geometry matches the profile
@@ -358,10 +438,23 @@ func reserveMigInstance(
 		return migInstance{}, migCreated, fmt.Errorf("read card %s state: %w", cardUUID, err)
 	}
 
-	entries, _ := scanMarkers(podsDir)
-	owned := ownedGiIDsOnCard(entries, cardUUID)
+	// A corrupt marker naming this card makes the owned set incomplete for it, so an unmarked
+	// leftover cannot be proven unbound: refuse to adopt it (a truncated marker write is enough to
+	// reach here, and adopting would put a second Pod on a partition another Pod still owns).
+	// Only the adoption is refused — the create path below reads occupancy from the driver's live
+	// set, never from markers, so the leftover still counts as occupied and a fresh create in a
+	// free slot on this same card proceeds normally.
+	entries, corrupt := scanMarkers(podsDir)
+	var (
+		reused    migInstance
+		adoptable bool
+	)
+	if !ownershipUnknownOnCard(corrupt, cardUUID) {
+		owned := ownedGiIDsOnCard(entries, cardUUID)
+		reused, adoptable = reuseUnboundInstance(state, owned, computeSlices, memorySlices)
+	}
 
-	if reused, ok := reuseUnboundInstance(state, owned, computeSlices, memorySlices); ok {
+	if adoptable {
 		inst = reused
 		outcome = migBound
 	} else {
@@ -541,322 +634,4 @@ func resourceForCard(devs *workercore.Devices, cardUUID string) deviceplugin.Res
 		}
 	}
 	return deviceplugin.Resource{Device: cardUUID}
-}
-
-// reclaimMaxMisses debounces a liveness decision: a pod (or a drained card's orphans) must be
-// absent/idle for this many consecutive reconciles before its partition is destroyed, so a
-// transient list gap never reclaims live state. It matches deviceplugin's podDirGC and the
-// MetaX/Cambricon loops. Against the 60s resync it is the create-before-marker guard: a
-// crash-then-retry Allocate rebinds its GI well within reclaimMaxMisses × resync, so the orphan
-// GC never destroys a partition an in-flight retry still owns (spec F4: size it > the kubelet
-// Allocate-retry window).
-const reclaimMaxMisses = 3
-
-// reclaimMaxDestroyMisses bounds how many consecutive reconciles a destroy may fail with
-// NVML_ERROR_IN_USE before the loop surfaces an operator-visible log — a residual process is
-// holding the instance. The debounce is never cleared meanwhile, so the destroy keeps retrying
-// every pass; sibling cards are never blocked (per-card locks). Devices.Status is rebuilt
-// wholesale each reconcile from Spec + Pod annotations, so a status condition would be stomped;
-// the log is the operator-visible surface.
-const reclaimMaxDestroyMisses = 8
-
-// cardMissPrefix namespaces a per-card orphan-GC miss counter in the same misses map as the
-// per-pod counters; pod UIDs are UUIDs, so they never collide with this prefix.
-const cardMissPrefix = "card:"
-
-// reclaimer is the level-based MIG reclaim loop's state, driven by the reconciler's broadcast
-// live pod-UID set plus a periodic resync ticker (deviceplugin.RunSlicedReclaimLoop). A sliced
-// pool has no Release callback, so a Pod's GPU/compute instances are freed here. Each reconcile
-// re-scans the markers and re-lists the driver, so it self-heals across restarts with no
-// in-memory instance registry. It runs single-threaded (the loop calls reconcile serially), so
-// its counter maps need no lock; only the per-card lock coordinates with concurrent Allocates.
-type reclaimer struct {
-	driver  migDriver
-	podsDir string
-	logger  klog.Logger
-	// liveClaims returns, per card UUID, the physical-slice placements live (non-terminating)
-	// Pods currently claim by annotation — the attribution self-check source, so a mis-attributed
-	// marker (the oldest-Pending getAllocatingPod heuristic can bind an Allocate to the wrong
-	// same-profile Pod) never destroys an instance a running Pod holds. It is injected so the
-	// loop is table-tested without a Kubernetes client.
-	liveClaims func() (map[string][]migPlacement, error)
-	misses     map[string]int // pod UID / "card:<uuid>" -> consecutive absent-or-idle reconciles
-	inUse      map[string]int // pod UID -> consecutive IN_USE-failed destroy reconciles
-}
-
-func newReclaimer(driver migDriver, podsDir string, logger klog.Logger, liveClaims func() (map[string][]migPlacement, error)) *reclaimer {
-	return &reclaimer{
-		driver: driver, podsDir: podsDir, logger: logger, liveClaims: liveClaims,
-		misses: make(map[string]int), inUse: make(map[string]int),
-	}
-}
-
-// reconcile reconciles the MIG partitions against the on-disk markers for one live pod-UID
-// snapshot. Every liveness decision is debounced by reclaimMaxMisses consecutive absent
-// reconciles, so a transient list gap never reclaims live state; each destroy runs under its
-// card's lock (never the node-wide mutex) so it never races an in-flight same-card Allocate's
-// create+marker window while sibling cards proceed in parallel. It reconciles in two directions:
-//   - a marker whose pod is dead -> destroy its GPU instance (CI then GI), unless a running Pod
-//     still claims that placement (attribution self-check); NVML_ERROR_IN_USE is a bounded,
-//     retryable partial failure (the debounce is not cleared) surfacing a log at the bound;
-//   - a marker-less GPU instance (a crash between GI-create and marker-write, or an out-of-band
-//     one) is destroyed only once its card is fully drained (no live Pod claims or marks it), as
-//     MetaX does for unidentifiable orphans — a MIG GI carries no operator tag, so per-pod
-//     attribution of a marker-less GI is impossible.
-func (r *reclaimer) reconcile(livePodUIDs []string) {
-	live := sets.New[string](livePodUIDs...)
-
-	markers, corrupt := scanMarkers(r.podsDir)
-	for _, p := range corrupt {
-		r.logger.Info("reclaim: skipping unparseable marker", "path", p)
-	}
-
-	// The attribution self-check needs the live claim set; without it fail closed (skip the
-	// whole pass) rather than risk destroying an instance a running Pod holds.
-	claims, cerr := r.liveClaims()
-	if cerr != nil {
-		r.logger.Error(cerr, "reclaim: read live pod claims, skipping this pass")
-		return
-	}
-
-	// The live instance list backs both the marker identity check (a GI id NVML reused after an
-	// out-of-band destroy must not be destroyed under a stale marker) and the orphan sweep;
-	// without it fail closed (skip the pass) rather than act on an unvalidated view.
-	instances, lerr := r.driver.ListInstances()
-	if lerr != nil {
-		r.logger.Error(lerr, "reclaim: list mig instances, skipping this pass")
-		return
-	}
-	liveByCard := make(map[string]map[uint32]migInstance)
-	for i := range instances {
-		li := instances[i]
-		if liveByCard[li.Card] == nil {
-			liveByCard[li.Card] = make(map[uint32]migInstance)
-		}
-		liveByCard[li.Card][li.Inst.GiID] = li.Inst
-	}
-
-	// touched marks every miss key still relevant this pass; the rest are pruned at the end.
-	touched := sets.New[string]()
-
-	// A card is "live" while any live Pod marks or claims it, so its marker-less orphans are
-	// kept (one could be a live Pod's create-before-marker GI). markedGI indexes every GI a
-	// marker owns so orphan detection finds the marker-less ones.
-	liveOnCard := make(map[string]bool)
-	for card, ps := range claims {
-		if len(ps) > 0 {
-			liveOnCard[card] = true
-		}
-	}
-	markedGI := make(map[string]map[uint32]bool)
-	byPod := make(map[string][]markerEntry)
-	for i := range markers {
-		m := markers[i].marker
-		byPod[m.PodUID] = append(byPod[m.PodUID], markers[i])
-		if markedGI[m.Card] == nil {
-			markedGI[m.Card] = make(map[uint32]bool)
-		}
-		markedGI[m.Card][m.GiID] = true
-		if live.Has(m.PodUID) {
-			liveOnCard[m.Card] = true
-		}
-	}
-
-	// Per-pod liveness decision + debounce: a dead pod's markers are reclaimed after the bound.
-	for uid, entries := range byPod {
-		touched.Insert(uid)
-		if live.Has(uid) {
-			r.misses[uid] = 0
-			r.inUse[uid] = 0
-			continue
-		}
-		r.misses[uid]++
-		if r.misses[uid] < reclaimMaxMisses {
-			continue
-		}
-		r.destroyPod(uid, entries, claims, liveByCard)
-	}
-
-	// Orphan GC: a marker-less GI is destroyed only on a fully drained card.
-	orphansByCard := make(map[string][]migInstance)
-	for i := range instances {
-		li := instances[i]
-		if markedGI[li.Card][li.Inst.GiID] {
-			continue // owned by a marker; handled above
-		}
-		orphansByCard[li.Card] = append(orphansByCard[li.Card], li.Inst)
-	}
-	for card, orphans := range orphansByCard {
-		key := cardMissPrefix + card
-		touched.Insert(key)
-		if liveOnCard[card] {
-			r.misses[key] = 0
-			r.inUse[key] = 0
-			continue
-		}
-		r.misses[key]++
-		if r.misses[key] < reclaimMaxMisses {
-			continue
-		}
-		r.destroyOrphans(key, card, orphans)
-	}
-
-	for k := range r.misses {
-		if !touched.Has(k) {
-			delete(r.misses, k)
-		}
-	}
-	for k := range r.inUse {
-		if !touched.Has(k) {
-			delete(r.inUse, k)
-		}
-	}
-}
-
-// destroyPod tears down one dead pod's partitions: for each marker, destroy the GPU instance
-// (under that card's lock) and remove only that marker file. Two guards precede the destroy:
-//   - attribution self-check — if a running Pod claims the placement, the marker is
-//     mis-attributed (a dead pod's marker over a live pod's instance), so it is never destroyed;
-//   - identity check — the GI id must still carry the instance the marker recorded (compare the
-//     MIG-device UUID against liveByCard); an out-of-band destroy + NVML GI-id reuse can put a
-//     different, possibly live, instance at that id, so on a UUID mismatch the stale marker is
-//     dropped without any destroy, and a GI already gone needs only its marker removed.
-//
-// A residual NVML_ERROR_IN_USE is a bounded retryable failure: the pod's miss counter is not
-// cleared (retry next pass) and an operator-visible log is surfaced once the retries cross the
-// bound. The miss/in-use counters are cleared only when every one of the pod's partitions is
-// reclaimed.
-func (r *reclaimer) destroyPod(uid string, entries []markerEntry, claims map[string][]migPlacement, liveByCard map[string]map[uint32]migInstance) {
-	ok := true
-	inUseHit := false
-	for i := range entries {
-		m := entries[i].marker
-		card := m.Card
-
-		if placementOverlapsAny(migPlacement{Start: m.Start, Length: m.Length}, claims[card]) {
-			r.logger.Info("reclaim: placement is claimed by a running pod, skipping destroy (attribution conflict)",
-				"podUID", uid, "card", card, "giID", m.GiID)
-			ok = false
-			continue
-		}
-
-		if live, present := liveByCard[card][m.GiID]; present && live.UUID != m.MigUUID {
-			// The GI id was reused by a different instance; drop the stale marker, never destroy.
-			r.logger.Info("reclaim: gpu-instance id reused by a different instance, dropping stale marker without destroy",
-				"podUID", uid, "card", card, "giID", m.GiID, "markerUUID", m.MigUUID, "liveUUID", live.UUID)
-			if !r.removeMarker(entries[i].path) {
-				ok = false
-			}
-			continue
-		} else if present {
-			// The marker still describes the live instance: destroy it under the card lock.
-			unlock := lockCard(card)
-			derr := r.driver.DestroyInstance(card, m.instance())
-			unlock()
-			if derr != nil {
-				ok = false
-				if errors.Is(derr, errInstanceInUse) {
-					inUseHit = true
-					continue
-				}
-				r.logger.Error(derr, "reclaim: destroy gpu instance", "podUID", uid, "card", card, "giID", m.GiID)
-				continue
-			}
-		}
-		// The instance is destroyed or was already gone: remove the marker.
-		if !r.removeMarker(entries[i].path) {
-			ok = false
-		}
-	}
-
-	if inUseHit {
-		r.inUse[uid]++
-		if r.inUse[uid] == reclaimMaxDestroyMisses {
-			r.logger.Error(errInstanceInUse,
-				"reclaim: a mig instance is still in use after bounded destroy retries; a residual process is holding it, reclamation is blocked until it exits",
-				"podUID", uid, "attempts", r.inUse[uid])
-		}
-	} else {
-		r.inUse[uid] = 0
-	}
-
-	if ok {
-		delete(r.misses, uid)
-		delete(r.inUse, uid)
-		r.logger.Info("reclaim: reclaimed dead pod's partitions", "podUID", uid, "partitions", len(entries))
-	}
-}
-
-// removeMarker removes a marker file (and its now-empty container/pod dirs, so a sibling
-// container's live marker is never dropped) and reports whether the removal succeeded.
-func (r *reclaimer) removeMarker(path string) bool {
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		r.logger.Error(err, "reclaim: remove marker", "path", path)
-		return false
-	}
-	removeIfEmpty(filepath.Dir(path))
-	removeIfEmpty(filepath.Dir(filepath.Dir(path)))
-	return true
-}
-
-// destroyOrphans removes the marker-less GPU instances on a fully drained card (no live Pod). It
-// re-scans markers under the card lock and bails if the card now carries ANY marker: create+marker
-// is atomic under this same lock, so a marker appearing since the lock-free snapshot means an
-// allocation arrived and the card is no longer fully drained — its orphans wait for a later pass
-// (as MetaX keeps unidentifiable orphans while any pod holds the card). A residual
-// NVML_ERROR_IN_USE is a bounded retryable failure with the same condition-at-the-bound surface as
-// the per-pod path; the miss counter is cleared only when every removal succeeds.
-func (r *reclaimer) destroyOrphans(missKey, card string, orphans []migInstance) {
-	unlock := lockCard(card)
-	defer unlock()
-
-	entries, _ := scanMarkers(r.podsDir)
-	if len(ownedGiIDsOnCard(entries, card)) > 0 {
-		return
-	}
-
-	ok := true
-	inUseHit := false
-	destroyed := 0
-	for _, inst := range orphans {
-		if derr := r.driver.DestroyInstance(card, inst); derr != nil {
-			ok = false
-			if errors.Is(derr, errInstanceInUse) {
-				inUseHit = true
-				continue
-			}
-			r.logger.Error(derr, "reclaim: destroy orphan gpu instance on drained card", "card", card, "giID", inst.GiID)
-			continue
-		}
-		destroyed++
-	}
-
-	if inUseHit {
-		r.inUse[missKey]++
-		if r.inUse[missKey] == reclaimMaxDestroyMisses {
-			r.logger.Error(errInstanceInUse,
-				"reclaim: a marker-less mig instance on a drained card is still in use after bounded destroy retries; a residual process is holding it",
-				"card", card, "attempts", r.inUse[missKey])
-		}
-	} else {
-		r.inUse[missKey] = 0
-	}
-
-	if ok {
-		delete(r.misses, missKey)
-		delete(r.inUse, missKey)
-		if destroyed > 0 {
-			r.logger.Info("reclaim: reclaimed marker-less orphans on drained card", "card", card, "count", destroyed)
-		}
-	}
-}
-
-// removeIfEmpty removes dir only when it holds no entries, so reclaiming one container never
-// orphans a sibling's marker.
-func removeIfEmpty(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil || len(entries) > 0 {
-		return
-	}
-	_ = os.Remove(dir)
 }

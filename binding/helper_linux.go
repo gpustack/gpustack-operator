@@ -1,16 +1,17 @@
 package binding
 
 import (
+	"bufio"
+	"bytes"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
-	"path/filepath"
-	"os/exec"
-	"bufio"
-	"gpustack.ai/gpustack/pkg/utils/osx"
-	"bytes"
 	"syscall"
+
 	"golang.org/x/sys/unix"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 // Toggle of the functions.
