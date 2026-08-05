@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	core "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	klog "k8s.io/klog/v2"
@@ -192,6 +193,61 @@ func partitionPod(uid string) (*core.Pod, *core.Container) {
 	return &core.Pod{ObjectMeta: meta.ObjectMeta{Name: uid, UID: types.UID(uid)}}, &core.Container{Name: "c"}
 }
 
+// slicedPod is the Pod/container pair a logical slice is allocated for, carrying the ".sliced.*" limits
+// the chain folds a request into. A zero figure means the request carries no limit of that kind at all,
+// which is how the cases that turn on an absent dimension state themselves.
+func slicedPod(uid string, coresPercent, memPercent, memMib int64) (*core.Pod, *core.Container) {
+	limits := core.ResourceList{}
+	for res, v := range map[core.ResourceName]int64{
+		nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer):  coresPercent,
+		nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer): memPercent,
+		nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer):        memMib,
+	} {
+		if v > 0 {
+			limits[res] = *resource.NewQuantity(v, resource.DecimalSI)
+		}
+	}
+	pod := &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: uid, UID: types.UID(uid)},
+		Spec: core.PodSpec{
+			Containers: []core.Container{{
+				Name:      "c",
+				Resources: core.ResourceRequirements{Limits: limits},
+			}},
+		},
+	}
+	return pod, &pod.Spec.Containers[0]
+}
+
+// slicedDevices is the sliced fixture: the same cards the whole-card fixture addresses — each carrying
+// the ordinal that names its device node and the kernel minor that node holds — in one group whose VRAM
+// every per-card memory budget is derived against.
+func slicedDevices(memoryMib uint64, uuids ...string) *workercore.Devices {
+	devs := partitionDevices(uuids...)
+	devs.Spec.Groups[0].Memory = memoryMib
+	return devs
+}
+
+// newSlicedServer builds the server that serves "<base>.sliced". It holds no partition driver, which is
+// the shape New registers it in: a logical slice never touches the partitioning surface.
+func newSlicedServer(t *testing.T) *server {
+	t.Helper()
+	s, ok := newServer(klog.Background(), workercore.DeviceAllocationModeSliced, nil).(*server)
+	require.True(t, ok)
+	return s
+}
+
+// writeCardNodes publishes the whole-card node set: the two shared control nodes, then each fixture
+// card's node under the name its ordinal gives it, carrying the minor the detector recorded for it.
+func writeCardNodes(t *testing.T) {
+	t.Helper()
+	for _, path := range sharedControlNodePaths() {
+		writeCharNode(t, path, 0)
+	}
+	writeCharNode(t, cardNodePath(testPPUIndex0), testPPUMinor0)
+	writeCharNode(t, cardNodePath(testPPUIndex1), testPPUMinor1)
+}
+
 // newPartitionedServer builds a partitioned server over the in-memory driver, with the card(s) seeded
 // to offer the test profile.
 func newPartitionedServer(cards ...string) (*server, *fakeMigDriver) {
@@ -220,7 +276,8 @@ func devicePaths(resp *deviceplugin.ContainerAllocateResponse) []string {
 
 // TestNew_ServerSet pins which families this vendor registers a device-plugin server for, that each
 // control flag removes exactly its own, and that the one partition driver is shared with both servers
-// that address partitions. The vendor has no logical slicing, so no Sliced server is ever registered.
+// that address partitions — the sliced server holds none, because a logical slice never touches the
+// partitioning surface.
 func TestNew_ServerSet(t *testing.T) {
 	serversOf := func(a device.Allocator) []*server {
 		agg, ok := a.(aggregated)
@@ -246,6 +303,7 @@ func TestNew_ServerSet(t *testing.T) {
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
 				workercore.DeviceAllocationModeShared,
+				workercore.DeviceAllocationModeSliced,
 				workercore.DeviceAllocationModePartitioned,
 				workercore.DeviceAllocationModeVisibility,
 			},
@@ -260,6 +318,7 @@ func TestNew_ServerSet(t *testing.T) {
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
 				workercore.DeviceAllocationModeShared,
+				workercore.DeviceAllocationModeSliced,
 				workercore.DeviceAllocationModeVisibility,
 			},
 		},
@@ -268,6 +327,7 @@ func TestNew_ServerSet(t *testing.T) {
 			opts: device.AllocatorOptions{NoShared: true},
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
+				workercore.DeviceAllocationModeSliced,
 				workercore.DeviceAllocationModePartitioned,
 				workercore.DeviceAllocationModeVisibility,
 			},
@@ -277,7 +337,7 @@ func TestNew_ServerSet(t *testing.T) {
 			},
 		},
 		{
-			name: "--no-sliced changes nothing: this vendor has no logical slicing",
+			name: "--no-sliced drops only the sliced server",
 			opts: device.AllocatorOptions{NoSliced: true},
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
@@ -484,6 +544,215 @@ func TestGetContainerAllocateResponse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGetSlicedContainerAllocateResponse pins the whole response a logically sliced container is
+// given: the same node set every whole-card allocation takes, plus the quota figures the shim reads at
+// load, the mounts that preload it, and the writable directory its usage region lives in. Every
+// variable name and container path is written out rather than referred to through the constants the
+// code builds them from, because a container's environment and mount table are a contract with a
+// library that reads them by name, and an expectation stated through the same constant would hold
+// whatever the name became.
+func TestGetSlicedContainerAllocateResponse(t *testing.T) {
+	devDir, _ := redirectNodeRoots(t)
+	writeCardNodes(t)
+
+	// A PPU-ZW810E-like card: 98304 MiB of VRAM, of which this container asks 25 %, and 10 % of the
+	// card's compute — two independent dimensions rather than one ratio.
+	devs := slicedDevices(98304, testPPUUUID0, testPPUUUID1)
+	pod, ctr := slicedPod("pod-a", 10, 25, 0)
+
+	got, err := newSlicedServer(t).GetContainerAllocateResponse(
+		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0))
+	require.NoError(t, err)
+
+	// The device set is the whole-card one, unchanged: the slice is enforced inside the container, so
+	// it is handed the same nodes — the two shared control nodes and the node its card's ordinal names.
+	assert.Equal(t, []string{
+		filepath.Join(devDir, "alixpu"),
+		filepath.Join(devDir, "alixpu_ctl"),
+		filepath.Join(devDir, "alixpu_ppu14"),
+	}, devicePaths(got), "a slice takes the same nodes a whole card does, no fewer")
+
+	assert.Equal(t, map[string]string{
+		"HGGC_DEVICE_SM_LIMIT":       "10",
+		"HGGC_DEVICE_MEMORY_LIMIT_0": "24576", // 98304 MiB * 25 %, a bare MiB integer
+		"HGGC_LEDGER_PATH":           "/var/run/vppu/ledger",
+		"LIBHGGC_LOG_LEVEL":          "1",
+	}, got.Envs)
+
+	// The region's directory is created for the container to open the region in, world-writable
+	// because the workload's user is not ours to predict.
+	ledgerDir := filepath.Join(deviceplugin.PodWorkDir("pod-a", "c"), "run/vppu")
+	info, statErr := os.Stat(ledgerDir)
+	require.NoError(t, statErr, "the usage region's directory must exist before the container starts")
+	assert.Equal(t, os.FileMode(0o777), info.Mode().Perm())
+
+	libDir := filepath.Join(deviceplugin.OperatorLibDir, "thead")
+	assert.Equal(t, []*deviceplugin.Mount{
+		{ContainerPath: "/etc/ld.so.preload", HostPath: filepath.Join(libDir, "ld.so.preload"), ReadOnly: true},
+		{ContainerPath: "/usr/local/vppu/hgml_dlsym_hook.so", HostPath: filepath.Join(libDir, "hgml_dlsym_hook.so"), ReadOnly: true},
+		{ContainerPath: "/usr/local/vppu/hggc_quota.so", HostPath: filepath.Join(libDir, "hggc_quota.so"), ReadOnly: true},
+		{ContainerPath: "/usr/local/vppu/ppu-monitor", HostPath: filepath.Join(libDir, "ppu-monitor"), ReadOnly: true},
+		{ContainerPath: "/var/run/vppu", HostPath: ledgerDir, ReadOnly: false},
+	}, got.Mounts, "the preload asset and both shared objects are mounted where that asset names them")
+}
+
+// TestGetSlicedContainerAllocateResponseQuota pins how a request becomes quota: one figure per card for
+// the exact dimension, one figure for the whole container for the oversubscribable one, and a refusal
+// wherever a figure cannot be derived — never a card handed over uncapped.
+func TestGetSlicedContainerAllocateResponseQuota(t *testing.T) {
+	cases := []struct {
+		name string
+		// coresPercent, memPercent and memMib are the container's request; zero means the request
+		// carries no limit of that kind at all.
+		coresPercent int64
+		memPercent   int64
+		memMib       int64
+		// devs overrides the single-group fixture, for the cases that turn on a card's own group.
+		devs func() (*workercore.Devices, map[deviceplugin.Resource]int32)
+		// breaks corrupts the device record after it is built.
+		breaks func(devs *workercore.Devices)
+		// wantQuota are the quota variables expected, log level and ledger path aside.
+		wantQuota map[string]string
+		wantErr   string
+	}{
+		{
+			name:         "a percentage of the card's own VRAM",
+			coresPercent: 10,
+			memPercent:   25,
+			wantQuota: map[string]string{
+				"HGGC_DEVICE_SM_LIMIT":       "10",
+				"HGGC_DEVICE_MEMORY_LIMIT_0": "24576",
+			},
+		},
+		{
+			name:         "an absolute memory figure is taken as it stands",
+			coresPercent: 10,
+			memMib:       8192,
+			wantQuota: map[string]string{
+				"HGGC_DEVICE_SM_LIMIT":       "10",
+				"HGGC_DEVICE_MEMORY_LIMIT_0": "8192",
+			},
+		},
+		{
+			// The one thing not copied from the HAMi-core key shape: an absent compute figure means
+			// "no cap" there and "unusable card" to this shim, so a whole card's worth is stated.
+			name:       "a request with no compute dimension states the whole card's worth rather than omitting it",
+			memPercent: 50,
+			wantQuota: map[string]string{
+				"HGGC_DEVICE_SM_LIMIT":       "100",
+				"HGGC_DEVICE_MEMORY_LIMIT_0": "49152",
+			},
+		},
+		{
+			name:         "a request with no memory dimension is refused, not handed the whole card",
+			coresPercent: 10,
+			wantErr:      "derive sliced memory limit",
+		},
+		{
+			// Admission pins a logical slice to one card today, so no such container is admitted. The
+			// loop is written for several anyway, exactly as the NVIDIA branch's is, and this is what
+			// keeps its indexing honest until the gate is lifted.
+			name:         "two cards each take their own group's VRAM, under one shared compute figure",
+			coresPercent: 50,
+			memPercent:   25,
+			devs: func() (*workercore.Devices, map[deviceplugin.Resource]int32) {
+				devs := &workercore.Devices{
+					Spec: workercore.DevicesSpec{
+						Groups: []workercore.DevicesGroup{
+							{
+								ID: "ppu-98", Manufacturer: Manufacturer, Memory: 98304,
+								Accelerators: []workercore.Accelerator{{
+									ID: testPPUUUID0, Index: testPPUIndex0,
+									PhysicalIndexes: []uint32{testPPUMinor0},
+								}},
+							},
+							{
+								ID: "ppu-49", Manufacturer: Manufacturer, Memory: 49152,
+								Accelerators: []workercore.Accelerator{{
+									ID: testPPUUUID1, Index: testPPUIndex1,
+									PhysicalIndexes: []uint32{testPPUMinor1},
+								}},
+							},
+						},
+					},
+				}
+				return devs, map[deviceplugin.Resource]int32{
+					{Group: "ppu-98", Device: testPPUUUID0}: 1,
+					{Group: "ppu-49", Device: testPPUUUID1}: 1,
+				}
+			},
+			wantQuota: map[string]string{
+				"HGGC_DEVICE_SM_LIMIT":       "50",
+				"HGGC_DEVICE_MEMORY_LIMIT_0": "24576",
+				"HGGC_DEVICE_MEMORY_LIMIT_1": "12288",
+			},
+		},
+		{
+			// The addressing guard runs before any injection, so a card that cannot be proven fails
+			// the allocation rather than being quota-capped and then handed a neighbour's node.
+			name:         "a card whose minor number cannot be proven is refused before anything is injected",
+			coresPercent: 10,
+			memPercent:   25,
+			breaks: func(devs *workercore.Devices) {
+				devs.Spec.Groups[0].Accelerators[0].PhysicalIndexes = nil
+			},
+			wantErr: "no recorded minor number to prove its device node addresses it",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			redirectNodeRoots(t)
+			writeCardNodes(t)
+
+			devs, allocated := slicedDevices(98304, testPPUUUID0, testPPUUUID1), allocatedOn(testPPUUUID0)
+			if c.devs != nil {
+				devs, allocated = c.devs()
+			}
+			if c.breaks != nil {
+				c.breaks(devs)
+			}
+			pod, ctr := slicedPod("pod-"+strconv.Itoa(len(c.name)), c.coresPercent, c.memPercent, c.memMib)
+
+			got, err := newSlicedServer(t).GetContainerAllocateResponse(
+				context.Background(), pod, ctr, devs, allocated)
+			if c.wantErr != "" {
+				require.Error(t, err, "a figure that cannot be derived must fail the allocation")
+				assert.Nil(t, got)
+				assert.Contains(t, err.Error(), c.wantErr)
+				return
+			}
+			require.NoError(t, err)
+
+			quota := make(map[string]string, len(got.Envs))
+			for k, v := range got.Envs {
+				if strings.HasPrefix(k, "HGGC_DEVICE_") {
+					quota[k] = v
+				}
+			}
+			assert.Equal(t, c.wantQuota, quota)
+		})
+	}
+}
+
+// A sliced container that declares LIBHGGC_LOG_LEVEL keeps its own value: the level is the debugging
+// escape hatch, so the allocator states a default and never overrides a stated one.
+func TestGetSlicedContainerAllocateResponseRespectsContainerLogLevel(t *testing.T) {
+	redirectNodeRoots(t)
+	writeCardNodes(t)
+
+	devs := slicedDevices(98304, testPPUUUID0, testPPUUUID1)
+	pod, ctr := slicedPod("pod-loglevel", 10, 25, 0)
+	ctr.Env = []core.EnvVar{{Name: "LIBHGGC_LOG_LEVEL", Value: "2"}}
+
+	got, err := newSlicedServer(t).GetContainerAllocateResponse(
+		context.Background(), pod, ctr, devs, allocatedOn(testPPUUUID0))
+	require.NoError(t, err)
+
+	_, injected := got.Envs["LIBHGGC_LOG_LEVEL"]
+	assert.False(t, injected, "a container that states its own verbosity keeps it")
 }
 
 // TestActuatePhysicalSliced pins the whole node set a partitioned container is given, in order: the
