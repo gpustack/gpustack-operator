@@ -23,7 +23,6 @@ on:
       - "!.github/workflows/ci.yml"
       - "deploy/**"
       - "docs/**"
-      - "pack/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
@@ -39,7 +38,6 @@ on:
       - "!.github/workflows/ci.yml"
       - "deploy/**"
       - "docs/**"
-      - "pack/**"
       - "**.md"
       - "**.mdx"
       - "**.png"
@@ -155,6 +153,17 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      - name: Maximize Docker Build Space
+        # detect-heavy sees only this event's own diff, so it cannot know the registry cache went
+        # stale in an earlier commit -- and whichever build inherits that miss pulls all eight
+        # vendor SDK stages for real, overruns a standard runner's disk, and dies before it can
+        # write any job log at all, leaving nothing to read. The -8x variant a heavy build targets
+        # has the room already, so it skips the reclaim.
+        if: ${{ !contains(matrix.runner, '-8x') }}
+        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
+        with:
+          deep-clean: true
+          root-reserve-mb: 20480
       - name: Setup BuildX
         id: setup-buildx
         uses: docker/setup-buildx-action@v3
