@@ -1,4 +1,4 @@
-name: sync-image
+name: Sync Image
 
 permissions:
   contents: read

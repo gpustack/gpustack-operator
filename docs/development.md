@@ -75,7 +75,7 @@ To change an upstream chart:
 install in `ImagePullBackOff`, and `make lint chart` will not catch it (it checks that the override
 knobs reach each reference, not that the reference resolves).
 
-`ci-chart.yml` runs all three across the supported Kubernetes matrix, and gates two kinds of drift:
+`chart.yml` runs all three across the supported Kubernetes matrix, and gates two kinds of drift:
 `make generate chart` must leave `README.md`/`values.schema.json` unchanged, and `make deps` must
 leave the vendored trees unchanged. Both fail the build with the command to run.
 

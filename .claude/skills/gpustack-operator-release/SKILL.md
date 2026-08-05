@@ -1,6 +1,6 @@
 ---
 name: gpustack-operator-release
-description: "Cut a GPUStack Operator release end to end: sync & verify the target branch (any branch, default `main`), pick and confirm the release commit, draft highlight-focused release notes from the Conventional-Commit history, cut & push the `vX.Y.Z` git tag, watch every tag-triggered pipeline (`ci.yml` image/Release + `ci-chart.yml` Helm chart) go green, then promote the CI-published pre-release to the official/latest release. Releases are published as **pre-releases first** and promoted only after CI is green and the user confirms. Also supports **overwrite (re-publish)** — re-cutting an existing `vX.Y.Z` under the same version via delete+recreate, interactive-only and confirm-gated. Proactively offer this when the user wants to ship/tag/publish a new version. Examples: \"release v0.7.0\", \"cut the next release\", \"tag and publish v0.7.0\", \"do an rc pre-release\", \"ship v0.7.0 and watch CI\", \"overwrite v0.7.0\", \"re-release v0.7.0\", \"redo the release\", \"覆盖发布 v0.7.0\", \"重新发布 v0.7.0\"."
+description: "Cut a GPUStack Operator release end to end: sync & verify the target branch (any branch, default `main`), pick and confirm the release commit, draft highlight-focused release notes from the Conventional-Commit history, cut & push the `vX.Y.Z` git tag, watch every tag-triggered pipeline (`ci.yml` image/Release + `chart.yml` Helm chart) go green, then promote the CI-published pre-release to the official/latest release. Releases are published as **pre-releases first** and promoted only after CI is green and the user confirms. Also supports **overwrite (re-publish)** — re-cutting an existing `vX.Y.Z` under the same version via delete+recreate, interactive-only and confirm-gated. Proactively offer this when the user wants to ship/tag/publish a new version. Examples: \"release v0.7.0\", \"cut the next release\", \"tag and publish v0.7.0\", \"do an rc pre-release\", \"ship v0.7.0 and watch CI\", \"overwrite v0.7.0\", \"re-release v0.7.0\", \"redo the release\", \"覆盖发布 v0.7.0\", \"重新发布 v0.7.0\"."
 allowed-tools: "Read, AskUserQuestion, Bash(git fetch*), Bash(git log*), Bash(git tag -l*), Bash(git tag --list*), Bash(git rev-parse*), Bash(git status*), Bash(git show*), Bash(git diff*), Bash(git describe*), Bash(git merge-base*), Bash(make version), Bash(command -v*), Bash(date*), Bash(mkdir -p .claude/reports/*), Bash(tee .claude/reports/*), Bash(gh auth status*), Bash(gh release list*), Bash(gh release view*), Bash(gh api repos/gpustack/gpustack-operator/releases/latest*), Bash(gh run list*), Bash(gh run view*), Bash(gh run watch*), Bash(gh pr list*), Bash(gh pr view*), Bash(curl -sL https://gpustack.github.io/gpustack-operator/*), Bash(tar tzf /tmp/*), Bash(tar xzf /tmp/*)"
 model: sonnet
 ---
@@ -10,7 +10,7 @@ model: sonnet
 Drive a full release from a version number to a published GitHub Release. Cutting a release is a single act — **pushing a `vX.Y.Z` git tag** — which fans out to two pipelines:
 
 - `ci.yml` → multi-arch image + the **GitHub Release** object (published as a **pre-release** with a categorized baseline note).
-- `ci-chart.yml` → the Helm chart, repacked from the tag and published to `github-pages`.
+- `chart.yml` → the Helm chart, repacked from the tag and published to `github-pages`.
 
 The version propagates from the tag → binary (`pack/utils.mk` / `hack/lib/version.sh` → ldflags → `gpustack-operator --version`) and → chart, so **the git tag is the single source of truth** — there is no `VERSION` file to bump.
 
@@ -21,7 +21,7 @@ The version propagates from the tag → binary (`pack/utils.mk` / `hack/lib/vers
 ## Hard rules
 
 - **Release off any branch; default to `origin/main`.** Tag by SHA — never switch branches. Default target = `origin/main` HEAD; when the user names another branch/commit (e.g. a maintenance line like `origin/v0.5-dev`), tag that. A maintenance-line commit will **not** be an ancestor of `origin/main` — expected, not an error; confirm the (branch, commit) with the user and flag it as a maintenance release in the summary.
-- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less form like `v0.6.1rc1` is rejected (Phase 1 regex). The `-rcN` **hyphen is required**: `ci-chart.yml` sets the Helm chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less pre-release like `0.6.1rc1`; the build's version derivation requires this shape too. Any tag containing `rc` stays a pre-release and must not be promoted.
+- **Tag shape is exactly `vX.Y.Z` (final) or `vX.Y.Z-rcN` (pre-release)** — nothing else; a hyphen-less form like `v0.6.1rc1` is rejected (Phase 1 regex). The `-rcN` **hyphen is required**: `chart.yml` sets the Helm chart version to the tag without the `v`, and Helm enforces strict SemVer2, which rejects a hyphen-less pre-release like `0.6.1rc1`; the build's version derivation requires this shape too. Any tag containing `rc` stays a pre-release and must not be promoted.
 - **Every mutating step is confirmed** — creating/pushing the tag, `gh release edit`, and any tag/release deletion. Read-only inspection (git log/status, `gh run list/watch`, `gh release view`) runs without prompting.
 - **Never force-push.** An existing tag is **rejected by default**; the only way past it is the explicit, confirm-gated **overwrite path** (delete + recreate — Phase 1 detects, Phase 3 tears down), which never force-pushes and never mutates a published tag/release without a separate explicit confirm.
 - **Never delete a release without exporting its notes first.** `gh release delete` destroys the body irrecoverably — GitHub keeps no history of it. Phase 3 writes it to `$RPT/notes-original-$VER.md` **before** teardown; that file is the only thing that makes a rollback possible (see *Rolling back an overwrite*).
@@ -133,14 +133,14 @@ git tag -a "$VER" "$SHA" -m "Release $VER"
 git push origin "$VER"
 ```
 
-This triggers `ci.yml` and `ci-chart.yml`. Per the note-generation contract, `ci.yml` creates the GitHub Release as a **pre-release** carrying the categorized baseline body.
+This triggers `ci.yml` and `chart.yml`. Per the note-generation contract, `ci.yml` creates the GitHub Release as a **pre-release** carrying the categorized baseline body.
 
 ### Phase 4 — Monitor CI (read-only)
 
 Watch **every** run for the tag (both workflows) to completion. Tag pushes show up with the tag name as the head branch.
 
 ```bash
-gh run list --branch "$VER" --limit 20              # enumerate ci.yml + ci-chart.yml runs
+gh run list --branch "$VER" --limit 20              # enumerate ci.yml + chart.yml runs
 gh run watch <run-id> --exit-status --compact       # per run, blocks until it finishes
 ```
 
