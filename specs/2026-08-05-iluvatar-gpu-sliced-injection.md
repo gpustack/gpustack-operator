@@ -1,6 +1,6 @@
 # Spec: Iluvatar GPU Logical Slicing — HAMi-core Injection
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -214,7 +214,7 @@ mounts := []*deviceplugin.Mount{
         32GiB → SM_LIMIT=25, MEMORY_LIMIT_0=16384m; absent cores% → 100; self-declared LIBCUDA_LOG_LEVEL kept.
       Verify: `go test ./pkg/devicemanager/allocator/iluvatar/...`
 
-- [ ] **T4 · Docs: flip Iluvatar to logical-sliced in the matrix**
+- [x] **T4 · Docs: flip Iluvatar to logical-sliced in the matrix**
       Blocked by: T3
       Owns: `docs/architecture/discovery.md`, `README.md`
       Acceptance: Iluvatar joins the "preload library + per-container compute/VRAM quota" row
