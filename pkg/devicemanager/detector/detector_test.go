@@ -8,8 +8,11 @@ import (
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 
+	workercore "gpustack.ai/gpustack/api/worker/v1alpha1"
 	"gpustack.ai/gpustack/pkg/device"
+	"gpustack.ai/gpustack/pkg/kubemeta"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/systemname"
 )
@@ -176,4 +179,79 @@ func TestAlignDeviceGroups(t *testing.T) {
 			assert.Equal(t, c.want, got)
 		})
 	}
+}
+
+// TestControlOnNodeWithoutBlock pins the upgrade-across-ownership-change path: a Devices object
+// created by v0.5.4 or earlier carries a NodeFeature controller reference, and the post-upgrade
+// align pass must REPLACE it with the Node reference rather than append a second controller —
+// the API server rejects two controller references, which is what froze every carried-over
+// Devices at its pre-upgrade content (gpustack-operator#77).
+func TestControlOnNodeWithoutBlock(t *testing.T) {
+	nd := &core.Node{ObjectMeta: meta.ObjectMeta{Name: "node-0", UID: "uid-node"}}
+
+	t.Run("a NodeFeature controller reference from a pre-upgrade release is replaced", func(t *testing.T) {
+		devs := &workercore.Devices{ObjectMeta: meta.ObjectMeta{
+			Name: "node-0",
+			OwnerReferences: []meta.OwnerReference{
+				{
+					APIVersion:         "nfd.k8s-sigs.io/v1alpha1",
+					Kind:               "NodeFeature",
+					Name:               "node-0",
+					UID:                "uid-nodefeature",
+					Controller:         ptr.To(true),
+					BlockOwnerDeletion: ptr.To(false),
+				},
+			},
+		}}
+
+		controlOnNodeWithoutBlock(devs, nd)
+
+		refs := devs.GetOwnerReferences()
+		assert.Len(t, refs, 1, "exactly one controller reference survives")
+		assert.Equal(t, "Node", refs[0].Kind)
+		assert.Equal(t, nd.UID, refs[0].UID)
+		assert.True(t, ptr.Deref(refs[0].Controller, false))
+		assert.False(t, ptr.Deref(refs[0].BlockOwnerDeletion, true))
+	})
+
+	t.Run("an existing Node controller reference is refreshed in place", func(t *testing.T) {
+		devs := &workercore.Devices{}
+		kubemeta.ControlOnWithoutBlock(devs, nd, core.SchemeGroupVersion.WithKind("Node"))
+
+		controlOnNodeWithoutBlock(devs, nd)
+
+		refs := devs.GetOwnerReferences()
+		assert.Len(t, refs, 1)
+		assert.Equal(t, "Node", refs[0].Kind)
+		assert.Equal(t, nd.UID, refs[0].UID)
+	})
+
+	t.Run("non-controller references of other kinds are left alone", func(t *testing.T) {
+		devs := &workercore.Devices{ObjectMeta: meta.ObjectMeta{
+			Name: "node-0",
+			OwnerReferences: []meta.OwnerReference{
+				{
+					APIVersion: "nfd.k8s-sigs.io/v1alpha1",
+					Kind:       "NodeFeature",
+					Name:       "node-0",
+					UID:        "uid-nodefeature",
+					Controller: ptr.To(true),
+				},
+				{
+					APIVersion: "apps/v1",
+					Kind:       "DaemonSet",
+					Name:       "device-manager",
+					UID:        "uid-daemonset",
+				},
+			},
+		}}
+
+		controlOnNodeWithoutBlock(devs, nd)
+
+		refs := devs.GetOwnerReferences()
+		assert.Len(t, refs, 2, "the foreign controller is retired, the plain reference kept")
+		assert.Equal(t, "DaemonSet", refs[0].Kind)
+		assert.Equal(t, "Node", refs[1].Kind)
+		assert.True(t, ptr.Deref(refs[1].Controller, false))
+	})
 }
