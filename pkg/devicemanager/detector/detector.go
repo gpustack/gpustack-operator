@@ -10,6 +10,7 @@ import (
 
 	core "k8s.io/api/core/v1"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 	nfd "sigs.k8s.io/node-feature-discovery/api/nfd/v1alpha1"
@@ -293,7 +294,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		}
 		// Update owner reference.
 		if !kubemeta.IsControlledBy(aNf, nd) {
-			kubemeta.ControlOnWithoutBlock(aNf, nd, core.SchemeGroupVersion.WithKind("Node"))
+			controlOnNodeWithoutBlock(aNf, nd)
 			skip = false
 		}
 		return aNf, skip, err
@@ -351,7 +352,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 		}
 		// Update owner reference.
 		if !kubemeta.IsControlledBy(aDevs, nd) {
-			kubemeta.ControlOnWithoutBlock(aDevs, nd, core.SchemeGroupVersion.WithKind("Node"))
+			controlOnNodeWithoutBlock(aDevs, nd)
 			skip = false
 		}
 		return aDevs, skip, err
@@ -364,6 +365,19 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	}
 
 	return nil
+}
+
+// controlOnNodeWithoutBlock sets the node as the object's sole controller owner, retiring any
+// existing controller reference of another kind first. ControlOnWithoutBlock only replaces a
+// reference matched by api-version and kind, so without this an object carried over from a release
+// that owned it by a different kind (e.g. Devices owned by the NodeFeature before v0.6) would gain
+// a SECOND controller reference — which the API server rejects, freezing the object at its
+// pre-upgrade content on every sync pass.
+func controlOnNodeWithoutBlock(obj kubemeta.MetaObject, nd *core.Node) {
+	if ctrlRef := kubemeta.GetControllerOfNoCopy(obj); ctrlRef != nil && ctrlRef.UID != nd.UID {
+		kubemeta.ControlOff(obj, nil, schema.FromAPIVersionAndKind(ctrlRef.APIVersion, ctrlRef.Kind))
+	}
+	kubemeta.ControlOnWithoutBlock(obj, nd, core.SchemeGroupVersion.WithKind("Node"))
 }
 
 // alignDeviceGroups reconciles the existing device groups (aGroups) against the freshly detected
