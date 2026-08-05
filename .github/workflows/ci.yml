@@ -12,7 +12,17 @@ defaults:
     shell: bash
 
 on:
-  workflow_dispatch: { }
+  workflow_dispatch:
+    inputs:
+      heavy:
+        description: 'Build on the larger "-8x" runners: "auto" decides from the changed files, "true" forces them, "false" keeps the standard runners.'
+        required: false
+        type: choice
+        options:
+          - "auto"
+          - "true"
+          - "false"
+        default: "auto"
   push:
     branches:
       - "main"
@@ -67,6 +77,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
+          HEAVY_INPUT: ${{ github.event.inputs.heavy || 'auto' }}
         run: |
           #
           # A change to the operator Dockerfile, go.sum, or this CI workflow either
@@ -75,6 +86,16 @@ jobs:
           # changed files against its base, and when present mark the build "heavy" so
           # the matrix targets the "-8x" runner variant.
           #
+          # An explicit "heavy" input overrides that, because the detection can only see
+          # this repository: a vendor base image moving under a mutable tag voids the
+          # registry cache without changing a single file here, and then only the person
+          # dispatching the run knows the build is about to be a full one.
+          #
+          if [[ "${HEAVY_INPUT}" != "auto" ]]; then
+            echo "heavy=${HEAVY_INPUT}" >>"$GITHUB_OUTPUT"
+            echo "DEBUG: heavy=${HEAVY_INPUT} (forced by input)"
+            exit 0
+          fi
           HEAVY="false"
           BASE=""
           case "${EVENT_NAME}" in
