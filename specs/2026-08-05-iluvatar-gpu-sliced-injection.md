@@ -181,7 +181,7 @@ mounts := []*deviceplugin.Mount{
 }
 ```
 ### Implementation Plan
-- [ ] **T1 · Image asset: stage libvgpu.so for Iluvatar**
+- [x] **T1 · Image asset: stage libvgpu.so for Iluvatar**
       Blocked by: None
       Owns: `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/rootfs/etc/gpustack/lib/iluvatar/**`
       Gate: review

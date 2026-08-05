@@ -415,6 +415,11 @@ COPY --from=xbuild-ascend-cann-9-310p /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-310
 COPY --from=xbuild-nvidia-cuda-12 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-12
 COPY --from=xbuild-nvidia-cuda-13 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-13
 
+## Copy the Iluvatar logical-slicing runtime (HAMi-core). corex is a CUDA-compatible layer that
+## needs only HAMi-core's headers, not CUDA linkage, so it reuses the NVIDIA cuda-12 artifact —
+## one flat library, no CUDA-major subdirectory and no new build stage.
+COPY --from=xbuild-nvidia-cuda-12 /out ${GPUSTACK_LIB_DIR}/iluvatar
+
 ## Copy the THead PPU logical-slicing shims and their usage reader. Flat, with no
 ## runtime-version subdirectory: the workload brings its own SDK, so there is no
 ## host library to match a generation against. Empty on arm64, by design.
@@ -506,6 +511,8 @@ EOT
         "${GPUSTACK_LIB_DIR}"/ascend/ld.so.preload
     install -D -m 0644 /rootfs/etc/gpustack/lib/nvidia/ld.so.preload \
         "${GPUSTACK_LIB_DIR}"/nvidia/ld.so.preload
+    install -D -m 0644 /rootfs/etc/gpustack/lib/iluvatar/ld.so.preload \
+        "${GPUSTACK_LIB_DIR}"/iluvatar/ld.so.preload
     install -D -m 0644 /rootfs/etc/gpustack/lib/thead/ld.so.preload \
         "${GPUSTACK_LIB_DIR}"/thead/ld.so.preload
 
