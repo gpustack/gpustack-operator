@@ -172,8 +172,8 @@ docs/architecture/discovery.md, README.md            # F5
 ```
 ### Code Style
 ```go
-// F3: a logical slice is single-card and corex ships one CUDA-compat libvgpu,
-// so no per-card index fan-out and no CUDA-major reconciliation.
+// F3: a logical slice is single-card and corex presents a single CUDA-compatible
+// driver level, so no per-card index fan-out and no CUDA-major reconciliation.
 libDir := filepath.Join(deviceplugin.OperatorLibDir, Manufacturer)
 mounts := []*deviceplugin.Mount{
     {ContainerPath: ctrLdPreloadPath, HostPath: filepath.Join(libDir, "ld.so.preload"), ReadOnly: true},
@@ -202,7 +202,7 @@ mounts := []*deviceplugin.Mount{
       Verify: `GODEBUG=gotypesalias=0 CGO_ENABLED=1 go build ./pkg/devicemanager/detector/iluvatar/...`
         and `go test ./pkg/devicemanager/detector/iluvatar/...` (compiles; reports no test files).
 
-- [ ] **T3 · Allocator: HAMi-core sliced injection branch**
+- [x] **T3 · Allocator: HAMi-core sliced injection branch**
       Blocked by: None
       Owns: `pkg/devicemanager/allocator/iluvatar/**`
       Gate: review
