@@ -2,6 +2,9 @@ package thead
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	core "k8s.io/api/core/v1"
@@ -13,6 +16,7 @@ import (
 	"gpustack.ai/gpustack/pkg/deviceplugin"
 	"gpustack.ai/gpustack/pkg/nodefeature"
 	"gpustack.ai/gpustack/pkg/utils/gox"
+	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
 const Manufacturer = nodefeature.ManufacturerTHead
@@ -40,6 +44,14 @@ func New(opts device.AllocatorOptions) device.Allocator {
 	if !opts.NoShared {
 		servers = append(servers,
 			newServer(logger, workercore.DeviceAllocationModeShared, nil),
+		)
+	}
+	// The sliced server serves "<base>.sliced": a share of one card, enforced inside the container by
+	// the preload pair this operator's image builds rather than by the driver. It takes no partition
+	// driver — a logical slice never touches the partitioning surface.
+	if !opts.NoSliced {
+		servers = append(servers,
+			newServer(logger, workercore.DeviceAllocationModeSliced, nil),
 		)
 	}
 	if partitioned {
@@ -160,10 +172,17 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig mig
 	return s
 }
 
+// _AllocatedAccelerator pairs an allocated card with its group; the group carries the VRAM the
+// sliced path derives that card's own memory budget from.
+type _AllocatedAccelerator struct {
+	group *workercore.DevicesGroup
+	accel *workercore.Accelerator
+}
+
 func (s *server) GetContainerAllocateResponse(
 	_ context.Context,
-	_ *core.Pod,
-	_ *core.Container,
+	pod *core.Pod,
+	ctr *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
@@ -183,7 +202,9 @@ func (s *server) GetContainerAllocateResponse(
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 
-	// Mount specified devices.
+	// Mount specified devices. The pass also collects each allocated card with its group, in devs
+	// order, which is the order the sliced path indexes its per-card memory figures by.
+	var accelerators []_AllocatedAccelerator
 	for i := range devs.Spec.Groups {
 		devGroup := &devs.Spec.Groups[i]
 		for j := range devGroup.Accelerators {
@@ -207,8 +228,105 @@ func (s *server) GetContainerAllocateResponse(
 				return nil, err
 			}
 			ctrResp.Devices = append(ctrResp.Devices, cardNode)
+			accelerators = append(accelerators,
+				_AllocatedAccelerator{
+					group: devGroup,
+					accel: devsAccelerator,
+				},
+			)
 		}
 	}
 
+	// A sliced container gets that same device set plus the shim's preload and quota; every other
+	// mode's response is the device set alone, because this vendor has no container-runtime hook to
+	// interpret anything else.
+	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
+		return s.getSlicedContainerAllocateResponse(pod, ctr, ctrResp.Devices, accelerators)
+	}
+
 	return ctrResp, nil
+}
+
+// In-container paths the PPU slicing shim expects. The two shared objects sit exactly where the
+// ld.so.preload asset names them, so that file and these constants are one contract.
+const (
+	ctrLdPreloadPath = "/etc/ld.so.preload"
+	ctrDlsymHookPath = "/usr/local/vppu/hgml_dlsym_hook.so"
+	ctrQuotaLibPath  = "/usr/local/vppu/hggc_quota.so"
+	ctrMonitorPath   = "/usr/local/vppu/ppu-monitor"
+	ctrLedgerDir     = "/var/run/vppu"
+	ctrLedgerPath    = ctrLedgerDir + "/ledger"
+)
+
+// getSlicedContainerAllocateResponse renders the logical-slicing injection for a sliced container:
+// the quota figures the shim reads at load, the mounts that preload it, and the writable directory
+// its cross-process usage region lives in. devices is the container's already-verified device set,
+// which a slice takes unchanged — the vendor has no container-runtime hook, so the nodes are the
+// whole of the container's access whether it holds a share of a card or all of it.
+func (s *server) getSlicedContainerAllocateResponse(
+	pod *core.Pod,
+	ctr *core.Container,
+	devices []*deviceplugin.DeviceSpec,
+	accels []_AllocatedAccelerator,
+) (*deviceplugin.ContainerAllocateResponse, error) {
+	if len(accels) == 0 {
+		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
+	}
+
+	// The usage region is per container rather than per node, unlike the NVIDIA branch's host
+	// /dev/shm: it is addressed by container-local card index, so a shared location would let two
+	// containers' index 0 charge one slot. Under the pod work dir, so the existing per-pod reclaim
+	// removes it with the pod. The shim creates the region file itself; this is only its directory,
+	// world-writable because the workload's user is not ours to predict.
+	ledgerDir := filepath.Join(deviceplugin.PodWorkDir(string(pod.UID), ctr.Name), "run/vppu")
+	if err := osx.MkdirAll(ledgerDir, 0o777); err != nil {
+		return nil, fmt.Errorf("create %q: %w", ledgerDir, err)
+	}
+
+	// The variable shape is HAMi-core's, deliberately: a per-card memory limit indexed by loop
+	// position, and ONE un-indexed compute limit which the shim reads as the cap for every card
+	// carrying no figure of its own. Admission pins a logical slice to a single card, so the index
+	// is 0 today; the loop is written for several anyway, exactly as the NVIDIA branch's is.
+	//
+	// What is NOT copied from HAMi-core is what an absent compute figure means. It defaults to a
+	// whole card's compute there and makes the card unusable here, and SlicedCoresPercent returns
+	// 100 when nothing was requested — so the figure is emitted even at 100, because omitting it
+	// would be indistinguishable from "no compute quota" to everything downstream.
+	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
+	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
+	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
+	envs := map[string]string{
+		"HGGC_DEVICE_SM_LIMIT": strconv.Itoa(deviceplugin.SlicedCoresPercent(ctr, coresRes)),
+		"HGGC_LEDGER_PATH":     ctrLedgerPath,
+	}
+	for i := range accels {
+		// The MiB figure carries no unit suffix, unlike the NVIDIA branch's "…m": HAMi-core parses
+		// a suffix, the shim parses a bare MiB integer.
+		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(accels[i].group.Memory))
+		if err != nil {
+			return nil, fmt.Errorf("derive sliced memory limit: %w", err)
+		}
+		envs["HGGC_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(memMib, 10)
+	}
+
+	// State the verbosity the slice runs at rather than inheriting it: level 1 reports denials and
+	// errors, which is the shim's own default today, and naming it keeps the level a property of the
+	// allocation instead of a library default a later shim change could move underneath it. A
+	// container that sets LIBHGGC_LOG_LEVEL itself keeps its value — the debugging escape hatch.
+	if !deviceplugin.ContainerEnvDeclared(ctr, "LIBHGGC_LOG_LEVEL") {
+		envs["LIBHGGC_LOG_LEVEL"] = "1"
+	}
+
+	libDir := filepath.Join(deviceplugin.OperatorLibDir, "thead")
+	return &deviceplugin.ContainerAllocateResponse{
+		Devices: devices,
+		Envs:    envs,
+		Mounts: []*deviceplugin.Mount{
+			{ContainerPath: ctrLdPreloadPath, HostPath: filepath.Join(libDir, "ld.so.preload"), ReadOnly: true},
+			{ContainerPath: ctrDlsymHookPath, HostPath: filepath.Join(libDir, "hgml_dlsym_hook.so"), ReadOnly: true},
+			{ContainerPath: ctrQuotaLibPath, HostPath: filepath.Join(libDir, "hggc_quota.so"), ReadOnly: true},
+			{ContainerPath: ctrMonitorPath, HostPath: filepath.Join(libDir, "ppu-monitor"), ReadOnly: true},
+			{ContainerPath: ctrLedgerDir, HostPath: ledgerDir, ReadOnly: false},
+		},
+	}, nil
 }

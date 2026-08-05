@@ -27,10 +27,11 @@ partitioning, and an allocator branch that mounts the library plus a container-s
 `/etc/ld.so.preload` and injects the vendor's own quota variables. Four things depart from it, each
 forced by what the PPU deployment model or the shim itself actually is:
 
-- **The shim is two shared objects, and their preload order is load-bearing.** `hggc_quota.so`
-  enforces; `hgml_dlsym_hook.so` makes the quota visible to `ppu-smi`. Two libraries that interpose
-  `dlsym` do not chain through each other, so the visibility half must come first or it is loaded,
-  initialised and never entered — a silently physical figure rather than an error.
+- **The shim is two shared objects, not one library.** `hggc_quota.so` enforces; `hgml_dlsym_hook.so`
+  makes the quota visible to `ppu-smi`. Their own relative order is inert — only the visibility half
+  defines `dlsym`, and that was measured with `readelf` rather than assumed — but a *foreign* `dlsym`
+  interposer arriving ahead of them leaves the visibility half loaded, initialised and never entered: a
+  silently physical figure rather than an error. That is a documented caveat, not something we enforce.
 - **Devices are passed through, not injected by a runtime hook.** THead follows the ROCm model: the SDK
   lives in the workload container and the host only passes `/dev/alixpu`, `/dev/alixpu_ctl` and
   `/dev/alixpu_ppu<N>`. So the sliced response carries the same fail-closed device set the other modes
@@ -62,7 +63,7 @@ and what this spec leaves unproven on hardware is the wiring, not the enforcemen
 - **Build and stage the shim tree from the operator image.** `hggc_quota.so`, `hgml_dlsym_hook.so` and
   `ppu-monitor` compiled from `csrc/` — the repo's first library built from its own sources rather than
   a pinned upstream commit — installed into `${GPUSTACK_LIB_DIR}/thead/` beside a `thead/ld.so.preload`
-  that names the container paths in the required order.
+  that names the two container paths.
 - **Advertise the capability in the NVIDIA detector's exact shape** — the `else` arm of the
   partitioning-mode branch and nothing beyond it: no library-presence check, no architecture check. The
   two detectors then differ only in the driver call they read the mode with, which is what keeps a later
@@ -267,8 +268,14 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   |---|---|
   | `HGGC_DEVICE_MEMORY_LIMIT_<i>` | MiB, from `.sliced.memory-percentage` / `.sliced.memory-mib` against **that card's own group** VRAM; `<i>` is the loop position over the allocated cards |
   | `HGGC_DEVICE_SM_LIMIT` | percent, from `.sliced.cores-percentage`, un-indexed, **emitted even at 100** |
-  | `HGGC_LEDGER_PATH` | the per-container region file inside the rw mount below |
+  | `HGGC_LEDGER_PATH` | `/var/run/vppu/ledger` — the region file inside the per-container rw mount below |
   | `LIBHGGC_LOG_LEVEL` | `1` — denials and errors — injected only when the workload declares no value of its own |
+
+  `LIBHGGC_LOG_LEVEL=1` **changes nothing at runtime**, and that is stated rather than glossed: the shim's
+  own default is already level 1, so this key states the level the slice runs at instead of inheriting a
+  library default that a later shim change could move underneath the allocation. It is the one key here
+  whose value the NVIDIA branch's reasoning does not carry over — HAMi-core defaults to a per-call log
+  and has to be quieted, where our level 1 is per-denial and is the level we want.
 
 - **The shape of that pair is the NVIDIA branch's, deliberately.** HAMi-core is given a per-card
   `CUDA_DEVICE_MEMORY_LIMIT_<i>` and a single un-indexed `CUDA_DEVICE_SM_LIMIT`
@@ -381,7 +388,7 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   100 %; keep a card's logical and physical capabilities mutually exclusive; keep the ledger region per
   container.
 - **Ask first:** publishing any image; anything that runs on, deploys to, or consumes a card on the PPU
-  host; changing the `ld.so.preload` order; adding a compile recipe anywhere other than the tree's own
+  host; changing the `ld.so.preload` entries; adding a compile recipe anywhere other than the tree's own
   `build.sh`.
 - **Never:** write the host's `/etc/ld.so.preload`; replace or shadow a host library; inject the slicing
   preload into the device-manager process itself; let a missing or unparsable quota degrade into "no
@@ -408,9 +415,9 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   The one input that *can* change is that mode, and an administrator toggling it already requires a
   DeviceManager restart for the partitioning work that landed before this. The underlying staleness is a
   pre-existing defect and stays out of scope.
-- The two preloads are ordered correctly by us and then a workload image's own `dlsym` interposer wins
-  the race anyway → nothing inside the library can detect it; the constraint is documented in
-  `discovery.md` and the asset's ordering is what we control. `ppu-smi` then reports the physical card
+- A workload image's own `dlsym` interposer arrives ahead of ours and wins the race → nothing inside the
+  library can detect it; the constraint is documented in `discovery.md`, and what we control is only the
+  two entries of the asset, which are processed after any `LD_PRELOAD`. `ppu-smi` then reports the physical card
   while enforcement still holds, so the failure mode is a wrong *display*, not a leaked quota.
 - A sliced container starts, the mounts resolve, and the shim then refuses every allocation because a
   figure is missing → the allocator emits a complete indexed pair per card and the unit tests assert the
@@ -596,7 +603,7 @@ in practice even though nothing blocks on it.
       — `thead` 35.2 % → **35.1 %** and `nvidia` 22.5 % unchanged, the dip being the four uncovered statements
       of the new arm and reported rather than hidden behind a test that would only restate the literal
 
-- [ ] **T3 · The allocator hands out the slice**
+- [x] **T3 · The allocator hands out the slice**
       Blocked by: None
       Owns: `pkg/devicemanager/allocator/thead/deviceplugin.go`,
       `pkg/devicemanager/allocator/thead/deviceplugin_test.go`
@@ -616,8 +623,10 @@ in practice even though nothing blocks on it.
       admission does not admit it today; compute at 100 when nothing was requested; a memory error when
       neither memory request is present; the declared log level left alone; a card whose minor number
       cannot be proven refused; and the non-sliced modes' responses unchanged.
-      Verify: `go test -count=1 -cover ./pkg/devicemanager/allocator/thead/...` (at or above the 88.9 %
-      baseline)
+      Verify: `go test -count=1 -cover ./pkg/devicemanager/allocator/thead/...` — `88.9 %` → **`89.1 %`**,
+      and three source mutations each fail exactly the rows that name them: the MiB figure carrying
+      HAMi-core's `"m"` suffix, a whole card's compute omitted instead of stated, and the usage region moved
+      to a node-wide location
 
 **Checkpoint.** `make lint && make test` clean, and the remote amd64 image carrying all four files in
 `${GPUSTACK_LIB_DIR}/thead/`. Only then is the capability real end to end, and only then does documenting
@@ -660,8 +669,8 @@ code solid enough prior to committing the changes necessary to implement this en
 
 #### Unit tests
 
-- `pkg/devicemanager/allocator/thead`: `2026-08-05` - `88.9%` (baseline; must not regress, and the sliced
-  branch and its ordering rule are covered by the T3 cases)
+- `pkg/devicemanager/allocator/thead`: `2026-08-05` - `88.9%` → `89.1%` (the sliced branch and its per-card
+  indexing are covered by the T3 cases)
 - `pkg/devicemanager/detector/thead`: `2026-08-05` - `35.2%` → `35.1%` (T2 adds no test: its four statements
   sit inside `DetectAccelerator`, which needs a real card, and extracting them to buy coverage would be a
   test that restates a struct literal. The same four are the whole reason the figure moves)
