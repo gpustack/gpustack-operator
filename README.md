@@ -36,13 +36,14 @@ slots per card) requests. What differs is how — and whether — a single card 
 | **MetaX** | GPU | `metax-tech.com/gpu` | ✅ | — |
 | **Moore Threads** | GPU | `mthreads.com/gpu` | ✅ | — |
 | **NVIDIA** | GPU | `nvidia.com/gpu` | ✅ | ✅ **MIG** |
-| **T-Head** | PPU | `alibabacloud.com/ppu` | — | ✅ **MIG** |
+| **T-Head** | PPU | `alibabacloud.com/ppu` | ✅ | ✅ **MIG** |
 
 - **Logical slicing is software.** The card stays whole; each container gets the vendor's own sharing
   facility applied to it — a preload library, a kernel module, a sub-device — budgeting its compute
   (SM / aicore %) and its VRAM separately, so `50 %` of the memory at `40 %` of the compute is a valid
-  ask. The VRAM budget is a hard cap everywhere; on Moore Threads the compute share is a scheduling
-  weight rather than a hard cap.
+  ask. The VRAM budget is a hard cap everywhere; the compute budget is not one kind of thing — on Moore
+  Threads it is a scheduling weight, and on T-Head it is a duty-cycle share of a short window, so a
+  slice may exceed its percentage instantaneously and not across the window.
 - **Physical partitioning is hardware.** It is a driver-level configuration mode an administrator
   enables on the card — the operator observes it, never flips it. See [NVIDIA MIG
   Operations](./docs/operation/nvidia-mig.md) and [T-Head PPU Partitioning

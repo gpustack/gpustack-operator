@@ -29,7 +29,7 @@ A card is shared in one of two physically incompatible ways, and GPUStack names 
 
 | Term | What it is | How isolation is enforced | Example |
 |---|---|---|---|
-| **Logical slicing** (`.sliced*`) | software slicing of a whole card | a vendor preload library caps compute and VRAM per container (NVIDIA HAMi-core `libvgpu.so`, Ascend vcann-rt `libvruntime.so`) | 50 % of an A10G |
+| **Logical slicing** (`.sliced*`) | software slicing of a whole card | the vendor's own sharing facility caps compute and VRAM per container — [which facility, per vendor](architecture/discovery.md#sliced-logical-slicing) | 50 % of an A10G |
 | **Physical partitioning** (`.partitioned*`) | hardware partitioning of a card put into a partitioning mode | the hardware itself; the operator materializes the instance | an NVIDIA MIG `3g.40gb` or a T-Head PPU partition |
 
 The two never apply to the same card. A card in a partitioning mode advertises **only** the partition

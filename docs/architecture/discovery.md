@@ -241,24 +241,44 @@ budget from the per-card memory request (`.sliced.memory-percentage` preferred o
 VRAM.
 
 **How that budget is applied differs by vendor** — every sliceable vendor has real per-slice runtime
-isolation, but only two of them get it from a preload library:
+isolation, but only three of them get it from a preload library:
 
 | Vendor | Mechanism |
 |---|---|
-| NVIDIA, Ascend | preload library + per-container compute/VRAM quota — see below |
+| NVIDIA, Ascend, T-Head | preload library + per-container compute/VRAM quota — see below |
 | MThreads | `MTHREADS_QOS_*` env vars consumed by the host sGPU kmod (the compute share is a scheduling weight, not a hard cap) |
 | Hygon | a per-pod `vdev.conf` — a `cores%`-derived CU bitmask + VRAM cap — mounted read-only at `/etc/vdev/docker/` and read by the host DTK/hyhal runtime |
 | MetaX | a sysfs `sgpu` subdevice — the allocator puts the card in `sgpu` mode and writes a `cores%`-derived compute quota + VRAM cap under a `fixed-share` scheduling class to `/sys/bus/pci/devices/<BDF>/sgpu/create`, then injects `METAX_SGPUS` plus the card device nodes for the host MetaX runtime |
 | Cambricon | a cnDev sMLU profile + instance — the allocator creates or reuses a profile with `mluQuota = cores%` and `memorySize` set to the VRAM budget, instantiates a subdevice, and injects its device nodes `/dev/cambricon_dev*` / `/dev/cambricon_ipcm*` / the instance node, with a `VIRTUAL_DEVICES` env fallback for `--use-runtime` deployments since sMLU does not support CDI |
 
-For NVIDIA and Ascend, the container is started with a vendor preload library — NVIDIA HAMi-core `libvgpu.so`, Ascend
-vcann-rt `libvruntime.so` — activated via `/etc/ld.so.preload`, plus per-container quota (NVIDIA env
+For NVIDIA, Ascend and T-Head, the container is started with a vendor preload library — NVIDIA HAMi-core `libvgpu.so`, Ascend
+vcann-rt `libvruntime.so`, T-Head the pair `hggc_quota.so` (enforcement) + `hgml_dlsym_hook.so`
+(visibility) — activated via `/etc/ld.so.preload`, plus per-container quota (NVIDIA env
 `CUDA_DEVICE_SM_LIMIT` / `CUDA_DEVICE_MEMORY_LIMIT_*`; Ascend an `npu_info.config` carrying
-`aicore-quota` / `memory-quota`).
+`aicore-quota` / `memory-quota`; T-Head env `HGGC_DEVICE_SM_LIMIT` / `HGGC_DEVICE_MEMORY_LIMIT_*`,
+where the compute figure is emitted **even at 100 %** because that library refuses a card whose figure
+is missing rather than reading absence as "no cap").
+
+T-Head's sliced response carries **no** visible-devices env: like its other modes it passes the card's
+own device node plus the two shared control nodes, and adds only the library mounts, the quota env and a
+per-container directory for the ledger region under the pod working directory (per container, because
+the region is addressed by container-local card index).
+
+On T-Head the visibility half is what makes the container's own `ppu-smi` report its quota rather than
+the physical card, by interposing `dlsym`. **A workload image that brings its own `dlsym` interposer
+through `LD_PRELOAD` — processed before `/etc/ld.so.preload` — leaves that half loaded but never
+entered**: the quota still applies, but `ppu-smi` shows the whole card. Nothing in the library can
+detect that, so it is a caveat rather than an error. A mounted `ppu-monitor` reads the quota and usage
+of both dimensions out of the container's own ledger region (`HGGC_LEDGER_PATH`), which is where the
+compute cap can be seen at all — no `ppu-smi` field carries it.
 
 It also quiets each preload library's verbose per-call logging by default — injecting
 `LIBCUDA_LOG_LEVEL=0` (HAMi-core) / `ENPU_LOG_LEVEL=1` (vcann-rt) unless the workload already sets
-that variable — so a normal run is not buried in interception-library noise. On Ascend it injects one
+that variable — so a normal run is not buried in interception-library noise. T-Head is injected
+`LIBHGGC_LOG_LEVEL=1` under the same never-overwrite rule, and `1` rather than `0` because its levels
+are not HAMi-core's: `1` logs a line per *denial*, not per intercepted call, and `0` would hide the
+diagnostics of a slice that is refusing every allocation. That is already the library's own default —
+naming it keeps the level a property of the allocation rather than a library default. On Ascend it injects one
 more, `ENPU_DSMI_HOOK=1` under the same never-overwrite rule (which reads the container's own `env:`
 entries — an `envFrom:`-sourced value is not visible to the allocator, so opting out that way needs an
 explicit `env:`): it enables a vendored vcann-rt hook
@@ -300,6 +320,13 @@ scripts under `pack/gpustack-operator/external/{nvidia,ascend}`) and staged onto
 (`/var/lib/gpustack/operator/lib`) by a device-manager **init container**; the allocator mounts the
 matching library + a per-pod working directory into each sliced container and reclaims those
 directories once their pods are gone.
+
+**T-Head's pair is the exception on both counts.** It is built from this repository's own sources
+(`csrc/thead/ppu-slicing-shim`, compiled by the `xbuild-thead-ppu` stage inside the vendor SDK image)
+rather than cloned from an upstream at a pinned commit, and it carries no runtime-version subdirectory,
+because the PPU SDK lives in the workload container rather than in ours. That SDK is distributed for
+`x86_64` only, so the **`arm64` operator image carries no PPU shim** — the detector does not check for
+one, on the ground that a PPU card only exists in an `x86_64` host.
 
 ## SSH-enabled Instances and the visibility resource
 

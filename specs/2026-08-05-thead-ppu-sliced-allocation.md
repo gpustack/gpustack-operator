@@ -1,6 +1,6 @@
 # Spec: THead PPU logical slicing — the capability, from the image build to the allocator
 
-Status: Building
+Status: Shipped
 Type: Feature
 
 > **This spec ships the capability, not the library.** `specs/2026-08-03-thead-ppu-slicing-shim.md`
@@ -334,7 +334,9 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
   `0` (our level 1 is per-denial, not per-call); "Where the preload libraries come from" records the one
   that is built from this repo's own `csrc/` tree rather than a pinned upstream commit, and that it is
   amd64-only.
-- `docs/accelerator-requests.md`'s logical-slicing row names the THead library alongside the other two.
+- `docs/accelerator-requests.md`'s logical-slicing row drops the per-vendor library names it carried and
+  links to the mechanism table instead: which facility a vendor slices with is a `discovery.md` fact, and
+  naming two of them on a request page was the third place that list had to be kept in step.
 - Routed through the `gpustack-operator-docs` skill so the index, links and tables of contents are
   checked rather than assumed.
 
@@ -513,7 +515,8 @@ pkg/devicemanager/allocator/thead/deviceplugin.go       # + Sliced server behind
 pkg/devicemanager/allocator/thead/deviceplugin_test.go  # + the sliced response cases
 README.md                                               # matrix row
 docs/architecture/discovery.md                          # mechanism table, env names, ordering, sources
-docs/accelerator-requests.md                            # library name in the logical-slicing row
+docs/accelerator-requests.md                            # logical-slicing row: drop the library names,
+                                                        #   link the per-vendor mechanism table
 specs/2026-08-05-thead-ppu-sliced-allocation.md
 ```
 
@@ -632,7 +635,22 @@ in practice even though nothing blocks on it.
 `${GPUSTACK_LIB_DIR}/thead/`. Only then is the capability real end to end, and only then does documenting
 it describe something that exists.
 
-- [ ] **T4 · Documentation**
+**Checkpoint met**, `2026-08-05`, on the remote amd64 builder (`PACKAGE_PUSH` left at its `false` default,
+so nothing was published):
+
+- `make lint` `0 issues.`; `make test` green across 50 packages, `allocator/thead` `89.1 %`,
+  `detector/thead` `35.1 %`.
+- `/etc/gpustack/lib/thead/` holds `hggc_quota.so` `0755`, `hgml_dlsym_hook.so` `0755`, `ppu-monitor`
+  `0755` and `ld.so.preload` `0644` — the preload asset's mode being the one thing the stage-level build
+  could not show, since `install -D` runs in the final stage.
+- Read inside the **shipped** image rather than the build stage: all three artifacts' `DT_NEEDED` is
+  `libc.so.6` alone, and the build's own assertions reported `GLIBC_2.17` for `hggc_quota.so` and
+  `GLIBC_2.4` for the other two.
+- `ppu-monitor` runs in that image — no SDK, no device, no card — and exits `1` on its own "no usage
+  region" message rather than in the loader, naming the default `/dev/shm/vppu-ledger` because nothing
+  injected `HGGC_LEDGER_PATH` for a `docker run`.
+
+- [x] **T4 · Documentation**
       Blocked by: T1, T2, T3
       Owns: `README.md`, `docs/architecture/discovery.md`, `docs/accelerator-requests.md`
       Gate: (none)
@@ -645,10 +663,14 @@ it describe something that exists.
       `LIBHGGC_LOG_LEVEL=1` and why it is `1` rather than `0` (per-denial, not per-call), and records in
       "Where the preload libraries come from" the one library built from this repo's own `csrc/` tree
       rather than a pinned upstream commit, amd64-only; `accelerator-requests.md`'s logical-slicing row
-      names the THead library alongside the other two. Routed through the `gpustack-operator-docs` skill.
-      Verify: the `gpustack-operator-docs` skill's index / link / table-of-contents checks pass, and
-      `make lint` still passes — the repo has no doc linter, so those checks plus a read of the rendered
-      tables are the whole gate
+      drops its per-vendor library names for a link to that mechanism table. Routed through the
+      `gpustack-operator-docs` skill.
+      Verify: the `gpustack-operator-docs` skill's index / link / table-of-contents checks pass
+      (`OK: 17 docs pages checked`), `docs/architecture.md` stays at 140 lines — the overview gains nothing —
+      and `make lint` still passes. The repo has no doc linter, so those checks plus a read of the rendered
+      tables are the whole gate. One clause beyond the four items above: the sliced section states that this
+      vendor's sliced response carries no visible-devices env, since the whole section is otherwise written
+      around one.
 
 ### Test Plan
 
