@@ -179,6 +179,12 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+			// Logical (software) slicing via HAMi-core ld.preload; Iluvatar's native vcuda-core model
+			// is 1%-granular with 100 == a whole card, so the per-card slice ceiling is 100.
+			status.LogicalSliced = device.AcceleratorLogicalSliced{
+				Count:                     100,
+				CoresPercentageOvercommit: true,
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -193,6 +199,8 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		)
 		index++
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }
