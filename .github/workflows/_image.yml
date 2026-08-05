@@ -1,0 +1,344 @@
+# This reusable workflow builds one container image under pack/ for a set of platforms and
+# assembles the multi-arch manifest.
+#
+# It exists because the caller workflows differ only in what they build and when — the event
+# model, the tag policy, and which changes count as "heavy" — while the build itself is the
+# same nine steps every time. Keeping those steps here means a new image needs only a thin
+# entrypoint, and a fix to the build applies to every image at once.
+#
+# The caller owns: its own "on:" triggers, the runner matrix (so it decides platform coverage
+# and whether the build is heavy), and the tag policy. This workflow owns everything from
+# checkout to manifest push.
+
+name: Image
+
+permissions:
+  actions: read
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+on:
+  workflow_call:
+    inputs:
+      repository:
+        description: 'Image name under pack/, which is also the Docker Hub repository.'
+        required: true
+        type: string
+      matrix:
+        description: 'JSON array of {"runner","platform"} objects, one per platform to build.'
+        required: true
+        type: string
+      tags:
+        description: 'docker/metadata-action "tags" block.'
+        required: true
+        type: string
+      flavor:
+        description: 'docker/metadata-action "flavor" block, minus the per-platform suffix this workflow adds itself.'
+        required: false
+        type: string
+        default: "latest=false"
+      suffix-on-latest:
+        description: 'Apply the per-platform suffix to the "latest" tag as well.'
+        required: false
+        type: boolean
+        default: false
+      push:
+        description: 'Push the images, and write the registry build cache. False builds only, which is what a pull request wants.'
+        required: false
+        type: boolean
+        default: false
+      build-args:
+        description: 'Build arguments, one KEY=VALUE per line. For values that are safe to render in the run log.'
+        required: false
+        type: string
+        default: ""
+      build-args-secret:
+        description: 'Build arguments as a single space-separated "KEY=VALUE ..." string, expanded without ever echoing the values. For an input carrying a credential, such as a presigned URL.'
+        required: false
+        type: string
+        default: ""
+      go-cache:
+        description: 'Carry the Go build/module cache across runs. Only an image that compiles this repository needs it.'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      dockerhub-password:
+        required: true
+
+env:
+  INPUT_PASSWORD: ${{ secrets.dockerhub-password }}
+  INPUT_REPOSITORY: ${{ inputs.repository }}
+
+jobs:
+  build:
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Prepare Env
+        env:
+          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
+          INPUT_PLATFORM: ${{ matrix.platform }}
+        run: |
+          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          INPUT_PLATFORM=$(echo "${INPUT_PLATFORM}" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
+          echo "INPUT_NAMESPACE=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
+          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
+          echo "INPUT_PLATFORM=${INPUT_PLATFORM}" >> $GITHUB_ENV
+          echo "DEBUG: INPUT_NAMESPACE=${INPUT_NAMESPACE}"
+          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
+          echo "DEBUG: INPUT_PLATFORM=${INPUT_PLATFORM}"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Maximize Docker Build Space
+        # A caller's heavy detection sees only its own event's diff, so it cannot know the registry
+        # cache went stale in an earlier commit — and whichever build inherits that miss rebuilds
+        # every vendor SDK stage, overruns a standard runner's disk, and dies before it can write
+        # any job log at all, leaving nothing to read. This reclaim folds the idle /mnt temp disk
+        # into Docker's storage, on top of removing preinstalled toolchains. The "-8x" variant a
+        # heavy build targets has the room already, so it skips the reclaim.
+        if: ${{ !contains(matrix.runner, '-8x') }}
+        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
+        with:
+          deep-clean: true
+          root-reserve-mb: 40960
+      - name: Setup BuildX
+        id: setup-buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            network=host
+            env.BUILDKIT_STEP_LOG_MAX_SIZE=-1
+            env.BUILDKIT_STEP_LOG_MAX_SPEED=-1
+          buildkitd-flags: |
+            --allow-insecure-entitlement=network.host
+            --allow-insecure-entitlement=security.insecure
+            --oci-worker-net=host
+            --oci-worker-gc-keepstorage=204800
+            --oci-max-parallelism=1
+      - name: Setup BuildX Cache
+        id: setup-buildx-cache
+        if: ${{ inputs.go-cache }}
+        uses: actions/cache@v4
+        with:
+          path: |-
+            ${{ github.workspace }}/.cache/go-build
+            ${{ github.workspace }}/.cache/go-mod
+            ${{ github.workspace }}/.sbin
+          key: ci-${{ matrix.platform }}-${{ hashFiles('go.sum') }}
+      - name: Restore BuildX Cache
+        if: ${{ inputs.go-cache }}
+        uses: reproducible-containers/buildkit-cache-dance@v3
+        with:
+          builder: ${{ steps.setup-buildx.outputs.name }}
+          cache-map: |-
+            {
+              "${{ github.workspace }}/.cache/go-build": {
+                "target": "/root/.cache/go-build"
+              },
+              "${{ github.workspace }}/.cache/go-mod": {
+                "target": "/go/pkg/mod"
+              },
+              "${{ github.workspace }}/.sbin": {
+                "target": "/usr/local/go/src/gpustack.ai/gpustack/.sbin"
+              }
+            }
+          dockerfile: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
+          skip-extraction: ${{ steps.setup-buildx-cache.outputs.cache-hit }}
+      - name: Login DockerHub
+        if: ${{ inputs.push }}
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.INPUT_USERNAME }}
+          password: ${{ env.INPUT_PASSWORD }}
+      - name: Get Metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
+          tags: |
+            ${{ inputs.tags }}
+          # The per-platform suffix is this workflow's own: the matrix builds one image per
+          # platform and the manifest job below assembles them under the unsuffixed tag.
+          flavor: |
+            ${{ inputs.flavor }}
+            suffix=-${{ env.INPUT_PLATFORM }}${{ inputs.suffix-on-latest && ',onlatest=true' || '' }}
+      - name: Get Build Cache Ref
+        run: |
+          #
+          # Use different cache ref for different branches.
+          #
+          # Examples:
+          # CACHE_FROM_REFS
+          #   - vX.Y.Z                 -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}" + "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}"
+          #   - PR/PUSH to branch      -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}" + "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}"
+          # CACHE_TO_REF
+          #   - vX.Y.Z                 -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}"
+          #   - PUSH to branch         -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}"
+          #
+          # Stories:
+          # CACHE_FROM_REFS
+          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          # CACHE_TO_REF
+          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
+          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
+          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
+          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
+          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
+          #
+          # A version/branch-specific cache ref only gets refreshed by builds on that
+          # exact ref (e.g. a release tag), so it goes stale against the default
+          # branch's cache between releases. Always cache-from the default branch
+          # ref too, in addition to the version/branch-specific one, so a release
+          # build still hits the layers the default branch kept warm meanwhile. A
+          # nonexistent registry cache ref is a no-op for buildx, not a failure, so
+          # no existence check is needed.
+          #
+          DEFAULT_BRANCH="main"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            REF="${GITHUB_REF#refs/tags/}"
+            IFS="." read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${REF}"
+            VERSION="${VERSION_MAJOR}.${VERSION_MINOR}"
+            CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}-${INPUT_PLATFORM}"
+            CACHE_TO_REF="${CACHE_FROM_REF}"
+          else
+            REF="${GITHUB_BASE_REF:-${GITHUB_REF}}"
+            BRANCH="${REF#refs/heads/}"
+            BRANCH="${BRANCH%-dev}"
+            CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}-${INPUT_PLATFORM}"
+            CACHE_TO_REF="${CACHE_FROM_REF}"
+          fi
+          CACHE_FROM_DEFAULT_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}-${INPUT_PLATFORM}"
+          CACHE_FROM_REFS="type=registry,ref=${CACHE_FROM_REF}"
+          if [[ "${CACHE_FROM_REF}" != "${CACHE_FROM_DEFAULT_REF}" ]]; then
+            CACHE_FROM_REFS="${CACHE_FROM_REFS}
+          type=registry,ref=${CACHE_FROM_DEFAULT_REF}"
+          fi
+          {
+            echo "CACHE_FROM_REFS<<CACHE_FROM_REFS_EOF"
+            echo "${CACHE_FROM_REFS}"
+            echo "CACHE_FROM_REFS_EOF"
+          } >> $GITHUB_ENV
+          echo "CACHE_TO_REF=${CACHE_TO_REF}" >> $GITHUB_ENV
+          echo "DEBUG: GITHUB_BASE_REF=${GITHUB_BASE_REF}"
+          echo "DEBUG: GITHUB_REF=${GITHUB_REF}"
+          echo "DEBUG: CACHE_FROM_REFS=${CACHE_FROM_REFS}"
+          echo "DEBUG: CACHE_TO_REF=${CACHE_TO_REF}"
+      - name: Get Build Args
+        if: ${{ inputs.build-args-secret != '' }}
+        env:
+          INPUT_ARGS: ${{ inputs.build-args-secret }}
+        run: |
+          #
+          # Expand the space-separated "KEY=VALUE ..." input into one build argument per
+          # line. Split with read -ra rather than an unquoted for-loop: a value may hold
+          # shell-special characters (a presigned URL carries '&', '?' and '%'), and an
+          # unquoted expansion would additionally glob-expand '?' and '*'.
+          #
+          # Never echo the expanded values — a presigned URL carries its signature.
+          # Emit them with printf rather than echo, which would eat a value that begins
+          # with a dash by reading it as one of its own options.
+          #
+          read -ra ARGS <<<"${INPUT_ARGS}" || true
+          {
+            echo "BUILD_ARGS<<BUILD_ARGS_EOF"
+            for arg in "${ARGS[@]}"; do
+              if [[ -n "${arg}" ]]; then
+                printf '%s\n' "${arg}"
+              fi
+            done
+            echo "BUILD_ARGS_EOF"
+          } >>"$GITHUB_ENV"
+          echo "DEBUG: received ${#ARGS[@]} build argument(s)"
+      - name: Package
+        uses: docker/build-push-action@v6
+        with:
+          allow: |
+            network.host
+            security.insecure
+          ulimit: |
+            nofile=65536:65536
+          shm-size: "16G"
+          provenance: false
+          sbom: false
+          push: ${{ inputs.push }}
+          file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
+          context: ${{ github.workspace }}
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            ${{ inputs.build-args }}
+            ${{ env.BUILD_ARGS }}
+          tags: |
+            ${{ steps.metadata.outputs.tags }}
+          labels: |
+            ${{ steps.metadata.outputs.labels }}
+          cache-from: |
+            ${{ env.CACHE_FROM_REFS }}
+          # Writing the cache needs the same credentials pushing does, so it follows "push".
+          # This is what keeps the cache fresh for later runs: a build that cannot write it
+          # leaves the next one to redo whatever it had to rebuild.
+          cache-to: |
+            ${{ inputs.push && format('type=registry,mode=max,compression=gzip,ref={0},ignore-error=true', env.CACHE_TO_REF) || '' }}
+
+  manifest:
+    # Nothing was pushed to assemble otherwise.
+    if: ${{ inputs.push }}
+    needs:
+      - build
+    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Prepare Env
+        env:
+          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+          echo "INPUT_NAMESPACE=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
+          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
+          echo "DEBUG: INPUT_NAMESPACE=${INPUT_NAMESPACE}"
+          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
+      - name: Login DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.INPUT_USERNAME }}
+          password: ${{ env.INPUT_PASSWORD }}
+      - name: Get Metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        # The same tags as the pack job, without the per-platform suffix: these are the names
+        # the assembled manifests take, and the suffixed ones are their entries.
+        with:
+          images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
+          tags: |
+            ${{ inputs.tags }}
+          flavor: |
+            ${{ inputs.flavor }}
+      - name: Create
+        env:
+          INPUT_MATRIX: ${{ inputs.matrix }}
+          INPUT_MANIFEST_IMAGES: ${{ toJson(fromJson(steps.metadata.outputs.json).tags) }}
+        run: |
+          for MANIFEST_IMAGE in $(echo "${INPUT_MANIFEST_IMAGES}" | jq -r '.[]'); do
+            docker manifest create --amend "${MANIFEST_IMAGE}" \
+              $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
+            docker manifest inspect "${MANIFEST_IMAGE}"
+            docker manifest push --purge "${MANIFEST_IMAGE}"
+          done

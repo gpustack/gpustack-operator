@@ -1,6 +1,6 @@
 # This workflow packs for dependent container images of the project.
 
-name: pack
+name: Base Image
 
 permissions:
   actions: read
@@ -43,9 +43,7 @@ on:
         default: "auto"
 
 env:
-  INPUT_PASSWORD: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
   INPUT_REPOSITORY: ${{ inputs.repository }}
-  INPUT_TAG: ${{ inputs.tag }}
 
 jobs:
   expand-matrix:
@@ -118,219 +116,22 @@ jobs:
           esac
           MATRIX="$(jq -cr . <<<"[${ENTRIES}]")"
           echo "matrix=${MATRIX}" >>"$GITHUB_OUTPUT"
-          echo "DEBUG: matrix=${MATRIX}"
+          echo "DEBUG: MATRIX=${MATRIX}"
 
-  pack:
-    timeout-minutes: 360
+  image:
     needs:
       - expand-matrix
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.expand-matrix.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - name: Prepare Env
-        env:
-          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          INPUT_PLATFORM: ${{ matrix.platform }}
-        run: |
-          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          INPUT_PLATFORM=$(echo "${INPUT_PLATFORM}" | tr '[:upper:]' '[:lower:]' | tr '/' '-')
-          echo "INPUT_NAMESPACE=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "INPUT_PLATFORM=${INPUT_PLATFORM}" >> $GITHUB_ENV
-          echo "DEBUG: INPUT_NAMESPACE=${INPUT_NAMESPACE}"
-          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
-          echo "DEBUG: INPUT_PLATFORM=${INPUT_PLATFORM}"
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-          fetch-depth: 0
-          fetch-tags: true
-          persist-credentials: false
-      - name: Maximize Docker Build Space
-        # These images carry whole vendor SDKs, so a build that misses its cache does not fit on a
-        # standard runner — and it fails by killing the runner before it can write any job log,
-        # leaving nothing to read. The -8x variant a heavy build targets has the room already, so it
-        # skips the reclaim.
-        if: ${{ !contains(matrix.runner, '-8x') }}
-        uses: gpustack/.github/.github/actions/maximize-docker-build-space@main
-        with:
-          deep-clean: true
-          root-reserve-mb: 20480
-      - name: Setup BuildX
-        id: setup-buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver-opts: |
-            network=host
-            env.BUILDKIT_STEP_LOG_MAX_SIZE=-1
-            env.BUILDKIT_STEP_LOG_MAX_SPEED=-1
-          buildkitd-flags: |
-            --allow-insecure-entitlement=network.host
-            --allow-insecure-entitlement=security.insecure
-            --oci-worker-net=host
-            --oci-worker-gc-keepstorage=204800
-      - name: Login DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.INPUT_USERNAME }}
-          password: ${{ env.INPUT_PASSWORD }}
-      - name: Get Metadata
-        id: metadata
-        uses: docker/metadata-action@v5
-        with:
-          images: "${{ env.INPUT_NAMESPACE }}/${{ env.INPUT_REPOSITORY }}"
-          tags: |
-            type=raw,value=${{ env.INPUT_TAG }}
-          flavor: |
-            suffix=-${{ env.INPUT_PLATFORM }},onlatest=true
-      - name: Get Build Cache Ref
-        run: |
-          #
-          # Use different cache ref for different branches.
-          #
-          # Examples:
-          # CACHE_FROM_REFS
-          #   - vX.Y.Z                 -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}" + "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}"
-          #   - PR/PUSH to branch      -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}" + "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}"
-          # CACHE_TO_REF
-          #   - vX.Y.Z                 -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}"
-          #   - PUSH to branch         -> "${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}"
-          #
-          # Stories:
-          # CACHE_FROM_REFS
-          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7, ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          # CACHE_TO_REF
-          #   - Release tag v0.7.0rc1      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - Release tag v0.7.0         -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - PR to "main" branch        -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - PR to "v0.7-dev" branch    -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #   - Push to "main" branch      -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-main
-          #   - Push to "v0.7-dev" branch  -> ${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-v0.7
-          #
-          # A version/branch-specific cache ref only gets refreshed by builds on that
-          # exact ref (e.g. a release tag), so it goes stale against the default
-          # branch's cache between releases. Always cache-from the default branch
-          # ref too, in addition to the version/branch-specific one, so a release
-          # build still hits the layers the default branch kept warm meanwhile. A
-          # nonexistent registry cache ref is a no-op for buildx, not a failure, so
-          # no existence check is needed.
-          #
-          DEFAULT_BRANCH="main"
-          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
-            REF="${GITHUB_REF#refs/tags/}"
-            IFS="." read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${REF}"
-            VERSION="${VERSION_MAJOR}.${VERSION_MINOR}"
-            CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${VERSION}-${INPUT_PLATFORM}"
-            CACHE_TO_REF="${CACHE_FROM_REF}"
-          else
-            REF="${GITHUB_BASE_REF:-${GITHUB_REF}}"
-            BRANCH="${REF#refs/heads/}"
-            BRANCH="${BRANCH%-dev}"
-            CACHE_FROM_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${BRANCH}-${INPUT_PLATFORM}"
-            CACHE_TO_REF="${CACHE_FROM_REF}"
-          fi
-          CACHE_FROM_DEFAULT_REF="${INPUT_NAMESPACE}/build-cache:${INPUT_REPOSITORY}-${DEFAULT_BRANCH}-${INPUT_PLATFORM}"
-          CACHE_FROM_REFS="type=registry,ref=${CACHE_FROM_REF}"
-          if [[ "${CACHE_FROM_REF}" != "${CACHE_FROM_DEFAULT_REF}" ]]; then
-            CACHE_FROM_REFS="${CACHE_FROM_REFS}
-          type=registry,ref=${CACHE_FROM_DEFAULT_REF}"
-          fi
-          {
-            echo "CACHE_FROM_REFS<<CACHE_FROM_REFS_EOF"
-            echo "${CACHE_FROM_REFS}"
-            echo "CACHE_FROM_REFS_EOF"
-          } >> $GITHUB_ENV
-          echo "CACHE_TO_REF=${CACHE_TO_REF}" >> $GITHUB_ENV
-          echo "DEBUG: GITHUB_BASE_REF=${GITHUB_BASE_REF}"
-          echo "DEBUG: GITHUB_REF=${GITHUB_REF}"
-          echo "DEBUG: CACHE_FROM_REFS=${CACHE_FROM_REFS}"
-          echo "DEBUG: CACHE_TO_REF=${CACHE_TO_REF}"
-      - name: Get Build Args
-        env:
-          INPUT_ARGS: ${{ inputs.args }}
-        run: |
-          #
-          # Expand the space-separated "KEY=VALUE ..." input into one build argument per
-          # line. Split with read -ra rather than an unquoted for-loop: a value may hold
-          # shell-special characters (a presigned URL carries '&', '?' and '%'), and an
-          # unquoted expansion would additionally glob-expand '?' and '*'.
-          #
-          # Never echo the expanded values — a presigned URL carries its signature.
-          # Emit them with printf rather than echo, which would eat a value that begins
-          # with a dash by reading it as one of its own options.
-          #
-          read -ra ARGS <<<"${INPUT_ARGS}" || true
-          {
-            echo "BUILD_ARGS<<BUILD_ARGS_EOF"
-            for arg in "${ARGS[@]}"; do
-              if [[ -n "${arg}" ]]; then
-                printf '%s\n' "${arg}"
-              fi
-            done
-            echo "BUILD_ARGS_EOF"
-          } >>"$GITHUB_ENV"
-          echo "DEBUG: received ${#ARGS[@]} build argument(s)"
-      - name: Package
-        uses: docker/build-push-action@v6
-        with:
-          allow: |
-            network.host
-            security.insecure
-          ulimit: |
-            nofile=65536:65536
-          shm-size: "16G"
-          provenance: false
-          sbom: false
-          push: true
-          file: ${{ github.workspace }}/pack/${{ env.INPUT_REPOSITORY }}/Dockerfile
-          context: ${{ github.workspace }}
-          platforms: ${{ matrix.platform }}
-          build-args: |
-            ${{ env.BUILD_ARGS }}
-          tags: |
-            ${{ steps.metadata.outputs.tags }}
-          labels: |
-            ${{ steps.metadata.outputs.labels }}
-          cache-from: |
-            ${{ env.CACHE_FROM_REFS }}
-          cache-to: |
-            type=registry,mode=max,compression=gzip,ref=${{ env.CACHE_TO_REF }},ignore-error=true
-
-  manifest:
-    needs:
-      - expand-matrix
-      - pack
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Prepare Env
-        env:
-          INPUT_REPOSITORY_OWNER: ${{ github.repository_owner }}
-        run: |
-          INPUT_REPOSITORY_OWNER=$(echo "${INPUT_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-          echo "INPUT_NAMESPACE=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "INPUT_USERNAME=${INPUT_REPOSITORY_OWNER}" >> $GITHUB_ENV
-          echo "DEBUG: INPUT_NAMESPACE=${INPUT_NAMESPACE}"
-          echo "DEBUG: INPUT_USERNAME=${INPUT_USERNAME}"
-      - name: Login DockerHub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ env.INPUT_USERNAME }}
-          password: ${{ env.INPUT_PASSWORD }}
-      - name: Create
-        env:
-          INPUT_MATRIX: ${{ needs.expand-matrix.outputs.matrix }}
-        run: |
-          MANIFEST_IMAGE="${INPUT_NAMESPACE}/${INPUT_REPOSITORY}:${INPUT_TAG}"
-          docker manifest create --amend "${MANIFEST_IMAGE}" \
-            $(echo "${INPUT_MATRIX}" | jq -r --arg tag "${MANIFEST_IMAGE}" '.[].platform | "\($tag)-" + gsub("/"; "-")')
-          docker manifest inspect "${MANIFEST_IMAGE}"
-          docker manifest push --purge "${MANIFEST_IMAGE}"
+    uses: ./.github/workflows/_image.yml
+    with:
+      repository: ${{ inputs.repository }}
+      matrix: ${{ needs.expand-matrix.outputs.matrix }}
+      # A dispatch exists in order to publish the image, so it always pushes.
+      push: true
+      tags: |
+        type=raw,value=${{ inputs.tag }}
+      flavor: |
+        latest=false
+      suffix-on-latest: true
+      build-args-secret: ${{ inputs.args }}
+    secrets:
+      dockerhub-password: ${{ secrets.CI_DOCKERHUB_PASSWORD }}
