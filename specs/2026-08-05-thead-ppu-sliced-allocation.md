@@ -1,6 +1,6 @@
 # Spec: THead PPU logical slicing — the capability, from the image build to the allocator
 
-Status: Planned
+Status: Building
 Type: Feature
 
 > **This spec ships the capability, not the library.** `specs/2026-08-03-thead-ppu-slicing-shim.md`
@@ -186,7 +186,9 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
 - **A `xbuild-thead-ppu` Dockerfile stage** on `gpustack/thead-ppu-devel:2.1.1`, installing to `/out`,
   arch-selected rather than platform-forced:
   - the amd64 stage builds the tree; the arm64 stage is a stand-in that produces an **empty** `/out`;
-    a `FROM xbuild-thead-ppu-${TARGETARCH} AS xbuild-thead-ppu` alias picks between them.
+    a `FROM xbuild-thead-ppu-${TARGETARCH} AS xbuild-thead-ppu` alias picks between them, using
+    BuildKit's pre-defined `TARGETARCH` with no declaration of its own. The unreferenced leg is pruned:
+    an arm64 build never resolves the amd64-only devel image at all.
   - Why not `FROM --platform=linux/amd64`: buildx would resolve an amd64 manifest under emulation on the
     arm64 leg and the final arm64 image would then carry an amd64 `.so` that no container can load —
     a capability the detector's file check would wrongly accept. Why not simply omitting the stage: the
@@ -195,16 +197,22 @@ misconfigured one — the compute limit appears in no `ppu-smi` field at all.
 - **The final stage** copies `/out` to `${GPUSTACK_LIB_DIR}/thead` beside the Ascend and NVIDIA copies,
   and `install -D`s `rootfs/etc/gpustack/lib/thead/ld.so.preload` next to the existing pair.
 - **`pack/gpustack-operator/rootfs/etc/gpustack/lib/thead/ld.so.preload`** names the two **container**
-  paths, visibility first:
+  paths:
 
   ```
   /usr/local/vppu/hgml_dlsym_hook.so
   /usr/local/vppu/hggc_quota.so
   ```
 
-  The order is a checked fact rather than a preference (shim spec F5, `cases/thead-case-2.sh` pins both
-  directions): behind another `dlsym` interposer the visibility half never runs and `ppu-smi` reports the
-  physical card.
+  **Their relative order is inert, and that was measured rather than assumed**: only
+  `hgml_dlsym_hook.so` defines `dlsym` (`FUNC GLOBAL`), while `hggc_quota.so` merely imports it
+  (`NOTYPE GLOBAL UND`), so the two do not contest the symbol and no build-time assertion over this
+  file's line order would be testing anything. The ordering rule the shim spec records is about a
+  **foreign** `dlsym` interposer, and this file cannot express it: mounting over `/etc/ld.so.preload`
+  replaces whatever the workload image had there, so a peer can only arrive through `LD_PRELOAD` —
+  processed *before* this file — or through the workload binary's own `DT_NEEDED`. Behind such a peer the
+  visibility half is inert and `ppu-smi` reports the physical card. That stays a documented caveat, not
+  something the build can enforce.
 - Acceptance: `make package gpustack-operator` on an amd64 target produces an image where
   `${GPUSTACK_LIB_DIR}/thead/` holds `hggc_quota.so`, `hgml_dlsym_hook.so`, `ppu-monitor` and
   `ld.so.preload`; the same Dockerfile builds for `linux/arm64` with that directory holding only
@@ -482,7 +490,7 @@ pack/gpustack-operator/Dockerfile                       # + xbuild-thead-ppu-{am
 pack/gpustack-operator/external/thead/build-libvppu.sh  # NEW: wrapper over csrc/.../build.sh + the
                                                         #   DT_NEEDED and GLIBC floor assertions
 pack/gpustack-operator/rootfs/etc/gpustack/lib/thead/ld.so.preload
-                                                        # NEW: two container paths, visibility first
+                                                        # NEW: the two container paths of the preloads
 pkg/devicemanager/detector/thead/device.go              # + Status.LogicalSliced in the else arm of the
                                                         #   partitioning branch, gated on the staged tree
 pkg/devicemanager/detector/thead/device_test.go         # NEW (the package has only mig_profile_test.go
@@ -536,10 +544,10 @@ top, a heredoc `RUN` whose body is verbatim, `set -exo pipefail`.
 Four tasks. **T1, T2 and T3 have no dependency on each other** — they touch three disjoint trees, and the
 allocator never reads the detector's gate — so they can run concurrently; T4 documents what the three of
 them landed. T1 is the one carrying an unretired *build-system* unknown (whether a `TARGETARCH`-selected
-`FROM` alias resolves where this Dockerfile declares its arguments), so it goes first in practice even
-though nothing blocks on it.
+`FROM` alias resolves, and whether the unreferenced leg is pruned rather than resolved), so it goes first
+in practice even though nothing blocks on it.
 
-- [ ] **T1 · The image builds and stages the shim**
+- [x] **T1 · The image builds and stages the shim**
       Blocked by: None
       Owns: `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/thead/**`,
       `pack/gpustack-operator/rootfs/etc/gpustack/lib/thead/**`
@@ -552,12 +560,13 @@ though nothing blocks on it.
       `pack/thead-ppu-devel/Dockerfile:199` and `:210` already make for that image's own smoke object.
       `xbuild-thead-ppu-amd64` builds the tree inside `gpustack/thead-ppu-devel:2.1.1`;
       `xbuild-thead-ppu-arm64` is a `${UBUNTU_IMAGE}` stand-in producing an **empty** `/out`; and
-      `FROM xbuild-thead-ppu-${TARGETARCH} AS xbuild-thead-ppu` selects between them, which needs
-      `ARG TARGETARCH` at **global** scope — the three existing declarations (`:28`, `:93`, `:323`) are
-      stage-scoped and cannot reach a `FROM` line. The final stage copies `/out` to
+      `FROM xbuild-thead-ppu-${TARGETARCH} AS xbuild-thead-ppu` selects between them, and needs **no**
+      `ARG TARGETARCH` declaration to do it: BuildKit's pre-defined platform arguments are already in
+      global scope, which is why the three existing declarations (`:28`, `:93`, `:323`) exist at all —
+      re-declaring one inside a stage is what makes its value readable *there*. The final stage copies `/out` to
       `${GPUSTACK_LIB_DIR}/thead` beside the ascend/nvidia copies and `install -D`s the preload asset
-      beside their pair at `:469-474`, then asserts the installed file's **first** line names the
-      visibility shim — the one ordering rule nothing else can enforce.
+      beside their pair at `:469-474`. No assertion over that file's line order: only the visibility half
+      defines `dlsym`, so the two entries do not contest it and their order decides nothing.
       Verify: the two stage-level `docker buildx build --target xbuild-thead-ppu` runs under Commands (amd64
       lists three artifacts with clean linkage, arm64 lists none), then the remote full-image build and its
       `ls` / `head -2` / `ppu-monitor` run
@@ -614,7 +623,9 @@ it describe something that exists.
       Acceptance: the README matrix marks T-Head logical slicing supported and the note under it stays
       accurate about what the compute budget is here (a duty-cycle cap, not a scheduling weight);
       `discovery.md` adds T-Head to the preload-library row of the per-vendor mechanism table, names the
-      PPU pair and their ordering rule where it names `libvgpu.so` / `libvruntime.so`, records
+      PPU pair where it names `libvgpu.so` / `libvruntime.so` — including the caveat that a workload
+      image shipping its own `dlsym` interposer through `LD_PRELOAD` makes the visibility half inert —
+      records
       `LIBHGGC_LOG_LEVEL=1` and why it is `1` rather than `0` (per-denial, not per-call), and records in
       "Where the preload libraries come from" the one library built from this repo's own `csrc/` tree
       rather than a pinned upstream commit, amd64-only; `accelerator-requests.md`'s logical-slicing row

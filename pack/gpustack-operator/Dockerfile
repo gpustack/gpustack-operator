@@ -310,6 +310,35 @@ RUN --mount=type=bind,src=pack/gpustack-operator/external/nvidia/build-libvgpu.s
 EOF
 
 # =============================================================================
+# Stages: xbuild-thead-ppu-* (THead PPU logical slicing)
+# Build the two preloaded shims and the usage reader from this repo's own
+# csrc/thead/ppu-slicing-shim tree, against the SDK headers the devel image
+# carries; the final image copies /out into ${GPUSTACK_LIB_DIR}/thead. No
+# runtime-version fan-out, unlike the two stages above: the workload container
+# brings its own SDK, so there is no host library to match a generation against.
+#
+# The SDK ships x86_64-linux only. Selecting by TARGETARCH keeps one Dockerfile
+# building on both legs -- an arm64 build takes the empty stand-in and never
+# resolves the amd64-only devel image. This is safe not because the detector
+# inspects the staged libraries -- it does not; a non-partitioned card always
+# advertises logical slicing -- but because a PPU card only exists in an x86_64
+# host, so the detector never runs against one on an arm64 node.
+# =============================================================================
+FROM gpustack/thead-ppu-devel:2.1.1 AS xbuild-thead-ppu-amd64
+RUN --mount=type=bind,src=pack/gpustack-operator/external/thead/build-libvppu.sh,target=/build-libvppu.sh \
+    --mount=type=bind,src=csrc/thead/ppu-slicing-shim,target=/src <<EOF
+    set -exo pipefail
+    bash /build-libvppu.sh /src /out
+EOF
+
+# WORKDIR rather than a RUN: the directory has to exist for the final stage's
+# unconditional COPY, and nothing has to run to create it.
+FROM ${UBUNTU_IMAGE} AS xbuild-thead-ppu-arm64
+WORKDIR /out
+
+FROM xbuild-thead-ppu-${TARGETARCH} AS xbuild-thead-ppu
+
+# =============================================================================
 # Stage: gpustack (final)
 # Ubuntu 24.04 with only runtime packages — no Go, no build toolchain, no
 # download utilities, no -dev headers. Compiled binaries and CLI tools are
@@ -385,6 +414,11 @@ COPY --from=xbuild-ascend-cann-9-310p /out ${GPUSTACK_LIB_DIR}/ascend/cann-9-310
 ## Copy the NVIDIA logical-slicing runtime (HAMi-core) per CUDA major.
 COPY --from=xbuild-nvidia-cuda-12 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-12
 COPY --from=xbuild-nvidia-cuda-13 /out ${GPUSTACK_LIB_DIR}/nvidia/cuda-13
+
+## Copy the THead PPU logical-slicing shims and their usage reader. Flat, with no
+## runtime-version subdirectory: the workload brings its own SDK, so there is no
+## host library to match a generation against. Empty on arm64, by design.
+COPY --from=xbuild-thead-ppu /out ${GPUSTACK_LIB_DIR}/thead
 
 ## Copy CLI binaries from the build stages
 
@@ -472,6 +506,8 @@ EOT
         "${GPUSTACK_LIB_DIR}"/ascend/ld.so.preload
     install -D -m 0644 /rootfs/etc/gpustack/lib/nvidia/ld.so.preload \
         "${GPUSTACK_LIB_DIR}"/nvidia/ld.so.preload
+    install -D -m 0644 /rootfs/etc/gpustack/lib/thead/ld.so.preload \
+        "${GPUSTACK_LIB_DIR}"/thead/ld.so.preload
 
     # Try to update PCI IDs
     if ! update-pciids; then
