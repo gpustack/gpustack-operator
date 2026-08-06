@@ -10,7 +10,7 @@ GPUStack Operator discovers the accelerators on every node, profiles them into n
 units, and materializes a Kueue-based scheduling chain your workloads queue against. On top of
 whole-card and shared allocation it adds:
 
-- **Logical (software) slicing on 6 vendors** — one card serves many workloads, each with its own
+- **Logical (software) slicing** — one card serves many workloads, each with its own
   **compute budget and VRAM budget, set independently**. The limits are applied at runtime by the
   vendor's own facility — a preload library, a kernel module, a sub-device — not just by accounting.
 - **Physical (hardware) partitioning** — NVIDIA MIG and T-Head's own MIG-named partitioning, as a
@@ -28,13 +28,13 @@ slots per card) requests. What differs is how — and whether — a single card 
 
 | Vendor | Class | Kubernetes resource | Logical slicing (`.sliced`) | Physical partitioning (`.partitioned`) |
 |---|---|---|---|---|
-| **AMD** | GPU | `amd.com/gpu` | — | — |
-| **Cambricon** | MLU | `cambricon.com/mlu` | ✅ | — |
-| **Huawei Ascend** | NPU | `huawei.com/npu` | ✅ | — |
-| **Hygon** | DCU | `hygon.com/dcu` | ✅ | — |
-| **Iluvatar** | GPU | `iluvatar.com/gpu` | — | — |
-| **MetaX** | GPU | `metax-tech.com/gpu` | ✅ | — |
-| **Moore Threads** | GPU | `mthreads.com/gpu` | ✅ | — |
+| **AMD** | GPU | `amd.com/gpu` |  |  |
+| **Cambricon** | MLU | `cambricon.com/mlu` | ✅ |  |
+| **Huawei Ascend** | NPU | `huawei.com/npu` | ✅ |  |
+| **Hygon** | DCU | `hygon.com/dcu` | ✅ |  |
+| **Iluvatar** | GPU | `iluvatar.com/gpu` | ✅ |  |
+| **MetaX** | GPU | `metax-tech.com/gpu` | ✅ |  |
+| **Moore Threads** | GPU | `mthreads.com/gpu` | ✅ |  |
 | **NVIDIA** | GPU | `nvidia.com/gpu` | ✅ | ✅ **MIG** |
 | **T-Head** | PPU | `alibabacloud.com/ppu` | ✅ | ✅ **MIG** |
 
