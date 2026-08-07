@@ -28,6 +28,11 @@ type InstanceMetrics struct {
 var _ runtime.Object = (*InstanceMetrics)(nil)
 
 // InstanceMetricsSample is a single utilization sampling point of an Instance.
+//
+// Every memory and storage figure is reported in MiB: the sources measure in different
+// units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one
+// wins so that a consumer never has to mix units within one sample. A byte figure is
+// rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.
 type InstanceMetricsSample struct {
 	// Timestamp indicates when the CPU/memory/storage figures were measured by the kubelet.
 	Timestamp meta.Time `json:"timestamp" protobuf:"bytes,1,opt,name=timestamp"`
@@ -36,18 +41,18 @@ type InstanceMetricsSample struct {
 	// (core-nanoseconds per second), averaged over the kubelet's sample window.
 	CPUUsageNanoCores *uint64 `json:"cpuUsageNanoCores,omitempty" protobuf:"varint,2,opt,name=cpuUsageNanoCores"`
 
-	// MemoryWorkingSetBytes is the working set memory usage of the Instance's Pod in bytes.
-	MemoryWorkingSetBytes *uint64 `json:"memoryWorkingSetBytes,omitempty" protobuf:"varint,3,opt,name=memoryWorkingSetBytes"`
+	// MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.
+	MemoryWorkingSetMiB *uint64 `json:"memoryWorkingSetMiB,omitempty" protobuf:"varint,3,opt,name=memoryWorkingSetMiB"`
 
-	// RootfsUsedBytes is the used bytes of the Instance containers' writable layers,
+	// RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB,
 	// which accounts against the Instance's spec.resources.localStorage.
-	RootfsUsedBytes *uint64 `json:"rootfsUsedBytes,omitempty" protobuf:"varint,4,opt,name=rootfsUsedBytes"`
+	RootfsUsedMiB *uint64 `json:"rootfsUsedMiB,omitempty" protobuf:"varint,4,opt,name=rootfsUsedMiB"`
 
-	// EphemeralStorageUsedBytes is the total ephemeral storage usage of the Instance's Pod
-	// in bytes, including containers' writable layers, logs and emptyDir-backed volumes.
+	// EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod
+	// in MiB, including containers' writable layers, logs and emptyDir-backed volumes.
 	// Absent when the figures came from the metrics.k8s.io fallback, which carries no
 	// storage metrics.
-	EphemeralStorageUsedBytes *uint64 `json:"ephemeralStorageUsedBytes,omitempty" protobuf:"varint,5,opt,name=ephemeralStorageUsedBytes"`
+	EphemeralStorageUsedMiB *uint64 `json:"ephemeralStorageUsedMiB,omitempty" protobuf:"varint,5,opt,name=ephemeralStorageUsedMiB"`
 
 	// Accelerators holds the metrics of the accelerator devices allocated to the Instance,
 	// keyed by device ID; absent when the Instance has no allocated accelerator or the

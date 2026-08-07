@@ -233,6 +233,11 @@ message InstanceMetrics {
 }
 
 // InstanceMetricsSample is a single utilization sampling point of an Instance.
+//
+// Every memory and storage figure is reported in MiB: the sources measure in different
+// units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one
+// wins so that a consumer never has to mix units within one sample. A byte figure is
+// rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.
 message InstanceMetricsSample {
   // Timestamp indicates when the CPU/memory/storage figures were measured by the kubelet.
   optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 1;
@@ -241,18 +246,18 @@ message InstanceMetricsSample {
   // (core-nanoseconds per second), averaged over the kubelet's sample window.
   optional uint64 cpuUsageNanoCores = 2;
 
-  // MemoryWorkingSetBytes is the working set memory usage of the Instance's Pod in bytes.
-  optional uint64 memoryWorkingSetBytes = 3;
+  // MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.
+  optional uint64 memoryWorkingSetMiB = 3;
 
-  // RootfsUsedBytes is the used bytes of the Instance containers' writable layers,
+  // RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB,
   // which accounts against the Instance's spec.resources.localStorage.
-  optional uint64 rootfsUsedBytes = 4;
+  optional uint64 rootfsUsedMiB = 4;
 
-  // EphemeralStorageUsedBytes is the total ephemeral storage usage of the Instance's Pod
-  // in bytes, including containers' writable layers, logs and emptyDir-backed volumes.
+  // EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod
+  // in MiB, including containers' writable layers, logs and emptyDir-backed volumes.
   // Absent when the figures came from the metrics.k8s.io fallback, which carries no
   // storage metrics.
-  optional uint64 ephemeralStorageUsedBytes = 5;
+  optional uint64 ephemeralStorageUsedMiB = 5;
 
   // Accelerators holds the metrics of the accelerator devices allocated to the Instance,
   // keyed by device ID; absent when the Instance has no allocated accelerator or the

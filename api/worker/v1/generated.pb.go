@@ -723,18 +723,18 @@ func (m *InstanceMetricsSample) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 			dAtA[i] = 0x32
 		}
 	}
-	if m.EphemeralStorageUsedBytes != nil {
-		i = encodeVarintGenerated(dAtA, i, uint64(*m.EphemeralStorageUsedBytes))
+	if m.EphemeralStorageUsedMiB != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.EphemeralStorageUsedMiB))
 		i--
 		dAtA[i] = 0x28
 	}
-	if m.RootfsUsedBytes != nil {
-		i = encodeVarintGenerated(dAtA, i, uint64(*m.RootfsUsedBytes))
+	if m.RootfsUsedMiB != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.RootfsUsedMiB))
 		i--
 		dAtA[i] = 0x20
 	}
-	if m.MemoryWorkingSetBytes != nil {
-		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryWorkingSetBytes))
+	if m.MemoryWorkingSetMiB != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryWorkingSetMiB))
 		i--
 		dAtA[i] = 0x18
 	}
@@ -1925,14 +1925,14 @@ func (m *InstanceMetricsSample) Size() (n int) {
 	if m.CPUUsageNanoCores != nil {
 		n += 1 + sovGenerated(uint64(*m.CPUUsageNanoCores))
 	}
-	if m.MemoryWorkingSetBytes != nil {
-		n += 1 + sovGenerated(uint64(*m.MemoryWorkingSetBytes))
+	if m.MemoryWorkingSetMiB != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryWorkingSetMiB))
 	}
-	if m.RootfsUsedBytes != nil {
-		n += 1 + sovGenerated(uint64(*m.RootfsUsedBytes))
+	if m.RootfsUsedMiB != nil {
+		n += 1 + sovGenerated(uint64(*m.RootfsUsedMiB))
 	}
-	if m.EphemeralStorageUsedBytes != nil {
-		n += 1 + sovGenerated(uint64(*m.EphemeralStorageUsedBytes))
+	if m.EphemeralStorageUsedMiB != nil {
+		n += 1 + sovGenerated(uint64(*m.EphemeralStorageUsedMiB))
 	}
 	if len(m.Accelerators) > 0 {
 		for _, e := range m.Accelerators {
@@ -2461,9 +2461,9 @@ func (this *InstanceMetricsSample) String() string {
 	s := strings.Join([]string{`&InstanceMetricsSample{`,
 		`Timestamp:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.Timestamp), "Time", "v1.Time", 1), `&`, ``, 1) + `,`,
 		`CPUUsageNanoCores:` + valueToStringGenerated(this.CPUUsageNanoCores) + `,`,
-		`MemoryWorkingSetBytes:` + valueToStringGenerated(this.MemoryWorkingSetBytes) + `,`,
-		`RootfsUsedBytes:` + valueToStringGenerated(this.RootfsUsedBytes) + `,`,
-		`EphemeralStorageUsedBytes:` + valueToStringGenerated(this.EphemeralStorageUsedBytes) + `,`,
+		`MemoryWorkingSetMiB:` + valueToStringGenerated(this.MemoryWorkingSetMiB) + `,`,
+		`RootfsUsedMiB:` + valueToStringGenerated(this.RootfsUsedMiB) + `,`,
+		`EphemeralStorageUsedMiB:` + valueToStringGenerated(this.EphemeralStorageUsedMiB) + `,`,
 		`Accelerators:` + repeatedStringForAccelerators + `,`,
 		`}`,
 	}, "")
@@ -4555,7 +4555,7 @@ func (m *InstanceMetricsSample) Unmarshal(dAtA []byte) error {
 			m.CPUUsageNanoCores = &v
 		case 3:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MemoryWorkingSetBytes", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryWorkingSetMiB", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4572,10 +4572,10 @@ func (m *InstanceMetricsSample) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.MemoryWorkingSetBytes = &v
+			m.MemoryWorkingSetMiB = &v
 		case 4:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field RootfsUsedBytes", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field RootfsUsedMiB", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4592,10 +4592,10 @@ func (m *InstanceMetricsSample) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.RootfsUsedBytes = &v
+			m.RootfsUsedMiB = &v
 		case 5:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field EphemeralStorageUsedBytes", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field EphemeralStorageUsedMiB", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -4612,7 +4612,7 @@ func (m *InstanceMetricsSample) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.EphemeralStorageUsedBytes = &v
+			m.EphemeralStorageUsedMiB = &v
 		case 6:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field Accelerators", wireType)

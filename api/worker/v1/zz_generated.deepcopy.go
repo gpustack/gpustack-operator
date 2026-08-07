@@ -403,18 +403,18 @@ func (in *InstanceMetricsSample) DeepCopyInto(out *InstanceMetricsSample) {
 		*out = new(uint64)
 		**out = **in
 	}
-	if in.MemoryWorkingSetBytes != nil {
-		in, out := &in.MemoryWorkingSetBytes, &out.MemoryWorkingSetBytes
+	if in.MemoryWorkingSetMiB != nil {
+		in, out := &in.MemoryWorkingSetMiB, &out.MemoryWorkingSetMiB
 		*out = new(uint64)
 		**out = **in
 	}
-	if in.RootfsUsedBytes != nil {
-		in, out := &in.RootfsUsedBytes, &out.RootfsUsedBytes
+	if in.RootfsUsedMiB != nil {
+		in, out := &in.RootfsUsedMiB, &out.RootfsUsedMiB
 		*out = new(uint64)
 		**out = **in
 	}
-	if in.EphemeralStorageUsedBytes != nil {
-		in, out := &in.EphemeralStorageUsedBytes, &out.EphemeralStorageUsedBytes
+	if in.EphemeralStorageUsedMiB != nil {
+		in, out := &in.EphemeralStorageUsedMiB, &out.EphemeralStorageUsedMiB
 		*out = new(uint64)
 		**out = **in
 	}

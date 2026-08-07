@@ -1005,7 +1005,7 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.",
+				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.\n\nEvery memory and storage figure is reported in MiB: the sources measure in different units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one wins so that a consumer never has to mix units within one sample. A byte figure is rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"timestamp": {
@@ -1021,23 +1021,23 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 							Format:      "int64",
 						},
 					},
-					"memoryWorkingSetBytes": {
+					"memoryWorkingSetMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryWorkingSetBytes is the working set memory usage of the Instance's Pod in bytes.",
+							Description: "MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"rootfsUsedBytes": {
+					"rootfsUsedMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "RootfsUsedBytes is the used bytes of the Instance containers' writable layers, which accounts against the Instance's spec.resources.localStorage.",
+							Description: "RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB, which accounts against the Instance's spec.resources.localStorage.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"ephemeralStorageUsedBytes": {
+					"ephemeralStorageUsedMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "EphemeralStorageUsedBytes is the total ephemeral storage usage of the Instance's Pod in bytes, including containers' writable layers, logs and emptyDir-backed volumes. Absent when the figures came from the metrics.k8s.io fallback, which carries no storage metrics.",
+							Description: "EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod in MiB, including containers' writable layers, logs and emptyDir-backed volumes. Absent when the figures came from the metrics.k8s.io fallback, which carries no storage metrics.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
