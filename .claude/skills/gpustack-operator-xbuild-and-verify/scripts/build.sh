@@ -5,17 +5,21 @@
 #   xbuild-ascend-cann-* -> vcann-rt   (libvruntime.so + enpu-monitor -> XB_STAGE/{lib,tools})
 #   xbuild-nvidia-cuda-* -> HAMi-core  (libvgpu.so -> XB_STAGE/libvgpu.so)
 #   xbuild-thead-ppu     -> the slicing shims (csrc/thead/ppu-slicing-shim -> XB_STAGE)
+#   xbuild-amd-rocm      -> the ROCm slicing shim (csrc/amd/rocm-slicing-shim -> XB_STAGE)
 #
 #   XB_MODE=local                       bash .../build.sh xbuild-ascend-cann-8-910b
 #   XB_MODE=ssh XB_HOST=root@host         bash .../build.sh xbuild-nvidia-cuda-13
 #   XB_MODE=ssh XB_HOST=root@ppu-host XB_CTR=nerdctl  bash .../build.sh xbuild-thead-ppu
+#   XB_MODE=pty XB_HOST=user@proxy        bash .../build.sh xbuild-amd-rocm
 #
-# THEAD IS BUILT DIFFERENTLY, and the difference is the backend's own: there is no builder stage
-# for it in the Dockerfile yet, and its host needs none — the sources are compiled INSIDE the
-# published SDK image with `run`, because that image is where hggc.h lives, and `run` is all a
-# docker-less host with nerdctl can do. The recipes themselves are not here: the shim tree owns
-# them in its own `build.sh`, which this arm stages and calls. Once the `xbuild-thead-ppu` stage
-# exists in the Dockerfile, this arm can switch to buildx under the same target name.
+# TWO BACKENDS ARE BUILT DIFFERENTLY, and in both cases the difference is that their SOURCE IS IN
+# THIS REPO: there is no upstream commit to pin and nothing to fetch, so there is no builder stage
+# in the Dockerfile and the arm stages the tree onto the target and compiles it there with `run`.
+# The recipes themselves are not here: each shim tree owns them in its own `build.sh`, which the
+# arm stages and calls. THead compiles inside the published SDK image because that image is where
+# hggc.h lives; AMD compiles inside a ROCm devel image, or in place when the target has no
+# container runtime and already carries ROCm. Once a builder stage exists for either, that arm can
+# switch to buildx under the same target name.
 #
 # Env:
 #   XB_PLATFORM   linux/arm64 | linux/amd64   (default: detect from the target arch)
@@ -23,6 +27,7 @@
 #   XB_STAGE      host dir to stage artifacts (default: /opt/enpu/vcann-rt | /opt/vgpu)
 #   XB_REMOTE_CTX remote build-context dir    (default: ~/vcann-build, ssh mode only)
 #   XB_REPO       local repo root             (default: git rev-parse --show-toplevel)
+#   XB_ROCM_PATH  ROCm prefix for the AMD in-place route (default: /opt/rocm)
 #
 # The build context is minimal: the Dockerfile, the backend's external build script,
 # and — for ascend — the vendored vcann-rt patch dir the stage bind-mounts. Each stage
@@ -34,7 +39,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib.sh
 . "${HERE}/lib.sh"
 
-TARGET="${1:?usage: build.sh <TARGET>  e.g. xbuild-ascend-cann-8-910b | xbuild-nvidia-cuda-13 | xbuild-thead-ppu}"
+TARGET="${1:?usage: build.sh <TARGET>  e.g. xbuild-ascend-cann-8-910b | xbuild-nvidia-cuda-13 | xbuild-thead-ppu | xbuild-amd-rocm}"
 XB_REMOTE_CTX="${XB_REMOTE_CTX:-vcann-build}"   # relative to remote $HOME
 XB_REPO="${XB_REPO:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
 DOCKERFILE_REL="pack/gpustack-operator/Dockerfile"
@@ -63,7 +68,13 @@ case "${TARGET}" in
     XB_STAGE="${XB_STAGE:-/tmp/vppu}"
     SHIM_REL="csrc/thead/ppu-slicing-shim"
     ;;
-  *) echo "build.sh: unknown target '${TARGET}' (expect xbuild-ascend-cann-*, xbuild-nvidia-cuda-* or xbuild-thead-ppu)" >&2; exit 2 ;;
+  xbuild-amd-rocm)
+    XB_BACKEND=amd
+    XB_IMAGE="${XB_IMAGE:-rocm/dev-ubuntu-22.04:7.2.4}"
+    XB_STAGE="${XB_STAGE:-/tmp/vrocm}"
+    SHIM_REL="csrc/amd/rocm-slicing-shim"
+    ;;
+  *) echo "build.sh: unknown target '${TARGET}' (expect xbuild-ascend-cann-*, xbuild-nvidia-cuda-*, xbuild-thead-ppu or xbuild-amd-rocm)" >&2; exit 2 ;;
 esac
 
 # THead: stage the shim tree onto the target and compile it inside the SDK image. It shares
@@ -110,6 +121,83 @@ PAYLOAD
   rc=$?
   [ "${rc}" -eq 0 ] || { echo "build.sh: the shim build failed (rc=${rc})"; exit 1; }
   echo "# built the slicing shims; artifacts staged at ${XB_STAGE} on $(xtarget_desc)"
+  exit 0
+fi
+
+# AMD: the same in-repo-source shape as THead — stage the tree, call its own build.sh — with one
+# difference that belongs to the TARGET rather than to the backend. The only multi-XCC hardware
+# this work can reach is a rented single-card instance, and that instance IS a container: ROCm
+# sits on its filesystem and there is no container runtime at all, so there is nothing to run the
+# devel image with and nothing that needs it. Where a runtime resolves the compile happens inside
+# the image, which is what keeps the glibc floor a property of the build rather than of whichever
+# host happened to run it; where none does and hipcc is already present, it happens in place.
+# Refusing instead would make that hardware unusable, and it is the only place table B's rows and
+# the CDNA branch of the mask derivation can be measured at all.
+if [ "${XB_BACKEND}" = amd ]; then
+  XB_PLATFORM="${XB_PLATFORM:-linux/amd64}"   # ROCm ships no aarch64 user space
+  XB_ROCM_PATH="${XB_ROCM_PATH:-/opt/rocm}"
+
+  # Every source, by the tree's own layout: the module directories keep their names because the
+  # sources include each other by that path, and the compile has to resolve them exactly as a
+  # host build would.
+  for f in build.sh \
+           common/vrocm.h common/vrocm_log.h common/vrocm_log.c \
+           common/vrocm_quota.h common/vrocm_quota.c \
+           common/vrocm_ledger.h common/vrocm_ledger.c common/vrocm_test.c \
+           hip/hip_resolve.h hip/hip_resolve.c hip/hip_table.h hip/hip_table.c \
+           hip/hip_query.c hip/hip_mem.c hip/hip_pool.c \
+           device/vrocm_hwid.h \
+           tools/rocm_monitor.c tools/rocm_cumask_check.c \
+           testing/hip_mem_paths.c testing/hip_props_probe.c \
+           testing/cumask_soak.c testing/ledger_lifecycle.c; do
+    [ -f "${XB_REPO}/${SHIM_REL}/${f}" ] \
+      || { echo "build.sh: source not found: ${SHIM_REL}/${f}" >&2; exit 2; }
+    xput "${XB_REPO}/${SHIM_REL}/${f}" "${XB_STAGE}/${f}" \
+      || { echo "build.sh: failed to stage ${f}" >&2; exit 2; }
+  done
+
+  # XB_CTR=none forces the in-place route, which is the only way to exercise it on a target that
+  # has both — xctr_resolve takes any explicit value as given, so there is otherwise no way to
+  # say "pretend there is no runtime".
+  if [ "${XB_CTR}" != none ] && xctr_resolve; then
+    echo "# build ${TARGET} in ${XB_IMAGE} (${XB_PLATFORM}) on $(xtarget_desc)"
+    # V=1 so the log shows what was compiled; the tree's build.sh is otherwise silent, which is
+    # what lets amd-case-1.sh judge "compiles clean" on empty output.
+    xsh XB_CTR="${XB_CTR}" XB_CTR_ARGS="${XB_CTR_ARGS}" IMG="${XB_IMAGE}" \
+        STAGE="${XB_STAGE}" PLATFORM="${XB_PLATFORM}" <<'PAYLOAD'
+set -u
+# shellcheck disable=SC2086  # XB_CTR_ARGS is word-split on purpose
+${XB_CTR} ${XB_CTR_ARGS} run --rm -i --platform "${PLATFORM}" \
+  -v "${STAGE}:/work" -w /work "${IMG}" bash -lc 'set -e
+  chmod +x /work/build.sh
+  V=1 /work/build.sh lib
+  V=1 /work/build.sh tool
+  V=1 /work/build.sh test
+  V=1 /work/build.sh unit
+  ls -la /work/libvrocm.so /work/rocm-monitor /work/rocm-cumask-check'
+PAYLOAD
+    rc=$?
+  else
+    echo "# build ${TARGET} in place against ${XB_ROCM_PATH} on $(xtarget_desc) (no container runtime)"
+    xsh STAGE="${XB_STAGE}" ROCM="${XB_ROCM_PATH}" <<'PAYLOAD'
+set -u
+if [ ! -x "${ROCM}/bin/hipcc" ]; then
+  echo "build.sh: this target has no container runtime AND no hipcc at ${ROCM}/bin —"
+  echo "          one of the two is needed; set XB_ROCM_PATH if ROCm is installed elsewhere."
+  exit 2
+fi
+chmod +x "${STAGE}/build.sh"
+cd "${STAGE}" || exit 2
+V=1 ROCM_PATH="${ROCM}" ./build.sh lib  || exit 1
+V=1 ROCM_PATH="${ROCM}" ./build.sh tool || exit 1
+V=1 ROCM_PATH="${ROCM}" ./build.sh test || exit 1
+V=1 ROCM_PATH="${ROCM}" ./build.sh unit || exit 1
+ls -la libvrocm.so rocm-monitor rocm-cumask-check
+PAYLOAD
+    rc=$?
+  fi
+  [ "${rc}" -eq 0 ] || { echo "build.sh: the shim build failed (rc=${rc})"; exit 1; }
+  echo "# built the ROCm slicing shim; artifacts staged at ${XB_STAGE} on $(xtarget_desc)"
   exit 0
 fi
 

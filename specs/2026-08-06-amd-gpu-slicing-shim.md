@@ -775,9 +775,12 @@ of scope.
 #### F6 — `gpustack-operator-xbuild-and-verify` AMD backend
 
 - A fourth backend: an `xbuild-amd-rocm` arm in `scripts/build.sh` that stages the tree and calls its own
-  `build.sh` inside a ROCm devel image; hardware WARN rows in `scripts/preflight.sh` (`rocm-smi`, `/dev/kfd`,
-  the `amdgpu` module); a fourth Cases table and env-knob group in `SKILL.md`; and per-script `allowed-tools`
-  entries, since that list has no glob and an unlisted script cannot run.
+  `build.sh` inside a ROCm devel image, or in place when the target is itself a container carrying ROCm;
+  hardware WARN rows in `scripts/preflight.sh` (`rocm-smi`, `/dev/kfd`, the `amdgpu` module) plus one
+  reporting `NUM_XCC`, which is what selects the conformance table below; an `XB_MODE=pty` transport in
+  `scripts/lib.sh` for a target whose SSH offers only an interactive shell; a fourth Cases table and
+  env-knob group in `SKILL.md`; and per-script `allowed-tools` entries, since that list has no glob and an
+  unlisted script cannot run.
 - Cases, one per gate plus the unit tests:
   (1) build and linkage assertions, **no GPU**; (2) single-card injection and the reported-capacity surface
   across all three property entry points; (3) memory-path completeness including the pool family; (4) CU-mask
@@ -907,9 +910,10 @@ branch's arithmetic is unit-tested against the checked-in conformance table B, w
 `rocm-cumask-check` re-verifies it on the node at run time before a card is ever advertised. Every case is
 written to read the branch it is on from `NUM_XCC` rather than from a flag, so pointing it at a CDNA host is
 the only thing needed when one exists. When a rented CDNA host is used, note that it is behind a proxy
-offering only an interactive shell — no `exec`, no `scp` — so `XB_SSH` must not be assumed to support command
-execution; where it does not, the case harness pipes its script over stdin. A run that covered only one
-architecture is a partial result and says so in its summary.
+offering only an interactive shell — no `exec`, no `scp` — so `ssh <host> <command>` must not be assumed to
+work; `XB_MODE=pty` is the transport for such a target, typing the script over stdin and verifying every
+file it lands by digest. A run that covered only one architecture is a partial result and says so in its
+summary.
 
 ```bash
 # ---- the ONE place that knows how to compile this tree (runs INSIDE a container) ----
@@ -925,17 +929,19 @@ csrc/amd/rocm-slicing-shim/build.sh list <name>   # the translation units behind
 # ---- verification entry point: stages the tree onto the target, compiles it in a ROCm devel image ----
 # Follows the in-repo-source shape (stage + run), not the buildx shape the vendored-source backends use.
 SKILL=.claude/skills/gpustack-operator-xbuild-and-verify
-XB_MODE=ssh XB_SSH=<user>@<rdna-host> bash ${SKILL}/scripts/build.sh xbuild-amd-rocm
-XB_MODE=ssh XB_SSH=<user>@<cdna-host> bash ${SKILL}/scripts/build.sh xbuild-amd-rocm
+XB_MODE=ssh XB_HOST=<user>@<rdna-host> bash ${SKILL}/scripts/build.sh xbuild-amd-rocm
+XB_MODE=pty XB_HOST=<user>@<cdna-host> bash ${SKILL}/scripts/build.sh xbuild-amd-rocm
 
 # ---- preflight and the cases ----
 # The host needs /dev/kfd, /dev/dri and the amdgpu module; it does NOT need docker if nerdctl is
 # present (XB_CTR resolves either). A rented CDNA instance is itself a container: it has neither, so
-# the arm must fall back to compiling in place when XB_CTR resolves nothing and ROCm is already on the
-# host. Case 1 needs no card; cases 2-7 do. Run the whole set against BOTH hosts.
-XB_MODE=ssh XB_SSH=<user>@<rdna-host> bash ${SKILL}/scripts/preflight.sh
-XB_MODE=ssh XB_SSH=<user>@<rdna-host> bash ${SKILL}/cases/amd-case-1.sh   # ... through amd-case-7.sh
-XB_MODE=ssh XB_SSH=<user>@<cdna-host> bash ${SKILL}/cases/amd-case-1.sh   # ... through amd-case-7.sh
+# the arm falls back to compiling in place when XB_CTR resolves nothing and ROCm is already on the
+# host, and preflight reports that as a WARN rather than the FAIL a missing runtime used to be.
+# Case 1 needs no card; cases 2-7 do. Run the whole set against BOTH hosts -- on a runtime-less one,
+# cases 4 and 5 still run, since they drive staged binaries rather than injecting into a container.
+XB_MODE=ssh XB_HOST=<user>@<rdna-host> bash ${SKILL}/scripts/preflight.sh
+XB_MODE=ssh XB_HOST=<user>@<rdna-host> bash ${SKILL}/cases/amd-case-1.sh   # ... through amd-case-7.sh
+XB_MODE=pty XB_HOST=<user>@<cdna-host> bash ${SKILL}/cases/amd-case-4.sh   # ... and amd-case-5.sh
 
 # ---- regression: untouched by this spec, run to prove it ----
 make lint          # whole-module golangci-lint --fix; a cold cache needs a long timeout
@@ -979,8 +985,10 @@ csrc/amd/rocm-slicing-shim/            # the libvrocm.so source tree -- PRODUCT 
     └── ledger_lifecycle.c             #     Gate 6 -- hold, SIGKILL, re-acquire
 
 .claude/skills/gpustack-operator-xbuild-and-verify/
+├── scripts/lib.sh                     # + XB_MODE=pty, for a target reachable only through an
+│                                      #   interactive shell -- see T6
 ├── scripts/build.sh                   # + an xbuild-amd-rocm arm calling the tree's own build.sh
-├── scripts/preflight.sh               # + three AMD hardware WARN rows
+├── scripts/preflight.sh               # + four AMD hardware WARN rows
 ├── cases/amd-case-{1..7}.sh           # NEW
 ├── references/amd-*.md                # NEW, + an AMD section in troubleshooting.md
 ├── references/amd-hip-symbol-manifest.md   # NEW: F3's symbol surface + policy, with the image digest
@@ -1217,23 +1225,28 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       window; on the RDNA host the unmasked full-card figure is reproducible across three runs and the
       unmasked occupancy readout equals the card's CU count (60 on RDNA; 304 on CDNA, 38 per XCC).
 
-- [ ] **T6 · Verify-skill wiring: the `xbuild-amd-rocm` arm, preflight, and `SKILL.md`**
+- [x] **T6 · Verify-skill wiring: the `xbuild-amd-rocm` arm, preflight, and `SKILL.md`**
       Blocked by: T1
-      Owns: `SKILL/scripts/build.sh`, `SKILL/scripts/preflight.sh`, `SKILL/SKILL.md`
+      Owns: `SKILL/scripts/lib.sh`, `SKILL/scripts/build.sh`, `SKILL/scripts/preflight.sh`, `SKILL/SKILL.md`
       Gate: review
       Acceptance: an `xbuild-amd-rocm` arm that **stages the tree and compiles it inside a ROCm devel image**,
       following the in-repo-source shape rather than the buildx path the vendored-source backends use — the
       source is in this repo, so there is no upstream commit to pin and nothing to fetch. It must also survive
       a target that **is already a container**: a rented CDNA instance has ROCm on the host filesystem and
       neither docker nor nerdctl, so when `XB_CTR` resolves nothing and `/opt/rocm` is present the arm compiles
-      in place rather than failing. The same target may expose only an interactive SSH shell — no `exec`, no
-      `scp` — so the transport must not assume `ssh <host> <command>` works. `preflight.sh` gains three AMD
-      hardware WARN rows (`rocm-smi` probed by `PATH` and by `/opt/rocm/bin`, the `/dev/kfd` and
-      `/dev/dri/renderD*` nodes, the `amdgpu` module) plus a fourth reporting `NUM_XCC`, since that value
-      selects which conformance table the compute cases assert; none of them is a new FAIL condition.
+      in place rather than failing. That target is also the reason `preflight.sh`'s single required row cannot
+      stay "a container runtime answers": the same instance would FAIL a gate it is in fact usable behind, so
+      run-capable becomes PASS / **WARN when only an in-place ROCm toolchain is present** / FAIL when neither
+      is. The same target may expose only an interactive SSH shell — no `exec`, no `scp` — so the transport
+      must not assume `ssh <host> <command>` works; that is `lib.sh`'s concern rather than this arm's, since
+      `preflight.sh` and every case have to reach the same host, which is why `lib.sh` is owned here.
+      `preflight.sh` gains three AMD hardware WARN rows (`rocm-smi` probed by `PATH` and by `/opt/rocm/bin`,
+      the `/dev/kfd` and `/dev/dri/renderD*` nodes filtered to the ones `amdgpu` backs, the `amdgpu` module)
+      plus a fourth reporting `NUM_XCC`, since that value selects which conformance table the compute cases
+      assert; none of them is a new FAIL condition.
       `SKILL.md` gains a fourth Cases table, an AMD env-knob group, and a **per-script** `allowed-tools` entry
       for each of the seven case scripts — that list has no glob, so an unlisted script cannot run.
-      Verify: `bash -n` on all three; `preflight.sh` on the RDNA host → `FAILS=0` with four AMD rows reporting
+      Verify: `bash -n` on all four; `preflight.sh` on the RDNA host → `FAILS=0` with four AMD rows reporting
       `NUM_XCC=1`, and the same on a CDNA host reporting `NUM_XCC=8` when one is available; `preflight.sh`
       locally → the AMD rows WARN rather than FAIL; `build.sh xbuild-amd-rocm` produces `libvrocm.so` and both
       tools on the RDNA host, and on a CDNA host when one is available, including one with no container
