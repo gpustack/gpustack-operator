@@ -1344,7 +1344,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       one is available, the XCC-covering disjoint pair reports each tenant occupying exactly its own CUs while
       the naive bit-split pair is **rejected** by case 4 before case 5 would ever measure it.
 
-- [ ] **T9 · Cases 6–7 — unit plus multi-tenant, and lifecycle plus version reach**
+- [x] **T9 · Cases 6–7 — unit plus multi-tenant, and lifecycle plus version reach**
       Blocked by: T3, T7
       Owns: `SKILL/cases/amd-case-{6,7}.sh`
       Acceptance: case 6 runs `common/`'s unit tests, then two processes in one container against one quota,
