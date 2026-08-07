@@ -1,6 +1,6 @@
 # Spec: AMD GPU slicing shim — the library logical slicing needs, and the evidence it works
 
-Status: Planned
+Status: Building
 Type: Feature
 
 > **This spec ships the library, not the capability.** `libvrocm.so`'s sources, the feasibility gates that
@@ -1047,7 +1047,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
 - **T5 does not depend on `hip/` at all.** The mask self-check needs topology and a micro-benchmark, not the
   ledger and not the interposer, so it runs beside T2/T3 rather than after them.
 
-- [ ] **T1 · Tree skeleton, `build.sh`, and `common/`**
+- [x] **T1 · Tree skeleton, `build.sh`, and `common/`**
       Blocked by: None
       Owns: `SHIM/build.sh`, `SHIM/README.md`, `SHIM/common/**`
       Gate: review
