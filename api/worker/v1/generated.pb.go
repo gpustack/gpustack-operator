@@ -31,6 +31,8 @@ func (m *DevicesList) Reset() { *m = DevicesList{} }
 
 func (m *Instance) Reset() { *m = Instance{} }
 
+func (m *InstanceAcceleratorMetrics) Reset() { *m = InstanceAcceleratorMetrics{} }
+
 func (m *InstanceEvents) Reset() { *m = InstanceEvents{} }
 
 func (m *InstanceImagePullSecret) Reset() { *m = InstanceImagePullSecret{} }
@@ -44,6 +46,10 @@ func (m *InstanceList) Reset() { *m = InstanceList{} }
 func (m *InstanceLog) Reset() { *m = InstanceLog{} }
 
 func (m *InstanceLogOptions) Reset() { *m = InstanceLogOptions{} }
+
+func (m *InstanceMetrics) Reset() { *m = InstanceMetrics{} }
+
+func (m *InstanceMetricsSample) Reset() { *m = InstanceMetricsSample{} }
 
 func (m *InstancePersistentVolume) Reset() { *m = InstancePersistentVolume{} }
 
@@ -231,6 +237,74 @@ func (m *Instance) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i -= size
 		i = encodeVarintGenerated(dAtA, i, uint64(size))
 	}
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *InstanceAcceleratorMetrics) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *InstanceAcceleratorMetrics) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *InstanceAcceleratorMetrics) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Unhealthy != nil {
+		i--
+		if *m.Unhealthy {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x40
+	}
+	if m.PowerUsageWatts != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.PowerUsageWatts))
+		i--
+		dAtA[i] = 0x38
+	}
+	if m.TemperatureCelsius != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.TemperatureCelsius))
+		i--
+		dAtA[i] = 0x30
+	}
+	if m.CoresUtilizationPercent != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.CoresUtilizationPercent))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.MemoryUtilizationPercent != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryUtilizationPercent))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.MemoryUsageBytes != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryUsageBytes))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.MemoryBytes != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryBytes))
+		i--
+		dAtA[i] = 0x10
+	}
+	i -= len(m.ID)
+	copy(dAtA[i:], m.ID)
+	i = encodeVarintGenerated(dAtA, i, uint64(len(m.ID)))
 	i--
 	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
@@ -569,6 +643,116 @@ func (m *InstanceLogOptions) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	}
 	i--
 	dAtA[i] = 0x8
+	return len(dAtA) - i, nil
+}
+
+func (m *InstanceMetrics) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *InstanceMetrics) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *InstanceMetrics) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	{
+		size, err := m.Sample.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0x12
+	{
+		size, err := m.ObjectMeta.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0xa
+	return len(dAtA) - i, nil
+}
+
+func (m *InstanceMetricsSample) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *InstanceMetricsSample) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *InstanceMetricsSample) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.Accelerators) > 0 {
+		for iNdEx := len(m.Accelerators) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Accelerators[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintGenerated(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x32
+		}
+	}
+	if m.EphemeralStorageUsedBytes != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.EphemeralStorageUsedBytes))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.RootfsUsedBytes != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.RootfsUsedBytes))
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.MemoryWorkingSetBytes != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryWorkingSetBytes))
+		i--
+		dAtA[i] = 0x18
+	}
+	if m.CPUUsageNanoCores != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.CPUUsageNanoCores))
+		i--
+		dAtA[i] = 0x10
+	}
+	{
+		size, err := m.Timestamp.MarshalToSizedBuffer(dAtA[:i])
+		if err != nil {
+			return 0, err
+		}
+		i -= size
+		i = encodeVarintGenerated(dAtA, i, uint64(size))
+	}
+	i--
+	dAtA[i] = 0xa
 	return len(dAtA) - i, nil
 }
 
@@ -1565,6 +1749,38 @@ func (m *Instance) Size() (n int) {
 	return n
 }
 
+func (m *InstanceAcceleratorMetrics) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.ID)
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.MemoryBytes != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryBytes))
+	}
+	if m.MemoryUsageBytes != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryUsageBytes))
+	}
+	if m.MemoryUtilizationPercent != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryUtilizationPercent))
+	}
+	if m.CoresUtilizationPercent != nil {
+		n += 1 + sovGenerated(uint64(*m.CoresUtilizationPercent))
+	}
+	if m.TemperatureCelsius != nil {
+		n += 1 + sovGenerated(uint64(*m.TemperatureCelsius))
+	}
+	if m.PowerUsageWatts != nil {
+		n += 1 + sovGenerated(uint64(*m.PowerUsageWatts))
+	}
+	if m.Unhealthy != nil {
+		n += 2
+	}
+	return n
+}
+
 func (m *InstanceEvents) Size() (n int) {
 	if m == nil {
 		return 0
@@ -1681,6 +1897,48 @@ func (m *InstanceLogOptions) Size() (n int) {
 	}
 	if m.LimitBytes != nil {
 		n += 1 + sovGenerated(uint64(*m.LimitBytes))
+	}
+	return n
+}
+
+func (m *InstanceMetrics) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = m.ObjectMeta.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	l = m.Sample.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	return n
+}
+
+func (m *InstanceMetricsSample) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = m.Timestamp.Size()
+	n += 1 + l + sovGenerated(uint64(l))
+	if m.CPUUsageNanoCores != nil {
+		n += 1 + sovGenerated(uint64(*m.CPUUsageNanoCores))
+	}
+	if m.MemoryWorkingSetBytes != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryWorkingSetBytes))
+	}
+	if m.RootfsUsedBytes != nil {
+		n += 1 + sovGenerated(uint64(*m.RootfsUsedBytes))
+	}
+	if m.EphemeralStorageUsedBytes != nil {
+		n += 1 + sovGenerated(uint64(*m.EphemeralStorageUsedBytes))
+	}
+	if len(m.Accelerators) > 0 {
+		for _, e := range m.Accelerators {
+			l = e.Size()
+			n += 1 + l + sovGenerated(uint64(l))
+		}
 	}
 	return n
 }
@@ -2064,6 +2322,23 @@ func (this *Instance) String() string {
 	}, "")
 	return s
 }
+func (this *InstanceAcceleratorMetrics) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&InstanceAcceleratorMetrics{`,
+		`ID:` + fmt.Sprintf("%v", this.ID) + `,`,
+		`MemoryBytes:` + valueToStringGenerated(this.MemoryBytes) + `,`,
+		`MemoryUsageBytes:` + valueToStringGenerated(this.MemoryUsageBytes) + `,`,
+		`MemoryUtilizationPercent:` + valueToStringGenerated(this.MemoryUtilizationPercent) + `,`,
+		`CoresUtilizationPercent:` + valueToStringGenerated(this.CoresUtilizationPercent) + `,`,
+		`TemperatureCelsius:` + valueToStringGenerated(this.TemperatureCelsius) + `,`,
+		`PowerUsageWatts:` + valueToStringGenerated(this.PowerUsageWatts) + `,`,
+		`Unhealthy:` + valueToStringGenerated(this.Unhealthy) + `,`,
+		`}`,
+	}, "")
+	return s
+}
 func (this *InstanceEvents) String() string {
 	if this == nil {
 		return "nil"
@@ -2159,6 +2434,37 @@ func (this *InstanceLogOptions) String() string {
 		`Timestamps:` + fmt.Sprintf("%v", this.Timestamps) + `,`,
 		`TailLines:` + valueToStringGenerated(this.TailLines) + `,`,
 		`LimitBytes:` + valueToStringGenerated(this.LimitBytes) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *InstanceMetrics) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&InstanceMetrics{`,
+		`ObjectMeta:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.ObjectMeta), "ObjectMeta", "v1.ObjectMeta", 1), `&`, ``, 1) + `,`,
+		`Sample:` + strings.Replace(strings.Replace(this.Sample.String(), "InstanceMetricsSample", "InstanceMetricsSample", 1), `&`, ``, 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *InstanceMetricsSample) String() string {
+	if this == nil {
+		return "nil"
+	}
+	repeatedStringForAccelerators := "[]InstanceAcceleratorMetrics{"
+	for _, f := range this.Accelerators {
+		repeatedStringForAccelerators += strings.Replace(strings.Replace(f.String(), "InstanceAcceleratorMetrics", "InstanceAcceleratorMetrics", 1), `&`, ``, 1) + ","
+	}
+	repeatedStringForAccelerators += "}"
+	s := strings.Join([]string{`&InstanceMetricsSample{`,
+		`Timestamp:` + strings.Replace(strings.Replace(fmt.Sprintf("%v", this.Timestamp), "Time", "v1.Time", 1), `&`, ``, 1) + `,`,
+		`CPUUsageNanoCores:` + valueToStringGenerated(this.CPUUsageNanoCores) + `,`,
+		`MemoryWorkingSetBytes:` + valueToStringGenerated(this.MemoryWorkingSetBytes) + `,`,
+		`RootfsUsedBytes:` + valueToStringGenerated(this.RootfsUsedBytes) + `,`,
+		`EphemeralStorageUsedBytes:` + valueToStringGenerated(this.EphemeralStorageUsedBytes) + `,`,
+		`Accelerators:` + repeatedStringForAccelerators + `,`,
 		`}`,
 	}, "")
 	return s
@@ -2827,6 +3133,229 @@ func (m *Instance) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *InstanceAcceleratorMetrics) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: InstanceAcceleratorMetrics: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: InstanceAcceleratorMetrics: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ID", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.ID = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryBytes", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MemoryBytes = &v
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryUsageBytes", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MemoryUsageBytes = &v
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryUtilizationPercent", wireType)
+			}
+			var v uint32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MemoryUtilizationPercent = &v
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CoresUtilizationPercent", wireType)
+			}
+			var v uint32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.CoresUtilizationPercent = &v
+		case 6:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TemperatureCelsius", wireType)
+			}
+			var v uint32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.TemperatureCelsius = &v
+		case 7:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PowerUsageWatts", wireType)
+			}
+			var v uint32
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint32(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.PowerUsageWatts = &v
+		case 8:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Unhealthy", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			b := bool(v != 0)
+			m.Unhealthy = &b
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])
@@ -3805,6 +4334,319 @@ func (m *InstanceLogOptions) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.LimitBytes = &v
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *InstanceMetrics) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: InstanceMetrics: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: InstanceMetrics: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ObjectMeta", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.ObjectMeta.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Sample", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.Sample.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipGenerated(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if (skippy < 0) || (iNdEx+skippy) < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *InstanceMetricsSample) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowGenerated
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: InstanceMetricsSample: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: InstanceMetricsSample: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Timestamp", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if err := m.Timestamp.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 2:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field CPUUsageNanoCores", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.CPUUsageNanoCores = &v
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryWorkingSetBytes", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.MemoryWorkingSetBytes = &v
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RootfsUsedBytes", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.RootfsUsedBytes = &v
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field EphemeralStorageUsedBytes", wireType)
+			}
+			var v uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.EphemeralStorageUsedBytes = &v
+		case 6:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Accelerators", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowGenerated
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthGenerated
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Accelerators = append(m.Accelerators, InstanceAcceleratorMetrics{})
+			if err := m.Accelerators[len(m.Accelerators)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipGenerated(dAtA[iNdEx:])

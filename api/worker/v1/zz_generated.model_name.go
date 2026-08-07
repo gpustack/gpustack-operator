@@ -21,6 +21,11 @@ func (in Instance) OpenAPIModelName() string {
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceAcceleratorMetrics) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceAcceleratorMetrics"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceEvents) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceEvents"
 }
@@ -53,6 +58,16 @@ func (in InstanceLog) OpenAPIModelName() string {
 // OpenAPIModelName returns the OpenAPI model name for this type.
 func (in InstanceLogOptions) OpenAPIModelName() string {
 	return "ai.gpustack.worker.v1.InstanceLogOptions"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceMetrics) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceMetrics"
+}
+
+// OpenAPIModelName returns the OpenAPI model name for this type.
+func (in InstanceMetricsSample) OpenAPIModelName() string {
+	return "ai.gpustack.worker.v1.InstanceMetricsSample"
 }
 
 // OpenAPIModelName returns the OpenAPI model name for this type.

@@ -1,6 +1,6 @@
 # Spec: Instance Utilization Metrics (CPU/RAM/DISK/GPU)
 
-Status: Planned
+Status: Building
 Type: Feature
 
 ## Summary
@@ -285,7 +285,7 @@ branch are its product; the R-tasks replace/rewrite them in place — `/my-ship`
       `pkg/utils/json`.
       Verify: `go test -race ./pkg/utils/datax/... ./pkg/devicemanager/... && go build ./...`
 
-- [ ] **R2 · API types rework — current gauge, no options**
+- [x] **R2 · API types rework — current gauge, no options**
       Blocked by: None
       Owns: `api/**`
       Acceptance: `InstanceMetrics` carries a single current `sample` (the existing unit-bearing

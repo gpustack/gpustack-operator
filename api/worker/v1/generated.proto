@@ -58,6 +58,34 @@ message Instance {
   optional .gpustack.ai.gpustack.api.worker.v1alpha1.InstanceStatus status = 3;
 }
 
+// InstanceAcceleratorMetrics is the metrics of one accelerator device
+// allocated to an Instance.
+message InstanceAcceleratorMetrics {
+  // ID is the universally unique identifier of the accelerator device.
+  optional string id = 1;
+
+  // MemoryBytes is the total memory of the accelerator in bytes.
+  optional uint64 memoryBytes = 2;
+
+  // MemoryUsageBytes is the used memory of the accelerator in bytes.
+  optional uint64 memoryUsageBytes = 3;
+
+  // MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].
+  optional uint32 memoryUtilizationPercent = 4;
+
+  // CoresUtilizationPercent is the cores utilization of the accelerator in [0, 100].
+  optional uint32 coresUtilizationPercent = 5;
+
+  // TemperatureCelsius is the temperature of the accelerator in Celsius.
+  optional uint32 temperatureCelsius = 6;
+
+  // PowerUsageWatts is the power usage of the accelerator in Watts.
+  optional uint32 powerUsageWatts = 7;
+
+  // Unhealthy indicates whether the accelerator is unhealthy.
+  optional bool unhealthy = 8;
+}
+
 // InstanceEvents is the events of an Instance subresource,
 // which provides the events related to the underlying Kubernetes Pod.
 //
@@ -183,6 +211,53 @@ message InstanceLogOptions {
   // log output. This may not display a complete final line of logging, and may return
   // slightly more or slightly less than the specified limit.
   optional int64 limitBytes = 6;
+}
+
+// InstanceMetrics is the subresource of Instance for reading the current utilization,
+// which provides one up-to-date sample of the underlying Kubernetes Pod's
+// CPU/memory/storage usage and the allocated accelerators' metrics.
+//
+// The CPU/memory/storage figures are read in real time from the node kubelet at request
+// time; the accelerator figures are at most one monitor period stale.
+//
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+message InstanceMetrics {
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.ObjectMeta metadata = 1;
+
+  // Sample is the current utilization sample of the Instance.
+  // Pointer fields inside are absent when the corresponding source is unavailable.
+  optional InstanceMetricsSample sample = 2;
+}
+
+// InstanceMetricsSample is a single utilization sampling point of an Instance.
+message InstanceMetricsSample {
+  // Timestamp indicates when the CPU/memory/storage figures were measured by the kubelet.
+  optional .k8s.io.apimachinery.pkg.apis.meta.v1.Time timestamp = 1;
+
+  // CPUUsageNanoCores is the CPU usage of the Instance's Pod in nanocores
+  // (core-nanoseconds per second), averaged over the kubelet's sample window.
+  optional uint64 cpuUsageNanoCores = 2;
+
+  // MemoryWorkingSetBytes is the working set memory usage of the Instance's Pod in bytes.
+  optional uint64 memoryWorkingSetBytes = 3;
+
+  // RootfsUsedBytes is the used bytes of the Instance containers' writable layers,
+  // which accounts against the Instance's spec.resources.localStorage.
+  optional uint64 rootfsUsedBytes = 4;
+
+  // EphemeralStorageUsedBytes is the total ephemeral storage usage of the Instance's Pod
+  // in bytes, including containers' writable layers, logs and emptyDir-backed volumes.
+  // Absent when the figures came from the metrics.k8s.io fallback, which carries no
+  // storage metrics.
+  optional uint64 ephemeralStorageUsedBytes = 5;
+
+  // Accelerators holds the metrics of the accelerator devices allocated to the Instance,
+  // keyed by device ID; absent when the Instance has no allocated accelerator or the
+  // device manager is unreachable.
+  //
+  // +listType=map
+  // +listMapKey=id
+  repeated InstanceAcceleratorMetrics accelerators = 6;
 }
 
 // InstancePersistentVolume is the schema for worker.gpustack.ai.
