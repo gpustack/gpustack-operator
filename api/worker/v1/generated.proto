@@ -60,15 +60,18 @@ message Instance {
 
 // InstanceAcceleratorMetrics is the metrics of one accelerator device
 // allocated to an Instance.
+//
+// All figures come from the vendor device libraries; a zero value may also
+// mean the library could not read that metric at sampling time.
 message InstanceAcceleratorMetrics {
   // ID is the universally unique identifier of the accelerator device.
   optional string id = 1;
 
-  // MemoryBytes is the total memory of the accelerator in bytes.
-  optional uint64 memoryBytes = 2;
+  // MemoryMiB is the total memory of the accelerator in MiB.
+  optional uint64 memoryMiB = 2;
 
-  // MemoryUsageBytes is the used memory of the accelerator in bytes.
-  optional uint64 memoryUsageBytes = 3;
+  // MemoryUsageMiB is the used memory of the accelerator in MiB.
+  optional uint64 memoryUsageMiB = 3;
 
   // MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].
   optional uint32 memoryUtilizationPercent = 4;

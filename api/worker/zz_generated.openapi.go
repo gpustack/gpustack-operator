@@ -541,7 +541,7 @@ func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.Referen
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceAcceleratorMetrics is the metrics of one accelerator device allocated to an Instance.",
+				Description: "InstanceAcceleratorMetrics is the metrics of one accelerator device allocated to an Instance.\n\nAll figures come from the vendor device libraries; a zero value may also mean the library could not read that metric at sampling time.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"id": {
@@ -552,16 +552,16 @@ func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.Referen
 							Format:      "",
 						},
 					},
-					"memoryBytes": {
+					"memoryMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryBytes is the total memory of the accelerator in bytes.",
+							Description: "MemoryMiB is the total memory of the accelerator in MiB.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
 					},
-					"memoryUsageBytes": {
+					"memoryUsageMiB": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryUsageBytes is the used memory of the accelerator in bytes.",
+							Description: "MemoryUsageMiB is the used memory of the accelerator in MiB.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},

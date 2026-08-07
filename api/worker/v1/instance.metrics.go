@@ -60,15 +60,18 @@ type InstanceMetricsSample struct {
 
 // InstanceAcceleratorMetrics is the metrics of one accelerator device
 // allocated to an Instance.
+//
+// All figures come from the vendor device libraries; a zero value may also
+// mean the library could not read that metric at sampling time.
 type InstanceAcceleratorMetrics struct {
 	// ID is the universally unique identifier of the accelerator device.
 	ID string `json:"id" protobuf:"bytes,1,opt,name=id"`
 
-	// MemoryBytes is the total memory of the accelerator in bytes.
-	MemoryBytes *uint64 `json:"memoryBytes,omitempty" protobuf:"varint,2,opt,name=memoryBytes"`
+	// MemoryMiB is the total memory of the accelerator in MiB.
+	MemoryMiB *uint64 `json:"memoryMiB,omitempty" protobuf:"varint,2,opt,name=memoryMiB"`
 
-	// MemoryUsageBytes is the used memory of the accelerator in bytes.
-	MemoryUsageBytes *uint64 `json:"memoryUsageBytes,omitempty" protobuf:"varint,3,opt,name=memoryUsageBytes"`
+	// MemoryUsageMiB is the used memory of the accelerator in MiB.
+	MemoryUsageMiB *uint64 `json:"memoryUsageMiB,omitempty" protobuf:"varint,3,opt,name=memoryUsageMiB"`
 
 	// MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].
 	MemoryUtilizationPercent *uint32 `json:"memoryUtilizationPercent,omitempty" protobuf:"varint,4,opt,name=memoryUtilizationPercent"`

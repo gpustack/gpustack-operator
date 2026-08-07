@@ -144,6 +144,7 @@ func metricsTestSummary() *statsv1alpha1.Summary {
 // and a foreign card.
 func metricsTestSnapshot() *devicemanager.MonitorSnapshot {
 	return &devicemanager.MonitorSnapshot{
+		Timestamp: time.Now(),
 		Groups: []device.MetricsGroup{
 			{
 				Manufacturer: "nvidia",
@@ -262,8 +263,8 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 		require.Len(t, sample.Accelerators, 1)
 		accel := sample.Accelerators[0]
 		assert.Equal(t, "gpu-uuid-1", accel.ID)
-		assert.Equal(t, uint64(81920<<20), *accel.MemoryBytes)
-		assert.Equal(t, uint64(1024<<20), *accel.MemoryUsageBytes)
+		assert.Equal(t, uint64(81920), *accel.MemoryMiB)
+		assert.Equal(t, uint64(1024), *accel.MemoryUsageMiB)
 		assert.Equal(t, uint32(34), *accel.CoresUtilizationPercent)
 		assert.Equal(t, uint32(42), *accel.TemperatureCelsius)
 		assert.Equal(t, uint32(120), *accel.PowerUsageWatts)
@@ -359,6 +360,22 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 			snapErr: fmt.Errorf("dm unreachable"),
 		})
 
+		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
+		require.NoError(t, err)
+
+		sample := obj.(*worker.InstanceMetrics).Sample
+		assert.NotNil(t, sample.CPUUsageNanoCores)
+		assert.Empty(t, sample.Accelerators)
+	})
+
+	t.Run("drops a stale snapshot instead of presenting it as current", func(t *testing.T) {
+		snapshot := metricsTestSnapshot()
+		snapshot.Timestamp = time.Now().Add(-2 * time.Minute)
+
+		h := newMetricsTestHandler(t, []core.Pod{*metricsTestDMPod()}, metricsTestSeams{
+			summary:  metricsTestSummary(),
+			snapshot: snapshot,
+		})
 		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
 		require.NoError(t, err)
 

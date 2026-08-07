@@ -292,13 +292,13 @@ func (m *InstanceAcceleratorMetrics) MarshalToSizedBuffer(dAtA []byte) (int, err
 		i--
 		dAtA[i] = 0x20
 	}
-	if m.MemoryUsageBytes != nil {
-		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryUsageBytes))
+	if m.MemoryUsageMiB != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryUsageMiB))
 		i--
 		dAtA[i] = 0x18
 	}
-	if m.MemoryBytes != nil {
-		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryBytes))
+	if m.MemoryMiB != nil {
+		i = encodeVarintGenerated(dAtA, i, uint64(*m.MemoryMiB))
 		i--
 		dAtA[i] = 0x10
 	}
@@ -1757,11 +1757,11 @@ func (m *InstanceAcceleratorMetrics) Size() (n int) {
 	_ = l
 	l = len(m.ID)
 	n += 1 + l + sovGenerated(uint64(l))
-	if m.MemoryBytes != nil {
-		n += 1 + sovGenerated(uint64(*m.MemoryBytes))
+	if m.MemoryMiB != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryMiB))
 	}
-	if m.MemoryUsageBytes != nil {
-		n += 1 + sovGenerated(uint64(*m.MemoryUsageBytes))
+	if m.MemoryUsageMiB != nil {
+		n += 1 + sovGenerated(uint64(*m.MemoryUsageMiB))
 	}
 	if m.MemoryUtilizationPercent != nil {
 		n += 1 + sovGenerated(uint64(*m.MemoryUtilizationPercent))
@@ -2328,8 +2328,8 @@ func (this *InstanceAcceleratorMetrics) String() string {
 	}
 	s := strings.Join([]string{`&InstanceAcceleratorMetrics{`,
 		`ID:` + fmt.Sprintf("%v", this.ID) + `,`,
-		`MemoryBytes:` + valueToStringGenerated(this.MemoryBytes) + `,`,
-		`MemoryUsageBytes:` + valueToStringGenerated(this.MemoryUsageBytes) + `,`,
+		`MemoryMiB:` + valueToStringGenerated(this.MemoryMiB) + `,`,
+		`MemoryUsageMiB:` + valueToStringGenerated(this.MemoryUsageMiB) + `,`,
 		`MemoryUtilizationPercent:` + valueToStringGenerated(this.MemoryUtilizationPercent) + `,`,
 		`CoresUtilizationPercent:` + valueToStringGenerated(this.CoresUtilizationPercent) + `,`,
 		`TemperatureCelsius:` + valueToStringGenerated(this.TemperatureCelsius) + `,`,
@@ -3217,7 +3217,7 @@ func (m *InstanceAcceleratorMetrics) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 2:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MemoryBytes", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryMiB", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -3234,10 +3234,10 @@ func (m *InstanceAcceleratorMetrics) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.MemoryBytes = &v
+			m.MemoryMiB = &v
 		case 3:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field MemoryUsageBytes", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field MemoryUsageMiB", wireType)
 			}
 			var v uint64
 			for shift := uint(0); ; shift += 7 {
@@ -3254,7 +3254,7 @@ func (m *InstanceAcceleratorMetrics) Unmarshal(dAtA []byte) error {
 					break
 				}
 			}
-			m.MemoryUsageBytes = &v
+			m.MemoryUsageMiB = &v
 		case 4:
 			if wireType != 0 {
 				return fmt.Errorf("proto: wrong wireType = %d for field MemoryUtilizationPercent", wireType)

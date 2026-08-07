@@ -184,9 +184,11 @@ new spec designs retention.)
 ### Risks and Mitigations
 
 - v1 worker→DeviceManager fetch skips TLS verification and the snapshot endpoint is unauthenticated
-  (it serves only node-level accelerator metrics) → Mitigation: follow-up hardening —
-  cert-manager-issued shared CA with proper server identity, plus a NetworkPolicy allowing only
-  worker ingress (chart change, ask-first).
+  (it serves only node-level accelerator metrics, and the subresource filters them to the
+  requesting Instance's allocated device IDs before returning) → **explicitly accepted by the user
+  on 2026-08-07 ("不做处理")**; optional hardening stays on the backlog — cert-manager-issued
+  shared CA with proper server identity, plus a NetworkPolicy allowing only worker ingress
+  (chart change, ask-first).
 - API-server node proxy adds per-request apiserver load → Mitigation: one proxied call per metrics
   request; the console is expected to poll moderately; caching can be added later if profiling says
   so.

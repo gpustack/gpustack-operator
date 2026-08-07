@@ -35,10 +35,15 @@ import (
 )
 
 const (
-	// _DeviceManagerSecurePort is the secure port of the device manager's webserver,
-	// which serves the monitor snapshot readout (devicemanager.MonitorSnapshotPath).
-	// It mirrors the chart's deviceManager.securePort value.
+	// _DeviceManagerSecurePort is the default secure port of the device manager's
+	// webserver, used when its container port is unnamed; it mirrors the chart's
+	// deviceManager.securePort default.
 	_DeviceManagerSecurePort = 32443
+
+	// _DeviceManagerSecurePortName is the name of the device manager's secure container
+	// port; the actual port is resolved from the pod spec so a chart-level
+	// deviceManager.securePort override keeps working.
+	_DeviceManagerSecurePortName = "https"
 
 	// _DeviceManagerComponentLabelValue selects the device manager pods.
 	_DeviceManagerComponentLabelValue = "device-manager"
@@ -54,7 +59,25 @@ const (
 	// including the kubelet read, the metrics API fallback, and the device manager fetch
 	// with one retry.
 	_InstanceMetricsTimeout = 10 * time.Second
+
+	// _MonitorSnapshotMaxAge bounds the accepted age of a device manager snapshot:
+	// three default monitor periods. Older snapshots mean the monitor is failing and
+	// must not be presented as current.
+	_MonitorSnapshotMaxAge = 45 * time.Second
 )
+
+// deviceManagerSecurePortOf resolves the device manager's secure port from its pod spec,
+// falling back to _DeviceManagerSecurePort when the port is unnamed.
+func deviceManagerSecurePortOf(pod *core.Pod) int {
+	for i := range pod.Spec.Containers {
+		for j := range pod.Spec.Containers[i].Ports {
+			if pod.Spec.Containers[i].Ports[j].Name == _DeviceManagerSecurePortName {
+				return int(pod.Spec.Containers[i].Ports[j].ContainerPort)
+			}
+		}
+	}
+	return _DeviceManagerSecurePort
+}
 
 // InstanceMetricsHandler handles the "metrics" subresource of v1.Instance objects.
 //
@@ -269,7 +292,7 @@ func (h *InstanceMetricsHandler) currentAcceleratorMetrics(
 		if err != nil {
 			return nil, err
 		}
-		url := "https://" + net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(_DeviceManagerSecurePort)) +
+		url := "https://" + net.JoinHostPort(pod.Status.PodIP, strconv.Itoa(deviceManagerSecurePortOf(pod))) +
 			devicemanager.MonitorSnapshotPath
 		return h.fetchMonitorSnapshot(ctx, url)
 	}
@@ -280,6 +303,11 @@ func (h *InstanceMetricsHandler) currentAcceleratorMetrics(
 		snapshot, err = fetch()
 	}
 	if err != nil || snapshot == nil {
+		return nil
+	}
+	// The detector only replaces the snapshot after a successful non-empty sample,
+	// so a failing monitor would otherwise serve stale metrics forever.
+	if time.Since(snapshot.Timestamp) > _MonitorSnapshotMaxAge {
 		return nil
 	}
 
@@ -432,6 +460,13 @@ func parsePodMetricsUsage(raw []byte) (*uint64, *uint64, *meta.Time, error) {
 	return &cpu, &memory, ts, nil
 }
 
+// _monitorSnapshotClient is the shared client for device manager readouts: one keep-alive
+// transport per process instead of one leaked per request.
+var _monitorSnapshotClient = &http.Client{
+	Transport: httpx.Transport(httpx.TransportOptions().WithoutProxy().WithTLSClientConfig(
+		&tls.Config{InsecureSkipVerify: true})), // nolint: gosec
+}
+
 // fetchMonitorSnapshot GETs and decodes the monitor snapshot readout of a device manager pod.
 // The caller owns the operation timeout.
 //
@@ -440,9 +475,7 @@ func parsePodMetricsUsage(raw []byte) (*uint64, *uint64, *meta.Time, error) {
 // disabled explicitly: the project's transport helpers honor proxy env vars, which must never
 // reroute pod-to-pod traffic.
 func fetchMonitorSnapshot(ctx context.Context, url string) (*devicemanager.MonitorSnapshot, error) {
-	rt := httpx.Transport(httpx.TransportOptions().WithoutProxy().WithTLSClientConfig(
-		&tls.Config{InsecureSkipVerify: true})) // nolint: gosec
-	client := &http.Client{Transport: rt}
+	client := _monitorSnapshotClient
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -481,15 +514,13 @@ func isPodReady(pod *core.Pod) bool {
 }
 
 // toInstanceAcceleratorMetrics converts the internal accelerator metrics to the API type,
-// scaling the memory figures from MiB to bytes.
+// keeping the vendor-native MiB memory figures.
 func toInstanceAcceleratorMetrics(am *device.AcceleratorMetrics) worker.InstanceAcceleratorMetrics {
 	result := worker.InstanceAcceleratorMetrics{
 		ID: am.ID,
 	}
-	memoryBytes := am.Memory << 20
-	result.MemoryBytes = &memoryBytes
-	memoryUsageBytes := am.MemoryUsage << 20
-	result.MemoryUsageBytes = &memoryUsageBytes
+	result.MemoryMiB = &am.Memory
+	result.MemoryUsageMiB = &am.MemoryUsage
 	result.MemoryUtilizationPercent = &am.MemoryUtilization
 	result.CoresUtilizationPercent = &am.CoresUtilization
 	result.TemperatureCelsius = &am.Temperature
