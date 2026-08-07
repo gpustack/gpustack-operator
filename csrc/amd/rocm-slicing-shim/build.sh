@@ -37,13 +37,22 @@
 # own would read as a compiler diagnostic. `V=1` prints each command for a human.
 #
 # Env: OUT (where artifacts land, default this directory) · ROCM_PATH (default /opt/rocm) ·
-#      CC (default gcc) · V=1 (trace).
+#      CC (default gcc) · OFFLOAD_ARCH (GPU architectures for the artifacts carrying device code) ·
+#      V=1 (trace).
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="${OUT:-${HERE}}"
 ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
 CC="${CC:-gcc}"
+
+# The artifacts with device code read architecture-specific hardware registers, so each needs a code
+# object per architecture it may be pointed at, and the loader picks. Named explicitly rather than
+# left to hipcc's own detection for two reasons: detection targets the BUILD host's card, which ties
+# a probe to the one card it was compiled beside, and on a build host with no card at all there is
+# nothing to detect and the default it falls back to is silent. The list is the architectures whose
+# mask semantics this tree carries a conformance table for, plus their immediate siblings.
+OFFLOAD_ARCH="${OFFLOAD_ARCH:-gfx90a gfx942 gfx1100 gfx1101 gfx1102}"
 
 ROCM_INC="${ROCM_PATH}/include"
 
@@ -110,6 +119,12 @@ run() {
     "$@"
 }
 
+# offload_flags — OFFLOAD_ARCH as hipcc flags.
+offload_flags() {
+    local arch
+    for arch in ${OFFLOAD_ARCH}; do printf -- '--offload-arch=%s ' "${arch}"; done
+}
+
 # build_lib — the preloaded shared object, compiled from the tree root so the module include paths
 # resolve, and linked against nothing. The HIP headers are on the include path for type-checking
 # the wrapper signatures and for offsetof(); they must not produce a DT_NEEDED entry, which is
@@ -135,9 +150,13 @@ build_tool() {
             # shellcheck disable=SC2086
             run "${CC}" ${STD} -O2 ${WARN} "-I${HERE}" -o "${OUT}/${name//_/-}" ${list}
             ;;
+        # The mask probe carries a kernel, so it goes through hipcc rather than cc -- and through
+        # `-x hip`, which is not decoration: hipcc compiles a .c file as C, and measured, it does
+        # not even put the HIP headers on the include path when it does. It links libhsa-runtime64
+        # for the topology API on top of the HIP runtime hipcc links itself.
         rocm_cumask_check)
-            # shellcheck disable=SC2086
-            run "${CC}" ${STD} -O2 ${WARN} ${HIP_PLATFORM} "-I${HERE}" "-I${ROCM_INC}" \
+            # shellcheck disable=SC2086,SC2046
+            run "${ROCM_PATH}/bin/hipcc" -O2 ${WARN} -x hip $(offload_flags) "-I${HERE}" \
                 -o "${OUT}/${name//_/-}" ${list} \
                 "-L${ROCM_PATH}/lib" -lhsa-runtime64 "-Wl,-rpath,${ROCM_PATH}/lib"
             ;;

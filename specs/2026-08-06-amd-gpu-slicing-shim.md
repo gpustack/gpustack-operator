@@ -542,6 +542,34 @@ read-only with respect to their host.
 The library does not enforce compute. This feature is the contract that makes the platform's enforcement
 correct, plus the artifact that detects when it is not.
 
+**Three separate things are easy to conflate here, so they are named before anything else. Computing a mask,
+injecting it, and checking it took effect are three different jobs, done by three different pieces, and only
+the third one ships in this spec.**
+
+| | job | who does it | when |
+| --- | --- | --- | --- |
+| **Compute** | topology and a requested percentage → a mask string, by the arithmetic below | the Go allocator, `allocator/amd/cumask.go` | per allocation |
+| **Inject** | emit `HSA_CU_MASK` into the container, alongside `ROCR_VISIBLE_DEVICES` and the memory-limit variables | the Go allocator's device-plugin `Allocate` | per allocation |
+| **Enforce** | apply the mask to the workload's queues | **ROCr**, at its own init — not this library, which never touches compute | per process |
+| **Check** | run a kernel, read the hardware back, decide whether the mask took effect | `tools/rocm-cumask-check` | once, at detection |
+
+**The mask is derived, never discovered.** The arithmetic below is closed-form integer work over figures read
+once from the HSA agent-info API: there is no probing, no trial launch, no measurement in the loop and no
+fallback. Given 60 CU / 3 SE / 1 XCC and 50 %, the answer is `0:0-29` and nothing else; given 304 CU / 8 XCC
+and 50 %, it is `0:0-151`. That is what makes the allocator's job testable against a table rather than against
+a card.
+
+**The check exists because deriving correctly and being obeyed are different questions, and the platform
+answers neither.** A rejected mask produces no error, no log line and no changed return code — the container
+simply gets the whole card. `0:0-14` looks like fifteen CUs and delivers sixty; `0:0` on `gfx942` reads as a
+plausible 3.7 % of throughput while the container reaches 267 of 304 CUs. Nothing short of running a kernel
+and reading the hardware separates *honoured*, *discarded* and *honoured on some XCCs only*.
+
+**What this spec ships is the last row, and none of the first three.** `cumask.go` and the injection are
+Non-Goals — the mask is consumed by the allocator and never by the library, so they land with that work, and
+enforcement was never ours to write. What this spec owes that work is two things: the conformance tables
+below, which its arithmetic must reproduce, and the probe that proves a card honours what they say.
+
 **The derivation branches on `NUM_XCC`, and the two branches share no arithmetic.** This is the single most
 consequential thing in this spec, because both branches are correct-looking and each is silently wrong on the
 other architecture.
@@ -657,10 +685,18 @@ error, no log line and no changed return code.
 perfectly plausible 3.7 % of the card's throughput while 267 of its 304 CUs were reachable by the container,
 because the makespan is set by the most-constrained XCC and says nothing about the others. So the probe
 launches its own kernel and reads `HW_ID` — and `XCC_ID` where `NUM_XCC > 1` — from inside it, collecting the
-set of physical `(XCC, SE, CU)` slots its waves actually ran on, and reports PASS only when that set matches
-what the mask asked for. A throughput comparison remains as a second, weaker signal for single-XCC parts.
-Its intended caller is the detector, which should decline to advertise `.sliced` for a card that fails rather
-than advertise a capability the node will not honour.
+set of physical slots its waves actually ran on.
+
+**What it compares that set against is its cardinality, plus its per-XCC partition on CDNA — not its
+identity**, and the reason is a mapping nobody has measured. Which physical `(SE, SA, WGP)` triple a given
+mask bit lands on is not documented and was not established on hardware; the one axis that *was* read out of
+the registers is the XCC, where bit `i` lands on `i mod X`. So the probe asserts what it can defend: that the
+number of distinct units occupied equals the number the mask asked for, and on a multi-XCC part that the count
+in every XCC does too. That is sufficient, because every fail-open mode measured on either architecture shows
+up as a count: a discarded mask occupies the whole card, and an uncovered XCC occupies 38 CUs where the mask
+asked for none. A throughput comparison remains as a second, weaker signal for single-XCC parts. Its intended
+caller is the detector, which should decline to advertise `.sliced` for a card that fails rather than advertise
+a capability the node will not honour.
 
 - Acceptance: the probe returns non-zero for each fail-open construction — Gate 4's three on RDNA, and on
   CDNA a mask that leaves an XCC uncovered — and zero for each valid row of both conformance tables, on real
@@ -1132,7 +1168,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       `build.sh list rocm-monitor` both confirm no `vrocm_ledger` object is linked in; running it when no
       region exists prints a diagnostic and creates nothing (checked with `ls` before and after).
 
-- [ ] **T4 · `tools/rocm-cumask-check` and the mask conformance fixture**
+- [x] **T4 · `tools/rocm-cumask-check` and the mask conformance fixture**
       Blocked by: T1
       Owns: `SHIM/tools/rocm_cumask_check.c`, `SKILL/references/amd-cumask-conformance.md`
       Gate: review
