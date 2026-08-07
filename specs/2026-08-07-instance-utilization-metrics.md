@@ -274,7 +274,7 @@ Commands).
 Rework supersedes iteration 1 (commits `0abb6f44`, `39c0110d`, `aaf6a0eb`, `e241ec56` on this
 branch are its product; the R-tasks replace/rewrite them in place — `/my-ship` folds the history).
 
-- [ ] **R1 · `datax.Snapshot` + DeviceManager single-snapshot monitor**
+- [x] **R1 · `datax.Snapshot` + DeviceManager single-snapshot monitor**
       Blocked by: None
       Owns: `pkg/utils/datax/**`, `pkg/device/types.go`, `pkg/devicemanager/**`
       Acceptance: `datax.Snapshot[T]` (atomic Store/Load) with a `-race` concurrency test; the
