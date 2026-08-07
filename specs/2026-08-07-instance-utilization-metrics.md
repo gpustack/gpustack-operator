@@ -1,6 +1,6 @@
 # Spec: Instance Utilization Metrics (CPU/RAM/DISK/GPU)
 
-Status: Building
+Status: Built
 Type: Feature
 
 ## Summary
@@ -308,7 +308,7 @@ branch are its product; the R-tasks replace/rewrite them in place — `/my-ship`
       `make generate && make lint` clean.
       Verify: `go test ./pkg/worker/extensionapis/...`
 
-- [ ] **R4 · e2e case-37 rework + run on the test cluster**
+- [x] **R4 · e2e case-37 rework + run on the test cluster**
       Blocked by: R3
       Owns: `.claude/skills/gpustack-operator-e2e/**`
       Acceptance: case-37 asserts the current-gauge contract (fields present, instance-scoped,
