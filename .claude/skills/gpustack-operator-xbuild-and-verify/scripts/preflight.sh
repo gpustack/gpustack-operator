@@ -155,7 +155,14 @@ if [ -n "${rocm_smi}" ]; then
   # Count DISTINCT indices: --showid prints several lines per card, so a plain line count reports
   # a multiple of the card count.
   n="$("${rocm_smi}" --showid 2>/dev/null | grep -oE '^GPU\[[0-9]+\]' | sort -u | wc -l | tr -d ' ')"
-  row PASS "rocm-smi" "${rocm_smi} (cards matched: ${n})"
+  # Decided by the count, not by the file existing. rocm-smi is installed by the ROCm package and
+  # runs whether or not the driver is loaded, so a row that stopped at "it is on disk" would
+  # advertise a card to AMD-CASE 2..7 on a host that has none.
+  if [ "${n}" -gt 0 ]; then
+    row PASS "rocm-smi" "${rocm_smi} (cards matched: ${n})"
+  else
+    row WARN "rocm-smi" "${rocm_smi} present but reports no card (driver not loaded?) — AMD-CASE 2..7 (hardware) unavailable"
+  fi
 else
   row WARN "rocm-smi" "absent on PATH and under ${ROCM_PATH:-/opt/rocm}/bin — AMD-CASE 2..7 (hardware) unavailable"
 fi
@@ -172,7 +179,14 @@ if [ -e /dev/kfd ]; then
     all_nodes=$((all_nodes+1))
     [ "$(basename "$(readlink -f "${d}/device/driver")")" = amdgpu ] && amd_nodes=$((amd_nodes+1))
   done
-  row PASS "kfd-devices" "/dev/kfd present; ${amd_nodes} amdgpu render node(s) of ${all_nodes}"
+  # /dev/kfd alone is not a card: the amdgpu module creates it, and a host whose only render node
+  # belongs to integrated graphics has the file and nothing HIP will enumerate. The count is the
+  # row, and zero amdgpu nodes is the same answer as no /dev/kfd.
+  if [ "${amd_nodes}" -gt 0 ]; then
+    row PASS "kfd-devices" "/dev/kfd present; ${amd_nodes} amdgpu render node(s) of ${all_nodes}"
+  else
+    row WARN "kfd-devices" "/dev/kfd present but 0 of ${all_nodes} render node(s) are amdgpu — AMD-CASE 2..7 need a real GPU"
+  fi
 else
   row WARN "kfd-devices" "/dev/kfd absent — AMD-CASE 2..7 need a real GPU"
 fi

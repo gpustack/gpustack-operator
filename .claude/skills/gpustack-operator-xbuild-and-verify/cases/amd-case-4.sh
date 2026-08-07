@@ -126,7 +126,7 @@ while read -r pct culist; do
     row FAIL "table ${table} · ${pct}%" "derived ${got:-<none>}, table says ${want}"
     fails=$((fails+1))
   else
-    row PASS "table ${table} · ${pct}%" "${got} — $(grep -c '^PASS' "${W}/p${pct}") rules, FAILS=0"
+    row PASS "table ${table} · ${pct}%" "${got} — $(grep -c '^PASS' "${W}/p${pct}") rules held, none broken"
   fi
 done <<EOF
 ${positives}
@@ -185,4 +185,8 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "AMD-CASE 4: PASS"; exit 0; } || { echo "AMD-CASE 4: FAIL"; exit 1; }
+# The verdict is the payload's own count, read as a NUMBER off the last `FAILS=` line. Matching
+# the token anywhere in the output would let any row satisfy the verdict by printing it in a
+# detail column, and a payload that died before printing the line has to read as failure.
+total="$(echo "${out}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+[ "${total:-1}" -eq 0 ] && { echo "AMD-CASE 4: PASS"; exit 0; } || { echo "AMD-CASE 4: FAIL"; exit 1; }

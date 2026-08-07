@@ -221,12 +221,23 @@ max_glibc() {
 }
 
 check_artifact() {
-    local so="$1" bad=0 max needed undef exported
+    local so="$1" bad=0 max needed undef exported tool
 
     if [ ! -f "${so}" ]; then
         echo "build.sh: ${so} has not been built" >&2
         return 2
     fi
+
+    # Every check below reads the object through one of these and discards its stderr, so a tool
+    # that is not installed answers with nothing -- an empty symbol list, an empty version list,
+    # a count of zero -- and each check reads that as "nothing wrong". Refuse to run rather than
+    # report four assertions that cannot fail.
+    for tool in readelf objdump nm; do
+        if ! command -v "${tool}" > /dev/null 2>&1; then
+            echo "build.sh: ${tool} is not installed; the artifact checks would pass vacuously" >&2
+            return 2
+        fi
+    done
 
     # 1. Exports only the HIP entry points it interposes. `readelf --dyn-syms` with an explicit
     # GLOBAL/DEFAULT/non-UND filter rather than `nm -D | grep`, which also matches an IMPORTED

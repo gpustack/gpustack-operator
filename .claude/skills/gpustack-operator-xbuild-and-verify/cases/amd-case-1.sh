@@ -87,6 +87,17 @@ if [ ! -x "${WORK}/build.sh" ]; then
   echo "FAILS=1"; exit 0
 fi
 
+# Every ELF assertion in this case reads the object through one of these. A tool that is not
+# installed answers with nothing, and each assertion reads that empty answer as "nothing wrong":
+# `nm -D -u | grep -c` counts zero, the version list has no entry above GLIBC_2.4, the export
+# list is empty. That is a whole green case built on a missing package, so stop here instead.
+for t in readelf nm strings; do
+  if ! command -v "${t}" > /dev/null 2>&1; then
+    row FAIL "binutils available" "${t} is not installed in this image — every ELF assertion below would pass without reading anything"
+    echo "FAILS=1"; exit 0
+  fi
+done
+
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "${SCRATCH}"' EXIT
 
@@ -371,4 +382,8 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "AMD-CASE 1: PASS"; exit 0; } || { echo "AMD-CASE 1: FAIL"; exit 1; }
+# The verdict is the payload's own count, read as a NUMBER off the last `FAILS=` line. Matching
+# the token anywhere in the output would let any row satisfy the verdict by printing it in a
+# detail column, and a payload that died before printing the line has to read as failure.
+total="$(echo "${out}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+[ "${total:-1}" -eq 0 ] && { echo "AMD-CASE 1: PASS"; exit 0; } || { echo "AMD-CASE 1: FAIL"; exit 1; }

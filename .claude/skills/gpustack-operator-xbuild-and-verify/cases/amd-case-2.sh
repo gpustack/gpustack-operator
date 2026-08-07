@@ -175,6 +175,17 @@ fi
 
 PHYS="$(cap "${W}/baseline" hipMemGetInfo)"
 MPC="$(sed -n 's/^CAP entry=hipGetDeviceProperties(mapped) .* mpc=\([0-9]*\).*/\1/p' "${W}/baseline")"
+
+# These two are the yardstick every row below measures against, and an unset yardstick makes
+# those rows agree with anything: `[ "${c_bare}" = "${PHYS}" ]` is true when the probe reported
+# neither figure, so both control arms -- the ones that give the inject arm its meaning -- would
+# pass on a probe that printed nothing at all. Stop here rather than pass vacuously.
+if [ -z "${PHYS}" ] || [ -z "${MPC}" ]; then
+  row FAIL "baseline: the physical figures were read" \
+    "hipMemGetInfo ${PHYS:-<nothing>} MiB, multiProcessorCount ${MPC:-<nothing>} — every comparison below is against these"
+  echo "FAILS=1"; exit 0
+fi
+
 row INFO "card ${GPU}" "physical ${PHYS} MiB, multiProcessorCount ${MPC}, $(sed -n 's/.*name=\(.*\)$/\1/p' "${W}/baseline" | tail -1)"
 
 # Every capacity name binds into the runtime when nothing is preloaded. Without this row the
@@ -300,4 +311,8 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "AMD-CASE 2: PASS"; exit 0; } || { echo "AMD-CASE 2: FAIL"; exit 1; }
+# The verdict is the payload's own count, read as a NUMBER off the last `FAILS=` line. Matching
+# the token anywhere in the output would let any row satisfy the verdict by printing it in a
+# detail column, and a payload that died before printing the line has to read as failure.
+total="$(echo "${out}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+[ "${total:-1}" -eq 0 ] && { echo "AMD-CASE 2: PASS"; exit 0; } || { echo "AMD-CASE 2: FAIL"; exit 1; }

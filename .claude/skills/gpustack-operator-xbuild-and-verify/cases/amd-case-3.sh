@@ -164,7 +164,20 @@ while read -r family entry quota under over; do
   # is the one mistake this case is built to avoid.
   run_path "${family}" "${under}" "${quota}" under
   log="${W}/${family}.under"
-  if [ "$(result "${log}" "${family}")" != success ]; then
+  got="$(result "${log}" "${family}")"
+
+  # No result line at all is its own answer, and it is not "the runtime refused". The program
+  # crashed, failed to load, or no longer knows this family's name -- and reading that as a
+  # refusal would send it down the SKIP arm below, which counts nothing and skips the over-quota
+  # arm too, so the family would disappear from the suite without anything turning red.
+  if [ -z "${got}" ]; then
+    row FAIL "${family}: the probe reported a result" \
+      "read no 'PATH ${family} result=' line: $(tail -3 "${log}" | tr '\n' ' ' | cut -c1-200)"
+    fails=$((fails+1))
+    continue
+  fi
+
+  if [ "${got}" != success ]; then
     rc="$(status "${log}" "${family}")"
     if [ "${rc}" = "${OOM}" ]; then
       row FAIL "${family}: ${under} MiB under a ${quota} MiB quota is served" \
@@ -254,7 +267,14 @@ grep -h '^\[vrocm\] .* <- ' "${W}"/*.under "${W}"/*.over "${W}"/refund.once 2>/d
 
 self="$(awk '$3 ~ /libamdhip64/ { print $1 }' "${W}/origins" | sort -u | tr '\n' ' ')"
 alloc_self="$(awk '$3 ~ /libamdhip64/ && $1 != "hipMemGetInfo" { print $1 }' "${W}/origins" | sort -u | tr '\n' ' ')"
-if [ -z "${alloc_self}" ]; then
+if [ ! -s "${W}/origins" ]; then
+  # An empty file and a clean baseline look identical to the test below, and only one of them is
+  # evidence. Every run above sets LIBVROCM_LOG_LEVEL=2, so no origin line at all means the
+  # diagnostic never fired and this row has read nothing.
+  row FAIL "caller origin: the runs recorded who called each entry" \
+    "not one origin line across $(ls "${W}"/*.under "${W}"/*.over "${W}"/refund.once 2>/dev/null | wc -l | tr -d ' ') run(s) — the baseline below would be drawn from an empty file"
+  fails=$((fails+1))
+elif [ -z "${alloc_self}" ]; then
   row PASS "caller origin: the runtime calls no allocating entry of its own" \
     "entries reached from libamdhip64: ${self:-none}"
 else
@@ -270,4 +290,8 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "AMD-CASE 3: PASS"; exit 0; } || { echo "AMD-CASE 3: FAIL"; exit 1; }
+# The verdict is the payload's own count, read as a NUMBER off the last `FAILS=` line. Matching
+# the token anywhere in the output would let any row satisfy the verdict by printing it in a
+# detail column, and a payload that died before printing the line has to read as failure.
+total="$(echo "${out}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+[ "${total:-1}" -eq 0 ] && { echo "AMD-CASE 3: PASS"; exit 0; } || { echo "AMD-CASE 3: FAIL"; exit 1; }
