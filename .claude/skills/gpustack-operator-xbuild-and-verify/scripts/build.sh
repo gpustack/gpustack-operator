@@ -145,7 +145,7 @@ if [ "${XB_BACKEND}" = amd ]; then
            common/vrocm_quota.h common/vrocm_quota.c \
            common/vrocm_ledger.h common/vrocm_ledger.c common/vrocm_test.c \
            hip/hip_resolve.h hip/hip_resolve.c hip/hip_table.h hip/hip_table.c \
-           hip/hip_query.c hip/hip_mem.c hip/hip_pool.c \
+           hip/hip_query.c hip/hip_mem.c hip/hip_pool.c hip/hip_vmm.c \
            device/vrocm_hwid.h \
            tools/rocm_monitor.c tools/rocm_cumask_check.c \
            testing/hip_mem_paths.c testing/hip_props_probe.c \

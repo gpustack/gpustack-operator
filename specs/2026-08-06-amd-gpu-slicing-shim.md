@@ -395,6 +395,43 @@ read-only with respect to their host.
   `OK` and nothing else moves. `hipMallocArray` being unsupported on `gfx942` means the array entries cannot
   be exercised on CDNA and their coverage rests on the RDNA host.
 
+  **Five more doors turned up later, and by a different method — which is the transferable part.** The table
+  above is a list of entry points somebody thought to try, and that is not a coverage claim. Building
+  `references/amd-hip-symbol-manifest.md` replaced it with a subtraction: list every allocating name
+  `libamdhip64` exports, remove the interposed set, and measure whatever is left. Each of the five below then
+  satisfied a **512 MiB** request under a **64 MiB** quota on `gfx1101`, in runs where `hipMalloc` was
+  correctly refused one:
+
+  | entry point | why it was missed | what it is |
+  | --- | --- | --- |
+  | `hipMalloc3D` | `hipMallocPitch` was wrapped and this was assumed to be the same door | a separate exported entry into the same linear device memory — the pitched entry with a depth |
+  | `hipMemCreate` | the virtual-memory-management family has no `Malloc` in its name | **PyTorch's expandable-segments allocator is built on it.** Only this entry allocates; `hipMemMap`/`hipMemAddressReserve`/`hipMemSetAccess` move addresses |
+  | `hipMemAllocPitch` | assumed to be an alias of `hipMallocPitch` | the **driver-API** half — a different symbol at a different address |
+  | `hipArrayCreate` | assumed to be an alias of `hipMallocArray` | the driver-API half of the 2D array family |
+  | `hipArray3DCreate` | as above | the driver-API half of the 3D array family |
+
+  All five are now wrapped, all are carried by AMD-CASE 3, and AMD-CASE 1 asserts the exported set is exactly
+  the interposed one. The general rule this establishes for any future surface: **coverage is a difference
+  between two sets, and only one of them can be read off the product** — and the width of the net that
+  produces the other set is part of the claim. The first version of the manifest got that half wrong too: its
+  denominator was a narrow name pattern and four of these five fell outside it.
+
+  `references/amd-hip-symbol-manifest.md` reasons about every name left in the difference, one group at a
+  time — address-space operations that move no memory, pool lifecycle as distinct from pool allocation, host
+  memory (counted, never charged), memory another process or API already paid for (the same policy
+  `hipMemPoolImportPointer` follows), queries, copy and fill graph nodes, and the mipmapped-array family,
+  which returns `operation not supported` on `gfx1101` whatever the size and so cannot be exercised on the
+  hardware this work has.
+
+  One door in that difference is **measured open and deliberately left open in this iteration**:
+  `hipGraphAddMemAllocNode` took 512 MiB under a 64 MiB quota. A graph allocation node is added at capture
+  time and takes its memory at **launch**, and one graph may be launched any number of times, so charging at
+  node-add is wrong and charging at launch means wrapping `hipGraphLaunch`, walking the instantiated graph for
+  its allocation and free nodes, and tracking `hipDeviceGraphMemTrim`. The accounting stops being one call in
+  and one call out, which is a different shape of problem from every other entry here; getting it half right
+  would produce charges nobody can reconcile. It is recorded as a known boundary with its measurement rather
+  than as an unknown — see Risks and Mitigations.
+
   *Build constraints — one new requirement, found here.* On a glibc-2.35 build host the library's own loader
   calls raise the floor: `dlopen`, `dlsym` and `dladdr` moved into `libc` at `GLIBC_2.34`, and they were the
   **only** symbols above `GLIBC_2.4` in the product. The `.symver` pins in F1 restore a `GLIBC_2.4` ceiling
@@ -854,7 +891,17 @@ of scope.
 - **The interception table drifts behind ROCm** — a future release adds an allocation entry point and the
   quota quietly stops being a quota → the manifest is regenerated against the build image's own
   `libamdhip64` and diffed in CI; case 3 exercises each family through its own entry rather than assuming one
-  funnels into another.
+  funnels into another. The manifest's **denominator is the mitigation**, not its list of interposed names:
+  it prints every exported name that could hand out, map or release device memory and subtracts the
+  interposed set, so a new entry point appears as a name in that difference rather than as a silent gap. Five
+  entry points were found exactly this way after the table was believed complete.
+- **A graph memory-allocation node bypasses the quota** — `hipGraphAddMemAllocNode` was measured taking
+  512 MiB under a 64 MiB quota → **not mitigated in this iteration**, recorded as a known boundary in
+  `references/amd-hip-symbol-manifest.md` with its measurement. The node is added at capture time and takes
+  its memory at launch, and a graph may be launched many times, so the accounting is no longer one call in
+  and one call out: closing it means wrapping `hipGraphLaunch`, walking the instantiated graph for its
+  allocation and free nodes and tracking `hipDeviceGraphMemTrim`. A container that uses HIP graph memory
+  nodes can exceed its memory quota; nothing else in the design changes.
 - **`hipDeviceProp_t` grows or reorders between ROCm releases** → the offset is taken with `offsetof` at build
   time and the measured values are a regression fixture; a struct that changed shows up as a case-2 failure,
   not as a wrong number in production.
@@ -1139,12 +1186,20 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       the wrapper.
 
       *The allocating families.* The classic family (`hipMalloc`, `hipMallocManaged`, `hipMallocPitch`,
-      `hipExtMallocWithFlags`, `hipMallocArray`, `hipMalloc3DArray`) and the **stream-ordered/pool family**
-      (`hipMallocAsync`, `hipFreeAsync`, `hipMallocFromPoolAsync`) are both charged against the per-card
+      `hipMalloc3D`, `hipExtMallocWithFlags`, `hipMallocArray`, `hipMalloc3DArray`), the **driver-API
+      halves** of that family (`hipMemAllocPitch`, `hipArrayCreate`, `hipArray3DCreate`,
+      `hipArrayDestroy` — separate exported symbols, not aliases), the **virtual-memory-management
+      family** (`hipMemCreate`/`hipMemRelease`, in `hip/hip_vmm.c`; only `hipMemCreate` allocates, and
+      it is keyed on the handle because no address exists yet) and the **stream-ordered/pool family**
+      (`hipMallocAsync`, `hipFreeAsync`, `hipMallocFromPoolAsync`) are all charged against the per-card
       figure through `vrocm_ledger_admit()`, and the freeing entries refund exactly once per pointer. Every
       name in that list is a door somebody measured open, not a precaution: the pool family lets a 2 GiB quota
       hold 12 GiB, and `hipMallocManaged`, `hipExtMallocWithFlags` and `hipMallocPitch` each satisfied a
-      512 MiB request under a 256 MiB quota when only `hipMalloc` and the pool family were wrapped.
+      512 MiB request under a 256 MiB quota when only `hipMalloc` and the pool family were wrapped, and
+      `hipMalloc3D`, `hipMemCreate`, `hipMemAllocPitch`, `hipArrayCreate` and `hipArray3DCreate` each took
+      512 MiB out of a 64 MiB quota after all of those were closed — found by subtracting the interposed set
+      from the runtime's own allocating exports while building the symbol manifest, which is the only method
+      here that finds a door nobody thought to try.
       `hipMallocArray` returns "operation not supported" on `gfx942`, so its coverage can only be proven on
       RDNA. Host-memory entries are counted and never charged — pinned host pages are not device VRAM — and an
       **imported** pool pointer is deliberately not recorded, because it maps memory another process already

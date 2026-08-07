@@ -12,7 +12,16 @@
  * With only `hipMalloc` and the pool family wrapped, `hipMallocManaged`, `hipExtMallocWithFlags`
  * and `hipMallocPitch` each satisfied a 512 MiB request under a 256 MiB quota; and with only the
  * classic family wrapped, `hipMallocFromPoolAsync` took another 10 GiB on RDNA and 50 GiB on CDNA
- * out of a card whose quota was 2 GiB. The pool family is not a layer over `hipMalloc`.
+ * out of a card whose quota was 2 GiB; and `hipMalloc3D` took 512 MiB out of a 64 MiB quota in
+ * the same run that saw `hipMalloc` refused one. The pool family is not a layer over `hipMalloc`,
+ * and neither is the 3D pitched entry.
+ *
+ * THE LAST FOUR WERE FOUND BY SUBTRACTION, NOT BY GUESSING. Listing every allocating name
+ * `libamdhip64` exports and removing the interposed ones left `hipMemCreate` — the
+ * virtual-memory-management sequence a tuned PyTorch job allocates through — beside the DRIVER-API
+ * halves `hipMemAllocPitch`, `hipArrayCreate` and `hipArray3DCreate`, which are separate symbols
+ * from their runtime-API twins. All four took 512 MiB out of a 64 MiB quota. That method is now
+ * the one that matters: a list of doors somebody thought to try is not a coverage claim.
  *
  * WHY `host` IS HERE AND IS EXPECTED TO SUCCEED. Pinned host pages are not device VRAM, so the
  * library counts them and charges nothing. Running it is how a case proves that is still true —
@@ -113,6 +122,40 @@ static int path_pitch(size_t bytes)
     }
     (void)hipFree(ptr);
     return finish("pitch", 1, hipSuccess);
+}
+
+/* path_malloc3d — the pitched entry with a depth, and the one that was measured open LAST.
+ *
+ * It satisfied a 512 MiB request under a 64 MiB quota while `hipMalloc` was correctly refusing
+ * one, which is what put it in the interception table. The depth is deliberately greater than 1:
+ * with `depth = 1` this is `hipMallocPitch` under another name, and the charge would not exercise
+ * the depth multiplication at all. */
+static int path_malloc3d(size_t bytes)
+{
+    size_t height = 256, depth = 4;
+    hipPitchedPtr pitched;
+    hipExtent extent;
+    hipError_t rc;
+
+    extent.width = bytes / (height * depth);
+    extent.height = height;
+    extent.depth = depth;
+    if (extent.width == 0) {
+        extent.width = 1;
+    }
+    memset(&pitched, 0, sizeof(pitched));
+
+    rc = hipMalloc3D(&pitched, extent);
+    step("malloc3d", "hipMalloc3D", rc);
+    printf("PATH malloc3d width=%zu height=%zu depth=%zu pitch=%zu asked_mib=%llu took_mib=%llu\n",
+           extent.width, extent.height, extent.depth, pitched.pitch,
+           (unsigned long long)(extent.width * height * depth) / MIB,
+           (unsigned long long)(pitched.pitch * height * depth) / MIB);
+    if (rc != hipSuccess) {
+        return finish("malloc3d", 0, rc);
+    }
+    (void)hipFree(pitched.ptr);
+    return finish("malloc3d", 1, hipSuccess);
 }
 
 /* device_limit — one texture-dimension ceiling, or a conservative default if it cannot be read.
@@ -220,6 +263,148 @@ static int path_array3d(size_t bytes, int device)
     return finish("array3d", 1, hipSuccess);
 }
 
+/* path_vmm — the virtual-memory-management sequence, which is how a tuned PyTorch job allocates.
+ *
+ * Four calls where the others have one, and only the first of them takes memory: the reserve
+ * takes address space, the map binds the handle into it and the access call sets permissions. A
+ * case reading this needs the WHOLE sequence to run, because a quota that refused at `hipMemCreate`
+ * and let the rest proceed would leave the caller mapping a handle it does not have. */
+static int path_vmm(size_t bytes, int device)
+{
+    hipMemAllocationProp prop;
+    hipMemAccessDesc access;
+    hipMemGenericAllocationHandle_t handle;
+    size_t granularity = 0, size;
+    void *ptr = NULL;
+    hipError_t rc;
+
+    memset(&prop, 0, sizeof(prop));
+    prop.type = hipMemAllocationTypePinned;
+    prop.location.type = hipMemLocationTypeDevice;
+    prop.location.id = device;
+
+    rc = hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum);
+    step("vmm", "hipMemGetAllocationGranularity", rc);
+    if (granularity == 0) {
+        granularity = 2 * MIB;
+    }
+    /* Rounded up because the runtime refuses a size that is not a multiple, and a case must not
+     * read that refusal as the quota's. */
+    size = ((bytes + granularity - 1) / granularity) * granularity;
+    printf("PATH vmm granularity=%zu asked_mib=%llu rounded_mib=%llu\n", granularity,
+           (unsigned long long)bytes / MIB, (unsigned long long)size / MIB);
+
+    rc = hipMemCreate(&handle, size, &prop, 0);
+    step("vmm", "hipMemCreate", rc);
+    if (rc != hipSuccess) {
+        return finish("vmm", 0, rc);
+    }
+    rc = hipMemAddressReserve(&ptr, size, 0, NULL, 0);
+    step("vmm", "hipMemAddressReserve", rc);
+    if (rc == hipSuccess) {
+        rc = hipMemMap(ptr, size, 0, handle, 0);
+        step("vmm", "hipMemMap", rc);
+        memset(&access, 0, sizeof(access));
+        access.location = prop.location;
+        access.flags = hipMemAccessFlagsProtReadWrite;
+        (void)hipMemSetAccess(ptr, size, &access, 1);
+        (void)hipMemUnmap(ptr, size);
+        (void)hipMemAddressFree(ptr, size);
+    }
+    (void)hipMemRelease(handle);
+    return finish("vmm", 1, hipSuccess);
+}
+
+/* path_drvpitch / path_drvarray / path_drvarray3d — the driver-API halves.
+ *
+ * They exist for the same reason `pool` does: a different exported symbol reaching the same
+ * memory. Each was measured satisfying a 512 MiB request under a 64 MiB quota while its
+ * runtime-API twin was refused one. */
+static int path_drvpitch(size_t bytes)
+{
+    hipDeviceptr_t ptr = NULL;
+    size_t pitch = 0, height = 1024, width = bytes / 1024;
+    hipError_t rc;
+
+    if (width == 0) {
+        width = 1;
+    }
+    rc = hipMemAllocPitch(&ptr, &pitch, width, height, 4);
+    step("drvpitch", "hipMemAllocPitch", rc);
+    printf("PATH drvpitch width=%zu height=%zu pitch=%zu asked_mib=%llu took_mib=%llu\n", width,
+           height, pitch, (unsigned long long)(width * height) / MIB,
+           (unsigned long long)(pitch * height) / MIB);
+    if (rc != hipSuccess) {
+        return finish("drvpitch", 0, rc);
+    }
+    (void)hipFree(ptr);
+    return finish("drvpitch", 1, hipSuccess);
+}
+
+static int path_drvarray(size_t bytes, int device)
+{
+    HIP_ARRAY_DESCRIPTOR desc;
+    hipArray_t array = NULL;
+    size_t width = 0, height = 0, ceiling = 0;
+    hipError_t rc;
+
+    if (!shape_2d(bytes / 4, device, &width, &height, &ceiling)) {
+        printf("PATH drvarray shape=unavailable asked_mib=%llu ceiling_mib=%llu\n",
+               (unsigned long long)bytes / MIB, (unsigned long long)(ceiling * 4) / MIB);
+        return finish("drvarray", 0, hipErrorInvalidValue);
+    }
+    memset(&desc, 0, sizeof(desc));
+    desc.Width = width;
+    desc.Height = height;
+    desc.Format = HIP_AD_FORMAT_FLOAT;
+    desc.NumChannels = 1;
+    printf("PATH drvarray width=%zu height=%zu\n", width, height);
+
+    rc = hipArrayCreate(&array, &desc);
+    step("drvarray", "hipArrayCreate", rc);
+    if (rc != hipSuccess) {
+        return finish("drvarray", 0, rc);
+    }
+    (void)hipArrayDestroy(array);
+    return finish("drvarray", 1, hipSuccess);
+}
+
+static int path_drvarray3d(size_t bytes, int device)
+{
+    HIP_ARRAY3D_DESCRIPTOR desc;
+    hipArray_t array = NULL;
+    size_t width = 0, height = 0, depth = 64, ceiling = 0;
+    hipError_t rc;
+
+    if (!shape_2d(bytes / (4 * depth), device, &width, &height, &ceiling)) {
+        printf("PATH drvarray3d shape=unavailable asked_mib=%llu\n",
+               (unsigned long long)bytes / MIB);
+        return finish("drvarray3d", 0, hipErrorInvalidValue);
+    }
+    if (width > device_limit(hipDeviceAttributeMaxTexture3DWidth, device, 2048)) {
+        width = device_limit(hipDeviceAttributeMaxTexture3DWidth, device, 2048);
+    }
+    if (height > device_limit(hipDeviceAttributeMaxTexture3DHeight, device, 2048)) {
+        height = device_limit(hipDeviceAttributeMaxTexture3DHeight, device, 2048);
+    }
+    memset(&desc, 0, sizeof(desc));
+    desc.Width = width;
+    desc.Height = height;
+    desc.Depth = depth;
+    desc.Format = HIP_AD_FORMAT_FLOAT;
+    desc.NumChannels = 1;
+    printf("PATH drvarray3d width=%zu height=%zu depth=%zu took_mib=%llu\n", width, height, depth,
+           (unsigned long long)(width * height * depth * 4) / MIB);
+
+    rc = hipArray3DCreate(&array, &desc);
+    step("drvarray3d", "hipArray3DCreate", rc);
+    if (rc != hipSuccess) {
+        return finish("drvarray3d", 0, rc);
+    }
+    (void)hipArrayDestroy(array);
+    return finish("drvarray3d", 1, hipSuccess);
+}
+
 static int path_host(size_t bytes)
 {
     void *ptr = NULL;
@@ -314,7 +499,8 @@ static int path_refund(size_t bytes)
 static void usage(void)
 {
     fprintf(stderr, "usage: hip_mem_paths <path> <mib> [device]\n"
-                    "  paths: plain managed ext pitch array array3d host async pool refund\n");
+                    "  paths: plain managed ext pitch malloc3d array array3d vmm drvpitch drvarray\n"
+                    "         drvarray3d host async pool refund\n");
 }
 
 int main(int argc, char **argv)
@@ -359,11 +545,26 @@ int main(int argc, char **argv)
     if (strcmp(path, "pitch") == 0) {
         return path_pitch(bytes);
     }
+    if (strcmp(path, "malloc3d") == 0) {
+        return path_malloc3d(bytes);
+    }
     if (strcmp(path, "array") == 0) {
         return path_array(bytes, device);
     }
     if (strcmp(path, "array3d") == 0) {
         return path_array3d(bytes, device);
+    }
+    if (strcmp(path, "vmm") == 0) {
+        return path_vmm(bytes, device);
+    }
+    if (strcmp(path, "drvpitch") == 0) {
+        return path_drvpitch(bytes);
+    }
+    if (strcmp(path, "drvarray") == 0) {
+        return path_drvarray(bytes, device);
+    }
+    if (strcmp(path, "drvarray3d") == 0) {
+        return path_drvarray3d(bytes, device);
     }
     if (strcmp(path, "host") == 0) {
         return path_host(bytes);

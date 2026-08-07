@@ -90,7 +90,7 @@ srcs() {
         # stream-ordered/pool family. Each family registers its own entries from its own
         # translation unit, so no two of them edit one file.
         libvrocm) echo "hip/hip_resolve.c hip/hip_table.c hip/hip_query.c hip/hip_mem.c \
-hip/hip_pool.c ${COMMON_ALL}" ;;
+hip/hip_pool.c hip/hip_vmm.c ${COMMON_ALL}" ;;
 
         # The usage reader. It links none of common/ on purpose: the ledger's mapping helper
         # CREATES the region when none exists and its other entries take the card's lock, and a
