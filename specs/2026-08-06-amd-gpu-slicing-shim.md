@@ -389,7 +389,7 @@ read-only with respect to their host.
   | `hipHostMalloc` | OK | host memory, correctly not charged |
   | `hipMallocArray` | `operation not supported` | unavailable on this part at all |
 
-  The shim under test wrapped only `hipMalloc` and the pool family, so this is what T3's symbol list is
+  The shim under test wrapped only `hipMalloc` and the pool family, so this is what T2's symbol list is
   *for* — measured rather than assumed. The control that makes the table trustworthy is the same run with the
   pool wrappers removed, where `hipMallocAsync` and `hipMallocFromPoolAsync` flip from `out of memory` to
   `OK` and nothing else moves. `hipMallocArray` being unsupported on `gfx942` means the array entries cannot
@@ -1027,10 +1027,9 @@ exclusion is a re-entrancy-counted GCC atomic spinlock and cross-process exclusi
 
 ### Implementation Plan
 
-Eleven tasks. T1 is the foundation and the only task nothing else can start without; after it, **five tasks
-(T2, T4, T5, T6, T7) are unblocked with disjoint `Owns:`** and build concurrently. The library then completes
-along T2 → T3, the cases land once both the artifacts and the entry point exist, and T11 folds the measured
-figures back into this file.
+Ten tasks. T1 is the foundation and the only task nothing else can start without; after it, **five tasks
+(T2, T3, T4, T5, T6) are unblocked with disjoint `Owns:`** and build concurrently. The cases land once both
+the artifacts and the entry point exist, and T10 folds the measured figures back into this file.
 
 Paths in `Owns:` are relative to the repository root; `SHIM` abbreviates `csrc/amd/rocm-slicing-shim` and
 `SKILL` abbreviates `.claude/skills/gpustack-operator-xbuild-and-verify`. Every `Verify` runs on the AMD host
@@ -1040,19 +1039,25 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
 
 - **T1 writes `build.sh`'s complete artifact table up front**, including recipes for artifacts that do not
   exist yet. The alternative — each task appending its own recipe — would put five tasks on one file and
-  serialise the whole fan-out. The cost is that `build.sh lib` fails until T2 and T3 land, so T1's `Verify` is
-  scoped to `unit` and `list`.
-- **The interception table's *mechanism* is T2's; each family's *entries* live in its own translation unit.**
-  Otherwise T3 would have to edit T2's `hip_table.c`, which is a write conflict wearing a dependency's clothes.
-- **T5 does not depend on `hip/` at all.** The mask self-check needs topology and a micro-benchmark, not the
-  ledger and not the interposer, so it runs beside T2/T3 rather than after them.
+  serialise the whole fan-out. The cost is that `build.sh lib` fails until T2 lands, so T1's `Verify` is
+  scoped to `unit`, `list` and the mutation checks.
+- **`hip/` is ONE task, not two.** An earlier cut split the resolver and the reported-capacity family from the
+  allocating families, on the reasoning that a family editing another's table is a write conflict wearing a
+  dependency's clothes. That reasoning holds only for tasks that run at the same time, and these two never
+  could: the second was blocked by the first, nothing else depended on the first alone, and the split bought
+  no parallelism at all. What it did buy was a first task with **nothing to assert against** — `libvrocm.so`
+  does not link until every one of its translation units exists, so the `.symver` pins would have shipped one
+  task before the assertion that proves they work. The families still live in their own translation units;
+  what changed is that one task writes them.
+- **T4 does not depend on `hip/` at all.** The mask self-check needs topology and a micro-benchmark, not the
+  ledger and not the interposer, so it runs beside T2 rather than after it.
 
 - [x] **T1 · Tree skeleton, `build.sh`, and `common/`**
       Blocked by: None
       Owns: `SHIM/build.sh`, `SHIM/README.md`, `SHIM/common/**`
       Gate: review
       Acceptance: `build.sh` implements `lib | tool | test | unit | check | list`, declares the translation
-      units for **every** artifact this spec names (including the ones T2–T6 will fill in), is silent on
+      units for **every** artifact this spec names (including the ones T2–T5 will fill in), is silent on
       success, and honours `OUT` / `CC` / `V=1`. `common/` lands complete and contains **no** `hip*`/`hsa*`
       type and **no** `pthread_*`/`sem_*` call — that is what lets it be tested with neither ROCm nor a
       device: `vrocm.h`, `vrocm_log.{h,c}` (the three levels), `vrocm_quota.{h,c}` (per-card and un-indexed
@@ -1066,53 +1071,57 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       Verify: `build.sh unit` inside a plain `ubuntu:22.04` container → every named case passes, with no ROCm
       image and no device node; `build.sh list <name>` prints a non-empty TU list for every declared artifact.
 
-- [ ] **T2 · `hip/` resolver, interception table, and the reported-capacity family**
+- [ ] **T2 · `hip/` — the interposer, end to end**
       Blocked by: T1
-      Owns: `SHIM/hip/hip_resolve.{h,c}`, `SHIM/hip/hip_table.{h,c}`, `SHIM/hip/hip_query.c`
+      Owns: `SHIM/hip/**`
       Gate: review
-      Acceptance: one resolver serves every wrapper — `dlsym(RTLD_NEXT, …)`, then
+      Acceptance, in three parts that together make one linkable artifact.
+
+      *The resolver and the table.* One resolver serves every wrapper — `dlsym(RTLD_NEXT, …)`, then
       `dlopen("libamdhip64.so", RTLD_NOLOAD | RTLD_LAZY)` and `dlsym` on that handle, then **abort with the
       symbol name**. It must never fabricate a status: `1` is `hipErrorInvalidValue`, so returning it on a
       resolve miss disguises "symbol not found" as "the runtime rejected your arguments". `hip_table` provides
-      the registration mechanism, the per-entry counters and the level-2 caller-origin diagnostic
-      (`dladdr` on `__builtin_return_address(0)`, first N firings per entry); each family registers its own
-      entries from its own TU. `hip_query.c` covers **all three** reported-capacity paths —
-      `hipMemGetInfo`, `hipGetDevicePropertiesR0600` and `hipDeviceTotalMem` — plus the plain
-      `hipGetDeviceProperties` for callers built against pre-6.0 headers. `totalGlobalMem`'s offset comes from
-      `offsetof` at build time; the measured figures (struct 1472, `totalGlobalMem` 288,
-      `multiProcessorCount` 388 — identical on `gfx1101`/ROCm 7.2 and `gfx942`/ROCm 7.2.4) are checked in as a
-      regression fixture, not hard-coded into the wrapper. `hip_resolve.c` carries the two `.symver` pins for
-      `dlopen` and `dlsym` (`@GLIBC_2.2.5`): without them those two symbols alone bind at `GLIBC_2.34` on any
-      build host newer than that and the F1 floor assertion fails.
-      Verify: `build.sh lib` clean and `build.sh check` green (exports only intercepted HIP names,
-      `NEEDED` is `libc.so.6` alone, no `GLIBC_` above `GLIBC_2.4`, zero undefined `hip*`/`hsa*`) **on a
-      glibc ≥ 2.35 build image**, which is what makes the pins load-bearing rather than decorative; on the RDNA host
-      with a 4 GiB quota, a probe reports 4.000 GiB through `hipMemGetInfo` **and**
-      `hipDeviceProp_t.totalGlobalMem` **and** `hipDeviceTotalMem`.
+      the registration mechanism, the per-entry counters and the level-2 caller-origin diagnostic (`dladdr` on
+      `__builtin_return_address(0)`, first N firings per entry). `hip_resolve.c` carries **three** `.symver`
+      pins — `dlopen`, `dlsym` and `dladdr`, all `@GLIBC_2.2.5`; without them those symbols alone bind at
+      `GLIBC_2.34` on any build host newer than that and the F1 floor assertion fails. `dladdr` is the one to
+      miss, because it arrives with the diagnostic rather than with the resolver.
 
-- [ ] **T3 · `hip/` allocation, free, and pool families**
-      Blocked by: T2
-      Owns: `SHIM/hip/hip_mem.c`, `SHIM/hip/hip_pool.c`
-      Gate: review
-      Acceptance: the classic family (`hipMalloc`, `hipMallocManaged`, `hipMallocPitch`,
+      *The reported-capacity family.* `hip_query.c` covers **all three** paths — `hipMemGetInfo`,
+      `hipGetDevicePropertiesR0600` and `hipDeviceTotalMem` — plus the plain `hipGetDeviceProperties` for
+      callers built against pre-6.0 headers. `totalGlobalMem`'s offset comes from `offsetof` at build time;
+      the measured figures (struct 1472, `totalGlobalMem` 288, `multiProcessorCount` 388 — identical on
+      `gfx1101`/ROCm 7.2 and `gfx942`/ROCm 7.2.4) are checked in as a regression fixture, not hard-coded into
+      the wrapper.
+
+      *The allocating families.* The classic family (`hipMalloc`, `hipMallocManaged`, `hipMallocPitch`,
       `hipExtMallocWithFlags`, `hipMallocArray`, `hipMalloc3DArray`) and the **stream-ordered/pool family**
       (`hipMallocAsync`, `hipFreeAsync`, `hipMallocFromPoolAsync`) are both charged against the per-card
-      figure, and the freeing entries refund exactly once per pointer. Every name in that list is a door
-      somebody measured open, not a precaution: the pool family lets a 2 GiB quota hold 12 GiB, and
-      `hipMallocManaged`, `hipExtMallocWithFlags` and `hipMallocPitch` each satisfied a 512 MiB request under
-      a 256 MiB quota when only `hipMalloc` and the pool family were wrapped. `hipMallocArray` returns
-      "operation not supported" on `gfx942`, so its coverage can only be proven on RDNA. Host-memory
-      entries are counted and never charged — pinned host pages are not device VRAM — and an **imported** pool
-      pointer is deliberately not recorded, because it maps memory another process already paid for and
-      crediting this container's free for it would refund memory that was never taken. The pitched entries
-      admit on the caller's width and reconcile to `stride × height` under the same lock, reporting rather
-      than refusing a stride that overruns, since freeing a successful allocation behind the caller's back
-      would break a working workload over padding it never asked for.
-      Verify: on the AMD host under a 2 GiB quota, the three-path probe reports `hipMalloc` stopping at
-      2.000 GiB **and** `hipMallocFromPoolAsync` returning `hipErrorOutOfMemory` rather than the extra
-      10.000 GiB it takes today; total device memory held equals the quota.
+      figure through `vrocm_ledger_admit()`, and the freeing entries refund exactly once per pointer. Every
+      name in that list is a door somebody measured open, not a precaution: the pool family lets a 2 GiB quota
+      hold 12 GiB, and `hipMallocManaged`, `hipExtMallocWithFlags` and `hipMallocPitch` each satisfied a
+      512 MiB request under a 256 MiB quota when only `hipMalloc` and the pool family were wrapped.
+      `hipMallocArray` returns "operation not supported" on `gfx942`, so its coverage can only be proven on
+      RDNA. Host-memory entries are counted and never charged — pinned host pages are not device VRAM — and an
+      **imported** pool pointer is deliberately not recorded, because it maps memory another process already
+      paid for and crediting this container's free for it would refund memory that was never taken. The
+      pitched entries admit on the caller's width and reconcile to `stride × height` under the same lock,
+      reporting rather than refusing a stride that overruns, since freeing a successful allocation behind the
+      caller's back would break a working workload over padding it never asked for.
 
-- [ ] **T4 · `tools/rocm-monitor`**
+      **Each family still registers its own entries from its own translation unit** — `hip_query.c`,
+      `hip_mem.c`, `hip_pool.c` — even though one task now writes all three. The reason is no longer write
+      contention but blast radius: a table that listed every entry in one file would make every family's
+      change a diff against every other family's.
+      Verify: `build.sh lib` clean and `build.sh check` green (exports only intercepted HIP names, `NEEDED` is
+      `libc.so.6` alone, no `GLIBC_` above `GLIBC_2.4`, zero undefined `hip*`/`hsa*`) **on a glibc ≥ 2.35 build
+      image**, which is what makes the pins load-bearing rather than decorative. Then on the RDNA host: under a
+      4 GiB quota a probe reports 4.000 GiB through `hipMemGetInfo` **and** `hipDeviceProp_t.totalGlobalMem`
+      **and** `hipDeviceTotalMem`; and under a 2 GiB quota the per-entry probe reports `hipMalloc` stopping at
+      2.000 GiB **and** `hipMallocFromPoolAsync` returning `hipErrorOutOfMemory` rather than the extra
+      10.000 GiB it takes unwrapped, with total device memory held equal to the quota.
+
+- [ ] **T3 · `tools/rocm-monitor`**
       Blocked by: T1
       Owns: `SHIM/tools/rocm_monitor.c`
       Acceptance: prints quota and accounted usage per card by mapping the region **read-only** and parsing it
@@ -1123,7 +1132,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       `build.sh list rocm-monitor` both confirm no `vrocm_ledger` object is linked in; running it when no
       region exists prints a diagnostic and creates nothing (checked with `ls` before and after).
 
-- [ ] **T5 · `tools/rocm-cumask-check` and the mask conformance fixture**
+- [ ] **T4 · `tools/rocm-cumask-check` and the mask conformance fixture**
       Blocked by: T1
       Owns: `SHIM/tools/rocm_cumask_check.c`, `SKILL/references/amd-cumask-conformance.md`
       Gate: review
@@ -1143,7 +1152,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       each table-B row and **non-zero** for `0:0`, `0:0-3`, `0:0,8,16,24`, `0:304-400` and a `GPU-<hex>`
       `GPU_list` — the first three of which a throughput-only probe would pass.
 
-- [ ] **T6 · `testing/` gate programs**
+- [ ] **T5 · `testing/` gate programs**
       Blocked by: T1
       Owns: `SHIM/testing/**`
       Acceptance: four programs, seeded from the PoC artifacts this spec's gates were measured with.
@@ -1161,7 +1170,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       window; on the RDNA host the unmasked full-card figure is reproducible across three runs and the
       unmasked occupancy readout equals the card's CU count (60 on RDNA; 304 on CDNA, 38 per XCC).
 
-- [ ] **T7 · Verify-skill wiring: the `xbuild-amd-rocm` arm, preflight, and `SKILL.md`**
+- [ ] **T6 · Verify-skill wiring: the `xbuild-amd-rocm` arm, preflight, and `SKILL.md`**
       Blocked by: T1
       Owns: `SKILL/scripts/build.sh`, `SKILL/scripts/preflight.sh`, `SKILL/SKILL.md`
       Gate: review
@@ -1183,8 +1192,8 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       tools on the RDNA host, and on a CDNA host when one is available, including one with no container
       runtime.
 
-- [ ] **T8 · Cases 1–3 and the symbol manifest**
-      Blocked by: T3, T6, T7
+- [ ] **T7 · Cases 1–3 and the symbol manifest**
+      Blocked by: T2, T5, T6
       Owns: `SKILL/cases/amd-case-{1,2,3}.sh`, `SKILL/references/amd-hip-symbol-manifest.md`
       Gate: review
       Acceptance: **case 1 needs no GPU** and asserts the four linkage properties per artifact, using
@@ -1202,8 +1211,8 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       with captured output; re-running the manifest's recorded command reproduces its generated block byte
       for byte.
 
-- [ ] **T9 · Cases 4–5 — mask conformance and compute semantics**
-      Blocked by: T5, T7
+- [ ] **T8 · Cases 4–5 — mask conformance and compute semantics**
+      Blocked by: T4, T6
       Owns: `SKILL/cases/amd-case-{4,5}.sh`
       Acceptance: case 4 selects its conformance table from the card's `NUM_XCC` and drives
       `rocm-cumask-check` across every row of it and every fail-open construction for that architecture, as
@@ -1214,14 +1223,14 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       the disjoint, fully-overlapping and mixed-capped rows. On a multi-XCC card it must additionally assert
       **occupancy** per tenant, not throughput alone: Gate 8's naive-bit-split row has both tenants reading a
       healthy solo-equivalent figure while sharing 152 CUs. Every timed row uses the barrier and the saturating
-      kernel from T6; any PyTorch arm keeps warm-up outside the timed window.
+      kernel from T5; any PyTorch arm keeps warm-up outside the timed window.
       Verify: both on the RDNA host → `FAILS=0`; case 5's single-tenant half-card row lands near 50 % of the
       unmasked figure and its three-tenant same-mask row is reproducible across repeats. On a CDNA host, when
       one is available, the XCC-covering disjoint pair reports each tenant occupying exactly its own CUs while
       the naive bit-split pair is **rejected** by case 4 before case 5 would ever measure it.
 
-- [ ] **T10 · Cases 6–7 — unit plus multi-tenant, and lifecycle plus version reach**
-      Blocked by: T4, T8
+- [ ] **T9 · Cases 6–7 — unit plus multi-tenant, and lifecycle plus version reach**
+      Blocked by: T3, T7
       Owns: `SKILL/cases/amd-case-{6,7}.sh`
       Acceptance: case 6 runs `common/`'s unit tests, then two processes in one container against one quota,
       then **one container across two cards carrying different quotas** — the last is what gives per-card
@@ -1233,8 +1242,8 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       Verify: both on the AMD host → `FAILS=0`, with the two-card row showing each card held to its own
       figure and the 6.x arm enforcing the same quota as the 7.x arm.
 
-- [ ] **T11 · Fold the measured figures back into this spec**
-      Blocked by: T8, T9, T10
+- [ ] **T10 · Fold the measured figures back into this spec**
+      Blocked by: T7, T8, T9
       Owns: `specs/2026-08-06-amd-gpu-slicing-shim.md`, `SKILL/references/amd-*.md`,
       `SKILL/references/troubleshooting.md`
       Acceptance: every projected figure in F2–F6 is replaced by what the delivered cases measured, or is
@@ -1247,9 +1256,9 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       Verify: `bash -n` clean; the spec reads top-to-bottom with no claim the cases did not establish; every
       `Status:`-relevant field is current.
 
-**Checkpoints.** After T1 the tree builds and its unit tests pass with no ROCm and no device. After T3 and T7
+**Checkpoints.** After T1 the tree builds and its unit tests pass with no ROCm and no device. After T2 and T6
 the library is complete and has an entry point, so every later task is verification rather than construction.
-After T10 all seven cases are green and T11 is bookkeeping.
+After T9 all seven cases are green and T10 is bookkeeping.
 
 ### Test Plan
 
