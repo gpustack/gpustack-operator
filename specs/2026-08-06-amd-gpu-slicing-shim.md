@@ -1140,12 +1140,23 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       `NUM_SHADER_ENGINES`, `NUM_SHADER_ARRAYS_PER_SE`, `NUM_XCC` — and **never** from KFD sysfs, remembering
       that the reported shader-engine count is device-wide and already carries the XCC multiplier. It branches
       on `NUM_XCC`, derives a half-card mask per the matching F4 branch, and **decides by occupancy, not by
-      throughput**: it launches its own kernel, reads `HW_ID` (and `XCC_ID` where `NUM_XCC > 1`) from inside
-      it, and exits non-zero unless the physical `(XCC, SE, CU)` slots its waves ran on are exactly the ones
-      the mask asked for. A throughput comparison is kept as a secondary signal only — Gate 8 measured a mask
-      that passes a throughput check while leaking 267 of 304 CUs. Both F4 conformance tables are checked in as
-      the fixture the handed-off Go will be tested against, with each architecture's fail-open constructions as
-      negative rows.
+      throughput**: it launches its own kernel, reads the wave's own hardware identity from inside it, and
+      exits non-zero unless the units it ran on are the ones the mask asked for. A throughput comparison is
+      kept as a secondary signal only — Gate 8 measured a mask that passes a throughput check while leaking
+      267 of 304 CUs.
+
+      **The register and the unit both differ by architecture, and each matches that architecture's
+      allocation atom.** On CDNA the wave reports `HW_ID` (`CU_ID[11:8]`, `SH_ID[12]`, `SE_ID[15:13]`) plus
+      `XCC_ID`, and the unit compared is the **CU**. On RDNA the register is `HW_ID1`
+      (`SIMD_ID[9:8]`, `WGP_ID[13:10]`, `SA_ID[16]`, `SE_ID[20:18]`) and the unit compared is the **WGP** —
+      measured, `SIMD_ID` only ever reports 0 or 1 there, so the two CUs of a WGP are not distinguishable from
+      inside a wave and a CU-level comparison would be counting something the hardware does not expose. That
+      is not a limitation in practice: the WGP is exactly RDNA's allocation atom, so each architecture is
+      compared in the unit it allocates in. Confirmed against the mask on real hardware — unmasked reports 30
+      WGPs, `0:0-29` reports 15, `0:0-13` reports 7, `0:0-1` reports 1.
+
+      Both F4 conformance tables are checked in as the fixture the handed-off Go will be tested against, with
+      each architecture's fail-open constructions as negative rows.
       Verify: on the RDNA host, topology reads CU=60, SE=3, SA/SE=2, XCC=1; exit 0 for each table-A row and
       **non-zero** for each of `0:0-14`, a `ROC_GLOBAL_CU_MASK` whose bits all sit at or above the WGP count,
       and a `GPU-<hex>` `GPU_list`. On the CDNA host, topology reads CU=304, SE=32, SA/SE=1, XCC=8; exit 0 for
