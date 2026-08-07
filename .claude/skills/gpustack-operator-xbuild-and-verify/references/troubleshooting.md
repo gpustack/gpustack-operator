@@ -315,7 +315,7 @@ Concrete failure modes hit while building this skill, with fixes.
 - **A CU mask "works" and the container still gets most of the card** — a rejected mask is silent by
   construction: no error, no log line, no changed return code. On a multi-XCC part this is worse
   than it sounds, because throughput alone cannot see it: `HSA_CU_MASK=0:0` measured a plausible
-  3.9 % of the card while **occupying 267 of 304 CUs**, since the seven XCCs the mask never reached
+  3.7 % of the card while **occupying 267 of 304 CUs**, since the seven XCCs the mask never reached
   ran unmasked. Occupancy, read from `HW_ID`, is the only verdict on such a part. `rocm-cumask-check`
   reports both, AMD-CASE 4 asserts the occupancy figure for every fail-open construction, and
   `references/amd-cumask-conformance.md` is where the constructions are listed.

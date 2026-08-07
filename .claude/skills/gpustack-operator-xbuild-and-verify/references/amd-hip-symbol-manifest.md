@@ -164,10 +164,11 @@ nobody has thought about.
   `hipMemPoolTrimTo`, `hipMemPoolSetAccess`, `hipMemPoolSetAttribute` and the pool export/import
   pair. Creating a pool takes nothing; `hipMallocFromPoolAsync` is where a pool hands memory out,
   and it is charged.
-- **Host memory — counted, never charged.** `hipMallocHost`, `hipHostAlloc`, `hipMemAllocHost`,
-  `hipFreeHost`, `hipHostRegister`, `hipHostUnregister`. Pinned system RAM is not device VRAM, and
-  AMD-CASE 3's `host` row is what keeps that true rather than assumed: it asks for twice the quota
-  and requires success.
+- **Host memory — not device memory, so not interposed.** `hipMallocHost`, `hipHostAlloc`,
+  `hipMemAllocHost`, `hipFreeHost`, `hipHostRegister`, `hipHostUnregister`. Pinned system RAM is not
+  device VRAM, so there is nothing on these paths to account. `hipHostMalloc` and `hipHostFree` are
+  interposed all the same — counted, never charged — and AMD-CASE 3's `host` row is what keeps the
+  second half of that true rather than assumed: it asks for twice the quota and requires success.
 - **Memory this process did not allocate.** `hipIpcOpenMemHandle`, `hipIpcCloseMemHandle`,
   `hipImportExternalMemory`, `hipExternalMemoryGetMappedBuffer`, `hipMemImportFromShareableHandle`,
   `hipGraphicsMapResources`, `hipGraphicsResourceGetMappedPointer`. Each maps memory another

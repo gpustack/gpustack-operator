@@ -365,9 +365,12 @@ case "${verb}" in
         # Captured before printing rather than piped: a pipeline reports the LAST command's
         # status, so an unknown artifact would exit 0 through `| tr`.
         # The artifacts are named with hyphens and the sources with underscores, so accept either:
-        # somebody asking about `rocm-monitor` is asking about the command they can type.
-        list="$(srcs "${1:-}")" || list="$(srcs "${1//-/_}")" ||
-            { echo "build.sh: unknown artifact '${1:-}'" >&2; exit 2; }
+        # somebody asking about `rocm-monitor` is asking about the command they can type. The
+        # name is taken into a variable first: `${1//-/_}` on an unset $1 aborts under `set -u`,
+        # so `list` with no argument would die on the shell rather than print its own message.
+        want="${1:-}"
+        list="$(srcs "${want}")" || list="$(srcs "${want//-/_}")" ||
+            { echo "build.sh: unknown artifact '${want}'" >&2; exit 2; }
         # shellcheck disable=SC2086  # split on purpose: one translation unit per line
         printf '%s\n' ${list}
         ;;

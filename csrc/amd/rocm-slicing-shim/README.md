@@ -100,10 +100,9 @@ rule is what keeps it that way. It also calls no `pthread_*` and no `sem_*`: tho
 the product's ceiling is `GLIBC_2.4`. In-process exclusion is a compiler-atomic spinlock and
 cross-process exclusion is an `fcntl()` record lock, both of which predate it.
 
-> **Landed so far:** the whole tree — `build.sh`, `common/`, `hip/`, `device/`, `tools/` and
-> `testing/`. Every verb works. What is still outstanding is outside this directory: the
-> verification skill's `xbuild-amd-rocm` arm and the `amd-case-*.sh` scripts that drive these
-> artifacts.
+> **Landed:** the whole tree — `build.sh`, `common/`, `hip/`, `device/`, `tools/` and `testing/` —
+> together with the verification skill's `xbuild-amd-rocm` arm and the seven `amd-case-*.sh`
+> scripts that drive these artifacts on a card.
 
 ## Building
 
@@ -257,7 +256,12 @@ conformance table depending on whether the card reports one XCC or several.
 
 Say so wherever it is described. Removing the preload restores the whole card's memory; `env -u
 HSA_CU_MASK` restores the whole card's compute; `HSA_CU_MASK_SKIP_INIT=1` does the latter without
-removing anything; a child process started with a cleared environment loses the quota variables;
-and `rocm-smi` reads sysfs and the DRM nodes rather than HIP, so it reports the physical card
-under any quota. The mechanism keeps a cooperative workload inside its slice. It does not keep an
-uncooperative one there.
+removing anything; and `rocm-smi` reads sysfs and the DRM nodes rather than HIP, so it reports the
+physical card under any quota. The mechanism keeps a cooperative workload inside its slice. It
+does not keep an uncooperative one there.
+
+A cleared environment is not on that list, and the difference is worth stating: `/etc/ld.so.preload`
+is a file, so a child started with `env -i` still loads this library — it just loads it with no
+figure. `vrocm_quota_validate` then marks the container unusable and every allocation is refused.
+That direction is deliberate: losing the quota variables must cost the workload its memory, not
+cost the node its limit.

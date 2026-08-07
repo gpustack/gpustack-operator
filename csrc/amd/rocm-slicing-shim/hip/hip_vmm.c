@@ -90,12 +90,20 @@ VROCM_EXPORT hipError_t hipMemCreate(hipMemGenericAllocationHandle_t *handle, si
     return vrocm_admit_status(rc, ctx.status);
 }
 
+/* The refund follows the release and depends on its status, for the reason every free in this
+ * tree does: a handle the runtime declines to release is a handle the card is still backing, and
+ * crediting its charge back would let the container take those bytes twice. */
 VROCM_EXPORT hipError_t hipMemRelease(hipMemGenericAllocationHandle_t handle)
 {
+    hipError_t status;
+
     VROCM_REAL(hipMemRelease, fn_mem_release);
     VROCM_ENTRY(hipMemRelease);
 
     VROCM_HIT(hipMemRelease);
-    vrocm_ledger_release((unsigned long long)(uintptr_t)handle, NULL, NULL);
-    return real_hipMemRelease(handle);
+    status = real_hipMemRelease(handle);
+    if (status == hipSuccess) {
+        vrocm_ledger_release((unsigned long long)(uintptr_t)handle, NULL, NULL);
+    }
+    return status;
 }

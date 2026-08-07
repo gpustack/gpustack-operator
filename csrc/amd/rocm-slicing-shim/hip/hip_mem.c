@@ -513,31 +513,42 @@ VROCM_EXPORT hipError_t hipArray3DCreate(hipArray_t *array, const HIP_ARRAY3D_DE
 
 /* ---- the frees ---------------------------------------------------------------------------- */
 
+/* THE REFUND FOLLOWS THE FREE, and only a free the runtime accepted. A release the runtime
+ * refuses -- an invalid pointer, a second free of the same one -- leaves the memory exactly where
+ * it was, so crediting the charge back would let the container take those bytes a second time
+ * while the card still holds them once.
+ *
+ * A pointer this library never recorded is refunded nothing either way: an allocation made before
+ * the preload loaded is that case, and so is one the workload invented. The NULL test only spares
+ * the key map a scan that could not match. */
 VROCM_EXPORT hipError_t hipFree(void *ptr)
 {
+    hipError_t status;
+
     VROCM_REAL(hipFree, fn_free);
     VROCM_ENTRY(hipFree);
 
     VROCM_HIT(hipFree);
-    /* A pointer this library never recorded is refunded nothing and passed straight through: an
-     * allocation made before the preload loaded is exactly that case, and so is one the workload
-     * invented. Refunding an unknown key would credit memory that was never charged. */
-    if (ptr != NULL) {
+    status = real_hipFree(ptr);
+    if (status == hipSuccess && ptr != NULL) {
         vrocm_ledger_release((unsigned long long)(uintptr_t)ptr, NULL, NULL);
     }
-    return real_hipFree(ptr);
+    return status;
 }
 
 VROCM_EXPORT hipError_t hipFreeArray(hipArray_t array)
 {
+    hipError_t status;
+
     VROCM_REAL(hipFreeArray, fn_free_array);
     VROCM_ENTRY(hipFreeArray);
 
     VROCM_HIT(hipFreeArray);
-    if (array != NULL) {
+    status = real_hipFreeArray(array);
+    if (status == hipSuccess && array != NULL) {
         vrocm_ledger_release((unsigned long long)(uintptr_t)array, NULL, NULL);
     }
-    return real_hipFreeArray(array);
+    return status;
 }
 
 /* The driver-API free. It takes the same handle `hipFreeArray` does and either entry accepts an
@@ -546,14 +557,17 @@ VROCM_EXPORT hipError_t hipFreeArray(hipArray_t array)
  * to use holding its charge for the life of the process. */
 VROCM_EXPORT hipError_t hipArrayDestroy(hipArray_t array)
 {
+    hipError_t status;
+
     VROCM_REAL(hipArrayDestroy, fn_drv_array_destroy);
     VROCM_ENTRY(hipArrayDestroy);
 
     VROCM_HIT(hipArrayDestroy);
-    if (array != NULL) {
+    status = real_hipArrayDestroy(array);
+    if (status == hipSuccess && array != NULL) {
         vrocm_ledger_release((unsigned long long)(uintptr_t)array, NULL, NULL);
     }
-    return real_hipArrayDestroy(array);
+    return status;
 }
 
 /* ---- host memory: counted, never charged --------------------------------------------------- */

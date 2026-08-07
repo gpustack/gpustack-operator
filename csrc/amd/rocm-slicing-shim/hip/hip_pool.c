@@ -106,17 +106,24 @@ VROCM_EXPORT hipError_t hipMallocFromPoolAsync(void **dev_ptr, size_t size, hipM
  * charge until a synchronisation this library never sees — would leave a container that frees and
  * re-allocates in a loop climbing towards its cap for no reason a user could act on. The cost is
  * that the accounted total can sit briefly below the driver's, which errs towards admitting rather
- * than towards refusing, and the next admission's own check is what still bounds the card. */
+ * than towards refusing, and the next admission's own check is what still bounds the card.
+ *
+ * Issued is still not the same as accepted, so the refund follows the call and depends on its
+ * status: a free the runtime refuses queues nothing, and crediting the charge back for it would
+ * hand the container bytes the card is still holding. */
 VROCM_EXPORT hipError_t hipFreeAsync(void *dev_ptr, hipStream_t stream)
 {
+    hipError_t status;
+
     VROCM_REAL(hipFreeAsync, fn_free_async);
     VROCM_ENTRY(hipFreeAsync);
 
     VROCM_HIT(hipFreeAsync);
-    if (dev_ptr != NULL) {
+    status = real_hipFreeAsync(dev_ptr, stream);
+    if (status == hipSuccess && dev_ptr != NULL) {
         vrocm_ledger_release((unsigned long long)(uintptr_t)dev_ptr, NULL, NULL);
     }
-    return real_hipFreeAsync(dev_ptr, stream);
+    return status;
 }
 
 VROCM_EXPORT hipError_t hipMemPoolImportPointer(void **dev_ptr, hipMemPool_t mem_pool,

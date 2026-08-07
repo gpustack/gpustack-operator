@@ -848,7 +848,7 @@ of scope.
   output; and the fail-open constructions are present as **negative** rows, so a case set that stopped
   detecting them fails rather than quietly narrowing.
 
-**Delivered — what the suite measures, and where it ran.** All seven cases are green: **141 PASS rows and
+**Delivered — what the suite measures, and where it ran.** All seven cases are green: **147 PASS rows and
 no FAIL**. Row counts on the RDNA host (`gfx1101`, `NUM_XCC = 1`, 60 CU / 30 WGP / 3 SE / 16 GiB, ROCm 7.2):
 
 | Case | Rows | What it established |
@@ -858,7 +858,7 @@ no FAIL**. Row counts on the RDNA host (`gfx1101`, `NUM_XCC = 1`, 60 CU / 30 WGP
 | 3 | 30 PASS | thirteen allocation families, each served under the quota through its own counted entry and each refused over it with a counted denial; pinned host memory served at twice the quota; the runtime called **no** allocating entry of its own |
 | 4 | 10 PASS / 3 INFO | every row of table A and every RDNA fail-open construction as a negative row; on the CDNA host, table B, its own five fail-open constructions and the sub-atom refusal |
 | 5 | 8 PASS / 3 INFO | RDNA: ceiling 0.519 of the unmasked figure at a 50 % mask, occupancy 15/30 WGPs, three-tenant fairness 1.009×. CDNA: ceiling 0.609, occupancy 152/304 CUs, fairness 1.369× against a tolerance derived from the card's 8 XCCs |
-| 6 | 47 PASS | `common/`'s 36 unit cases; a 2048 MiB request refused while another process holds 3072 of 4096 MiB, with the denial and `rocm-monitor` agreeing; and one container holding two cards at 2048 and 6144 MiB answering a 4096 MiB request both ways |
+| 6 | 53 PASS | `common/`'s 42 unit cases; a 2048 MiB request refused while another process holds 3072 of 4096 MiB, with the denial and `rocm-monitor` agreeing; and one container holding two cards at 2048 and 6144 MiB answering a 4096 MiB request both ways |
 | 7 | 10 PASS | a `SIGKILL`ed holder's 3072 MiB reclaimed by a later process, refused first while it was alive; and one `libvrocm.so`, identical by digest, enforcing the same quota against `libamdhip64.so.7` and `libamdhip64.so.6` |
 
 **The two-architecture rule was met for cases 4 and 5 only, and that is a partial result.** The CDNA target
@@ -968,6 +968,35 @@ argument, not a measurement, and it should be closed on a CDNA host with a runti
   through to the single-XCC path correctly; the occupancy self-check is the runtime gate that stops an
   unverified partition mode from advertising a capability. Carried as an Open Question with a named
   experiment.
+- **The card's in-process lock is a spin held across the runtime's real allocation** — holding it there is
+  what closes the check-then-allocate race, but a second thread of the same process then spins, and the
+  holder may itself be blocked in `F_SETLKW` behind *another process's* driver call, so the wait is not
+  bounded by this process's own work → **partly mitigated**. The loop carries a `PAUSE`, which is neither a
+  syscall nor a wait: it drains the pipeline's speculated loads, drops the power the loop burns, and frees
+  the issue slots an SMT sibling needs to reach the unlock. What it does not do is stop the thread, and the
+  alternatives that would — `sched_yield`, a futex — put a syscall on a path this design keeps free of one.
+  It costs CPU rather than correctness, and it needs two threads of one process allocating on one card at
+  the same moment. Worth revisiting when a workload is measured spinning, not before.
+- **Re-entry on a DIFFERENT card is refused rather than nested** — `vrocm_ledger_admit` returns
+  `DENIED_CONFIG`, which the caller reports as `hipErrorOutOfMemory`, so a runtime that allocated on card B
+  from inside an allocation on card A would meet a spurious refusal → the ordering argument for refusing
+  stands (two cards taken in two orders by two threads deadlock, and a spurious refusal is recoverable where
+  a deadlock is not), and case 3's caller-origin baseline is what watches for the situation arising at all:
+  it asserts that the runtime makes no call of its own into any allocating entry. A row appearing there is
+  the signal to revisit this.
+- **A pid in the region names a process only within the namespace that wrote it** — the reclaim sweep asks
+  `kill(pid, 0)`, and a Pod's containers have separate pid namespaces unless the Pod asks for
+  `shareProcessNamespace`, so two containers sharing one ledger path can be wrong in both directions: a live
+  charge whose owner this namespace cannot see is reclaimed, and a dead one whose number is in use here is
+  kept → the shape the design assumes is **one ledger path per container**, which is what `PodWorkDir` gives
+  it. Sharing one path across containers is unsupported, and the sweep is the first thing that breaks.
+- **The region file is created `0600` by whichever process allocates first** — a later process running as a
+  different uid is then refused at `open()` and accounts nothing → narrower than it first looks, because the
+  path is per container: this needs one container to change uid between allocations, not two containers to
+  meet. The mode is left alone deliberately — a wider one would let any uid that reaches the path rewrite the
+  totals — and the directory the device-plugin creates is where to widen if a workload ever needs it, which
+  is what the THead backend does with an `0777` ledger directory. The shim creates the file 0600 there, the
+  same as THead's does.
 
 ## Design Details
 
