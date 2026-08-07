@@ -331,7 +331,10 @@ case "${verb}" in
     list)
         # Captured before printing rather than piped: a pipeline reports the LAST command's
         # status, so an unknown artifact would exit 0 through `| tr`.
-        list="$(srcs "${1:-}")" || { echo "build.sh: unknown artifact '${1:-}'" >&2; exit 2; }
+        # The artifacts are named with hyphens and the sources with underscores, so accept either:
+        # somebody asking about `rocm-monitor` is asking about the command they can type.
+        list="$(srcs "${1:-}")" || list="$(srcs "${1//-/_}")" ||
+            { echo "build.sh: unknown artifact '${1:-}'" >&2; exit 2; }
         # shellcheck disable=SC2086  # split on purpose: one translation unit per line
         printf '%s\n' ${list}
         ;;

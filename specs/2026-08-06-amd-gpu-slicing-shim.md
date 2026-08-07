@@ -1121,7 +1121,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       2.000 GiB **and** `hipMallocFromPoolAsync` returning `hipErrorOutOfMemory` rather than the extra
       10.000 GiB it takes unwrapped, with total device memory held equal to the quota.
 
-- [ ] **T3 · `tools/rocm-monitor`**
+- [x] **T3 · `tools/rocm-monitor`**
       Blocked by: T1
       Owns: `SHIM/tools/rocm_monitor.c`
       Acceptance: prints quota and accounted usage per card by mapping the region **read-only** and parsing it
