@@ -77,7 +77,73 @@ static void spin_unlock(volatile int *flag)
 
 static struct vrocm_region *region_map;
 static int region_fd = -1;
-static int region_state; /* 0 untried, 1 usable, 2 unusable */
+
+/* The latch is a state machine rather than a flag because opening is not instantaneous: the body
+ * below blocks in F_SETLKW for as long as another PROCESS takes to initialise the file. A thread
+ * arriving during that window has to be able to tell "not decided yet" from "decided, and the
+ * answer is no" -- reading the first as the second refuses an allocation on an empty card. */
+enum { REGION_UNTRIED = 0, REGION_USABLE, REGION_UNUSABLE, REGION_OPENING };
+
+static volatile int region_state;
+
+/* ---- fork ------------------------------------------------------------------------------- */
+
+/* Everything declared above is process-local, and fork() hands the child a copy of all of it.
+ * Two of those copies are actively harmful:
+ *
+ *  - A SPINLOCK INHERITED IN THE HELD STATE has no owner in the child, because fork carries over
+ *    only the calling thread. `spin_lock` would spin on it forever, at 100% of a core, with no
+ *    error and no log line. The window is not narrow: `device_lock` is held across the runtime's
+ *    real allocation, and `keys_lock` across a 16384-slot scan taken on every allocation and
+ *    every free. The re-entrancy counters are worse than a hang -- a child that inherits
+ *    `held_depth` > 0 believes it already holds a card lock it does not hold, and proceeds to
+ *    account with no lock at all. The region's latch is the same shape: a fork landing while
+ *    another thread is inside `region_create` leaves the child a latch reading "in progress"
+ *    with no thread left to finish it, so a child that kept it would wait on an answer that can
+ *    never arrive. Sent back to untried, the child opens its own.
+ *  - THE KEY MAP INHERITED WITH THE PARENT'S LIVE ENTRIES lets the child refund charges it never
+ *    made: an inherited pointer freed in the child takes the parent's bytes off the card total
+ *    and off a slot the child then keys to its own pid, and the next sweep re-derives the total
+ *    from those slots and makes the loss permanent.
+ *
+ * The usual answer is pthread_atfork(), which this library cannot call: the pthread names would
+ * raise its glibc floor above the GLIBC_2.4 that the .symver pins exist to hold. So the check is
+ * made where the state is used. The owning pid is recorded, and a pid that no longer matches
+ * means this process is a child that has not reset yet.
+ *
+ * THE REGION ITSELF IS NOT RESET, only its latch. The mapping is MAP_SHARED, so the child seeing
+ * the same bytes as the parent is the design rather than a bug, and its descriptor survives the
+ * fork. POSIX does not pass record locks to a child, so the child genuinely holds none -- which
+ * is exactly what clearing `device_lock` assumes. */
+static int owner_pid;
+
+static void fork_reset(void)
+{
+    int self = (int)getpid();
+
+    if (owner_pid == self) {
+        return;
+    }
+    if (owner_pid == 0) {
+        /* First use in this process. The state is still as the loader left it. */
+        owner_pid = self;
+        return;
+    }
+
+    if (region_state == REGION_OPENING) {
+        region_state = REGION_UNTRIED;
+    }
+    memset((void *)device_lock, 0, sizeof(device_lock));
+    keys_lock = 0;
+    memset(keys, 0, sizeof(keys));
+    held_device = -1;
+    held_depth = 0;
+    /* Counters, not state: a child reporting the parent's tallies would describe work it never
+     * did, and both are read back as this process's own. */
+    lock_epochs = 0;
+    tracking_refusals = 0;
+    owner_pid = self;
+}
 
 /* record_lock — one fcntl() record lock, on `len` bytes at `offset`. Separated from its callers
  * because the creation lock and the per-card lock differ only in where they point. */
@@ -100,19 +166,19 @@ static bool record_lock(int fd, int type, off_t offset, off_t len)
     return true;
 }
 
-/* region_open — map the region, creating and initialising it if this process is the first.
+/* region_create — map the region, creating and initialising it if this process is the first.
  *
- * Latched: the answer is computed once per process, so a broken configuration costs one open()
- * rather than one per allocation, and a usable one costs no repeated syscalls on the hot path. */
-static struct vrocm_region *region_open(void)
+ * Runs exactly once per process, on the one thread `region_open` elects; it does no latching of
+ * its own.
+ *
+ * The file is created 0600, which means whichever container reaches the path first owns it: a
+ * sibling running as a different uid is refused at open() and accounts nothing. That is the
+ * conservative direction -- a wider mode would let any uid on the node rewrite another
+ * container's totals -- and the shape it assumes is one uid per ledger path. */
+static struct vrocm_region *region_create(void)
 {
     const char *path;
     struct vrocm_region *map;
-
-    if (region_state != 0) {
-        return region_state == 1 ? region_map : NULL;
-    }
-    region_state = 2;
 
     path = vrocm_quota_ledger_path();
     if (path == NULL) {
@@ -186,10 +252,46 @@ static struct vrocm_region *region_open(void)
         return NULL;
     }
 
-    region_map = map;
-    region_state = 1;
     vrocm_log(VROCM_LOG_DEBUG, "ledger %s mapped (layout %u)\n", path, VROCM_REGION_VERSION);
-    return region_map;
+    return map;
+}
+
+/* region_open — the region, or NULL if this process cannot use one.
+ *
+ * Latched, so a broken configuration costs one open() rather than one per allocation and a usable
+ * one costs no repeated syscalls on the hot path. One thread is elected to do the work and the
+ * rest wait for its answer: opening twice would map the region twice and, because POSIX ends a
+ * file's record locks for the WHOLE process as soon as ANY descriptor on it is closed, the loser
+ * closing its own fd would drop the card locks the winner is holding. */
+static struct vrocm_region *region_open(void)
+{
+    struct vrocm_region *map;
+    int state;
+
+    for (;;) {
+        state = __sync_val_compare_and_swap(&region_state, REGION_UNTRIED, REGION_OPENING);
+        if (state == REGION_UNTRIED) {
+            break; /* elected */
+        }
+        if (state == REGION_USABLE) {
+            return region_map;
+        }
+        if (state == REGION_UNUSABLE) {
+            return NULL;
+        }
+        /* Another thread is inside region_create(), where it can sit in F_SETLKW for as long as
+         * a different process takes to initialise the file. Its answer is the one this thread
+         * wants, so wait for it rather than treat "undecided" as "unusable". */
+        while (region_state == REGION_OPENING) {
+        }
+    }
+
+    map = region_create();
+    region_map = map;
+    /* A full barrier, so a thread that sees the settled state also sees `region_map`. */
+    __sync_val_compare_and_swap(&region_state, REGION_OPENING,
+                                map != NULL ? REGION_USABLE : REGION_UNUSABLE);
+    return map;
 }
 
 /* ---- the per-card lock --------------------------------------------------------------- */
@@ -246,6 +348,7 @@ static void ledger_unlock(int device)
 
 VROCM_INTERNAL bool vrocm_ledger_holding(int *device)
 {
+    fork_reset();
     if (held_depth == 0) {
         return false;
     }
@@ -354,8 +457,12 @@ VROCM_INTERNAL unsigned long long vrocm_ledger_reclaim(int device)
         if (slot->pid == 0) {
             continue;
         }
-        /* kill(pid, 0) answers within this pid namespace, which is the container's -- and the
-         * region is per Pod, so every pid in this table is one this namespace can see. */
+        /* kill(pid, 0) is answered in THIS process's pid namespace, and a Pod's containers each
+         * have their own unless the Pod asks for shareProcessNamespace. So the answer is exact
+         * for an entry this process wrote and a guess for one written from another namespace:
+         * absent here, and a live charge is reclaimed; present here by coincidence, and a dead
+         * one is kept. The sweep is therefore sound within a namespace, which is the shape one
+         * ledger path per container gives it. */
         if (kill((pid_t)slot->pid, 0) < 0 && errno == ESRCH) {
             vrocm_log(VROCM_LOG_DEBUG, "card %d: reclaiming %llu bytes from dead pid %d\n", device,
                       (unsigned long long)slot->memory_bytes, (int)slot->pid);
@@ -390,6 +497,7 @@ VROCM_INTERNAL enum vrocm_admit vrocm_ledger_admit(int device, unsigned long lon
     unsigned long long quota, key = 0, charged;
     int index;
 
+    fork_reset();
     if (!vrocm_quota_usable() || !device_valid(device) || alloc == NULL) {
         return VROCM_ADMIT_DENIED_CONFIG;
     }
@@ -457,6 +565,21 @@ VROCM_INTERNAL enum vrocm_admit vrocm_ledger_admit(int device, unsigned long lon
         return VROCM_ADMIT_ALLOC_FAILED;
     }
 
+    /* A successful allocation that produced no key is a zero-size one: the runtime answers with
+     * success and a null pointer, and the free that matches it is `hipFree(NULL)`, which is
+     * defined to do nothing. No call will ever arrive to give this slot back, so committing one
+     * leaks a slot for every zero-size request -- and a framework that makes them in a loop, as
+     * one does over a batch that happens to be empty, exhausts the 16384-slot map and the card
+     * begins refusing real allocations while it is empty. Measured before this guard: 17001
+     * zero-size requests, then 64 MiB against a 4096 MiB quota on an unused card, refused with
+     * hipErrorOutOfMemory. Nothing was taken from the card either, so there is nothing to charge;
+     * charging bytes that no free can ever refund would leak the quota instead of the map. */
+    if (key == 0) {
+        ledger_unlock(device);
+        slot_free(index);
+        return VROCM_ADMIT_OK;
+    }
+
     /* The allocation may have taken more than it was admitted for -- a pitched allocation is
      * decided on the caller's width and settled on the runtime's stride. It is charged for what
      * it took, and the overrun is REPORTED rather than refused: freeing a successful allocation
@@ -484,6 +607,7 @@ VROCM_INTERNAL bool vrocm_ledger_release(unsigned long long key, int *device,
     unsigned long long held;
     int card;
 
+    fork_reset();
     if (!slot_take(key, &card, &held)) {
         return false;
     }
@@ -515,6 +639,7 @@ VROCM_INTERNAL bool vrocm_ledger_release(unsigned long long key, int *device,
 
 VROCM_INTERNAL unsigned long long vrocm_ledger_used(int device)
 {
+    fork_reset();
     if (region_open() == NULL || !device_valid(device)) {
         return 0;
     }
@@ -523,6 +648,7 @@ VROCM_INTERNAL unsigned long long vrocm_ledger_used(int device)
 
 VROCM_INTERNAL unsigned long long vrocm_ledger_quota(int device)
 {
+    fork_reset();
     if (region_open() == NULL || !device_valid(device)) {
         return 0;
     }

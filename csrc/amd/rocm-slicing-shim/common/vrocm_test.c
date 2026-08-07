@@ -656,6 +656,185 @@ static void test_keymap_process_local(void)
                "two processes holding the same key value refund only their own charge");
 }
 
+/* ---- zero-size allocations ---------------------------------------------------------------- */
+
+/* zero_key_alloc — what the runtime answers a zero-size request with: success, and no pointer. */
+static bool zero_key_alloc(void *ctx, unsigned long long *key, unsigned long long *bytes)
+{
+    (void)ctx;
+    (void)bytes;
+    fake_calls++;
+    *key = 0;
+    return true;
+}
+
+static int child_zero_size_keeps_no_slot(void)
+{
+    int i;
+
+    setenv(VROCM_ENV_MEMORY_LIMIT, "4096", 1);
+    vrocm_quota_validate();
+
+    /* More of them than the key map holds. Every one is a successful allocation that no free can
+     * ever match -- freeing a null pointer is defined to do nothing -- so a slot kept for any one
+     * of them is kept for the life of the process, and the map fills with allocations that took
+     * no memory at all. A batch that happens to be empty is how a framework makes these. */
+    for (i = 0; i < 20000; i++) {
+        if (vrocm_ledger_admit(0, 0, zero_key_alloc, NULL) != VROCM_ADMIT_OK) {
+            return 1;
+        }
+    }
+    if (vrocm_ledger_tracking_refusals() != 0) {
+        return 2;
+    }
+    /* The card never gave anything out, so a real request must still be served. */
+    if (vrocm_ledger_admit(0, GIB, fake_alloc, NULL) != VROCM_ADMIT_OK) {
+        return 3;
+    }
+    return vrocm_ledger_used(0) == GIB ? 0 : 4;
+}
+
+static void test_zero_size_keeps_no_slot(void)
+{
+    int rc = run_child(child_zero_size_keeps_no_slot, region_path(14));
+
+    check_that(rc == 0, "ledger/zero_size_keeps_no_slot", "%s",
+               rc == 1   ? "zero-size allocations filled the key map and were then refused"
+               : rc == 3 ? "1 GiB was refused on an empty card after 20000 zero-size allocations"
+                         : "a zero-size allocation is served, charged nothing and keeps no slot");
+}
+
+/* ---- fork ----------------------------------------------------------------------------------
+ *
+ * A forked child inherits the key map, the re-entrancy counters and the spinlocks, and every one
+ * of those copies is wrong in the child. The two tests below assert the consequences through the
+ * public entries rather than the reset itself, because the consequences are what a workload
+ * meets: a child that refunds its parent's charge, and a child that hangs on a lock nothing will
+ * release. */
+
+/* The gate between a forked child and the parent that forked it. The child cannot take the card
+ * while the parent still holds it -- an fcntl record lock belongs to the PROCESS, so the child
+ * would block on the parent while the parent waits for the child. The parent therefore finishes
+ * its allocation, releases, and only then lets the child go. */
+static int fork_gate[2] = { -1, -1 };
+
+/* forking_alloc — an allocation callback that forks while the card's lock is held.
+ *
+ * That is the moment worth testing and it is not contrived: the lock is held across the whole of
+ * the runtime's real allocation, which is the window a data loader's worker is spawned in. The
+ * child reports what it found through its exit code. */
+static bool forking_alloc(void *ctx, unsigned long long *key, unsigned long long *bytes)
+{
+    pid_t *child = ctx;
+
+    (void)bytes;
+    *child = fork();
+    if (*child == 0) {
+        int device = -1;
+        char go = 0;
+
+        /* The spin below has no timeout of its own, so without this a regression would hang the
+         * suite rather than fail it. */
+        alarm(10);
+        /* Inherited re-entrancy counters make this true, and a child that believes it holds the
+         * card goes on to account with no lock held at all. */
+        if (vrocm_ledger_holding(&device)) {
+            _exit(1);
+        }
+        if (read(fork_gate[0], &go, 1) != 1) {
+            _exit(2);
+        }
+        /* The parent has released the card by now, so this must complete. An inherited
+         * `device_lock` entry, still set from the fork, has no owner in this process and nothing
+         * will ever release it: this is the call that spins until the alarm ends it. */
+        if (vrocm_ledger_admit(0, GIB, fake_alloc, NULL) != VROCM_ADMIT_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    if (*child < 0) {
+        return false;
+    }
+    *key = fake_next_key++;
+    return true;
+}
+
+static int child_fork_under_lock(void)
+{
+    pid_t child = -1;
+    int status = 0;
+
+    setenv(VROCM_ENV_MEMORY_LIMIT, "4096", 1);
+    vrocm_quota_validate();
+    if (pipe(fork_gate) != 0) {
+        return 1;
+    }
+    if (vrocm_ledger_admit(0, GIB, forking_alloc, &child) != VROCM_ADMIT_OK) {
+        return 2;
+    }
+    if (write(fork_gate[1], "g", 1) != 1) {
+        return 3;
+    }
+    if (waitpid(child, &status, 0) != child) {
+        return 4;
+    }
+    if (!WIFEXITED(status)) {
+        return 5;
+    }
+    return WEXITSTATUS(status) == 0 ? 0 : 5 + WEXITSTATUS(status);
+}
+
+static void test_fork_under_lock(void)
+{
+    int rc = run_child(child_fork_under_lock, region_path(15));
+
+    check_that(rc == 0, "ledger/fork_under_lock", "%s",
+               rc == 5   ? "a child forked under the card's lock spun on it until the alarm"
+               : rc == 6 ? "a child forked under the card's lock believed it held it"
+               : rc == 8 ? "a child forked under the card's lock could not go on to take it"
+                         : "a child forked while a card was locked takes it cleanly afterwards");
+}
+
+static int child_fork_refunds_nothing(void)
+{
+    unsigned long long key;
+    pid_t child;
+    int status = 0;
+
+    setenv(VROCM_ENV_MEMORY_LIMIT, "4096", 1);
+    vrocm_quota_validate();
+    key = fake_next_key;
+    if (vrocm_ledger_admit(0, GIB, fake_alloc, NULL) != VROCM_ADMIT_OK) {
+        return 1;
+    }
+
+    child = fork();
+    if (child == 0) {
+        /* The child inherited the key map, the pointer that key stands for, and the mapped
+         * region. Releasing an inherited key must find nothing: the charge belongs to a process
+         * this one is not, and refunding it here takes bytes off a card that is still holding
+         * them -- and the next sweep, which re-derives the total from the slots, makes it stick. */
+        _exit(vrocm_ledger_release(key, NULL, NULL) ? 1 : 0);
+    }
+    if (child < 0 || waitpid(child, &status, 0) != child || !WIFEXITED(status)) {
+        return 2;
+    }
+    if (WEXITSTATUS(status) != 0) {
+        return 3;
+    }
+    return vrocm_ledger_used(0) == GIB ? 0 : 4;
+}
+
+static void test_fork_refunds_nothing(void)
+{
+    int rc = run_child(child_fork_refunds_nothing, region_path(16));
+
+    check_that(rc == 0, "ledger/fork_refunds_nothing", "%s",
+               rc == 3   ? "a forked child refunded a charge its parent still holds"
+               : rc == 4 ? "the parent's charge did not survive its child"
+                         : "an inherited key is not the child's to give back");
+}
+
 int main(int argc, char **argv)
 {
     self = argv[0];
@@ -692,6 +871,9 @@ int main(int argc, char **argv)
     test_lock_released();
     test_keymap_process_local();
     test_overrun_is_charged();
+    test_zero_size_keeps_no_slot();
+    test_fork_under_lock();
+    test_fork_refunds_nothing();
 
     printf("FAILS=%d\n", fails);
     return fails == 0 ? 0 : 1;

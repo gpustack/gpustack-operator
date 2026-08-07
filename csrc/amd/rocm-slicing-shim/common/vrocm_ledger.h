@@ -34,6 +34,11 @@
  *     own call back into an interposed entry is COUNTED rather than deadlocked.
  *   - the read side takes no lock at all. A usage figure that is one allocation stale is worth
  *     far more than a reader that can wedge behind a hung allocation.
+ *   - a fork() while the lock is held gives the child a COPY of the spinlock flag and none of the
+ *     lock: record locks are not inherited, and fork carries over only the calling thread, so the
+ *     child's copy is set with nobody left to release it. The ledger notices the pid has changed
+ *     and resets its process-local state -- the flags, the key map, the re-entrancy counters --
+ *     before touching any of it. The region is MAP_SHARED and is deliberately kept.
  */
 #ifndef VROCM_COMMON_VROCM_LEDGER_H
 #define VROCM_COMMON_VROCM_LEDGER_H
@@ -130,6 +135,11 @@ enum vrocm_admit {
  *
  * `key` is whatever the caller will later present to refund the charge; for HIP that is the
  * returned device pointer. Returning false means the runtime refused.
+ *
+ * A key of ZERO means the allocation succeeded and produced nothing to refund, which is what a
+ * zero-size request does: the runtime answers with success and a null pointer, and freeing a null
+ * pointer is defined to do nothing. Nothing is charged and no slot is kept for it -- a slot kept
+ * for an allocation no free can ever match is a slot kept for the life of the process.
  *
  * `bytes` is IN-OUT: in, what the admission was decided against; out, what the allocation
  * actually took. They differ for a pitched allocation, where the runtime picks the stride and the
