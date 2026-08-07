@@ -266,10 +266,19 @@ backend with numbered cases, so that the mechanism keeps being re-proved after e
   the build-time assertion is what catches the one that does not get it.
 - The constructor must not touch the ledger. The region is mapped lazily on first memory operation, so a
   container that never allocates never creates one.
-- Acceptance: `nm -D` on the product exports only the intercepted HIP names and no `la_*` symbol;
-  `objdump -p` shows `NEEDED libc.so.6` and nothing else; `objdump -T` shows no `GLIBC_` above `GLIBC_2.4`;
-  the undefined-symbol set contains no `hip*` or `hsa*` name. All four are asserted at build time and
-  re-checked by case 1, which needs no GPU.
+- Acceptance, as delivered: the product's exported set is **exactly** the interposed HIP names — asserted as a
+  set rather than as "only these and nothing foreign", because that is the half that catches an entry which
+  stopped being compiled in; `DT_NEEDED` is exactly `libc.so.6`; no `GLIBC_` requirement above `GLIBC_2.4`;
+  and no `hip*`/`hsa*` name among the undefined symbols. All four are asserted at build time by
+  `build.sh check` and re-asserted by case 1, which needs no GPU and no container runtime where ROCm is
+  installed. The export check reads `readelf -W --dyn-syms` and requires `GLOBAL DEFAULT` with a non-`UND`
+  section; `nm -D | grep` cannot decide it, because it also matches a symbol the object merely **imports** and
+  would therefore pass for any library that calls the entry point instead of defining it. The undefined-symbol
+  check is the one place a `grep` over `nm` output means what it looks like, and it uses `nm -D -u`.
+  The `GLIBC_2.4` figure is a claim about the **shared object** only: an executable built in the same image
+  carries `__libc_start_main@GLIBC_2.34` and `fstat@GLIBC_2.33` from its startup stub whatever it calls, so
+  case 1 records `rocm-monitor`'s floor rather than asserting it, and a reader meant to run inside an
+  Ubuntu 20.04 workload image has to be built on an older base.
 
 #### F2 — PoC gates (all met; recorded output below)
 
