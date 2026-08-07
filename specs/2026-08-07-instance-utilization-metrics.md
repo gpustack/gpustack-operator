@@ -294,7 +294,7 @@ branch are its product; the R-tasks replace/rewrite them in place — `/my-ship`
       OpenAPI violation exceptions.
       Verify: `make generate` (symlinked layout) `&& go build ./api/...`
 
-- [ ] **R3 · Instance `metrics` subresource — real-time**
+- [x] **R3 · Instance `metrics` subresource — real-time**
       Blocked by: R1, R2
       Owns: `pkg/worker/extensionapis/worker/**`
       Gate: review
