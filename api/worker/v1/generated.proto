@@ -221,7 +221,8 @@ message InstanceLogOptions {
 // CPU/memory/storage usage and the allocated accelerators' metrics.
 //
 // The CPU/memory/storage figures are read in real time from the node kubelet at request
-// time; the accelerator figures are at most one monitor period stale.
+// time; the accelerator figures come from the device manager's latest snapshot and are
+// dropped when older than a few monitor periods.
 //
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 message InstanceMetrics {

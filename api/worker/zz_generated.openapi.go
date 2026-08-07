@@ -962,7 +962,7 @@ func schema_gpustack_api_worker_v1_InstanceMetrics(ref common.ReferenceCallback)
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceMetrics is the subresource of Instance for reading the current utilization, which provides one up-to-date sample of the underlying Kubernetes Pod's CPU/memory/storage usage and the allocated accelerators' metrics.\n\nThe CPU/memory/storage figures are read in real time from the node kubelet at request time; the accelerator figures are at most one monitor period stale.",
+				Description: "InstanceMetrics is the subresource of Instance for reading the current utilization, which provides one up-to-date sample of the underlying Kubernetes Pod's CPU/memory/storage usage and the allocated accelerators' metrics.\n\nThe CPU/memory/storage figures are read in real time from the node kubelet at request time; the accelerator figures come from the device manager's latest snapshot and are dropped when older than a few monitor periods.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"kind": {

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -190,7 +192,8 @@ func metricsTestSummary() *kubeletstats.Summary {
 // and a foreign card.
 func metricsTestSnapshot() *devicemanager.MonitorSnapshot {
 	return &devicemanager.MonitorSnapshot{
-		Timestamp: time.Now(),
+		Timestamp:     time.Now(),
+		PeriodSeconds: 15,
 		Groups: []device.MetricsGroup{
 			{
 				Manufacturer: "nvidia",
@@ -305,7 +308,22 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 
 	t.Run("returns the current instance-scoped sample", func(t *testing.T) {
 		serveSummary(t, metricsTestSummary(), nil)
-		h := newMetricsTestHandler(t, []core.Pod{*metricsTestDMPod()})
+
+		// Stand up a loopback device manager: a TLS server whose address the
+		// fake dm pod advertises as its pod IP + named https port.
+		dmSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, devicemanager.MonitorSnapshotPath, r.URL.Path)
+			w.Header().Set("Content-Type", "application/json")
+			bs, _ := json.Marshal(metricsTestSnapshot())
+			_, _ = w.Write(bs)
+		}))
+		t.Cleanup(dmSrv.Close)
+		dmPort, _ := strconv.Atoi(strings.TrimPrefix(dmSrv.URL, "https://127.0.0.1:"))
+		dmPod := metricsTestDMPod()
+		dmPod.Status.PodIP = "127.0.0.1"
+		dmPod.Spec.Containers[0].Ports[0].ContainerPort = int32(dmPort)
+
+		h := newMetricsTestHandler(t, []core.Pod{*dmPod})
 
 		obj, err := h.OnGet(context.Background(), metricsTestKey(), ctrlcli.GetOptions{})
 		require.NoError(t, err)
@@ -322,10 +340,10 @@ func TestInstanceMetricsHandler_OnGet(t *testing.T) {
 		assert.Equal(t, uint64(2048), *sample.RootfsUsedMiB)
 		assert.Equal(t, uint64(3072), *sample.EphemeralStorageUsedMiB)
 
-		// The device manager pod IP is unreachable in the unit environment,
-		// so the accelerator section degrades away; merge logic is covered
-		// by the pure filter tests below.
-		assert.Empty(t, sample.Accelerators)
+		// The merged accelerator section: only the allocated card, vendor-native MiB.
+		require.Len(t, sample.Accelerators, 1)
+		assert.Equal(t, "gpu-uuid-1", sample.Accelerators[0].ID)
+		assert.Equal(t, uint64(81920), *sample.Accelerators[0].MemoryMiB)
 	})
 
 	t.Run("falls back when the kubelet does not carry the pod yet", func(t *testing.T) {
@@ -521,6 +539,14 @@ func TestFilterAllocatedAcceleratorMetrics(t *testing.T) {
 		snapshot := metricsTestSnapshot()
 		snapshot.Timestamp = time.Now().Add(-2 * time.Minute)
 		assert.Empty(t, filterAllocatedAcceleratorMetrics(snapshot, allocGroups))
+	})
+
+	t.Run("scales the staleness bound with the reported period", func(t *testing.T) {
+		// A 60s monitor period must not drop healthy 50s-old samples.
+		snapshot := metricsTestSnapshot()
+		snapshot.PeriodSeconds = 60
+		snapshot.Timestamp = time.Now().Add(-50 * time.Second)
+		assert.NotEmpty(t, filterAllocatedAcceleratorMetrics(snapshot, allocGroups))
 	})
 
 	t.Run("drops everything for a CPU instance", func(t *testing.T) {

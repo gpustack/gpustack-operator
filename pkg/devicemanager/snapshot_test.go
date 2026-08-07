@@ -15,7 +15,8 @@ import (
 
 func TestMonitorSnapshotHandler(t *testing.T) {
 	sample := &MonitorSnapshot{
-		Timestamp: time.Date(2026, 8, 7, 1, 2, 3, 0, time.UTC),
+		Timestamp:     time.Date(2026, 8, 7, 1, 2, 3, 0, time.UTC),
+		PeriodSeconds: 15,
 		Groups: device.MetricsGroupList{
 			{
 				Manufacturer: "nvidia",
@@ -51,7 +52,7 @@ func TestMonitorSnapshotHandler(t *testing.T) {
 			name:   "empty before the first tick",
 			method: http.MethodGet,
 			want:   http.StatusOK,
-			wantRaw: `{"timestamp":"0001-01-01T00:00:00Z","groups":[]}
+			wantRaw: `{"timestamp":"0001-01-01T00:00:00Z","periodSeconds":0,"groups":[]}
 `,
 		},
 		{
@@ -59,7 +60,7 @@ func TestMonitorSnapshotHandler(t *testing.T) {
 			method: http.MethodGet,
 			sample: sample,
 			want:   http.StatusOK,
-			wantRaw: `{"timestamp":"2026-08-07T01:02:03Z","groups":[` +
+			wantRaw: `{"timestamp":"2026-08-07T01:02:03Z","periodSeconds":15,"groups":[` +
 				`{"manufacturer":"nvidia","timestamp":"2026-08-07T01:02:02Z","accelerators":[` +
 				`{"id":"gpu-1","memory":0,"memoryUsage":1024,"memoryUtilization":0,"coresUtilization":0,"temperature":0,"powerUsage":0,"unhealthy":false},` +
 				`{"id":"gpu-0","memory":0,"memoryUsage":2048,"memoryUtilization":0,"coresUtilization":0,"temperature":0,"powerUsage":0,"unhealthy":false}]},` +

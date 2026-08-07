@@ -52,6 +52,9 @@ type MonitorSnapshot struct {
 	// Timestamp is the time when the sample was stored,
 	// zero before the first monitor tick.
 	Timestamp time.Time `json:"timestamp"`
+	// PeriodSeconds is the monitor period in effect when the sample was stored,
+	// so consumers can scale their staleness bound to the configured cadence.
+	PeriodSeconds int64 `json:"periodSeconds"`
 	// Groups is the latest accelerator metrics sample,
 	// empty before the first monitor tick.
 	Groups device.MetricsGroupList `json:"groups"`
@@ -203,7 +206,10 @@ func (d *Detector) Start(ctx context.Context) error {
 			if len(metricsGrpList) != 0 {
 				d.monitorSnapshot.Store(&MonitorSnapshot{
 					Timestamp: time.Now(),
-					Groups:    metricsGrpList,
+					// Round up: truncating a sub-second remainder would understate the period
+					// and make consumers drop healthy samples as stale.
+					PeriodSeconds: int64((d.monitorPeriod + time.Second - 1) / time.Second),
+					Groups:        metricsGrpList,
 				})
 			}
 

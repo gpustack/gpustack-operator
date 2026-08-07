@@ -63,9 +63,8 @@ const (
 	// per allocated manufacturer.
 	_InstanceMetricsTimeout = 10 * time.Second
 
-	// _MonitorSnapshotMaxAge bounds the accepted age of a device manager snapshot:
-	// three default monitor periods. Older snapshots mean the monitor is failing and
-	// must not be presented as current.
+	// _MonitorSnapshotMaxAge is the fallback accepted age of a device manager snapshot
+	// (three default monitor periods) when the snapshot does not report its period.
 	_MonitorSnapshotMaxAge = 45 * time.Second
 
 	// _MonitorSnapshotMaxBytes bounds a device manager snapshot readout, orders of
@@ -353,13 +352,22 @@ func allocatedManufacturers(allocGroups []workercore.DevicesAllocationGroup) []s
 
 // filterAllocatedAcceleratorMetrics filters a device manager snapshot to the metrics of the
 // devices recorded in the pod's allocation, keyed by manufacturer and device ID.
-// A snapshot older than _MonitorSnapshotMaxAge means the monitor is failing — the detector
+// A snapshot older than three monitor periods means the monitor is failing — the detector
 // only replaces the snapshot after a successful non-empty sample — and yields nothing.
+// The bound scales with the period the snapshot reports, falling back to
+// _MonitorSnapshotMaxAge when the field is absent (older device managers).
 func filterAllocatedAcceleratorMetrics(
 	snapshot *devicemanager.MonitorSnapshot,
 	allocGroups []workercore.DevicesAllocationGroup,
 ) []worker.InstanceAcceleratorMetrics {
-	if snapshot == nil || time.Since(snapshot.Timestamp) > _MonitorSnapshotMaxAge {
+	if snapshot == nil {
+		return nil
+	}
+	maxAge := _MonitorSnapshotMaxAge
+	if snapshot.PeriodSeconds > 0 {
+		maxAge = time.Duration(snapshot.PeriodSeconds) * time.Second * 3
+	}
+	if time.Since(snapshot.Timestamp) > maxAge {
 		return nil
 	}
 	allocatedByManufacturer := make(map[string]map[string]struct{}, len(allocGroups))
