@@ -1271,7 +1271,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       with captured output; re-running the manifest's recorded command reproduces its generated block byte
       for byte.
 
-- [ ] **T8 · Cases 4–5 — mask conformance and compute semantics**
+- [x] **T8 · Cases 4–5 — mask conformance and compute semantics**
       Blocked by: T4, T6
       Owns: `SKILL/cases/amd-case-{4,5}.sh`
       Acceptance: case 4 selects its conformance table from the card's `NUM_XCC` and drives
