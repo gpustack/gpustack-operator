@@ -1199,7 +1199,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       each table-B row and **non-zero** for `0:0`, `0:0-3`, `0:0,8,16,24`, `0:304-400` and a `GPU-<hex>`
       `GPU_list` — the first three of which a throughput-only probe would pass.
 
-- [ ] **T5 · `testing/` gate programs**
+- [x] **T5 · `testing/` gate programs**
       Blocked by: T1
       Owns: `SHIM/testing/**`
       Acceptance: four programs, seeded from the PoC artifacts this spec's gates were measured with.

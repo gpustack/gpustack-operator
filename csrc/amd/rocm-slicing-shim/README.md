@@ -88,6 +88,10 @@ device/                  the code that runs ON the GPU — one header, shared by
                          carries no kernel
 tools/                   the readers and the probe — preloaded into nothing
 testing/                 gate-only artifacts, never shipped in the library
+  hip_mem_paths.c        one allocation family per invocation
+  hip_props_probe.c      every reported-capacity entry, and which symbol each one bound
+  cumask_soak.c          the barrier, the saturating kernel, and per-tenant occupancy
+  ledger_lifecycle.c     hold a charge, take SIGKILL, prove the next process gets it back
 ```
 
 `common/` is where every rule that can be tested without hardware lives, and the no-`hip*`/`hsa*`
@@ -96,10 +100,10 @@ rule is what keeps it that way. It also calls no `pthread_*` and no `sem_*`: tho
 the product's ceiling is `GLIBC_2.4`. In-process exclusion is a compiler-atomic spinlock and
 cross-process exclusion is an `fcntl()` record lock, both of which predate it.
 
-> **Landed so far:** `build.sh`, `common/`, `hip/`, `device/` and `tools/`. `build.sh` declares
-> every artifact this tree will carry, including the ones whose sources are not written yet, so
-> `test` fails until `testing/` lands; `lib`, `tool`, `unit`, `check`, `list` and the mutation
-> checks work today.
+> **Landed so far:** the whole tree — `build.sh`, `common/`, `hip/`, `device/`, `tools/` and
+> `testing/`. Every verb works. What is still outstanding is outside this directory: the
+> verification skill's `xbuild-amd-rocm` arm and the `amd-case-*.sh` scripts that drive these
+> artifacts.
 
 ## Building
 

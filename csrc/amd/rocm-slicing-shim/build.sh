@@ -173,17 +173,20 @@ build_test() {
 
     case "${name}" in
         # ledger_lifecycle holds a charge and takes SIGKILL. It links common/ because what it is
-        # testing IS common/'s reclaim, from a real process rather than a forked stand-in.
+        # testing IS common/'s reclaim, from a real process rather than a forked stand-in -- and it
+        # links NO ROCm for the same reason: putting the runtime, the preload and the quota
+        # variables between the test and the reclaim would make a failure anywhere in that chain
+        # read as a reclaim failure. It therefore also runs on a host with no card.
         ledger_lifecycle)
             # shellcheck disable=SC2086
-            run "${CC}" ${STD} -O2 ${WARN} ${HIP_PLATFORM} "-I${HERE}" "-I${ROCM_INC}" \
-                -o "${OUT}/${name}" ${list} ${COMMON_ALL} \
-                "-L${ROCM_PATH}/lib" -lamdhip64 "-Wl,-rpath,${ROCM_PATH}/lib"
+            run "${CC}" ${STD} -O2 ${WARN} "-I${HERE}" -o "${OUT}/${name}" ${list} ${COMMON_ALL}
             ;;
-        # cumask_soak needs a kernel to occupy CUs with, so it goes through hipcc rather than cc.
+        # cumask_soak needs a kernel to occupy CUs with, so it goes through hipcc and `-x hip` for
+        # the same reason the mask probe does.
         cumask_soak)
-            # shellcheck disable=SC2086
-            run "${ROCM_PATH}/bin/hipcc" -O3 ${WARN} "-I${HERE}" -o "${OUT}/${name}" ${list}
+            # shellcheck disable=SC2086,SC2046
+            run "${ROCM_PATH}/bin/hipcc" -O3 ${WARN} -x hip $(offload_flags) "-I${HERE}" \
+                -o "${OUT}/${name}" ${list}
             ;;
         *)
             # shellcheck disable=SC2086
