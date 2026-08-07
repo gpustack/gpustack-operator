@@ -1071,7 +1071,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       Verify: `build.sh unit` inside a plain `ubuntu:22.04` container → every named case passes, with no ROCm
       image and no device node; `build.sh list <name>` prints a non-empty TU list for every declared artifact.
 
-- [ ] **T2 · `hip/` — the interposer, end to end**
+- [x] **T2 · `hip/` — the interposer, end to end**
       Blocked by: T1
       Owns: `SHIM/hip/**`
       Gate: review

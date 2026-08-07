@@ -90,29 +90,43 @@ static int run_child(int (*body)(void), const char *path)
 static unsigned long long fake_next_key = 0x1000;
 static int fake_calls;
 
-static bool fake_alloc(void *ctx, unsigned long long *key)
+static bool fake_alloc(void *ctx, unsigned long long *key, unsigned long long *bytes)
 {
     (void)ctx;
+    (void)bytes;
     fake_calls++;
     *key = fake_next_key++;
     return true;
 }
 
-static bool refusing_alloc(void *ctx, unsigned long long *key)
+static bool refusing_alloc(void *ctx, unsigned long long *key, unsigned long long *bytes)
 {
     (void)ctx;
     (void)key;
+    (void)bytes;
     fake_calls++;
     return false;
+}
+
+/* A pitched allocation's stand-in: it takes twice what it was admitted for, the way a runtime
+ * rounding a width up to a stride does. */
+static bool overrunning_alloc(void *ctx, unsigned long long *key, unsigned long long *bytes)
+{
+    (void)ctx;
+    fake_calls++;
+    *key = fake_next_key++;
+    *bytes *= 2;
+    return true;
 }
 
 /* asserts_lock_held — an allocation callback that fails unless the card's lock is held around
  * it. This is the hook the "one lock acquisition" property is asserted with: a build that
  * released the lock between the check and the charge would run this with nothing held. */
-static bool asserts_lock_held(void *ctx, unsigned long long *key)
+static bool asserts_lock_held(void *ctx, unsigned long long *key, unsigned long long *bytes)
 {
     int device = -1;
 
+    (void)bytes;
     if (!vrocm_ledger_holding(&device) || device != *(int *)ctx) {
         return false;
     }
@@ -599,6 +613,39 @@ static int child_keymap_is_local(void)
     return vrocm_ledger_release(key, NULL, NULL) ? 3 : 0;
 }
 
+/* A pitched allocation is decided on the caller's width and settled on the runtime's stride, so
+ * the charge has to follow the stride -- under the same lock, or another process decides against
+ * a total that is already stale. */
+static int child_overrun(void)
+{
+    unsigned long long key;
+
+    setenv(VROCM_ENV_MEMORY_LIMIT, "4096", 1);
+    vrocm_quota_validate();
+    key = fake_next_key;
+    if (vrocm_ledger_admit(0, GIB, overrunning_alloc, NULL) != VROCM_ADMIT_OK) {
+        return 1;
+    }
+    if (vrocm_ledger_used(0) != 2 * GIB) {
+        return 2; /* charged the request rather than what was taken */
+    }
+    /* And the refund must give back what was charged, not what was asked for. */
+    if (!vrocm_ledger_release(key, NULL, NULL)) {
+        return 3;
+    }
+    return vrocm_ledger_used(0) == 0 ? 0 : 4;
+}
+
+static void test_overrun_is_charged(void)
+{
+    int rc = run_child(child_overrun, region_path(13));
+
+    check_that(rc == 0, "ledger/allocation_charged_for_what_it_took",
+               "%s", rc == 2 ? "an over-running allocation was charged its request, not its size"
+                             : rc == 4 ? "the refund gave back the request rather than the charge"
+                                       : "a stride wider than the width is charged and refunded whole");
+}
+
 static void test_keymap_process_local(void)
 {
     const char *path = region_path(12);
@@ -644,6 +691,7 @@ int main(int argc, char **argv)
     test_quota_wraps();
     test_lock_released();
     test_keymap_process_local();
+    test_overrun_is_charged();
 
     printf("FAILS=%d\n", fails);
     return fails == 0 ? 0 : 1;

@@ -129,8 +129,14 @@ enum vrocm_admit {
  * free of every `hip*` type — the callback closes over them, this file never names one.
  *
  * `key` is whatever the caller will later present to refund the charge; for HIP that is the
- * returned device pointer. Returning false means the runtime refused. */
-typedef bool (*vrocm_alloc_fn)(void *ctx, unsigned long long *key);
+ * returned device pointer. Returning false means the runtime refused.
+ *
+ * `bytes` is IN-OUT: in, what the admission was decided against; out, what the allocation
+ * actually took. They differ for a pitched allocation, where the runtime picks the stride and the
+ * caller only knows the width it asked for. Revising it here rather than through a second call is
+ * what keeps the reconciliation under the SAME lock as the check — a second call would have to
+ * take the lock again, and by then another process could have decided against the stale total. */
+typedef bool (*vrocm_alloc_fn)(void *ctx, unsigned long long *key, unsigned long long *bytes);
 
 /* vrocm_ledger_admit — the whole admission, under ONE acquisition of the card's lock.
  *

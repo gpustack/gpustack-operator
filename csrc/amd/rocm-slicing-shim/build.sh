@@ -53,10 +53,24 @@ ROCM_INC="${ROCM_PATH}/include"
 WARN="-Wall -Wextra"
 STD="-std=gnu11"
 
+# The HIP headers refuse to define anything until one platform is chosen, and the diagnostic they
+# raise is a single #error whose fallout is a page of "unknown type name" further down. Every
+# translation unit that includes them needs this; the ones that do not are unaffected.
+HIP_PLATFORM="-D__HIP_PLATFORM_AMD__"
+
+# The library's per-thread state is reached WITHOUT __tls_get_addr, and that is what keeps
+# DT_NEEDED at exactly libc.so.6. The default general-dynamic model calls into the dynamic loader
+# for every thread-local access, which puts ld-linux-x86-64.so.2 in DT_NEEDED and fails the
+# assertion below. Initial-exec is the correct model here rather than a trick: this object is
+# loaded through /etc/ld.so.preload, which means it is always in the initial link map and never
+# dlopen()ed, and initial-exec is only invalid for the latter. Measured: general-dynamic needs
+# libc.so.6 AND ld-linux-x86-64.so.2, initial-exec needs libc.so.6 alone; -ldl changes neither,
+# because the loader dependency was never about the dl* calls.
+TLS_MODEL="-ftls-model=initial-exec"
+
 # The product links NOTHING but libc: it is preloaded into a container that brings its own ROCm,
-# so every runtime symbol is reached through the resolver at run time and DT_NEEDED stays exactly
-# libc.so.6. That also rules out -ldl -- on a modern glibc it is an empty stub, and on an older one
-# it would be a second DT_NEEDED entry.
+# so every runtime symbol is reached through the resolver at run time. That also rules out -ldl --
+# on a modern glibc it is an empty stub, and on an older one it would be a second DT_NEEDED entry.
 COMMON_ALL="common/vrocm_log.c common/vrocm_quota.c common/vrocm_ledger.c"
 
 # srcs <artifact> — the translation units behind one artifact, first one first.
@@ -104,7 +118,7 @@ build_lib() {
     local name="$1" list
     list="$(srcs "${name}")" || { echo "build.sh: unknown library '${name}'" >&2; return 2; }
     # shellcheck disable=SC2086  # the source list and the flag lists are word-split on purpose
-    run "${CC}" -shared -fPIC -O2 ${STD} ${WARN} -fvisibility=hidden \
+    run "${CC}" -shared -fPIC -O2 ${STD} ${WARN} -fvisibility=hidden ${TLS_MODEL} ${HIP_PLATFORM} \
         "-I${HERE}" "-I${ROCM_INC}" -o "${OUT}/${name}.so" ${list}
 }
 
@@ -123,7 +137,7 @@ build_tool() {
             ;;
         rocm_cumask_check)
             # shellcheck disable=SC2086
-            run "${CC}" ${STD} -O2 ${WARN} "-I${HERE}" "-I${ROCM_INC}" \
+            run "${CC}" ${STD} -O2 ${WARN} ${HIP_PLATFORM} "-I${HERE}" "-I${ROCM_INC}" \
                 -o "${OUT}/${name//_/-}" ${list} \
                 "-L${ROCM_PATH}/lib" -lhsa-runtime64 "-Wl,-rpath,${ROCM_PATH}/lib"
             ;;
@@ -143,8 +157,8 @@ build_test() {
         # testing IS common/'s reclaim, from a real process rather than a forked stand-in.
         ledger_lifecycle)
             # shellcheck disable=SC2086
-            run "${CC}" ${STD} -O2 ${WARN} "-I${HERE}" "-I${ROCM_INC}" -o "${OUT}/${name}" \
-                ${list} ${COMMON_ALL} \
+            run "${CC}" ${STD} -O2 ${WARN} ${HIP_PLATFORM} "-I${HERE}" "-I${ROCM_INC}" \
+                -o "${OUT}/${name}" ${list} ${COMMON_ALL} \
                 "-L${ROCM_PATH}/lib" -lamdhip64 "-Wl,-rpath,${ROCM_PATH}/lib"
             ;;
         # cumask_soak needs a kernel to occupy CUs with, so it goes through hipcc rather than cc.
@@ -154,8 +168,8 @@ build_test() {
             ;;
         *)
             # shellcheck disable=SC2086
-            run "${CC}" ${STD} -O2 ${WARN} "-I${HERE}" "-I${ROCM_INC}" -o "${OUT}/${name}" \
-                ${list} "-L${ROCM_PATH}/lib" -lamdhip64 "-Wl,-rpath,${ROCM_PATH}/lib"
+            run "${CC}" ${STD} -O2 ${WARN} ${HIP_PLATFORM} "-I${HERE}" "-I${ROCM_INC}" \
+                -o "${OUT}/${name}" ${list} "-L${ROCM_PATH}/lib" -lamdhip64 "-Wl,-rpath,${ROCM_PATH}/lib"
             ;;
     esac
 }
@@ -261,6 +275,11 @@ mutants() {
             echo "build.sh: mutant '${label}' did not fail '${row}' -- that test proves nothing" >&2
             rc=1
         fi
+    # These programs are coupled to the exact source text they patch, which is a real cost and a
+    # deliberate one: a mutation that stops applying is reported as "did not fail its row" rather
+    # than passing quietly. That has already happened once -- changing the allocation callback's
+    # signature silently un-hooked the lock-split mutant, and this message is what caught it.
+    #
     # Every program below is SINGLE-LINE and address-scoped where it has to be. sed matches one
     # line at a time, so a pattern spanning `\n` silently matches nothing -- and a mutation that
     # never applied looks exactly like a property that holds. A `\n` in the REPLACEMENT is worse:
@@ -268,7 +287,7 @@ mutants() {
     # one host and not the other.
     done <<'MUTANTS'
 quota-frozen|ledger/quota_reread_on_attach|s#usage->memory_quota_bytes = quota;#if (usage->memory_quota_bytes != 0) { quota = usage->memory_quota_bytes; } else { usage->memory_quota_bytes = quota; }#
-lock-split|ledger/check_allocate_charge_under_one_lock|s#if (!alloc(ctx, &key)) {#ledger_unlock(device); if (!ledger_lock(device)) { slot_free(index); return VROCM_ADMIT_DENIED_CONFIG; } if (!alloc(ctx, \&key)) {#
+lock-split|ledger/check_allocate_charge_under_one_lock|s#if (!alloc(ctx, &key, &charged)) {#ledger_unlock(device); if (!ledger_lock(device)) { slot_free(index); return VROCM_ADMIT_DENIED_CONFIG; } if (!alloc(ctx, \&key, \&charged)) {#
 tracking-silent|ledger/tracking_insert_is_fail_closed|/^static int slot_reserve/,/^}/ s#return -1;#return 0;#
 no-sweep|ledger/dead_charge_swept|s#if (kill((pid_t)slot->pid, 0) < 0 \&\& errno == ESRCH) {#if (0) {#
 MUTANTS

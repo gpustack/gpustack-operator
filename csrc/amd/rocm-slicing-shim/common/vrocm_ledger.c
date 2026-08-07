@@ -387,7 +387,7 @@ VROCM_INTERNAL enum vrocm_admit vrocm_ledger_admit(int device, unsigned long lon
 {
     struct vrocm_device_usage *usage;
     struct vrocm_process_charge *slot;
-    unsigned long long quota, key = 0;
+    unsigned long long quota, key = 0, charged;
     int index;
 
     if (!vrocm_quota_usable() || !device_valid(device) || alloc == NULL) {
@@ -450,15 +450,28 @@ VROCM_INTERNAL enum vrocm_admit vrocm_ledger_admit(int device, unsigned long lon
     /* THE LOCK IS STILL HELD, and this is the line that whole design exists for: the runtime's
      * real allocation happens between the check above and the charge below, so no other process
      * can decide against the same free figure and hand out the same bytes twice. */
-    if (!alloc(ctx, &key)) {
+    charged = bytes;
+    if (!alloc(ctx, &key, &charged)) {
         ledger_unlock(device);
         slot_free(index);
         return VROCM_ADMIT_ALLOC_FAILED;
     }
 
-    usage->memory_used_bytes += bytes;
-    slot->memory_bytes += bytes;
-    slot_commit(index, key, device, bytes);
+    /* The allocation may have taken more than it was admitted for -- a pitched allocation is
+     * decided on the caller's width and settled on the runtime's stride. It is charged for what
+     * it took, and the overrun is REPORTED rather than refused: freeing a successful allocation
+     * behind the caller's back would break a working workload over padding it never asked for.
+     * The card can therefore sit slightly over its figure, which the next admission sees and
+     * refuses on. */
+    if (charged > bytes) {
+        vrocm_log(VROCM_LOG_DENY,
+                  "card %d: admitted %llu bytes, allocation took %llu; charging what it took\n",
+                  device, bytes, charged);
+    }
+
+    usage->memory_used_bytes += charged;
+    slot->memory_bytes += charged;
+    slot_commit(index, key, device, charged);
     ledger_unlock(device);
     return VROCM_ADMIT_OK;
 }
