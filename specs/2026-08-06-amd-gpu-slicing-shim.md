@@ -1307,7 +1307,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       tools on the RDNA host, and on a CDNA host when one is available, including one with no container
       runtime.
 
-- [ ] **T7 · Cases 1–3 and the symbol manifest**
+- [x] **T7 · Cases 1–3 and the symbol manifest**
       Blocked by: T2, T5, T6
       Owns: `SKILL/cases/amd-case-{1,2,3}.sh`, `SKILL/references/amd-hip-symbol-manifest.md`
       Gate: review
