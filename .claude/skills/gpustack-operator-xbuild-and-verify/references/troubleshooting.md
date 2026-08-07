@@ -264,3 +264,63 @@ Concrete failure modes hit while building this skill, with fixes.
   caller's own pid; a filter that let a neighbour's samples in makes each loop read the card total, and two
   containers capped at 25% then settle near 13% each. Case 7's two-container row is the guard, and its floor is
   set to catch exactly that — a floor of "anything non-zero" passes it.
+
+## AMD (ROCm / `libvrocm.so`)
+- **The preload is in place and nothing is virtualised** — the container reports the whole card and no
+  `[vrocm]` line ever appears. Check, in this order: `/etc/ld.so.preload` is the one **inside the
+  container** (the host's is the wrong file and there is no diagnostic for that);
+  `LIBVROCM_LOG_LEVEL=2`, because the load marker and the counter dump sit above the default of 1,
+  which carries denials only; and `VROCM_LEDGER_PATH`, which has **no default** — without it the
+  constructor reports `VROCM_LEDGER_PATH is unset; nothing can be accounted` once and then refuses
+  everything, which looks nothing like "quietly did nothing" but is easy to miss on a busy stream.
+  A dynamic-loader failure is not silent either, but its one line is easy to lose: glibc prints
+  `ERROR: ld.so: object '…' from /etc/ld.so.preload cannot be preloaded … ignored` and then starts
+  the process normally. On musl/Alpine there is no line at all.
+- **`totalGlobalMem` still shows the whole card while `hipMemGetInfo` shows the quota** — the
+  property wrapper is not firing. `hipGetDeviceProperties` is **three** exported symbols at three
+  addresses, and ROCm 6+ headers macro-map every source call to `…R0600`; a wrapper on the plain
+  name interposes a symbol nothing calls. `hip_props_probe` prints the object each name binds to,
+  which is what turns this from a guess into a reading. AMD-CASE 2's second control arm reproduces
+  the failure deliberately.
+- **A framework allocates past its quota and no counter moved** — the allocation took a door that is
+  not wrapped, and the way to find it is a set difference, not a guess: regenerate
+  `references/amd-hip-symbol-manifest.md`, whose last two sections list every allocating name the
+  runtime exports and then the ones not interposed. Five entry points were found exactly this way
+  after the table was believed complete — `hipMalloc3D`, `hipMemCreate` (the virtual-memory family
+  PyTorch's expandable-segments allocator uses), and the driver-API halves `hipMemAllocPitch`,
+  `hipArrayCreate` and `hipArray3DCreate`. **`hipGraphAddMemAllocNode` is still open** and is
+  recorded as a known boundary: a graph node allocates at launch rather than at capture.
+- **Nothing is intercepted under a framework that `dlopen`s the runtime** — `RTLD_NEXT` finds
+  nothing when `libamdhip64` was not in the initial link map, which is exactly what PyTorch does.
+  The resolver falls back to `dlopen(soname, RTLD_NOLOAD|RTLD_LAZY)` over `libamdhip64.so.7`,
+  `.so.6` and the plain name, and logs `resolving through <soname>` at level 2 when it takes that
+  path. If that line never appears the fallback was not needed — a workload that LINKS the runtime
+  never takes it, so its absence is not a fault. Asking for the plain `libamdhip64.so` alone would
+  miss, because only a devel image carries that symlink.
+- **`build.sh check` fails with `requires GLIBC_2.34`** — glibc moved `libdl` into `libc` at 2.34, so
+  `dlopen`, `dlsym` and `dladdr` bind at that version on any modern build host and become the only
+  symbols above the floor. Three `.symver` pins in `hip/hip_resolve.c` hold it. `dladdr` is the one
+  to forget: it arrives with the caller-origin diagnostic rather than with the resolver, so the floor
+  was clean until that diagnostic was added. Any new `libdl` call needs its own pin.
+  Note the same figure on an **executable** is not the same problem and cannot be pinned away:
+  `__libc_start_main@GLIBC_2.34` and `fstat@GLIBC_2.33` come from the startup stub of anything built
+  on a glibc-2.35 image, which is why AMD-CASE 1 asserts the floor for `libvrocm.so` and only
+  records it for `rocm-monitor`.
+- **A timed compute run reports more than the card can physically do** — the tenants were not
+  started together. Without a cross-process barrier each process measures a window in which the
+  others had not yet reached their kernel, and N tenants then sum to well over 100 % of the card's
+  peak. `cumask_soak`'s file barrier is the fix and every timed row in AMD-CASE 5 uses it. A
+  latency-bound kernel is the other half of the same trap: it under-fills a small partition and
+  inflates every overlap reading, which is why the kernel is ILP-saturating.
+- **A CU mask "works" and the container still gets most of the card** — a rejected mask is silent by
+  construction: no error, no log line, no changed return code. On a multi-XCC part this is worse
+  than it sounds, because throughput alone cannot see it: `HSA_CU_MASK=0:0` measured a plausible
+  3.9 % of the card while **occupying 267 of 304 CUs**, since the seven XCCs the mask never reached
+  ran unmasked. Occupancy, read from `HW_ID`, is the only verdict on such a part. `rocm-cumask-check`
+  reports both, AMD-CASE 4 asserts the occupancy figure for every fail-open construction, and
+  `references/amd-cumask-conformance.md` is where the constructions are listed.
+- **`rocm-monitor` says `no usage region`** — nothing in that container has allocated yet. The region
+  is created lazily by the first allocation, and the reader opens `O_RDONLY` on purpose: opening with
+  `O_CREAT` would leave an empty region behind for every container somebody merely looked at, and the
+  next reader could not tell that from a slice that had allocated nothing. Exit 1 is "absent or
+  unreadable", exit 2 is "present and unparseable"; the two are deliberately distinct.

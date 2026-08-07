@@ -1,6 +1,6 @@
 # Spec: AMD GPU slicing shim — the library logical slicing needs, and the evidence it works
 
-Status: Building
+Status: Built
 Type: Feature
 
 > **This spec ships the library, not the capability.** `libvrocm.so`'s sources, the feasibility gates that
@@ -839,6 +839,27 @@ of scope.
   output; and the fail-open constructions are present as **negative** rows, so a case set that stopped
   detecting them fails rather than quietly narrowing.
 
+**Delivered — what the suite measures, and where it ran.** All seven cases are green: **141 PASS rows and
+no FAIL**. Row counts on the RDNA host (`gfx1101`, `NUM_XCC = 1`, 60 CU / 30 WGP / 3 SE / 16 GiB, ROCm 7.2):
+
+| Case | Rows | What it established |
+| --- | --- | --- |
+| 1 | 21 PASS / 13 INFO | 26 exported entry points and no others, `DT_NEEDED` exactly `libc.so.6`, `GLIBC_2.4`, zero undefined `hip*`/`hsa*`; the tree's own four assertions and its four mutants re-run. Passes on both the container route and the in-place route |
+| 2 | 15 PASS | physical 16368 MiB, quota 4096 MiB through all four capacity entries, `multiProcessorCount` 30 unchanged, layout `1472/288/388`. Both control arms behaved as the R0600 finding predicts |
+| 3 | 30 PASS | thirteen allocation families, each served under the quota through its own counted entry and each refused over it with a counted denial; pinned host memory served at twice the quota; the runtime called **no** allocating entry of its own |
+| 4 | 10 PASS / 3 INFO | every row of table A and every RDNA fail-open construction as a negative row; on the CDNA host, table B, its own five fail-open constructions and the sub-atom refusal |
+| 5 | 8 PASS / 3 INFO | RDNA: ceiling 0.519 of the unmasked figure at a 50 % mask, occupancy 15/30 WGPs, three-tenant fairness 1.009×. CDNA: ceiling 0.609, occupancy 152/304 CUs, fairness 1.369× against a tolerance derived from the card's 8 XCCs |
+| 6 | 47 PASS | `common/`'s 36 unit cases; a 2048 MiB request refused while another process holds 3072 of 4096 MiB, with the denial and `rocm-monitor` agreeing; and one container holding two cards at 2048 and 6144 MiB answering a 4096 MiB request both ways |
+| 7 | 10 PASS | a `SIGKILL`ed holder's 3072 MiB reclaimed by a later process, refused first while it was alive; and one `libvrocm.so`, identical by digest, enforcing the same quota against `libamdhip64.so.7` and `libamdhip64.so.6` |
+
+**The two-architecture rule was met for cases 4 and 5 only, and that is a partial result.** The CDNA target
+available was a rented instance that **is itself a container** with no container runtime of its own, so the
+five cases that inject `libvrocm.so` had nothing to inject it into. Cases 4 and 5 need only a card — they
+drive staged binaries under `HSA_CU_MASK` — and both ran there, which is what covers the branch that
+matters most: the two mask derivations share no arithmetic. Cases 1, 2, 3, 6 and 7 are RDNA-only, and what
+they assert is architecture-independent (linkage, symbol coverage, accounting, lifecycle) — but that is an
+argument, not a measurement, and it should be closed on a CDNA host with a runtime when one exists.
+
 ### Notes / Constraints / Caveats
 
 - C11, no C++, no external dependency. The product links `libc` alone.
@@ -1021,6 +1042,8 @@ csrc/amd/rocm-slicing-shim/            # the libvrocm.so source tree -- PRODUCT 
 │   ├── hip_table.{h,c}                #     the interposed-name table and the per-entry counters
 │   ├── hip_mem.c                      #     the classic allocating/freeing family: charge / refund
 │   ├── hip_pool.c                     #     the stream-ordered and pool family -- Gate 2's finding
+│   ├── hip_vmm.c                      #     hipMemCreate/hipMemRelease -- the family PyTorch's
+│   │                                  #     expandable segments allocate through; only Create takes memory
 │   └── hip_query.c                    #     hipMemGetInfo + all three reported-capacity entry points
 ├── tools/                             # preloaded into nothing -- they read
 │   ├── rocm_monitor.c                 #     -> rocm-monitor: quota and usage per card, from the region
@@ -1209,7 +1232,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       caller's back would break a working workload over padding it never asked for.
 
       **Each family still registers its own entries from its own translation unit** — `hip_query.c`,
-      `hip_mem.c`, `hip_pool.c` — even though one task now writes all three. The reason is no longer write
+      `hip_mem.c`, `hip_pool.c`, `hip_vmm.c` — even though one task now writes all four. The reason is no longer write
       contention but blast radius: a table that listed every entry in one file would make every family's
       change a diff against every other family's.
       Verify: `build.sh lib` clean and `build.sh check` green (exports only intercepted HIP names, `NEEDED` is
@@ -1357,7 +1380,7 @@ Three ordering decisions are deliberate, because each one buys parallelism that 
       Verify: both on the AMD host → `FAILS=0`, with the two-card row showing each card held to its own
       figure and the 6.x arm enforcing the same quota as the 7.x arm.
 
-- [ ] **T10 · Fold the measured figures back into this spec**
+- [x] **T10 · Fold the measured figures back into this spec**
       Blocked by: T7, T8, T9
       Owns: `specs/2026-08-06-amd-gpu-slicing-shim.md`, `SKILL/references/amd-*.md`,
       `SKILL/references/troubleshooting.md`
@@ -1524,4 +1547,22 @@ this spec deliberately does not deliver.
 - **Should the detector hard-fail or soft-warn when the self-check probe fails?** Declining to advertise
   `.sliced` is the safe reading and is what F4 proposes, but it turns a transient probe failure into a
   capability disappearing from the node. The alternative — advertise and log — trades a silent isolation loss
-  for availability. This is a product decision, not a technical one.
+  for availability. This is a product decision, not a technical one. **Unchanged by the build**, which
+  delivers the probe and the conformance table the decision would be made against.
+- ~~**Is the interception table complete?**~~ **Answered by building the symbol manifest, and the answer
+  changed the product.** Reviewing the table found nothing; subtracting it from the runtime's own allocating
+  exports found **five** open doors, each then measured taking 512 MiB out of a 64 MiB quota —
+  `hipMalloc3D`, `hipMemCreate`, `hipMemAllocPitch`, `hipArrayCreate` and `hipArray3DCreate`. All five are
+  now wrapped and carried by AMD-CASE 3. The transferable result is the method: **coverage is a difference
+  between two sets, and only one of them can be read off the product.** One door in that difference remains
+  measured-open by decision — `hipGraphAddMemAllocNode`, whose accounting is not one call in and one call
+  out; see Risks.
+- **Is the multi-tenant sharing model the same on CDNA as on RDNA?** Partly, and the difference is
+  quantised rather than noisy. Three same-mask tenants on `gfx942` shared in XCC-sized proportions — 8 XCCs
+  across 3 tenants splits 3:3:2, predicting a 1.5× spread, and four rounds measured 1.36–1.52 with the
+  aggregate stable to 0.7 % and the slow tenant rotating. AMD-CASE 5 therefore derives its fairness bound
+  from the card's own XCC count rather than carrying a constant. What is **not** settled is the
+  complementary-pair aggregate: five identical runs of a disjoint pair gave 97–105 % four times and 73 %
+  once, so "disjoint partitioning costs nothing" holds as a finding but is not reliably reproducible with a
+  multi-stream kernel. Case 5 asserts an ordering — spread beats packed by a wide margin, true in every
+  sample — rather than a band that would flake about one run in five.

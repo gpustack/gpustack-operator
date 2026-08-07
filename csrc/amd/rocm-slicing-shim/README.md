@@ -61,7 +61,7 @@ defect in it, and it is why this is not a security boundary — see below.
 
 | Artifact | Interposes | What it does |
 | --- | --- | --- |
-| `libvrocm.so` | `libamdhip64.so` — the HIP runtime | Enforces the VRAM quota and reports it. The classic allocating family, the stream-ordered/pool family, and all three entry points that reach the card's total memory. |
+| `libvrocm.so` | `libamdhip64.so` — the HIP runtime | Enforces the VRAM quota and reports it. The classic allocating family, its **driver-API halves** (`hipMemAllocPitch`, `hipArrayCreate`, `hipArray3DCreate` — separate symbols, not aliases), the stream-ordered/pool family, the **virtual-memory-management** family (`hipMemCreate`/`hipMemRelease`), and all three entry points that reach the card's total memory. The list is maintained by subtraction, not by review: see `references/amd-hip-symbol-manifest.md` in the verify skill, whose last sections are every allocating name the runtime exports minus the ones interposed. |
 | `rocm-monitor` | nothing — it *reads* | Prints the slice: the quota in force and what is charged against it, per card. Preloaded into nothing; it parses the usage region, which is the path a metrics scraper takes too. |
 | `rocm-cumask-check` | nothing — it *probes* | Derives a mask for the card it is pointed at, runs under it, and reports whether the CUs it actually ran on are the ones the mask asked for. |
 
