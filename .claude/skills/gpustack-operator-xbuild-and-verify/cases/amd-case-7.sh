@@ -63,7 +63,7 @@ fails=0
 
 if [ ! -x "${STAGE}/ledger_lifecycle" ]; then
   row FAIL "A: ledger_lifecycle staged" "${STAGE}/ledger_lifecycle missing — run scripts/build.sh xbuild-amd-rocm first"
-  echo "PARTA_FAILS=1"; exit 0
+  echo "FAILS=1"; exit 0
 fi
 
 W="$(mktemp -d)"
@@ -82,7 +82,7 @@ for _ in $(seq 50); do grep -q '^HOLD ready' "${W}/hold.log" && break; sleep 0.1
 if ! grep -q '^HOLD ready' "${W}/hold.log"; then
   row FAIL "A: a process holds ${HOLD} MiB" "$(tail -2 "${W}/hold.log" | tr '\n' ' ')"
   kill "${holder}" 2>/dev/null
-  echo "PARTA_FAILS=1"; exit 0
+  echo "FAILS=1"; exit 0
 fi
 row PASS "A: a process holds ${HOLD} MiB of a ${QUOTA} MiB quota" "pid ${holder}, and it will not release it"
 
@@ -129,11 +129,10 @@ else
   fails=$((fails+1))
 fi
 
-echo "PARTA_FAILS=${fails}"
+echo "FAILS=${fails}"
 PAYLOAD
 )"
-echo "${partA}" | grep -v '^PARTA_FAILS='
-a_fails="$(echo "${partA}" | sed -n 's/^PARTA_FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+echo "${partA}" | grep -v '^FAILS='
 
 # ---- Part B: the same artifact under two ROCm versions --------------------------------------
 if ! xctr_resolve; then
@@ -263,7 +262,6 @@ PAYLOAD
 fi
 echo "${partB}" | grep -v '^FAILS='
 
-b_fails="$(echo "${partB}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
-total=$(( ${a_fails:-1} + ${b_fails:-1} ))
+total=$(( $(xb_fails "${partA}") + $(xb_fails "${partB}") ))
 echo "FAILS=${total}"
-[ "${total}" -eq 0 ] && { echo "AMD-CASE 7: PASS"; exit 0; } || { echo "AMD-CASE 7: FAIL"; exit 1; }
+xb_verdict "AMD-CASE 7" "${total}"

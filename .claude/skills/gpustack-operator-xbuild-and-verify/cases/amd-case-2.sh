@@ -311,8 +311,4 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-# The verdict is the payload's own count, read as a NUMBER off the last `FAILS=` line. Matching
-# the token anywhere in the output would let any row satisfy the verdict by printing it in a
-# detail column, and a payload that died before printing the line has to read as failure.
-total="$(echo "${out}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
-[ "${total:-1}" -eq 0 ] && { echo "AMD-CASE 2: PASS"; exit 0; } || { echo "AMD-CASE 2: FAIL"; exit 1; }
+xb_verdict "AMD-CASE 2" "$(xb_fails "${out}")"

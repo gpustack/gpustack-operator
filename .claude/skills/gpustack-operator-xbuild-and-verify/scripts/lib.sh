@@ -297,3 +297,40 @@ xtarget_desc() {
     *)   echo "local" ;;
   esac
 }
+
+# ---- the verdict --------------------------------------------------------------------------
+#
+# EVERY CASE DECIDES HERE, and that is the point of putting it here. Each payload ends by
+# printing its own count as `FAILS=<n>`, and the two functions below are the only code that
+# reads it.
+#
+# What they replace was `echo "${out}" | grep -q 'FAILS=0'`, which searches EVERY line for the
+# token instead of reading the count. A row that happens to print `FAILS=0` in its detail column
+# therefore decided the whole case, and one did: AMD-CASE 4 printed it in every passing row, so
+# the case built to catch a silently discarded CU mask could not fail. Measured — with one of its
+# assertions deliberately broken it printed a red FAIL row, printed `FAILS=1`, and still exited 0
+# saying PASS.
+#
+# Twenty-one copies of a decision is twenty-one chances to write it that way again, which is why
+# this is a function rather than a paragraph in a style guide.
+
+# xb_fails <output> — the count a payload printed, as a number.
+#
+# Anchored to a whole line, so only the payload's own count line can answer. The LAST one, because
+# a case that runs two payloads prints two. Nothing found reads as 1, never 0: a payload that died
+# before printing its count failed, and reading its silence as success is the same bug in reverse.
+xb_fails() {
+  local n
+  n="$(printf '%s\n' "$1" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+  printf '%s' "${n:-1}"
+}
+
+# xb_verdict <label> <count> — print the case's verdict and exit with it. Does not return.
+xb_verdict() {
+  if [ "${2:-1}" -eq 0 ]; then
+    echo "$1: PASS"
+    exit 0
+  fi
+  echo "$1: FAIL"
+  exit 1
+}

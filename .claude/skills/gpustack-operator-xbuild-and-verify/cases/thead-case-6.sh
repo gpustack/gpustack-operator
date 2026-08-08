@@ -10,8 +10,8 @@
 # exist because `common/` names no `hg*`/`hggc*`/`hgml*` type: the quota arithmetic, the key
 # map and the region can be exercised with no SDK, no vendor library and no device, which is
 # true of nothing else in this tree. The rows come from the test binary itself; this case folds
-# its failure count into its own and does NOT relay its FAILS= line, because the outer PASS/FAIL
-# grep matches any line and a nested FAILS=0 would mask this case's own failures.
+# its failure count into its own and does NOT relay its FAILS= line, because the verdict reads the
+# LAST such line and a relayed one would stand in for this case's own count.
 #
 # Part B asks the question no single-process case can: does the quota belong to the CONTAINER?
 # One container, one card, two processes against one figure — the first takes the whole quota
@@ -506,4 +506,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | tail -1 | grep -q 'FAILS=0' && { echo "THEAD-CASE 6: PASS"; exit 0; } || { echo "THEAD-CASE 6: FAIL"; exit 1; }
+xb_verdict "THEAD-CASE 6" "$(xb_fails "${out}")"

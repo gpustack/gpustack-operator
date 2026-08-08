@@ -204,4 +204,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "THEAD-CASE 3: PASS"; exit 0; } || { echo "THEAD-CASE 3: FAIL"; exit 1; }
+xb_verdict "THEAD-CASE 3" "$(xb_fails "${out}")"

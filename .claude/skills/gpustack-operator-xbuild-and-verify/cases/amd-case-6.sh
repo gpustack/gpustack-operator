@@ -9,8 +9,8 @@
 # PART A runs `common/`'s unit tests and relays their rows. They link **no ROCm at all** — that is
 # the point of the rule that `common/` names no `hip*`/`hsa*` type — so they run wherever a C
 # compiler ran, with no device and no container. Their own `FAILS=` line is folded into this case's
-# count and NOT relayed: the outer verdict greps for `FAILS=0` anywhere in the output, so a second
-# such line would decide this case's verdict on the unit suite's count.
+# count and NOT relayed: the verdict reads the LAST `FAILS=` line a part printed, so a relayed one
+# would stand in for this case's own count.
 #
 # PART B puts two processes in one container against one quota. The holder charges the ledger
 # DIRECTLY rather than through `hipMalloc`, and that is deliberate rather than convenient: it links
@@ -63,11 +63,11 @@ fails=0
 
 if [ ! -x "${STAGE}/vrocm_test" ]; then
   row FAIL "A: unit tests staged" "${STAGE}/vrocm_test missing — run scripts/build.sh xbuild-amd-rocm first"
-  echo "PARTA_FAILS=1"; exit 0
+  echo "FAILS=1"; exit 0
 fi
 
-# Relayed row by row, and the suite's own FAILS= line dropped: the outer verdict grep matches any
-# line, so relaying it would let the unit suite's count decide this case's verdict.
+# Relayed row by row, and the suite's own FAILS= line dropped: the verdict reads the LAST `FAILS=`
+# line in this part's output, so relaying it would put the unit suite's count there instead.
 "${STAGE}/vrocm_test" > /tmp/.amd-case-6-unit 2>&1
 rc=$?
 grep -E '^(PASS|FAIL|SKIP|INFO) \| ' /tmp/.amd-case-6-unit | sed 's/^/A: /' |
@@ -81,11 +81,10 @@ else
   fails=$((fails + ${unit_fails:-1}))
 fi
 rm -f /tmp/.amd-case-6-unit
-echo "PARTA_FAILS=${fails}"
+echo "FAILS=${fails}"
 PAYLOAD
 )"
-echo "${partA}" | grep -v '^PARTA_FAILS='
-a_fails="$(echo "${partA}" | sed -n 's/^PARTA_FAILS=\([0-9]*\)$/\1/p' | tail -1)"
+echo "${partA}" | grep -v '^FAILS='
 
 # ---- Parts B and C: in a container, on the card(s) -----------------------------------------
 if ! xctr_resolve; then
@@ -288,7 +287,6 @@ PAYLOAD
 fi
 echo "${bc}" | grep -v '^FAILS='
 
-bc_fails="$(echo "${bc}" | sed -n 's/^FAILS=\([0-9]*\)$/\1/p' | tail -1)"
-total=$(( ${a_fails:-1} + ${bc_fails:-1} ))
+total=$(( $(xb_fails "${partA}") + $(xb_fails "${bc}") ))
 echo "FAILS=${total}"
-[ "${total}" -eq 0 ] && { echo "AMD-CASE 6: PASS"; exit 0; } || { echo "AMD-CASE 6: FAIL"; exit 1; }
+xb_verdict "AMD-CASE 6" "${total}"

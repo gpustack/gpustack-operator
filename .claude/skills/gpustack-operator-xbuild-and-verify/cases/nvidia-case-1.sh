@@ -57,4 +57,4 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "NVIDIA-CASE 1: PASS"; exit 0; } || { echo "NVIDIA-CASE 1: FAIL"; exit 1; }
+xb_verdict "NVIDIA-CASE 1" "$(xb_fails "${out}")"

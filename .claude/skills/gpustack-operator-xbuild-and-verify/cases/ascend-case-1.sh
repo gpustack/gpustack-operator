@@ -115,4 +115,4 @@ INNER
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "ASCEND-CASE 1: PASS"; exit 0; } || { echo "ASCEND-CASE 1: FAIL"; exit 1; }
+xb_verdict "ASCEND-CASE 1" "$(xb_fails "${out}")"

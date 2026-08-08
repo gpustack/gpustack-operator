@@ -77,4 +77,4 @@ echo "FAILS=${fails}"
 PAYLOAD
 )"
 echo "${out}"
-echo "${out}" | grep -q 'FAILS=0' && { echo "ASCEND-CASE 2: PASS"; exit 0; } || { echo "ASCEND-CASE 2: FAIL"; exit 1; }
+xb_verdict "ASCEND-CASE 2" "$(xb_fails "${out}")"

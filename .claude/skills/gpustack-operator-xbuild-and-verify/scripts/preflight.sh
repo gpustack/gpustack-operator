@@ -215,8 +215,65 @@ fi
 echo "FAILS=${fails}"
 PAYLOAD
 )"
-echo "${out}"
+# The payload's own count line is dropped and folded in below, so the table ends with ONE count
+# and it is the total: the row that follows is decided here rather than on the target.
+echo "${out}" | grep -v '^FAILS='
+fails="$(xb_fails "${out}")"
 
-# Mirror the payload's FAILS into our exit code so callers (and CI) can detect a
-# failed required check from the return status, not just by reading the table.
-echo "${out}" | grep -q 'FAILS=0' && exit 0 || exit 1
+# --- the suite's own verdicts (LOCAL: this reads the repository, not the target) ---
+#
+# Every case must decide through `xb_verdict`, which is the only code that reads a payload's
+# count. Asserted by the ABSENCE of that call rather than by the shape of the bug that prompted
+# it: a check for one known-bad pattern only catches the mistake somebody already made, and every
+# way of getting this wrong looks identical from the outside -- a green case that cannot go red.
+# One did, for as long as it existed: AMD-CASE 4 printed the literal `FAILS=0` in each passing
+# row's detail, and the verdict grepped for that token anywhere in the output, so the case built
+# to catch a silently discarded CU mask could not itself fail.
+#
+# This is the ONLY thing that runs over these scripts -- no CI job touches this directory and
+# nothing runs shellcheck over it -- so it is a floor, not a gate. It catches the next case that
+# hand-rolls a verdict, and only for somebody who runs preflight.
+rogue=""
+seen=0
+for c in "${HERE}/../cases"/*.sh; do
+  [ -f "${c}" ] || continue
+  seen=$((seen + 1))
+  # Anchored to the start of a line, so it takes a CALL and not a mention. `grep -q 'xb_verdict '`
+  # was satisfied by a comment naming the helper -- a guard that a case could pass while doing the
+  # very thing the guard exists to catch, which is the shape of the bug it was written for.
+  grep -qE '^[[:space:]]*xb_verdict ' "${c}" || rogue="${rogue} $(basename "${c}")"
+done
+if [ "${seen}" -eq 0 ]; then
+  printf '%s | %s | %s\n' FAIL "case verdicts" "no case script found under ${HERE}/../cases — this row would otherwise pass by finding nothing"
+  fails=$((fails + 1))
+elif [ -z "${rogue}" ]; then
+  printf '%s | %s | %s\n' PASS "case verdicts" "all ${seen} cases decide through xb_verdict"
+else
+  printf '%s | %s | %s\n' FAIL "case verdicts" "decides its own verdict instead of calling xb_verdict:${rogue} — a hand-rolled verdict is how one became unfailable"
+  fails=$((fails + 1))
+fi
+
+# And the function they all call is itself worth two inputs, because the row above only asserts
+# that everybody asks the same code -- code which, written the wrong way, would answer "no
+# failures" for all 21 cases at once.
+#
+# The poisoned line comes AFTER the count on purpose. That is the ordering that separates reading
+# whole lines from taking the last line that merely contains the token: with the token quoted in a
+# row above the count, both readings happen to agree, so an input in that order asserts nothing.
+# The second input is the other property -- a payload that printed no count at all failed, and its
+# silence must never read as zero.
+poisoned="$(xb_fails 'FAIL | a | broken
+FAILS=3
+INFO | b | the run before this one reported FAILS=0')"
+absent="$(xb_fails 'PASS | a | nothing counted')"
+if [ "${poisoned}" = 3 ] && [ "${absent}" = 1 ]; then
+  printf '%s | %s | %s\n' PASS "verdict arithmetic" "a row quoting FAILS=0 after the count still counts 3; a missing count line counts 1"
+else
+  printf '%s | %s | %s\n' FAIL "verdict arithmetic" "xb_fails read a poisoned table as ${poisoned} (want 3) and a countless one as ${absent} (want 1) — all ${seen} cases are decided by this"
+  fails=$((fails + 1))
+fi
+
+echo "FAILS=${fails}"
+# Mirror the count into the exit status so callers can detect a failed required check from the
+# return status rather than by reading the table.
+[ "${fails}" -eq 0 ] && exit 0 || exit 1
