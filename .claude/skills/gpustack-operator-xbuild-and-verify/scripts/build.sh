@@ -205,8 +205,10 @@ fi
 if [ -z "${XB_PLATFORM:-}" ]; then
   arch="$(xrun 'uname -m' | tr -d '[:space:]')"
   case "${arch}" in
-    x86_64)  XB_PLATFORM=linux/amd64 ;;
-    aarch64) XB_PLATFORM=linux/arm64 ;;
+    x86_64|amd64)  XB_PLATFORM=linux/amd64 ;;
+    # `arm64` is what Darwin calls it, and XB_MODE=local on an Apple Silicon machine is a real
+    # route: it is the only arm64 builder most developers have, and the Ascend stages are arm64.
+    aarch64|arm64) XB_PLATFORM=linux/arm64 ;;
     *) echo "build.sh: cannot map target arch '${arch}'" >&2; exit 1 ;;
   esac
 fi
@@ -258,5 +260,15 @@ else
   echo "staged ->"; ls -la "${XB_STAGE}/lib/libvruntime.so" "${XB_STAGE}/tools/enpu-monitor"
 fi
 PAYLOAD
+rc=$?
+# Checked, like the two backends above check theirs. Unchecked, a build whose IMAGE succeeded and
+# whose STAGING did not still printed the success line below and exited 0 -- measured, against a
+# target where the default XB_STAGE is under /opt and the login user is not root. Every case then
+# fails with "run build.sh first", which is the one thing the operator has already done.
+[ "${rc}" -eq 0 ] || {
+  echo "build.sh: the image built but staging its artifacts to ${XB_STAGE} failed (rc=${rc});" >&2
+  echo "          set XB_STAGE to a directory this user can write." >&2
+  exit 1
+}
 
 echo "# built ${XB_IMAGE}; artifacts staged at ${XB_STAGE} (XB_WORKLOAD_IMAGE default = ${XB_IMAGE})"
