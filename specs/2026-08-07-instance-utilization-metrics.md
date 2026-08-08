@@ -1,6 +1,6 @@
 # Spec: Instance Utilization Metrics (CPU/RAM/DISK/GPU)
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 ## Summary
@@ -137,9 +137,13 @@ new spec designs retention.)
 
 **F3 — GPU merge**
 - AC3.1: With allocated accelerators, the sample includes those cards' metrics (filtered by
-  device UUID from the allocation annotation), converted to the unit-bearing API fields.
+  device UUID from the allocation annotation), converted to the unit-bearing API fields. One
+  DeviceManager runs per manufacturer and its snapshot only carries that manufacturer's cards,
+  so the handler reads one snapshot per allocated manufacturer and never substitutes another
+  manufacturer's DeviceManager.
 - AC3.2: DeviceManager unreachable → the sample still returns CPU/RAM/DISK with the accelerator
-  section absent (GPU is best-effort; pod stats are authoritative).
+  section absent (GPU is best-effort; pod stats are authoritative), and the reason is logged —
+  an absent section must not be indistinguishable from "no cards allocated".
 
 **F4 — API contract**
 - AC4.1: `InstanceMetrics` carries one current sample (no `samples` array, no options type);
@@ -152,6 +156,14 @@ new spec designs retention.)
 
 - Pinned product decisions: no history, no `custom.metrics.k8s.io`, no metrics-server dependency,
   no Prometheus, no metrics in CR status, no CRD schema change.
+- Every memory and storage figure in the API is reported in MiB (decided 2026-08-09). The sources
+  disagree — the kubelet measures in bytes, the vendor device libraries in MiB — and one sample
+  mixing two units is worse for a consumer than the coarser unit throughout. Scaling MiB up to
+  bytes is the rejected alternative: it fabricates precision the vendor libraries never had.
+  Byte figures round **up**, decided after measuring an idle instance on the test cluster:
+  working set 585,728 B, writable layer 12,288 B, ephemeral storage 20,480 B — truncation
+  reported all three as 0, which reads as "broken" rather than "small". Rounding up keeps a
+  measured figure visible and reserves 0 for genuinely no usage.
 - JSON encoding in new/changed code uses the project's `pkg/utils/json` wrapper, not
   `encoding/json` directly.
 - The kubelet read goes through the API-server node proxy (`nodes/proxy` is covered by the
@@ -163,8 +175,10 @@ new spec designs retention.)
   the same trust domain (v1 decision, confirmed 2026-08-07 — see Risks for the mTLS follow-up).
   The project's HTTP transport honors proxy env vars (`pkg/utils/httpx/transport_options.go:15`);
   the pod-IP client disables proxying.
-- A single latest snapshot needs no response-size cap; the handler still bounds the operation with
-  one timeout covering resolution + fetch (+ one retry).
+- The handler bounds the whole operation with one timeout covering resolution + fetches. There is
+  no retry: both attempts would share that deadline and the pod resolution they repeat cannot
+  change within it. The snapshot readout is still size-bounded, since the peer's identity is not
+  verified.
 - The 15s default monitor period also paces device re-detection (the detect loop exits and
   re-detects on device-key change observed during monitor ticks); 15s detection lag is accepted.
 - Known adjacent hazards (out of scope, do not regress): workspace `volume.ephemeral.capacity` is
@@ -304,9 +318,10 @@ branch are its product; the R-tasks replace/rewrite them in place — `/my-ship`
       ephemeral-storage read at request time from the node kubelet via the API-server node proxy;
       on kubelet failure CPU/memory fall back to `metrics.k8s.io` when available (typed
       `ServiceUnavailable` when neither works); accelerators merged from the DeviceManager
-      snapshot when the pod has allocated cards (best-effort — absent on DM failure); the backing
-      pod is verified by name + UID label; operation-wide timeout (resolution + fetch + one
-      retry); proxying disabled for the pod-IP fetch; `pkg/utils/json` throughout;
+      snapshot of each allocated manufacturer when the pod has allocated cards (best-effort —
+      absent on DM failure, with the reason logged); the backing pod is verified by name + UID
+      label; operation-wide timeout (resolution + fetches); proxying disabled and the response
+      size bounded for the pod-IP fetch; `pkg/utils/json` throughout;
       `make generate && make lint` clean.
       Verify: `go test ./pkg/worker/extensionapis/...`
 
