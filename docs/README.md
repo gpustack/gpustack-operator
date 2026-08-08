@@ -59,6 +59,7 @@ Everything written about GPUStack Operator, and the order to read it in. Start a
 | [Migrating to the bundled subcharts](migration/to-subcharts.md) | The one-time ownership transfer from the runtime-installed releases | operators | ~15 min |
 | [Migrating from v0.5.x](migration/from-v0.5.md) | Upgrading across the scheduling-chain refactor | operators | ~10 min |
 | [Instance Type Unit Resources Preset Reference](reference/instance-type-unit-resources.md) | The per-product CPU/RAM tier a derived InstanceType is sized with, and where each tier came from | operators | reference |
+| [Instance Metrics Reference](reference/instance-metrics.md) | The `instances/<name>/metrics` subresource: one current CPU/memory/disk/GPU sample, its sources, scoping and limits | users, console developers | ~6 min |
 
 ## Conventions
 
