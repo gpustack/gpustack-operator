@@ -48,7 +48,9 @@ fi
 # compiles against in place. That is a WARN and not a PASS, because it is a genuinely degraded
 # target — every other backend's cases still need a runtime and cannot run there at all.
 sv=""
+have_ctr=""
 if [ -n "${XB_CTR}" ] && command -v "${XB_CTR}" >/dev/null 2>&1; then
+  have_ctr=yes
   # shellcheck disable=SC2086  # XB_CTR_ARGS is word-split on purpose
   sv="$("${XB_CTR}" ${XB_CTR_ARGS} info --format '{{.ServerVersion}}' 2>/dev/null | tail -1)"
 fi
@@ -56,8 +58,14 @@ if [ -n "${sv}" ]; then
   row PASS "run-capable" "${XB_CTR} ${XB_CTR_ARGS} -> server ${sv}"
 elif [ -x "${ROCM_PATH:-/opt/rocm}/bin/hipcc" ]; then
   row WARN "run-capable" "no container runtime, but ${ROCM_PATH:-/opt/rocm}/bin/hipcc is here — the AMD arm compiles and runs in place; every other backend needs a runtime"
-elif [ -n "${XB_CTR}" ]; then
+elif [ -n "${have_ctr}" ]; then
   row FAIL "run-capable" "${XB_CTR} found but its daemon does not answer 'info'"; fails=$((fails+1))
+elif [ "${XB_CTR}" = none ]; then
+  row FAIL "run-capable" "XB_CTR=none asks for no runtime, and there is no in-place ROCm to fall back on"; fails=$((fails+1))
+elif [ -n "${XB_CTR}" ]; then
+  # Told which runtime to use and it is not there. Reported apart from the dead-daemon row
+  # because the two are fixed in different places, and a wrong name reads as a broken target.
+  row FAIL "run-capable" "XB_CTR names ${XB_CTR}, which is not on PATH on this target"; fails=$((fails+1))
 else
   row FAIL "run-capable" "no container runtime (XB_CTR='${XB_CTR}'; probed docker, nerdctl) and no in-place ROCm"; fails=$((fails+1))
 fi
