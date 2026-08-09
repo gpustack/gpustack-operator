@@ -47,10 +47,16 @@ VROCM_INTERNAL void vrocm_entry_hit(struct vrocm_entry *entry, void *return_addr
         link_entry(entry);
     }
 
-    if (vrocm_log_level() < VROCM_LOG_DEBUG || entry->traced >= TRACE_LIMIT) {
+    /* Relaxed atomics rather than a plain read-and-increment: `calls` and `denials` beside it are
+     * already atomic, and this one is reached from the same wrappers, which run in frameworks with
+     * dozens of threads. Nothing is ordered against it -- it only bounds how many origin lines an
+     * entry prints -- so relaxed is the whole requirement, and the cap is approximate either way:
+     * threads that pass the test together all print, which overshoots by at most their number. */
+    if (vrocm_log_level() < VROCM_LOG_DEBUG ||
+        __atomic_load_n(&entry->traced, __ATOMIC_RELAXED) >= TRACE_LIMIT) {
         return;
     }
-    entry->traced++;
+    __atomic_fetch_add(&entry->traced, 1, __ATOMIC_RELAXED);
 
     {
         const char *caller = vrocm_caller_of(return_address);

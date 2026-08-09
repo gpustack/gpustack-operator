@@ -87,7 +87,12 @@ static void print_card(unsigned index, const struct vrocm_device_usage *usage, u
 int main(int argc, char **argv)
 {
     const char *path;
-    struct vrocm_region header;
+    /* The WHOLE region, not just its head: every check below runs against a copy read in one
+     * go, so the size test that guards it is the size test for every byte later mapped. Named
+     * for what it is because a reader who took it for a header read the guard as a header-sized
+     * one and reported a truncated file as a SIGBUS waiting to happen.
+     */
+    struct vrocm_region snapshot;
     struct vrocm_region *region;
     struct stat st;
     unsigned charged = 0;
@@ -95,14 +100,15 @@ int main(int argc, char **argv)
     int fd;
 
     /* argv[1] first, so an operator can point this at another container's region from the host;
-     * the container's own variable otherwise. There is no default path, for the same reason the
-     * shim has none: a default under /tmp either accounts a slice nobody configured, or -- on a
-     * shared host mount -- lets unrelated containers collide in one region. */
+     * otherwise the region the shim in this container would write: the variable, and the same
+     * default when it is unset or empty.
+     *
+     * Resolved here rather than by calling the shim's own resolver, because this tool links no
+     * object from common/ -- see the note at the top of this file. The two must agree, so the
+     * NAME and the DEFAULT both come from the shared header and neither is spelled twice. */
     path = (argc > 1) ? argv[1] : getenv(VROCM_ENV_LEDGER_PATH);
     if (path == NULL || *path == '\0') {
-        fprintf(stderr, TOOL ": no region path; pass one as an argument or set %s\n",
-                VROCM_ENV_LEDGER_PATH);
-        return 1;
+        path = VROCM_LEDGER_DEFAULT_PATH;
     }
 
     /* O_RDONLY and nothing else. Opening with O_CREAT here is the whole failure this tool is
@@ -121,38 +127,58 @@ int main(int argc, char **argv)
         close(fd);
         return 1;
     }
-    if ((size_t)st.st_size < sizeof(header)) {
-        fprintf(stderr, TOOL ": %s: %llu bytes, too small to carry a region header\n", path,
-                (unsigned long long)st.st_size);
+    if ((size_t)st.st_size < sizeof(snapshot)) {
+        fprintf(stderr, TOOL ": %s: %llu bytes, too small to be a region — one is %llu bytes and"
+                        " every one of them is read before any is mapped\n",
+                path, (unsigned long long)st.st_size, (unsigned long long)sizeof(snapshot));
         close(fd);
         return 2;
     }
-    if (read(fd, &header, sizeof(header)) != (ssize_t)sizeof(header)) {
-        fprintf(stderr, TOOL ": %s: cannot read the region header: %s\n", path, strerror(errno));
-        close(fd);
-        return 2;
+    /* LOOPED, because one read() is not one answer. It is allowed to hand back fewer bytes than
+     * it was asked for, and what it returns does not say whether the region was short or the call
+     * was -- the fstat above has already settled the first, so reading on is what tells them
+     * apart. A single call that took the difference for a malformed region would report a healthy
+     * ledger as unparseable to whatever scrapes this. */
+    {
+        size_t got = 0;
+
+        while (got < sizeof(snapshot)) {
+            ssize_t n = read(fd, (char *)&snapshot + got, sizeof(snapshot) - got);
+
+            if (n > 0) {
+                got += (size_t)n;
+                continue;
+            }
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            fprintf(stderr, TOOL ": %s: cannot read the region: %s\n", path,
+                    n < 0 ? strerror(errno) : "it ended before the region did");
+            close(fd);
+            return 2;
+        }
     }
 
-    if (memcmp(header.magic, VROCM_REGION_MAGIC, VROCM_REGION_MAGIC_BYTES) != 0) {
+    if (memcmp(snapshot.magic, VROCM_REGION_MAGIC, VROCM_REGION_MAGIC_BYTES) != 0) {
         fprintf(stderr, TOOL ": %s: not a usage region, no %s magic at offset 0\n", path,
                 VROCM_REGION_MAGIC);
         close(fd);
         return 2;
     }
-    if (header.layout_version != VROCM_REGION_VERSION) {
+    if (snapshot.layout_version != VROCM_REGION_VERSION) {
         fprintf(stderr,
                 TOOL ": %s: layout version %u, this reader speaks %u. Refusing rather than reading"
                      " figures out of offsets that may have moved.\n",
-                path, (unsigned)header.layout_version, VROCM_REGION_VERSION);
+                path, (unsigned)snapshot.layout_version, VROCM_REGION_VERSION);
         close(fd);
         return 2;
     }
     /* The version alone is not enough: two builds can agree on the layout and disagree on how many
      * slots it holds, and this reader indexes a fixed-size table. */
-    if (header.device_slots != VROCM_MAX_DEVICES ||
-        header.process_slots != VROCM_MAX_PROCESSES_PER_DEVICE) {
+    if (snapshot.device_slots != VROCM_MAX_DEVICES ||
+        snapshot.process_slots != VROCM_MAX_PROCESSES_PER_DEVICE) {
         fprintf(stderr, TOOL ": %s: %u cards x %u processes, this reader was built for %u x %u\n",
-                path, (unsigned)header.device_slots, (unsigned)header.process_slots,
+                path, (unsigned)snapshot.device_slots, (unsigned)snapshot.process_slots,
                 VROCM_MAX_DEVICES, VROCM_MAX_PROCESSES_PER_DEVICE);
         close(fd);
         return 2;
@@ -166,7 +192,7 @@ int main(int argc, char **argv)
     }
 
     printf("region path=%s version=%u cards=%u procs=%u\n", path, VROCM_REGION_VERSION,
-           (unsigned)header.device_slots, (unsigned)header.process_slots);
+           (unsigned)snapshot.device_slots, (unsigned)snapshot.process_slots);
 
     /* Read without taking the card's lock, deliberately — see the header. A figure one allocation
      * stale is worth far more than a reader that can wedge behind a hung allocation. */
