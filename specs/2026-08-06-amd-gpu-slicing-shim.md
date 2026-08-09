@@ -863,13 +863,24 @@ no FAIL**. Row counts on the RDNA host (`gfx1101`, `NUM_XCC = 1`, 60 CU / 30 WGP
 | 6 | 56 PASS | `common/`'s 45 unit cases; a 2048 MiB request refused while another process holds 3072 of 4096 MiB, with the denial and `rocm-monitor` agreeing; and one container holding two cards at 2048 and 6144 MiB answering a 4096 MiB request both ways |
 | 7 | 10 PASS | a `SIGKILL`ed holder's 3072 MiB reclaimed by a later process, refused first while it was alive; and one `libvrocm.so`, identical by digest, enforcing the same quota against `libamdhip64.so.7` and `libamdhip64.so.6` |
 
-**The two-architecture rule was met for cases 4 and 5 only, and that is a partial result.** The CDNA target
-available was a rented instance that **is itself a container** with no container runtime of its own, so the
-five cases that inject `libvrocm.so` had nothing to inject it into. Cases 4 and 5 need only a card — they
-drive staged binaries under `HSA_CU_MASK` — and both ran there, which is what covers the branch that
-matters most: the two mask derivations share no arithmetic. Cases 1, 2, 3, 6 and 7 are RDNA-only, and what
-they assert is architecture-independent (linkage, symbol coverage, accounting, lifecycle) — but that is an
-argument, not a measurement, and it should be closed on a CDNA host with a runtime when one exists.
+**The two-architecture rule is met for every case but one.** The CDNA target available is a rented
+instance that **is itself a container** with no container runtime of its own — a nested one is not
+available either, since the instance is refused the user namespace `podman` needs. Cases 4 and 5 never
+needed one; they drive staged binaries under `HSA_CU_MASK`, and they cover the branch that matters most,
+because the two mask derivations share no arithmetic. The cases that inject `libvrocm.so` reach that target
+by a second route: where there is no runtime, the arms run **in place** against the instance's own root
+filesystem, through the same `/etc/ld.so.preload` the product uses. Measured on `gfx942` (304 CU, 8 XCC,
+192 GiB): **all seven cases green**, with case 2 reporting the 4096 MiB quota through all five capacity
+entries against a 196592 MiB card, the same `1472/288/388` layout fixture, and both control arms
+reproducing the `R0600` finding on CDNA as they do on RDNA.
+
+**Three arms skip there, and each names what the instance cannot express rather than weakening a row.**
+Case 7's cross-version arm asserts one `libvrocm.so`, identical by digest, enforcing the same quota against
+two ROCm majors — two runtimes on one host, and therefore two images, which an instance carrying one ROCm
+cannot provide; its lifecycle arm drives a binary that links no ROCm at all and runs there unchanged. Case
+6 divides the same way: the unit arm runs anywhere, and the cross-process arms need a container and, for
+per-card keying, a second card the rented instance does not have. Case 3 skips the four array families the
+`gfx942` runtime refuses with `rc=801` whatever the quota — a fact about that card, recorded as one.
 
 ### Notes / Constraints / Caveats
 

@@ -243,6 +243,11 @@ xsh() {
 # nerdctl. An explicit XB_CTR is taken as given — including a bogus one, so the
 # no-runtime path stays exercisable.
 xctr_resolve() {
+  # `none` is the sentinel for "use no runtime even if one is here" — the only way to exercise the
+  # in-place route on a target that has both. Decided HERE rather than by each caller, because a
+  # caller that missed it would run the literal word as a command: measured, that is a case
+  # announcing the container route and then dying on `none: command not found`.
+  [ "${XB_CTR}" = none ] && return 1
   [ -n "${XB_CTR}" ] && return 0
   XB_CTR="$(xrun 'for c in docker nerdctl; do command -v "${c}" >/dev/null 2>&1 && { echo "${c}"; break; }; done' \
     | tail -1 | tr -d '[:space:]')"

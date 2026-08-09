@@ -34,11 +34,14 @@
 # fixture for that: if a ROCm release moves them, this row is where it surfaces — as a fact about
 # the runtime rather than as a quota that mysteriously stopped applying.
 #
-# All arms run in ONE container, so the physical figure every control is compared against is the
-# same card's, read minutes rather than runs apart. Activation is `/etc/ld.so.preload` INSIDE the
-# container, which is the product's own contract; it is written immediately before an arm and
-# removed immediately after, so the shell's own commands do not load a library they have no quota
-# for.
+# All arms run against ONE card in ONE root filesystem, so the physical figure every control is
+# compared against is the same card's, read minutes rather than runs apart. Activation is
+# `/etc/ld.so.preload`, which is the product's own contract; it is written immediately before an
+# arm and removed immediately after, so the shell's own commands do not load a library they have
+# no quota for. Where the target has a container runtime that filesystem is a throwaway
+# container's; where it has none the target is itself a container and the arms run in place
+# against its own — the only route by which multi-XCC hardware, which is rentable only as an
+# instance with no runtime inside it, can be reached at all.
 #
 # Assumes `scripts/build.sh xbuild-amd-rocm` already staged and compiled the tree.
 #
@@ -54,12 +57,23 @@ XB_IMAGE="${XB_IMAGE:-rocm/dev-ubuntu-22.04:7.2.4}"
 XB_STAGE="${XB_STAGE:-/tmp/vrocm}"
 XB_PLATFORM="${XB_PLATFORM:-linux/amd64}"
 
-xctr_resolve || { echo "amd-case-2: no container runtime on $(xtarget_desc); this case injects into a container"; exit 2; }
-
-echo "# AMD-CASE 2 — single-card inject in ${XB_IMAGE} on $(xtarget_desc)"
+# TWO ROUTES TO THE SAME ARMS, and the choice belongs to the target rather than to the case. Where
+# a container runtime exists the arms run in a throwaway container, which is the product's own
+# shape. Where none does the target IS a container — the only multi-XCC hardware this work can
+# reach is a rented instance with ROCm on its filesystem and no runtime at all — and the arms run
+# in place against that filesystem. The mechanism is identical either way, `/etc/ld.so.preload`
+# read by the loader; what differs is whose root filesystem carries it, so the in-place route
+# refuses to start if the target already has one of its own.
+if xctr_resolve; then
+  echo "# AMD-CASE 2 — single-card inject in ${XB_IMAGE} on $(xtarget_desc)"
+else
+  XB_CTR=""
+  echo "# AMD-CASE 2 — single-card inject in place on $(xtarget_desc) (no container runtime)"
+fi
 
 out="$(xsh XB_CTR="${XB_CTR}" XB_CTR_ARGS="${XB_CTR_ARGS}" IMG="${XB_IMAGE}" STAGE="${XB_STAGE}" \
-           PLATFORM="${XB_PLATFORM}" GPU="${XB_AMD_GPU:-0}" QUOTA="${XB_AMD_QUOTA_MIB:-4096}" <<'PAYLOAD'
+           PLATFORM="${XB_PLATFORM}" GPU="${XB_AMD_GPU:-0}" QUOTA="${XB_AMD_QUOTA_MIB:-4096}" \
+           ROCM="${XB_ROCM_PATH:-/opt/rocm}" <<'PAYLOAD'
 set -u
 row() { printf '%s | %s | %s\n' "$1" "$2" "$3"; }
 
@@ -72,11 +86,24 @@ if [ ! -e /dev/kfd ]; then
   echo "FAILS=0"; exit 0
 fi
 
-# shellcheck disable=SC2086  # XB_CTR_ARGS is word-split on purpose
-${XB_CTR} ${XB_CTR_ARGS} run --rm -i --platform "${PLATFORM}" \
-  --device /dev/kfd --device /dev/dri --group-add video --group-add render \
-  --security-opt seccomp=unconfined \
-  -e "GPU=${GPU}" -e "QUOTA=${QUOTA}" -v "${STAGE}:/work" -w /work "${IMG}" bash -s <<'INNER'
+if [ -z "${XB_CTR}" ]; then
+  if [ ! -x "${ROCM}/bin/rocminfo" ] && [ ! -f "${ROCM}/lib/libamdhip64.so" ]; then
+    row SKIP "single-card inject" "no container runtime and no ROCm at ${ROCM} — nothing to inject into"
+    echo "FAILS=0"; exit 0
+  fi
+  # The target's own activation file, if it has one, is not this case's to overwrite: it would be
+  # restored as absent afterwards, which is a different state from the one it was in.
+  if [ -e /etc/ld.so.preload ]; then
+    row FAIL "in place: the target carries no activation file of its own" \
+      "/etc/ld.so.preload exists on $(hostname) — refusing to write over it"
+    echo "FAILS=1"; exit 0
+  fi
+fi
+
+INNER_SH="$(mktemp)"
+trap 'rm -f "${INNER_SH}"' EXIT
+
+cat > "${INNER_SH}" <<'INNER'
 set -u
 row() { printf '%s | %s | %s\n' "$1" "$2" "$3"; }
 fails=0
@@ -135,7 +162,7 @@ fi
 # ordinal. This arm gives the container one card, so that position is 0 whatever GPU is. The CU
 # list comes from `rocm-cumask-check`'s own derivation rather than from a literal here: a literal
 # would be a second place to encode the card's geometry, and the wrong one.
-/work/rocm-cumask-check --device "${GPU}" --percent 100 > "${W}/derive" 2>&1
+"${WORK}"/rocm-cumask-check --device "${GPU}" --percent 100 > "${W}/derive" 2>&1
 culist="$(sed -n 's/^derive .*mask=[0-9]*:\(.*\)$/\1/p' "${W}/derive" | tail -1)"
 if [ -z "${culist}" ]; then
   row FAIL "full-card mask derived" "rocm-cumask-check printed no mask: $(head -3 "${W}/derive" | tr '\n' ' ')"
@@ -150,12 +177,20 @@ row INFO "injection contract" "ROCR_VISIBLE_DEVICES=${GPU} HSA_CU_MASK=${MASK} V
 # environment, take the file away again. The removal suppresses its own stderr because it runs
 # while the file still exists: the shim would otherwise load into `rm` too and report, correctly,
 # that `rm` was given no quota.
+#
+# TRUNCATED BEFORE IT IS REMOVED, and the order is the whole safety of the in-place route. `rm` is
+# a new process, so it goes through the loader that this file is aimed at: a library that cannot
+# load takes `rm` down with it and the activation file stays, which on a container the case does
+# not own means every later process fails to start. Truncation is a shell redirection and execs
+# nothing, and the loader ignores an empty file — so by the time `rm` runs, the thing that could
+# have stopped it is already gone.
 probe() {
   local lib="$1"; shift
   local rc
   [ "${lib}" != none ] && echo "${lib}" > /etc/ld.so.preload
-  env "$@" /work/hip_props_probe 0 2>&1
+  env "$@" "${WORK}"/hip_props_probe 0 2>&1
   rc=$?
+  : > /etc/ld.so.preload
   rm -f /etc/ld.so.preload 2>/dev/null
   return "${rc}"
 }
@@ -226,7 +261,7 @@ fi
 
 # ---- the full arm ---------------------------------------------------------------------------
 # shellcheck disable=SC2086
-probe /work/libvrocm.so ${BASE_ENV} "VROCM_DEVICE_MEMORY_LIMIT_0=${QUOTA}" \
+probe "${WORK}"/libvrocm.so ${BASE_ENV} "VROCM_DEVICE_MEMORY_LIMIT_0=${QUOTA}" \
   "VROCM_LEDGER_PATH=${LEDGER}" LIBVROCM_LOG_LEVEL=2 > "${W}/full" 2>&1
 
 if grep -q '^\[vrocm\] loaded' "${W}/full"; then
@@ -308,6 +343,17 @@ fi
 
 echo "FAILS=${fails}"
 INNER
+
+if [ -n "${XB_CTR}" ]; then
+  # shellcheck disable=SC2086  # XB_CTR_ARGS is word-split on purpose
+  ${XB_CTR} ${XB_CTR_ARGS} run --rm -i --platform "${PLATFORM}" \
+    --device /dev/kfd --device /dev/dri --group-add video --group-add render \
+    --security-opt seccomp=unconfined \
+    -e "GPU=${GPU}" -e "QUOTA=${QUOTA}" -e WORK=/work \
+    -v "${STAGE}:/work" -w /work "${IMG}" bash -s < "${INNER_SH}"
+else
+  GPU="${GPU}" QUOTA="${QUOTA}" WORK="${STAGE}" bash "${INNER_SH}"
+fi
 PAYLOAD
 )"
 echo "${out}"
