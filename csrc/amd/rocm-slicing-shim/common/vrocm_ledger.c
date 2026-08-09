@@ -187,12 +187,10 @@ static struct vrocm_region *region_create(void)
     const char *path;
     struct vrocm_region *map;
 
+    /* Never NULL -- an unset variable answers the default -- so there is no "no path" case here
+     * and the branch that used to handle it is gone. Whether the path was configured or defaulted
+     * is a question `vrocm_quota_validate` answers once, at load. */
     path = vrocm_quota_ledger_path();
-    if (path == NULL) {
-        vrocm_log(VROCM_LOG_DENY, "%s is unset; nothing can be accounted\n",
-                  VROCM_ENV_LEDGER_PATH);
-        return NULL;
-    }
 
     region_fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0600);
     if (region_fd < 0) {

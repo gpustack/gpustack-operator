@@ -45,13 +45,24 @@
 /* The cross-process region's path. The allocator hands down a PER-CONTAINER one, because the
  * region is addressed by the card's position in ROCR_VISIBLE_DEVICES and that position is
  * container-local: two containers sharing a region would charge two different physical cards into
- * the slot they both call index 0.
+ * the slot they both call index 0. On the `.sliced` path this variable is always set, to a
+ * directory under the pod work dir that the device-plugin creates and garbage-collects.
  *
- * It has NO DEFAULT, and that is the point. A default under /tmp is either private to one
- * container, which silently accounts a slice the operator never configured, or on a shared host
- * mount, where it lets unrelated containers collide in one region. Absence is a configuration
- * error instead: reported once, and then every allocation refused. */
+ * THE DEFAULT IS FOR THE OTHER PATH -- running this tree by hand, which is how it is verified --
+ * and it is /dev/shm for the reasons the THead shim chose the same: a tmpfs present in every
+ * container, shared by every process in one, and gone when the container is.
+ *
+ * IT IS ONLY CONTAINER-PRIVATE BY DEFAULT, AND THAT IS THE HAZARD. Two ordinary configurations
+ * make /dev/shm shared, and both of them break the addressing above:
+ *   - `hostIPC: true` makes it the host's, so every container on the node meets there;
+ *   - an `emptyDir{medium: Memory}` mounted at /dev/shm is shared by a Pod's containers, which is
+ *     the usual answer to a data loader that finds the default 64 MiB too small.
+ * In either case two containers charge two different physical cards into one slot, and nothing
+ * says so -- the quota is simply wrong. The default is a convenience for a single container run
+ * by hand; it is not a substitute for the allocator setting this, and the `.sliced` path must
+ * always set it. */
 #define VROCM_ENV_LEDGER_PATH "VROCM_LEDGER_PATH"
+#define VROCM_LEDGER_DEFAULT_PATH "/dev/shm/vrocm-ledger"
 
 /* The unit the allocator emits both forms in. Mebibytes rather than bytes because that is what
  * the request API's `.sliced.memory-*` dimension is denominated in, and a unit conversion in the
@@ -76,7 +87,9 @@ VROCM_INTERNAL unsigned long long vrocm_quota_parse(const char *value, unsigned 
  * Out-of-range indices answer 0 rather than reading past the table. */
 VROCM_INTERNAL unsigned long long vrocm_quota_memory_bytes(int device);
 
-/* vrocm_quota_ledger_path — the configured region path, or NULL when none was given. */
+/* vrocm_quota_ledger_path — the region path in force. NEVER NULL: an unset or empty variable
+ * answers VROCM_LEDGER_DEFAULT_PATH, so callers have a path to open rather than a case to handle.
+ * A caller that wants to know whether the default is the one in force asks getenv itself. */
 VROCM_INTERNAL const char *vrocm_quota_ledger_path(void);
 
 /* vrocm_quota_validate — report the configuration once, at load, and latch whether it is usable.

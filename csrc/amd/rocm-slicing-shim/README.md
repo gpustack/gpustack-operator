@@ -114,7 +114,7 @@ the same dimensions are named beside each other — what differs, differs for a 
 | --- | --- | --- | --- | --- |
 | Memory, per card | `VROCM_DEVICE_MEMORY_LIMIT_<N>` | `HGGC_DEVICE_MEMORY_LIMIT_<N>` | MiB, bare integer | that card is refused |
 | Memory, all cards | `VROCM_DEVICE_MEMORY_LIMIT` | `HGGC_DEVICE_MEMORY_LIMIT` | MiB, bare integer | see the indexed form |
-| Usage region | `VROCM_LEDGER_PATH` | `HGGC_LEDGER_PATH` | path | **AMD: no default, every allocation refused.** THead: `/dev/shm/vppu-ledger` |
+| Usage region | `VROCM_LEDGER_PATH` | `HGGC_LEDGER_PATH` | path | `/dev/shm/vrocm-ledger` · `/dev/shm/vppu-ledger` — **read the warning below before relying on either** |
 | Log level | `LIBVROCM_LOG_LEVEL` | `LIBHGGC_LOG_LEVEL` | 0 quiet · 1 denials · 2 debug | 1 |
 | Compute | **none — see below** | `HGGC_DEVICE_SM_LIMIT[_<N>]` | percent | THead: the card is unusable |
 
@@ -124,11 +124,23 @@ own, and the indexed form wins where both are set.
 
 Three differences are deliberate rather than incidental:
 
-- **The region path has no default here.** THead falls back to `/dev/shm/vppu-ledger`, so a
-  container whose allocator did not reach it still accounts, into a path nobody chose. This
-  library refuses instead: no path is a configuration error, and a quota that silently accounts
-  somewhere else is worse than one that visibly does not work. In practice neither default is
-  exercised — the device-plugin injects the variable on both backends.
+- **The region path defaults, and the default is only safe for one container.** Both shims fall
+  back to `/dev/shm`, which is a tmpfs every container has, shares between its own processes, and
+  loses when it exits — exactly the properties the region needs, and the reason running this tree
+  by hand takes one variable instead of two.
+
+  **It stops being safe the moment `/dev/shm` is shared, and two ordinary configurations share
+  it.** `hostIPC: true` makes it the host's, so every container on the node meets in one region.
+  An `emptyDir{medium: Memory}` mounted at `/dev/shm` is shared by a Pod's containers, which is
+  the usual answer to a data loader that finds the default 64 MiB too small. Either way two
+  containers charge two *different physical cards* into the slot they both call index 0 — the
+  region is addressed by each container's own position in `ROCR_VISIBLE_DEVICES` — and nothing
+  reports it. The quota is simply wrong.
+
+  So the default is a convenience for a single container run by hand, and **the `.sliced` path
+  must always set the variable**; the device-plugin does, to a per-container directory under the
+  pod work dir that it also garbage-collects. THead carries the same exposure for the same reason
+  and is documented alongside.
 - **There is no compute variable.** THead throttles compute in its own shim, so it takes a
   percentage and six tuning knobs. On AMD the platform does it: `HSA_CU_MASK` is read by ROCr and
   enforced below anything this library can see, so a figure here would be a number it could not
@@ -225,9 +237,10 @@ It needs **neither ROCm nor a device**, which is what lets it run in the contain
 on, in a sidecar, or on the host against another container's region. The argument comes first so an
 operator can point it anywhere; `VROCM_LEDGER_PATH` is the container's own — the allocator gives
 each container its own region, because the index a card is charged under is that container's own
-position in `ROCR_VISIBLE_DEVICES`. There is no default path: one under `/tmp` would either account
-a slice nobody configured, or, on a shared host mount, let unrelated containers collide in one
-region.
+position in `ROCR_VISIBLE_DEVICES`. With no argument and no variable it resolves the same default
+the shim does, `/dev/shm/vrocm-ledger`, taking both the name and the default from the shared header
+so the reader and the writer cannot disagree about where the region is when neither was told — but
+see the warning under *Settings* for what that default cannot do.
 
 It **reads and never writes**: it maps the region read-only, without `O_CREAT` and without taking
 the card's lock. Creating a region would conjure a slice into existence for anything that merely

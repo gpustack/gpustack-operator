@@ -69,7 +69,10 @@ VROCM_INTERNAL const char *vrocm_quota_ledger_path(void)
 {
     const char *path = getenv(VROCM_ENV_LEDGER_PATH);
 
-    return (path != NULL && *path != '\0') ? path : NULL;
+    /* An empty value falls back too, rather than being honoured as a path: `VROCM_LEDGER_PATH=`
+     * is how a variable arrives when something meant to substitute it had nothing to put there,
+     * and opening "" would fail for a reason nobody could read. */
+    return (path != NULL && *path != '\0') ? path : VROCM_LEDGER_DEFAULT_PATH;
 }
 
 static bool usable;
@@ -109,19 +112,27 @@ VROCM_INTERNAL void vrocm_quota_validate(void)
 
     usable = false;
 
-    if (path == NULL) {
-        /* Loud when this process was asked to be policed and quiet when it was not, because the
-         * two absences are different problems. THIS LIBRARY LOADS INTO EVERY PROCESS IN THE
-         * CONTAINER -- `/etc/ld.so.preload` does not distinguish a workload from the `sed` in a
-         * start-up script -- so a container that carries it and no configuration at all would
-         * otherwise print this line hundreds of times and say nothing an operator can act on. A
-         * figure without a path is the case that matters: something was configured, incompletely.
-         *
-         * Nothing is lost by going quiet, because the refusal itself now says so: a process that
-         * actually asks for memory and is refused prints one line from `vrocm_ledger_admit`. */
-        vrocm_log(any_figure_named() ? VROCM_LOG_DENY : VROCM_LOG_DEBUG,
-                  "%s is unset; every allocation will be refused\n", VROCM_ENV_LEDGER_PATH);
+    /* NOTHING WAS NAMED, SO NOTHING HERE WAS ASKED TO BE POLICED, and that is not an error worth
+     * a line at the default level. THIS LIBRARY LOADS INTO EVERY PROCESS IN THE CONTAINER --
+     * `/etc/ld.so.preload` does not distinguish a workload from the `sed` in a start-up script --
+     * so a container carrying it and no configuration would otherwise print once per process and
+     * say nothing an operator could act on. A figure that IS named and turns out unusable is the
+     * opposite case, and stays loud below.
+     *
+     * Nothing is lost by going quiet: a process that actually asks for memory and is refused
+     * prints one line of its own from `vrocm_ledger_admit`. */
+    if (!any_figure_named()) {
+        vrocm_log(VROCM_LOG_DEBUG, "no %s figure in either form; every allocation will be refused\n",
+                  VROCM_ENV_MEMORY_LIMIT);
         return;
+    }
+
+    /* Which region is in force, and whether it is the one the allocator chose. The default is a
+     * convenience for a tree run by hand; on the `.sliced` path the variable is always set, so
+     * seeing the default there means the injection did not arrive. */
+    if (getenv(VROCM_ENV_LEDGER_PATH) == NULL) {
+        vrocm_log(VROCM_LOG_DEBUG, "%s is unset; using the default region %s\n",
+                  VROCM_ENV_LEDGER_PATH, VROCM_LEDGER_DEFAULT_PATH);
     }
 
     if (shared != NULL) {

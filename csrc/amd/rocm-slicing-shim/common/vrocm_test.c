@@ -199,11 +199,23 @@ static void test_quota_usable_latch(void)
     check_that(!vrocm_quota_usable(), "quota_latch/no_figure_is_unusable",
                "a container with no figure in either form refuses everything");
 
+    /* The path falls back rather than refusing, so a tree run by hand needs one variable instead
+     * of two. The figure is what decides usability -- the region is where an answer is written,
+     * not what makes one possible. */
     setenv(VROCM_ENV_MEMORY_LIMIT, "1024", 1);
     unsetenv(VROCM_ENV_LEDGER_PATH);
     vrocm_quota_validate();
-    check_that(!vrocm_quota_usable(), "quota_latch/no_ledger_path_is_unusable",
-               "%s has no default and its absence is a refusal", VROCM_ENV_LEDGER_PATH);
+    check_that(vrocm_quota_usable(), "quota_latch/ledger_path_falls_back",
+               "%s unset falls back to %s rather than refusing", VROCM_ENV_LEDGER_PATH,
+               VROCM_LEDGER_DEFAULT_PATH);
+    check_that(strcmp(vrocm_quota_ledger_path(), VROCM_LEDGER_DEFAULT_PATH) == 0,
+               "quota_latch/ledger_path_default", "%s", vrocm_quota_ledger_path());
+    /* Empty is the shape a variable takes when a substitution had nothing to put in it, and it
+     * falls back too rather than being opened as a path of no characters. */
+    setenv(VROCM_ENV_LEDGER_PATH, "", 1);
+    check_that(strcmp(vrocm_quota_ledger_path(), VROCM_LEDGER_DEFAULT_PATH) == 0,
+               "quota_latch/ledger_path_empty_falls_back", "%s", vrocm_quota_ledger_path());
+    unsetenv(VROCM_ENV_LEDGER_PATH);
 
     unsetenv(VROCM_ENV_MEMORY_LIMIT);
 }

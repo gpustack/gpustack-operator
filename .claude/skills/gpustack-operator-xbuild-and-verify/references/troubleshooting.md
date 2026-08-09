@@ -270,9 +270,15 @@ Concrete failure modes hit while building this skill, with fixes.
   `[vrocm]` line ever appears. Check, in this order: `/etc/ld.so.preload` is the one **inside the
   container** (the host's is the wrong file and there is no diagnostic for that);
   `LIBVROCM_LOG_LEVEL=2`, because the load marker and the counter dump sit above the default of 1,
-  which carries denials only; and `VROCM_LEDGER_PATH`, which has **no default** — without it the
-  constructor reports `VROCM_LEDGER_PATH is unset; nothing can be accounted` once and then refuses
-  everything, which looks nothing like "quietly did nothing" but is easy to miss on a busy stream.
+  which carries denials only; and whether a **memory figure** arrived at all. The figure is what
+  decides: with none, the constructor says so only at level 2 — deliberately, since this library
+  loads into every process in the container and a per-process line would bury the container that
+  was misconfigured under the ones that were never configured — and the first process that actually
+  asks for memory prints `no usable quota configuration` once and is refused. `VROCM_LEDGER_PATH`
+  is *not* the thing to check first: it falls back to `/dev/shm/vrocm-ledger`, so its absence
+  accounts correctly for one container rather than refusing anything. What its absence does mean
+  under `.sliced` is that the injection never arrived, and that a Pod sharing `/dev/shm` between
+  containers is then cross-charging — level 2 names the default when it is in force.
   A dynamic-loader failure is not silent either, but its one line is easy to lose: glibc prints
   `ERROR: ld.so: object '…' from /etc/ld.so.preload cannot be preloaded … ignored` and then starts
   the process normally. On musl/Alpine there is no line at all.

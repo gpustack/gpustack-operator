@@ -776,15 +776,17 @@ their real names because they are the platform's, not ours.
   inject device nodes, not by the ROCm user-space runtime — measured, setting it to `1` or to `void` leaves
   `hipGetDeviceCount` unchanged at 2. The existing whole-card AMD allocator injects only this variable and
   relies on the runtime hook; a sliced container needs card-precise ROCr visibility and cannot reuse that.
-- **`VROCM_LEDGER_PATH` must be per CONTAINER and is an init error when absent.** The repo already has the
+- **`VROCM_LEDGER_PATH` must be set by the allocator, and per CONTAINER.** The repo already has the
   mechanism — `deviceplugin.PodWorkDir(podUID, containerName)` under `OperatorPodsDir`, which the THead
   backend uses for its ledger and which the device-plugin server garbage-collects. Per container rather than
   per Pod, and the reason is the addressing: a region is indexed by the card's position in
   `ROCR_VISIBLE_DEVICES`, which is container-local, so two containers sharing one region would have their
   index 0 — two *different* physical cards — charge the same slot. Sharing it across a Pod's containers is
   therefore not a looser version of this design, it is a broken one; THead reached the same conclusion for
-  the same reason. There is no default path either, so a container the device-plugin did not reach refuses
-  every allocation instead of accounting into a location nobody chose.
+  the same reason. The variable falls back to `/dev/shm/vrocm-ledger`, which is what lets this tree be run
+  by hand with one variable rather than two — but `/dev/shm` is container-private only until something
+  shares it, and both `hostIPC: true` and an `emptyDir{medium: Memory}` mounted there do. The default is for
+  the hand-run path; the `.sliced` path must always set the variable.
 - **The quota is re-read on attach, never frozen by the region's creator.** A region that caches the first
   writer's limit means a container restarting with a different quota silently keeps the old one — measured as
   a real failure mode: a 2 GiB run against a region created at 4 GiB was still refused only at 4 GiB.
@@ -848,7 +850,7 @@ of scope.
   output; and the fail-open constructions are present as **negative** rows, so a case set that stopped
   detecting them fails rather than quietly narrowing.
 
-**Delivered — what the suite measures, and where it ran.** All seven cases are green: **147 PASS rows and
+**Delivered — what the suite measures, and where it ran.** All seven cases are green: **150 PASS rows and
 no FAIL**. Row counts on the RDNA host (`gfx1101`, `NUM_XCC = 1`, 60 CU / 30 WGP / 3 SE / 16 GiB, ROCm 7.2):
 
 | Case | Rows | What it established |
@@ -858,7 +860,7 @@ no FAIL**. Row counts on the RDNA host (`gfx1101`, `NUM_XCC = 1`, 60 CU / 30 WGP
 | 3 | 30 PASS | thirteen allocation families, each served under the quota through its own counted entry and each refused over it with a counted denial; pinned host memory served at twice the quota; the runtime called **no** allocating entry of its own |
 | 4 | 10 PASS / 3 INFO | every row of table A and every RDNA fail-open construction as a negative row; on the CDNA host, table B, its own five fail-open constructions and the sub-atom refusal |
 | 5 | 8 PASS / 3 INFO | RDNA: ceiling 0.519 of the unmasked figure at a 50 % mask, occupancy 15/30 WGPs, three-tenant fairness 1.009×. CDNA: ceiling 0.609, occupancy 152/304 CUs, fairness 1.369× against a tolerance derived from the card's 8 XCCs |
-| 6 | 53 PASS | `common/`'s 42 unit cases; a 2048 MiB request refused while another process holds 3072 of 4096 MiB, with the denial and `rocm-monitor` agreeing; and one container holding two cards at 2048 and 6144 MiB answering a 4096 MiB request both ways |
+| 6 | 56 PASS | `common/`'s 45 unit cases; a 2048 MiB request refused while another process holds 3072 of 4096 MiB, with the denial and `rocm-monitor` agreeing; and one container holding two cards at 2048 and 6144 MiB answering a 4096 MiB request both ways |
 | 7 | 10 PASS | a `SIGKILL`ed holder's 3072 MiB reclaimed by a later process, refused first while it was alive; and one `libvrocm.so`, identical by digest, enforcing the same quota against `libamdhip64.so.7` and `libamdhip64.so.6` |
 
 **The two-architecture rule was met for cases 4 and 5 only, and that is a partial result.** The CDNA target
@@ -938,10 +940,14 @@ argument, not a measurement, and it should be closed on a CDNA host with a runti
 - **A fixed-capacity allocation table overflows and leaks charges** → insert failure is fail-closed, and case 6
   fills the quota with many allocations, frees them all, and re-requests the whole quota; it is admitted only
   if every refund landed.
-- **A shared ledger cross-charges whoever shares it** → the path is per container, comes from
-  `PodWorkDir(podUID, containerName)`, and is an init error when absent rather than defaulting. Per container
-  and not merely per Pod: the region is addressed by a container-local card index, so two containers of one
-  Pod sharing a region would charge two different cards into one slot.
+- **A shared ledger cross-charges whoever shares it** → the path is per container and comes from
+  `PodWorkDir(podUID, containerName)`. Per container and not merely per Pod: the region is addressed by a
+  container-local card index, so two containers of one Pod sharing a region would charge two different cards
+  into one slot. **The `/dev/shm` default does not have that property and is not mitigated** — it is
+  container-private only until `hostIPC: true` or an `emptyDir{medium: Memory}` at `/dev/shm` makes it
+  shared, and then the quota is silently wrong rather than visibly absent. It exists so the tree can be run
+  by hand; the allocator must always set the variable, and the THead shim carries the identical exposure for
+  the identical reason.
 - **A future ROCm release starts self-calling an allocating entry point**, which a preload cannot decline and
   which would double-charge or recurse → the caller-origin diagnostic makes it a visible line naming
   `libamdhip64` rather than a silent miscount; the in-process lock is re-entrancy-counted so a nested call
