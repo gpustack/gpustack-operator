@@ -78,11 +78,16 @@ jobs:
           HEAVY_INPUT: ${{ github.event.inputs.heavy || 'auto' }}
         run: |
           #
-          # A change to the operator Dockerfile, go.sum, or this CI workflow either
-          # rebuilds the whole image (base image / dependency graph) or alters the
-          # build recipe, which needs a bigger runner. Detect it by diffing the event's
-          # changed files against its base, and when present mark the build "heavy" so
-          # the matrix targets the "-8x" runner variant.
+          # A change to the operator Dockerfile, go.sum, the vendor shim sources under
+          # csrc/, or this CI workflow either rebuilds the whole image (base image /
+          # dependency graph) or alters the build recipe, which needs a bigger runner.
+          # The shim sources count because each shim is compiled inside its vendor's own
+          # build stage, on top of that vendor's SDK image: touching them voids that
+          # stage's cache, so the SDK image behind it is pulled and unpacked in full
+          # rather than served from the registry cache — and the standard runner's disk
+          # is what runs out first. Detect it by diffing the event's changed files
+          # against its base, and when present mark the build "heavy" so the matrix
+          # targets the "-8x" runner variant.
           #
           # An explicit "heavy" input overrides that, because the detection can only see
           # this repository: a vendor base image moving under a mutable tag voids the
@@ -109,7 +114,7 @@ jobs:
           else
             CHANGED="$(git show --name-only --format='' HEAD)"
           fi
-          if grep -qxE 'pack/gpustack-operator/Dockerfile|go\.sum|\.github/workflows/(ci|_image)\.yml' <<<"${CHANGED}"; then
+          if grep -qxE 'pack/gpustack-operator/Dockerfile|go\.sum|csrc/.+|\.github/workflows/(ci|_image)\.yml' <<<"${CHANGED}"; then
             HEAVY="true"
           fi
           echo "heavy=${HEAVY}" >>"$GITHUB_OUTPUT"
