@@ -60,7 +60,21 @@
 #define VPPU_ENV_LEDGER_PATH "HGGC_LEDGER_PATH"
 
 /* /dev/shm because it is a tmpfs present in every container and shared by every process in
- * it, and because the allocator already mounts it read-write for the Ascend reader tool. */
+ * it, and because the allocator already mounts it read-write for the Ascend reader tool.
+ *
+ * THE DEFAULT IS ONLY SAFE FOR ONE CONTAINER, and the allocator therefore always sets the
+ * variable — to a per-container directory under the pod work dir, for the reason in the
+ * deviceplugin comment: this region is addressed by a CONTAINER-LOCAL card index, so a shared
+ * location lets two containers' index 0 charge one slot.
+ *
+ * /dev/shm is container-private by default and two ordinary configurations make it shared:
+ * `hostIPC: true` makes it the host's, so every container on the node meets in one region; and an
+ * `emptyDir{medium: Memory}` mounted at /dev/shm is shared by a Pod's containers, which is the
+ * usual answer to a data loader that finds the default 64 MiB too small. In either case two
+ * containers charge two DIFFERENT physical cards into the same slot and nothing says so — the
+ * quota is silently wrong rather than visibly absent. Treat this default as a convenience for a
+ * single container run by hand, never as a substitute for the allocator setting the variable.
+ * The AMD shim's `VROCM_LEDGER_PATH` carries the same shape and the same warning. */
 #define VPPU_LEDGER_DEFAULT_PATH "/dev/shm/vppu-ledger"
 
 /* One process's charge against one card. `pid` is 0 for a free slot; a slot whose process no
