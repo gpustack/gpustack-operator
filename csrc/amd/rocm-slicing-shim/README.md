@@ -104,6 +104,53 @@ cross-process exclusion is an `fcntl()` record lock, both of which predate it.
 > together with the verification skill's `xbuild-amd-rocm` arm and the seven `amd-case-*.sh`
 > scripts that drive these artifacts on a card.
 
+## Settings, and how they line up with the THead shim
+
+Everything this library reads is an environment variable, and the allocator emits all of them
+together. The THead shim (`csrc/thead/ppu-slicing-shim/`) is the closest precedent in the repo, so
+the same dimensions are named beside each other — what differs, differs for a reason given below.
+
+| Dimension | AMD | THead | Unit | Absent |
+| --- | --- | --- | --- | --- |
+| Memory, per card | `VROCM_DEVICE_MEMORY_LIMIT_<N>` | `HGGC_DEVICE_MEMORY_LIMIT_<N>` | MiB, bare integer | that card is refused |
+| Memory, all cards | `VROCM_DEVICE_MEMORY_LIMIT` | `HGGC_DEVICE_MEMORY_LIMIT` | MiB, bare integer | see the indexed form |
+| Usage region | `VROCM_LEDGER_PATH` | `HGGC_LEDGER_PATH` | path | **AMD: no default, every allocation refused.** THead: `/dev/shm/vppu-ledger` |
+| Log level | `LIBVROCM_LOG_LEVEL` | `LIBHGGC_LOG_LEVEL` | 0 quiet · 1 denials · 2 debug | 1 |
+| Compute | **none — see below** | `HGGC_DEVICE_SM_LIMIT[_<N>]` | percent | THead: the card is unusable |
+
+`<N>` is the card's position in the container's own visible-device list — `ROCR_VISIBLE_DEVICES`
+here — not a physical ordinal. The un-indexed form stands for every card carrying no figure of its
+own, and the indexed form wins where both are set.
+
+Three differences are deliberate rather than incidental:
+
+- **The region path has no default here.** THead falls back to `/dev/shm/vppu-ledger`, so a
+  container whose allocator did not reach it still accounts, into a path nobody chose. This
+  library refuses instead: no path is a configuration error, and a quota that silently accounts
+  somewhere else is worse than one that visibly does not work. In practice neither default is
+  exercised — the device-plugin injects the variable on both backends.
+- **There is no compute variable.** THead throttles compute in its own shim, so it takes a
+  percentage and six tuning knobs. On AMD the platform does it: `HSA_CU_MASK` is read by ROCr and
+  enforced below anything this library can see, so a figure here would be a number it could not
+  enforce and could not verify. The allocator emits `HSA_CU_MASK` directly, and
+  `rocm-cumask-check` is what answers whether the hardware honoured it.
+- **A figure that is set but unusable is named; one that was never set is not.** Both shims treat
+  a typo as an error worth a line at the default level. Absence is different: this library loads
+  into *every* process in the container, so a container carrying it and no configuration would
+  print a line per `sed` and per `rm`. That case is logged at level 2, and the process that
+  actually asks for memory and is refused prints one line of its own — see *Reading the log*.
+
+### Reading the log
+
+`[vrocm] ` prefixes every line, so a case or an operator can grep it out of output interleaved
+with the runtime's own. Level 1 is the default and carries denials only, which is the question a
+user actually asks — *why was my allocation refused*. Level 2 adds the load marker, the resolver's
+choices and the per-entry counter dump; the verification cases pin it.
+
+What a correctly injected container prints at level 1 is **nothing**, until something is refused.
+Measured, with the variables injected the way the device-plugin injects them: no line from any
+process, workload or otherwise.
+
 ## Building
 
 `build.sh` is the only place that knows the translation units, the include roots and which
@@ -198,6 +245,54 @@ could not honestly be put there — compute is enforced by the platform through 
 library never sees, and whether the hardware honoured it is the next tool's question. And **a card
 the container holds but has never allocated on**: a card appears the first time an admission touches
 it, so an untouched card is indistinguishable here from one the container does not hold.
+
+#### The region is a layout, not an API
+
+`rocm-monitor` links none of `common/`: it takes the struct definitions from the header and does
+its own read-only `mmap`. That is the point rather than an inconvenience — a metrics scraper cannot
+be asked to preload a slicing library into itself, so the bytes have to be readable by anything
+that knows the offsets. Being a second parser of the same layout is what keeps the layout honest,
+and the `_Static_assert`s in `common/vrocm_ledger.h` fail the build if a field moves under it.
+
+| Offset | Bytes | Field | Value |
+| --- | --- | --- | --- |
+| 0 | 8 | `magic` | `VROCMRGN`, no terminator — so `strings` identifies the file |
+| 8 | 4 | `layout_version` | 1. A reader that does not know the version must refuse, not guess |
+| 12 | 4 | `header_bytes` | 96 — the offset of `devices[]`, so a newer header stays skippable |
+| 16 | 4 | `device_slots` | 64 |
+| 20 | 4 | `process_slots` | 32 |
+| 32 | 64 | `lock_arena` | one byte per card, **locked by offset and never read as data**. Frozen at version 1: two builds must lock the same byte for the same card, or they exclude nobody |
+| 96 | 64 × 544 | `devices[]` | per card, below |
+
+Each `devices[i]` is 544 bytes:
+
+| Offset | Bytes | Field |
+| --- | --- | --- |
+| +0 | 8 | `memory_quota_bytes` — refreshed from the environment on every admission, never frozen by whichever process created the region |
+| +8 | 8 | `memory_used_bytes` — the sum of the live entries below |
+| +16 | 4 | `lock_holder_pid` — 0 when the card is not held |
+| +32 | 32 × 16 | `processes[]`: `int32 pid` · `uint32` reserved · `uint64 memory_bytes`. `pid == 0` is a free slot |
+
+Total 34912 bytes. A worked read of one process holding 3072 MiB of a 4096 MiB card, taken from the
+same file `rocm-monitor` printed above:
+
+```console
+$ od -An -c   -N8       ledger      #  magic          ->  V R O C M R G N
+$ od -An -tu4 -j8   -N4 ledger      #  layout_version ->  1
+$ od -An -tu4 -j16  -N4 ledger      #  device_slots   ->  64
+$ od -An -tu8 -j96  -N8 ledger      #  card 0 quota   ->  4294967296
+$ od -An -tu8 -j104 -N8 ledger      #  card 0 used    ->  3221225472
+$ od -An -td4 -j128 -N4 ledger      #  card 0 proc 0  ->  pid 9
+$ od -An -tu8 -j136 -N8 ledger      #  its charge     ->  3221225472
+```
+
+Read **without any lock**, deliberately, and a reader should do the same: a figure one allocation
+stale is worth far more than a reader that can wedge behind an allocation that hung. The two
+consequences are worth knowing. `memory_used_bytes` and the `processes[]` entries are updated under
+the card's lock but read outside it, so a reader can catch the aggregate a moment before or after
+the breakdown agrees with it. And `lock_holder_pid` is a diagnostic, not a lease — it names the
+process inside the card's critical section at the instant of the read, and is 0 the rest of the
+time.
 
 ### `rocm-cumask-check` — did the compute mask actually take effect?
 
