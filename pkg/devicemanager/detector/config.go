@@ -12,7 +12,6 @@ type Config struct {
 	Manufacturers           sets.Set[string]
 	NoFastFailed            bool
 	MonitorPeriod           time.Duration
-	MonitorHistory          uint64
 	DetectedManufacturersCh chan<- sets.Set[string]
 }
 

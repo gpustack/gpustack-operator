@@ -46,6 +46,9 @@ func (m *Manager) Prepare(ctx context.Context) error {
 func (m *Manager) Start(ctx context.Context) error {
 	cm := m.Manager.CtrlManager
 
+	// Register the accelerator monitor snapshot readout.
+	cm.GetWebhookServer().Register(MonitorSnapshotPath, newMonitorSnapshotHandler(m.Detector.MonitorSnapshot))
+
 	// Start.
 	gp := gox.GroupWithContextIn(ctx)
 	gp.Go(func(ctx context.Context) error {

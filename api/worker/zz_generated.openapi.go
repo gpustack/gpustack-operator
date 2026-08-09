@@ -24,6 +24,7 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.Devices{}.OpenAPIModelName():                                      schema_gpustack_api_worker_v1_Devices(ref),
 		v1.DevicesList{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_DevicesList(ref),
 		v1.Instance{}.OpenAPIModelName():                                     schema_gpustack_api_worker_v1_Instance(ref),
+		v1.InstanceAcceleratorMetrics{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref),
 		v1.InstanceEvents{}.OpenAPIModelName():                               schema_gpustack_api_worker_v1_InstanceEvents(ref),
 		v1.InstanceImagePullSecret{}.OpenAPIModelName():                      schema_gpustack_api_worker_v1_InstanceImagePullSecret(ref),
 		v1.InstanceImagePullSecretList{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1_InstanceImagePullSecretList(ref),
@@ -31,6 +32,8 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1.InstanceList{}.OpenAPIModelName():                                 schema_gpustack_api_worker_v1_InstanceList(ref),
 		v1.InstanceLog{}.OpenAPIModelName():                                  schema_gpustack_api_worker_v1_InstanceLog(ref),
 		v1.InstanceLogOptions{}.OpenAPIModelName():                           schema_gpustack_api_worker_v1_InstanceLogOptions(ref),
+		v1.InstanceMetrics{}.OpenAPIModelName():                              schema_gpustack_api_worker_v1_InstanceMetrics(ref),
+		v1.InstanceMetricsSample{}.OpenAPIModelName():                        schema_gpustack_api_worker_v1_InstanceMetricsSample(ref),
 		v1.InstancePersistentVolume{}.OpenAPIModelName():                     schema_gpustack_api_worker_v1_InstancePersistentVolume(ref),
 		v1.InstancePersistentVolumeEvents{}.OpenAPIModelName():               schema_gpustack_api_worker_v1_InstancePersistentVolumeEvents(ref),
 		v1.InstancePersistentVolumeList{}.OpenAPIModelName():                 schema_gpustack_api_worker_v1_InstancePersistentVolumeList(ref),
@@ -534,6 +537,77 @@ func schema_gpustack_api_worker_v1_Instance(ref common.ReferenceCallback) common
 	}
 }
 
+func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceAcceleratorMetrics is the metrics of one accelerator device allocated to an Instance.\n\nAll figures come from the vendor device libraries; a zero value may also mean the library could not read that metric at sampling time.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"id": {
+						SchemaProps: spec.SchemaProps{
+							Description: "ID is the universally unique identifier of the accelerator device.",
+							Default:     "",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"memoryMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryMiB is the total memory of the accelerator in MiB.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"memoryUsageMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryUsageMiB is the used memory of the accelerator in MiB.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"memoryUtilizationPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryUtilizationPercent is the memory utilization of the accelerator in [0, 100].",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"coresUtilizationPercent": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CoresUtilizationPercent is the cores utilization of the accelerator in [0, 100].",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"temperatureCelsius": {
+						SchemaProps: spec.SchemaProps{
+							Description: "TemperatureCelsius is the temperature of the accelerator in Celsius.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"powerUsageWatts": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PowerUsageWatts is the power usage of the accelerator in Watts.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"unhealthy": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Unhealthy indicates whether the accelerator is unhealthy.",
+							Type:        []string{"boolean"},
+							Format:      "",
+						},
+					},
+				},
+				Required: []string{"id"},
+			},
+		},
+	}
+}
+
 func schema_gpustack_api_worker_v1_InstanceEvents(ref common.ReferenceCallback) common.OpenAPIDefinition {
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
@@ -881,6 +955,121 @@ func schema_gpustack_api_worker_v1_InstanceLogOptions(ref common.ReferenceCallba
 		},
 		Dependencies: []string{
 			metav1.Time{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceMetrics(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceMetrics is the subresource of Instance for reading the current utilization, which provides one up-to-date sample of the underlying Kubernetes Pod's CPU/memory/storage usage and the allocated accelerators' metrics.\n\nThe CPU/memory/storage figures are read in real time from the node kubelet at request time; the accelerator figures come from the device manager's latest snapshot and are dropped when older than a few monitor periods.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"kind": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"apiVersion": {
+						SchemaProps: spec.SchemaProps{
+							Description: "APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources",
+							Type:        []string{"string"},
+							Format:      "",
+						},
+					},
+					"metadata": {
+						SchemaProps: spec.SchemaProps{
+							Default: map[string]interface{}{},
+							Ref:     ref(metav1.ObjectMeta{}.OpenAPIModelName()),
+						},
+					},
+					"sample": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Sample is the current utilization sample of the Instance. Pointer fields inside are absent when the corresponding source is unavailable.",
+							Default:     map[string]interface{}{},
+							Ref:         ref(v1.InstanceMetricsSample{}.OpenAPIModelName()),
+						},
+					},
+				},
+				Required: []string{"sample"},
+			},
+		},
+		Dependencies: []string{
+			v1.InstanceMetricsSample{}.OpenAPIModelName(), metav1.ObjectMeta{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.\n\nEvery memory and storage figure is reported in MiB: the sources measure in different units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one wins so that a consumer never has to mix units within one sample. A byte figure is rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"timestamp": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Timestamp indicates when the CPU/memory/storage figures were measured by the kubelet.",
+							Ref:         ref(metav1.Time{}.OpenAPIModelName()),
+						},
+					},
+					"cpuUsageNanoCores": {
+						SchemaProps: spec.SchemaProps{
+							Description: "CPUUsageNanoCores is the CPU usage of the Instance's Pod in nanocores (core-nanoseconds per second), averaged over the kubelet's sample window.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"memoryWorkingSetMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "MemoryWorkingSetMiB is the working set memory usage of the Instance's Pod in MiB.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"rootfsUsedMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "RootfsUsedMiB is the used size of the Instance containers' writable layers in MiB, which accounts against the Instance's spec.resources.localStorage.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"ephemeralStorageUsedMiB": {
+						SchemaProps: spec.SchemaProps{
+							Description: "EphemeralStorageUsedMiB is the total ephemeral storage usage of the Instance's Pod in MiB, including containers' writable layers, logs and emptyDir-backed volumes. Absent when the figures came from the metrics.k8s.io fallback, which carries no storage metrics.",
+							Type:        []string{"integer"},
+							Format:      "int64",
+						},
+					},
+					"accelerators": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-map-keys": []interface{}{
+									"id",
+								},
+								"x-kubernetes-list-type": "map",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "Accelerators holds the metrics of the accelerator devices allocated to the Instance, keyed by device ID; absent when the Instance has no allocated accelerator or the device manager is unreachable.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1.InstanceAcceleratorMetrics{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+				},
+				Required: []string{"timestamp"},
+			},
+		},
+		Dependencies: []string{
+			v1.InstanceAcceleratorMetrics{}.OpenAPIModelName(), metav1.Time{}.OpenAPIModelName()},
 	}
 }
 

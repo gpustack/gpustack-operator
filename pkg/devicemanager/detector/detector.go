@@ -39,8 +39,25 @@ type Detector struct {
 	noFastFailed            bool
 	detectors               []device.Detector
 	monitorPeriod           time.Duration
-	monitorHistory          *datax.RingBuffer[device.MetricsGroupList]
+	monitorSnapshot         datax.Snapshot[MonitorSnapshot]
 	detectedManufacturersCh chan<- sets.Set[string]
+}
+
+// MonitorSnapshot is the latest accelerator metrics sample stored by the monitor loop.
+//
+// The envelope carries its own Timestamp (the time the device manager stored the sample) because
+// device.MetricsGroupList has no top-level timestamp — each MetricsGroup timestamps itself — and a
+// single store time makes staleness checks (one monitor period) a one-field comparison.
+type MonitorSnapshot struct {
+	// Timestamp is the time when the sample was stored,
+	// zero before the first monitor tick.
+	Timestamp time.Time `json:"timestamp"`
+	// PeriodSeconds is the monitor period in effect when the sample was stored,
+	// so consumers can scale their staleness bound to the configured cadence.
+	PeriodSeconds int64 `json:"periodSeconds"`
+	// Groups is the latest accelerator metrics sample,
+	// empty before the first monitor tick.
+	Groups device.MetricsGroupList `json:"groups"`
 }
 
 // New creates a Detector with the given configuration.
@@ -65,7 +82,6 @@ func New(c *Config) (*Detector, error) {
 		noFastFailed:            c.NoFastFailed,
 		detectors:               detectors,
 		monitorPeriod:           c.MonitorPeriod,
-		monitorHistory:          datax.NewRingBuffer[device.MetricsGroupList](c.MonitorHistory),
 		detectedManufacturersCh: c.DetectedManufacturersCh,
 	}, nil
 }
@@ -110,6 +126,12 @@ func (d *Detector) MonitorAccelerator(_ context.Context) (grpListMerged device.M
 	}
 
 	return grpListMerged
+}
+
+// MonitorSnapshot returns the latest accelerator metrics sample stored by the monitor loop,
+// or nil if the monitor has not completed a tick yet.
+func (d *Detector) MonitorSnapshot() *MonitorSnapshot {
+	return d.monitorSnapshot.Load()
 }
 
 // _DeviceKey represents the comparable unique identifier of a device.
@@ -176,13 +198,19 @@ func (d *Detector) Start(ctx context.Context) error {
 			deviceKeys.Clear() // Clear device keys to trigger re-detection in the next loop.
 		}
 
-		// Monitor devices and update the monitor history.
+		// Monitor devices and update the monitor snapshot.
 		_ = waitx.UntilContextCancel(ctx, d.monitorPeriod, true, func(ctx context.Context) error {
 			logger.V(3).Info("monitoring")
 
 			metricsGrpList := d.MonitorAccelerator(ctx)
 			if len(metricsGrpList) != 0 {
-				d.monitorHistory.Push(metricsGrpList)
+				d.monitorSnapshot.Store(&MonitorSnapshot{
+					Timestamp: time.Now(),
+					// Round up: truncating a sub-second remainder would understate the period
+					// and make consumers drop healthy samples as stale.
+					PeriodSeconds: int64((d.monitorPeriod + time.Second - 1) / time.Second),
+					Groups:        metricsGrpList,
+				})
 			}
 
 			// Get current devices ID from the monitor result.

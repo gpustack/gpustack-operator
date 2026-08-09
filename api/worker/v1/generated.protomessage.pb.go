@@ -16,6 +16,8 @@ func (*DevicesList) ProtoMessage() {}
 
 func (*Instance) ProtoMessage() {}
 
+func (*InstanceAcceleratorMetrics) ProtoMessage() {}
+
 func (*InstanceEvents) ProtoMessage() {}
 
 func (*InstanceImagePullSecret) ProtoMessage() {}
@@ -29,6 +31,10 @@ func (*InstanceList) ProtoMessage() {}
 func (*InstanceLog) ProtoMessage() {}
 
 func (*InstanceLogOptions) ProtoMessage() {}
+
+func (*InstanceMetrics) ProtoMessage() {}
+
+func (*InstanceMetricsSample) ProtoMessage() {}
 
 func (*InstancePersistentVolume) ProtoMessage() {}
 

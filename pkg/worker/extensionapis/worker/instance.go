@@ -77,8 +77,9 @@ func (h *InstanceHandler) SetupHandler(
 
 	// Create subresource handlers.
 	srs = map[string]rest.Storage{
-		"log":    newInstanceLogHandler(h.ObjectInfo, opts),
-		"events": newInstanceEventsHandler(h.ObjectInfo, opts),
+		"log":     newInstanceLogHandler(h.ObjectInfo, opts),
+		"events":  newInstanceEventsHandler(h.ObjectInfo, opts),
+		"metrics": newInstanceMetricsHandler(h.ObjectInfo, opts),
 	}
 
 	return gvr, srs, err

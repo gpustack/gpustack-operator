@@ -75,6 +75,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&InstanceList{},
 		&InstanceLog{},
 		&InstanceLogOptions{},
+		&InstanceMetrics{},
 		&InstancePersistentVolume{},
 		&InstancePersistentVolumeEvents{},
 		&InstancePersistentVolumeList{},
