@@ -40,6 +40,10 @@ static volatile int keys_lock;
 static unsigned long long lock_epochs;
 static unsigned long long tracking_refusals;
 
+/* Latched so the "this process has no usable configuration" line is said once rather than on
+ * every allocation the refusal covers -- see the refusal in vrocm_ledger_admit. */
+static int config_refusal_said;
+
 /* One flag per card, because fcntl() record locks are held by the PROCESS: two threads of one
  * process both succeed on the same byte, so the record lock alone would not exclude siblings. */
 static volatile int device_lock[VROCM_MAX_DEVICES];
@@ -139,9 +143,12 @@ static void fork_reset(void)
     held_device = -1;
     held_depth = 0;
     /* Counters, not state: a child reporting the parent's tallies would describe work it never
-     * did, and both are read back as this process's own. */
+     * did, and both are read back as this process's own. The "said once" latch goes with them --
+     * the line names the process, so a child that inherited it silenced would be refused with no
+     * reason of its own. */
     lock_epochs = 0;
     tracking_refusals = 0;
+    config_refusal_said = 0;
     owner_pid = self;
 }
 
@@ -498,7 +505,19 @@ VROCM_INTERNAL enum vrocm_admit vrocm_ledger_admit(int device, unsigned long lon
     int index;
 
     fork_reset();
-    if (!vrocm_quota_usable() || !device_valid(device) || alloc == NULL) {
+    if (!vrocm_quota_usable()) {
+        /* Said HERE, and once. The load-time complaint had to go quiet for a process that was
+         * never configured -- this library loads into every process in the container, and a
+         * start-up script's `sed` is not a workload -- but a process that actually asks for
+         * memory and is refused deserves the reason, and it is the only one that does. */
+        if (__atomic_exchange_n(&config_refusal_said, 1, __ATOMIC_RELAXED) == 0) {
+            vrocm_log(VROCM_LOG_DENY,
+                      "no usable quota configuration; every allocation in this process is"
+                      " refused\n");
+        }
+        return VROCM_ADMIT_DENIED_CONFIG;
+    }
+    if (!device_valid(device) || alloc == NULL) {
         return VROCM_ADMIT_DENIED_CONFIG;
     }
     quota = vrocm_quota_memory_bytes(device);

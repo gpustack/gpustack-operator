@@ -74,6 +74,26 @@ VROCM_INTERNAL const char *vrocm_quota_ledger_path(void)
 
 static bool usable;
 
+/* any_figure_named — whether either form of the memory figure names anything at all.
+ *
+ * "Given no quota" and "given a quota this build cannot use" are different states, and only the
+ * second is worth a line at the default level. Answered by asking rather than by remembering,
+ * because it is read once per process at load and never on an allocation path. */
+static bool any_figure_named(void)
+{
+    int device;
+
+    if (getenv(VROCM_ENV_MEMORY_LIMIT) != NULL) {
+        return true;
+    }
+    for (device = 0; device < VROCM_MAX_DEVICES; device++) {
+        if (env_indexed(device) != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Reporting walks the indexed forms as well as the un-indexed one so a container is told about
  * every figure it was actually given, rather than only about the one this process happens to
  * look up first. A card carrying nothing at all is not reported: with only the un-indexed form
@@ -90,8 +110,17 @@ VROCM_INTERNAL void vrocm_quota_validate(void)
     usable = false;
 
     if (path == NULL) {
-        vrocm_log(VROCM_LOG_DENY, "%s is unset; every allocation will be refused\n",
-                  VROCM_ENV_LEDGER_PATH);
+        /* Loud when this process was asked to be policed and quiet when it was not, because the
+         * two absences are different problems. THIS LIBRARY LOADS INTO EVERY PROCESS IN THE
+         * CONTAINER -- `/etc/ld.so.preload` does not distinguish a workload from the `sed` in a
+         * start-up script -- so a container that carries it and no configuration at all would
+         * otherwise print this line hundreds of times and say nothing an operator can act on. A
+         * figure without a path is the case that matters: something was configured, incompletely.
+         *
+         * Nothing is lost by going quiet, because the refusal itself now says so: a process that
+         * actually asks for memory and is refused prints one line from `vrocm_ledger_admit`. */
+        vrocm_log(any_figure_named() ? VROCM_LOG_DENY : VROCM_LOG_DEBUG,
+                  "%s is unset; every allocation will be refused\n", VROCM_ENV_LEDGER_PATH);
         return;
     }
 
