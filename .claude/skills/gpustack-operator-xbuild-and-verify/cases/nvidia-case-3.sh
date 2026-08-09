@@ -71,4 +71,4 @@ PAYLOAD
 )"
 echo "${out}"
 echo "${out}" | grep -q 'SKIP_FEWER_GPUS' && { echo "NVIDIA-CASE 3: SKIP (insufficient GPUs)"; exit 0; }
-echo "${out}" | grep -q 'FAILS=0' && { echo "NVIDIA-CASE 3: PASS"; exit 0; } || { echo "NVIDIA-CASE 3: FAIL"; exit 1; }
+xb_verdict "NVIDIA-CASE 3" "$(xb_fails "${out}")"

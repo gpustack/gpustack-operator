@@ -4,15 +4,17 @@
 #
 #   XB_MODE=local                      bash .../preflight.sh
 #   XB_MODE=ssh XB_HOST=root@host       bash .../preflight.sh
+#   XB_MODE=pty XB_HOST=user@proxy      bash .../preflight.sh   (interactive-shell-only target)
 #
 # Prints a STATUS | CHECK | DETAIL table. STATUS is PASS / WARN / FAIL.
-#   - run-capable (docker or nerdctl answering on the target) is the ONLY required
-#     check: with no runtime, no case can execute at all. Absent => FAIL.
+#   - run-capable is the ONLY required check: with nothing able to execute a case, none can run.
+#     A container runtime answering on the target => PASS; no runtime but an in-place ROCm
+#     toolchain => WARN (the AMD arm works there, no other backend does); neither => FAIL.
 #   - build-capable (docker buildx) is a WARN, not a FAIL: a host without it still runs
 #     every case against an image built on a docker host and loaded here. No buildkitd
 #     is ever started — a PPU/NPU host is usually someone else's production node.
-#   - npu-smi / nvidia-smi / ppu-smi, the vendor runtimes and /dev/{davinci,nvidia,alixpu}*
-#     are required only for the HARDWARE cases; absent => WARN.
+#   - npu-smi / nvidia-smi / ppu-smi / rocm-smi, the vendor runtimes and
+#     /dev/{davinci,nvidia,alixpu,kfd}* are required only for the HARDWARE cases; absent => WARN.
 # Exits non-zero if any required check FAILs.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -40,16 +42,32 @@ fi
 
 # run-capable (required): the resolved runtime must exist AND its daemon must answer,
 # because a present binary with a dead daemon runs no container either.
+#
+# A target that IS a container has neither, and is still usable for one backend: a rented
+# single-card instance carries ROCm on its own filesystem, which is what build.sh's AMD arm
+# compiles against in place. That is a WARN and not a PASS, because it is a genuinely degraded
+# target — every other backend's cases still need a runtime and cannot run there at all.
+sv=""
+have_ctr=""
 if [ -n "${XB_CTR}" ] && command -v "${XB_CTR}" >/dev/null 2>&1; then
+  have_ctr=yes
   # shellcheck disable=SC2086  # XB_CTR_ARGS is word-split on purpose
   sv="$("${XB_CTR}" ${XB_CTR_ARGS} info --format '{{.ServerVersion}}' 2>/dev/null | tail -1)"
-  if [ -n "${sv}" ]; then
-    row PASS "run-capable" "${XB_CTR} ${XB_CTR_ARGS} -> server ${sv}"
-  else
-    row FAIL "run-capable" "${XB_CTR} found but its daemon does not answer 'info'"; fails=$((fails+1))
-  fi
+fi
+if [ -n "${sv}" ]; then
+  row PASS "run-capable" "${XB_CTR} ${XB_CTR_ARGS} -> server ${sv}"
+elif [ -x "${ROCM_PATH:-/opt/rocm}/bin/hipcc" ]; then
+  row WARN "run-capable" "no container runtime, but ${ROCM_PATH:-/opt/rocm}/bin/hipcc is here — the AMD arm compiles and runs in place; every other backend needs a runtime"
+elif [ -n "${have_ctr}" ]; then
+  row FAIL "run-capable" "${XB_CTR} found but its daemon does not answer 'info'"; fails=$((fails+1))
+elif [ "${XB_CTR}" = none ]; then
+  row FAIL "run-capable" "XB_CTR=none asks for no runtime, and there is no in-place ROCm to fall back on"; fails=$((fails+1))
+elif [ -n "${XB_CTR}" ]; then
+  # Told which runtime to use and it is not there. Reported apart from the dead-daemon row
+  # because the two are fixed in different places, and a wrong name reads as a broken target.
+  row FAIL "run-capable" "XB_CTR names ${XB_CTR}, which is not on PATH on this target"; fails=$((fails+1))
 else
-  row FAIL "run-capable" "no container runtime (XB_CTR='${XB_CTR}'; probed docker, nerdctl)"; fails=$((fails+1))
+  row FAIL "run-capable" "no container runtime (XB_CTR='${XB_CTR}'; probed docker, nerdctl) and no in-place ROCm"; fails=$((fails+1))
 fi
 
 # build-capable (WARN only): buildx builds the multi-stage Dockerfiles (heredoc +
@@ -133,11 +151,137 @@ else
   row WARN "alixpu-module" "kernel module alixpu not loaded — THEAD-CASE 2/3/5 need it"
 fi
 
+# --- AMD ROCm hardware checks (WARN only; needed for AMD-CASE 2..7) ---
+# rocm-smi is probed BOTH ways: a ROCm install always puts it under the install prefix and only
+# some distributions also drop it on PATH, so a row that probed one of the two would report a
+# working host as unavailable.
+rocm_smi=""
+for p in "$(command -v rocm-smi 2>/dev/null)" "${ROCM_PATH:-/opt/rocm}/bin/rocm-smi"; do
+  [ -n "${p}" ] && [ -x "${p}" ] && { rocm_smi="${p}"; break; }
+done
+if [ -n "${rocm_smi}" ]; then
+  # Count DISTINCT indices: --showid prints several lines per card, so a plain line count reports
+  # a multiple of the card count.
+  n="$("${rocm_smi}" --showid 2>/dev/null | grep -oE '^GPU\[[0-9]+\]' | sort -u | wc -l | tr -d ' ')"
+  # Decided by the count, not by the file existing. rocm-smi is installed by the ROCm package and
+  # runs whether or not the driver is loaded, so a row that stopped at "it is on disk" would
+  # advertise a card to AMD-CASE 2..7 on a host that has none.
+  if [ "${n}" -gt 0 ]; then
+    row PASS "rocm-smi" "${rocm_smi} (cards matched: ${n})"
+  else
+    row WARN "rocm-smi" "${rocm_smi} present but reports no card (driver not loaded?) — AMD-CASE 2..7 (hardware) unavailable"
+  fi
+else
+  row WARN "rocm-smi" "absent on PATH and under ${ROCM_PATH:-/opt/rocm}/bin — AMD-CASE 2..7 (hardware) unavailable"
+fi
+
+# /dev/kfd is what HIP opens; the render nodes are what a container has to be given. Not every
+# /dev/dri/renderD* belongs to an AMD card — a host with integrated graphics carries one that
+# does not, and counting nodes rather than amdgpu-backed ones advertises a card HIP will never
+# enumerate — so the row counts the ones whose driver is amdgpu and says how many it skipped.
+if [ -e /dev/kfd ]; then
+  amd_nodes=0
+  all_nodes=0
+  for d in /sys/class/drm/renderD*; do
+    [ -e "${d}/device/driver" ] || continue
+    all_nodes=$((all_nodes+1))
+    [ "$(basename "$(readlink -f "${d}/device/driver")")" = amdgpu ] && amd_nodes=$((amd_nodes+1))
+  done
+  # /dev/kfd alone is not a card: the amdgpu module creates it, and a host whose only render node
+  # belongs to integrated graphics has the file and nothing HIP will enumerate. The count is the
+  # row, and zero amdgpu nodes is the same answer as no /dev/kfd.
+  if [ "${amd_nodes}" -gt 0 ]; then
+    row PASS "kfd-devices" "/dev/kfd present; ${amd_nodes} amdgpu render node(s) of ${all_nodes}"
+  else
+    row WARN "kfd-devices" "/dev/kfd present but 0 of ${all_nodes} render node(s) are amdgpu — AMD-CASE 2..7 need a real GPU"
+  fi
+else
+  row WARN "kfd-devices" "/dev/kfd absent — AMD-CASE 2..7 need a real GPU"
+fi
+
+if lsmod 2>/dev/null | grep -q '^amdgpu '; then
+  row PASS "amdgpu-module" "loaded (refcount $(lsmod | awk '$1=="amdgpu"{print $3}'))"
+else
+  row WARN "amdgpu-module" "kernel module amdgpu not loaded or not visible from here — AMD-CASE 2..7 need it"
+fi
+
+# NUM_XCC decides WHICH conformance table AMD-CASE 4/5 assert, so it is reported before anything
+# is built: a run that assumed the wrong table would fail rows that are correct for the card in
+# front of it, and the two tables share no arithmetic. It is read straight out of the KFD topology
+# rather than derived — the one figure in that directory safe to take at face value, since the
+# neighbouring array_count has already been multiplied by it and anything divided out of that file
+# is wrong on exactly the hardware this row exists to identify. CPU nodes carry no such property,
+# so only GPU nodes contribute.
+xcc="$(cat /sys/class/kfd/kfd/topology/nodes/*/properties 2>/dev/null \
+       | awk '$1=="num_xcc"{print $2}' | sort -u | tr '\n' ',' | sed 's/,$//')"
+if [ -n "${xcc}" ]; then
+  row PASS "amd-num-xcc" "NUM_XCC=${xcc} (1 selects the RDNA conformance table, >1 the CDNA one)"
+else
+  row WARN "amd-num-xcc" "no GPU node in the KFD topology — AMD-CASE 4/5 cannot pick a conformance table"
+fi
+
 echo "FAILS=${fails}"
 PAYLOAD
 )"
-echo "${out}"
+# The payload's own count line is dropped and folded in below, so the table ends with ONE count
+# and it is the total: the row that follows is decided here rather than on the target.
+echo "${out}" | grep -v '^FAILS='
+fails="$(xb_fails "${out}")"
 
-# Mirror the payload's FAILS into our exit code so callers (and CI) can detect a
-# failed required check from the return status, not just by reading the table.
-echo "${out}" | grep -q 'FAILS=0' && exit 0 || exit 1
+# --- the suite's own verdicts (LOCAL: this reads the repository, not the target) ---
+#
+# Every case must decide through `xb_verdict`, which is the only code that reads a payload's
+# count. Asserted by the ABSENCE of that call rather than by the shape of the bug that prompted
+# it: a check for one known-bad pattern only catches the mistake somebody already made, and every
+# way of getting this wrong looks identical from the outside -- a green case that cannot go red.
+# One did, for as long as it existed: AMD-CASE 4 printed the literal `FAILS=0` in each passing
+# row's detail, and the verdict grepped for that token anywhere in the output, so the case built
+# to catch a silently discarded CU mask could not itself fail.
+#
+# This is the ONLY thing that runs over these scripts -- no CI job touches this directory and
+# nothing runs shellcheck over it -- so it is a floor, not a gate. It catches the next case that
+# hand-rolls a verdict, and only for somebody who runs preflight.
+rogue=""
+seen=0
+for c in "${HERE}/../cases"/*.sh; do
+  [ -f "${c}" ] || continue
+  seen=$((seen + 1))
+  # Anchored to the start of a line, so it takes a CALL and not a mention. `grep -q 'xb_verdict '`
+  # was satisfied by a comment naming the helper -- a guard that a case could pass while doing the
+  # very thing the guard exists to catch, which is the shape of the bug it was written for.
+  grep -qE '^[[:space:]]*xb_verdict ' "${c}" || rogue="${rogue} $(basename "${c}")"
+done
+if [ "${seen}" -eq 0 ]; then
+  printf '%s | %s | %s\n' FAIL "case verdicts" "no case script found under ${HERE}/../cases — this row would otherwise pass by finding nothing"
+  fails=$((fails + 1))
+elif [ -z "${rogue}" ]; then
+  printf '%s | %s | %s\n' PASS "case verdicts" "all ${seen} cases decide through xb_verdict"
+else
+  printf '%s | %s | %s\n' FAIL "case verdicts" "decides its own verdict instead of calling xb_verdict:${rogue} — a hand-rolled verdict is how one became unfailable"
+  fails=$((fails + 1))
+fi
+
+# And the function they all call is itself worth two inputs, because the row above only asserts
+# that everybody asks the same code -- code which, written the wrong way, would answer "no
+# failures" for all 21 cases at once.
+#
+# The poisoned line comes AFTER the count on purpose. That is the ordering that separates reading
+# whole lines from taking the last line that merely contains the token: with the token quoted in a
+# row above the count, both readings happen to agree, so an input in that order asserts nothing.
+# The second input is the other property -- a payload that printed no count at all failed, and its
+# silence must never read as zero.
+poisoned="$(xb_fails 'FAIL | a | broken
+FAILS=3
+INFO | b | the run before this one reported FAILS=0')"
+absent="$(xb_fails 'PASS | a | nothing counted')"
+if [ "${poisoned}" = 3 ] && [ "${absent}" = 1 ]; then
+  printf '%s | %s | %s\n' PASS "verdict arithmetic" "a row quoting FAILS=0 after the count still counts 3; a missing count line counts 1"
+else
+  printf '%s | %s | %s\n' FAIL "verdict arithmetic" "xb_fails read a poisoned table as ${poisoned} (want 3) and a countless one as ${absent} (want 1) — all ${seen} cases are decided by this"
+  fails=$((fails + 1))
+fi
+
+echo "FAILS=${fails}"
+# Mirror the count into the exit status so callers can detect a failed required check from the
+# return status rather than by reading the table.
+[ "${fails}" -eq 0 ] && exit 0 || exit 1
