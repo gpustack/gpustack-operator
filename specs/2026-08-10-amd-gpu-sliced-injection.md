@@ -410,6 +410,11 @@ Emission is `"<i>:<lo>-<hi>"`, `<i>` the card's position in `ROCR_VISIBLE_DEVICE
   through the constants that already exist. Topology comes from this API and never from KFD sysfs — both
   agree on both architectures, but sysfs paths are not an interface AMD maintains, and on a card running
   under SR-IOV `rocm-smi` could not complete a libdrm query at all while agent-info returned every field.
+- **The requested percentage is an integer, so table B's fractional rows are asserted through a
+  surrogate.** `deviceplugin.SlicedCoresPercent` returns an `int` and admission accepts `1`–`100`, so
+  `2.63 %`, `5.26 %` and `10.5 %` are not requestable through any path; the cases assert the smallest
+  integer that lands on the same atom count (`3 %`, `6 %`, `11 %`), which reproduces the table's `mask`
+  column exactly. Should the request API ever carry milli-percent, those rows become exact.
 - Acceptance: table-driven cases reproduce every row of conformance tables A and B — the `mask` column
   for the valid rows, the refusal for table B's 1 % row — plus a refusal for RDNA below one round; the
   degenerate inputs all refuse rather than panic (`CU=0`, odd `CU`, `SE=0`, `SE > CU/2`, `XCC=0`,
@@ -970,7 +975,7 @@ code and the hardware verification, because only then is there something to veri
       Verify: captured output per form, folded into F5; every command confirmed with the user before it
       runs, per Boundaries
 
-- [ ] **T2 · The mask derivation, against the conformance tables**
+- [x] **T2 · The mask derivation, against the conformance tables**
       Blocked by: None
       Owns: `pkg/devicemanager/allocator/amd/cumask.go`,
       `pkg/devicemanager/allocator/amd/cumask_test.go`
@@ -1271,8 +1276,12 @@ Question rather than as an omission.
 - **Should the minimum requestable percentage be visible to admission?** Today a sub-quantum request is
   admitted and refused at `Allocate`, which leaves a Pod that cannot start. Publishing a per-card minimum
   in `AcceleratorLogicalSliced` and validating against it in the Pod webhook is the fix; it is API
-  surface plus a validation rule plus a capacity-key question, and the floor differs per card (10 % on a
-  60 CU / 3 SE part, 2.63 % on a 304 CU / 8 XCC one).
+  surface plus a validation rule plus a capacity-key question, and the floor differs per card.
+  **Two different numbers are easy to conflate here, and T2 measured both**: the smallest *requestable*
+  integer percentage is 9 % on a 60 CU / 3 SE `gfx1101`, 3 % on a 304 CU / 8 XCC `gfx942`, and 1 % on a
+  104 CU single-XCC `gfx90a` — while the smallest *delivered* share is 10 %, 2.63 % and ~0.96 % of the
+  card respectively, because a request is rounded half-up before it is aligned. A webhook would have to
+  publish the requestable figure; this spec's earlier drafts named the delivered one.
 - **Should a rounded-down request report its effective percentage?** A 47 % request on a 3-SE RDNA card
   is served as 40 %, silently, while Kueue charges 47 %. The refusal path names its number; the rounding
   path does not, and no vendor in this repo publishes an effective figure today.
