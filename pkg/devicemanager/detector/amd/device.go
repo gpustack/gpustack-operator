@@ -206,6 +206,17 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 		var status device.AcceleratorStatus
 		{
 			status.Unhealthy = memoryUnhealthy
+
+			// AMD has no partitioning mode, so logical (software) slicing via the
+			// ld.so.preload shim is unconditional. The count is a deliberately loose device-plugin token
+			// pool — the binding constraint on a slice request is its memory budget — set to
+			// the same 128 the NVIDIA and THead detectors publish. Overcommit is true because
+			// CU masks may overlap and tenants sharing an overlap divide it fairly, measured on
+			// both RDNA and CDNA; memory is the exact dimension the flag does not touch.
+			status.LogicalSliced = device.AcceleratorLogicalSliced{
+				Count:                     128,
+				CoresPercentageOvercommit: true,
+			}
 		}
 
 		grpList[grpIndex].Accelerators = append(
@@ -220,6 +231,8 @@ func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, er
 		)
 		index++
 	}
+
+	device.SetGroupSlicedDetails(grpList)
 
 	return grpList, nil
 }
