@@ -217,9 +217,9 @@ new spec designs retention.)
 
 ### Commands
 
-Environment (confirmed): **local** macOS (go 1.26.4) for build/test/lint; **remote**
-`frank@192.168.50.17` for image packaging/push; E2E on the k3s test cluster
-(context `k3s-192-168-50-17`) via the `gpustack-operator-e2e` skill.
+Environment (confirmed): **local** macOS (go 1.26.4) for build/test/lint; a **remote amd64 builder**
+for image packaging/push; E2E on the k3s test cluster it also hosts, via the `gpustack-operator-e2e`
+skill.
 
 ```bash
 make deps                 # fetch dependencies
@@ -228,8 +228,8 @@ go test ./pkg/...         # unit tests (local)
 go test -race ./pkg/utils/datax/... ./pkg/devicemanager/... ./pkg/worker/extensionapis/...
 make build                # cross build (local)
 
-# remote package + push (remote tree is at /home/frank/gpustack.ai/gpustack):
-ssh frank@192.168.50.17 'cd /home/frank/gpustack.ai/gpustack && \
+# remote package + push (the builder's own checkout, whose path ends in gpustack.ai/gpustack):
+ssh <builder> 'cd <checkout> && \
   PACKAGE_NAMESPACE=thxcode PACKAGE_TAG=dev-<hash> PACKAGE_PUSH=true make package'
 ```
 
