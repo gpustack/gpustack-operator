@@ -339,6 +339,47 @@ WORKDIR /out
 FROM xbuild-thead-ppu-${TARGETARCH} AS xbuild-thead-ppu
 
 # =============================================================================
+# Stages: xbuild-amd-rocm-* (AMD ROCm logical slicing)
+# Build the preloaded quota library, the usage reader and the CU-mask
+# self-check from this repo's own csrc/amd/rocm-slicing-shim tree; the final
+# image copies /out into ${GPUSTACK_LIB_DIR}/amd.
+#
+# ONE stage, not a per-runtime fan-out like NVIDIA's cuda-12/cuda-13 or
+# Ascend's cann-<major>-<family>: the product links no ROCm object at all --
+# every runtime symbol is reached through the resolver at run time, which the
+# tree's own `build.sh check` asserts inside this build -- so one build serves
+# every ROCm version the workload container may bring, and the staged
+# directory is flat. The devel base is here for the mask self-check, which is
+# compiled by hipcc and links libhsa-runtime64; the base tag therefore fixes
+# only the glibc floor, not a ROCm generation.
+#
+# ROCm ships no aarch64 user space, so the arm64 leg takes an empty stand-in.
+# Selecting by TARGETARCH rather than FROM --platform=linux/amd64 is what
+# makes that correct: --platform would resolve the amd64 manifest under
+# emulation on the arm64 leg and ship an object that cannot load there.
+# Omitting the stage is not an option either, because the final stage's
+# COPY --from is unconditional.
+# =============================================================================
+FROM rocm/dev-ubuntu-22.04:7.2.4 AS xbuild-amd-rocm-amd64
+# This base leaves /bin/sh as dash, which has no `set -o pipefail`, so the heredoc below would die
+# on its first line. The vendor bases the other xbuild stages use happen to ship bash as /bin/sh and
+# get away without this; `docker buildx build --check` cannot tell the difference, because it never
+# runs a RUN. Declared here for the same reason the builder stages above declare it.
+SHELL ["/bin/bash", "-c"]
+RUN --mount=type=bind,src=pack/gpustack-operator/external/amd/build-libvrocm.sh,target=/build-libvrocm.sh \
+    --mount=type=bind,src=csrc/amd/rocm-slicing-shim,target=/src <<EOF
+    set -exo pipefail
+    bash /build-libvrocm.sh /src /out
+EOF
+
+# WORKDIR rather than a RUN: the directory has to exist for the final stage's
+# unconditional COPY, and nothing has to run to create it.
+FROM ${UBUNTU_IMAGE} AS xbuild-amd-rocm-arm64
+WORKDIR /out
+
+FROM xbuild-amd-rocm-${TARGETARCH} AS xbuild-amd-rocm
+
+# =============================================================================
 # Stage: gpustack (final)
 # Ubuntu 24.04 with only runtime packages — no Go, no build toolchain, no
 # download utilities, no -dev headers. Compiled binaries and CLI tools are
@@ -424,6 +465,11 @@ COPY --from=xbuild-nvidia-cuda-12 /out ${GPUSTACK_LIB_DIR}/iluvatar
 ## runtime-version subdirectory: the workload brings its own SDK, so there is no
 ## host library to match a generation against. Empty on arm64, by design.
 COPY --from=xbuild-thead-ppu /out ${GPUSTACK_LIB_DIR}/thead
+
+## Copy the AMD ROCm logical-slicing library, its usage reader and its CU-mask self-check.
+## Flat, with no ROCm-version subdirectory: the library links no ROCm object, so one build
+## serves every runtime the workload brings. Empty on arm64, by design.
+COPY --from=xbuild-amd-rocm /out ${GPUSTACK_LIB_DIR}/amd
 
 ## Copy CLI binaries from the build stages
 
@@ -515,6 +561,8 @@ EOT
         "${GPUSTACK_LIB_DIR}"/iluvatar/ld.so.preload
     install -D -m 0644 /rootfs/etc/gpustack/lib/thead/ld.so.preload \
         "${GPUSTACK_LIB_DIR}"/thead/ld.so.preload
+    install -D -m 0644 /rootfs/etc/gpustack/lib/amd/ld.so.preload \
+        "${GPUSTACK_LIB_DIR}"/amd/ld.so.preload
 
     # Try to update PCI IDs
     if ! update-pciids; then

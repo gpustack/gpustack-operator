@@ -1031,7 +1031,7 @@ code and the hardware verification, because only then is there something to veri
       releasing the reservation and leaving no annotation; and a sliced allocation's intervals invisible
       to both `accumulatePhysicalOccupied` and `priorPartitionTokens`
 
-- [ ] **T5 · The image builds and stages the shim**
+- [x] **T5 · The image builds and stages the shim**
       Blocked by: None
       Owns: `pack/gpustack-operator/Dockerfile`, `pack/gpustack-operator/external/amd/**`,
       `pack/gpustack-operator/rootfs/etc/gpustack/lib/amd/**`
