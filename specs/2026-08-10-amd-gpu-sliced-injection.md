@@ -529,16 +529,20 @@ throughout. So the allocator must know what a card already carries before it pla
   | `VROCM_LEDGER_PATH` | `/var/run/vrocm/ledger` — the region file inside the per-container rw mount below |
   | `LIBVROCM_LOG_LEVEL` | `1` — denials and errors — injected only when the workload declares no value of its own (`deviceplugin.ContainerEnvDeclared`) |
 
-- **The device identity in `ROCR_VISIBLE_DEVICES` is unresolved and blocks the tuple.** The only measured
-  case is numeric (`ROCR_VISIBLE_DEVICES=1,0` reorders, so `0:` addresses physical card 1); UUID
-  acceptance was never tested. Neither candidate is free: an index is a position in ROCr's own
-  enumeration, and this repository has not shown that `Accelerator.Index` — an AMD-SMI detection-loop
-  counter (`detector/amd/device.go:102-115`) — equals it; while the UUID form depends on
-  `AsicInfo.GetUniqueId()`, which returns the **empty string** when the ASIC serial reads `N/A`
-  (`binding/amdsmi/library_device.go:85-90`). If the hook exposes one identity while this variable names
-  another, the container sees zero HIP devices, or fails initialisation, or — worst — caps and masks a
-  *different card* than the one it was given. T1 settles the form on hardware before the allocator is
-  written, and an ambiguous or absent mapping fails the allocation rather than guessing.
+- **The device identity is `GPU-<hex>`, and it is the string the allocator already has.** Measured on a
+  two-card RDNA host (T1): `ROCR_VISIBLE_DEVICES=GPU-<hex>` selects exactly the named card, and the
+  `<hex>` ROCr matches is byte-for-byte what `AsicInfo.GetUniqueId()` returns
+  (`binding/amdsmi/library_device.go:85-90`) — the same value today's response already emits as
+  `AMD_VISIBLE_DEVICES`. So the two variables carry one string and no index mapping is needed anywhere;
+  in particular `Accelerator.Index`, an AMD-SMI detection-loop counter, is **not** used, and it would
+  have been wrong to: on that host the DRM node numbering runs opposite to AMD-SMI's card ordering
+  (PCI `…04:00.0` is `card0` to AMD-SMI and `renderD128`/`card1` to DRM).
+  - A decimal index also works (`ROCR_VISIBLE_DEVICES=1` selects the second agent), and is not used.
+  - **Every other spelling yields zero GPU agents**, measured: a bare `<hex>` and an `0x`-prefixed one
+    both leave the container with no agent at all. That is the good failure — visibility fails closed,
+    unlike a mis-derived CU mask, which fails open.
+  - A card whose ASIC serial reads `N/A` has an empty `GetUniqueId()`, and an empty identity would make
+    both variables meaningless; the allocator refuses such a card rather than emitting an empty value.
 - **The three device-scoped variables are one tuple.** `HSA_CU_MASK`'s `GPU_list` index and
   `VROCM_DEVICE_MEMORY_LIMIT_<i>`'s `<i>` are both positions in the **post-`ROCR_VISIBLE_DEVICES`**
   ordering, not physical ordinals — ROCr has already applied that variable by the time agents are
@@ -593,12 +597,14 @@ allocation families, the reported-capacity surface, every fail-open mask constru
 semantics and the ledger's lifecycle. What this spec adds on top is Go that composes figures, paths and
 mounts — and three things in that composition that no existing measurement covers:
 
-1. **The device identity `ROCR_VISIBLE_DEVICES` accepts** — index or UUID — and whether it composes with
-   the container-runtime hook's own restriction. This is a **prerequisite** (T1), settled before the
-   allocator is written, because F5's whole tuple is expressed in the index space it defines.
-2. **The index alignment.** That the card `HSA_CU_MASK`'s `0:` addresses and the card
-   `VROCM_DEVICE_MEMORY_LIMIT_0` caps are the same card, under the emitted `ROCR_VISIBLE_DEVICES`, on a
-   **non-zero** physical card — the case a single-card test can never distinguish.
+1. ~~**The device identity `ROCR_VISIBLE_DEVICES` accepts.**~~ **Answered by T1: `GPU-<hex>`, the string
+   the allocator already emits as `AMD_VISIBLE_DEVICES`.** See F5.
+2. ~~**The index alignment.**~~ **Answered by T1, on the non-zero physical card.** With
+   `ROCR_VISIBLE_DEVICES` naming the second card and `HSA_CU_MASK=0:0-11`, `rocm-cumask-check` exits `0`
+   and reports 6 of 30 WGPs occupied; the negative control `HSA_CU_MASK=1:0-11` — an index past the end
+   of the container's own list — reports "no segment names this device" and **30 of 30 WGPs occupied**,
+   exiting `1`. A misaligned tuple therefore loses the whole card's isolation silently, and the probe is
+   the only thing on the node that says so.
 3. **Packed placement at non-zero offsets.** Every conformance-table row places its window at zero, and
    the C reference implementation cannot emit anything else. Offset windows have exactly two measured
    witnesses on RDNA (`0:2-15` and `0:16-29`, both correctly throttled) and one on CDNA (`0:8-15`,
@@ -737,12 +743,10 @@ mounts — and three things in that composition that no existing measurement cov
 - **Occupancy cardinality passes while two windows alias the same physical units** → the probe cannot
   decide physical identity on RDNA, so F6 does not ask it to: simultaneous saturated runs across several
   sizes and offsets, judged on aggregate throughput, are what separate disjoint from aliased.
-- **`ROCR_VISIBLE_DEVICES` needs an identity the allocator cannot compose** — an index it cannot predict,
-  or a UUID that is empty when the ASIC serial reads `N/A` → this is the highest-uncertainty item in the
-  contract, which is why it is a prerequisite task rather than an acceptance row. If neither form
-  composes, the fallback is to emit nothing and rely on the runtime hook having restricted the container
-  to one card, so index `0` is that card by construction — weaker, because it assumes a correctly
-  configured hook, and it would be recorded as a node constraint rather than hidden.
+- ~~**`ROCR_VISIBLE_DEVICES` needs an identity the allocator cannot compose.**~~ **Retired by T1**: the
+  form ROCr accepts is `GPU-<hex>`, which is the value the allocator already holds. What remains of the
+  risk is a card whose ASIC serial reads `N/A` and whose `GetUniqueId()` is therefore empty — an empty
+  identity would silently widen the container to every card, so the allocation is refused instead.
 - **A window chosen outside the node mutex is chosen twice** → the placement is a mutex-scoped step of
   the generic server, published into the reservation before it unlocks, exactly as the partition
   selection is.
@@ -961,7 +965,7 @@ fans out immediately. T1 is a hardware spike that settles a contract the allocat
 without; T2 is the arithmetic PoC whose fixture is already checked in. The checkpoint sits between the
 code and the hardware verification, because only then is there something to verify.
 
-- [ ] **T1 · Which device identity does `ROCR_VISIBLE_DEVICES` accept?**
+- [x] **T1 · Which device identity does `ROCR_VISIBLE_DEVICES` accept?**
       Blocked by: None
       Owns: `specs/2026-08-10-amd-gpu-sliced-injection.md` (F5's identity paragraph and F6 item 1)
       Gate: review
@@ -974,6 +978,25 @@ code and the hardware verification, because only then is there something to veri
       hook, the fallback in Risks is recorded as the decision, with what it assumes about the node.
       Verify: captured output per form, folded into F5; every command confirmed with the user before it
       runs, per Boundaries
+
+      **Measured**, on the two-card `gfx1101` host, `2026-08-10`:
+
+      | form | GPU agents the container sees |
+      | --- | --- |
+      | *(none)* | both |
+      | `1` | the second card only |
+      | `0` | the first card only |
+      | `GPU-<hex>` of the second card | that card only |
+      | `<hex>` with no prefix | **none** |
+      | `0x<hex>` | **none** |
+
+      ROCr's own reported `Uuid` is `GPU-<hex>`, byte-for-byte `AsicInfo.GetUniqueId()`'s output. The
+      full tuple then held on that non-zero card, inside `gpustack/runner:rocm7.2-vllm*` with the shim
+      preloaded: `device_count = 1`, `get_device_properties(0).total_memory` and `mem_get_info` both
+      `4.000 GiB` against a 16 GiB card, `rocm-cumask-check` `rc=0` at 6 of 30 WGPs occupied, and
+      `rocm-monitor` reading `mem_quota_mib=4096` out of the per-container region. The negative control
+      `HSA_CU_MASK=1:0-11` under the same `ROCR_VISIBLE_DEVICES` reports "no segment names this device"
+      and 30 of 30 WGPs, `rc=1`.
 
 - [x] **T2 · The mask derivation, against the conformance tables**
       Blocked by: None
