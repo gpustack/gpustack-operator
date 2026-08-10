@@ -28,7 +28,7 @@ slots per card) requests. What differs is how — and whether — a single card 
 
 | Vendor | Class | Kubernetes resource | Logical slicing (`.sliced`) | Physical partitioning (`.partitioned`) |
 |---|---|---|---|---|
-| **AMD** | GPU | `amd.com/gpu` |  |  |
+| **AMD** | GPU | `amd.com/gpu` | ✅ |  |
 | **Cambricon** | MLU | `cambricon.com/mlu` | ✅ |  |
 | **Huawei Ascend** | NPU | `huawei.com/npu` | ✅ |  |
 | **Hygon** | DCU | `hygon.com/dcu` | ✅ |  |
@@ -42,8 +42,10 @@ slots per card) requests. What differs is how — and whether — a single card 
   facility applied to it — a preload library, a kernel module, a sub-device — budgeting its compute
   (SM / aicore %) and its VRAM separately, so `50 %` of the memory at `40 %` of the compute is a valid
   ask. The VRAM budget is a hard cap everywhere; the compute budget is not one kind of thing — on Moore
-  Threads it is a scheduling weight, and on T-Head it is a duty-cycle share of a short window, so a
-  slice may exceed its percentage instantaneously and not across the window.
+  Threads it is a scheduling weight, on T-Head a duty-cycle share of a short window (so a slice may
+  exceed its percentage instantaneously and not across the window), and on AMD a hardware compute-unit
+  mask, which is a *ceiling* rather than a QoS: it carries no memory-bandwidth isolation at all, so a
+  bandwidth-hungry neighbour still costs a slice throughput.
 - **Physical partitioning is hardware.** It is a driver-level configuration mode an administrator
   enables on the card — the operator observes it, never flips it. See [NVIDIA MIG
   Operations](./docs/operation/nvidia-mig.md) and [T-Head PPU Partitioning

@@ -149,6 +149,23 @@ func hsaAgentGetInfoComputeUnitCount(agent Agent) (uint32, Return) {
 	return cuCount, hsaAgentGetInfo(agent, AgentInfo(AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), unsafe.Pointer(&cuCount))
 }
 
+func hsaAgentGetInfoNumShaderEngines(agent Agent) (uint32, Return) {
+	var numShaderEngines uint32
+	return numShaderEngines, hsaAgentGetInfo(
+		agent, AgentInfo(AMD_AGENT_INFO_NUM_SHADER_ENGINES), unsafe.Pointer(&numShaderEngines))
+}
+
+func hsaAgentGetInfoNumShaderArraysPerSE(agent Agent) (uint32, Return) {
+	var numShaderArraysPerSE uint32
+	return numShaderArraysPerSE, hsaAgentGetInfo(
+		agent, AgentInfo(AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE), unsafe.Pointer(&numShaderArraysPerSE))
+}
+
+func hsaAgentGetInfoNumXcc(agent Agent) (uint32, Return) {
+	var numXcc uint32
+	return numXcc, hsaAgentGetInfo(agent, AgentInfo(AMD_AGENT_INFO_NUM_XCC), unsafe.Pointer(&numXcc))
+}
+
 func hsaAgentGetInfoAsicFamilyId(agent Agent) (uint32, Return) {
 	var familyId uint32
 	// cFamilyId := (*C.uint32_t)(unsafe.Pointer(&familyId))

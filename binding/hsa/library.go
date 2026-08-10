@@ -81,12 +81,15 @@ func (l *HSA) ShutDown() Return {
 type (
 	// AgentProperty represents the properties of an HSA agent (GPU).
 	AgentProperty struct {
-		BDF              string
-		UUID             string
-		ProductName      string
-		Name             string
-		ComputeUnitCount uint32
-		AsicFamilyId     uint32
+		BDF                  string
+		UUID                 string
+		ProductName          string
+		Name                 string
+		ComputeUnitCount     uint32
+		NumShaderEngines     uint32
+		NumShaderArraysPerSE uint32
+		NumXcc               uint32
+		AsicFamilyId         uint32
 	}
 	// Agents is a map of AgentUUID to AgentProperty,
 	// representing the properties of all detected HSA agents (GPUs).
@@ -114,6 +117,9 @@ func (l *HSA) GetAgents() Agents {
 		productName, _ := hsaAgentGetInfoProduceName(agent)
 		name, _ := hsaAgentGetInfoName(agent)
 		computeUnitCount, _ := hsaAgentGetInfoComputeUnitCount(agent)
+		numShaderEngines, _ := hsaAgentGetInfoNumShaderEngines(agent)
+		numShaderArraysPerSE, _ := hsaAgentGetInfoNumShaderArraysPerSE(agent)
+		numXcc, _ := hsaAgentGetInfoNumXcc(agent)
 		asicFamilyId, _ := hsaAgentGetInfoAsicFamilyId(agent)
 
 		key := bdf
@@ -121,12 +127,15 @@ func (l *HSA) GetAgents() Agents {
 			key = uuid
 		}
 		agents[key] = AgentProperty{
-			BDF:              bdf,
-			UUID:             uuid,
-			ProductName:      productName,
-			Name:             name,
-			ComputeUnitCount: computeUnitCount,
-			AsicFamilyId:     asicFamilyId,
+			BDF:                  bdf,
+			UUID:                 uuid,
+			ProductName:          productName,
+			Name:                 name,
+			ComputeUnitCount:     computeUnitCount,
+			NumShaderEngines:     numShaderEngines,
+			NumShaderArraysPerSE: numShaderArraysPerSE,
+			NumXcc:               numXcc,
+			AsicFamilyId:         asicFamilyId,
 		}
 		return STATUS_SUCCESS
 	})

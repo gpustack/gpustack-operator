@@ -803,6 +803,12 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	// Its reads (getAllocatingPod, getDevices) are served from the informer cache and it makes no
 	// durable writes; crucially the mutex is NOT held across the annotation patch, which runs after
 	// the mutex is released.
+	// A responder that places logical geometry is called twice more: once inside the mutex below
+	// to pick the window, once after it to render the response from what was picked. Resolved
+	// once here so the two calls cannot disagree about whether this responder places at all.
+	logicalPlacer, placesLogical := s.Responder.(LogicalSlicedResponder)
+	placesLogical = placesLogical && s.AllocationMode == workercore.DeviceAllocationModeSliced
+
 	var (
 		pod                 *core.Pod
 		ctr                 *core.Container
@@ -810,6 +816,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		profile             string
 		allocatedStatus     workercore.DevicesStatus
 		allocatedAllocation = make(map[Resource]int32)
+		logicalPlacements   LogicalPlacements
 	)
 	if err := func() error {
 		s.Reconciler.allocateMutex.Lock()
@@ -834,6 +841,19 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 			if err != nil {
 				s.Logger.Error(err, "get occupied placements for allocation")
 				return grpcstatus.Errorf(grpccodes.Internal, "get occupied placements for allocation: %v", err)
+			}
+		}
+
+		// A logical slice that occupies a position on the card needs the same snapshot, in its
+		// own key space: what every live allocation already occupies, so this one can be placed
+		// beside them rather than on top of them.
+		var occupiedLogical LogicalPlacements
+		if placesLogical {
+			occupiedLogical, err = s.occupiedLogicalPlacements(ctx)
+			if err != nil {
+				s.Logger.Error(err, "get occupied logical placements for allocation")
+				return grpcstatus.Errorf(grpccodes.Internal,
+					"get occupied logical placements for allocation: %v", err)
 			}
 		}
 
@@ -901,7 +921,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 			// sibling would place on THAT card, bypassing the vendor's per-(pod, container,
 			// card) reuse marker and carving a second instance. The card-bound families get
 			// this for free, since kubelet re-offers the tokens it checkpointed.
-			if prior, held := s.priorPartitionAllocation(pod, ctr.Name); held {
+			if prior, held := s.priorAllocationOf(pod, ctr.Name); held {
 				cardTokens, placements = priorPartitionTokens(prior)
 			}
 			if cardTokens == nil {
@@ -984,6 +1004,27 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 			}
 		}
 
+		// Publish the logical slice's geometry into the allocation for the same reason the
+		// partition selection is published below, and at the same point: before the reservation,
+		// so the next serialized Allocate places against a card whose window is already spoken
+		// for. Choosing it later — in the responder, after the mutex — cannot be made race-free.
+		if placesLogical {
+			// A retried Allocate must reuse the window this container already holds. The kubelet
+			// re-runs Allocate for a container whose checkpoint it lost, and by then this
+			// container's own window is part of the node's occupancy: deciding afresh would read
+			// it as somebody else's, move the container to a different window, and strand the
+			// first one until the Pod goes away.
+			if prior, held := s.priorLogicalPlacements(pod, ctr.Name); held {
+				logicalPlacements = prior
+			} else if logicalPlacements, err = logicalPlacer.PlaceLogicalSliced(
+				ctx, pod, ctr, devs, allocatedAllocation, occupiedLogical); err != nil {
+				s.Logger.Error(err, "place logical slice for allocation",
+					"pod", kubemeta.GetNamespacedNameKey(pod), "container", ctr.Name)
+				return grpcstatus.Errorf(grpccodes.Internal, "place logical slice: %v", err)
+			}
+			applyLogicalPlacements(&allocatedStatus, logicalPlacements)
+		}
+
 		// Publish the partition selection — card, profile and the intervals it intends to
 		// occupy — into the allocation BEFORE the reservation below, so the next serialized
 		// Allocate decides against a card that is already spoken for rather than one that
@@ -1033,6 +1074,38 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		s.Reconciler.reserveDevices(pod.UID, ctr.Name, allocatedStatus, allocatedDeviceIDs)
 	}
 
+	// A logical-slice response is rendered BEFORE the durable patch, and ONLY that one.
+	//
+	// It has to be: it is the response whose failure would otherwise leave a CU window recorded on
+	// a card for a container kubelet never starts, and it creates nothing but a directory, so
+	// rendering it early costs nothing if the patch then fails.
+	//
+	// Moving the OTHER responders here would be a regression, and a quiet one. Cambricon and MetaX
+	// materialize a subdevice and an on-disk ownership marker inside GetContainerAllocateResponse;
+	// were that to run before a patch that then failed, the hardware would exist while the ledger
+	// said the card was free, and their reclaimers — which preserve an instance whose Pod is still
+	// live — would keep it that way. They stay where they are, below the patch, and the strand
+	// their own failure can leave is pre-existing and out of scope here.
+	//
+	// A physical-slice allocation injects only the partition's visible-devices env the actuator
+	// already assembled (no logical-slice artifacts), so it bypasses the responder entirely.
+	var ctrResp *ContainerAllocateResponse
+	switch {
+	case physical != nil:
+		ctrResp = physical.Response
+	case placesLogical:
+		// The placement is consumed, never recomputed: what the container is told must be what
+		// the ledger recorded, and only one of the two can be authoritative.
+		var respErr error
+		ctrResp, respErr = logicalPlacer.GetLogicalSlicedResponse(
+			ctx, pod, ctr, devs, allocatedAllocation, logicalPlacements)
+		if respErr != nil {
+			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
+			s.Logger.Error(respErr, "get logical sliced response")
+			return nil, respErr
+		}
+	}
+
 	// Persist the durable allocation annotation outside the mutex (I/O). On failure roll back the
 	// reservation written above: with the annotation absent, the Pod-delete watch (gated on it)
 	// would never enqueue a prune, so the card would stay stranded for the opposite mode. Kubelet
@@ -1048,12 +1121,9 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 	}
 
-	// A physical-slice allocation injects only the partition's visible-devices env the actuator
-	// already assembled (no logical-slice artifacts), so it bypasses the logical-slice responder.
-	var ctrResp *ContainerAllocateResponse
-	if physical != nil {
-		ctrResp = physical.Response
-	} else {
+	// Every other responder keeps its position after the patch, unchanged — see above for why
+	// moving it would strand hardware some vendors create in here.
+	if ctrResp == nil {
 		var err error
 		ctrResp, err = s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
 		if err != nil {
@@ -1088,10 +1158,12 @@ func partitionProfileOf(ctr *core.Container) (string, bool) {
 	return "", false
 }
 
-// priorPartitionAllocation returns the partition this container already holds: the in-process
+// priorAllocationOf returns the allocation this container already holds: the in-process
 // reservation first, then the durable annotation, which is the only record that survives a
-// device-manager restart. It is what makes a retried Allocate idempotent.
-func (s *ResourceServer) priorPartitionAllocation(
+// device-manager restart. It is what makes a retried Allocate idempotent, for a partition's card
+// and interval and for a logical slice's window alike — the lookup is mode-agnostic, and each
+// caller reads out the part of the record it owns.
+func (s *ResourceServer) priorAllocationOf(
 	pod *core.Pod, container string,
 ) (workercore.DevicesStatus, bool) {
 	if reserved, ok := s.Reconciler.reservedDevices(pod.UID, container); ok && len(reserved.Groups) > 0 {
@@ -1156,7 +1228,12 @@ func priorPartitionTokens(
 			acc := &grp.Accelerators[j]
 			res := Resource{Group: grp.ID, Device: acc.ID}
 			tokens[res] = append(tokens[res], ResourceUnit{Resource: res, Index: uint64(len(tokens[res]))})
-			if len(acc.AllocatedPhysicalPlacements) > 0 {
+			// The profile is what tells the two ledgers sharing this field apart, and it is checked
+			// here for the same reason every other reader checks it. This path cannot meet a
+			// logical entry today — it is reached only for a container that requested a partition
+			// profile, and a container requests one family or the other — but "cannot happen today"
+			// is not what the other readers rely on, and it should not be what this one does.
+			if acc.AllocatedPhysicalProfile != "" && len(acc.AllocatedPhysicalPlacements) > 0 {
 				placements[res] = acc.AllocatedPhysicalPlacements
 			}
 		}
@@ -1179,6 +1256,61 @@ func partitionTokens(
 		placements[res] = append(placements[res], selections[i].Placement)
 	}
 	return tokens, placements
+}
+
+// occupiedLogicalPlacements unions the same two records the physical placement decision reads, in
+// the logical ledger's own key space: the geometry live allocations recorded in their Pod
+// annotations, and the geometry in-flight allocations published into their reservation before the
+// annotation could land. Neither source alone is enough — the annotation lags by a cache
+// round-trip, the reservation forgets everything across a restart.
+//
+// An allocation legitimately appears in BOTH once its annotation has propagated. That is harmless
+// for a decision reading overlap as a yes/no, which is what the physical ledger does; it is not
+// harmless for one that ranks candidates by how much they overlap, so a placer that ranks must
+// merge before it measures.
+func (s *ResourceServer) occupiedLogicalPlacements(ctx context.Context) (LogicalPlacements, error) {
+	occupied, err := s.Reconciler.LiveLogicalOccupied(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for id, placements := range s.Reconciler.reservedLogicalOccupied() {
+		occupied[id] = append(occupied[id], placements...)
+	}
+	return occupied, nil
+}
+
+// applyLogicalPlacements records the geometry the responder chose into the allocation status, so
+// the reservation publishes it and the annotation patch persists it. Keyed by accelerator UUID —
+// see LogicalPlacements for why the group is deliberately not part of that key.
+//
+// It writes AllocatedPhysicalPlacements and leaves AllocatedPhysicalProfile empty, which is what
+// tells the two ledgers apart: the physical accumulator skips an entry with no profile, and the
+// logical one requires exactly that shape.
+func applyLogicalPlacements(status *workercore.DevicesStatus, placements LogicalPlacements) {
+	for i := range status.Groups {
+		grp := &status.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if p, ok := placements[acc.ID]; ok && len(p) > 0 {
+				acc.AllocatedPhysicalPlacements = p
+			}
+		}
+	}
+}
+
+// priorLogicalPlacements returns the geometry this container already holds, so a retried Allocate
+// reuses its own window instead of reading it as somebody else's.
+func (s *ResourceServer) priorLogicalPlacements(pod *core.Pod, container string) (LogicalPlacements, bool) {
+	prior, held := s.priorAllocationOf(pod, container)
+	if !held {
+		return nil, false
+	}
+	placements := make(LogicalPlacements)
+	accumulateLogicalOccupied(prior, placements)
+	if len(placements) == 0 {
+		return nil, false
+	}
+	return placements, true
 }
 
 // occupiedPhysicalPlacements unions the two records of what a node's cards already carry: the

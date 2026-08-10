@@ -538,6 +538,20 @@ func (r *DevicesReconciler) reservedPhysicalOccupied() map[Resource][]workercore
 	return occupied
 }
 
+// reservedLogicalOccupied is the logical counterpart of reservedPhysicalOccupied: the geometry the
+// in-process reservations claim. It is the half of the occupancy that is already true but not yet
+// visible in any annotation, which is what makes a batch of concurrent Allocates resolve to
+// distinct windows rather than to the same free one.
+func (r *DevicesReconciler) reservedLogicalOccupied() LogicalPlacements {
+	r.reservationsMutex.RLock()
+	defer r.reservationsMutex.RUnlock()
+	occupied := make(LogicalPlacements)
+	for _, v := range r.reservations {
+		accumulateLogicalOccupied(v.Allocated, occupied)
+	}
+	return occupied
+}
+
 // reservedModeForResource reports the allocation mode a physical card (group:device) is
 // currently held in by any pod's reservation, and the owning pod UID. The reservation map is
 // written synchronously by every workload Allocate, so it is the race-safe cross-pod source of
@@ -965,6 +979,28 @@ func accumulatePhysicalOccupied(
 	}
 }
 
+// accumulateLogicalOccupied folds a Pod's annotation-recorded logical-slice geometry into the
+// per-card occupied set, keyed by accelerator UUID.
+//
+// It shares the AllocatedPhysicalPlacements transport with the physical ledger, and the two are
+// told apart by shape: a logical entry carries intervals and NO profile name, which is exactly the
+// entry accumulatePhysicalOccupied skips. The mode is checked too, so neither can be read as the
+// other by a future writer that forgets the profile is load-bearing.
+func accumulateLogicalOccupied(podStatus workercore.DevicesStatus, occupied LogicalPlacements) {
+	for i := range podStatus.Groups {
+		grp := &podStatus.Groups[i]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if acc.Mode != workercore.DeviceAllocationModeSliced ||
+				acc.AllocatedPhysicalProfile != "" ||
+				len(acc.AllocatedPhysicalPlacements) == 0 {
+				continue
+			}
+			occupied[acc.ID] = append(occupied[acc.ID], acc.AllocatedPhysicalPlacements...)
+		}
+	}
+}
+
 // foldPhysicalLedger sets the aggregated OUTPUT AllocatedProfiles/RemainingProfiles on each
 // physical-slice-enabled card in the wholesale Status, from the annotation-reconstructed
 // occupied set (occupied/allocated — the upward transport accumulatePhysicalOccupied built)
@@ -1026,6 +1062,29 @@ func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resou
 			continue
 		}
 		accumulatePhysicalOccupied(podDevsStatus, occupied, allocated)
+	}
+	return occupied, nil
+}
+
+// LiveLogicalOccupied lists, per accelerator UUID, the logical-slice geometry Pods on this node
+// currently claim by annotation — the durable half of what a placement decision reads, and the only
+// half that survives a device-manager restart. A terminating Pod still counts, matching the live set
+// every other ledger here is built from: its window is freed when the Pod object is gone, not when
+// its containers exit. It reads the informer cache (no device I/O).
+func (r *DevicesReconciler) LiveLogicalOccupied(ctx context.Context) (LogicalPlacements, error) {
+	podList := new(core.PodList)
+	if err := r.Client.List(ctx, podList,
+		ctrlcli.MatchingFields{IndexingPodsByNodeName: r.NodeName},
+		ctrlcli.UnsafeDisableDeepCopy); err != nil {
+		return nil, err
+	}
+	occupied := make(LogicalPlacements)
+	for i := range podList.Items {
+		podDevsStatus, err := extractAllocatedStatusFromPod(&podList.Items[i])
+		if err != nil {
+			continue
+		}
+		accumulateLogicalOccupied(podDevsStatus, occupied)
 	}
 	return occupied, nil
 }

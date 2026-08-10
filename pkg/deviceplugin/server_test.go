@@ -3190,3 +3190,319 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard(t
 	assert.Equal(t, "dev-0", unit.Device,
 		"a must-include token must be echoed even on a card with no room left; the fit check belongs to cards this call is choosing, not to one already allocated")
 }
+
+// ---- the logical placement ledger -----------------------------------------------------------
+//
+// A logical slice whose responder places geometry occupies a POSITION on the card, so the server
+// has to decide that position where the partition selection is decided — inside the node allocate
+// mutex, published into the reservation before it unlocks — and persist it where the partition
+// interval is persisted. These cases pin both halves, plus what happens when neither runs.
+
+// slicedPod builds a Pod requesting one logical slice on the workload container.
+func slicedPod(nodeName, name, uid string) *core.Pod {
+	resName := nodefeature.GetAcceleratableResourceName(
+		nodefeature.ManufacturerNVIDIA, workercore.DeviceAllocationModeSliced)
+	return &core.Pod{
+		ObjectMeta: meta.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uid)},
+		Spec: core.PodSpec{
+			NodeName: nodeName,
+			Containers: []core.Container{{
+				Name:      workloadContainer,
+				Resources: core.ResourceRequirements{Limits: core.ResourceList{resName: resource.MustParse("1")}},
+			}},
+		},
+	}
+}
+
+// slicedDevices builds a one-card node whose card advertises logical slicing.
+func slicedDevices(nodeName string) *workercore.Devices {
+	return &workercore.Devices{
+		ObjectMeta: meta.ObjectMeta{Name: nodeName},
+		Spec: workercore.DevicesSpec{
+			Groups: []workercore.DevicesGroup{{
+				ID:           "grp-0",
+				Manufacturer: nodefeature.ManufacturerNVIDIA,
+				Accelerators: []workercore.Accelerator{{ID: "dev-0", Index: 0}},
+			}},
+		},
+	}
+}
+
+// recordingPlacer is a LogicalSlicedResponder that hands out a fixed-length window at the lowest
+// start no recorded window already covers — the shape a real placer has, reduced to what these
+// cases need to observe: which occupancy the server showed it, and how often it was asked.
+type recordingPlacer struct {
+	length  int32
+	seen    []LogicalPlacements
+	handed  LogicalPlacements
+	respErr error
+}
+
+func (p *recordingPlacer) GetContainerAllocateResponse(
+	context.Context, *core.Pod, *core.Container, *workercore.Devices, map[Resource]int32,
+) (*ContainerAllocateResponse, error) {
+	return nil, errors.New("the sliced path must not reach GetContainerAllocateResponse")
+}
+
+func (p *recordingPlacer) PlaceLogicalSliced(
+	_ context.Context, _ *core.Pod, _ *core.Container, _ *workercore.Devices,
+	allocated map[Resource]int32, occupied LogicalPlacements,
+) (LogicalPlacements, error) {
+	p.seen = append(p.seen, occupied)
+
+	placed := make(LogicalPlacements)
+	for res := range allocated {
+		var start int32
+		for _, taken := range occupied[res.Device] {
+			if end := taken.Start + taken.Length; end > start {
+				start = end
+			}
+		}
+		placed[res.Device] = []workercore.AcceleratorPhysicalPlacement{{Start: start, Length: p.length}}
+	}
+	return placed, nil
+}
+
+func (p *recordingPlacer) GetLogicalSlicedResponse(
+	_ context.Context, _ *core.Pod, _ *core.Container, _ *workercore.Devices,
+	_ map[Resource]int32, placements LogicalPlacements,
+) (*ContainerAllocateResponse, error) {
+	if p.respErr != nil {
+		return nil, p.respErr
+	}
+	p.handed = placements
+	return &ContainerAllocateResponse{}, nil
+}
+
+func slicedServer(rec *DevicesReconciler, responder ContainerAllocateResponder) *ResourceServer {
+	return &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+		Reconciler:     rec,
+		Responder:      responder,
+	}
+}
+
+func allocateOneSlice(t *testing.T, s *ResourceServer) error {
+	t.Helper()
+	_, err := s.Allocate(context.Background(), &AllocateRequest{
+		ContainerRequests: []*ContainerAllocateRequest{{DevicesIds: []string{"grp-0:dev-0:0000"}}},
+	})
+	return err
+}
+
+// TestResourceServer_Allocate_SlicedPublishesWindowBeforeUnlocking is the one that justifies
+// placing under the mutex at all. The annotation patch is suppressed, so the ONLY record of the
+// first allocation's window is the in-process reservation the mutex section published — and the
+// second allocation must still see it. Deciding in the responder instead would read an empty
+// occupancy here and hand out the same window twice.
+func TestResourceServer_Allocate_SlicedPublishesWindowBeforeUnlocking(t *testing.T) {
+	const nodeName = "node-logical-race"
+
+	first, second := slicedPod(nodeName, "first", "pod-first"), slicedPod(nodeName, "second", "pod-second")
+	second.CreationTimestamp = meta.NewTime(first.CreationTimestamp.Add(time.Second))
+	cli := ctrlfake.NewClientBuilder().
+		WithScheme(scheme.Scheme).
+		WithObjects(slicedDevices(nodeName), first, second).
+		WithIndex(&core.Pod{}, IndexingPodsByNodeName, func(obj ctrlcli.Object) []string {
+			return []string{obj.(*core.Pod).Spec.NodeName}
+		}).
+		WithInterceptorFuncs(ctrlintercept.Funcs{
+			Patch: func(context.Context, ctrlcli.WithWatch, ctrlcli.Object, ctrlcli.Patch, ...ctrlcli.PatchOption) error {
+				return nil // the durable half never lands, leaving only the reservation
+			},
+		}).
+		Build()
+
+	placer := &recordingPlacer{length: 8}
+	s := slicedServer(&DevicesReconciler{NodeName: nodeName, Client: cli}, placer)
+
+	require.NoError(t, allocateOneSlice(t, s))
+	require.NoError(t, allocateOneSlice(t, s))
+
+	require.Len(t, placer.seen, 2)
+	assert.Empty(t, placer.seen[0]["dev-0"], "the first allocation finds the card empty")
+	assert.Equal(t,
+		[]workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 8}}, placer.seen[1]["dev-0"],
+		"the second must see the first's window through the reservation alone")
+	assert.Equal(t,
+		[]workercore.AcceleratorPhysicalPlacement{{Start: 8, Length: 8}}, placer.handed["dev-0"],
+		"and must therefore be placed beside it, not on top of it")
+}
+
+// TestResourceServer_Allocate_SlicedPersistsWindow pins the durable half: the window reaches the
+// Pod's allocation annotation, which is the only record that survives a device-manager restart,
+// and it lands on the transport the physical ledger shares — with no profile, which is what tells
+// the two apart.
+func TestResourceServer_Allocate_SlicedPersistsWindow(t *testing.T) {
+	const nodeName = "node-logical-persist"
+
+	pod := slicedPod(nodeName, "p", "pod-p")
+	cli := nodeFixture(slicedDevices(nodeName), pod)
+	s := slicedServer(&DevicesReconciler{NodeName: nodeName, Client: cli}, &recordingPlacer{length: 12})
+
+	require.NoError(t, allocateOneSlice(t, s))
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+	allocated, err := extractAllocatedStatusFromPod(got)
+	require.NoError(t, err)
+	require.Len(t, allocated.Groups, 1)
+	require.Len(t, allocated.Groups[0].Accelerators, 1)
+	acc := allocated.Groups[0].Accelerators[0]
+	assert.Equal(t,
+		[]workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 12}}, acc.AllocatedPhysicalPlacements)
+	assert.Empty(t, acc.AllocatedPhysicalProfile,
+		"a logical entry carries no profile; that absence is what keeps the physical ledger from reading it")
+}
+
+// TestResourceServer_Allocate_SlicedRetryReusesTheWindow pins idempotence. The kubelet re-runs
+// Allocate for a container whose checkpoint it lost, and by then this container's own window is
+// part of the node's occupancy: placing afresh would read it as somebody else's, move the
+// container to a second window and strand the first until the Pod goes away.
+func TestResourceServer_Allocate_SlicedRetryReusesTheWindow(t *testing.T) {
+	const nodeName = "node-logical-retry"
+
+	pod := slicedPod(nodeName, "p", "pod-p")
+	cli := nodeFixture(slicedDevices(nodeName), pod)
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	placer := &recordingPlacer{length: 8}
+	s := slicedServer(rec, placer)
+
+	require.NoError(t, allocateOneSlice(t, s))
+	rec.releaseReservation(pod.UID, workloadContainer) // a device-manager restart, annotation kept
+	require.NoError(t, allocateOneSlice(t, s))
+
+	assert.Len(t, placer.seen, 1, "a retry reuses the recorded window instead of placing again")
+	assert.Equal(t,
+		[]workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 8}}, placer.handed["dev-0"],
+		"and the response is rendered from that same window")
+}
+
+// TestResourceServer_Allocate_ResponderFailureLeavesNothing pins the ordering fix. The response is
+// rendered before the durable patch, so a responder that fails leaves no annotation and no
+// reservation. Built the other way round, a Pod that kubelet never starts kept its allocation —
+// and its window — until the Pod object disappeared.
+func TestResourceServer_Allocate_ResponderFailureLeavesNothing(t *testing.T) {
+	const nodeName = "node-logical-respfail"
+
+	pod := slicedPod(nodeName, "p", "pod-p")
+	cli := nodeFixture(slicedDevices(nodeName), pod)
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	s := slicedServer(rec, &recordingPlacer{length: 8, respErr: errors.New("no working directory")})
+
+	require.Error(t, allocateOneSlice(t, s))
+
+	_, held := reservedWorkload(rec, pod.UID)
+	assert.False(t, held, "the reservation must be released when the response cannot be rendered")
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+	allocations, err := AllocatedAcceleratorsOf(got)
+	require.NoError(t, err)
+	assert.Empty(t, allocations, "and no allocation annotation must have been written")
+}
+
+// TestAccumulateOccupied_LedgersDoNotReadEachOther pins the one property that lets both ledgers
+// share the AllocatedPhysicalPlacements transport: a logical entry carries windows and no profile,
+// which the physical accumulator skips, and a physical entry carries a profile, which the logical
+// one skips. Sharing the field is only safe while this holds.
+func TestAccumulateOccupied_LedgersDoNotReadEachOther(t *testing.T) {
+	window := workercore.AcceleratorPhysicalPlacement{Start: 8, Length: 8}
+	status := func(mode workercore.DeviceAllocationMode, profile string) workercore.DevicesStatus {
+		return workercore.DevicesStatus{Groups: []workercore.DevicesAllocationGroup{{
+			ID:           "grp-0",
+			Manufacturer: nodefeature.ManufacturerNVIDIA,
+			Accelerators: []workercore.AcceleratorAllocation{{
+				ID:                          "dev-0",
+				Mode:                        mode,
+				AllocatedPhysicalProfile:    profile,
+				AllocatedPhysicalPlacements: []workercore.AcceleratorPhysicalPlacement{window},
+			}},
+		}}}
+	}
+
+	cases := []struct {
+		name        string
+		status      workercore.DevicesStatus
+		wantLogical bool
+		wantPhysic  bool
+	}{
+		{
+			name:        "a sliced window is invisible to the physical ledger",
+			status:      status(workercore.DeviceAllocationModeSliced, ""),
+			wantLogical: true,
+		},
+		{
+			name:       "a partition interval is invisible to the logical ledger",
+			status:     status(workercore.DeviceAllocationModePartitioned, "7g.80gb"),
+			wantPhysic: true,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			logical := make(LogicalPlacements)
+			accumulateLogicalOccupied(c.status, logical)
+			assert.Equal(t, c.wantLogical, len(logical["dev-0"]) > 0)
+
+			physical := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
+			accumulatePhysicalOccupied(c.status, physical, make(map[Resource]map[string]int32))
+			assert.Equal(t, c.wantPhysic, len(physical[Resource{Group: "grp-0", Device: "dev-0"}]) > 0)
+		})
+	}
+}
+
+// TestResourceServer_Allocate_SlicedWithoutPlacerRecordsNoWindow pins the opt-in: a responder that
+// does not place geometry is served exactly as before — no occupancy read, no window recorded.
+func TestResourceServer_Allocate_SlicedWithoutPlacerRecordsNoWindow(t *testing.T) {
+	const nodeName = "node-logical-optout"
+
+	pod := slicedPod(nodeName, "p", "pod-p")
+	cli := nodeFixture(slicedDevices(nodeName), pod)
+	s := slicedServer(&DevicesReconciler{NodeName: nodeName, Client: cli}, stubResponder{})
+
+	require.NoError(t, allocateOneSlice(t, s))
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+	allocated, err := extractAllocatedStatusFromPod(got)
+	require.NoError(t, err)
+	require.Len(t, allocated.Groups, 1)
+	assert.Empty(t, allocated.Groups[0].Accelerators[0].AllocatedPhysicalPlacements)
+}
+
+// failingResponder implements only ContainerAllocateResponder, and fails.
+type failingResponder struct{}
+
+func (failingResponder) GetContainerAllocateResponse(
+	context.Context, *core.Pod, *core.Container, *workercore.Devices, map[Resource]int32,
+) (*ContainerAllocateResponse, error) {
+	return nil, errors.New("vendor responder failed")
+}
+
+// TestResourceServer_Allocate_LegacyResponderFailureKeepsItsShape pins the BOUNDARY of the
+// reordering that TestResourceServer_Allocate_ResponderFailureLeavesNothing pins the inside of.
+// Only a logical-slice response is rendered before the durable patch. Every other responder keeps
+// its position after it — including its pre-existing failure shape, where the annotation is already
+// written — because two vendors materialize a subdevice and an ownership marker inside that call,
+// and rendering them before a patch that then failed would leave the hardware allocated while the
+// ledger read the card as free. That strand is pre-existing; this branch must not widen it.
+func TestResourceServer_Allocate_LegacyResponderFailureKeepsItsShape(t *testing.T) {
+	const nodeName = "node-legacy-respfail"
+
+	pod := slicedPod(nodeName, "p", "pod-p")
+	cli := nodeFixture(slicedDevices(nodeName), pod)
+	rec := &DevicesReconciler{NodeName: nodeName, Client: cli}
+	s := slicedServer(rec, failingResponder{})
+
+	require.Error(t, allocateOneSlice(t, s))
+
+	got := new(core.Pod)
+	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
+	allocations, err := AllocatedAcceleratorsOf(got)
+	require.NoError(t, err)
+	assert.NotEmpty(t, allocations,
+		"the annotation is written before a non-logical responder runs, exactly as before this branch")
+}
