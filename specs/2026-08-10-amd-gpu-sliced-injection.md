@@ -354,7 +354,7 @@ expects to meet.
 
 ```
 # --- family selection ------------------------------------------------------
-gfx9*                -> CDNA/GCN arithmetic, X = NUM_XCC (0 or absent -> 1)
+gfx9*                -> CDNA/GCN arithmetic, X = NUM_XCC (0 or absent -> REFUSE, see below)
 gfx10* gfx11* gfx12* -> RDNA arithmetic
 anything else        -> REFUSE to derive (the allocation fails with the family named)
 
@@ -490,14 +490,19 @@ throughout. So the allocator must know what a card already carries before it pla
   container whose checkpoint it lost, and by then this container's window is part of the node's
   occupancy — deciding afresh would read it as somebody else's and move the container to a different
   window while stranding the first. The partition path already solves exactly this
-  (`server.go:896-918`, `priorPartitionAllocation`); the logical path reuses the same lookup.
-- **The response is built before the durable patch, which also closes a pre-existing hole.** Today a
-  responder error at `server.go:1058-1062` returns without releasing the reservation and without undoing
-  the annotation patch made at `:1042`, so a Pod that never started keeps its allocation until the Pod
-  object disappears — a hole that already affects the NVIDIA and THead sliced responders, whose
-  `MkdirAll` and memory derivation can both fail. Reordering to build-then-patch, with the reservation
-  released on a build failure, fixes it for every vendor at once. The existing patch-failure path is
-  already correct (`:1036-1048`) and is left alone.
+  (`server.go:896-918`, `priorAllocationOf`); the logical path reuses the same lookup.
+- **The logical response is built before the durable patch — and only that one.** A responder error
+  today returns without releasing the reservation and without undoing the annotation patch, so a Pod
+  that never started keeps its allocation until the Pod object disappears; for a responder that places
+  geometry, the CU window goes with it. Rendering the logical response first, with the reservation
+  released on failure, closes that for the path this feature adds.
+  - **It deliberately does not close it for the other responders, and the reason is a regression it
+    would cause.** Cambricon and MetaX materialize a subdevice and an on-disk ownership marker *inside*
+    `GetContainerAllocateResponse`. Moved above the patch, a patch that then failed would leave that
+    hardware allocated while the ledger read the card as free — and their reclaimers, which preserve an
+    instance whose Pod is still live, would keep it that way. So every other responder stays below the
+    patch, its pre-existing failure shape untouched, and that strand stays pre-existing rather than
+    widened. Both shapes are pinned by a test.
 - **The ledger is advisory in exactly one direction, and that is stated rather than glossed.** It cannot
   stop a card from being oversubscribed — `CoresPercentageOvercommit` is `true` and admission counts
   credits, not CU windows — so a full card degrades into overlap rather than into a refusal. What the
@@ -514,10 +519,11 @@ throughout. So the allocator must know what a card already carries before it pla
 
 - `New` registers `newServer(logger, DeviceAllocationModeSliced)` behind `!opts.NoSliced`, between the
   shared and visibility servers, matching the ordering the other vendors use.
-- `GetContainerAllocateResponse` stops discarding its Pod and container parameters (`:98-99`) and keeps
-  its single pass over the allocated cards, now collecting the `(group, accelerator)` pairs the sliced
-  path needs. The non-sliced response is byte-for-byte what it is today; the sliced one is served by
-  F4's two-method interface instead.
+- `GetContainerAllocateResponse` keeps its single pass over the allocated cards, now collecting the
+  `(group, accelerator)` pairs through a helper the sliced path shares, and its response stays
+  byte-for-byte what it is today. It goes on ignoring its Pod and container parameters, which an
+  earlier draft of this spec expected it to stop doing: F4's two-method interface serves the sliced
+  path instead, so the non-sliced one genuinely needs neither.
 - **Environment**, the whole of it:
 
   | | |
@@ -807,7 +813,7 @@ on a multi-XCC or a `gfx90a` card. Both are carried in Open Questions rather tha
 - **A re-detect regroups a card and orphans its ledger entry** → the logical occupancy is keyed by
   accelerator UUID, which survives a group ID derived from name and memory changing underneath it.
 - **A retry moves the container to a different window and strands the first** → the container's own prior
-  placement is reused, mirroring `priorPartitionAllocation`.
+  placement is reused, mirroring `priorAllocationOf`.
 - **A responder failure after the durable patch strands a window on a container that never started** →
   the response is built before the patch and the reservation is released if it fails; this also closes
   the same pre-existing hole for the NVIDIA and THead sliced paths.
@@ -1156,7 +1162,7 @@ code and the hardware verification, because only then is there something to veri
       un-tied from the position in `ROCR_VISIBLE_DEVICES`, the MiB figure carrying HAMi-core's `"m"`
       suffix, and the ledger path moved to a node-wide location
 
-- [ ] **Checkpoint.** `make lint && make test` clean; the remote amd64 image carrying all four files in
+- [x] **Checkpoint.** `make lint && make test` clean; the remote amd64 image carrying all four files in
       `${GPUSTACK_LIB_DIR}/amd/` and the arm64 leg carrying only `ld.so.preload`; the seam compiling on
       linux. Only then is the capability real end to end, and only then is there something for T8 to
       point at hardware.
