@@ -17,18 +17,21 @@ node groups, and point your local kubeconfig at it.
   `computes/nebius`).
 - On every **GPU** node, installs `gpustack-node-prep.service` — a boot-time
   oneshot that moves the image's vendor device-plugin **static Pod** manifest
-  out of `/etc/kubernetes/manifests/` and disables the DCGM services. Both would
-  otherwise fight GPUStack: the static Pod advertises the same accelerator
-  resource the GPUStack device plugin does (and the kubelet owns it, so
-  `kubectl delete` cannot remove it), and DCGM holds driver handles that make a
-  MIG mode switch fail. It runs on **every** boot, not just the first, because
-  the provider reboots a node whose GPU health check fails — and putting a card
-  into MIG mode is by itself enough to fail that check. DCGM is **masked**, not
-  merely disabled: it was observed running again hours after a clean disable,
-  pulled back in by the vendor's own units.
-- Turns off auto-repair for the `NebiusGPUError` node condition on every **GPU**
-  node group. See [MIG readiness](#mig-readiness) — without this, a partitioning
-  test shuts down the node it runs on.
+  out of `/etc/kubernetes/manifests/` and, on MIG-capable groups only, disables
+  the DCGM services. Both would otherwise fight GPUStack: the static Pod
+  advertises the same accelerator resource the GPUStack device plugin does (and
+  the kubelet owns it, so `kubectl delete` cannot remove it), and DCGM holds
+  driver handles that make a MIG mode switch fail. It runs on **every** boot,
+  not just the first, because the provider reboots a node whose GPU health check
+  fails — and putting a card into MIG mode is by itself enough to fail that
+  check. DCGM is **masked**, not merely disabled: it was observed running again
+  hours after a clean disable, pulled back in by the vendor's own units.
+- Turns off auto-repair for the `NebiusGPUError` node condition on **MIG-capable
+  GPU** node groups. See [MIG readiness](#mig-readiness) — without this, a
+  partitioning test shuts down the node it runs on.
+- Buys a GPU node group from **preemptible** capacity when its
+  `gpu_instance_types` entry sets `preemptible = true`. See
+  [Preemptible nodes](#preemptible-nodes).
 - After apply, runs `nebius mk8s cluster get-credentials` to merge the cluster
   into `~/.kube/config` as a new context, which becomes the current one (unless
   `switch_kube_context=false`); on destroy it removes that
@@ -46,10 +49,9 @@ node hosting a webhook went away.
 
 Two things make a node MIG-ready, and both are in the Terraform:
 
-- `auto_repair.conditions` names `NebiusGPUError` with `disabled = true` on GPU
-  node groups. The condition is still reported and still visible in
-  `kubectl describe node`; it is simply no longer node-fatal. Every other
-  auto-repair rule keeps its default.
+- `auto_repair.conditions` names `NebiusGPUError` with `disabled = true`. The
+  condition is still reported and still visible in `kubectl describe node`; it is
+  simply no longer node-fatal. Every other auto-repair rule keeps its default.
 - `gpustack-node-prep.service` masks `nvidia-dcgm` / `nvidia-dcgm-exporter`,
   which otherwise hold driver handles that make `nvidia-smi -mig 1` fail.
 
@@ -60,6 +62,37 @@ re-apply.
 `nvidia-fabricmanager` is deliberately left running — MIG does not require it to
 be stopped, and stopping it breaks NVLink for whole-card workloads on the same
 node.
+
+### Groups that cannot be partitioned
+
+MIG is a datacenter-SXM feature. An `gpu-l40s-*` or `gpu-rtx6000` card has no
+MIG at all, and applying the two preparations above to such a group is pure
+damage: it would lose its GPU telemetry for a capability it will never have, and
+give up platform auto-repair for a `NebiusGPUError` that on those cards can only
+mean the GPU is genuinely broken.
+
+So both are gated on a per-group `mig` flag. It defaults to whether the group's
+platform appears in `main.tf`'s `mig_platforms` list (`gpu-h100-sxm`,
+`gpu-h200-sxm`, `gpu-b200-sxm`, `gpu-b200-sxm-a`, `gpu-b300-sxm`); anything else
+is treated as non-partitionable and keeps DCGM and its platform auto-repair. A
+non-MIG group still gets the vendor device-plugin static Pod moved aside —
+GPUStack has to own the card either way.
+
+Set `mig` explicitly on a group to override the derivation. Do that as soon as
+Nebius adds a partitionable platform this list does not know about: the default
+would be `false`, auto-repair would stay on, and the first MIG switch would
+**shut the node down**.
+
+## Preemptible nodes
+
+A `gpu_instance_types` entry with `preemptible = true` is provisioned from
+preemptible capacity: cheaper, and reclaimable by the platform at any time — the
+node can disappear mid-test and its Pods go with it. Use it for a group whose
+loss the test can absorb (a second accelerator flavour, a scale-out node), not
+for the one hosting the thing under test. The CPU group is always on-demand.
+
+`preemptible` is per group, so a cluster can mix both: below, an on-demand H100
+group and a preemptible L40S one.
 
 ## Prerequisites
 
@@ -114,6 +147,23 @@ one `gpu-h100` node. A GPU group needs only `platform` + `preset`; its `os` and
 CPU group, or `-var='gpu_instance_types={...}'` to change, add, or remove GPU
 groups; each `gpu_instance_types` map key becomes that group's `gpu-<key>` name.
 
+A three-node cluster with one on-demand, MIG-capable H100 node, one preemptible
+L40S node (Intel host CPU, no MIG) and one CPU node:
+
+```bash
+terraform apply \
+  -var="project_id=$NEBIUS_PROJECT_ID" \
+  -var='gpu_instance_types={
+          h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" },
+          l40s = { platform = "gpu-l40s-a",   preset = "1gpu-8vcpu-32gb", preemptible = true }
+        }'
+```
+
+Only `project_id` survives in `.last-apply.auto.tfvars.json`, so **re-apply with
+the same `-var='gpu_instance_types=...'`** — a bare `terraform apply` falls back
+to the single-`h100` default and destroys the `gpu-l40s` group. `terraform
+destroy` needs no vars.
+
 Node groups don't expose per-node IPs in Terraform state, so reach individual
 nodes via `kubectl ... get nodes -o wide` -> `ssh ubuntu@<ExternalIP>`; the SSH
 source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
@@ -130,7 +180,7 @@ source CIDR (`0.0.0.0/0`) and SSH username (`ubuntu`) are fixed, matching
 | `node_boot_disk_size_gb` | Node boot disk size, in GiB, for every node group | `100` |
 | `node_boot_disk_type` | Node boot disk type (`NETWORK_SSD`, `NETWORK_HDD`, `NETWORK_SSD_NON_REPLICATED`, `NETWORK_SSD_IO_M3`) | `NETWORK_SSD` |
 | `cpu_instance_types` | Instance type for the CPU node group: `{platform, preset, os}` | `{ platform = "cpu-e2", preset = "4vcpu-16gb", os = "ubuntu24.04" }` |
-| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; set them to override. | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
+| `gpu_instance_types` | GPU node groups keyed by group name (each becomes `gpu-<name>`): `{platform, preset, os (optional), drivers_preset (optional), preemptible (optional), mig (optional)}`. `os`/`drivers_preset` default to the newest match from the compatibility matrix for `release`; `preemptible` defaults to `false` ([preemptible nodes](#preemptible-nodes)); `mig` defaults to whether the platform supports MIG ([groups that cannot be partitioned](#groups-that-cannot-be-partitioned)). | `{ h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" } }` |
 | `switch_kube_context` | Let `get-credentials` leave this cluster current; `false` restores the previous context | `true` |
 
 ## Outputs

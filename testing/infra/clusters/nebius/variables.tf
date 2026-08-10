@@ -84,13 +84,20 @@ variable "cpu_instance_types" {
 # var.release, picking the newest available driver preset. Set os/drivers_preset explicitly only
 # to override that choice (e.g. pin an older CUDA preset); run the matrix query yourself to see
 # the valid combinations (see README).
+#
+# preemptible buys the group's nodes from preemptible capacity: cheaper, and reclaimable by the
+# platform at any time. mig declares whether the group's cards can be partitioned in hardware; it
+# defaults to whether the platform appears in main.tf's mig_platforms list, and gates the
+# MIG-specific node preparation (see README).
 variable "gpu_instance_types" {
-  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release and may be overridden per group."
+  description = "GPU node groups keyed by group name (each becomes gpu-<name>). platform+preset are required; os and drivers_preset default to the newest match from `nebius mk8s node-group get-compatibility-matrix` for var.release; preemptible defaults to false; mig defaults to whether the platform supports NVIDIA MIG."
   type = map(object({
     platform       = string
     preset         = string
     os             = optional(string)
     drivers_preset = optional(string)
+    preemptible    = optional(bool, false)
+    mig            = optional(bool)
   }))
   default = {
     h100 = { platform = "gpu-h100-sxm", preset = "1gpu-16vcpu-200gb" }

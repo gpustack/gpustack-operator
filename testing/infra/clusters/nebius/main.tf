@@ -16,66 +16,20 @@ locals {
   cluster_name = "${var.name_prefix}-${random_string.suffix.result}"
   context_name = local.cluster_name
 
-  # Node preparation for a GPU node group. The managed GPU image ships two things GPUStack must not
-  # compete with: a vendor device plugin as a STATIC Pod (it advertises the same accelerator resource
-  # the GPUStack device plugin does, and cannot be removed with `kubectl delete` because the kubelet
-  # owns it), and a DCGM telemetry service holding driver handles that make a MIG mode switch fail.
-  #
-  # This runs as a boot-time unit rather than a one-shot cloud-init command, for two reasons: the
-  # static manifest is written by the node bootstrap, which has not necessarily finished when
-  # cloud-init runs; and the provider reboots a node whose GPU health check fails — which putting a
-  # card into MIG mode is enough to cause — so anything merely stopped would come back.
-  gpu_node_prep = <<-EOT
-    write_files:
-      - path: /usr/local/sbin/gpustack-node-prep.sh
-        permissions: "0755"
-        content: |
-          #!/usr/bin/env bash
-          # Idempotent, and re-applied on every boot.
-          set -u
-          disabled=/etc/kubernetes/manifests.disabled
-          mkdir -p "$disabled"
-          shopt -s nullglob
-          # Wait out the node bootstrap: the manifests directory may not be populated yet.
-          for _ in $(seq 1 60); do
-            found=(/etc/kubernetes/manifests/*device-plugin*.yaml /etc/kubernetes/manifests/*device_plugin*.yaml)
-            if [ $${#found[@]} -gt 0 ]; then
-              mv -f "$${found[@]}" "$disabled"/
-              break
-            fi
-            sleep 10
-          done
-          # Mask rather than disable: DCGM holds driver handles that make a MIG mode switch fail,
-          # and a disabled unit is still pulled back in by the vendor's own units and timers — it
-          # was observed running again hours after a clean disable. Masking is what actually
-          # keeps it down. Wait for the units to exist: the driver preset installs them after the
-          # first boot, so an early mask would silently no-op.
-          for _ in $(seq 1 60); do
-            systemctl list-unit-files 'nvidia-dcgm*' 2>/dev/null | grep -q nvidia-dcgm && break
-            sleep 10
-          done
-          systemctl mask --now nvidia-dcgm nvidia-dcgm-exporter 2>/dev/null || true
-      - path: /etc/systemd/system/gpustack-node-prep.service
-        content: |
-          [Unit]
-          Description=Disable the vendor device plugin and DCGM so GPUStack owns the accelerators
-          After=network-online.target
-          [Service]
-          Type=oneshot
-          RemainAfterExit=yes
-          ExecStart=/usr/local/sbin/gpustack-node-prep.sh
-          [Install]
-          WantedBy=multi-user.target
-    runcmd:
-      - [ systemctl, daemon-reload ]
-      - [ systemctl, enable, --now, gpustack-node-prep.service ]
-  EOT
+  # Platforms whose cards can be partitioned in hardware (NVIDIA MIG). MIG is a datacenter-SXM
+  # feature: an L40S or an RTX PRO 6000 has none, and a card without MIG must not be treated as if
+  # it had it — see the `mig` flag in local.node_groups for what that gating actually protects.
+  # A platform missing from this list is treated as non-partitionable; override it per group with
+  # `mig` in var.gpu_instance_types rather than waiting for this list to catch up.
+  mig_platforms = ["gpu-h100-sxm", "gpu-h200-sxm", "gpu-b200-sxm", "gpu-b200-sxm-a", "gpu-b300-sxm"]
 
   node_groups = merge(
     {
       cpu = {
         instance_type = { platform = var.cpu_instance_types.platform, preset = var.cpu_instance_types.preset }
         os            = var.cpu_instance_types.os
+        preemptible   = false
+        mig           = false
         gpu           = null
       }
     },
@@ -84,10 +38,82 @@ locals {
       "gpu-${name}" => {
         instance_type = { platform = cfg.platform, preset = cfg.preset }
         os            = coalesce(cfg.os, data.external.gpu_compat[name].result.os)
-        gpu           = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
+        preemptible   = cfg.preemptible
+        # Everything this module does *for* MIG — masking DCGM, turning off the NebiusGPUError
+        # auto-repair rule — hangs off this flag, so a platform that cannot be partitioned keeps
+        # its GPU telemetry and its platform-level auto-repair instead of losing both for a
+        # capability it will never have.
+        mig = coalesce(cfg.mig, contains(local.mig_platforms, cfg.platform))
+        gpu = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
       }
     },
   )
+
+  # Node preparation, per GPU node group — keyed by group because half of it is MIG-only. The
+  # managed GPU image ships two things GPUStack must not compete with: a vendor device plugin as a
+  # STATIC Pod (it advertises the same accelerator resource the GPUStack device plugin does, and
+  # cannot be removed with `kubectl delete` because the kubelet owns it), and a DCGM telemetry
+  # service holding driver handles that make a MIG mode switch fail.
+  #
+  # The device plugin is moved aside on every GPU node. DCGM is masked only where the card can be
+  # partitioned at all: elsewhere there is nothing to unblock, and the node would lose its GPU
+  # telemetry for nothing.
+  #
+  # This runs as a boot-time unit rather than a one-shot cloud-init command, for two reasons: the
+  # static manifest is written by the node bootstrap, which has not necessarily finished when
+  # cloud-init runs; and the provider reboots a node whose GPU health check fails — which putting a
+  # card into MIG mode is enough to cause — so anything merely stopped would come back.
+  gpu_node_prep = {
+    for name, group in local.node_groups : name => <<-EOT
+      write_files:
+        - path: /usr/local/sbin/gpustack-node-prep.sh
+          permissions: "0755"
+          content: |
+            #!/usr/bin/env bash
+            # Idempotent, and re-applied on every boot.
+            set -u
+            disabled=/etc/kubernetes/manifests.disabled
+            mkdir -p "$disabled"
+            shopt -s nullglob
+            # Wait out the node bootstrap: the manifests directory may not be populated yet.
+            for _ in $(seq 1 60); do
+              found=(/etc/kubernetes/manifests/*device-plugin*.yaml /etc/kubernetes/manifests/*device_plugin*.yaml)
+              if [ $${#found[@]} -gt 0 ]; then
+                mv -f "$${found[@]}" "$disabled"/
+                break
+              fi
+              sleep 10
+            done
+            # Everything below is MIG-only; the unit passes MIG_CAPABLE per node group.
+            [ "$${MIG_CAPABLE:-false}" = true ] || exit 0
+            # Mask rather than disable: DCGM holds driver handles that make a MIG mode switch fail,
+            # and a disabled unit is still pulled back in by the vendor's own units and timers — it
+            # was observed running again hours after a clean disable. Masking is what actually
+            # keeps it down. Wait for the units to exist: the driver preset installs them after the
+            # first boot, so an early mask would silently no-op.
+            for _ in $(seq 1 60); do
+              systemctl list-unit-files 'nvidia-dcgm*' 2>/dev/null | grep -q nvidia-dcgm && break
+              sleep 10
+            done
+            systemctl mask --now nvidia-dcgm nvidia-dcgm-exporter 2>/dev/null || true
+        - path: /etc/systemd/system/gpustack-node-prep.service
+          content: |
+            [Unit]
+            Description=Disable the vendor device plugin (and DCGM where MIG applies) so GPUStack owns the accelerators
+            After=network-online.target
+            [Service]
+            Type=oneshot
+            RemainAfterExit=yes
+            Environment=MIG_CAPABLE=${group.mig}
+            ExecStart=/usr/local/sbin/gpustack-node-prep.sh
+            [Install]
+            WantedBy=multi-user.target
+      runcmd:
+        - [ systemctl, daemon-reload ]
+        - [ systemctl, enable, --now, gpustack-node-prep.service ]
+    EOT
+    if group.gpu != null
+  }
 }
 
 # Resolve each GPU group's os + drivers_preset from Nebius' live compatibility matrix for
@@ -251,8 +277,12 @@ resource "nebius_mk8s_v1_node_group" "this" {
               - "${trimspace(file(pathexpand(var.ssh_public_key)))}"
       EOT
       ,
-      each.value.gpu != null ? local.gpu_node_prep : "",
+      each.value.gpu != null ? local.gpu_node_prep[each.key] : "",
     ]))
+
+    # An empty object is how the API asks for preemptible nodes; null keeps the group on-demand.
+    # Preemptible capacity is cheaper, and the platform may reclaim a node at any time.
+    preemptible = each.value.preemptible ? {} : null
 
     gpu_settings = each.value.gpu != null ? {
       drivers_preset = each.value.gpu.drivers_preset
@@ -265,7 +295,10 @@ resource "nebius_mk8s_v1_node_group" "this" {
   # shuts it down, so a partitioning test kills the very node it runs on. Turning the rule off
   # leaves the condition reported and visible, but no longer node-fatal. Every other auto-repair
   # rule (kernel deadlock, disk IO, container runtime) keeps its default.
-  auto_repair = each.value.gpu != null ? {
+  #
+  # Only groups that can be partitioned give this up. On a card without MIG the condition can only
+  # mean the GPU is genuinely broken, and the platform is left free to repair the node.
+  auto_repair = each.value.mig ? {
     conditions = [{
       type     = "NebiusGPUError"
       disabled = true
