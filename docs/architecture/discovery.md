@@ -246,6 +246,7 @@ isolation, but only four of them get it from a preload library:
 | Vendor | Mechanism |
 |---|---|
 | NVIDIA, Iluvatar, Ascend, T-Head | preload library + per-container compute/VRAM quota — see below |
+| AMD | preload library for VRAM, plus a hardware **compute-unit mask** the operator derives and ROCr enforces — see below |
 | MThreads | `MTHREADS_QOS_*` env vars consumed by the host sGPU kmod (the compute share is a scheduling weight, not a hard cap) |
 | Hygon | a per-pod `vdev.conf` — a `cores%`-derived CU bitmask + VRAM cap — mounted read-only at `/etc/vdev/docker/` and read by the host DTK/hyhal runtime |
 | MetaX | a sysfs `sgpu` subdevice — the allocator puts the card in `sgpu` mode and writes a `cores%`-derived compute quota + VRAM cap under a `fixed-share` scheduling class to `/sys/bus/pci/devices/<BDF>/sgpu/create`, then injects `METAX_SGPUS` plus the card device nodes for the host MetaX runtime |
@@ -265,6 +266,43 @@ preloaded `libvgpu.so` finds no corex `libcuda.so.1` to hook. Its HAMi-core-on-c
 verified at the symbol level against a real corex driver but **not yet on Iluvatar hardware**, so the
 capability is advertised-and-injected but hardware-unvalidated.
 
+**AMD splits the two dimensions across two enforcers, and it is the only vendor that does.** Memory is a
+preload library like the others — `libvrocm.so`, built from this repository's own `csrc/` tree, activated
+through `/etc/ld.so.preload`, reading a per-card `VROCM_DEVICE_MEMORY_LIMIT_<i>` in bare MiB and keeping
+its accounting in a per-container region named by `VROCM_LEDGER_PATH`. Compute is **not** a variable at
+all: ROCm enforces it in hardware through `HSA_CU_MASK`, which ROCr reads while it initialises, before
+any preloaded code exists. So the operator *derives* the mask — a closed-form calculation over the
+card's own topology, branching on its GPU architecture family — and injects it, and the library never
+sees it.
+
+A sliced AMD container therefore carries one value under two names: `AMD_VISIBLE_DEVICES`, which the
+container runtime reads to inject `/dev/kfd` and the card's render node, and `ROCR_VISIBLE_DEVICES`,
+which the ROCm user-space runtime reads to filter and order its agents. Both are the card's
+`GPU-<hex>` UUID. That ordering is the index space the other two per-card variables live in —
+`HSA_CU_MASK`'s `GPU_list` index and `VROCM_DEVICE_MEMORY_LIMIT_<i>`'s `<i>` are both positions in the
+`ROCR_VISIBLE_DEVICES` list, never physical ordinals — so the three are emitted together and must stay
+in step.
+
+> **Why this one needs a probe.** A CU mask fails **open**: a mask ROCr rejects produces no error, no
+> log line and no changed return code, and the container simply gets the whole card. Nothing a user can
+> read reports it — `rocm-smi` and `amd-smi` read sysfs and never see a mask at all. So the allocator
+> mounts `rocm-cumask-check` beside the library: it runs a kernel, reads the physical units its own
+> waves landed on, and exits `0` only if they are the units the mask asked for. `rocm-monitor`, mounted
+> alongside, prints the memory quota and what is charged against it. A slice that behaves like a whole
+> card is one command away from being diagnosed, on a node nobody is watching.
+
+Because the mask is quantised to the card's own allocation atom, the **smallest requestable percentage
+is a per-card property** — 9 % on a 60 CU / 3 shader-engine part, 3 % on a 304 CU / 8 XCC one. A request
+below it is refused at allocation time with the card's minimum in the message, rather than rounded up
+into a ceiling nobody asked for; a request above it that does not land on the atom is aligned **down**,
+and the allocator logs the percentage actually delivered.
+
+> **Admission does not know that minimum yet.** The webhook validates `1`–`100` and nothing publishes
+> the per-card floor, so a request below it is admitted, scheduled, and then refused by the device
+> plugin — the Pod fails to start and will keep failing. Until the floor is published, the request to
+> keep in mind is the very small one: on a card with many shader engines, single-digit percentages may
+> not be servable at all.
+
 T-Head's sliced response carries **no** visible-devices env: like its other modes it passes the card's
 own device node plus the two shared control nodes, and adds only the library mounts, the quota env and a
 per-container directory for the ledger region under the pod working directory (per container, because
@@ -281,9 +319,9 @@ compute cap can be seen at all — no `ppu-smi` field carries it.
 It also quiets each preload library's verbose per-call logging by default — injecting
 `LIBCUDA_LOG_LEVEL=0` (HAMi-core) / `ENPU_LOG_LEVEL=1` (vcann-rt) unless the workload already sets
 that variable — so a normal run is not buried in interception-library noise. T-Head is injected
-`LIBHGGC_LOG_LEVEL=1` under the same never-overwrite rule, and `1` rather than `0` because its levels
-are not HAMi-core's: `1` logs a line per *denial*, not per intercepted call, and `0` would hide the
-diagnostics of a slice that is refusing every allocation. That is already the library's own default —
+`LIBHGGC_LOG_LEVEL=1` and AMD `LIBVROCM_LOG_LEVEL=1` under the same never-overwrite rule, and `1`
+rather than `0` because their levels are not HAMi-core's: `1` logs a line per *denial*, not per
+intercepted call, and `0` would hide the diagnostics of a slice that is refusing every allocation. That is already the library's own default —
 naming it keeps the level a property of the allocation rather than a library default. On Ascend it injects one
 more, `ENPU_DSMI_HOOK=1` under the same never-overwrite rule (which reads the container's own `env:`
 entries — an `envFrom:`-sourced value is not visible to the allocator, so opting out that way needs an
@@ -330,6 +368,16 @@ directories once their pods are gone.
 **Iluvatar adds no build stage of its own** — its lib dir is filled by copying the
 `xbuild-nvidia-cuda-12` HAMi-core `/out` a second time (corex exposes a CUDA-compatible
 `libcuda.so.1`, so the same library serves it), one flat directory with no runtime-version subdivision.
+
+**AMD needs exactly one build stage, and that is a property of the library rather than a shortcut.**
+`libvrocm.so` links no ROCm object at all — every runtime entry point is resolved at load time instead
+of at link time — so one artifact serves every ROCm version a workload container may bring, and
+`${GPUSTACK_LIB_DIR}/amd/` is flat where `nvidia/` and `ascend/` carry a subdirectory per runtime
+generation. It is built from this repository's own `csrc/amd/rocm-slicing-shim` tree, inside a ROCm
+devel image chosen for its glibc floor rather than its ROCm version, and it ships with two readers
+(`rocm-monitor`, `rocm-cumask-check`) the allocator mounts beside it. ROCm publishes no `aarch64` user
+space, so the **`arm64` operator image carries no AMD shim** — and no AMD node either, since the
+detector's own libraries do not load there.
 
 **T-Head's pair is the exception on both counts.** It is built from this repository's own sources
 (`csrc/thead/ppu-slicing-shim`, compiled by the `xbuild-thead-ppu` stage inside the vendor SDK image)

@@ -1,6 +1,6 @@
 # Spec: AMD GPU logical slicing — the capability, from the image build to the allocator
 
-Status: Building
+Status: Built
 Type: Feature
 
 > **This spec ships the capability, not the library.** `specs/2026-08-06-amd-gpu-slicing-shim.md`
@@ -1175,7 +1175,7 @@ code and the hardware verification, because only then is there something to veri
       Verify: recorded PASS/FAIL rows with captured output, folded into F6; every command confirmed with
       the user before it runs
 
-- [ ] **T9 · Documentation**
+- [x] **T9 · Documentation**
       Blocked by: T5, T6, T7, T8
       Owns: `README.md`, `docs/architecture/discovery.md`
       Gate: (none)
