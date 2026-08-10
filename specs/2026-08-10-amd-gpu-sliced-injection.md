@@ -1087,7 +1087,7 @@ code and the hardware verification, because only then is there something to veri
       Verify: `make lint` clean and `go test -count=1 -cover ./pkg/devicemanager/detector/...` still
       passing, with the AMD package's coverage reported rather than hidden
 
-- [ ] **T7 · The allocator hands out the slice**
+- [x] **T7 · The allocator hands out the slice**
       Blocked by: T1, T2, T3, T4
       Owns: `pkg/devicemanager/allocator/amd/deviceplugin.go`,
       `pkg/devicemanager/allocator/amd/deviceplugin_test.go`
