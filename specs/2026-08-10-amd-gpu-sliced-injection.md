@@ -1,6 +1,6 @@
 # Spec: AMD GPU logical slicing — the capability, from the image build to the allocator
 
-Status: Built
+Status: Shipped
 Type: Feature
 
 > **This spec ships the capability, not the library.** `specs/2026-08-06-amd-gpu-slicing-shim.md`
@@ -261,6 +261,22 @@ that I can tell a throttled workload from one whose isolation silently failed op
   `ld.so.preload`; `rocm-monitor` executes in that image — no ROCm, no device — reaching its own "no
   usage region" message rather than dying in the loader; `build.sh check`'s four assertions run inside
   the build rather than being checked by hand afterwards.
+
+**Delivered — `make package gpustack-operator` on the amd64 host, `2026-08-10`.** The image's
+`/etc/gpustack/lib/amd/` carries all four files, beside the `ascend`, `iluvatar`, `nvidia` and `thead`
+directories it does not disturb; `ld.so.preload` reads `/usr/local/vrocm/libvrocm.so`, the mount constant
+T7 emits, byte for byte; `libvrocm.so`'s `NEEDED` is `libc.so.6` alone at a `GLIBC_2.4` ceiling, asserted
+*inside* the build by `build.sh check` rather than read afterwards; and `rocm-monitor` runs in that image
+— no ROCm, no device — to its own "no usage region" message (`rc=1`), which is the loader question this
+check exists to ask. `rocm-cumask-check` is present and links `libhsa-runtime64.so.1` and
+`libamdhip64.so.7` by design, so only its `NEEDED` set is read.
+
+The **arm64 leg** is proven at stage level — `--target xbuild-amd-rocm --platform linux/arm64` yields an
+empty `/out` — and the full arm64 image builds: CI's `image / build (linux/arm64)` job is green on this
+branch, on a native arm64 runner, which is what settles that the final stage's unconditional
+`COPY --from` survives an empty `/out`. What no run inspects is that directory's *contents* on arm64;
+that it then holds `ld.so.preload` alone follows from the same `COPY` the THead stage has shipped for
+releases. Stated rather than implied, as F6's limits are.
 
 #### F2 — Detector: per-card `Status.LogicalSliced`, and the group fold AMD never had
 
