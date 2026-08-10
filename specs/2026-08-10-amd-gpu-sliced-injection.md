@@ -1006,7 +1006,7 @@ code and the hardware verification, because only then is there something to veri
       the remote amd64 builder (the real arm) — a `_linux.go` seam gets no local check on darwin, so a
       linux compile is the only thing that proves it builds
 
-- [ ] **T4 · The logical placement ledger in `pkg/deviceplugin`**
+- [x] **T4 · The logical placement ledger in `pkg/deviceplugin`**
       Blocked by: None
       Owns: `pkg/deviceplugin/**`, `api/worker/v1alpha1/devices.go` (documentation comment only)
       Gate: review

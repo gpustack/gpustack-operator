@@ -92,7 +92,63 @@ type (
 			string,
 		) (*ContainerAllocateResponse, error)
 	}
+
+	// LogicalSlicedResponder is an optional capability of a ContainerAllocateResponder whose
+	// logical slice occupies a POSITION on the card rather than only a share of it — an AMD CU
+	// mask is a range of compute units, and two containers handed the same range share those
+	// units instead of the card. A responder that does not implement it keeps today's behavior
+	// exactly: the server never reads logical occupancy and never records a window.
+	//
+	// The two methods are split by where they may run, not by taste:
+	//
+	//   - PlaceLogicalSliced is called under the node allocate mutex, so the window it picks is
+	//     published into the reservation before the next serialized Allocate reads it. Choosing
+	//     it in GetContainerAllocateResponse instead cannot be made race-free: that call happens
+	//     after the mutex is released AND after the durable annotation is written, so two
+	//     concurrent allocations would pick the same free window and neither choice would
+	//     survive a restart. It must therefore be pure over the snapshot it is given: no I/O.
+	//   - GetLogicalSlicedResponse is called after the mutex is released, and CONSUMES the
+	//     placement the server published rather than recomputing it. The responder's own I/O
+	//     (creating a per-container working directory, say) belongs here for the same reason the
+	//     annotation patch does — off the serialized path.
+	//
+	// Unlike PhysicalSlicedResponder there is no rollback: a mask is a string in an environment,
+	// and nothing was materialized on the card that a failure could strand.
+	LogicalSlicedResponder interface {
+		// PlaceLogicalSliced picks the geometry this container will occupy on each allocated
+		// card, given what the node's live allocations already occupy. Returning an empty map
+		// is legal and means "this responder records no geometry for this container".
+		PlaceLogicalSliced(
+			context.Context,
+			*core.Pod,
+			*core.Container,
+			*workercore.Devices,
+			map[Resource]int32,
+			LogicalPlacements,
+		) (LogicalPlacements, error)
+
+		// GetLogicalSlicedResponse renders the container response for a placement the server
+		// has already published. It replaces GetContainerAllocateResponse for the sliced mode.
+		GetLogicalSlicedResponse(
+			context.Context,
+			*core.Pod,
+			*core.Container,
+			*workercore.Devices,
+			map[Resource]int32,
+			LogicalPlacements,
+		) (*ContainerAllocateResponse, error)
+	}
 )
+
+// LogicalPlacements maps an accelerator's UUID to the interval(s) a logical slice occupies on it,
+// in whatever unit that vendor's geometry counts (AMD: CU-mask bit indexes, exactly as they appear
+// in HSA_CU_MASK).
+//
+// Keyed by UUID alone, not by Resource: a card's group ID is derived from its detected name and
+// memory, so a re-detect that regroups the card — a marketing name that reads differently, a VRAM
+// figure that rounds differently — would orphan an entry keyed by both, and the card would then
+// hand out a window it has already given away. The UUID is the identity that survives regrouping.
+type LogicalPlacements map[string][]workercore.AcceleratorPhysicalPlacement
 
 // PhysicalSlicedAllocation is the outcome of materializing a physical GPU partition for a
 // container: the per-card placements to record upward into the Pod's allocation annotation

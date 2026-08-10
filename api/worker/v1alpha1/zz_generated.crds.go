@@ -440,7 +440,7 @@ func crd_gpustack_api_worker_v1alpha1_Devices() *v1.CustomResourceDefinition {
 																			Format:      "int32",
 																		},
 																		"allocatedPhysicalPlacements": {
-																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition\noccupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the\nnode's Pods into each card's occupied set to derive RemainingProfiles.",
+																			Description: "AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT\ndepends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:\n- Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.\nThe reconciler unions these across the node's Pods to derive RemainingProfiles.\n- Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes\nexactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The\nphysical reader skips an entry with no profile, which is what lets one field carry\nboth ledgers; the logical reader requires that shape and keys by accelerator UUID.",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{
@@ -1066,7 +1066,7 @@ func crd_gpustack_api_worker_v1alpha1_Instance() *v1.CustomResourceDefinition {
 																			Format:      "int32",
 																		},
 																		"allocatedPhysicalPlacements": {
-																			Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition\noccupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the\nnode's Pods into each card's occupied set to derive RemainingProfiles.",
+																			Description: "AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT\ndepends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:\n- Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.\nThe reconciler unions these across the node's Pods to derive RemainingProfiles.\n- Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes\nexactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The\nphysical reader skips an entry with no profile, which is what lets one field carry\nboth ledgers; the logical reader requires that shape and keys by accelerator UUID.",
 																			Type:        "array",
 																			Items: &v1.JSONSchemaPropsOrArray{
 																				Schema: &v1.JSONSchemaProps{

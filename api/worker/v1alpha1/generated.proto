@@ -84,9 +84,15 @@ message AcceleratorAllocation {
   // the aggregated Devices.Status. A Pod holds one instance of one profile per card.
   optional string allocatedPhysicalProfile = 8;
 
-  // AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition
-  // occupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the
-  // node's Pods into each card's occupied set to derive RemainingProfiles.
+  // AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT
+  // depends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:
+  //
+  //   - Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.
+  //     The reconciler unions these across the node's Pods to derive RemainingProfiles.
+  //   - Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes
+  //     exactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The
+  //     physical reader skips an entry with no profile, which is what lets one field carry
+  //     both ledgers; the logical reader requires that shape and keys by accelerator UUID.
   //
   // +listType=atomic
   repeated AcceleratorPhysicalPlacement allocatedPhysicalPlacements = 9;

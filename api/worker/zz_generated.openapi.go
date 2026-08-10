@@ -2157,7 +2157,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies, paired with AllocatedPhysicalProfile. The reconciler unions these across the node's Pods into each card's occupied set to derive RemainingProfiles.",
+							Description: "AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT depends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:\n\n  - Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.\n    The reconciler unions these across the node's Pods to derive RemainingProfiles.\n  - Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes\n    exactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The\n    physical reader skips an entry with no profile, which is what lets one field carry\n    both ledgers; the logical reader requires that shape and keys by accelerator UUID.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
