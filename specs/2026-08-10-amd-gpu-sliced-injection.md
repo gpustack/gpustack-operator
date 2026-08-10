@@ -995,7 +995,7 @@ code and the hardware verification, because only then is there something to veri
       drop the shader-engine alignment (table A's 25 % and 75 % rows), drop the XCC alignment (table B's
       5 % row), route by `NUM_XCC > 1` instead of by family (the `gfx90a` case)
 
-- [ ] **T3 · Topology, read through HSA behind the platform seam**
+- [x] **T3 · Topology, read through HSA behind the platform seam**
       Blocked by: T2
       Owns: `binding/hsa/**`, `pkg/devicemanager/allocator/amd/cumask_driver_linux.go`,
       `pkg/devicemanager/allocator/amd/cumask_driver_other.go`
