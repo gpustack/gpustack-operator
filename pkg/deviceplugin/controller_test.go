@@ -148,7 +148,7 @@ func TestDevicesReconciler_PatchAllocatingPod_PerContainer(t *testing.T) {
 		return got
 	}
 	chargedCards := func(p *core.Pod) []string {
-		status, err := extractAllocatedStatusFromPod(p)
+		status, err := allocatedStatusOf(p)
 		require.NoError(t, err)
 		var cards []string
 		for i := range status.Groups {

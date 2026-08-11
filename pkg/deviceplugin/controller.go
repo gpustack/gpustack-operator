@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -113,6 +114,13 @@ type (
 	}
 )
 
+// Reconcile rebuilds one node's Devices Status from its Spec and the annotations of the Pods
+// scheduled to it, then sweeps the resulting live pod-UID set through the in-process
+// reservation/visibility-grant tables and notifies ListAndWatch subscribers. The Status rebuild
+// is wholesale, not incremental: buildDesiredStatus recomputes every accelerator's Mode,
+// Remaining, AllocatedProfiles and RemainingProfiles from Spec + Pod annotations in a single pass,
+// and this method assigns the result once — there is deliberately no second, separately-applied
+// write that a later pass could stomp.
 func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	nodeName := req.Name
 
@@ -134,81 +142,10 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{RequeueAfter: time.Second}, err
 	}
 
-	// Clear/Initialize devices status.
-	eDevsStatus := workercore.DevicesStatus{
-		Groups: make([]workercore.DevicesAllocationGroup, 0, len(devs.Spec.Groups)),
-	}
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		devsStatusGroup := workercore.DevicesAllocationGroup{
-			ID:           devsGroup.ID,
-			Manufacturer: devsGroup.Manufacturer,
-			Accelerators: make([]workercore.AcceleratorAllocation, 0, len(devsGroup.Accelerators)),
-		}
-		for j := range devsGroup.Accelerators {
-			devAccelerator := &devsGroup.Accelerators[j]
-			devsStatusGroup.Accelerators = append(devsStatusGroup.Accelerators, workercore.AcceleratorAllocation{
-				ID:        devAccelerator.ID,
-				Index:     devAccelerator.Index,
-				Mode:      workercore.DeviceAllocationModeNone,
-				Remaining: nodefeature.ResourceMaxUnits,
-			})
-		}
-		eDevsStatus.Groups = append(eDevsStatus.Groups, devsStatusGroup)
-	}
+	desiredStatus, livePodUIDs := buildDesiredStatus(logger, devs, podList)
 
-	// Merge allocated accelerators, and in the same pass collect the live pod-UUID
-	// set this node hands to the sliced per-pod working-dir GC (empty/nil ⇒ no pods;
-	// non-sliced consumers ignore the payload).
-	//
-	// physicalOccupied/physicalAllocated reconstruct each physical-slice card's occupied
-	// placement intervals and per-profile instance counts from the same Pod annotations,
-	// keyed by card, to feed the placement-aware ledger fold below (pure arithmetic, no
-	// device access).
-	physicalOccupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
-	physicalAllocated := make(map[Resource]map[string]int32)
-	livePodUIDs := make([]string, 0, len(podList.Items))
-	for i := range podList.Items {
-		pod := &podList.Items[i]
-		// Keep terminating pods (DeletionTimestamp != nil) in the live set AND in the
-		// allocation merge: during the grace period their containers can still be running
-		// with the working dir mounted and their hardware still carved, and the reclaimer
-		// destroys an instance on pod deletion rather than on container exit. Dropping them
-		// here would report a card free while it is still physically occupied.
-		livePodUIDs = append(livePodUIDs, string(pod.UID))
-
-		podDevsStatus, err := extractAllocatedStatusFromPod(pod)
-		if err != nil {
-			// An unreadable record is the one failure this rebuild cannot absorb: the pod's
-			// cards drop out of the ledger and read FREE while its containers still hold them,
-			// which is how an opposite-mode pod lands on an occupied card. Nothing here can
-			// recover the occupancy, so say loudly what is at stake. The reachable cause is an
-			// annotation an older device-manager wrote in a shape this one no longer reads —
-			// pre-release formats are a clean break, so drain a node before upgrading it.
-			logger.Error(err, "cannot read the allocation this pod holds; its cards will be "+
-				"reported free while it still occupies them — drain the node before upgrading "+
-				"the device manager",
-				"pod", ctrlcli.ObjectKeyFromObject(pod))
-			continue
-		}
-
-		eDevsStatus, err = applyAllocatedStatus(podDevsStatus, eDevsStatus)
-		if err != nil {
-			logger.Error(err, "merge allocated accelerators into devices status", "pod", ctrlcli.ObjectKeyFromObject(pod))
-			continue
-		}
-
-		accumulatePhysicalOccupied(podDevsStatus, physicalOccupied, physicalAllocated)
-	}
-
-	// Fold the per-card physical-slice profile ledger into the same wholesale Status build
-	// (never a second, stompable write), computed by pure arithmetic from the
-	// annotation-derived occupied set and the detect-time-cached empty-card Placements.
-	// The upward transport → aggregated output bridge lives in foldPhysicalLedger.
-	foldPhysicalLedger(devs, &eDevsStatus, physicalOccupied, physicalAllocated)
-
-	if !kubemeta.DeepEqual(devs.Status, eDevsStatus) {
-		devs.Status = eDevsStatus
+	if !kubemeta.DeepEqual(devs.Status, desiredStatus) {
+		devs.Status = desiredStatus
 		err = r.Client.Status().Update(ctx, devs)
 		if err != nil {
 			logger.Error(err, "update devices status")
@@ -226,6 +163,100 @@ func (r *DevicesReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	r.notifyListeners()
 
 	return ctrl.Result{}, nil
+}
+
+// buildDesiredStatus rebuilds a node's Devices Status wholesale from Spec + Pod annotations: it
+// seeds every accelerator from Spec, then merges in what each Pod's annotation says it holds. The
+// two steps run as one pass — mergePodAllocations both folds the physical-slice profile ledger and
+// collects the live pod-UID set in the same walk it merges allocations in — so there is never a
+// second, separately-applied write that a later pass could stomp.
+func buildDesiredStatus(
+	logger logr.Logger, devs *workercore.Devices, podList *core.PodList,
+) (workercore.DevicesStatus, []string) {
+	return mergePodAllocations(logger, devs, podList, initDesiredStatus(devs))
+}
+
+// initDesiredStatus seeds one Status accelerator per Spec accelerator, at Mode None and full
+// Remaining — the state a card reports before any Pod annotation is merged in.
+func initDesiredStatus(devs *workercore.Devices) workercore.DevicesStatus {
+	desiredStatus := workercore.DevicesStatus{
+		Groups: make([]workercore.DevicesAllocationGroup, 0, len(devs.Spec.Groups)),
+	}
+	for i := range devs.Spec.Groups {
+		specGrp := &devs.Spec.Groups[i]
+		statusGrp := workercore.DevicesAllocationGroup{
+			ID:           specGrp.ID,
+			Manufacturer: specGrp.Manufacturer,
+			Accelerators: make([]workercore.AcceleratorAllocation, 0, len(specGrp.Accelerators)),
+		}
+		for j := range specGrp.Accelerators {
+			acc := &specGrp.Accelerators[j]
+			statusGrp.Accelerators = append(statusGrp.Accelerators, workercore.AcceleratorAllocation{
+				ID:        acc.ID,
+				Index:     acc.Index,
+				Mode:      workercore.DeviceAllocationModeNone,
+				Remaining: nodefeature.ResourceMaxUnits,
+			})
+		}
+		desiredStatus.Groups = append(desiredStatus.Groups, statusGrp)
+	}
+	return desiredStatus
+}
+
+// mergePodAllocations merges every Pod's annotation-recorded allocation into desiredStatus, folds
+// the per-card physical-slice profile ledger into the same pass (never a second, stompable write),
+// and collects the live pod-UID set the sliced per-pod working-dir GC consumes (empty/nil ⇒ no
+// pods; non-sliced consumers ignore the payload).
+func mergePodAllocations(
+	logger logr.Logger, devs *workercore.Devices, podList *core.PodList, desiredStatus workercore.DevicesStatus,
+) (workercore.DevicesStatus, []string) {
+	// physicalOccupied/physicalAllocated reconstruct each physical-slice card's occupied
+	// placement intervals and per-profile instance counts from the same Pod annotations,
+	// keyed by card, to feed the placement-aware ledger fold below (pure arithmetic, no
+	// device access).
+	physicalOccupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
+	physicalAllocated := make(map[Resource]map[string]int32)
+	livePodUIDs := make([]string, 0, len(podList.Items))
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		// Keep terminating pods (DeletionTimestamp != nil) in the live set AND in the
+		// allocation merge: during the grace period their containers can still be running
+		// with the working dir mounted and their hardware still carved, and the reclaimer
+		// destroys an instance on pod deletion rather than on container exit. Dropping them
+		// here would report a card free while it is still physically occupied.
+		livePodUIDs = append(livePodUIDs, string(pod.UID))
+
+		podStatus, err := allocatedStatusOf(pod)
+		if err != nil {
+			// An unreadable record is the one failure this rebuild cannot absorb: the pod's
+			// cards drop out of the ledger and read FREE while its containers still hold them,
+			// which is how an opposite-mode pod lands on an occupied card. Nothing here can
+			// recover the occupancy, so say loudly what is at stake. The reachable cause is an
+			// annotation an older device-manager wrote in a shape this one no longer reads —
+			// pre-release formats are a clean break, so drain a node before upgrading it.
+			logger.Error(err, "cannot read the allocation this pod holds; its cards will be "+
+				"reported free while it still occupies them — drain the node before upgrading "+
+				"the device manager",
+				"pod", ctrlcli.ObjectKeyFromObject(pod))
+			continue
+		}
+
+		desiredStatus, err = applyAllocatedStatus(podStatus, desiredStatus)
+		if err != nil {
+			logger.Error(err, "merge allocated accelerators into devices status", "pod", ctrlcli.ObjectKeyFromObject(pod))
+			continue
+		}
+
+		accumulatePhysicalOccupied(podStatus, physicalOccupied, physicalAllocated)
+	}
+
+	// Fold the per-card physical-slice profile ledger into the same wholesale Status build
+	// (never a second, stompable write), computed by pure arithmetic from the
+	// annotation-derived occupied set and the detect-time-cached empty-card Placements.
+	// The upward transport → aggregated output bridge lives in foldPhysicalLedger.
+	foldPhysicalLedger(devs, &desiredStatus, physicalOccupied, physicalAllocated)
+
+	return desiredStatus, livePodUIDs
 }
 
 // notifyListeners broadcasts the last live-pod-UID sweep to every ListAndWatch subscriber,
@@ -250,8 +281,18 @@ func (r *DevicesReconciler) notifyListeners() {
 	}
 }
 
+// IndexingPodsByNodeName is the field-indexer key SetupController registers for Pods, keyed by
+// Spec.NodeName. Every Pod lookup in this package goes through it rather than scanning the whole
+// cluster's Pods, so a lookup for one node stays cheap regardless of how many other nodes the
+// cluster has.
 const IndexingPodsByNodeName = "pods.nodeName"
 
+// SetupController registers the Pod-by-node-name field index, resolves the current node's name
+// from the KUBERNETES_NODE_NAME environment variable, and wires the manager's controller: it
+// watches this node's v1alpha1.Devices object plus every Pod scheduled to this node that carries
+// (or carried) the AllocatedAcceleratorAnnoKey annotation, enqueuing a Reconcile for the node on
+// each relevant change. Call it once, before the manager is started, so the field index it
+// registers is in place before the cache begins syncing.
 func (r *DevicesReconciler) SetupController(ctx context.Context, opts controller.SetupOptions) error {
 	// Configure field indexer.
 	fi := opts.Manager.GetFieldIndexer()
@@ -620,6 +661,10 @@ func livePodUIDSet(livePodUIDs []string) sets.Set[types.UID] {
 }
 
 const (
+	// AllocatedAcceleratorAnnoKey names the annotation carrying a Pod's per-container accelerator
+	// allocation, as the JSON of PodAllocations. It is the only durable record of what a container
+	// holds — the in-process reservations do not survive a device-manager restart — so the ledger
+	// rebuild, the reclaim loops and the Pod-delete watch are all gated on it.
 	AllocatedAcceleratorAnnoKey       = "device.gpustack.ai/accelerator.allocated"
 	_PreferredAcceleratorIDAnnoKey    = "device.gpustack.ai/accelerator.preferred-id"
 	_PreferredAcceleratorIndexAnnoKey = "device.gpustack.ai/accelerator.preferred-index"
@@ -668,6 +713,13 @@ func (r *DevicesReconciler) getAllocatingPodWithRetry(
 	return nil, nil, fmt.Errorf("get allocating pod with retry: %w", err)
 }
 
+// _AllocatingCandidate pairs a pending container with its pod, for the classify/rank search
+// getAllocatingPod runs over the node's pending containers.
+type _AllocatingCandidate struct {
+	pod *core.Pod
+	ctr *core.Container
+}
+
 // getAllocatingPod maps a kubelet Allocate/GetPreferredAllocation call to the container being
 // admitted, preferring the oldest Pending pod. Candidates are ranked rather than filtered: an
 // unclaimed feasible container wins; failing that an unclaimed but infeasible one (the
@@ -693,12 +745,17 @@ func (r *DevicesReconciler) getAllocatingPod(
 		return a.CreationTimestamp.Compare(b.CreationTimestamp.Time)
 	})
 
-	type candidate struct {
-		pod *core.Pod
-		ctr *core.Container
-	}
-	var feasible, infeasible, claimed []candidate
+	feasible, infeasible, claimed := r.classifyAllocatingCandidates(podList.Items, match)
 
+	return rankAllocatingCandidate(ctrllog.FromContext(ctx), match, feasible, infeasible, claimed)
+}
+
+// classifyAllocatingCandidates walks the node's Pending pods, oldest first, and sorts every
+// container that requests match's resource into feasible, infeasible or claimed — the three tiers
+// rankAllocatingCandidate picks from in that order.
+func (r *DevicesReconciler) classifyAllocatingCandidates(
+	pods []core.Pod, match _AllocationMatch,
+) (feasible, infeasible, claimed []_AllocatingCandidate) {
 	classify := func(pod *core.Pod, ctr *core.Container) {
 		if !containerRequests(ctr, match.ResourceName, match.Quantity) {
 			return
@@ -709,23 +766,23 @@ func (r *DevicesReconciler) getAllocatingPod(
 		// concurrent batch does not re-pick what the previous one just took.
 		if match.SkipReserved {
 			if _, ok := r.reservedDevices(pod.UID, ctr.Name); ok {
-				claimed = append(claimed, candidate{pod, ctr})
+				claimed = append(claimed, _AllocatingCandidate{pod, ctr})
 				return
 			}
 		}
 		if match.SkipGranted && r.visibilityGranted(pod.UID, ctr.Name) {
-			claimed = append(claimed, candidate{pod, ctr})
+			claimed = append(claimed, _AllocatingCandidate{pod, ctr})
 			return
 		}
 		if match.Feasible != nil && !match.Feasible(pod, ctr) {
-			infeasible = append(infeasible, candidate{pod, ctr})
+			infeasible = append(infeasible, _AllocatingCandidate{pod, ctr})
 			return
 		}
-		feasible = append(feasible, candidate{pod, ctr})
+		feasible = append(feasible, _AllocatingCandidate{pod, ctr})
 	}
 
-	for i := range podList.Items {
-		pod := &podList.Items[i]
+	for i := range pods {
+		pod := &pods[i]
 		if p := pod.Status.Phase; p != "" && p != core.PodPending {
 			continue
 		}
@@ -737,7 +794,16 @@ func (r *DevicesReconciler) getAllocatingPod(
 		}
 	}
 
-	logger := ctrllog.FromContext(ctx)
+	return feasible, infeasible, claimed
+}
+
+// rankAllocatingCandidate picks the oldest candidate from the highest-ranked non-empty tier —
+// feasible, then infeasible, then claimed — logging why it fell back whenever the winner is not a
+// feasible one.
+func rankAllocatingCandidate(
+	logger logr.Logger, match _AllocationMatch,
+	feasible, infeasible, claimed []_AllocatingCandidate,
+) (*core.Pod, *core.Container, error) {
 	switch {
 	case len(feasible) > 0:
 		return feasible[0].pod, feasible[0].ctr, nil
@@ -899,7 +965,7 @@ func (r *DevicesReconciler) patchAllocatingPod(
 	return err
 }
 
-func extractAllocatedStatusFromPod(pod *core.Pod) (allocatedStatus workercore.DevicesStatus, err error) {
+func allocatedStatusOf(pod *core.Pod) (allocatedStatus workercore.DevicesStatus, err error) {
 	allocations, err := AllocatedAcceleratorsOf(pod)
 	if err != nil {
 		return workercore.DevicesStatus{}, err
@@ -1057,11 +1123,11 @@ func (r *DevicesReconciler) LivePhysicalOccupied(ctx context.Context) (map[Resou
 	occupied := make(map[Resource][]workercore.AcceleratorPhysicalPlacement)
 	allocated := make(map[Resource]map[string]int32)
 	for i := range podList.Items {
-		podDevsStatus, err := extractAllocatedStatusFromPod(&podList.Items[i])
+		podStatus, err := allocatedStatusOf(&podList.Items[i])
 		if err != nil {
 			continue
 		}
-		accumulatePhysicalOccupied(podDevsStatus, occupied, allocated)
+		accumulatePhysicalOccupied(podStatus, occupied, allocated)
 	}
 	return occupied, nil
 }
@@ -1080,11 +1146,11 @@ func (r *DevicesReconciler) LiveLogicalOccupied(ctx context.Context) (LogicalPla
 	}
 	occupied := make(LogicalPlacements)
 	for i := range podList.Items {
-		podDevsStatus, err := extractAllocatedStatusFromPod(&podList.Items[i])
+		podStatus, err := allocatedStatusOf(&podList.Items[i])
 		if err != nil {
 			continue
 		}
-		accumulateLogicalOccupied(podDevsStatus, occupied)
+		accumulateLogicalOccupied(podStatus, occupied)
 	}
 	return occupied, nil
 }
@@ -1129,7 +1195,7 @@ func (r *DevicesReconciler) liveDeviceIDs(ctx context.Context) (sets.Set[string]
 	return held, nil
 }
 
-func extractPreferredAcceleratorIDsFromPod(pod *core.Pod, devices *workercore.Devices) sets.Set[string] {
+func preferredAcceleratorIDsOf(pod *core.Pod, devices *workercore.Devices) sets.Set[string] {
 	if pod != nil && pod.Annotations != nil {
 		str, ok := pod.Annotations[_PreferredAcceleratorIDAnnoKey]
 		if ok {
@@ -1150,11 +1216,11 @@ func extractPreferredAcceleratorIDsFromPod(pod *core.Pod, devices *workercore.De
 
 			requiredIDsSet := sets.New[string]()
 			for i := range devices.Spec.Groups {
-				devGroup := &devices.Spec.Groups[i]
-				for j := range devGroup.Accelerators {
-					devAccelerator := &devGroup.Accelerators[j]
-					if requiredIndexesSet.Has(strconv.Itoa(int(devAccelerator.Index))) {
-						requiredIDsSet.Insert(devAccelerator.ID)
+				grp := &devices.Spec.Groups[i]
+				for j := range grp.Accelerators {
+					acc := &grp.Accelerators[j]
+					if requiredIndexesSet.Has(strconv.Itoa(int(acc.Index))) {
+						requiredIDsSet.Insert(acc.ID)
 					}
 				}
 			}

@@ -30,7 +30,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-func TestResourceServer_GetResourceName(t *testing.T) {
+func TestResourceServer_ResourceName(t *testing.T) {
 	cases := []struct {
 		name string
 		mode workercore.DeviceAllocationMode
@@ -66,7 +66,7 @@ func TestResourceServer_GetResourceName(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			s := &ResourceServer{Manufacturer: nodefeature.ManufacturerNVIDIA, AllocationMode: c.mode}
-			assert.Equal(t, c.want, s.GetResourceName())
+			assert.Equal(t, c.want, s.ResourceName())
 		})
 	}
 }
@@ -162,7 +162,7 @@ func TestResourceServer_Allocate_Sliced(t *testing.T) {
 
 	got := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
-	allocated, err := extractAllocatedStatusFromPod(got)
+	allocated, err := allocatedStatusOf(got)
 	require.NoError(t, err)
 	require.Len(t, allocated.Groups, 1)
 	require.Len(t, allocated.Groups[0].Accelerators, 1)
@@ -236,7 +236,7 @@ func TestResourceServer_Allocate_Sliced_RecordsUnits(t *testing.T) {
 
 	got := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
-	allocated, err := extractAllocatedStatusFromPod(got)
+	allocated, err := allocatedStatusOf(got)
 	require.NoError(t, err)
 	require.Len(t, allocated.Groups, 1)
 	require.Len(t, allocated.Groups[0].Accelerators, 1)
@@ -1166,7 +1166,7 @@ func mustGetDevices(t *testing.T, rec *DevicesReconciler) *workercore.Devices {
 func cardTokenCount(resp *kubeletdeviceplugin.ListAndWatchResponse, res Resource) int {
 	n := 0
 	for i := range resp.Devices {
-		if ru, err := ConvertResourceUnitFromDeviceIds(resp.Devices[i].ID); err == nil && ru.Resource == res {
+		if ru, err := ParseResourceUnit(resp.Devices[i].ID); err == nil && ru.Resource == res {
 			n++
 		}
 	}
@@ -1181,7 +1181,7 @@ func cardHealthyTokenCount(resp *kubeletdeviceplugin.ListAndWatchResponse, res R
 		if resp.Devices[i].Health != kubeletdeviceplugin.Healthy {
 			continue
 		}
-		if ru, err := ConvertResourceUnitFromDeviceIds(resp.Devices[i].ID); err == nil && ru.Resource == res {
+		if ru, err := ParseResourceUnit(resp.Devices[i].ID); err == nil && ru.Resource == res {
 			n++
 		}
 	}
@@ -1251,7 +1251,7 @@ func TestDevicesReconciler_ReleaseOnPodTermination(t *testing.T) {
 	require.NoError(t, err, "a shared claim must succeed on the freed card")
 	gotB := new(core.Pod)
 	require.NoError(t, cli.Get(ctx, ctrlcli.ObjectKeyFromObject(podB), gotB))
-	allocated, err := extractAllocatedStatusFromPod(gotB)
+	allocated, err := allocatedStatusOf(gotB)
 	require.NoError(t, err)
 	require.Len(t, allocated.Groups, 1)
 	require.Len(t, allocated.Groups[0].Accelerators, 1)
@@ -1675,7 +1675,7 @@ func TestResourceServer_Allocate_Partitioned(t *testing.T) {
 
 	got := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
-	allocated, err := extractAllocatedStatusFromPod(got)
+	allocated, err := allocatedStatusOf(got)
 	require.NoError(t, err)
 	require.Len(t, allocated.Groups, 1)
 	require.Len(t, allocated.Groups[0].Accelerators, 1)
@@ -2256,7 +2256,7 @@ func visibilityReservation(dev string) workercore.DevicesStatus {
 }
 
 // TestResourceServer_GetListAndWatch_Visibility verifies the visibility mode advertises, per
-// card, a flat pool of SlicedResourceMaxSize healthy tokens (via Resource.GetDeviceIds).
+// card, a flat pool of SlicedResourceMaxSize healthy tokens (via Resource.DeviceIDs).
 func TestResourceServer_GetListAndWatch_Visibility(t *testing.T) {
 	const nodeName = "node-v"
 	devs := &workercore.Devices{
@@ -2950,7 +2950,7 @@ func availableDeviceIDsFor(devs *workercore.Devices, mode workercore.DeviceAlloc
 		grp := &devs.Spec.Groups[i]
 		for j := range grp.Accelerators {
 			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
-			ids = append(ids, res.GetDeviceIds(mode, tokensPerCard)...)
+			ids = append(ids, res.DeviceIDs(mode, tokensPerCard)...)
 		}
 	}
 	return ids
@@ -2997,7 +2997,7 @@ func TestResourceServer_PreferredAllocation_HintNamesAnAvailableToken(t *testing
 
 			offered := sets.New(availableDeviceIDs...)
 			for _, id := range resp.GetDeviceIDs() {
-				unit, err := ConvertResourceUnitFromDeviceIds(id)
+				unit, err := ParseResourceUnit(id)
 				require.NoError(t, err, "kubelet can only read a three-segment device ID")
 				assert.Equal(t, id, unit.String(), "a hint ID must round-trip")
 				assert.True(t, offered.Has(id), "the hint must name a token kubelet offered: %q", id)
@@ -3087,7 +3087,7 @@ func TestResourceServer_PreferredAllocation_SlicedPacks(t *testing.T) {
 				return
 			}
 			require.Len(t, resp.GetDeviceIDs(), 1, "a one-card claim is hinted exactly one token")
-			unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+			unit, err := ParseResourceUnit(resp.GetDeviceIDs()[0])
 			require.NoError(t, err)
 			assert.Equal(t, c.wantCard, unit.Device)
 		})
@@ -3119,7 +3119,7 @@ func TestResourceServer_PreferredAllocation_SlicedPinnedCardThatCannotFit(t *tes
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
-	unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+	unit, err := ParseResourceUnit(resp.GetDeviceIDs()[0])
 	require.NoError(t, err)
 	assert.Equal(t, "dev-1", unit.Device,
 		"a pinned card that cannot take the claim must not be hinted — over-committing it costs a runtime OOM")
@@ -3151,7 +3151,7 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeComesFirst(t *testi
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
-	unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+	unit, err := ParseResourceUnit(resp.GetDeviceIDs()[0])
 	require.NoError(t, err)
 	assert.Equal(t, "dev-0", unit.Device,
 		"the card kubelet already allocated to this container must be hinted ahead of a fuller one")
@@ -3185,7 +3185,7 @@ func TestResourceServer_PreferredAllocation_SlicedMustIncludeSurvivesAFullCard(t
 	require.NoError(t, err)
 	require.Len(t, resp.GetDeviceIDs(), 1)
 
-	unit, err := ConvertResourceUnitFromDeviceIds(resp.GetDeviceIDs()[0])
+	unit, err := ParseResourceUnit(resp.GetDeviceIDs()[0])
 	require.NoError(t, err)
 	assert.Equal(t, "dev-0", unit.Device,
 		"a must-include token must be echoed even on a card with no room left; the fit check belongs to cards this call is choosing, not to one already allocated")
@@ -3345,7 +3345,7 @@ func TestResourceServer_Allocate_SlicedPersistsWindow(t *testing.T) {
 
 	got := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
-	allocated, err := extractAllocatedStatusFromPod(got)
+	allocated, err := allocatedStatusOf(got)
 	require.NoError(t, err)
 	require.Len(t, allocated.Groups, 1)
 	require.Len(t, allocated.Groups[0].Accelerators, 1)
@@ -3467,7 +3467,7 @@ func TestResourceServer_Allocate_SlicedWithoutPlacerRecordsNoWindow(t *testing.T
 
 	got := new(core.Pod)
 	require.NoError(t, cli.Get(context.Background(), ctrlcli.ObjectKeyFromObject(pod), got))
-	allocated, err := extractAllocatedStatusFromPod(got)
+	allocated, err := allocatedStatusOf(got)
 	require.NoError(t, err)
 	require.Len(t, allocated.Groups, 1)
 	assert.Empty(t, allocated.Groups[0].Accelerators[0].AllocatedPhysicalPlacements)

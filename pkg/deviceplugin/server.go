@@ -19,6 +19,7 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 	core "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/sets"
 	klog "k8s.io/klog/v2"
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
@@ -34,6 +35,12 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/waitx"
 )
 
+// ResourceServer serves one (manufacturer, allocation mode) pair to kubelet over the device-plugin
+// gRPC API: it advertises that family's tokens, answers the allocation hint, and performs the
+// allocation. One is registered per mode, and every one of them shares a single DevicesReconciler —
+// which is what lets the node-wide allocate mutex and the per-card cross-mode invariant reach
+// across the modes rather than only within one. Responder carries the vendor-specific half of a
+// response; Allocate refuses the request outright when it is unset.
 type ResourceServer struct {
 	deviceplugin.UnimplementedDevicePluginServer
 
@@ -46,8 +53,8 @@ type ResourceServer struct {
 	server *grpc.Server
 }
 
-// GetResourceName returns the resource name to be registered to the Device Manager based on the kind and name.
-func (s *ResourceServer) GetResourceName() core.ResourceName {
+// ResourceName returns the resource name to be registered to the Device Manager based on the kind and name.
+func (s *ResourceServer) ResourceName() core.ResourceName {
 	// GetAcceleratableResourceName maps every mode, including the internal Visibility mode
 	// (the device-only "device.gpustack.ai/<manufacturer>.visibility" resource). For sliced
 	// this is the bare ".sliced" injection-token key; the ".sliced.units" counting key is
@@ -133,83 +140,96 @@ func (s *ResourceServer) getListAndWatchResponse(ctx context.Context) (*ListAndW
 
 	resp := &deviceplugin.ListAndWatchResponse{}
 	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		if devGroup.Manufacturer != s.Manufacturer {
+		grp := &devs.Spec.Groups[i]
+		if grp.Manufacturer != s.Manufacturer {
 			continue
 		}
-		for j := range devGroup.Accelerators {
-			devAccelerator := &devGroup.Accelerators[j]
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
 			res := Resource{
-				Group:  devGroup.ID,
-				Device: devAccelerator.ID,
+				Group:  grp.ID,
+				Device: acc.ID,
 			}
-			// This server's family draws tokens only from the card population that can
-			// physically serve it, and sizes its pool from that card's own capability:
-			// logical slicing and hardware partitioning are exclusive card states, and a
-			// partitioned card is no longer available as a whole card. Scope, not health, is
-			// the mechanism here — the populations are physically exclusive, so a card
-			// skipped this way could never become servable while it stays in that state.
-			// Visibility is exempt and advertised everywhere: a visibility request must
-			// co-allocate the very card its owner holds, whatever state that card is in.
-			var poolSize int32
-			switch s.AllocationMode {
-			case workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared:
-				if !device.IsWholeCardCapable(devAccelerator.Status) {
-					continue
-				}
-			case workercore.DeviceAllocationModeSliced:
-				if !device.IsLogicallySliceable(devAccelerator.Status) {
-					continue
-				}
-				poolSize = devAccelerator.Status.LogicalSliced.Count
-			}
-			// Hardware health alone does not protect a card held in another allocation mode:
-			// kubelet picks tokens freely (GetPreferredAllocation does run, but its answer is
-			// only a hint kubelet is free to ignore), so a held card still
-			// advertised as Healthy WILL eventually be handed to an opposite-mode pod, whose
-			// Allocate then fails with a permanent UnexpectedAdmissionError. Keep the held
-			// card's tokens advertised (removing them would strand kubelet's checkpointed
-			// allocations on re-registration) but report them Unhealthy — kubelet never assigns
-			// Unhealthy devices to new pods, while the holding pod's existing allocation is
-			// unaffected. The hold is read from the ledger Status AND the in-process
-			// reservation, so a just-reserved card is withheld in the same ListAndWatch cycle.
-			// The Visibility server is exempt: a visibility request must co-allocate the very
-			// card its owner holds, whatever mode that hold is.
-			health := deviceplugin.Healthy
-			if devAccelerator.Status.Unhealthy {
-				health = deviceplugin.Unhealthy
-			} else if s.AllocationMode != workercore.DeviceAllocationModeVisibility {
-				if held, _ := s.cardHeldInOtherMode(devs, res); held {
-					health = deviceplugin.Unhealthy
-				}
-			}
-			var topology *deviceplugin.TopologyInfo
-			if numa := binding.StrRangeToList(devAccelerator.Topology.NumaAffinity); len(numa) > 0 {
-				topology = &deviceplugin.TopologyInfo{
-					Nodes: slicex.Transform(numa, func(n int) *deviceplugin.NUMANode {
-						return &deviceplugin.NUMANode{
-							ID: int64(n),
-						}
-					}),
-				}
-			}
-			ids := res.GetDeviceIds(s.AllocationMode, poolSize)
-			for k := range ids {
-				resp.Devices = append(resp.Devices,
-					&deviceplugin.Device{
-						ID:       ids[k],
-						Health:   health,
-						Topology: topology,
-					},
-				)
-			}
+			resp.Devices = append(resp.Devices, s.advertiseCard(devs, acc, res)...)
 		}
 	}
+
 	return resp, nil
 }
 
+// advertiseCard returns the tokens one card contributes to this family's ListAndWatch response, or
+// nothing at all when the card lies outside the family's scope.
+//
+// This server's family draws tokens only from the card population that can physically serve it, and
+// sizes its pool from that card's own capability: logical slicing and hardware partitioning are
+// exclusive card states, and a partitioned card is no longer available as a whole card. Scope, not
+// health, is the mechanism — the populations are physically exclusive, so a card skipped this way
+// could never become servable while it stays in that state. Visibility is exempt and advertised
+// everywhere: a visibility request must co-allocate the very card its owner holds, whatever state
+// that card is in.
+func (s *ResourceServer) advertiseCard(
+	devs *workercore.Devices, acc *workercore.Accelerator, res Resource,
+) []*deviceplugin.Device {
+	var poolSize int32
+	switch s.AllocationMode {
+	case workercore.DeviceAllocationModeExclusive, workercore.DeviceAllocationModeShared:
+		if !device.IsWholeCardCapable(acc.Status) {
+			return nil
+		}
+	case workercore.DeviceAllocationModeSliced:
+		if !device.IsLogicallySliceable(acc.Status) {
+			return nil
+		}
+		poolSize = acc.Status.LogicalSliced.Count
+	}
+
+	// Hardware health alone does not protect a card held in another allocation mode: kubelet picks
+	// tokens freely (GetPreferredAllocation does run, but its answer is only a hint kubelet is free
+	// to ignore), so a held card still advertised as Healthy WILL eventually be handed to an
+	// opposite-mode pod, whose Allocate then fails with a permanent UnexpectedAdmissionError. Keep
+	// the held card's tokens advertised — removing them would strand kubelet's checkpointed
+	// allocations on re-registration — but report them Unhealthy, which kubelet never assigns to new
+	// pods while leaving the holding pod's existing allocation unaffected. The hold is read from the
+	// ledger Status AND the in-process reservation, so a just-reserved card is withheld in the same
+	// ListAndWatch cycle. The Visibility server is exempt: a visibility request must co-allocate the
+	// very card its owner holds, whatever mode that hold is.
+	health := deviceplugin.Healthy
+	if acc.Status.Unhealthy {
+		health = deviceplugin.Unhealthy
+	} else if s.AllocationMode != workercore.DeviceAllocationModeVisibility {
+		if held, _ := s.cardHeldInOtherMode(devs, res); held {
+			health = deviceplugin.Unhealthy
+		}
+	}
+
+	var topology *deviceplugin.TopologyInfo
+	if numa := binding.StrRangeToList(acc.Topology.NumaAffinity); len(numa) > 0 {
+		topology = &deviceplugin.TopologyInfo{
+			Nodes: slicex.Transform(numa, func(n int) *deviceplugin.NUMANode {
+				return &deviceplugin.NUMANode{
+					ID: int64(n),
+				}
+			}),
+		}
+	}
+
+	ids := res.DeviceIDs(s.AllocationMode, poolSize)
+	devices := make([]*deviceplugin.Device, 0, len(ids))
+	for k := range ids {
+		devices = append(devices,
+			&deviceplugin.Device{
+				ID:       ids[k],
+				Health:   health,
+				Topology: topology,
+			},
+		)
+	}
+
+	return devices
+}
+
 // getPartitionListAndWatchResponse publishes the partition pool. Its tokens are a fungible
-// node-level count — Allocate chooses the card (F2) — so health answers "how many more
+// node-level count — Allocate chooses the card — so health answers "how many more
 // instances can this node host", never "which card is free". That also means a partition token
 // carries no NUMA hint: it names no card, so a hint would tell the TopologyManager something
 // the token cannot honor.
@@ -243,19 +263,19 @@ func (s *ResourceServer) getPartitionListAndWatchResponse(
 		room int
 	)
 	for i := range devs.Spec.Groups {
-		devGroup := &devs.Spec.Groups[i]
-		if devGroup.Manufacturer != s.Manufacturer {
+		grp := &devs.Spec.Groups[i]
+		if grp.Manufacturer != s.Manufacturer {
 			continue
 		}
-		for j := range devGroup.Accelerators {
-			devAccelerator := &devGroup.Accelerators[j]
-			if !device.IsPartitioned(devAccelerator.Status) {
+		for j := range grp.Accelerators {
+			acc := &grp.Accelerators[j]
+			if !device.IsPartitioned(acc.Status) {
 				continue
 			}
-			res := Resource{Group: devGroup.ID, Device: devAccelerator.ID}
-			ceiling := devAccelerator.Status.PhysicalSliced.Count
-			ids = append(ids, res.GetDeviceIds(s.AllocationMode, ceiling)...)
-			if devAccelerator.Status.Unhealthy {
+			res := Resource{Group: grp.ID, Device: acc.ID}
+			ceiling := acc.Status.PhysicalSliced.Count
+			ids = append(ids, res.DeviceIDs(s.AllocationMode, ceiling)...)
+			if acc.Status.Unhealthy {
 				// A broken card keeps its IDs — a live allocation may still hold one — but
 				// offers no room for a new instance.
 				continue
@@ -325,7 +345,7 @@ func partitionRoomOf(devs *workercore.Devices, res Resource, ceiling int32) int 
 func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *PreferredAllocationRequest) (*PreferredAllocationResponse, error) {
 	// The visibility and partition token pools are flat and interchangeable — a visibility
 	// token resolves to the pod's already-reserved device, and a partition token to whatever
-	// card Allocate chooses (F2) — so neither has a preference to express. Return an empty
+	// card Allocate chooses — so neither has a preference to express. Return an empty
 	// response (kubelet picks freely) rather than run the sliced per-card bin-fit, which
 	// assumes tokens map to the real devices they name.
 	if s.AllocationMode == workercore.DeviceAllocationModeVisibility ||
@@ -337,7 +357,7 @@ func (s *ResourceServer) GetPreferredAllocation(ctx context.Context, req *Prefer
 
 	ctrReq := req.GetContainerRequests()[0]
 
-	resName := s.GetResourceName()
+	resName := s.ResourceName()
 	resQuantity := *resource.NewQuantity(int64(ctrReq.GetAllocationSize()), resource.DecimalSI)
 	// Advisory path: do not skip reserved containers (kubelet may ignore this hint, and the
 	// authoritative identification with skip-reserved happens in Allocate).
@@ -375,31 +395,17 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 	ctr *core.Container,
 	devs *workercore.Devices,
 ) (*ContainerPreferredAllocationResponse, error) {
-	availableDeviceIDs := ctrReq.GetAvailableDeviceIDs()
-	sort.Strings(availableDeviceIDs)
-	availableResUnitsMap := make(map[Resource][]ResourceUnit)
-	for i := range availableDeviceIDs {
-		resUnit, err := ConvertResourceUnitFromDeviceIds(availableDeviceIDs[i])
-		if err != nil {
-			return nil, fmt.Errorf("convert available device id %q: %w", availableDeviceIDs[i], err)
-		}
-		availableResUnitsMap[resUnit.Resource] = append(availableResUnitsMap[resUnit.Resource], resUnit)
+	availableResUnitsMap, err := parseResourceUnitsByCard(ctrReq.GetAvailableDeviceIDs())
+	if err != nil {
+		return nil, fmt.Errorf("convert available device id %w", err)
 	}
-
-	mustIncludedDeviceIDs := ctrReq.GetMustIncludeDeviceIDs()
-	sort.Strings(mustIncludedDeviceIDs)
-	mustIncludedResUnitsMap := make(map[Resource][]ResourceUnit)
-	for i := range mustIncludedDeviceIDs {
-		resUnit, err := ConvertResourceUnitFromDeviceIds(mustIncludedDeviceIDs[i])
-		if err != nil {
-			return nil, fmt.Errorf("convert must include device id %q: %w", mustIncludedDeviceIDs[i], err)
-		}
-		mustIncludedResUnitsMap[resUnit.Resource] = append(mustIncludedResUnitsMap[resUnit.Resource], resUnit)
+	mustIncludedResUnitsMap, err := parseResourceUnitsByCard(ctrReq.GetMustIncludeDeviceIDs())
+	if err != nil {
+		return nil, fmt.Errorf("convert must include device id %w", err)
 	}
 
 	allocationSize := ctrReq.GetAllocationSize()
-	preferredDeviceIDsSet := extractPreferredAcceleratorIDsFromPod(pod, devs)
-	remainingSize := allocationSize
+	preferredDeviceIDsSet := preferredAcceleratorIDsOf(pod, devs)
 
 	// For sliced, every card this HINT offers must still have this container's per-card
 	// ".sliced.units" (the memory budget the Pod webhook folded in) free. That constrains the hint,
@@ -415,85 +421,18 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 		}
 	}
 
-	selectedResUnits := make([]ResourceUnit, 0, allocationSize)
-	var unselectedResUnits []ResourceUnit // Only used if provided preferred device IDs.
-	for i := range devs.Spec.Groups {
-		devsGroup := &devs.Spec.Groups[i]
-		if devsGroup.Manufacturer != s.Manufacturer {
-			continue
-		}
-		for _, j := range slicedPackingOrder(devs, devsGroup, mustIncludedResUnitsMap, slicedUnits) {
-			devsAccelerator := &devsGroup.Accelerators[j]
-			res := Resource{
-				Group:  devsGroup.ID,
-				Device: devsAccelerator.ID,
-			}
-
-			// Skip the resource is not in the available list.
-			resUnits, existed := availableResUnitsMap[res]
-			if !existed {
-				continue
-			}
-			// Skip the resource is occupied by other modes.
-			mode := workercore.DeviceAllocationModeNone
-			if len(devs.Status.Groups) > i && len(devs.Status.Groups[i].Accelerators) > j {
-				mode = devs.Status.Groups[i].Accelerators[j].Mode
-			}
-			if mode != workercore.DeviceAllocationModeNone && mode != s.AllocationMode {
-				continue
-			}
-
-			// Exclusive, shared and sliced all select one device unit (token) per
-			// card; the per-card concurrency/units accounting lives elsewhere (Kueue
-			// credits and the ".sliced.units" capacity), not in the device plugin.
-			if miResUnits, existed := mustIncludedResUnitsMap[res]; existed {
-				// Only the first must-include unit per card is consumed (one token). The
-				// must-include set is what kubelet has already allocated to this container, and it
-				// intersects the hint with the still-available set, so echoing such a token cannot
-				// win the card back. Echoing it still matters: it spends one of the claim's slots,
-				// which is what leaves that intersection holding exactly the devices kubelet still
-				// needs rather than a wider set it would then pick from arbitrarily. This is why
-				// slicedPackingOrder visits these cards first.
-				//
-				// It is echoed whatever the ledger reports free — the fit check below deliberately
-				// sits on the other branch. This token's units are ALREADY counted in that card's
-				// Remaining, so measuring it against Remaining charges the container for its own
-				// claim a second time and would drop a token the response has to carry.
-				preferredDeviceIDsSet.Delete(res.Device)
-				selectedResUnits = append(selectedResUnits, miResUnits[0])
-			} else {
-				// Defer a card that cannot fit this slice's per-card units without over-committing
-				// it (its ledger Remaining is below the request) to unselectedResUnits. That list is
-				// consumed only on the preferred-accelerator path below, when the annotation's cards
-				// could not all be selected; with no annotation a claim no card fits yields an empty
-				// hint and these cards are never used.
-				if slicedUnits > 0 && statusRemainingOf(devs, res) < slicedUnits {
-					unselectedResUnits = append(unselectedResUnits, resUnits[0])
-					continue
-				}
-				if preferredDeviceIDsSet.Len() != 0 && !preferredDeviceIDsSet.Has(res.Device) {
-					unselectedResUnits = append(unselectedResUnits, resUnits[0])
-					continue
-				}
-				preferredDeviceIDsSet.Delete(res.Device)
-				selectedResUnits = append(selectedResUnits, resUnits[0])
-			}
-			remainingSize -= 1
-			if preferredDeviceIDsSet.Len() == 0 && remainingSize <= 0 {
-				goto outside
-			}
-		}
-	}
-outside:
+	sel := s.selectPreferredUnits(devs, availableResUnitsMap, mustIncludedResUnitsMap,
+		preferredDeviceIDsSet, allocationSize, slicedUnits)
+	selectedResUnits, remainingSize := sel.Selected, sel.RemainingSize
 
 	if preferredDeviceIDsSet.Len() > 0 {
 		s.Logger.Error(nil, "not enough preferred devices: %v", preferredDeviceIDsSet.UnsortedList())
-		if len(unselectedResUnits) == 0 {
+		if len(sel.Unselected) == 0 {
 			return &ContainerPreferredAllocationResponse{}, nil
 		}
-		if remainingSize <= int32(len(unselectedResUnits)) {
+		if remainingSize <= int32(len(sel.Unselected)) {
 			s.Logger.Info("try to allocate from unselected devices since preferred devices are not enough")
-			selectedResUnits = append(selectedResUnits, unselectedResUnits[:remainingSize]...)
+			selectedResUnits = append(selectedResUnits, sel.Unselected[:remainingSize]...)
 			remainingSize = 0
 		}
 	}
@@ -514,7 +453,125 @@ outside:
 	return resp, nil
 }
 
-// slicedPackingOrder returns the positions of devsGroup's accelerators in the order a claim of
+// parseResourceUnitsByCard parses device IDs into their ResourceUnits, grouped by the card each one
+// names. The IDs are sorted first, so a card's units land in a stable order and a caller taking the
+// first of them gets the same token on every call.
+func parseResourceUnitsByCard(deviceIDs []string) (map[Resource][]ResourceUnit, error) {
+	sort.Strings(deviceIDs)
+
+	byCard := make(map[Resource][]ResourceUnit)
+	for i := range deviceIDs {
+		resUnit, err := ParseResourceUnit(deviceIDs[i])
+		if err != nil {
+			return nil, fmt.Errorf("%q: %w", deviceIDs[i], err)
+		}
+		byCard[resUnit.Resource] = append(byCard[resUnit.Resource], resUnit)
+	}
+
+	return byCard, nil
+}
+
+// _PreferredSelection is what one walk of this node's cards produced for an allocation hint.
+type _PreferredSelection struct {
+	// Selected are the tokens the hint will offer, at most one per card.
+	Selected []ResourceUnit
+	// Unselected are the tokens of cards passed over: one that cannot fit this slice's per-card
+	// units, or one outside the preferred set. Only the preferred-accelerator fallback draws on them.
+	Unselected []ResourceUnit
+	// RemainingSize is how much of the requested allocation the walk could not satisfy.
+	RemainingSize int32
+}
+
+// selectPreferredUnits walks this manufacturer's cards in packing order and takes one token per
+// card until the claim is full and every preferred card has been honored, which is the point it
+// returns from. Returning is what lets it leave both loops at once; the two used to need a goto.
+//
+// preferredDeviceIDsSet is narrowed in place as cards are honored, so what remains in it after the
+// walk is exactly the preferred cards that could not be met — which is how the caller decides
+// whether to fall back. RemainingSize is returned by value rather than shared, so the loop's exit
+// stays one expression and no part of this walk becomes server state.
+func (s *ResourceServer) selectPreferredUnits(
+	devs *workercore.Devices,
+	availableResUnitsMap, mustIncludedResUnitsMap map[Resource][]ResourceUnit,
+	preferredDeviceIDsSet sets.Set[string],
+	allocationSize, slicedUnits int32,
+) _PreferredSelection {
+	sel := _PreferredSelection{
+		Selected:      make([]ResourceUnit, 0, allocationSize),
+		RemainingSize: allocationSize,
+	}
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		if grp.Manufacturer != s.Manufacturer {
+			continue
+		}
+		for _, j := range slicedPackingOrder(devs, grp, mustIncludedResUnitsMap, slicedUnits) {
+			acc := &grp.Accelerators[j]
+			res := Resource{
+				Group:  grp.ID,
+				Device: acc.ID,
+			}
+
+			// Skip the resource is not in the available list.
+			resUnits, existed := availableResUnitsMap[res]
+			if !existed {
+				continue
+			}
+			// Skip the resource is occupied by other modes.
+			mode := workercore.DeviceAllocationModeNone
+			if len(devs.Status.Groups) > i && len(devs.Status.Groups[i].Accelerators) > j {
+				mode = devs.Status.Groups[i].Accelerators[j].Mode
+			}
+			if mode != workercore.DeviceAllocationModeNone && mode != s.AllocationMode {
+				continue
+			}
+
+			// Exclusive, shared and sliced all select one device unit (token) per card; the
+			// per-card concurrency/units accounting lives elsewhere (Kueue credits and the
+			// ".sliced.units" capacity), not in the device plugin.
+			if mustUnits, existed := mustIncludedResUnitsMap[res]; existed {
+				// Only the first must-include unit per card is consumed (one token). The
+				// must-include set is what kubelet has already allocated to this container, and it
+				// intersects the hint with the still-available set, so echoing such a token cannot
+				// win the card back. Echoing it still matters: it spends one of the claim's slots,
+				// which is what leaves that intersection holding exactly the devices kubelet still
+				// needs rather than a wider set it would then pick from arbitrarily. This is why
+				// slicedPackingOrder visits these cards first.
+				//
+				// It is echoed whatever the ledger reports free — the fit check below deliberately
+				// sits on the other branch. This token's units are ALREADY counted in that card's
+				// Remaining, so measuring it against Remaining charges the container for its own
+				// claim a second time and would drop a token the response has to carry.
+				preferredDeviceIDsSet.Delete(res.Device)
+				sel.Selected = append(sel.Selected, mustUnits[0])
+			} else {
+				// Defer a card that cannot fit this slice's per-card units without over-committing
+				// it (its ledger Remaining is below the request). That list is consumed only on the
+				// preferred-accelerator path, when the annotation's cards could not all be selected;
+				// with no annotation a claim no card fits yields an empty hint and these cards are
+				// never used.
+				if slicedUnits > 0 && statusRemainingOf(devs, res) < slicedUnits {
+					sel.Unselected = append(sel.Unselected, resUnits[0])
+					continue
+				}
+				if preferredDeviceIDsSet.Len() != 0 && !preferredDeviceIDsSet.Has(res.Device) {
+					sel.Unselected = append(sel.Unselected, resUnits[0])
+					continue
+				}
+				preferredDeviceIDsSet.Delete(res.Device)
+				sel.Selected = append(sel.Selected, resUnits[0])
+			}
+			sel.RemainingSize--
+			if preferredDeviceIDsSet.Len() == 0 && sel.RemainingSize <= 0 {
+				return sel
+			}
+		}
+	}
+
+	return sel
+}
+
+// slicedPackingOrder returns the positions of grp's accelerators in the order a claim of
 // slicedUnits should try them. A non-positive slicedUnits leaves the cards in their natural order.
 //
 // A card kubelet already allocated to this container (mustInclude) comes first whatever its
@@ -530,11 +587,11 @@ outside:
 // on the lower position, so two identical requests against identical state place identically.
 func slicedPackingOrder(
 	devs *workercore.Devices,
-	devsGroup *workercore.DevicesGroup,
+	grp *workercore.DevicesGroup,
 	mustInclude map[Resource][]ResourceUnit,
 	slicedUnits int32,
 ) []int {
-	order := make([]int, len(devsGroup.Accelerators))
+	order := make([]int, len(grp.Accelerators))
 	for j := range order {
 		order[j] = j
 	}
@@ -543,7 +600,7 @@ func slicedPackingOrder(
 	}
 
 	resourceAt := func(j int) Resource {
-		return Resource{Group: devsGroup.ID, Device: devsGroup.Accelerators[j].ID}
+		return Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
 	}
 	slices.SortStableFunc(order, func(a, b int) int {
 		resA, resB := resourceAt(a), resourceAt(b)
@@ -783,7 +840,7 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 	sort.Strings(allocatedDeviceIDs)
 	allocatedResUnitsMap := make(map[Resource][]ResourceUnit)
 	for i := range allocatedDeviceIDs {
-		resUnit, err := ConvertResourceUnitFromDeviceIds(allocatedDeviceIDs[i])
+		resUnit, err := ParseResourceUnit(allocatedDeviceIDs[i])
 		if err != nil {
 			s.Logger.Error(err, "convert device id", "device id", allocatedDeviceIDs[i])
 			return nil, grpcstatus.Errorf(grpccodes.InvalidArgument, "invalid device id %q: %v", allocatedDeviceIDs[i], err)
@@ -791,354 +848,501 @@ func (s *ResourceServer) Allocate(ctx context.Context, req *AllocateRequest) (*A
 		allocatedResUnitsMap[resUnit.Resource] = append(allocatedResUnitsMap[resUnit.Resource], resUnit)
 	}
 
-	resName := s.GetResourceName()
-	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
+	// A responder that places logical geometry is called twice: once inside the mutex to pick the
+	// window, once after it is released to render the response from what was picked. Resolved once
+	// here so the two calls cannot disagree about whether this responder places at all.
+	logicalPlacer, placesLogical := s.Responder.(LogicalSlicedResponder)
+	placesLogical = placesLogical && s.AllocationMode == workercore.DeviceAllocationModeSliced
 
 	// Identify the pod, enforce the cross-mode invariant, and reserve the cards under the node
 	// allocate mutex (see DevicesReconciler.allocateMutex). Holding it across the whole section
 	// makes a concurrent Allocate batch (e.g. Kueue admitting identical Pods together) resolve to
 	// DISTINCT pods — getAllocatingPod skips pods a prior Allocate already reserved, and that
-	// reservation is written here before the next Allocate reads it — and stops an opposite-mode
+	// reservation is written there before the next Allocate reads it — and stops an opposite-mode
 	// Allocate for the same card from interleaving between the check and the reservation (TOCTOU).
-	// Its reads (getAllocatingPod, getDevices) are served from the informer cache and it makes no
-	// durable writes; crucially the mutex is NOT held across the annotation patch, which runs after
-	// the mutex is released.
-	// A responder that places logical geometry is called twice more: once inside the mutex below
-	// to pick the window, once after it to render the response from what was picked. Resolved
-	// once here so the two calls cannot disagree about whether this responder places at all.
-	logicalPlacer, placesLogical := s.Responder.(LogicalSlicedResponder)
-	placesLogical = placesLogical && s.AllocationMode == workercore.DeviceAllocationModeSliced
-
-	var (
-		pod                 *core.Pod
-		ctr                 *core.Container
-		devs                *workercore.Devices
-		profile             string
-		allocatedStatus     workercore.DevicesStatus
-		allocatedAllocation = make(map[Resource]int32)
-		logicalPlacements   LogicalPlacements
-	)
-	if err := func() error {
+	//
+	// The lock is taken here rather than inside decideAllocation so the serialized region is one
+	// named call at the point it is entered, and defer releases it on every path including a
+	// panic: a leaked allocate mutex would hang every later Allocate on this node.
+	decision, err := func() (_AllocationDecision, error) {
 		s.Reconciler.allocateMutex.Lock()
 		defer s.Reconciler.allocateMutex.Unlock()
 
-		var err error
-		// The ledger is read first: it is what tells two otherwise identical candidates apart
-		// in the feasibility test below.
-		devs, err = s.Reconciler.getDevices(ctx)
-		if err != nil {
-			s.Logger.Error(err, "get devices for allocation")
-			return grpcstatus.Errorf(grpccodes.Internal, "get devices for allocation: %v", err)
-		}
-
-		// The Partitioned family decides the placement itself, so it needs the node's live
-		// per-card occupancy — the annotations every live allocation carries, unioned with the
-		// selections in-flight allocations have already published. Reading it once here keeps
-		// the candidate test and the placement decision on one snapshot.
-		var occupied map[Resource][]workercore.AcceleratorPhysicalPlacement
-		if s.AllocationMode == workercore.DeviceAllocationModePartitioned {
-			occupied, err = s.occupiedPhysicalPlacements(ctx)
-			if err != nil {
-				s.Logger.Error(err, "get occupied placements for allocation")
-				return grpcstatus.Errorf(grpccodes.Internal, "get occupied placements for allocation: %v", err)
-			}
-		}
-
-		// A logical slice that occupies a position on the card needs the same snapshot, in its
-		// own key space: what every live allocation already occupies, so this one can be placed
-		// beside them rather than on top of them.
-		var occupiedLogical LogicalPlacements
-		if placesLogical {
-			occupiedLogical, err = s.occupiedLogicalPlacements(ctx)
-			if err != nil {
-				s.Logger.Error(err, "get occupied logical placements for allocation")
-				return grpcstatus.Errorf(grpccodes.Internal,
-					"get occupied logical placements for allocation: %v", err)
-			}
-		}
-
-		pod, ctr, err = s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
-			ResourceName: resName,
-			Quantity:     resQuantity,
-			SkipReserved: true,
-			Feasible:     s.candidateFeasible(devs, allocatedResUnitsMap, occupied),
-		})
-		if err != nil {
-			s.Logger.Error(err, "get allocating pod for allocation")
-			return grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
-		}
-
-		// Each token placed on a card commits the container's per-card counting units — the
-		// normalized value the Pod webhook folds the memory budget into (".sliced.units" for a
-		// logical slice, ".partitioned.units" for a partition). Recording that real cost (not
-		// the loose token count) keeps the per-card ledger honest, so the node-devices admission
-		// check refuses a card whose committed units would exceed capacity and the InstanceType
-		// views report the true remaining. Fall back to the token count when the units request
-		// is absent (a Pod the webhook did not shape).
-		unitsPerToken, unitsRequested := int64(1), false
-		if unitsResName := s.unitsResourceName(); unitsResName != "" {
-			if q, ok := ctr.Resources.Limits[unitsResName]; ok && q.Value() > 0 {
-				unitsPerToken, unitsRequested = q.Value(), true
-			}
-		}
-
-		// Which cards this allocation lands on. The three card-bound families take the cards
-		// kubelet's tokens name. Partitioned reads the tokens as a quantity and chooses the
-		// cards itself, against the live occupancy: kubelet cannot know which card can host a
-		// given geometry, and a wrong pick is the one placement error the plugin can repair
-		// rather than reject. A rejection here therefore means the node has no room at all.
-		var (
-			placements map[Resource][]workercore.AcceleratorPhysicalPlacement
-			cardTokens = allocatedResUnitsMap
-		)
-		if s.AllocationMode == workercore.DeviceAllocationModePartitioned {
-			cardTokens = nil // decided below, from the prior allocation or a fresh placement
-			var ok bool
-			if profile, ok = partitionProfileOf(ctr); !ok {
-				s.Logger.Error(nil, "partition allocation without a profile",
-					"pod", kubemeta.GetNamespacedNameKey(pod), "container", ctr.Name)
-				return grpcstatus.Errorf(grpccodes.FailedPrecondition,
-					"container %q of pod %s requests %s but names no partition profile",
-					ctr.Name, kubemeta.GetNamespacedNameKey(pod), resName)
-			}
-			// A partition names its own cost even when nothing shaped the request. The Pod
-			// webhook is scoped to queued Pods, so a partition Pod submitted outside the
-			// scheduling chain carries no units key — and for this family the token count is
-			// not a usable stand-in: one token is one whole card, which would charge a single
-			// unit for a partition that occupies half the card or all of it, leaving a card
-			// carved to capacity reading as untouched in the scalar ledger. The profile is the
-			// missing budget, so fold it here the way the webhook would have.
-			if !unitsRequested {
-				if units := s.partitionProfileUnits(devs, profile); units > 0 {
-					unitsPerToken = units
-				}
-			}
-			// A retried Allocate must land back on the card it already used. The kubelet
-			// re-runs Allocate for a container whose checkpoint it lost — a restart while the
-			// container was stopped — and by then this container's own placement is part of
-			// the node's occupancy. Deciding afresh would read it as somebody else's: a
-			// whole-card profile would report the node exhausted, and a node with a free
-			// sibling would place on THAT card, bypassing the vendor's per-(pod, container,
-			// card) reuse marker and carving a second instance. The card-bound families get
-			// this for free, since kubelet re-offers the tokens it checkpointed.
-			if prior, held := s.priorAllocationOf(pod, ctr.Name); held {
-				cardTokens, placements = priorPartitionTokens(prior)
-			}
-			if cardTokens == nil {
-				candidates, byID := s.partitionCandidates(devs, occupied, profile)
-				selections, placed := device.SelectPartitionPlacements(candidates, len(allocatedDeviceIDs))
-				if !placed {
-					s.Logger.Error(nil, "no card can host the requested partition profile",
-						"pod", kubemeta.GetNamespacedNameKey(pod), "profile", profile,
-						"instances", len(allocatedDeviceIDs))
-					return grpcstatus.Errorf(grpccodes.ResourceExhausted,
-						"no card on this node can host %d instance(s) of partition profile %q",
-						len(allocatedDeviceIDs), profile)
-				}
-				cardTokens, placements = partitionTokens(selections, byID)
-			}
-		}
-
-		// Enforce the per-card cross-mode invariant at the authoritative on-node gate: refuse a
-		// card another mode already holds (per the ledger Status OR the in-process reservation),
-		// so an exclusive tenant truly owns its card on every path, Kueue or raw. Free (None) and
-		// same-mode (e.g. sliced-on-sliced) cards pass. The partition selector already skipped
-		// held cards, so this re-checks its own choice rather than kubelet's.
-		for res := range cardTokens {
-			if held, mode := s.cardHeldInOtherMode(devs, res); held {
-				s.Logger.Error(nil, "cross-mode allocation rejected",
-					"pod", kubemeta.GetNamespacedNameKey(pod), "card", res.String(),
-					"heldMode", mode.String(), "requestedMode", s.AllocationMode.String())
-				return grpcstatus.Errorf(grpccodes.FailedPrecondition,
-					"card %s is held in %s mode, cannot allocate it in %s mode", res, mode, s.AllocationMode)
-			}
-		}
-
-		for i := range devs.Spec.Groups {
-			devsGroup := &devs.Spec.Groups[i]
-			if devsGroup.Manufacturer != s.Manufacturer {
-				continue
-			}
-			for j := range devsGroup.Accelerators {
-				devsAccelerator := &devsGroup.Accelerators[j]
-				res := Resource{
-					Group:  devsGroup.ID,
-					Device: devsAccelerator.ID,
-				}
-				resUnits, existed := cardTokens[res]
-				if !existed {
-					continue
-				}
-				var allocated int32
-				switch s.AllocationMode {
-				default:
-					allocated = nodefeature.ResourceMaxUnits // a whole card
-				case workercore.DeviceAllocationModeShared:
-					allocated = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize // units per owner
-				case workercore.DeviceAllocationModeSliced, workercore.DeviceAllocationModePartitioned:
-					// Real per-card units this container commits on the card, so the ledger
-					// reflects capacity rather than the loose token count. A partition needs its
-					// own branch here for the same reason a slice does, and for one more: the
-					// default charges a WHOLE card, which would make a single small instance look
-					// like it owned the card and hide the rest of its geometry from every
-					// consumer of the scalar remaining.
-					allocated = int32(min(unitsPerToken*int64(len(resUnits)), int64(nodefeature.ResourceMaxUnits)))
-				}
-				if allocated > nodefeature.ResourceMaxUnits {
-					allocated = nodefeature.ResourceMaxUnits
-				}
-				if len(allocatedStatus.Groups) == 0 || allocatedStatus.Groups[len(allocatedStatus.Groups)-1].ID != devsGroup.ID {
-					allocatedStatus.Groups = append(allocatedStatus.Groups, workercore.DevicesAllocationGroup{
-						ID:           devsGroup.ID,
-						Manufacturer: devsGroup.Manufacturer,
-					})
-				}
-				devsStatusGroup := &allocatedStatus.Groups[len(allocatedStatus.Groups)-1]
-				devsStatusGroup.Accelerators = append(devsStatusGroup.Accelerators, workercore.AcceleratorAllocation{
-					ID:        devsAccelerator.ID,
-					Index:     devsAccelerator.Index,
-					Mode:      s.AllocationMode,
-					Allocated: allocated,
-				})
-				allocatedAllocation[res] = allocated
-			}
-		}
-
-		// Publish the logical slice's geometry into the allocation for the same reason the
-		// partition selection is published below, and at the same point: before the reservation,
-		// so the next serialized Allocate places against a card whose window is already spoken
-		// for. Choosing it later — in the responder, after the mutex — cannot be made race-free.
-		if placesLogical {
-			// A retried Allocate must reuse the window this container already holds. The kubelet
-			// re-runs Allocate for a container whose checkpoint it lost, and by then this
-			// container's own window is part of the node's occupancy: deciding afresh would read
-			// it as somebody else's, move the container to a different window, and strand the
-			// first one until the Pod goes away.
-			if prior, held := s.priorLogicalPlacements(pod, ctr.Name); held {
-				logicalPlacements = prior
-			} else if logicalPlacements, err = logicalPlacer.PlaceLogicalSliced(
-				ctx, pod, ctr, devs, allocatedAllocation, occupiedLogical); err != nil {
-				s.Logger.Error(err, "place logical slice for allocation",
-					"pod", kubemeta.GetNamespacedNameKey(pod), "container", ctr.Name)
-				return grpcstatus.Errorf(grpccodes.Internal, "place logical slice: %v", err)
-			}
-			applyLogicalPlacements(&allocatedStatus, logicalPlacements)
-		}
-
-		// Publish the partition selection — card, profile and the intervals it intends to
-		// occupy — into the allocation BEFORE the reservation below, so the next serialized
-		// Allocate decides against a card that is already spoken for rather than one that
-		// merely has not been carved yet. Actuation happens after the mutex is released, and
-		// overwrites the intent with the interval the hardware actually gave.
-		if len(placements) > 0 {
-			applyPhysicalPlacements(&allocatedStatus, profile, placements)
-		}
-
-		// Reserve the cards in-process before releasing the mutex: the card is taken the instant
-		// the check passes, so the next serialized Allocate observes it (cross-mode check and
-		// getAllocatingPod's skip-reserved), and a visibility Allocate can co-allocate the same
-		// physical device without racing the annotation's cache propagation.
-		// The offered device IDs ride along so ListAndWatch can keep advertising exactly them
-		// Healthy for as long as this allocation lives.
-		s.Reconciler.reserveDevices(pod.UID, ctr.Name, allocatedStatus, allocatedDeviceIDs)
-		return nil
-	}(); err != nil {
+		return s.decideAllocation(ctx, allocatedDeviceIDs, allocatedResUnitsMap, logicalPlacer, placesLogical)
+	}()
+	if err != nil {
 		return nil, err
 	}
 
-	// Materialize the hardware partition(s) via the responder's actuator — under its own
-	// per-card lock — and record each chosen placement upward in allocatedStatus BEFORE the
-	// annotation patch, so the reconciler's ledger can reconstruct the card's occupied set. The
-	// actuator may land on a different interval of the selected card than the one published as
-	// the intent (it can adopt an instance the hardware already carries), so the reservation is
-	// re-published with what actually happened. The node mutex is already released; the
-	// per-card lock serializes only same-card creates, so sibling cards proceed in parallel. A
-	// responder that cannot actuate fails the allocation rather than starting a container with
-	// no partition.
-	var physical *PhysicalSlicedAllocation
-	if profile != "" {
-		actuator, canActuate := s.Responder.(PhysicalSlicedResponder)
-		if !canActuate {
-			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
-			return nil, grpcstatus.Errorf(grpccodes.Internal,
-				"responder cannot actuate partition profile %q", profile)
-		}
-		var actErr error
-		physical, actErr = actuator.ActuatePhysicalSliced(ctx, pod, ctr, devs, allocatedAllocation, profile)
-		if actErr != nil {
-			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
-			s.Logger.Error(actErr, "actuate partition for allocation", "pod", kubemeta.GetNamespacedNameKey(pod))
-			return nil, grpcstatus.Errorf(grpccodes.Internal, "actuate partition: %v", actErr)
-		}
-		applyPhysicalPlacements(&allocatedStatus, physical.Profile, physical.Placements)
-		s.Reconciler.reserveDevices(pod.UID, ctr.Name, allocatedStatus, allocatedDeviceIDs)
+	physical, err := s.actuatePartition(ctx, &decision, allocatedDeviceIDs)
+	if err != nil {
+		return nil, err
 	}
 
-	// A logical-slice response is rendered BEFORE the durable patch, and ONLY that one.
-	//
-	// It has to be: it is the response whose failure would otherwise leave a CU window recorded on
-	// a card for a container kubelet never starts, and it creates nothing but a directory, so
-	// rendering it early costs nothing if the patch then fails.
-	//
-	// Moving the OTHER responders here would be a regression, and a quiet one. Cambricon and MetaX
-	// materialize a subdevice and an on-disk ownership marker inside GetContainerAllocateResponse;
-	// were that to run before a patch that then failed, the hardware would exist while the ledger
-	// said the card was free, and their reclaimers — which preserve an instance whose Pod is still
-	// live — would keep it that way. They stay where they are, below the patch, and the strand
-	// their own failure can leave is pre-existing and out of scope here.
-	//
-	// A physical-slice allocation injects only the partition's visible-devices env the actuator
-	// already assembled (no logical-slice artifacts), so it bypasses the responder entirely.
-	var ctrResp *ContainerAllocateResponse
-	switch {
-	case physical != nil:
-		ctrResp = physical.Response
-	case placesLogical:
-		// The placement is consumed, never recomputed: what the container is told must be what
-		// the ledger recorded, and only one of the two can be authoritative.
-		var respErr error
-		ctrResp, respErr = logicalPlacer.GetLogicalSlicedResponse(
-			ctx, pod, ctr, devs, allocatedAllocation, logicalPlacements)
-		if respErr != nil {
-			s.Reconciler.releaseReservation(pod.UID, ctr.Name)
-			s.Logger.Error(respErr, "get logical sliced response")
-			return nil, respErr
-		}
+	ctrResp, err := s.renderPrePatchResponse(ctx, &decision, physical, logicalPlacer, placesLogical)
+	if err != nil {
+		return nil, err
 	}
 
-	// Persist the durable allocation annotation outside the mutex (I/O). On failure roll back the
-	// reservation written above: with the annotation absent, the Pod-delete watch (gated on it)
-	// would never enqueue a prune, so the card would stay stranded for the opposite mode. Kubelet
-	// does not start the container on this error, so freeing the reservation now is safe and keeps
-	// the release counting honest. A physical partition materialized above is also torn down, so
-	// no half-owned instance persists past a failed patch.
-	if err := s.Reconciler.patchAllocatingPod(ctx, pod, ctr.Name, allocatedStatus, allocatedDeviceIDs); err != nil {
-		if physical != nil && physical.Rollback != nil {
-			physical.Rollback()
-		}
-		s.Reconciler.releaseReservation(pod.UID, ctr.Name)
-		s.Logger.Error(err, "patch allocating pod for allocation")
-		return nil, grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
+	if err = s.persistAllocation(ctx, &decision, allocatedDeviceIDs, physical); err != nil {
+		return nil, err
 	}
 
-	// Every other responder keeps its position after the patch, unchanged — see above for why
-	// moving it would strand hardware some vendors create in here.
+	// Every other responder keeps its position after the patch — see renderPrePatchResponse for why
+	// moving it earlier would strand hardware some vendors create inside it.
 	if ctrResp == nil {
-		var err error
-		ctrResp, err = s.Responder.GetContainerAllocateResponse(ctx, pod, ctr, devs, allocatedAllocation)
-		if err != nil {
+		if ctrResp, err = s.Responder.GetContainerAllocateResponse(
+			ctx, decision.Pod, decision.Container, decision.Devices, decision.Allocation); err != nil {
 			s.Logger.Error(err, "get container allocate response")
 			return nil, err
 		}
 	}
 
-	resp := &AllocateResponse{
-		ContainerResponses: []*ContainerAllocateResponse{ctrResp},
-	}
-	s.Logger.Info("allocate response",
-		"pod", kubemeta.GetNamespacedNameKey(pod),
-		"response", resp)
+	resp := &AllocateResponse{ContainerResponses: []*ContainerAllocateResponse{ctrResp}}
+	s.Logger.Info("allocate response", "pod", kubemeta.GetNamespacedNameKey(decision.Pod), "response", resp)
+
 	return resp, nil
+}
+
+// _AllocationDecision is what one workload Allocate settles while it holds the node allocate
+// mutex: the pod and container the request was matched to, the ledger snapshot it decided against,
+// and the allocation it reserved.
+type _AllocationDecision struct {
+	Pod       *core.Pod
+	Container *core.Container
+	// Devices is the ledger snapshot every decision here was made against, carried forward so no
+	// later phase re-reads a node that may since have moved on.
+	Devices *workercore.Devices
+	// Profile is the partition profile this allocation intends; empty for every other family.
+	Profile string
+	// Status is the allocation as reserved. The actuation phase overwrites its physical placements
+	// with the interval the hardware actually gave, then re-publishes it.
+	Status workercore.DevicesStatus
+	// Allocation is the per-card units charge the responders are handed.
+	Allocation map[Resource]int32
+	// LogicalPlacements is the geometry picked under the mutex. GetLogicalSlicedResponse consumes
+	// it rather than recomputing it: only one of the two can be authoritative.
+	LogicalPlacements LogicalPlacements
+}
+
+// decideAllocation runs the identify → cross-mode check → reserve section of a workload Allocate.
+// The caller holds the node allocate mutex around this call, so nothing here may perform durable
+// I/O: every read is served from the informer cache, and the one write it makes is the in-process
+// reservation, which must be published before the mutex is released so the next serialized
+// Allocate observes it. The annotation patch, the vendor actuation and every response rendering
+// run after it returns, off the serialized path.
+func (s *ResourceServer) decideAllocation(
+	ctx context.Context,
+	deviceIDs []string,
+	tokensByCard map[Resource][]ResourceUnit,
+	logicalPlacer LogicalSlicedResponder,
+	placesLogical bool,
+) (_AllocationDecision, error) {
+	var d _AllocationDecision
+
+	// The ledger is read first: it is what tells two otherwise identical candidates apart in the
+	// feasibility test below.
+	devs, occupied, occupiedLogical, err := s.snapshotForAllocate(ctx, placesLogical)
+	if err != nil {
+		return d, err
+	}
+	d.Devices = devs
+
+	d.Pod, d.Container, err = s.Reconciler.getAllocatingPod(ctx, _AllocationMatch{
+		ResourceName: s.ResourceName(),
+		Quantity:     *resource.NewQuantity(int64(len(deviceIDs)), resource.DecimalSI),
+		SkipReserved: true,
+		Feasible:     s.candidateFeasible(devs, tokensByCard, occupied),
+	})
+	if err != nil {
+		s.Logger.Error(err, "get allocating pod for allocation")
+		return d, grpcstatus.Errorf(grpccodes.Internal, "get allocating pod for allocation: %v", err)
+	}
+
+	unitsPerToken, unitsRequested := s.requestedUnits(d.Container)
+
+	var placements map[Resource][]workercore.AcceleratorPhysicalPlacement
+	if s.AllocationMode == workercore.DeviceAllocationModePartitioned {
+		tokensByCard, placements, unitsPerToken, err = s.choosePartitionCards(&d, occupied, deviceIDs, unitsPerToken, unitsRequested)
+		if err != nil {
+			return d, err
+		}
+	}
+
+	if err = s.rejectCrossModeCards(devs, tokensByCard, d.Pod); err != nil {
+		return d, err
+	}
+
+	d.Status, d.Allocation = s.accumulateAllocation(devs, tokensByCard, unitsPerToken)
+
+	// Publish the logical slice's geometry into the allocation before the reservation, so the next
+	// serialized Allocate places against a card whose window is already spoken for. Choosing it
+	// later — in the responder, after the mutex — cannot be made race-free.
+	if placesLogical {
+		if d.LogicalPlacements, err = s.placeLogicalSlice(ctx, &d, logicalPlacer, occupiedLogical); err != nil {
+			return d, err
+		}
+		applyLogicalPlacements(&d.Status, d.LogicalPlacements)
+	}
+
+	// Publish the partition selection — card, profile and the intervals it intends to occupy —
+	// before the reservation for the same reason, so the next serialized Allocate decides against a
+	// card already spoken for rather than one that merely has not been carved yet. Actuation runs
+	// after the mutex is released and overwrites the intent with what the hardware actually gave.
+	if len(placements) > 0 {
+		applyPhysicalPlacements(&d.Status, d.Profile, placements)
+	}
+
+	// Reserve the cards in-process before releasing the mutex: the card is taken the instant the
+	// check passes, so the next serialized Allocate observes it (the cross-mode check and
+	// getAllocatingPod's skip-reserved), and a visibility Allocate can co-allocate the same physical
+	// device without racing the annotation's cache propagation. The offered device IDs ride along so
+	// ListAndWatch can keep advertising exactly them Healthy for as long as this allocation lives.
+	s.Reconciler.reserveDevices(d.Pod.UID, d.Container.Name, d.Status, deviceIDs)
+
+	return d, nil
+}
+
+// snapshotForAllocate reads the one consistent view every decision in decideAllocation is made
+// against: the Devices ledger, plus the node's live per-card occupancy for the families that choose
+// a position on the card themselves. Reading it once keeps the candidate test and the placement
+// decision on the same snapshot. Every read is served from the informer cache, which is what makes
+// it legal under the allocate mutex.
+func (s *ResourceServer) snapshotForAllocate(ctx context.Context, placesLogical bool) (
+	*workercore.Devices, map[Resource][]workercore.AcceleratorPhysicalPlacement, LogicalPlacements, error,
+) {
+	devs, err := s.Reconciler.getDevices(ctx)
+	if err != nil {
+		s.Logger.Error(err, "get devices for allocation")
+		return nil, nil, nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for allocation: %v", err)
+	}
+
+	// The Partitioned family decides the placement itself, so it needs the node's live per-card
+	// occupancy: the annotations every live allocation carries, unioned with the selections
+	// in-flight allocations have already published.
+	var occupied map[Resource][]workercore.AcceleratorPhysicalPlacement
+	if s.AllocationMode == workercore.DeviceAllocationModePartitioned {
+		if occupied, err = s.occupiedPhysicalPlacements(ctx); err != nil {
+			s.Logger.Error(err, "get occupied placements for allocation")
+			return nil, nil, nil, grpcstatus.Errorf(grpccodes.Internal,
+				"get occupied placements for allocation: %v", err)
+		}
+	}
+
+	// A logical slice that occupies a position on the card needs the same snapshot in its own key
+	// space: what every live allocation already occupies, so this one can be placed beside them
+	// rather than on top of them.
+	var occupiedLogical LogicalPlacements
+	if placesLogical {
+		if occupiedLogical, err = s.occupiedLogicalPlacements(ctx); err != nil {
+			s.Logger.Error(err, "get occupied logical placements for allocation")
+			return nil, nil, nil, grpcstatus.Errorf(grpccodes.Internal,
+				"get occupied logical placements for allocation: %v", err)
+		}
+	}
+
+	return devs, occupied, occupiedLogical, nil
+}
+
+// requestedUnits reports the per-card counting units one token commits — the normalized value the
+// Pod webhook folds the memory budget into (".sliced.units" for a logical slice,
+// ".partitioned.units" for a partition) — and whether the container requested it at all. Recording
+// that real cost rather than the loose token count keeps the per-card ledger honest, so the
+// node-devices admission check refuses a card whose committed units would exceed capacity and the
+// InstanceType views report the true remaining. It falls back to one unit per token for a Pod the
+// webhook did not shape; whether that fallback is usable is the caller's judgement, since for a
+// partition one token is a whole card.
+func (s *ResourceServer) requestedUnits(ctr *core.Container) (int64, bool) {
+	if unitsResName := s.unitsResourceName(); unitsResName != "" {
+		if q, ok := ctr.Resources.Limits[unitsResName]; ok && q.Value() > 0 {
+			return q.Value(), true
+		}
+	}
+
+	return 1, false
+}
+
+// choosePartitionCards decides which cards a partition allocation lands on, and at what unit cost.
+// This family reads kubelet's tokens as a quantity and picks the cards itself, against the live
+// occupancy: kubelet cannot know which card can host a given geometry, and a wrong pick is the one
+// placement error the plugin can repair rather than reject — so a rejection here means the node has
+// no room at all. It records the profile on d and returns the chosen cards, the intervals they
+// intend to occupy, and the unit cost, which it may fold from the profile.
+func (s *ResourceServer) choosePartitionCards(
+	d *_AllocationDecision,
+	occupied map[Resource][]workercore.AcceleratorPhysicalPlacement,
+	deviceIDs []string,
+	unitsPerToken int64,
+	unitsRequested bool,
+) (map[Resource][]ResourceUnit, map[Resource][]workercore.AcceleratorPhysicalPlacement, int64, error) {
+	profile, ok := partitionProfileOf(d.Container)
+	if !ok {
+		s.Logger.Error(nil, "partition allocation without a profile",
+			"pod", kubemeta.GetNamespacedNameKey(d.Pod), "container", d.Container.Name)
+		return nil, nil, unitsPerToken, grpcstatus.Errorf(grpccodes.FailedPrecondition,
+			"container %q of pod %s requests %s but names no partition profile",
+			d.Container.Name, kubemeta.GetNamespacedNameKey(d.Pod), s.ResourceName())
+	}
+	d.Profile = profile
+
+	// A partition names its own cost even when nothing shaped the request. The Pod webhook is scoped
+	// to queued Pods, so a partition Pod submitted outside the scheduling chain carries no units key
+	// — and for this family the token count is not a usable stand-in: one token is one whole card,
+	// which would charge a single unit for a partition that occupies half the card or all of it,
+	// leaving a card carved to capacity reading as untouched in the scalar ledger. The profile is
+	// the missing budget, so fold it here the way the webhook would have.
+	if !unitsRequested {
+		if units := s.partitionProfileUnits(d.Devices, profile); units > 0 {
+			unitsPerToken = units
+		}
+	}
+
+	// A retried Allocate must land back on the card it already used. The kubelet re-runs Allocate
+	// for a container whose checkpoint it lost — a restart while the container was stopped — and by
+	// then this container's own placement is part of the node's occupancy. Deciding afresh would
+	// read it as somebody else's: a whole-card profile would report the node exhausted, and a node
+	// with a free sibling would place on THAT card, bypassing the vendor's per-(pod, container,
+	// card) reuse marker and carving a second instance. The card-bound families get this for free,
+	// since kubelet re-offers the tokens it checkpointed.
+	var (
+		cardTokens map[Resource][]ResourceUnit
+		placements map[Resource][]workercore.AcceleratorPhysicalPlacement
+	)
+	if prior, held := s.priorAllocationOf(d.Pod, d.Container.Name); held {
+		cardTokens, placements = priorPartitionTokens(prior)
+	}
+	if cardTokens == nil {
+		candidates, byID := s.partitionCandidates(d.Devices, occupied, profile)
+		selections, placed := device.SelectPartitionPlacements(candidates, len(deviceIDs))
+		if !placed {
+			s.Logger.Error(nil, "no card can host the requested partition profile",
+				"pod", kubemeta.GetNamespacedNameKey(d.Pod), "profile", profile,
+				"instances", len(deviceIDs))
+			return nil, nil, unitsPerToken, grpcstatus.Errorf(grpccodes.ResourceExhausted,
+				"no card on this node can host %d instance(s) of partition profile %q",
+				len(deviceIDs), profile)
+		}
+		cardTokens, placements = partitionTokens(selections, byID)
+	}
+
+	return cardTokens, placements, unitsPerToken, nil
+}
+
+// rejectCrossModeCards enforces the per-card cross-mode invariant at the authoritative on-node
+// gate: it refuses a card another mode already holds, per the ledger Status OR the in-process
+// reservation, so an exclusive tenant truly owns its card on every path, Kueue or raw. Free (None)
+// and same-mode cards (e.g. sliced-on-sliced) pass. The partition selector already skipped held
+// cards, so for that family this re-checks its own choice rather than kubelet's.
+func (s *ResourceServer) rejectCrossModeCards(
+	devs *workercore.Devices, cardTokens map[Resource][]ResourceUnit, pod *core.Pod,
+) error {
+	for res := range cardTokens {
+		if held, mode := s.cardHeldInOtherMode(devs, res); held {
+			s.Logger.Error(nil, "cross-mode allocation rejected",
+				"pod", kubemeta.GetNamespacedNameKey(pod), "card", res.String(),
+				"heldMode", mode.String(), "requestedMode", s.AllocationMode.String())
+			return grpcstatus.Errorf(grpccodes.FailedPrecondition,
+				"card %s is held in %s mode, cannot allocate it in %s mode", res, mode, s.AllocationMode)
+		}
+	}
+
+	return nil
+}
+
+// accumulateAllocation charges each card the tokens land on for the units this container commits,
+// building the allocation status the reservation publishes and the annotation persists.
+func (s *ResourceServer) accumulateAllocation(
+	devs *workercore.Devices, cardTokens map[Resource][]ResourceUnit, unitsPerToken int64,
+) (workercore.DevicesStatus, map[Resource]int32) {
+	var (
+		allocatedStatus     workercore.DevicesStatus
+		allocatedAllocation = make(map[Resource]int32)
+	)
+	for i := range devs.Spec.Groups {
+		specGrp := &devs.Spec.Groups[i]
+		if specGrp.Manufacturer != s.Manufacturer {
+			continue
+		}
+		for j := range specGrp.Accelerators {
+			acc := &specGrp.Accelerators[j]
+			res := Resource{
+				Group:  specGrp.ID,
+				Device: acc.ID,
+			}
+			resUnits, existed := cardTokens[res]
+			if !existed {
+				continue
+			}
+			var allocated int32
+			switch s.AllocationMode {
+			default:
+				allocated = nodefeature.ResourceMaxUnits // a whole card
+			case workercore.DeviceAllocationModeShared:
+				allocated = nodefeature.ResourceMaxUnits / nodefeature.SharedResourceMaxSize // units per owner
+			case workercore.DeviceAllocationModeSliced, workercore.DeviceAllocationModePartitioned:
+				// Real per-card units this container commits on the card, so the ledger reflects
+				// capacity rather than the loose token count. A partition needs its own branch here
+				// for the same reason a slice does, and for one more: the default charges a WHOLE
+				// card, which would make a single small instance look like it owned the card and
+				// hide the rest of its geometry from every consumer of the scalar remaining.
+				allocated = int32(min(unitsPerToken*int64(len(resUnits)), int64(nodefeature.ResourceMaxUnits)))
+			}
+			if allocated > nodefeature.ResourceMaxUnits {
+				allocated = nodefeature.ResourceMaxUnits
+			}
+			if len(allocatedStatus.Groups) == 0 || allocatedStatus.Groups[len(allocatedStatus.Groups)-1].ID != specGrp.ID {
+				allocatedStatus.Groups = append(allocatedStatus.Groups, workercore.DevicesAllocationGroup{
+					ID:           specGrp.ID,
+					Manufacturer: specGrp.Manufacturer,
+				})
+			}
+			statusGrp := &allocatedStatus.Groups[len(allocatedStatus.Groups)-1]
+			statusGrp.Accelerators = append(statusGrp.Accelerators, workercore.AcceleratorAllocation{
+				ID:        acc.ID,
+				Index:     acc.Index,
+				Mode:      s.AllocationMode,
+				Allocated: allocated,
+			})
+			allocatedAllocation[res] = allocated
+		}
+	}
+
+	return allocatedStatus, allocatedAllocation
+}
+
+// placeLogicalSlice picks the geometry this container will occupy on each allocated card, reusing
+// the window it already holds when the kubelet is re-running an Allocate whose checkpoint it lost:
+// by then the container's own window is part of the node's occupancy, so deciding afresh would read
+// it as somebody else's, move the container to a different window, and strand the first one until
+// the Pod goes away.
+func (s *ResourceServer) placeLogicalSlice(
+	ctx context.Context,
+	d *_AllocationDecision,
+	logicalPlacer LogicalSlicedResponder,
+	occupiedLogical LogicalPlacements,
+) (LogicalPlacements, error) {
+	if prior, held := s.priorLogicalPlacements(d.Pod, d.Container.Name); held {
+		return prior, nil
+	}
+
+	placements, err := logicalPlacer.PlaceLogicalSliced(
+		ctx, d.Pod, d.Container, d.Devices, d.Allocation, occupiedLogical)
+	if err != nil {
+		s.Logger.Error(err, "place logical slice for allocation",
+			"pod", kubemeta.GetNamespacedNameKey(d.Pod), "container", d.Container.Name)
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "place logical slice: %v", err)
+	}
+
+	return placements, nil
+}
+
+// actuatePartition materializes the hardware partition(s) for an allocation that names a profile,
+// via the responder's actuator under that responder's own per-card lock, and records each chosen
+// placement upward in d.Status BEFORE the annotation patch, so the reconciler's ledger can
+// reconstruct the card's occupied set. The actuator may land on a different interval of the selected
+// card than the one published as the intent — it can adopt an instance the hardware already
+// carries — so the reservation is re-published with what actually happened. The node allocate mutex
+// is already released by now; the per-card lock serializes only same-card creates, so sibling cards
+// proceed in parallel. A responder that cannot actuate fails the allocation rather than starting a
+// container with no partition. Every family that names no profile gets a nil allocation and no work.
+func (s *ResourceServer) actuatePartition(
+	ctx context.Context, d *_AllocationDecision, deviceIDs []string,
+) (*PhysicalSlicedAllocation, error) {
+	if d.Profile == "" {
+		return nil, nil
+	}
+
+	actuator, canActuate := s.Responder.(PhysicalSlicedResponder)
+	if !canActuate {
+		s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
+
+		return nil, grpcstatus.Errorf(grpccodes.Internal,
+			"responder cannot actuate partition profile %q", d.Profile)
+	}
+
+	physical, err := actuator.ActuatePhysicalSliced(
+		ctx, d.Pod, d.Container, d.Devices, d.Allocation, d.Profile)
+	if err != nil {
+		s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
+		s.Logger.Error(err, "actuate partition for allocation", "pod", kubemeta.GetNamespacedNameKey(d.Pod))
+
+		return nil, grpcstatus.Errorf(grpccodes.Internal, "actuate partition: %v", err)
+	}
+	applyPhysicalPlacements(&d.Status, physical.Profile, physical.Placements)
+	s.Reconciler.reserveDevices(d.Pod.UID, d.Container.Name, d.Status, deviceIDs)
+
+	return physical, nil
+}
+
+// renderPrePatchResponse renders the container response for the two families whose response may be
+// built BEFORE the durable patch, and returns nil for every other one, which is rendered after it.
+//
+// A logical-slice response qualifies because it is the response whose failure would otherwise leave
+// a CU window recorded on a card for a container kubelet never starts, and it creates nothing but a
+// directory, so rendering it early costs nothing if the patch then fails.
+//
+// Moving the OTHER responders here would be a regression, and a quiet one. Cambricon and MetaX
+// materialize a subdevice and an on-disk ownership marker inside GetContainerAllocateResponse; were
+// that to run before a patch that then failed, the hardware would exist while the ledger said the
+// card was free, and their reclaimers — which preserve an instance whose Pod is still live — would
+// keep it that way. They stay below the patch, and the strand their own failure can leave is
+// pre-existing and out of scope here.
+//
+// A physical-slice allocation injects only the partition's visible-devices env the actuator already
+// assembled (no logical-slice artifacts), so it bypasses the responder entirely.
+func (s *ResourceServer) renderPrePatchResponse(
+	ctx context.Context,
+	d *_AllocationDecision,
+	physical *PhysicalSlicedAllocation,
+	logicalPlacer LogicalSlicedResponder,
+	placesLogical bool,
+) (*ContainerAllocateResponse, error) {
+	switch {
+	case physical != nil:
+		return physical.Response, nil
+
+	case placesLogical:
+		// The placement is consumed, never recomputed: what the container is told must be what the
+		// ledger recorded, and only one of the two can be authoritative.
+		ctrResp, err := logicalPlacer.GetLogicalSlicedResponse(
+			ctx, d.Pod, d.Container, d.Devices, d.Allocation, d.LogicalPlacements)
+		if err != nil {
+			s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
+			s.Logger.Error(err, "get logical sliced response")
+
+			return nil, err
+		}
+
+		return ctrResp, nil
+	}
+
+	return nil, nil
+}
+
+// persistAllocation writes the durable allocation annotation, which runs outside the node allocate
+// mutex because it is I/O. On failure it rolls back the reservation taken under the mutex: with the
+// annotation absent, the Pod-delete watch (gated on it) would never enqueue a prune, so the card
+// would stay stranded for the opposite mode. Kubelet does not start the container on this error, so
+// freeing the reservation now is safe and keeps the release counting honest. A partition
+// materialized beforehand is torn down too, so no half-owned instance persists past a failed patch.
+func (s *ResourceServer) persistAllocation(
+	ctx context.Context,
+	d *_AllocationDecision,
+	deviceIDs []string,
+	physical *PhysicalSlicedAllocation,
+) error {
+	err := s.Reconciler.patchAllocatingPod(ctx, d.Pod, d.Container.Name, d.Status, deviceIDs)
+	if err == nil {
+		return nil
+	}
+
+	if physical != nil && physical.Rollback != nil {
+		physical.Rollback()
+	}
+	s.Reconciler.releaseReservation(d.Pod.UID, d.Container.Name)
+	s.Logger.Error(err, "patch allocating pod for allocation")
+
+	return grpcstatus.Errorf(grpccodes.Internal, "patch allocating pod for allocation: %v", err)
 }
 
 // partitionProfileOf returns the single "<base>.partitioned.<kind>-<profile>" profile a
@@ -1361,7 +1565,7 @@ func applyPhysicalPlacements(
 func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRequest) (*AllocateResponse, error) {
 	ctrReq := req.GetContainerRequests()[0]
 
-	resName := s.GetResourceName()
+	resName := s.ResourceName()
 	resQuantity := *resource.NewQuantity(int64(len(ctrReq.GetDevicesIds())), resource.DecimalSI)
 	pod, ctr, err := s.claimVisibilityContainer(ctx, resName, resQuantity)
 	if err != nil {
@@ -1409,48 +1613,9 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		return nil, grpcstatus.Errorf(grpccodes.Internal, "get devices for visibility allocation: %v", err)
 	}
 
-	// Devices currently present on the node, so a stale reservation (a reserved device no
-	// longer in the inventory) fails closed below instead of yielding an empty
-	// visible-devices env from the Responder.
-	present := make(map[Resource]struct{})
-	for i := range devs.Spec.Groups {
-		grp := &devs.Spec.Groups[i]
-		for j := range grp.Accelerators {
-			present[Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}] = struct{}{}
-		}
-	}
-
-	// Reuse main's reserved devices as the "allocated" set so the Responder emits the vendor
-	// visible-devices env for exactly those devices; no HAMi mounts/limit, since this server
-	// is not the sliced mode. No patchAllocatingPod/reserveDevices: visibility consumes no
-	// ledger units and holds no reservation of its own.
-	reservedCount := 0
-	var reservedCards []string
-	allocated := make(map[Resource]int32)
-	for i := range reserved.Groups {
-		grp := &reserved.Groups[i]
-		for j := range grp.Accelerators {
-			reservedCount++
-			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
-			reservedCards = append(reservedCards, res.String())
-			if _, ok := present[res]; !ok {
-				continue
-			}
-			allocated[res] = grp.Accelerators[j].Allocated
-		}
-	}
-	// Fail closed unless every reserved device is still present AND the reservation matches the
-	// visibility request exactly. A partial/stale reservation (a reserved device gone from the
-	// inventory) or a request that does not match the reserved device count would otherwise grant
-	// a different device set than the owner holds; refuse rather than emit a degraded (or empty)
-	// visible-devices env a runtime could misread.
-	requestCount := len(ctrReq.GetDevicesIds())
-	if len(allocated) != reservedCount || reservedCount != requestCount {
-		err = fmt.Errorf("visibility reservation for pod %s held by container %q does not match the "+
-			"request (cards=%v, reserved=%d, present=%d, requested=%d); refusing to grant visibility",
-			kubemeta.GetNamespacedNameKey(pod), owner, reservedCards, reservedCount, len(allocated), requestCount)
-		s.Logger.Error(err, "visibility allocation with mismatched or stale reservation")
-		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
+	allocated, err := s.validateVisibilityReservation(devs, reserved, pod, owner, len(ctrReq.GetDevicesIds()))
+	if err != nil {
+		return nil, err
 	}
 
 	ctrResp, err := s.visibilityResponse(ctx, pod, ctr, devs, allocated, owner)
@@ -1467,6 +1632,61 @@ func (s *ResourceServer) allocateVisibility(ctx context.Context, req *AllocateRe
 		"pod", kubemeta.GetNamespacedNameKey(pod),
 		"response", resp)
 	return resp, nil
+}
+
+// validateVisibilityReservation turns the owner container's reservation into the "allocated" set a
+// visibility response is rendered from, and fails closed unless every reserved device is still
+// present on the node AND the reservation matches this request exactly.
+//
+// A partial or stale reservation — a reserved device gone from the inventory — or a request whose
+// device count differs from the reservation would otherwise grant a different device set than the
+// owner holds. Refusing is better than emitting a degraded, or empty, visible-devices env, which a
+// runtime could read as "all devices".
+//
+// The reserved devices are reused verbatim as the allocated set so the Responder emits the vendor
+// visible-devices env for exactly them, with no sliced-mode mounts or limit. Nothing is patched or
+// reserved here: visibility consumes no ledger units and holds no reservation of its own.
+func (s *ResourceServer) validateVisibilityReservation(
+	devs *workercore.Devices,
+	reserved workercore.DevicesStatus,
+	pod *core.Pod,
+	owner string,
+	requestCount int,
+) (map[Resource]int32, error) {
+	present := make(map[Resource]struct{})
+	for i := range devs.Spec.Groups {
+		grp := &devs.Spec.Groups[i]
+		for j := range grp.Accelerators {
+			present[Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}] = struct{}{}
+		}
+	}
+
+	reservedCount := 0
+	var reservedCards []string
+	allocated := make(map[Resource]int32)
+	for i := range reserved.Groups {
+		grp := &reserved.Groups[i]
+		for j := range grp.Accelerators {
+			reservedCount++
+			res := Resource{Group: grp.ID, Device: grp.Accelerators[j].ID}
+			reservedCards = append(reservedCards, res.String())
+			if _, ok := present[res]; !ok {
+				continue
+			}
+			allocated[res] = grp.Accelerators[j].Allocated
+		}
+	}
+
+	if len(allocated) != reservedCount || reservedCount != requestCount {
+		err := fmt.Errorf("visibility reservation for pod %s held by container %q does not match the "+
+			"request (cards=%v, reserved=%d, present=%d, requested=%d); refusing to grant visibility",
+			kubemeta.GetNamespacedNameKey(pod), owner, reservedCards, reservedCount, len(allocated), requestCount)
+		s.Logger.Error(err, "visibility allocation with mismatched or stale reservation")
+
+		return nil, grpcstatus.Errorf(grpccodes.FailedPrecondition, "%v", err)
+	}
+
+	return allocated, nil
 }
 
 // claimVisibilityContainer identifies the container a visibility Allocate is serving and records
@@ -1559,6 +1779,11 @@ func containerByName(pod *core.Pod, name string) *core.Container {
 	return nil
 }
 
+// Start listens on this server's own socket beside kubelet's, serves the device-plugin gRPC API on
+// it, and once the server reports ready registers the resource name with kubelet. It blocks until
+// ctx is canceled or either half fails, removing the socket on the way out. Calling it on a server
+// that is already running starts nothing and simply blocks until ctx is done, so a supervisor that
+// retries cannot end up with two servers on one socket.
 func (s *ResourceServer) Start(ctx context.Context, kubeSocket string) error {
 	if s.server != nil {
 		s.Logger.Error(nil, "server already started")
@@ -1634,7 +1859,7 @@ func (s *ResourceServer) register(ctx context.Context, kubeSocket, socket string
 	regReq := &deviceplugin.RegisterRequest{
 		Version:      deviceplugin.Version,
 		Endpoint:     filepath.Base(socket),
-		ResourceName: string(s.GetResourceName()),
+		ResourceName: string(s.ResourceName()),
 		Options:      regOpts,
 	}
 	if _, err = regCli.Register(ctx, regReq); err != nil {
@@ -1645,6 +1870,10 @@ func (s *ResourceServer) register(ctx context.Context, kubeSocket, socket string
 	return nil
 }
 
+// Stop stops the gRPC server and clears it, so a later Start may serve again. It returns
+// immediately and is a no-op, logged, on a server that was never started. In-flight Allocates are
+// abandoned rather than drained: kubelet retries an allocation it did not get an answer for, and
+// the reservations this server took are pruned by the reconciler once their Pods are gone.
 func (s *ResourceServer) Stop() {
 	if s.server == nil {
 		s.Logger.Errorf(nil, "server not started")

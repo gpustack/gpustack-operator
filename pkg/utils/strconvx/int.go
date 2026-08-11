@@ -2,6 +2,7 @@ package strconvx
 
 import (
 	"strconv"
+	"strings"
 
 	"gpustack.ai/gpustack/pkg/utils/typex"
 )
@@ -29,6 +30,17 @@ func FormatInt[T typex.SignedInteger](i T, base int) string {
 // but it accepts any unsigned integer type.
 func FormatUint[T typex.UnsignedInteger](i T, base int) string {
 	return strconv.FormatUint(uint64(i), base)
+}
+
+// PadZeroUint formats i in base 10, left-padded with zeros to width characters.
+// A value whose digits already reach width is returned unpadded, so the result is
+// never truncated; a non-positive width pads nothing.
+func PadZeroUint[T typex.UnsignedInteger](i T, width int) string {
+	s := FormatUint(i, 10)
+	if len(s) >= width {
+		return s
+	}
+	return strings.Repeat("0", width-len(s)) + s
 }
 
 // ParseInt is similar to strconv.ParseInt,
