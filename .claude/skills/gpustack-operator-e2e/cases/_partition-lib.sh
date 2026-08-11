@@ -141,6 +141,10 @@ part_require_mig_capable() {
 
 # set_mig_mode <index> <0|1> — toggle a card's partitioning mode and wait for it to converge.
 # Returns 0 on convergence, 1 otherwise (the caller records the failure with guidance).
+# Converged here means only that the CARD reports the new mode. The toggle on its own is invisible to
+# the operator, so a caller that stops at this point asserts against the capability the card had
+# BEFORE the flip and reads a stale answer as a real one. Follow every successful toggle with
+# refresh_dm.
 set_mig_mode() {
   local idx="$1" want="$2" target cur
   [ "$want" = 1 ] && target=Enabled || target=Disabled
@@ -159,6 +163,10 @@ set_mig_mode() {
 # mode flip is picked up by RESTARTING the DaemonSet. Deleting the Devices object is deliberately NOT
 # done: an existing group's capability is rewritten in place, and deleting it would hide a regression
 # of that.
+# Both halves are measured, not assumed: on an 8-card node the flip alone left the object at the same
+# generation and resourceVersion, unchanged again minutes later, while each restart moved it exactly
+# one generation — logical to partitioned and back — with the object's uid and creationTimestamp never
+# changing. So the restart is required, and it is also sufficient.
 refresh_dm() {
   echo "[case-${CASE_ID}]   refreshing Device Manager (rollout restart ${DM_DS}; the Devices object is kept)"
   kubectl -n "$NS" rollout restart "ds/${DM_DS}" >/dev/null 2>&1 || true
