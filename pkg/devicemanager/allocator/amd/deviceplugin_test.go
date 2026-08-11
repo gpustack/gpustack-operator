@@ -28,6 +28,10 @@ const (
 	testCardVRAMMib = 16368
 	testCardUUID    = "GPU-5c88007d760374f3"
 	testCardUUID2   = "GPU-d99e7fe92c7bdf75"
+	// The same two accelerators as the container runtime names them: the bare serial, without the
+	// "GPU-" prefix the ROCm runtime wants. The two consumers do not accept the same spelling.
+	testCardSerial  = "5c88007d760374f3"
+	testCardSerial2 = "d99e7fe92c7bdf75"
 )
 
 // redirectLogicalSliceDirs points the staged-library and pod-working directories into the test's own
@@ -160,15 +164,36 @@ func TestNew_ServerSet(t *testing.T) {
 }
 
 // TestGetContainerAllocateResponse pins the non-sliced response as it stands: one env, no mounts,
-// the accelerator's UUID for the container runtime to inject device nodes from.
+// the accelerator's bare serial for the container runtime to inject device nodes from. The serial is
+// bare because that is the only accelerator-identity spelling the runtime accepts — handed a
+// "GPU-"prefixed one it logs an invalid range, injects nothing, and still reports the container
+// configured for accelerator access.
 func TestGetContainerAllocateResponse(t *testing.T) {
 	s := &server{}
 	resp, err := s.GetContainerAllocateResponse(
 		context.Background(), testPod(), testContainer(0, 0),
 		testDevices(testCardUUID, testCardUUID2), testAllocated(testCardUUID2))
 	require.NoError(t, err)
-	assert.Equal(t, map[string]string{"AMD_VISIBLE_DEVICES": testCardUUID2}, resp.Envs)
+	assert.Equal(t, map[string]string{"AMD_VISIBLE_DEVICES": testCardSerial2}, resp.Envs)
 	assert.Empty(t, resp.Mounts)
+}
+
+// TestGetContainerAllocateResponseRefusesAnIdentitylessAccelerator covers the direction that matters
+// when the vendor library reports no serial. The variable this response carries is the container's
+// only accelerator filter, so an empty entry does not narrow it — it widens it to every accelerator on
+// the node. The sliced path already refuses such an accelerator; this pins that the whole/shared path
+// does too, rather than granting a claim the container would satisfy from hardware nobody gave it.
+func TestGetContainerAllocateResponseRefusesAnIdentitylessAccelerator(t *testing.T) {
+	devs := testDevices(testCardUUID, testCardUUID2)
+	devs.Spec.Groups[0].Accelerators[1].ID = ""
+
+	s := &server{}
+	resp, err := s.GetContainerAllocateResponse(
+		context.Background(), testPod(), testContainer(0, 0),
+		devs, testAllocated(""))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no unique id")
+	assert.Nil(t, resp)
 }
 
 func TestPlaceLogicalSliced(t *testing.T) {
@@ -265,7 +290,7 @@ func TestGetLogicalSlicedResponse_SingleCard(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]string{
-		"AMD_VISIBLE_DEVICES":         testCardUUID,
+		"AMD_VISIBLE_DEVICES":         testCardSerial,
 		"ROCR_VISIBLE_DEVICES":        testCardUUID,
 		"HSA_CU_MASK":                 "0:0-11",
 		"VROCM_DEVICE_MEMORY_LIMIT_0": "4092",
@@ -303,6 +328,8 @@ func TestGetLogicalSlicedResponse_MultiCard(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, testCardUUID+","+testCardUUID2, resp.Envs["ROCR_VISIBLE_DEVICES"])
+	assert.Equal(t, testCardSerial+","+testCardSerial2, resp.Envs["AMD_VISIBLE_DEVICES"],
+		"the runtime is given the same accelerators in the same order, spelled the way it accepts")
 	assert.Equal(t, "0:0-11;1:12-23", resp.Envs["HSA_CU_MASK"],
 		"one segment per card, indexed by position in the visible-devices list")
 	assert.Equal(t, "8184", resp.Envs["VROCM_DEVICE_MEMORY_LIMIT_0"])

@@ -159,19 +159,43 @@ func allocatedAccelerators(
 	return accels
 }
 
-// visibleDevices is the value both AMD_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES carry.
+// acceleratorIDPrefix is what the detector puts in front of an accelerator's ASIC serial to form its
+// ID. The ROCm runtime wants the whole thing; the container runtime wants the serial alone.
+const acceleratorIDPrefix = "GPU-"
+
+// rocrVisibleDevices is the value ROCR_VISIBLE_DEVICES carries: the accelerator IDs as the detector
+// recorded them, which is byte-for-byte the "GPU-<serial>" UUID ROCr matches an agent by.
 //
-// One string serves both, measured: ROCr matches an agent by the "GPU-<hex>" UUID it reports, which
-// is byte-for-byte what the detector recorded as the accelerator ID. The two variables are read by
-// different things — the container runtime injects device nodes from the first, the ROCm user-space
-// runtime filters and orders agents from the second — and giving them one value is what keeps the
-// container's device set and its agent list describing the same accelerators.
-func visibleDevices(accels []_AllocatedAccelerator) string {
+// Its order is load-bearing beyond this variable: HSA_CU_MASK's GPU_list index is a position in this
+// list, so every producer below has to walk the same slice in the same order.
+func rocrVisibleDevices(accels []_AllocatedAccelerator) string {
 	ids := make([]string, 0, len(accels))
 	for i := range accels {
 		ids = append(ids, accels[i].accel.ID)
 	}
 	return strings.Join(ids, ",")
+}
+
+// runtimeVisibleDevices is the value AMD_VISIBLE_DEVICES carries: the same accelerators, in the same
+// order, with the ID prefix stripped.
+//
+// The two variables cannot share one string, measured: amd-container-runtime accepts "all", "none",
+// an index range, or the bare serial, and rejects a "GPU-"prefixed one. It rejects it the worst way
+// available — it logs the value as an invalid range, adds no device to the OCI spec, and still
+// reports the container configured for accelerator access — so the container starts with no
+// /dev/kfd and no render node while every other layer believes it was served. Since this allocator
+// returns no DeviceSpec of its own and leaves device injection entirely to the runtime, this
+// spelling is the only thing standing between an admitted claim and an accelerator the container can
+// actually reach.
+//
+// The serial rather than the index, deliberately: an index is only meaningful in the enumeration the
+// runtime happens to use, and this host's DRM ordering already runs opposite to the vendor tool's.
+func runtimeVisibleDevices(accels []_AllocatedAccelerator) string {
+	serials := make([]string, 0, len(accels))
+	for i := range accels {
+		serials = append(serials, strings.TrimPrefix(accels[i].accel.ID, acceleratorIDPrefix))
+	}
+	return strings.Join(serials, ",")
 }
 
 func (s *server) GetContainerAllocateResponse(
@@ -181,11 +205,22 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Delegate to container runtime for device injection,
-	// use GPU UUID as AMD_VISIBLE_DEVICES value.
+	accels := allocatedAccelerators(devs, allocated)
+	// Refuse an accelerator with no identity, for the same reason the sliced path does: this variable
+	// is the only filter the container is given, and an empty entry widens it to every accelerator on
+	// the node rather than narrowing it to the granted one. Failing the claim visibly is the safe
+	// direction — the alternative is a container quietly running against hardware nobody granted it.
+	for i := range accels {
+		if accels[i].accel.ID == "" {
+			return nil, fmt.Errorf("card at index %d reports no unique id, so it cannot be granted",
+				accels[i].accel.Index)
+		}
+	}
+	// Delegate to container runtime for device injection, naming the accelerators the way that
+	// runtime accepts — see runtimeVisibleDevices for why the spelling is the whole contract here.
 	ctrResp := &deviceplugin.ContainerAllocateResponse{
 		Envs: map[string]string{
-			"AMD_VISIBLE_DEVICES": visibleDevices(allocatedAccelerators(devs, allocated)),
+			"AMD_VISIBLE_DEVICES": runtimeVisibleDevices(accels),
 		},
 	}
 	return ctrResp, nil
@@ -280,13 +315,13 @@ func (s *server) GetLogicalSlicedResponse(
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
 	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)
 
-	visible := visibleDevices(accels)
 	envs := map[string]string{
 		// The container runtime reads the first to inject /dev/kfd and the accelerator's render node;
 		// the ROCm user-space runtime reads the second to filter and order its agents. Neither is read
-		// by the other, and both name the same accelerators in the same order.
-		"AMD_VISIBLE_DEVICES":  visible,
-		"ROCR_VISIBLE_DEVICES": visible,
+		// by the other, and they spell an accelerator differently — bare serial against
+		// "GPU-<serial>" — so each gets its own rendering of the same accelerators in the same order.
+		"AMD_VISIBLE_DEVICES":  runtimeVisibleDevices(accels),
+		"ROCR_VISIBLE_DEVICES": rocrVisibleDevices(accels),
 		"VROCM_LEDGER_PATH":    ctrLedgerPath,
 	}
 
