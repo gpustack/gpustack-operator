@@ -10,10 +10,11 @@ objects — are in [Scheduling Chain](scheduling-chain.md).
 ## Contents
 
 - [Stage 1: Node Feature Discovery (NFD)](#stage-1-node-feature-discovery-nfd)
-- [The `gpustack-cpu-info` NodeFeatureRule](#the-gpustack-cpu-info-nodefeaturerule)
+- [The gpustack-cpu-info NodeFeatureRule](#the-gpustack-cpu-info-nodefeaturerule)
 - [Stage 2: the Device Manager (DM)](#stage-2-the-device-manager-dm)
-- [The `Devices` ledger](#the-devices-ledger)
+- [The Devices ledger](#the-devices-ledger)
 - [The device-plugin allocator](#the-device-plugin-allocator)
+- [Logical slicing per vendor](#logical-slicing-per-vendor)
 - [SSH-enabled Instances and the visibility resource](#ssh-enabled-instances-and-the-visibility-resource)
 - [Container identification and cross-mode exclusion](#container-identification-and-cross-mode-exclusion)
 - [Placement is a preference, not a decision](#placement-is-a-preference-not-a-decision)
@@ -245,26 +246,72 @@ isolation, but only four of them get it from a preload library:
 
 | Vendor | Mechanism |
 |---|---|
-| NVIDIA, Iluvatar, Ascend, T-Head | preload library + per-container compute/VRAM quota — see below |
-| AMD | preload library for VRAM, plus a hardware **compute-unit mask** the operator derives and ROCr enforces — see below |
-| MThreads | `MTHREADS_QOS_*` env vars consumed by the host sGPU kmod (the compute share is a scheduling weight, not a hard cap) |
-| Hygon | a per-pod `vdev.conf` — a `cores%`-derived CU bitmask + VRAM cap — mounted read-only at `/etc/vdev/docker/` and read by the host DTK/hyhal runtime |
-| MetaX | a sysfs `sgpu` subdevice — the allocator puts the card in `sgpu` mode and writes a `cores%`-derived compute quota + VRAM cap under a `fixed-share` scheduling class to `/sys/bus/pci/devices/<BDF>/sgpu/create`, then injects `METAX_SGPUS` plus the card device nodes for the host MetaX runtime |
-| Cambricon | a cnDev sMLU profile + instance — the allocator creates or reuses a profile with `mluQuota = cores%` and `memorySize` set to the VRAM budget, instantiates a subdevice, and injects its device nodes `/dev/cambricon_dev*` / `/dev/cambricon_ipcm*` / the instance node, with a `VIRTUAL_DEVICES` env fallback for `--use-runtime` deployments since sMLU does not support CDI |
+| NVIDIA, Iluvatar, Ascend, T-Head | preload library + per-container compute/VRAM quota — see [NVIDIA and Iluvatar](#nvidia-and-iluvatar), [Ascend](#ascend), [T-Head](#t-head) |
+| AMD | preload library for VRAM, plus a hardware **compute-unit mask** the operator derives and ROCr enforces — see [AMD](#amd) |
+| MThreads | `MTHREADS_QOS_*` env vars consumed by the host sGPU kmod — see [MThreads](#mthreads) |
+| Hygon | a per-pod `vdev.conf` compute+VRAM cap — see [Hygon](#hygon) |
+| MetaX | a sysfs `sgpu` subdevice — see [MetaX](#metax) |
+| Cambricon | a cnDev sMLU profile + instance — see [Cambricon](#cambricon) |
 
-For NVIDIA, Iluvatar, Ascend and T-Head, the container is started with a vendor preload library — NVIDIA and Iluvatar both HAMi-core `libvgpu.so` (Iluvatar reuses it, corex being a CUDA-compatible layer), Ascend
-vcann-rt `libvruntime.so`, T-Head the pair `hggc_quota.so` (enforcement) + `hgml_dlsym_hook.so`
-(visibility) — activated via `/etc/ld.so.preload`, plus per-container quota (NVIDIA and Iluvatar env
-`CUDA_DEVICE_SM_LIMIT` / `CUDA_DEVICE_MEMORY_LIMIT_*`; Ascend an `npu_info.config` carrying
-`aicore-quota` / `memory-quota`; T-Head env `HGGC_DEVICE_SM_LIMIT` / `HGGC_DEVICE_MEMORY_LIMIT_*`,
-where the compute figure is emitted **even at 100 %** because that library refuses a card whose figure
-is missing rather than reading absence as "no cap").
+It also quiets each preload library's verbose per-call logging by default — injecting
+`LIBCUDA_LOG_LEVEL=0` (HAMi-core) / `ENPU_LOG_LEVEL=1` (vcann-rt) unless the workload already sets
+that variable — so a normal run is not buried in interception-library noise. T-Head is injected
+`LIBHGGC_LOG_LEVEL=1` and AMD `LIBVROCM_LOG_LEVEL=1` under the same never-overwrite rule, and `1`
+rather than `0` because their levels are not HAMi-core's: `1` logs a line per *denial*, not per
+intercepted call, and `0` would hide the diagnostics of a slice that is refusing every allocation. That is already the library's own default —
+naming it keeps the level a property of the allocation rather than a library default. On Ascend it injects one
+more, `ENPU_DSMI_HOOK=1` under the same never-overwrite rule (which reads the container's own `env:`
+entries — an `envFrom:`-sourced value is not visible to the allocator, so opting out that way needs an
+explicit `env:`): it enables a vendored vcann-rt hook
+(`pack/gpustack-operator/external/ascend/vcann-rt/`) so the container's own `npu-smi info` reports its
+HBM **quota** and the slice's usage instead of the whole card — the same mixed view NVIDIA already
+gives, where `nvidia-smi` shows the virtual VRAM total while power and temperature stay card-wide.
+
+## Logical slicing per vendor
+
+### NVIDIA and Iluvatar
+
+NVIDIA and Iluvatar are started with a vendor preload library — both HAMi-core `libvgpu.so` (Iluvatar
+reuses it, corex being a CUDA-compatible layer) — activated via `/etc/ld.so.preload`, plus per-container
+quota env `CUDA_DEVICE_SM_LIMIT` / `CUDA_DEVICE_MEMORY_LIMIT_*`.
 
 Iluvatar keeps the card visible through `IX_VISIBLE_DEVICES` and relies on `ix-container-runtime` to
 inject corex, so a sliced Iluvatar Pod must carry `runtimeClassName: iluvatar` — without it the
 preloaded `libvgpu.so` finds no corex `libcuda.so.1` to hook. Its HAMi-core-on-corex enforcement is
 verified at the symbol level against a real corex driver but **not yet on Iluvatar hardware**, so the
 capability is advertised-and-injected but hardware-unvalidated.
+
+### Ascend
+
+Ascend is started with a vendor preload library — vcann-rt `libvruntime.so` — activated via
+`/etc/ld.so.preload`, plus per-container quota through an `npu_info.config` carrying `aicore-quota` /
+`memory-quota`.
+
+**On Ascend the allocator also turns on the driver's container-share mode for each card it is about to
+hand a second tenant** — the `sliced`, `shared` and `visibility` modes, never `exclusive`, which owns
+whole cards — reading the flag through `binding/dcmi` and writing it only when it is off, so a card
+already carrying a tenant costs one query.
+
+Without it the driver admits a single container per device and the *second* pod on a card still
+starts, then dies inside the container at `acl.rt.set_device` with `507899`
+(`ACL_ERROR_RT_DRV_INTERNAL_ERROR`), naming neither the card nor the flag; a card whose flag cannot be
+set therefore fails `Allocate` with both, rather than admitting a pod that cannot use its device.
+
+Two properties are worth stating plainly:
+
+- **Whole-card allocation is unaffected.** Measured on a 910B2 in both flag states, an exclusive
+  container starts, sees the card's full VRAM, and opens the device identically.
+- **The flag's one real effect is that the driver stops refusing a second container** — which is why
+  `npu-smi` warns *"There are security risks when opening device sharing, Please ensure that only a
+  single user uses the chip"* before setting it. Multi-tenancy on one chip is exactly what logical
+  slicing is for, and what keeps it safe here is not that guard but GPUStack's own per-card ledger
+  (the cross-mode invariant below) plus vcann-rt's memory-quota enforcement, which caps a slice at its
+  `memory-quota` rather than at the card total.
+
+The flag persists in the driver, so a card that has hosted a tenant stays shareable until the host is
+rebooted or an operator clears it with `npu-smi set -t device-share`.
+
+### AMD
 
 **AMD splits the two dimensions across two enforcers, and it is the only vendor that does.** Memory is a
 preload library like the others — `libvrocm.so`, built from this repository's own `csrc/` tree, activated
@@ -303,6 +350,14 @@ and the allocator logs the percentage actually delivered.
 > keep in mind is the very small one: on a card with many shader engines, single-digit percentages may
 > not be servable at all.
 
+### T-Head
+
+T-Head is started with a vendor preload library — the pair `hggc_quota.so` (enforcement) +
+`hgml_dlsym_hook.so` (visibility) — activated via `/etc/ld.so.preload`, plus per-container quota env
+`HGGC_DEVICE_SM_LIMIT` / `HGGC_DEVICE_MEMORY_LIMIT_*`, where the compute figure is emitted **even at
+100 %** because that library refuses a card whose figure is missing rather than reading absence as "no
+cap".
+
 T-Head's sliced response carries **no** visible-devices env: like its other modes it passes the card's
 own device node plus the two shared control nodes, and adds only the library mounts, the quota env and a
 per-container directory for the ledger region under the pod working directory (per container, because
@@ -316,47 +371,31 @@ detect that, so it is a caveat rather than an error. A mounted `ppu-monitor` rea
 of both dimensions out of the container's own ledger region (`HGGC_LEDGER_PATH`), which is where the
 compute cap can be seen at all — no `ppu-smi` field carries it.
 
-It also quiets each preload library's verbose per-call logging by default — injecting
-`LIBCUDA_LOG_LEVEL=0` (HAMi-core) / `ENPU_LOG_LEVEL=1` (vcann-rt) unless the workload already sets
-that variable — so a normal run is not buried in interception-library noise. T-Head is injected
-`LIBHGGC_LOG_LEVEL=1` and AMD `LIBVROCM_LOG_LEVEL=1` under the same never-overwrite rule, and `1`
-rather than `0` because their levels are not HAMi-core's: `1` logs a line per *denial*, not per
-intercepted call, and `0` would hide the diagnostics of a slice that is refusing every allocation. That is already the library's own default —
-naming it keeps the level a property of the allocation rather than a library default. On Ascend it injects one
-more, `ENPU_DSMI_HOOK=1` under the same never-overwrite rule (which reads the container's own `env:`
-entries — an `envFrom:`-sourced value is not visible to the allocator, so opting out that way needs an
-explicit `env:`): it enables a vendored vcann-rt hook
-(`pack/gpustack-operator/external/ascend/vcann-rt/`) so the container's own `npu-smi info` reports its
-HBM **quota** and the slice's usage instead of the whole card — the same mixed view NVIDIA already
-gives, where `nvidia-smi` shows the virtual VRAM total while power and temperature stay card-wide.
+### MThreads
 
-#### Ascend: the driver's container-share flag
+`MTHREADS_QOS_*` env vars consumed by the host sGPU kmod — the compute share is a scheduling weight,
+not a hard cap.
 
-**On Ascend the allocator also turns on the driver's container-share mode for each card it is about to
-hand a second tenant** — the `sliced`, `shared` and `visibility` modes, never `exclusive`, which owns
-whole cards — reading the flag through `binding/dcmi` and writing it only when it is off, so a card
-already carrying a tenant costs one query.
+### Hygon
 
-Without it the driver admits a single container per device and the *second* pod on a card still
-starts, then dies inside the container at `acl.rt.set_device` with `507899`
-(`ACL_ERROR_RT_DRV_INTERNAL_ERROR`), naming neither the card nor the flag; a card whose flag cannot be
-set therefore fails `Allocate` with both, rather than admitting a pod that cannot use its device.
+A per-pod `vdev.conf` — a `cores%`-derived CU bitmask + VRAM cap — mounted read-only at
+`/etc/vdev/docker/` and read by the host DTK/hyhal runtime.
 
-Two properties are worth stating plainly:
+### MetaX
 
-- **Whole-card allocation is unaffected.** Measured on a 910B2 in both flag states, an exclusive
-  container starts, sees the card's full VRAM, and opens the device identically.
-- **The flag's one real effect is that the driver stops refusing a second container** — which is why
-  `npu-smi` warns *"There are security risks when opening device sharing, Please ensure that only a
-  single user uses the chip"* before setting it. Multi-tenancy on one chip is exactly what logical
-  slicing is for, and what keeps it safe here is not that guard but GPUStack's own per-card ledger
-  (the cross-mode invariant below) plus vcann-rt's memory-quota enforcement, which caps a slice at its
-  `memory-quota` rather than at the card total.
+A sysfs `sgpu` subdevice — the allocator puts the card in `sgpu` mode and writes a `cores%`-derived
+compute quota + VRAM cap under a `fixed-share` scheduling class to
+`/sys/bus/pci/devices/<BDF>/sgpu/create`, then injects `METAX_SGPUS` plus the card device nodes for the
+host MetaX runtime.
 
-The flag persists in the driver, so a card that has hosted a tenant stays shareable until the host is
-rebooted or an operator clears it with `npu-smi set -t device-share`.
+### Cambricon
 
-#### Where the preload libraries come from
+A cnDev sMLU profile + instance — the allocator creates or reuses a profile with `mluQuota = cores%`
+and `memorySize` set to the VRAM budget, instantiates a subdevice, and injects its device nodes
+`/dev/cambricon_dev*` / `/dev/cambricon_ipcm*` / the instance node, with a `VIRTUAL_DEVICES` env
+fallback for `--use-runtime` deployments since sMLU does not support CDI.
+
+### Where the preload libraries come from
 
 They are compiled into the operator image per runtime version (cloned inline at pinned commits — no
 git submodule — built in the `xbuild-nvidia-cuda-*` / `xbuild-ascend-cann-*` Dockerfile stages,

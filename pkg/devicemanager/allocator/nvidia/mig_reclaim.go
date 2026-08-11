@@ -63,7 +63,7 @@ const corruptMissPrefix = "corrupt:"
 const corruptHeldMissPrefix = "corrupt-held:"
 
 // reclaimer is the level-based MIG reclaim loop's state, driven by the reconciler's broadcast
-// live pod-UID set plus a periodic resync ticker (deviceplugin.RunSlicedReclaimLoop). A sliced
+// live pod-UID set plus a periodic resync ticker (deviceplugin.RunReclaimLoop). A sliced
 // pool has no Release callback, so a Pod's GPU/compute instances are freed here. Each reconcile
 // re-scans the markers and re-lists the driver, so it self-heals across restarts with no
 // in-memory instance registry. It runs single-threaded (the loop calls reconcile serially), so
