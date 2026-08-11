@@ -51,10 +51,10 @@ type InstanceTypeFlavorSpec struct {
 	// Family is the product family, e.g. "ampere"; empty for a generic pool.
 	Family string `json:"family,omitempty" protobuf:"bytes,5,opt,name=family"`
 
-	// Memory is the per-card VRAM, e.g. "24576Mi"; empty for a generic pool.
+	// Memory is the per-accelerator VRAM, e.g. "24576Mi"; empty for a generic pool.
 	Memory string `json:"memory,omitempty" protobuf:"bytes,6,opt,name=memory"`
 
-	// Cores is the per-card accelerator core count, e.g. "9216"; empty for a generic pool.
+	// Cores is the per-accelerator core count, e.g. "9216"; empty for a generic pool.
 	Cores string `json:"cores,omitempty" protobuf:"bytes,7,opt,name=cores"`
 
 	// GeneralGroup is the general(CPU) group of the pool: the real CPU key when

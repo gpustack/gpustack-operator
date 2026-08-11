@@ -56,9 +56,9 @@ func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenA
 		v1alpha1.Accelerator{}.OpenAPIModelName():                            schema_gpustack_api_worker_v1alpha1_Accelerator(ref),
 		v1alpha1.AcceleratorAllocation{}.OpenAPIModelName():                  schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref),
 		v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName():               schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref),
-		v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName():           schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalPlacement(ref),
 		v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName():              schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref),
 		v1alpha1.AcceleratorPhysicalSlicedProfile{}.OpenAPIModelName():       schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref),
+		v1alpha1.AcceleratorPlacement{}.OpenAPIModelName():                   schema_gpustack_api_worker_v1alpha1_AcceleratorPlacement(ref),
 		v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorProfileCount(ref),
 		v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName():                schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref),
 		v1alpha1.AcceleratorSlicedLogicalDetail{}.OpenAPIModelName():         schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref),
@@ -541,7 +541,7 @@ func schema_gpustack_api_worker_v1_InstanceAcceleratorMetrics(ref common.Referen
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceAcceleratorMetrics is the metrics of one accelerator device allocated to an Instance.\n\nAll figures come from the vendor device libraries; a zero value may also mean the library could not read that metric at sampling time.",
+				Description: "InstanceAcceleratorMetrics is the metrics of one accelerator device allocated to an Instance.\n\nAll figures come from the manufacturer's device libraries; a zero value may also mean the library could not read that metric at sampling time.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"id": {
@@ -1005,7 +1005,7 @@ func schema_gpustack_api_worker_v1_InstanceMetricsSample(ref common.ReferenceCal
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.\n\nEvery memory and storage figure is reported in MiB: the sources measure in different units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one wins so that a consumer never has to mix units within one sample. A byte figure is rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.",
+				Description: "InstanceMetricsSample is a single utilization sampling point of an Instance.\n\nEvery memory and storage figure is reported in MiB: the sources measure in different units — the kubelet in bytes, the manufacturer's device libraries in MiB — and the coarser one wins so that a consumer never has to mix units within one sample. A byte figure is rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"timestamp": {
@@ -1768,14 +1768,14 @@ func schema_gpustack_api_worker_v1_InstanceTypeFlavorSpec(ref common.ReferenceCa
 					},
 					"memory": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Memory is the per-card VRAM, e.g. \"24576Mi\"; empty for a generic pool.",
+							Description: "Memory is the per-accelerator VRAM, e.g. \"24576Mi\"; empty for a generic pool.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
 					},
 					"cores": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Cores is the per-card accelerator core count, e.g. \"9216\"; empty for a generic pool.",
+							Description: "Cores is the per-accelerator core count, e.g. \"9216\"; empty for a generic pool.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -2109,7 +2109,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning every Pod's occupied slots on this card). Both are empty (omitted) for a card with no physical-slice profiles, so it serializes byte-identically to before they existed.\n\nAllocatedProfiles lists, by profile name, how many instances are currently created and bound on this card (the count of the Pods' recorded placements).",
+							Description: "AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning every Pod's occupied slots on this accelerator). Both are empty (omitted) for an accelerator with no physical-slice profiles, so it serializes byte-identically to before they existed.\n\nAllocatedProfiles lists, by profile name, how many instances are currently created and bound on this accelerator (the count of the Pods' recorded placements).",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -2131,7 +2131,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can still be created given the card's occupied placement slots — the placement-aware remaining capacity (the per-profile analog of the scalar Remaining) the AdmissionCheck gates on.",
+							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile can still be created given the accelerator's occupied placement slots — the placement-aware remaining capacity (the per-profile analog of the scalar Remaining) the AdmissionCheck gates on.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -2145,7 +2145,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 					},
 					"allocatedPhysicalProfile": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation TRANSPORT the reconciler consumes to build the ledger above — not status output. The device-plugin Allocate records, in the Pod's own allocation annotation, the single physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in the aggregated Devices.Status. A Pod holds one instance of one profile per card.",
+							Description: "AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation TRANSPORT the reconciler consumes to build the ledger above — not status output. The device-plugin Allocate records, in the Pod's own allocation annotation, the single physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance): its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in the aggregated Devices.Status. A Pod holds one instance of one profile per accelerator.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -2157,13 +2157,32 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT depends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:\n\n  - Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.\n    The reconciler unions these across the node's Pods to derive RemainingProfiles.\n  - Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes\n    exactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The\n    physical reader skips an entry with no profile, which is what lets one field carry\n    both ledgers; the logical reader requires that shape and keys by accelerator UUID.",
+							Description: "AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies on this accelerator. The reconciler unions these across the node's Pods to derive RemainingProfiles.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName()),
+										Ref:     ref(v1alpha1.AcceleratorPlacement{}.OpenAPIModelName()),
+									},
+								},
+							},
+						},
+					},
+					"allocatedLogicalPlacements": {
+						VendorExtensible: spec.VendorExtensible{
+							Extensions: spec.Extensions{
+								"x-kubernetes-list-type": "atomic",
+							},
+						},
+						SchemaProps: spec.SchemaProps{
+							Description: "AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads what the node's live slices already occupy. Empty (omitted) in the aggregated Devices.Status, and for a manufacturer whose logical slice has no position.",
+							Type:        []string{"array"},
+							Items: &spec.SchemaOrArray{
+								Schema: &spec.Schema{
+									SchemaProps: spec.SchemaProps{
+										Default: map[string]interface{}{},
+										Ref:     ref(v1alpha1.AcceleratorPlacement{}.OpenAPIModelName()),
 									},
 								},
 							},
@@ -2174,7 +2193,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorAllocation(ref common.Refere
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName(), v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()},
+			v1alpha1.AcceleratorPlacement{}.OpenAPIModelName(), v1alpha1.AcceleratorProfileCount{}.OpenAPIModelName()},
 	}
 }
 
@@ -2182,7 +2201,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref common.Ref
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorLogicalSliced describes a card's logical (software) slicing capability.",
+				Description: "AcceleratorLogicalSliced describes an accelerator's logical (software) slicing capability.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"coresPercentageOvercommit": {
@@ -2194,42 +2213,12 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorLogicalSliced(ref common.Ref
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the maximum number of logical slices this card can host. A card whose MIG mode is currently enabled is always 0, which excludes it from the logical capacity keys; a pending-enable card is not partitioned yet and still reports its logical count.",
+							Description: "Count is the maximum number of logical slices this accelerator can host. An accelerator whose MIG mode is currently enabled is always 0, which excludes it from the logical capacity keys; a pending-enable accelerator is not partitioned yet and still reports its logical count.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
 				},
-			},
-		},
-	}
-}
-
-func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalPlacement(ref common.ReferenceCallback) common.OpenAPIDefinition {
-	return common.OpenAPIDefinition{
-		Schema: spec.Schema{
-			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorPhysicalPlacement is one memory-slice interval [Start, Start+Size) a hardware GPU partition (e.g. an NVIDIA MIG GPU instance) occupies on a card, in memory-slice units. It is the placement geometry both the capability's empty-card legal-slot cache and the annotation-transported occupied slot are expressed in.",
-				Type:        []string{"object"},
-				Properties: map[string]spec.Schema{
-					"start": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Start is the first memory slice the interval covers (0-based).",
-							Default:     0,
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-					"length": {
-						SchemaProps: spec.SchemaProps{
-							Description: "Length is the number of memory slices the interval spans; the interval is [Start, Start+Length). Named Length, not Size, to avoid colliding with the protobuf-generated Size() method on this message.",
-							Default:     0,
-							Type:        []string{"integer"},
-							Format:      "int32",
-						},
-					},
-				},
-				Required: []string{"start", "length"},
 			},
 		},
 	}
@@ -2239,7 +2228,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref common.Re
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.",
+				Description: "AcceleratorPhysicalSliced describes an accelerator's physical (hardware) slicing capability.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"profiles": {
@@ -2252,7 +2241,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref common.Re
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Profiles is empty when the card does not support, or has not enabled, hard slicing.",
+							Description: "Profiles is empty when the accelerator does not support, or has not enabled, hard slicing.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -2266,7 +2255,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSliced(ref common.Re
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".partitioned\" token pool for a partitioned card, which is the family that serves it; a partitioned card offers no logical slicing and so leaves the \".sliced\" pool entirely. Zero when Profiles is empty.",
+							Description: "Count is the accelerator's physical-slice ceiling — the largest Count across Profiles (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare \".partitioned\" token pool for a partitioned accelerator, which is the family that serves it; a partitioned accelerator offers no logical slicing and so leaves the \".sliced\" pool entirely. Zero when Profiles is empty.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -2320,7 +2309,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref co
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the maximum number of instances of this profile on a single card.",
+							Description: "Count is the maximum number of instances of this profile on a single accelerator.",
 							Default:     0,
 							Type:        []string{"integer"},
 							Format:      "int32",
@@ -2333,13 +2322,13 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref co
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "Placements is the profile's full empty-card legal placement set (start:size in memory-slice units), enumerated once at detect time. The reconciler subtracts the occupied intervals it reconstructs from Pod annotations from this cached set to derive the card's RemainingProfiles, so no device query runs per reconcile. Caching the full empty-card set makes the subtraction correct regardless of whether the vendor's possible-placements query is itself occupancy-aware. Empty for a card with no physical-slice profiles.",
+							Description: "Placements is the profile's full empty-accelerator legal placement set (start:size in memory-slice units), enumerated once at detect time. The reconciler subtracts the occupied intervals it reconstructs from Pod annotations from this cached set to derive the accelerator's RemainingProfiles, so no device query runs per reconcile. Caching the full empty-accelerator set makes the subtraction correct regardless of whether the manufacturer's possible-placements query is itself occupancy-aware. Empty for an accelerator with no physical-slice profiles.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
 									SchemaProps: spec.SchemaProps{
 										Default: map[string]interface{}{},
-										Ref:     ref(v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName()),
+										Ref:     ref(v1alpha1.AcceleratorPlacement{}.OpenAPIModelName()),
 									},
 								},
 							},
@@ -2350,7 +2339,37 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorPhysicalSlicedProfile(ref co
 			},
 		},
 		Dependencies: []string{
-			v1alpha1.AcceleratorPhysicalPlacement{}.OpenAPIModelName()},
+			v1alpha1.AcceleratorPlacement{}.OpenAPIModelName()},
+	}
+}
+
+func schema_gpustack_api_worker_v1alpha1_AcceleratorPlacement(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Description: "AcceleratorPlacement is one contiguous run [Start, Start+Length) an allocation occupies on an accelerator. It is one record carrier for both placement ledgers; the unit it counts depends on the field carrying it:\n\n  - memory slices, for the physical-partition ledger — the interval a hardware GPU\n    partition (e.g. an NVIDIA MIG GPU instance) occupies, which is what both the\n    capability's empty-accelerator legal-slot cache and the annotation-transported\n    occupied slot are expressed in.\n  - the manufacturer's own compute units, for the logical-slice ledger — on AMD, CU-mask\n    bit indexes exactly as they appear in HSA_CU_MASK. A logical slice occupies a POSITION\n    on the accelerator, not only a share of it: two slices handed the same run share those\n    compute units instead of the accelerator.",
+				Type:        []string{"object"},
+				Properties: map[string]spec.Schema{
+					"start": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Start is the first unit the run covers (0-based).",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+					"length": {
+						SchemaProps: spec.SchemaProps{
+							Description: "Length is the number of units the run spans; the run is [Start, Start+Length). Named Length, not Size, to avoid colliding with the protobuf-generated Size() method on this message.",
+							Default:     0,
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
+				},
+				Required: []string{"start", "length"},
+			},
+		},
 	}
 }
 
@@ -2387,7 +2406,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedDetail(ref common.Refe
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from the group's per-card slicing status.",
+				Description: "AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from the group's per-accelerator slicing status.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"logical": {
@@ -2416,19 +2435,19 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedLogicalDetail(ref comm
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The per-card LogicalSliced is what a card-level decision reads; this group view is what external queries read to learn whether the node accepts logical-slice requests at all (Count > 0) and whether it permits compute overcommit.",
+				Description: "AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The per-accelerator LogicalSliced is what an accelerator-level decision reads; this group view is what external queries read to learn whether the node accepts logical-slice requests at all (Count > 0) and whether it permits compute overcommit.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"coresPercentageOvercommit": {
 						SchemaProps: spec.SchemaProps{
-							Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from any logically sliceable card; false and meaningless when no card is logically sliceable.",
+							Description: "CoresPercentageOvercommit is a per-model property (uniform within a group), taken from any logically sliceable accelerator; false and meaningless when no accelerator is logically sliceable.",
 							Type:        []string{"boolean"},
 							Format:      "",
 						},
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the sum of per-card LogicalSliced.Count across the group.",
+							Description: "Count is the sum of per-accelerator LogicalSliced.Count across the group.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -2470,7 +2489,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetail(ref com
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the sum of per-card PhysicalSliced.Count across the group.",
+							Description: "Count is the sum of per-accelerator PhysicalSliced.Count across the group.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
@@ -2487,7 +2506,7 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.",
+				Description: "AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's accelerators.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"name": {
@@ -2500,14 +2519,14 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorSlicedPhysicalDetailProfile(
 					},
 					"count": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Count is the sum of per-card Count for this profile name across the group.",
+							Description: "Count is the sum of per-accelerator Count for this profile name across the group.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
 					"memoryMib": {
 						SchemaProps: spec.SchemaProps{
-							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform per profile name within a group, so it is carried through (not summed). It is the VRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits) for a MIG request, which is why the aggregate — reachable from the InstanceType Detail, unlike per-card Devices — must carry it. Optional in the schema (a real profile always carries a non-zero value); the Pod webhook treats a not-yet-populated detail as a retryable not-ready state rather than relying on schema-required presence.",
+							Description: "MemoryMib is the memory of one instance of this profile, in MiB. It is uniform per profile name within a group, so it is carried through (not summed). It is the VRAM-anchored input the Pod webhook folds into \".sliced.units\" (MemoryMibToUnits) for a MIG request, which is why the aggregate — reachable from the InstanceType Detail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real profile always carries a non-zero value); the Pod webhook treats a not-yet-populated detail as a retryable not-ready state rather than relying on schema-required presence.",
 							Type:        []string{"integer"},
 							Format:      "int64",
 						},
@@ -2536,14 +2555,14 @@ func schema_gpustack_api_worker_v1alpha1_AcceleratorStatus(ref common.ReferenceC
 					},
 					"logicalSliced": {
 						SchemaProps: spec.SchemaProps{
-							Description: "LogicalSliced is the card's logical (software) slicing capability.",
+							Description: "LogicalSliced is the accelerator's logical (software) slicing capability.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorLogicalSliced{}.OpenAPIModelName()),
 						},
 					},
 					"physicalSliced": {
 						SchemaProps: spec.SchemaProps{
-							Description: "PhysicalSliced is the card's physical (hardware) slicing capability.",
+							Description: "PhysicalSliced is the accelerator's physical (hardware) slicing capability.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorPhysicalSliced{}.OpenAPIModelName()),
 						},
@@ -2857,7 +2876,7 @@ func schema_gpustack_api_worker_v1alpha1_DevicesGroup(ref common.ReferenceCallba
 					},
 					"acceleratorSlicedDetail": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its accelerators' per-card slicing status.",
+							Description: "AcceleratorSlicedDetail is the group's slicing capability, aggregated from its accelerators' per-accelerator slicing status.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.AcceleratorSlicedDetail{}.OpenAPIModelName()),
 						},
@@ -3282,21 +3301,21 @@ func schema_gpustack_api_worker_v1alpha1_InstanceResources(ref common.ReferenceC
 					},
 					"acceleratorSlicedMemoryPercentage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request becomes an exclusive whole-card request). The Pod webhook folds it into the normalized .sliced.units; it is ignored by non-sliced requests.",
+							Description: "AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request becomes an exclusive whole-accelerator request). The Pod webhook folds it into the normalized .sliced.units; it is ignored by non-sliced requests.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
 					"acceleratorSlicedCoresPercentage": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on a sliced InstanceType, as a percentage in [0,100]. It is independent of AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook copies it to the other. It is ignored by non-sliced requests.",
+							Description: "AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on a sliced InstanceType, as a percentage in [0,100]. It is independent of AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook copies it to the other. It is ignored by non-sliced requests.",
 							Type:        []string{"integer"},
 							Format:      "int32",
 						},
 					},
 					"acceleratorPartitionedProfile": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a request for one hardware partition of that shape, which is mutually exclusive with the two slice percentages above: hardware partitioning and software slicing cannot both apply to one card. It is ignored by InstanceTypes offering no partition.",
+							Description: "AcceleratorPartitionedProfile is the hardware partition profile requested on a partition-offering InstanceType, e.g. \"3g.40gb\". A non-empty value makes this a request for one hardware partition of that shape, which is mutually exclusive with the two slice percentages above: hardware partitioning and software slicing cannot both apply to one accelerator. It is ignored by InstanceTypes offering no partition.",
 							Type:        []string{"string"},
 							Format:      "",
 						},
@@ -4295,7 +4314,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypePartitionedResource(ref com
 	return common.OpenAPIDefinition{
 		Schema: spec.Schema{
 			SchemaProps: spec.SchemaProps{
-				Description: "InstanceTypePartitionedResource describes the hardware-partitionable resource of the InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.\n\nThe per-profile lists are what answers \"which partition profiles can I still get\". Neither of the alternatives does: the scalar Remaining is the best case over a card's profiles rather than a total (the profiles on one card compete for the same physical slices, so summing them would multiply-count the same hardware), and Detail.SlicedDetail is the static capability catalog, which by design does not move as instances are carved and released.",
+				Description: "InstanceTypePartitionedResource describes the hardware-partitionable resource of the InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.\n\nThe per-profile lists are what answers \"which partition profiles can I still get\". Neither of the alternatives does: the scalar Remaining is the best case over an accelerator's profiles rather than a total (the profiles on one accelerator compete for the same physical slices, so summing them would multiply-count the same hardware), and Detail.SlicedDetail is the static capability catalog, which by design does not move as instances are carved and released.",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
 					"onceMaxRequest": {
@@ -4326,7 +4345,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypePartitionedResource(ref com
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's partitioned cards currently hold, summed over those cards. A profile holding nothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.\n\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide aggregate it serves, so changing its zero-handling or its presence changes that aggregate too. Its readers are the consumers of this status — the UI and the GPUStack app — which show what a pool is running beside what it can still take, and which cannot derive it: RemainingProfiles alone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
+							Description: "AllocatedProfiles lists, by profile name, how many instances of each profile the pool's partitioned accelerators currently hold, summed over those accelerators. A profile holding nothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.\n\nThe worker gateway ingests it per candidate and sums it by profile name into the fleet-wide aggregate it serves, so changing its zero-handling or its presence changes that aggregate too. Its readers are the consumers of this status — the UI and the GPUStack app — which show what a pool is running beside what it can still take, and which cannot derive it: RemainingProfiles alone cannot say whether a zero is \"occupied\" or merely \"squeezed out by a sibling profile\".",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -4348,7 +4367,7 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypePartitionedResource(ref com
 							},
 						},
 						SchemaProps: spec.SchemaProps{
-							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool can still host, summed over its partitioned cards.\n\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a sibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but currently full\" from \"not offered at all\", and the wholesale status write does not churn the key set on every carve and release.",
+							Description: "RemainingProfiles lists, by profile name, how many more instances of each profile the pool can still host, summed over its partitioned accelerators.\n\nEvery profile the pool offers gets an entry, even at zero, so a profile whose room a sibling's instance consumed reads 0 instead of vanishing — a reader can tell \"offered but currently full\" from \"not offered at all\", and the wholesale status write does not churn the key set on every carve and release.",
 							Type:        []string{"array"},
 							Items: &spec.SchemaOrArray{
 								Schema: &spec.Schema{
@@ -4531,28 +4550,28 @@ func schema_gpustack_api_worker_v1alpha1_InstanceTypeStatus(ref common.Reference
 					},
 					"accelerator": {
 						SchemaProps: spec.SchemaProps{
-							Description: "Accelerator is the allocatable-as-exclusive view: whole cards that are entirely free, e.g. \"1\", \"4\".",
+							Description: "Accelerator is the allocatable-as-exclusive view: whole accelerators that are entirely free, e.g. \"1\", \"4\".",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
 						},
 					},
 					"acceleratorShared": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorShared is the shareable view: per-card ownership shares (up to SharedResourceMaxSize owners per card) summed over free and already-shared cards.",
+							Description: "AcceleratorShared is the shareable view: per-accelerator ownership shares (up to SharedResourceMaxSize owners per accelerator) summed over free and already-shared accelerators.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
 						},
 					},
 					"acceleratorSliced": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one hundred per card) summed over free and already-sliced cards.",
+							Description: "AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one hundred per accelerator) summed over free and already-sliced accelerators.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypeResource{}.OpenAPIModelName()),
 						},
 					},
 					"acceleratorPartitioned": {
 						SchemaProps: spec.SchemaProps{
-							Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the pool's partitioned cards can still host, summed over those cards. It is disjoint from the three views above — a card in a partitioning mode can serve no other kind of claim — so a pool with no partitioned card reports zero here.",
+							Description: "AcceleratorPartitioned is the hardware-partitionable view: the partition instances the pool's partitioned accelerators can still host, summed over those accelerators. It is disjoint from the three views above — an accelerator in a partitioning mode can serve no other kind of claim — so a pool with no partitioned accelerator reports zero here.",
 							Default:     map[string]interface{}{},
 							Ref:         ref(v1alpha1.InstanceTypePartitionedResource{}.OpenAPIModelName()),
 						},

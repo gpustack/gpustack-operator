@@ -28,7 +28,7 @@ type DevicesGroupApplyConfiguration struct {
 	// Accelerators is the list of the accelerator devices in this group.
 	Accelerators []AcceleratorApplyConfiguration `json:"accelerators,omitempty"`
 	// AcceleratorSlicedDetail is the group's slicing capability, aggregated from its
-	// accelerators' per-card slicing status.
+	// accelerators' per-accelerator slicing status.
 	AcceleratorSlicedDetail *AcceleratorSlicedDetailApplyConfiguration `json:"acceleratorSlicedDetail,omitempty"`
 }
 

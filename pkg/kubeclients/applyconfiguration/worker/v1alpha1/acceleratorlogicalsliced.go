@@ -5,14 +5,15 @@ package v1alpha1
 // AcceleratorLogicalSlicedApplyConfiguration represents a declarative configuration of the AcceleratorLogicalSliced type for use
 // with apply.
 //
-// AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
+// AcceleratorLogicalSliced describes an accelerator's logical (software) slicing capability.
 type AcceleratorLogicalSlicedApplyConfiguration struct {
 	// CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
 	// device compute (time-sharing / weighted sharing); false means compute is partitioned.
 	CoresPercentageOvercommit *bool `json:"coresPercentageOvercommit,omitempty"`
-	// Count is the maximum number of logical slices this card can host. A card whose MIG
-	// mode is currently enabled is always 0, which excludes it from the logical capacity
-	// keys; a pending-enable card is not partitioned yet and still reports its logical count.
+	// Count is the maximum number of logical slices this accelerator can host. An accelerator
+	// whose MIG mode is currently enabled is always 0, which excludes it from the logical
+	// capacity keys; a pending-enable accelerator is not partitioned yet and still reports
+	// its logical count.
 	Count *int32 `json:"count,omitempty"`
 }
 

@@ -5,15 +5,16 @@ package v1alpha1
 // AcceleratorPhysicalSlicedApplyConfiguration represents a declarative configuration of the AcceleratorPhysicalSliced type for use
 // with apply.
 //
-// AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
+// AcceleratorPhysicalSliced describes an accelerator's physical (hardware) slicing capability.
 type AcceleratorPhysicalSlicedApplyConfiguration struct {
-	// Profiles is empty when the card does not support, or has not enabled, hard slicing.
+	// Profiles is empty when the accelerator does not support, or has not enabled, hard
+	// slicing.
 	Profiles []AcceleratorPhysicalSlicedProfileApplyConfiguration `json:"profiles,omitempty"`
-	// Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
-	// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned" token pool
-	// for a partitioned card, which is the family that serves it; a partitioned card offers
-	// no logical slicing and so leaves the ".sliced" pool entirely. Zero when Profiles is
-	// empty.
+	// Count is the accelerator's physical-slice ceiling — the largest Count across Profiles
+	// (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned"
+	// token pool for a partitioned accelerator, which is the family that serves it; a
+	// partitioned accelerator offers no logical slicing and so leaves the ".sliced" pool
+	// entirely. Zero when Profiles is empty.
 	Count *int32 `json:"count,omitempty"`
 }
 

@@ -21,37 +21,40 @@ type AcceleratorAllocationApplyConfiguration struct {
 	Allocated *int32 `json:"allocated,omitempty"`
 	// Remaining is the remaining allocatable units of the device.
 	Remaining *int32 `json:"remaining,omitempty"`
-	// AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the
-	// AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod
-	// AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning
-	// every Pod's occupied slots on this card). Both are empty (omitted) for a card with no
-	// physical-slice profiles, so it serializes byte-identically to before they existed.
+	// AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger
+	// the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the
+	// per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below
+	// (unioning every Pod's occupied slots on this accelerator). Both are empty (omitted) for
+	// an accelerator with no physical-slice profiles, so it serializes byte-identically to
+	// before they existed.
 	//
 	// AllocatedProfiles lists, by profile name, how many instances are currently created
-	// and bound on this card (the count of the Pods' recorded placements).
+	// and bound on this accelerator (the count of the Pods' recorded placements).
 	AllocatedProfiles []AcceleratorProfileCountApplyConfiguration `json:"allocatedProfiles,omitempty"`
 	// RemainingProfiles lists, by profile name, how many more instances of each profile can
-	// still be created given the card's occupied placement slots — the placement-aware
+	// still be created given the accelerator's occupied placement slots — the placement-aware
 	// remaining capacity (the per-profile analog of the scalar Remaining) the
 	// AdmissionCheck gates on.
 	RemainingProfiles []AcceleratorProfileCountApplyConfiguration `json:"remainingProfiles,omitempty"`
 	// AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation
 	// TRANSPORT the reconciler consumes to build the ledger above — not status output. The
 	// device-plugin Allocate records, in the Pod's own allocation annotation, the single
-	// physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its
-	// profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in
-	// the aggregated Devices.Status. A Pod holds one instance of one profile per card.
+	// physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):
+	// its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)
+	// in the aggregated Devices.Status. A Pod holds one instance of one profile per
+	// accelerator.
 	AllocatedPhysicalProfile *string `json:"allocatedPhysicalProfile,omitempty"`
-	// AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT
-	// depends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:
-	//
-	// - Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.
-	// The reconciler unions these across the node's Pods to derive RemainingProfiles.
-	// - Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes
-	// exactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The
-	// physical reader skips an entry with no profile, which is what lets one field carry
-	// both ledgers; the logical reader requires that shape and keys by accelerator UUID.
-	AllocatedPhysicalPlacements []AcceleratorPhysicalPlacementApplyConfiguration `json:"allocatedPhysicalPlacements,omitempty"`
+	// AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies
+	// on this accelerator. The reconciler unions these across the node's Pods to derive
+	// RemainingProfiles.
+	AllocatedPhysicalPlacements []AcceleratorPlacementApplyConfiguration `json:"allocatedPhysicalPlacements,omitempty"`
+	// AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
+	// ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
+	// manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
+	// HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
+	// what the node's live slices already occupy. Empty (omitted) in the aggregated
+	// Devices.Status, and for a manufacturer whose logical slice has no position.
+	AllocatedLogicalPlacements []AcceleratorPlacementApplyConfiguration `json:"allocatedLogicalPlacements,omitempty"`
 }
 
 // AcceleratorAllocationApplyConfiguration constructs a declarative configuration of the AcceleratorAllocation type for use with
@@ -137,12 +140,25 @@ func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalProfile(v
 // WithAllocatedPhysicalPlacements adds the given value to the AllocatedPhysicalPlacements field in the declarative configuration
 // and returns the receiver, so that objects can be build by chaining "With" function invocations.
 // If called multiple times, values provided by each call will be appended to the AllocatedPhysicalPlacements field.
-func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalPlacements(values ...*AcceleratorPhysicalPlacementApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedPhysicalPlacements(values ...*AcceleratorPlacementApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
 	for i := range values {
 		if values[i] == nil {
 			panic("nil value passed to WithAllocatedPhysicalPlacements")
 		}
 		b.AllocatedPhysicalPlacements = append(b.AllocatedPhysicalPlacements, *values[i])
+	}
+	return b
+}
+
+// WithAllocatedLogicalPlacements adds the given value to the AllocatedLogicalPlacements field in the declarative configuration
+// and returns the receiver, so that objects can be build by chaining "With" function invocations.
+// If called multiple times, values provided by each call will be appended to the AllocatedLogicalPlacements field.
+func (b *AcceleratorAllocationApplyConfiguration) WithAllocatedLogicalPlacements(values ...*AcceleratorPlacementApplyConfiguration) *AcceleratorAllocationApplyConfiguration {
+	for i := range values {
+		if values[i] == nil {
+			panic("nil value passed to WithAllocatedLogicalPlacements")
+		}
+		b.AllocatedLogicalPlacements = append(b.AllocatedLogicalPlacements, *values[i])
 	}
 	return b
 }

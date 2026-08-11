@@ -9,9 +9,9 @@ package v1alpha1
 type AcceleratorStatusApplyConfiguration struct {
 	// Unhealthy indicates whether the device is healthy or not.
 	Unhealthy *bool `json:"unhealthy,omitempty"`
-	// LogicalSliced is the card's logical (software) slicing capability.
+	// LogicalSliced is the accelerator's logical (software) slicing capability.
 	LogicalSliced *AcceleratorLogicalSlicedApplyConfiguration `json:"logicalSliced,omitempty"`
-	// PhysicalSliced is the card's physical (hardware) slicing capability.
+	// PhysicalSliced is the accelerator's physical (hardware) slicing capability.
 	PhysicalSliced *AcceleratorPhysicalSlicedApplyConfiguration `json:"physicalSliced,omitempty"`
 }
 

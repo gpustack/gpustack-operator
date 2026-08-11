@@ -1286,12 +1286,12 @@ func ForKind(kind schema.GroupVersionKind) interface{} {
 		return &applyconfigurationworkerv1alpha1.AcceleratorAllocationApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorLogicalSliced"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorLogicalSlicedApplyConfiguration{}
-	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorPhysicalPlacement"):
-		return &applyconfigurationworkerv1alpha1.AcceleratorPhysicalPlacementApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorPhysicalSliced"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorPhysicalSlicedApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorPhysicalSlicedProfile"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorPhysicalSlicedProfileApplyConfiguration{}
+	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorPlacement"):
+		return &applyconfigurationworkerv1alpha1.AcceleratorPlacementApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorProfileCount"):
 		return &applyconfigurationworkerv1alpha1.AcceleratorProfileCountApplyConfiguration{}
 	case workerv1alpha1.SchemeGroupVersion.WithKind("AcceleratorSlicedDetail"):

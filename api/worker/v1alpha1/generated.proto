@@ -54,21 +54,22 @@ message AcceleratorAllocation {
   // Remaining is the remaining allocatable units of the device.
   optional int32 remaining = 5;
 
-  // AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the
-  // AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod
-  // AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning
-  // every Pod's occupied slots on this card). Both are empty (omitted) for a card with no
-  // physical-slice profiles, so it serializes byte-identically to before they existed.
+  // AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger
+  // the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the
+  // per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below
+  // (unioning every Pod's occupied slots on this accelerator). Both are empty (omitted) for
+  // an accelerator with no physical-slice profiles, so it serializes byte-identically to
+  // before they existed.
   //
   // AllocatedProfiles lists, by profile name, how many instances are currently created
-  // and bound on this card (the count of the Pods' recorded placements).
+  // and bound on this accelerator (the count of the Pods' recorded placements).
   //
   // +listType=map
   // +listMapKey=name
   repeated AcceleratorProfileCount allocatedProfiles = 6;
 
   // RemainingProfiles lists, by profile name, how many more instances of each profile can
-  // still be created given the card's occupied placement slots — the placement-aware
+  // still be created given the accelerator's occupied placement slots — the placement-aware
   // remaining capacity (the per-profile analog of the scalar Remaining) the
   // AdmissionCheck gates on.
   //
@@ -79,64 +80,57 @@ message AcceleratorAllocation {
   // AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation
   // TRANSPORT the reconciler consumes to build the ledger above — not status output. The
   // device-plugin Allocate records, in the Pod's own allocation annotation, the single
-  // physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its
-  // profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in
-  // the aggregated Devices.Status. A Pod holds one instance of one profile per card.
+  // physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):
+  // its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)
+  // in the aggregated Devices.Status. A Pod holds one instance of one profile per
+  // accelerator.
   optional string allocatedPhysicalProfile = 8;
 
-  // AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT
-  // depends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:
-  //
-  //   - Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.
-  //     The reconciler unions these across the node's Pods to derive RemainingProfiles.
-  //   - Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes
-  //     exactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The
-  //     physical reader skips an entry with no profile, which is what lets one field carry
-  //     both ledgers; the logical reader requires that shape and keys by accelerator UUID.
+  // AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies
+  // on this accelerator. The reconciler unions these across the node's Pods to derive
+  // RemainingProfiles.
   //
   // +listType=atomic
-  repeated AcceleratorPhysicalPlacement allocatedPhysicalPlacements = 9;
+  repeated AcceleratorPlacement allocatedPhysicalPlacements = 9;
+
+  // AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
+  // ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
+  // manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
+  // HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
+  // what the node's live slices already occupy. Empty (omitted) in the aggregated
+  // Devices.Status, and for a manufacturer whose logical slice has no position.
+  //
+  // +listType=atomic
+  repeated AcceleratorPlacement allocatedLogicalPlacements = 10;
 }
 
-// AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
+// AcceleratorLogicalSliced describes an accelerator's logical (software) slicing capability.
 message AcceleratorLogicalSliced {
   // CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
   // device compute (time-sharing / weighted sharing); false means compute is partitioned.
   optional bool coresPercentageOvercommit = 1;
 
-  // Count is the maximum number of logical slices this card can host. A card whose MIG
-  // mode is currently enabled is always 0, which excludes it from the logical capacity
-  // keys; a pending-enable card is not partitioned yet and still reports its logical count.
+  // Count is the maximum number of logical slices this accelerator can host. An accelerator
+  // whose MIG mode is currently enabled is always 0, which excludes it from the logical
+  // capacity keys; a pending-enable accelerator is not partitioned yet and still reports
+  // its logical count.
   optional int32 count = 2;
 }
 
-// AcceleratorPhysicalPlacement is one memory-slice interval [Start, Start+Size) a hardware
-// GPU partition (e.g. an NVIDIA MIG GPU instance) occupies on a card, in memory-slice
-// units. It is the placement geometry both the capability's empty-card legal-slot cache
-// and the annotation-transported occupied slot are expressed in.
-message AcceleratorPhysicalPlacement {
-  // Start is the first memory slice the interval covers (0-based).
-  optional int32 start = 1;
-
-  // Length is the number of memory slices the interval spans; the interval is
-  // [Start, Start+Length). Named Length, not Size, to avoid colliding with the
-  // protobuf-generated Size() method on this message.
-  optional int32 length = 2;
-}
-
-// AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
+// AcceleratorPhysicalSliced describes an accelerator's physical (hardware) slicing capability.
 message AcceleratorPhysicalSliced {
-  // Profiles is empty when the card does not support, or has not enabled, hard slicing.
+  // Profiles is empty when the accelerator does not support, or has not enabled, hard
+  // slicing.
   //
   // +listType=map
   // +listMapKey=name
   repeated AcceleratorPhysicalSlicedProfile profiles = 1;
 
-  // Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
-  // on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned" token pool
-  // for a partitioned card, which is the family that serves it; a partitioned card offers
-  // no logical slicing and so leaves the ".sliced" pool entirely. Zero when Profiles is
-  // empty.
+  // Count is the accelerator's physical-slice ceiling — the largest Count across Profiles
+  // (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned"
+  // token pool for a partitioned accelerator, which is the family that serves it; a
+  // partitioned accelerator offers no logical slicing and so leaves the ".sliced" pool
+  // entirely. Zero when Profiles is empty.
   optional int32 count = 2;
 }
 
@@ -159,19 +153,41 @@ message AcceleratorPhysicalSlicedProfile {
   // granularity on the memory axis (1..8 on current hardware).
   optional int32 memorySlices = 4;
 
-  // Count is the maximum number of instances of this profile on a single card.
+  // Count is the maximum number of instances of this profile on a single accelerator.
   optional int32 count = 5;
 
-  // Placements is the profile's full empty-card legal placement set (start:size in
+  // Placements is the profile's full empty-accelerator legal placement set (start:size in
   // memory-slice units), enumerated once at detect time. The reconciler subtracts the
-  // occupied intervals it reconstructs from Pod annotations from this cached set to
-  // derive the card's RemainingProfiles, so no device query runs per reconcile. Caching the
-  // full empty-card set makes the subtraction correct regardless of whether the vendor's
-  // possible-placements query is itself occupancy-aware. Empty for a card with no
-  // physical-slice profiles.
+  // occupied intervals it reconstructs from Pod annotations from this cached set to derive
+  // the accelerator's RemainingProfiles, so no device query runs per reconcile. Caching the
+  // full empty-accelerator set makes the subtraction correct regardless of whether the
+  // manufacturer's possible-placements query is itself occupancy-aware. Empty for an
+  // accelerator with no physical-slice profiles.
   //
   // +listType=atomic
-  repeated AcceleratorPhysicalPlacement placements = 6;
+  repeated AcceleratorPlacement placements = 6;
+}
+
+// AcceleratorPlacement is one contiguous run [Start, Start+Length) an allocation occupies on
+// an accelerator. It is one record carrier for both placement ledgers; the unit it counts
+// depends on the field carrying it:
+//
+//   - memory slices, for the physical-partition ledger — the interval a hardware GPU
+//     partition (e.g. an NVIDIA MIG GPU instance) occupies, which is what both the
+//     capability's empty-accelerator legal-slot cache and the annotation-transported
+//     occupied slot are expressed in.
+//   - the manufacturer's own compute units, for the logical-slice ledger — on AMD, CU-mask
+//     bit indexes exactly as they appear in HSA_CU_MASK. A logical slice occupies a POSITION
+//     on the accelerator, not only a share of it: two slices handed the same run share those
+//     compute units instead of the accelerator.
+message AcceleratorPlacement {
+  // Start is the first unit the run covers (0-based).
+  optional int32 start = 1;
+
+  // Length is the number of units the run spans; the run is [Start, Start+Length).
+  // Named Length, not Size, to avoid colliding with the protobuf-generated Size()
+  // method on this message.
+  optional int32 length = 2;
 }
 
 // AcceleratorProfileCount pairs a physical-slice profile name with a count of
@@ -188,7 +204,7 @@ message AcceleratorProfileCount {
 }
 
 // AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
-// the group's per-card slicing status.
+// the group's per-accelerator slicing status.
 message AcceleratorSlicedDetail {
   // Logical is the aggregated logical (software) slicing capability.
   optional AcceleratorSlicedLogicalDetail logical = 1;
@@ -198,15 +214,16 @@ message AcceleratorSlicedDetail {
 }
 
 // AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
-// per-card LogicalSliced is what a card-level decision reads; this group view is what
-// external queries read to learn whether the node accepts logical-slice requests at all
-// (Count > 0) and whether it permits compute overcommit.
+// per-accelerator LogicalSliced is what an accelerator-level decision reads; this group view
+// is what external queries read to learn whether the node accepts logical-slice requests at
+// all (Count > 0) and whether it permits compute overcommit.
 message AcceleratorSlicedLogicalDetail {
   // CoresPercentageOvercommit is a per-model property (uniform within a group), taken from
-  // any logically sliceable card; false and meaningless when no card is logically sliceable.
+  // any logically sliceable accelerator; false and meaningless when no accelerator is
+  // logically sliceable.
   optional bool coresPercentageOvercommit = 1;
 
-  // Count is the sum of per-card LogicalSliced.Count across the group.
+  // Count is the sum of per-accelerator LogicalSliced.Count across the group.
   optional int32 count = 2;
 }
 
@@ -218,23 +235,24 @@ message AcceleratorSlicedPhysicalDetail {
   // +listMapKey=name
   repeated AcceleratorSlicedPhysicalDetailProfile profiles = 1;
 
-  // Count is the sum of per-card PhysicalSliced.Count across the group.
+  // Count is the sum of per-accelerator PhysicalSliced.Count across the group.
   optional int32 count = 2;
 }
 
-// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.
+// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's
+// accelerators.
 message AcceleratorSlicedPhysicalDetailProfile {
   // Name is the profile identifier, e.g. "1g.5gb".
   optional string name = 1;
 
-  // Count is the sum of per-card Count for this profile name across the group.
+  // Count is the sum of per-accelerator Count for this profile name across the group.
   optional int32 count = 2;
 
   // MemoryMib is the memory of one instance of this profile, in MiB. It is uniform
   // per profile name within a group, so it is carried through (not summed). It is the
   // VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
   // for a MIG request, which is why the aggregate — reachable from the InstanceType
-  // Detail, unlike per-card Devices — must carry it. Optional in the schema (a real
+  // Detail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real
   // profile always carries a non-zero value); the Pod webhook treats a not-yet-populated
   // detail as a retryable not-ready state rather than relying on schema-required presence.
   optional int64 memoryMib = 3;
@@ -245,10 +263,10 @@ message AcceleratorStatus {
   // Unhealthy indicates whether the device is healthy or not.
   optional bool unhealthy = 1;
 
-  // LogicalSliced is the card's logical (software) slicing capability.
+  // LogicalSliced is the accelerator's logical (software) slicing capability.
   optional AcceleratorLogicalSliced logicalSliced = 2;
 
-  // PhysicalSliced is the card's physical (hardware) slicing capability.
+  // PhysicalSliced is the accelerator's physical (hardware) slicing capability.
   optional AcceleratorPhysicalSliced physicalSliced = 3;
 }
 
@@ -350,7 +368,7 @@ message DevicesGroup {
   repeated Accelerator accelerators = 10;
 
   // AcceleratorSlicedDetail is the group's slicing capability, aggregated from its
-  // accelerators' per-card slicing status.
+  // accelerators' per-accelerator slicing status.
   optional AcceleratorSlicedDetail acceleratorSlicedDetail = 11;
 }
 
@@ -496,15 +514,15 @@ message InstanceResources {
   // Accelerator is the accelerator resource requirement for the Instance, e.g. "1", "2".
   optional .k8s.io.apimachinery.pkg.api.resource.Quantity accelerator = 4;
 
-  // AcceleratorSlicedMemoryPercentage is the per-card VRAM budget requested on a
+  // AcceleratorSlicedMemoryPercentage is the per-accelerator VRAM budget requested on a
   // sliced InstanceType, as a percentage in [0,100]. 0 disables slicing (the request
-  // becomes an exclusive whole-card request). The Pod webhook folds it into the
+  // becomes an exclusive whole-accelerator request). The Pod webhook folds it into the
   // normalized .sliced.units; it is ignored by non-sliced requests.
   //
   // +optional
   optional int32 acceleratorSlicedMemoryPercentage = 5;
 
-  // AcceleratorSlicedCoresPercentage is the per-card compute (SM) budget requested on
+  // AcceleratorSlicedCoresPercentage is the per-accelerator compute (SM) budget requested on
   // a sliced InstanceType, as a percentage in [0,100]. It is independent of
   // AcceleratorSlicedMemoryPercentage; when only one of the two is set the webhook
   // copies it to the other. It is ignored by non-sliced requests.
@@ -516,7 +534,7 @@ message InstanceResources {
   // partition-offering InstanceType, e.g. "3g.40gb". A non-empty value makes this a
   // request for one hardware partition of that shape, which is mutually exclusive with
   // the two slice percentages above: hardware partitioning and software slicing cannot
-  // both apply to one card. It is ignored by InstanceTypes offering no partition.
+  // both apply to one accelerator. It is ignored by InstanceTypes offering no partition.
   //
   // +optional
   optional string acceleratorPartitionedProfile = 7;
@@ -800,16 +818,17 @@ message InstanceTypeList {
 // InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.
 //
 // The per-profile lists are what answers "which partition profiles can I still get". Neither of
-// the alternatives does: the scalar Remaining is the best case over a card's profiles rather
-// than a total (the profiles on one card compete for the same physical slices, so summing them
-// would multiply-count the same hardware), and Detail.SlicedDetail is the static capability
-// catalog, which by design does not move as instances are carved and released.
+// the alternatives does: the scalar Remaining is the best case over an accelerator's profiles
+// rather than a total (the profiles on one accelerator compete for the same physical slices, so
+// summing them would multiply-count the same hardware), and Detail.SlicedDetail is the static
+// capability catalog, which by design does not move as instances are carved and released.
 message InstanceTypePartitionedResource {
   optional InstanceTypeResource resource = 1;
 
   // AllocatedProfiles lists, by profile name, how many instances of each profile the pool's
-  // partitioned cards currently hold, summed over those cards. A profile holding nothing is
-  // absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.
+  // partitioned accelerators currently hold, summed over those accelerators. A profile holding
+  // nothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries
+  // meaning.
   //
   // The worker gateway ingests it per candidate and sums it by profile name into the fleet-wide
   // aggregate it serves, so changing its zero-handling or its presence changes that aggregate too.
@@ -822,7 +841,7 @@ message InstanceTypePartitionedResource {
   repeated AcceleratorProfileCount allocatedProfiles = 2;
 
   // RemainingProfiles lists, by profile name, how many more instances of each profile the pool
-  // can still host, summed over its partitioned cards.
+  // can still host, summed over its partitioned accelerators.
   //
   // Every profile the pool offers gets an entry, even at zero, so a profile whose room a
   // sibling's instance consumed reads 0 instead of vanishing — a reader can tell "offered but
@@ -927,23 +946,23 @@ message InstanceTypeStatus {
   // PhaseMessage is the message of the phase.
   optional string phaseMessage = 4;
 
-  // Accelerator is the allocatable-as-exclusive view: whole cards that are
+  // Accelerator is the allocatable-as-exclusive view: whole accelerators that are
   // entirely free, e.g. "1", "4".
   optional InstanceTypeResource accelerator = 5;
 
-  // AcceleratorShared is the shareable view: per-card ownership shares (up to
-  // SharedResourceMaxSize owners per card) summed over free and already-shared
-  // cards.
+  // AcceleratorShared is the shareable view: per-accelerator ownership shares (up to
+  // SharedResourceMaxSize owners per accelerator) summed over free and already-shared
+  // accelerators.
   optional InstanceTypeResource acceleratorShared = 6;
 
-  // AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
-  // hundred per card) summed over free and already-sliced cards.
+  // AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one
+  // hundred per accelerator) summed over free and already-sliced accelerators.
   optional InstanceTypeResource acceleratorSliced = 7;
 
-  // AcceleratorPartitioned is the hardware-partitionable view: the partition instances
-  // the pool's partitioned cards can still host, summed over those cards. It is disjoint
-  // from the three views above — a card in a partitioning mode can serve no other kind of
-  // claim — so a pool with no partitioned card reports zero here.
+  // AcceleratorPartitioned is the hardware-partitionable view: the partition instances the
+  // pool's partitioned accelerators can still host, summed over those accelerators. It is
+  // disjoint from the three views above — an accelerator in a partitioning mode can serve no
+  // other kind of claim — so a pool with no partitioned accelerator reports zero here.
   optional InstanceTypePartitionedResource acceleratorPartitioned = 9;
 
   // CPU is the CPU resource of the InstanceType, e.g. "4", "8".

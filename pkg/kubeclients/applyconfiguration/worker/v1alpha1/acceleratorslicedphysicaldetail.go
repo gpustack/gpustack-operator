@@ -9,7 +9,7 @@ package v1alpha1
 type AcceleratorSlicedPhysicalDetailApplyConfiguration struct {
 	// Profiles is the group's physical profiles, summed by name.
 	Profiles []AcceleratorSlicedPhysicalDetailProfileApplyConfiguration `json:"profiles,omitempty"`
-	// Count is the sum of per-card PhysicalSliced.Count across the group.
+	// Count is the sum of per-accelerator PhysicalSliced.Count across the group.
 	Count *int32 `json:"count,omitempty"`
 }
 

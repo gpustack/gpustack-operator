@@ -78,7 +78,7 @@ type (
 		Accelerators []Accelerator `json:"accelerators,omitempty" yaml:"accelerators,omitempty" protobuf:"bytes,10,opt,name=accelerators"`
 
 		// AcceleratorSlicedDetail is the group's slicing capability, aggregated from its
-		// accelerators' per-card slicing status.
+		// accelerators' per-accelerator slicing status.
 		AcceleratorSlicedDetail AcceleratorSlicedDetail `json:"acceleratorSlicedDetail,omitempty" yaml:"acceleratorSlicedDetail,omitempty" protobuf:"bytes,11,opt,name=acceleratorSlicedDetail"` // nolint: lll
 	}
 
@@ -148,8 +148,8 @@ const (
 	DeviceAllocationModeSliced
 	// DeviceAllocationModePartitioned indicates that the device is carved into hardware
 	// partitions (e.g. NVIDIA MIG GPU instances), each allocated to one consumer. Unlike
-	// Sliced, the isolation is enforced by the hardware, the card must be put into a
-	// partitioning mode first, and the card can then serve no other mode.
+	// Sliced, the isolation is enforced by the hardware, the accelerator must be put into a
+	// partitioning mode first, and it can then serve no other mode.
 	DeviceAllocationModePartitioned
 	// DeviceAllocationModeVisibility is an internal-only mode: it grants a container
 	// device-cgroup visibility to the physical device(s) another container in the same Pod
@@ -194,17 +194,25 @@ type (
 		Status AcceleratorStatus `json:"status" yaml:"status" protobuf:"bytes,5,name=status"`
 	}
 
-	// AcceleratorPhysicalPlacement is one memory-slice interval [Start, Start+Size) a hardware
-	// GPU partition (e.g. an NVIDIA MIG GPU instance) occupies on a card, in memory-slice
-	// units. It is the placement geometry both the capability's empty-card legal-slot cache
-	// and the annotation-transported occupied slot are expressed in.
-	AcceleratorPhysicalPlacement struct {
-		// Start is the first memory slice the interval covers (0-based).
+	// AcceleratorPlacement is one contiguous run [Start, Start+Length) an allocation occupies on
+	// an accelerator. It is one record carrier for both placement ledgers; the unit it counts
+	// depends on the field carrying it:
+	//
+	//   - memory slices, for the physical-partition ledger — the interval a hardware GPU
+	//     partition (e.g. an NVIDIA MIG GPU instance) occupies, which is what both the
+	//     capability's empty-accelerator legal-slot cache and the annotation-transported
+	//     occupied slot are expressed in.
+	//   - the manufacturer's own compute units, for the logical-slice ledger — on AMD, CU-mask
+	//     bit indexes exactly as they appear in HSA_CU_MASK. A logical slice occupies a POSITION
+	//     on the accelerator, not only a share of it: two slices handed the same run share those
+	//     compute units instead of the accelerator.
+	AcceleratorPlacement struct {
+		// Start is the first unit the run covers (0-based).
 		Start int32 `json:"start" yaml:"start" protobuf:"varint,1,opt,name=start"`
 
-		// Length is the number of memory slices the interval spans; the interval is
-		// [Start, Start+Length). Named Length, not Size, to avoid colliding with the
-		// protobuf-generated Size() method on this message.
+		// Length is the number of units the run spans; the run is [Start, Start+Length).
+		// Named Length, not Size, to avoid colliding with the protobuf-generated Size()
+		// method on this message.
 		Length int32 `json:"length" yaml:"length" protobuf:"varint,2,opt,name=length"`
 	}
 
@@ -227,46 +235,48 @@ type (
 		// granularity on the memory axis (1..8 on current hardware).
 		MemorySlices int32 `json:"memorySlices" yaml:"memorySlices" protobuf:"varint,4,opt,name=memorySlices"` // nolint: lll
 
-		// Count is the maximum number of instances of this profile on a single card.
+		// Count is the maximum number of instances of this profile on a single accelerator.
 		Count int32 `json:"count" yaml:"count" protobuf:"varint,5,opt,name=count"`
 
-		// Placements is the profile's full empty-card legal placement set (start:size in
+		// Placements is the profile's full empty-accelerator legal placement set (start:size in
 		// memory-slice units), enumerated once at detect time. The reconciler subtracts the
-		// occupied intervals it reconstructs from Pod annotations from this cached set to
-		// derive the card's RemainingProfiles, so no device query runs per reconcile. Caching the
-		// full empty-card set makes the subtraction correct regardless of whether the vendor's
-		// possible-placements query is itself occupancy-aware. Empty for a card with no
-		// physical-slice profiles.
+		// occupied intervals it reconstructs from Pod annotations from this cached set to derive
+		// the accelerator's RemainingProfiles, so no device query runs per reconcile. Caching the
+		// full empty-accelerator set makes the subtraction correct regardless of whether the
+		// manufacturer's possible-placements query is itself occupancy-aware. Empty for an
+		// accelerator with no physical-slice profiles.
 		//
 		// +listType=atomic
-		Placements []AcceleratorPhysicalPlacement `json:"placements,omitempty" yaml:"placements,omitempty" protobuf:"bytes,6,rep,name=placements"` // nolint: lll
+		Placements []AcceleratorPlacement `json:"placements,omitempty" yaml:"placements,omitempty" protobuf:"bytes,6,rep,name=placements"` // nolint: lll
 	}
 
-	// AcceleratorLogicalSliced describes a card's logical (software) slicing capability.
+	// AcceleratorLogicalSliced describes an accelerator's logical (software) slicing capability.
 	AcceleratorLogicalSliced struct {
 		// CoresPercentageOvercommit reports whether each slice may claim up to 100% of the
 		// device compute (time-sharing / weighted sharing); false means compute is partitioned.
 		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,1,opt,name=coresPercentageOvercommit"` // nolint: lll
 
-		// Count is the maximum number of logical slices this card can host. A card whose MIG
-		// mode is currently enabled is always 0, which excludes it from the logical capacity
-		// keys; a pending-enable card is not partitioned yet and still reports its logical count.
+		// Count is the maximum number of logical slices this accelerator can host. An accelerator
+		// whose MIG mode is currently enabled is always 0, which excludes it from the logical
+		// capacity keys; a pending-enable accelerator is not partitioned yet and still reports
+		// its logical count.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
-	// AcceleratorPhysicalSliced describes a card's physical (hardware) slicing capability.
+	// AcceleratorPhysicalSliced describes an accelerator's physical (hardware) slicing capability.
 	AcceleratorPhysicalSliced struct {
-		// Profiles is empty when the card does not support, or has not enabled, hard slicing.
+		// Profiles is empty when the accelerator does not support, or has not enabled, hard
+		// slicing.
 		//
 		// +listType=map
 		// +listMapKey=name
 		Profiles []AcceleratorPhysicalSlicedProfile `json:"profiles,omitempty" yaml:"profiles,omitempty" protobuf:"bytes,1,rep,name=profiles"` // nolint: lll
 
-		// Count is the card's physical-slice ceiling — the largest Count across Profiles (e.g. 7
-		// on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned" token pool
-		// for a partitioned card, which is the family that serves it; a partitioned card offers
-		// no logical slicing and so leaves the ".sliced" pool entirely. Zero when Profiles is
-		// empty.
+		// Count is the accelerator's physical-slice ceiling — the largest Count across Profiles
+		// (e.g. 7 on A100, from 7x 1g.5gb). It sizes the device-plugin's bare ".partitioned"
+		// token pool for a partitioned accelerator, which is the family that serves it; a
+		// partitioned accelerator offers no logical slicing and so leaves the ".sliced" pool
+		// entirely. Zero when Profiles is empty.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
@@ -275,39 +285,41 @@ type (
 		// Unhealthy indicates whether the device is healthy or not.
 		Unhealthy bool `json:"unhealthy" yaml:"unhealthy" protobuf:"varint,1,name=unhealthy"`
 
-		// LogicalSliced is the card's logical (software) slicing capability.
+		// LogicalSliced is the accelerator's logical (software) slicing capability.
 		LogicalSliced AcceleratorLogicalSliced `json:"logicalSliced,omitempty" yaml:"logicalSliced,omitempty" protobuf:"bytes,2,opt,name=logicalSliced"` // nolint: lll
 
-		// PhysicalSliced is the card's physical (hardware) slicing capability.
+		// PhysicalSliced is the accelerator's physical (hardware) slicing capability.
 		PhysicalSliced AcceleratorPhysicalSliced `json:"physicalSliced,omitempty" yaml:"physicalSliced,omitempty" protobuf:"bytes,3,opt,name=physicalSliced"` // nolint: lll
 	}
 
 	// AcceleratorSlicedLogicalDetail aggregates the group's logical slicing capability. The
-	// per-card LogicalSliced is what a card-level decision reads; this group view is what
-	// external queries read to learn whether the node accepts logical-slice requests at all
-	// (Count > 0) and whether it permits compute overcommit.
+	// per-accelerator LogicalSliced is what an accelerator-level decision reads; this group view
+	// is what external queries read to learn whether the node accepts logical-slice requests at
+	// all (Count > 0) and whether it permits compute overcommit.
 	AcceleratorSlicedLogicalDetail struct {
 		// CoresPercentageOvercommit is a per-model property (uniform within a group), taken from
-		// any logically sliceable card; false and meaningless when no card is logically sliceable.
+		// any logically sliceable accelerator; false and meaningless when no accelerator is
+		// logically sliceable.
 		CoresPercentageOvercommit bool `json:"coresPercentageOvercommit,omitempty" yaml:"coresPercentageOvercommit,omitempty" protobuf:"varint,1,opt,name=coresPercentageOvercommit"` // nolint: lll
 
-		// Count is the sum of per-card LogicalSliced.Count across the group.
+		// Count is the sum of per-accelerator LogicalSliced.Count across the group.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
-	// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.
+	// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's
+	// accelerators.
 	AcceleratorSlicedPhysicalDetailProfile struct {
 		// Name is the profile identifier, e.g. "1g.5gb".
 		Name string `json:"name" yaml:"name" protobuf:"bytes,1,opt,name=name"`
 
-		// Count is the sum of per-card Count for this profile name across the group.
+		// Count is the sum of per-accelerator Count for this profile name across the group.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 
 		// MemoryMib is the memory of one instance of this profile, in MiB. It is uniform
 		// per profile name within a group, so it is carried through (not summed). It is the
 		// VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
 		// for a MIG request, which is why the aggregate — reachable from the InstanceType
-		// Detail, unlike per-card Devices — must carry it. Optional in the schema (a real
+		// Detail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real
 		// profile always carries a non-zero value); the Pod webhook treats a not-yet-populated
 		// detail as a retryable not-ready state rather than relying on schema-required presence.
 		MemoryMib int64 `json:"memoryMib,omitempty" yaml:"memoryMib,omitempty" protobuf:"varint,3,opt,name=memoryMib"`
@@ -321,12 +333,12 @@ type (
 		// +listMapKey=name
 		Profiles []AcceleratorSlicedPhysicalDetailProfile `json:"profiles,omitempty" yaml:"profiles,omitempty" protobuf:"bytes,1,rep,name=profiles"` // nolint: lll
 
-		// Count is the sum of per-card PhysicalSliced.Count across the group.
+		// Count is the sum of per-accelerator PhysicalSliced.Count across the group.
 		Count int32 `json:"count,omitempty" yaml:"count,omitempty" protobuf:"varint,2,opt,name=count"`
 	}
 
 	// AcceleratorSlicedDetail is the group-level slicing capability view, aggregated from
-	// the group's per-card slicing status.
+	// the group's per-accelerator slicing status.
 	AcceleratorSlicedDetail struct {
 		// Logical is the aggregated logical (software) slicing capability.
 		Logical AcceleratorSlicedLogicalDetail `json:"logical,omitempty" yaml:"logical,omitempty" protobuf:"bytes,1,opt,name=logical"`
@@ -365,21 +377,22 @@ type (
 		// Remaining is the remaining allocatable units of the device.
 		Remaining int32 `json:"remaining,omitempty" yaml:"remaining,omitempty" protobuf:"varint,5,opt,name=remaining"`
 
-		// AllocatedProfiles and RemainingProfiles are the per-card physical-slice ledger the
-		// AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the per-Pod
-		// AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below (unioning
-		// every Pod's occupied slots on this card). Both are empty (omitted) for a card with no
-		// physical-slice profiles, so it serializes byte-identically to before they existed.
+		// AllocatedProfiles and RemainingProfiles are the per-accelerator physical-slice ledger
+		// the AdmissionCheck reads — the aggregated OUTPUT the reconciler computes from the
+		// per-Pod AllocatedPhysicalProfile/AllocatedPhysicalPlacements transport fields below
+		// (unioning every Pod's occupied slots on this accelerator). Both are empty (omitted) for
+		// an accelerator with no physical-slice profiles, so it serializes byte-identically to
+		// before they existed.
 		//
 		// AllocatedProfiles lists, by profile name, how many instances are currently created
-		// and bound on this card (the count of the Pods' recorded placements).
+		// and bound on this accelerator (the count of the Pods' recorded placements).
 		//
 		// +listType=map
 		// +listMapKey=name
 		AllocatedProfiles []AcceleratorProfileCount `json:"allocatedProfiles,omitempty" yaml:"allocatedProfiles,omitempty" protobuf:"bytes,6,rep,name=allocatedProfiles"` // nolint: lll
 
 		// RemainingProfiles lists, by profile name, how many more instances of each profile can
-		// still be created given the card's occupied placement slots — the placement-aware
+		// still be created given the accelerator's occupied placement slots — the placement-aware
 		// remaining capacity (the per-profile analog of the scalar Remaining) the
 		// AdmissionCheck gates on.
 		//
@@ -390,23 +403,28 @@ type (
 		// AllocatedPhysicalProfile and AllocatedPhysicalPlacements are the per-Pod annotation
 		// TRANSPORT the reconciler consumes to build the ledger above — not status output. The
 		// device-plugin Allocate records, in the Pod's own allocation annotation, the single
-		// physical partition that Pod holds on this card (e.g. an NVIDIA MIG instance): its
-		// profile name and the memory-slice interval(s) it occupies. Both are empty (omitted) in
-		// the aggregated Devices.Status. A Pod holds one instance of one profile per card.
+		// physical partition that Pod holds on this accelerator (e.g. an NVIDIA MIG instance):
+		// its profile name and the memory-slice interval(s) it occupies. Both are empty (omitted)
+		// in the aggregated Devices.Status. A Pod holds one instance of one profile per
+		// accelerator.
 		AllocatedPhysicalProfile string `json:"allocatedPhysicalProfile,omitempty" yaml:"allocatedPhysicalProfile,omitempty" protobuf:"bytes,8,opt,name=allocatedPhysicalProfile"` // nolint: lll
 
-		// AllocatedPhysicalPlacements is the interval(s) the Pod occupies on this card. Its UNIT
-		// depends on Mode, and the two readers are told apart by AllocatedPhysicalProfile:
-		//
-		//   - Partitioned: memory-slice intervals, paired with a non-empty AllocatedPhysicalProfile.
-		//     The reconciler unions these across the node's Pods to derive RemainingProfiles.
-		//   - Sliced: the compute geometry a logical slice holds (on AMD, CU-mask bit indexes
-		//     exactly as they appear in HSA_CU_MASK), with AllocatedPhysicalProfile EMPTY. The
-		//     physical reader skips an entry with no profile, which is what lets one field carry
-		//     both ledgers; the logical reader requires that shape and keys by accelerator UUID.
+		// AllocatedPhysicalPlacements is the memory-slice interval(s) the Pod's partition occupies
+		// on this accelerator. The reconciler unions these across the node's Pods to derive
+		// RemainingProfiles.
 		//
 		// +listType=atomic
-		AllocatedPhysicalPlacements []AcceleratorPhysicalPlacement `json:"allocatedPhysicalPlacements,omitempty" yaml:"allocatedPhysicalPlacements,omitempty" protobuf:"bytes,9,rep,name=allocatedPhysicalPlacements"` // nolint: lll
+		AllocatedPhysicalPlacements []AcceleratorPlacement `json:"allocatedPhysicalPlacements,omitempty" yaml:"allocatedPhysicalPlacements,omitempty" protobuf:"bytes,9,rep,name=allocatedPhysicalPlacements"` // nolint: lll
+
+		// AllocatedLogicalPlacements is the per-Pod annotation TRANSPORT of the logical-slice
+		// ledger: the compute geometry the Pod's logical slice holds on this accelerator, in the
+		// manufacturer's own compute units (on AMD, CU-mask bit indexes exactly as they appear in
+		// HSA_CU_MASK). The device-plugin Allocate records it so a later placement decision reads
+		// what the node's live slices already occupy. Empty (omitted) in the aggregated
+		// Devices.Status, and for a manufacturer whose logical slice has no position.
+		//
+		// +listType=atomic
+		AllocatedLogicalPlacements []AcceleratorPlacement `json:"allocatedLogicalPlacements,omitempty" yaml:"allocatedLogicalPlacements,omitempty" protobuf:"bytes,10,rep,name=allocatedLogicalPlacements"` // nolint: lll
 	}
 )
 

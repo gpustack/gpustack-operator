@@ -5,17 +5,18 @@ package v1alpha1
 // AcceleratorSlicedPhysicalDetailProfileApplyConfiguration represents a declarative configuration of the AcceleratorSlicedPhysicalDetailProfile type for use
 // with apply.
 //
-// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's cards.
+// AcceleratorSlicedPhysicalDetailProfile aggregates one profile across the group's
+// accelerators.
 type AcceleratorSlicedPhysicalDetailProfileApplyConfiguration struct {
 	// Name is the profile identifier, e.g. "1g.5gb".
 	Name *string `json:"name,omitempty"`
-	// Count is the sum of per-card Count for this profile name across the group.
+	// Count is the sum of per-accelerator Count for this profile name across the group.
 	Count *int32 `json:"count,omitempty"`
 	// MemoryMib is the memory of one instance of this profile, in MiB. It is uniform
 	// per profile name within a group, so it is carried through (not summed). It is the
 	// VRAM-anchored input the Pod webhook folds into ".sliced.units" (MemoryMibToUnits)
 	// for a MIG request, which is why the aggregate — reachable from the InstanceType
-	// Detail, unlike per-card Devices — must carry it. Optional in the schema (a real
+	// Detail, unlike per-accelerator Devices — must carry it. Optional in the schema (a real
 	// profile always carries a non-zero value); the Pod webhook treats a not-yet-populated
 	// detail as a retryable not-ready state rather than relying on schema-required presence.
 	MemoryMib *int64 `json:"memoryMib,omitempty"`

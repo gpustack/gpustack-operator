@@ -202,10 +202,10 @@ type InstanceTypeAcceleratorDetail struct {
 // as InstanceResources.AcceleratorSlicedMemoryPercentage / AcceleratorSlicedCoresPercentage.
 //
 // It deliberately does not exclude a partitioned pool, and IsPhysicallySliceable does not exclude
-// a logically sliceable one. The two capabilities are mutually exclusive per CARD — which is why
-// the per-card device.IsLogicallySliceable folds in !IsPartitioned — but a pool aggregates cards
-// of both kinds, and a mixed node advertises both families at once. Folding either predicate into
-// the other here would starve a mixed pool of logical slices.
+// a logically sliceable one. The two capabilities are mutually exclusive per ACCELERATOR — which
+// is why the per-accelerator device.IsLogicallySliceable folds in !IsPartitioned — but a pool
+// aggregates accelerators of both kinds, and a mixed node advertises both families at once.
+// Folding either predicate into the other here would starve a mixed pool of logical slices.
 func (in InstanceTypeAcceleratorDetail) IsLogicallySliceable() bool {
 	return in.SlicedDetail.Logical.Count > 0
 }
@@ -243,23 +243,23 @@ type InstanceTypeStatus struct {
 	// so the fleet reads as having no capacity on the new dimension. Wire it there in the same
 	// change; a reflection test in that package fails while the two are out of step.
 
-	// Accelerator is the allocatable-as-exclusive view: whole cards that are
+	// Accelerator is the allocatable-as-exclusive view: whole accelerators that are
 	// entirely free, e.g. "1", "4".
 	Accelerator InstanceTypeResource `json:"accelerator" protobuf:"bytes,5,name=accelerator"`
 
-	// AcceleratorShared is the shareable view: per-card ownership shares (up to
-	// SharedResourceMaxSize owners per card) summed over free and already-shared
-	// cards.
+	// AcceleratorShared is the shareable view: per-accelerator ownership shares (up to
+	// SharedResourceMaxSize owners per accelerator) summed over free and already-shared
+	// accelerators.
 	AcceleratorShared InstanceTypeResource `json:"acceleratorShared" protobuf:"bytes,6,name=acceleratorShared"`
 
-	// AcceleratorSliced is the sliceable view: per-card VRAM-percent units (one
-	// hundred per card) summed over free and already-sliced cards.
+	// AcceleratorSliced is the sliceable view: per-accelerator VRAM-percent units (one
+	// hundred per accelerator) summed over free and already-sliced accelerators.
 	AcceleratorSliced InstanceTypeResource `json:"acceleratorSliced" protobuf:"bytes,7,name=acceleratorSliced"`
 
-	// AcceleratorPartitioned is the hardware-partitionable view: the partition instances
-	// the pool's partitioned cards can still host, summed over those cards. It is disjoint
-	// from the three views above — a card in a partitioning mode can serve no other kind of
-	// claim — so a pool with no partitioned card reports zero here.
+	// AcceleratorPartitioned is the hardware-partitionable view: the partition instances the
+	// pool's partitioned accelerators can still host, summed over those accelerators. It is
+	// disjoint from the three views above — an accelerator in a partitioning mode can serve no
+	// other kind of claim — so a pool with no partitioned accelerator reports zero here.
 	AcceleratorPartitioned InstanceTypePartitionedResource `json:"acceleratorPartitioned" protobuf:"bytes,9,name=acceleratorPartitioned"`
 
 	// CPU is the CPU resource of the InstanceType, e.g. "4", "8".
@@ -284,16 +284,17 @@ type InstanceTypeResource struct {
 // InstanceType: the scalar view every resource shares, plus the pool's per-profile ledger.
 //
 // The per-profile lists are what answers "which partition profiles can I still get". Neither of
-// the alternatives does: the scalar Remaining is the best case over a card's profiles rather
-// than a total (the profiles on one card compete for the same physical slices, so summing them
-// would multiply-count the same hardware), and Detail.SlicedDetail is the static capability
-// catalog, which by design does not move as instances are carved and released.
+// the alternatives does: the scalar Remaining is the best case over an accelerator's profiles
+// rather than a total (the profiles on one accelerator compete for the same physical slices, so
+// summing them would multiply-count the same hardware), and Detail.SlicedDetail is the static
+// capability catalog, which by design does not move as instances are carved and released.
 type InstanceTypePartitionedResource struct {
 	InstanceTypeResource `json:",inline" protobuf:"bytes,1,opt,name=resource"`
 
 	// AllocatedProfiles lists, by profile name, how many instances of each profile the pool's
-	// partitioned cards currently hold, summed over those cards. A profile holding nothing is
-	// absent rather than listed at zero — unlike RemainingProfiles, where zero carries meaning.
+	// partitioned accelerators currently hold, summed over those accelerators. A profile holding
+	// nothing is absent rather than listed at zero — unlike RemainingProfiles, where zero carries
+	// meaning.
 	//
 	// The worker gateway ingests it per candidate and sums it by profile name into the fleet-wide
 	// aggregate it serves, so changing its zero-handling or its presence changes that aggregate too.
@@ -306,7 +307,7 @@ type InstanceTypePartitionedResource struct {
 	AllocatedProfiles []AcceleratorProfileCount `json:"allocatedProfiles,omitempty" protobuf:"bytes,2,rep,name=allocatedProfiles"` // nolint: lll
 
 	// RemainingProfiles lists, by profile name, how many more instances of each profile the pool
-	// can still host, summed over its partitioned cards.
+	// can still host, summed over its partitioned accelerators.
 	//
 	// Every profile the pool offers gets an entry, even at zero, so a profile whose room a
 	// sibling's instance consumed reads 0 instead of vanishing — a reader can tell "offered but

@@ -61,7 +61,7 @@ message Instance {
 // InstanceAcceleratorMetrics is the metrics of one accelerator device
 // allocated to an Instance.
 //
-// All figures come from the vendor device libraries; a zero value may also
+// All figures come from the manufacturer's device libraries; a zero value may also
 // mean the library could not read that metric at sampling time.
 message InstanceAcceleratorMetrics {
   // ID is the universally unique identifier of the accelerator device.
@@ -236,7 +236,7 @@ message InstanceMetrics {
 // InstanceMetricsSample is a single utilization sampling point of an Instance.
 //
 // Every memory and storage figure is reported in MiB: the sources measure in different
-// units — the kubelet in bytes, the vendor device libraries in MiB — and the coarser one
+// units — the kubelet in bytes, the manufacturer's device libraries in MiB — and the coarser one
 // wins so that a consumer never has to mix units within one sample. A byte figure is
 // rounded up, so a measured usage below 1 MiB reads as 1 and 0 means no usage at all.
 message InstanceMetricsSample {
@@ -501,10 +501,10 @@ message InstanceTypeFlavorSpec {
   // Family is the product family, e.g. "ampere"; empty for a generic pool.
   optional string family = 5;
 
-  // Memory is the per-card VRAM, e.g. "24576Mi"; empty for a generic pool.
+  // Memory is the per-accelerator VRAM, e.g. "24576Mi"; empty for a generic pool.
   optional string memory = 6;
 
-  // Cores is the per-card accelerator core count, e.g. "9216"; empty for a generic pool.
+  // Cores is the per-accelerator core count, e.g. "9216"; empty for a generic pool.
   optional string cores = 7;
 
   // GeneralGroup is the general(CPU) group of the pool: the real CPU key when
