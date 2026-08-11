@@ -75,12 +75,33 @@ func (info AsicInfo) GetMarketName() string {
 	return C.GoString((*C.char)(unsafe.Pointer(&info.Market_name[0])))
 }
 
+// isUnsupportedSerial reports whether a normalized serial is the vendor's "cannot report this"
+// sentinel rather than an identity. The header documents `0xFFFFFFFF if not supported` for the ASIC
+// serial and a wider all-ones form for sibling fields, so every width counts: no real serial is all
+// ones, and a sentinel that survives becomes an identity — the same one on every accelerator whose
+// serial the library cannot read.
+func isUnsupportedSerial(serial string) bool {
+	return serial != "" && strings.Trim(serial, "f") == ""
+}
+
+// GetAsicSerial returns the accelerator's ASIC serial in lower case, without the "0x" prefix the
+// vendor library only sometimes writes, and empty when the library has no serial to report.
+//
+// Trimming the prefix conditionally is load-bearing rather than defensive: the serial is the
+// accelerator's identity — the detector publishes it as the accelerator ID and the ROCm runtime
+// matches an agent against exactly that string — so cutting two characters unconditionally renames
+// every accelerator, and the container is then handed a filter that selects nothing.
+//
+// Two spellings mean the library has nothing to report: the literal "N/A", and the all-ones sentinel.
+// Both must come back empty, because callers treat an empty serial as "no identity" and refuse the
+// claim, whereas a surviving sentinel is silently accepted as one.
 func (info AsicInfo) GetAsicSerial() string {
-	ret := C.GoString((*C.char)(unsafe.Pointer(&info.Asic_serial[0])))
-	if ret == "N/A" {
+	ret := strings.TrimPrefix(
+		strings.ToLower(C.GoString((*C.char)(unsafe.Pointer(&info.Asic_serial[0])))), "0x")
+	if ret == "n/a" || isUnsupportedSerial(ret) {
 		return ""
 	}
-	return strings.ToLower(ret[2:])
+	return ret
 }
 
 func (info AsicInfo) GetUniqueId() string {
