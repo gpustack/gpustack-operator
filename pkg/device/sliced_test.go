@@ -32,8 +32,9 @@ func TestAggregateAcceleratorSlicedDetail(t *testing.T) {
 		want  AcceleratorSlicedDetail
 	}{
 		{
-			// Two logically sliceable NVIDIA cards + one MIG card: units logic aside, the logical
-			// count sums the two logical cards only, and the physical detail comes from the MIG card.
+			// Two logically sliceable NVIDIA accelerators + one MIG accelerator: units logic aside,
+			// the logical count sums the two logical ones only, and the physical detail comes from
+			// the MIG one.
 			name: "mixed logical + mig",
 			cards: []Accelerator{
 				card(128, true, 0),
@@ -72,7 +73,8 @@ func TestAggregateAcceleratorSlicedDetail(t *testing.T) {
 		},
 		{
 			// MemoryMib rides through the aggregation: it is uniform per profile name (one
-			// instance's VRAM), so it is carried once while Count sums across the group's cards.
+			// instance's VRAM), so it is carried once while Count sums across the group's
+			// accelerators.
 			name: "mig carries per-profile memory",
 			cards: []Accelerator{
 				card(0, false, 7, AcceleratorSlicedPhysicalDetailProfile{Name: "1g.10gb", Count: 7, MemoryMib: 10240}),
@@ -86,7 +88,7 @@ func TestAggregateAcceleratorSlicedDetail(t *testing.T) {
 			},
 		},
 		{
-			name:  "no cards",
+			name:  "no accelerators",
 			cards: nil,
 			want:  AcceleratorSlicedDetail{},
 		},

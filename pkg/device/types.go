@@ -20,9 +20,9 @@ type (
 	// AcceleratorPhysicalSlicedProfile represents one hardware partition profile of a
 	// device model, such as an NVIDIA MIG profile.
 	AcceleratorPhysicalSlicedProfile = workercore.AcceleratorPhysicalSlicedProfile
-	// AcceleratorLogicalSliced represents a card's logical (software) slicing capability.
+	// AcceleratorLogicalSliced represents an accelerator's logical (software) slicing capability.
 	AcceleratorLogicalSliced = workercore.AcceleratorLogicalSliced
-	// AcceleratorPhysicalSliced represents a card's physical (hardware) slicing capability.
+	// AcceleratorPhysicalSliced represents an accelerator's physical (hardware) slicing capability.
 	AcceleratorPhysicalSliced = workercore.AcceleratorPhysicalSliced
 	// AcceleratorSlicedDetail represents the group-level aggregated slicing capability.
 	AcceleratorSlicedDetail = workercore.AcceleratorSlicedDetail
@@ -33,12 +33,13 @@ type (
 	// AcceleratorSlicedPhysicalDetailProfile represents one group-aggregated physical profile.
 	AcceleratorSlicedPhysicalDetailProfile = workercore.AcceleratorSlicedPhysicalDetailProfile
 	// AcceleratorProfileCount pairs a physical-slice profile name with an instance count
-	// (allocated or free), as carried in a card's per-card MIG ledger.
+	// (allocated or free), as carried in an accelerator's per-accelerator MIG ledger.
 	AcceleratorProfileCount = workercore.AcceleratorProfileCount
-	// AcceleratorPhysicalPlacement is one memory-slice interval a hardware GPU partition occupies on a card.
-	AcceleratorPhysicalPlacement = workercore.AcceleratorPhysicalPlacement
-	// AcceleratorAllocation is a card's runtime allocation row — its mode, credit budget and,
-	// for a hardware-partitioned card, its per-profile partition ledger.
+	// AcceleratorPlacement is one contiguous run an allocation occupies on an accelerator, in
+	// the unit the field carrying it counts.
+	AcceleratorPlacement = workercore.AcceleratorPlacement
+	// AcceleratorAllocation is an accelerator's runtime allocation row — its mode, credit budget
+	// and, for a hardware-partitioned accelerator, its per-profile partition ledger.
 	AcceleratorAllocation = workercore.AcceleratorAllocation
 	// AcceleratorStatus represents the status of the accelerator device,
 	// including its health status and other status information.

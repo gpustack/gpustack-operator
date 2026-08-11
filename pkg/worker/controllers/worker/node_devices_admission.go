@@ -310,7 +310,7 @@ func (c cardLedger) servesFamily(family nodefeature.ResourceFamily) bool {
 	case nodefeature.ResourceFamilySliced:
 		return device.IsLogicallySliceable(c.capability)
 	default:
-		return device.IsWholeCardCapable(c.capability)
+		return device.IsWholeAcceleratorCapable(c.capability)
 	}
 }
 

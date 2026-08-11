@@ -186,7 +186,7 @@ func TestChartPciClassWhitelistMatchesNodeFeature(t *testing.T) {
 // TestChartKueueTransformationsMatchNodeFeature holds the credits mapping Kueue is configured
 // with equal to what pkg/nodefeature computes. The chart renders that mapping from
 // global.manufacturers through a template the vendored Kueue chart includes, so the constants it
-// is scored on — CreditsPerCard, SharedResourceMaxSize, ResourceMaxUnits — are restated in a
+// is scored on — CreditsPerAccelerator, SharedResourceMaxSize, ResourceMaxUnits — are restated in a
 // template and nothing but this test holds the two statements together.
 //
 // It renders the whole chart on purpose: the mapping only reaches Kueue if the helper, the patch
@@ -194,9 +194,9 @@ func TestChartPciClassWhitelistMatchesNodeFeature(t *testing.T) {
 // scheduling chain admitted nothing.
 func TestChartKueueTransformationsMatchNodeFeature(t *testing.T) {
 	const (
-		exclusiveCredits = nodefeature.CreditsPerCard
-		sharedCredits    = nodefeature.CreditsPerCard / nodefeature.SharedResourceMaxSize
-		unitCredits      = nodefeature.CreditsPerCard / nodefeature.ResourceMaxUnits
+		exclusiveCredits = nodefeature.CreditsPerAccelerator
+		sharedCredits    = nodefeature.CreditsPerAccelerator / nodefeature.SharedResourceMaxSize
+		unitCredits      = nodefeature.CreditsPerAccelerator / nodefeature.ResourceMaxUnits
 	)
 
 	var want []transformation

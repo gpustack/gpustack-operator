@@ -274,7 +274,7 @@ func buildResourceGroups(rfList *kueue.ResourceFlavorList, acceleratable bool, m
 
 		nominal := *resource.NewQuantity(capacity, resource.DecimalSI)
 		if acceleratable {
-			nominal = nodefeature.CardsToCredits(nominal)
+			nominal = nodefeature.AcceleratorsToCredits(nominal)
 		}
 
 		// A resource group holds at most 16 flavors.

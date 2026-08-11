@@ -379,21 +379,21 @@ func TestSlicedResourceDenominatorInvariants(t *testing.T) {
 	assert.Zero(t, int64(1e9)%ResourceMaxUnits, "1/D must be nano-clean")
 }
 
-func TestCreditsPerCardInvariants(t *testing.T) {
-	assert.Equal(t, int64(1_600_000), int64(CreditsPerCard), "B = D = 1600000")
+func TestCreditsPerAcceleratorInvariants(t *testing.T) {
+	assert.Equal(t, int64(1_600_000), int64(CreditsPerAccelerator), "B = D = 1600000")
 
 	// B must divide evenly by every per-mode max size so the per-mode credit
 	// magnitudes (shared B/10, sliced B/size) are exact integers and Kueue's
 	// ResourceValue int64 ceil never rounds them up.
-	assert.Zerof(t, CreditsPerCard%SharedResourceMaxSize,
+	assert.Zerof(t, CreditsPerAccelerator%SharedResourceMaxSize,
 		"B %% %d must be 0", SharedResourceMaxSize)
 	for _, size := range _SlicedResourceSizes {
-		assert.Zerof(t, CreditsPerCard%size,
+		assert.Zerof(t, CreditsPerAccelerator%size,
 			"B %% %d must be 0 for integer per-slice credits", size)
 	}
 }
 
-func TestCardsToCredits(t *testing.T) {
+func TestAcceleratorsToCredits(t *testing.T) {
 	cases := []struct {
 		name     string
 		cards    string
@@ -407,13 +407,13 @@ func TestCardsToCredits(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			q, err := resource.ParseQuantity(c.cards)
 			assert.NoError(t, err)
-			got := CardsToCredits(q)
+			got := AcceleratorsToCredits(q)
 			assert.Equal(t, c.expected, got.String())
 		})
 	}
 }
 
-func TestCreditsToCards(t *testing.T) {
+func TestCreditsToAccelerators(t *testing.T) {
 	cases := []struct {
 		name     string
 		credits  string
@@ -434,7 +434,7 @@ func TestCreditsToCards(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			q, err := resource.ParseQuantity(c.credits)
 			assert.NoError(t, err)
-			got := CreditsToCards(q)
+			got := CreditsToAccelerators(q)
 			assert.Equal(t, c.expected, got.String())
 		})
 	}
@@ -446,7 +446,7 @@ func TestCreditsRoundTrip(t *testing.T) {
 	for _, cards := range []string{"1", "2", "4", "8"} {
 		q, err := resource.ParseQuantity(cards)
 		assert.NoError(t, err)
-		got := CreditsToCards(CardsToCredits(q))
+		got := CreditsToAccelerators(AcceleratorsToCredits(q))
 		assert.Equal(t, cards, got.String(), "round trip for %s cards", cards)
 	}
 }
