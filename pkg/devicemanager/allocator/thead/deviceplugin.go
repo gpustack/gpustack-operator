@@ -46,9 +46,9 @@ func New(opts device.AllocatorOptions) device.Allocator {
 			newServer(logger, workercore.DeviceAllocationModeShared, nil),
 		)
 	}
-	// The sliced server serves "<base>.sliced": a share of one card, enforced inside the container by
-	// the preload pair this operator's image builds rather than by the driver. It takes no partition
-	// driver — a logical slice never touches the partitioning surface.
+	// The sliced server serves "<base>.sliced": a share of one accelerator, enforced inside the
+	// container by the preload pair this operator's image builds rather than by the driver. It takes
+	// no partition driver — a logical slice never touches the partitioning surface.
 	if !opts.NoSliced {
 		servers = append(servers,
 			newServer(logger, workercore.DeviceAllocationModeSliced, nil),
@@ -60,10 +60,10 @@ func New(opts device.AllocatorOptions) device.Allocator {
 		)
 	}
 	// The visibility server co-allocates a container to the same physical device(s) its owner
-	// container was granted: its Allocate reuses the owner's reserved device and the responder
-	// returns the same plain device-visibility response as the non-sliced modes (device-cgroup
-	// access only, no slicing artifacts). On a partition-backed card that response must name the
-	// owner's partition rather than the parent card, which is what the shared driver is for.
+	// container was granted: its Allocate reuses the owner's reserved device and the responder returns
+	// the same plain device-visibility response as the non-sliced modes (device-cgroup access only, no
+	// slicing artifacts). On a partition-backed accelerator that response must name the owner's
+	// partition rather than the parent accelerator, which is what the shared driver is for.
 	servers = append(servers,
 		newServer(logger, workercore.DeviceAllocationModeVisibility, mig),
 	)
@@ -117,8 +117,9 @@ func (in aggregated) Start(ctx context.Context) error {
 }
 
 // liveClaimsFrom adapts the reconciler's annotation-derived live physical-slice occupancy into the
-// reclaimer's per-card placement view (the Resource Device field is the card UUID for this vendor). It
-// is the attribution self-check source: reclaim never destroys an instance a running Pod still claims.
+// reclaimer's per-accelerator placement view (the Resource Accelerator field is the accelerator
+// UUID for this vendor). It is the attribution self-check source: reclaim never destroys an
+// instance a running Pod still claims.
 func liveClaimsFrom(ctx context.Context, reconciler *deviceplugin.DevicesReconciler) func() (map[string][]migPlacement, error) {
 	return func() (map[string][]migPlacement, error) {
 		occupied, err := reconciler.LivePhysicalOccupied(ctx)
@@ -172,8 +173,8 @@ func newServer(logger klog.Logger, mode workercore.DeviceAllocationMode, mig mig
 	return s
 }
 
-// _AllocatedAccelerator pairs an allocated card with its group; the group carries the VRAM the
-// sliced path derives that card's own memory budget from.
+// _AllocatedAccelerator pairs an allocated accelerator with its group; the group carries the VRAM
+// the sliced path derives that accelerator's own memory budget from.
 type _AllocatedAccelerator struct {
 	group *workercore.DevicesGroup
 	accel *workercore.Accelerator
@@ -188,12 +189,13 @@ func (s *server) GetContainerAllocateResponse(
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
 
-	// Mount control devices. They are needed once per container rather than per card, and every node
-	// here is required: this vendor has no container-runtime hook, so the injected nodes are the whole
-	// of the container's access, and a set missing one of them would start a container that cannot
-	// address its card at all. They are resolved through the same fail-closed helper the partition path
-	// uses, rather than the shared device-spec helper, which returns nil for a path that does not exist
-	// and would turn a missing node into a SUCCESSFUL allocation carrying a silently incomplete set.
+	// Mount control devices. They are needed once per container rather than per accelerator, and every
+	// node here is required: this vendor has no container-runtime hook, so the injected nodes are the
+	// whole of the container's access, and a set missing one of them would start a container that
+	// cannot address its accelerator at all. They are resolved through the same fail-closed helper the
+	// partition path uses, rather than the shared device-spec helper, which returns nil for a path
+	// that does not exist and would turn a missing node into a SUCCESSFUL allocation carrying a
+	// silently incomplete set.
 	for _, p := range sharedControlNodePaths() {
 		pDev, err := requireDeviceNode(p)
 		if err != nil {
@@ -202,8 +204,8 @@ func (s *server) GetContainerAllocateResponse(
 		ctrResp.Devices = append(ctrResp.Devices, pDev)
 	}
 
-	// Mount specified devices. The pass also collects each allocated card with its group, in devs
-	// order, which is the order the sliced path indexes its per-card memory figures by.
+	// Mount specified devices. The pass also collects each allocated accelerator with its group, in
+	// devs order, which is the order the sliced path indexes its per-accelerator memory figures by.
 	var accelerators []_AllocatedAccelerator
 	for i := range devs.Spec.Groups {
 		devGroup := &devs.Spec.Groups[i]
@@ -217,12 +219,12 @@ func (s *server) GetContainerAllocateResponse(
 				continue
 			}
 
-			// The vendor names a card's device node after the card's ordinal — its accelerator index —
-			// and that the ordinal reaches the card the detector measured is proven rather than assumed,
-			// through the same guard the partition path uses: the node it names must carry the minor
-			// number the detector recorded for this card. A card that cannot be proven is refused rather
-			// than answered with a device set that is silently short of its card, or that carries a
-			// neighboring card's node.
+			// The vendor names an accelerator's device node after its card ordinal — the accelerator index —
+			// and that the ordinal reaches the accelerator the detector measured is proven rather than
+			// assumed, through the same guard the partition path uses: the node it names must carry the
+			// minor number the detector recorded for this accelerator. An accelerator that cannot be proven
+			// is refused rather than answered with a device set that is silently short of its own node, or
+			// that carries a neighboring accelerator's node.
 			_, cardNode, err := requireCardNode(devs, devsAccelerator.ID)
 			if err != nil {
 				return nil, err
@@ -262,7 +264,7 @@ const (
 // the quota figures the shim reads at load, the mounts that preload it, and the writable directory
 // its cross-process usage region lives in. devices is the container's already-verified device set,
 // which a slice takes unchanged — the vendor has no container-runtime hook, so the nodes are the
-// whole of the container's access whether it holds a share of a card or all of it.
+// whole of the container's access whether it holds a share of an accelerator or all of it.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
@@ -274,8 +276,8 @@ func (s *server) getSlicedContainerAllocateResponse(
 	}
 
 	// The usage region is per container rather than per node, unlike the NVIDIA branch's host
-	// /dev/shm: it is addressed by container-local card index, so a shared location would let two
-	// containers' index 0 charge one slot. Under the pod work dir, so the existing per-pod reclaim
+	// /dev/shm: it is addressed by container-local accelerator index, so a shared location would let
+	// two containers' index 0 charge one slot. Under the pod work dir, so the existing per-pod reclaim
 	// removes it with the pod. The shim creates the region file itself; this is only its directory,
 	// world-writable because the workload's user is not ours to predict.
 	ledgerDir := filepath.Join(deviceplugin.PodWorkDir(string(pod.UID), ctr.Name), "run/vppu")
@@ -283,15 +285,15 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("create %q: %w", ledgerDir, err)
 	}
 
-	// The variable shape is HAMi-core's, deliberately: a per-card memory limit indexed by loop
-	// position, and ONE un-indexed compute limit which the shim reads as the cap for every card
-	// carrying no figure of its own. Admission pins a logical slice to a single card, so the index
-	// is 0 today; the loop is written for several anyway, exactly as the NVIDIA branch's is.
+	// The variable shape is HAMi-core's, deliberately: a per-accelerator memory limit indexed by loop
+	// position, and ONE un-indexed compute limit which the shim reads as the cap for every accelerator
+	// carrying no figure of its own. Admission pins a logical slice to a single accelerator, so the
+	// index is 0 today; the loop is written for several anyway, exactly as the NVIDIA branch's is.
 	//
-	// What is NOT copied from HAMi-core is what an absent compute figure means. It defaults to a
-	// whole card's compute there and makes the card unusable here, and SlicedCoresPercent returns
-	// 100 when nothing was requested — so the figure is emitted even at 100, because omitting it
-	// would be indistinguishable from "no compute quota" to everything downstream.
+	// What is NOT copied from HAMi-core is what an absent compute figure means. It defaults to a whole
+	// accelerator's compute there and makes the accelerator unusable here, and SlicedCoresPercent
+	// returns 100 when nothing was requested — so the figure is emitted even at 100, because omitting
+	// it would be indistinguishable from "no compute quota" to everything downstream.
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
 	memMibRes := nodefeature.GetAcceleratableSlicedMemoryMibResourceName(Manufacturer)

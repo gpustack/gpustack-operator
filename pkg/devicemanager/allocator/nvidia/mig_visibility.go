@@ -17,13 +17,13 @@ import (
 var _ deviceplugin.PhysicalSlicedResponder = (*server)(nil)
 
 // GetPhysicalSlicedVisibilityResponse names the MIG partitions the owner container already holds
-// on the allocated cards, for the container co-allocating them. The identity comes from the
+// on the allocated accelerators, for the container co-allocating them. The identity comes from the
 // owner's on-disk ownership markers — the record that survives a device-manager restart — and
 // each one is proven to still describe a live partition before it is injected.
 //
 // It fails closed on anything it cannot prove. A visibility allocation is a device-cgroup grant
-// and nothing else, so naming the parent card instead would open every partition carved on it,
-// including other tenants'.
+// and nothing else, so naming the parent accelerator instead would open every partition carved on
+// it, including other tenants'.
 func (s *server) GetPhysicalSlicedVisibilityResponse(
 	_ context.Context,
 	pod *core.Pod,
@@ -37,8 +37,8 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	}
 
 	// Resolve in devs order — the order the owner's own response used — so the co-allocating
-	// container's NVIDIA_VISIBLE_DEVICES is identical to the owner's, card for card.
-	cards := allocatedCards(devs, allocated)
+	// container's NVIDIA_VISIBLE_DEVICES is identical to the owner's, accelerator for accelerator.
+	cards := allocatedAccelerators(devs, allocated)
 	if len(cards) == 0 {
 		return nil, fmt.Errorf("no allocated card for visibility container %q", ctr.Name)
 	}
@@ -57,9 +57,9 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	}, nil
 }
 
-// livePartitionUUID returns the MIG-device UUID the owner container holds on cardUUID: read from
-// its ownership marker, then verified against the card's live state. A missing, malformed,
-// wrong-card, profile-less or dead record is an error, never a fallback.
+// livePartitionUUID returns the MIG-device UUID the owner container holds on the accelerator: read
+// from its ownership marker, then verified against the accelerator's live state. A missing,
+// malformed, wrong-accelerator, profile-less or dead record is an error, never a fallback.
 func (s *server) livePartitionUUID(devs *workercore.Devices, podUID, owner, cardUUID string) (string, error) {
 	path := markerPath(podUID, owner, cardUUID)
 	m, err := parseMarker(path)
@@ -70,20 +70,20 @@ func (s *server) livePartitionUUID(devs *workercore.Devices, podUID, owner, card
 	if m.Card != cardUUID {
 		return "", fmt.Errorf("marker %q records card %s, not %s: fail closed", path, m.Card, cardUUID)
 	}
-	// The card's own detect-time capability supplies the geometry the state read needs; a card
-	// that no longer offers the recorded profile cannot be asked about it, so fail closed rather
-	// than guess.
+	// The accelerator's own detect-time capability supplies the geometry the state read needs; an
+	// accelerator that no longer offers the recorded profile cannot be asked about it, so fail
+	// closed rather than guess.
 	computeSlices, memorySlices, ok := profileGeometry(devs, cardUUID, m.Profile)
 	if !ok {
 		return "", fmt.Errorf("card %s no longer offers the profile %q recorded by marker %q: fail closed",
 			cardUUID, m.Profile, path)
 	}
 
-	// Snapshot the card's state under the card lock — the same critical section reserveMigInstance
-	// takes — so a concurrent create or reclaim cannot tear this one read. The checks below run on
-	// the snapshot, outside the lock: they can only turn a still-live partition into a rejection,
-	// never the reverse, and a reclaim landing right after the unlock is the window the spec
-	// already records rather than one this read introduces.
+	// Snapshot the accelerator's state under the accelerator lock — the same critical section
+	// reserveMigInstance takes — so a concurrent create or reclaim cannot tear this one read. The
+	// checks below run on the snapshot, outside the lock: they can only turn a still-live partition
+	// into a rejection, never the reverse, and a reclaim landing right after the unlock is the
+	// window the spec already records rather than one this read introduces.
 	unlock := lockCard(cardUUID)
 	state, err := s.mig.CardState(cardUUID, m.Profile, computeSlices, memorySlices)
 	unlock()

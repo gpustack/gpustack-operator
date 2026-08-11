@@ -47,16 +47,10 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// The three methods below implement device.Detector, in its declaration order.
+
 func (in *nvidia) Name() string {
 	return Manufacturer
-}
-
-func (in *nvidia) init() {
-	in.once.Do(func() {
-		if ret := in.nvml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize NVML library")
-		}
-	})
 }
 
 func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -189,8 +183,9 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 			grpIndex = len(grpList) - 1
 		}
 
-		// The recorded minor number is what a card's device node is NAMED after on the vendors that
-		// build one from it (/dev/dri/card<minor> and friends), so it is left ABSENT when the driver
+		// The recorded minor number is what an accelerator's device node is NAMED after on the
+		// manufacturers that build one from it (/dev/dri/card<minor> and friends), so it is left ABSENT
+		// when the driver
 		// cannot answer for it rather than substituted by the enumeration index: a substituted value is
 		// indistinguishable from a real minor at every later consumer, which would then build a device
 		// path out of a guess. No allocator of this vendor reads the field today; publishing a number
@@ -210,20 +205,21 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 		{
 			status.Unhealthy = memoryUnhealthy
 
-			// Logical (software) and physical (MIG) slicing are mutually exclusive per card, keyed
-			// on the current MIG mode: a card that is currently MIG-enabled is hard-partitioned
-			// and reports only its physical MIG profiles. Every other card — MIG off, MIG
-			// unsupported (GetMigMode returns not-supported on non-MIG cards), or the mode
+			// Logical (software) and physical (MIG) slicing are mutually exclusive per accelerator,
+			// keyed on the current MIG mode: an accelerator that is currently MIG-enabled is
+			// hard-partitioned and reports only its physical MIG profiles. Every other accelerator —
+			// MIG off, MIG unsupported (GetMigMode returns not-supported on non-MIG accelerators), or
+			// the mode
 			// unreadable — reports the group's logical-slice capability. A pending-mode
 			// transition is not partitioned yet and is re-detected after the administrator's
-			// reset + DeviceManager restart. This runs per card, fixing the old placeholder's
-			// first-card-only-seed defect.
+			// reset + DeviceManager restart. This runs per accelerator, fixing the old placeholder's
+			// first-accelerator-only-seed defect.
 			//
 			// A mode the driver could not read is treated as MIG off, as it always has been, but
-			// it is no longer treated in silence: since a card in the mode reports ONLY its MIG
-			// profiles, an administrator who enabled MIG would otherwise see a card quietly
+			// it is no longer treated in silence: since an accelerator in the mode reports ONLY its MIG
+			// profiles, an administrator who enabled MIG would otherwise see an accelerator quietly
 			// advertising the logical-slice capability it cannot serve. A driver answering that
-			// the mode is unsupported is not a failure — that is a card which does not do MIG.
+			// the mode is unsupported is not a failure — that is an accelerator which does not do MIG.
 			migCurrent, _, migRet := dev.GetMigMode()
 			if !migRet.IsSuccess() && !driverReportsAbsent(migRet) {
 				logger.Error(migRet, "could not read a card's MIG mode, so it is reported as "+
@@ -237,7 +233,7 @@ func (in *nvidia) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 					Count:    maxProfileCount(profiles),
 				}
 			} else {
-				// Logical (software) slicing via HAMi-core ld.preload; the per-card slice count is
+				// Logical (software) slicing via HAMi-core ld.preload; the per-accelerator slice count is
 				// capped at the max CUDA user processes a GPU serves (128, Volta+).
 				status.LogicalSliced = device.AcceleratorLogicalSliced{
 					Count:                     128,
@@ -405,6 +401,14 @@ func (in *nvidia) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 	}
 
 	return grpList, nil
+}
+
+func (in *nvidia) init() {
+	in.once.Do(func() {
+		if ret := in.nvml.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize NVML library")
+		}
+	})
 }
 
 func stringifyRuntimeVersion(rtVer int32) string {

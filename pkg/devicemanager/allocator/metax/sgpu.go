@@ -17,14 +17,14 @@ import (
 	"gpustack.ai/gpustack/pkg/utils/osx"
 )
 
-// maxSGPUPerCard bounds the sgpu subdevices a single MetaX card can host
-// (DefaultDevCnt=16). A card's lowest-free index and the cap are both derived
+// maxSGPUPerCard bounds the sgpu subdevices a single MetaX accelerator can host
+// (DefaultDevCnt=16). An accelerator's lowest-free index and the cap are both derived
 // against the live driver registry UNION the on-disk markers, never markers alone.
 const maxSGPUPerCard = 16
 
-// wholeCardIndex marks an occupancy marker for a whole-card slice: the native
-// whole-card path creates no sgpu subdevice, but the marker still records the card
-// as taken so the on-disk scanner never double-books it.
+// wholeCardIndex marks an occupancy marker for a whole-accelerator slice: the native
+// whole-accelerator path creates no sgpu subdevice, but the marker still records the
+// accelerator as taken so the on-disk scanner never double-books it.
 const wholeCardIndex = -1
 
 // markerName is the per-container correlation + slot-ledger file written under the
@@ -61,8 +61,9 @@ const (
 	schedBurstShare schedClass = 2
 )
 
-// sgpuSubdevice is one sgpu subdevice enumerated from the driver registry: the card
-// it lives on, its per-card index, and the alias the operator tagged it with (empty
+// sgpuSubdevice is one sgpu subdevice enumerated from the driver registry: the
+// accelerator it lives on, its per-accelerator index, and the alias the operator tagged
+// it with (empty
 // when the driver does not expose the tag).
 type sgpuSubdevice struct {
 	bdf   string
@@ -73,14 +74,17 @@ type sgpuSubdevice struct {
 // sgpuManager is the injectable seam over the MetaX sysfs sgpu controls. The real
 // impl writes /sys/bus/pci/devices/<bdf>/sgpu/*; the test impl uses a fake root so
 // the encode / marker / slot-derivation / reclaim logic is table-tested without
-// hardware. List is global (returns every card's subdevices, each carrying its bdf)
-// so the reclaim loop can catch a crash-orphan on a card that has no marker yet.
+// hardware. List is global (returns every accelerator's subdevices, each carrying its
+// bdf) so the reclaim loop can catch a crash-orphan on an accelerator that has no marker
+// yet.
 type sgpuManager interface {
-	// EnsureModel puts the card into sgpu mode. Called only when the card has no
-	// existing subdevice (a card already hosting subdevices is already in sgpu mode).
+	// EnsureModel puts the accelerator into sgpu mode. Called only when the accelerator has
+	// no existing subdevice (an accelerator already hosting subdevices is already in sgpu
+	// mode).
 	EnsureModel(bdf string) error
-	// SetSchedClass sets the card's QoS scheduling class. Called only when the card
-	// has no existing operator subdevice, so a live card is never mutated in place.
+	// SetSchedClass sets the accelerator's QoS scheduling class. Called only when the
+	// accelerator has no existing operator subdevice, so a live accelerator is never mutated
+	// in place.
 	SetSchedClass(bdf string, c schedClass) error
 	// Create creates a subdevice at the operator-derived index with the given VRAM
 	// quota (MiB) and correlation alias.
@@ -89,7 +93,7 @@ type sgpuManager interface {
 	// already-absent subdevice is not an error, so a subdevice-less marker cleans up
 	// cleanly.
 	Remove(bdf string, index int) error
-	// List enumerates every sgpu subdevice across all cards.
+	// List enumerates every sgpu subdevice across all accelerators.
 	List() ([]sgpuSubdevice, error)
 }
 
@@ -117,7 +121,12 @@ func encodeMetaxSGPUs(bdf string, index, coresPct int, vramMiB int64, alias stri
 
 // sgpuMarker is one parsed marker: the pod<->subdevice correlation and slot ledger a
 // scanner treats as occupied and the reclaim loop keys its liveness decision on.
-// Index is wholeCardIndex for a whole-card occupancy marker (no subdevice).
+// Index is wholeCardIndex for a whole-accelerator occupancy marker (no subdevice).
+//
+// The CardBDF field and its "cardBDF" JSON tag are an ON-DISK FORMAT, not vocabulary:
+// markers written before this package spoke of accelerators are still on real nodes, and
+// renaming either would make them unreadable and break retry, visibility, adoption and
+// reclamation. Both are frozen.
 type sgpuMarker struct {
 	PodUID    string `json:"podUID"`
 	Container string `json:"container"`
@@ -182,8 +191,8 @@ func writeMarker(path string, m sgpuMarker) error {
 // the driver registry union — a corrupt marker whose subdevice still exists is
 // counted via the registry, and one whose subdevice is gone leaves a genuinely free
 // index. The fail-closed guard lives at the self-marker reuse check instead, so a
-// corrupt marker fails only the owning pod's allocation (scoped to that card), never
-// all of the vendor's allocations node-wide.
+// corrupt marker fails only the owning pod's allocation (scoped to that accelerator),
+// never all of the manufacturer's allocations node-wide.
 func scanMarkers(podsDir string) (entries []markerEntry, corrupt []string) {
 	_ = filepath.WalkDir(podsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -231,7 +240,7 @@ func usedIndexesOnCard(registry []sgpuSubdevice, markers []markerEntry, bdf stri
 }
 
 // lowestFreeIndex returns the lowest sgpu index in [0, maxSGPUPerCard) not in used,
-// or an error when the per-card pool is exhausted.
+// or an error when the per-accelerator pool is exhausted.
 func lowestFreeIndex(used map[int]bool) (int, error) {
 	for i := 0; i < maxSGPUPerCard; i++ {
 		if !used[i] {
@@ -241,8 +250,9 @@ func lowestFreeIndex(used map[int]bool) (int, error) {
 	return 0, fmt.Errorf("card sgpu pool exhausted (%d subdevices)", maxSGPUPerCard)
 }
 
-// sliceResult is what reserveSlice hands back to the responder: a whole-card slice
-// injects no METAX_SGPUS entry (the native whole-card devices are returned instead),
+// sliceResult is what reserveSlice hands back to the responder: a whole-accelerator slice
+// injects no METAX_SGPUS entry (the native whole-accelerator devices are returned
+// instead),
 // while a partial slice carries the created subdevice's index and env entry.
 type sliceResult struct {
 	wholeCard bool
@@ -251,12 +261,12 @@ type sliceResult struct {
 }
 
 // reserveSlice is the Allocate core. Under allocMu it: (1) reuses an existing
-// self-marker on an exact (card, cores%, memMiB) match and fails closed on a
+// self-marker on an exact (accelerator, cores%, memMiB) match and fails closed on a
 // mismatch (pod resource requests are immutable, so a mismatch signals corruption);
-// (2) for a whole-card slice writes only an occupancy marker; (3) for a partial
-// slice ensures the card is in sgpu mode with a fixed-share class (only when the card
-// has no existing subdevice, so a live card is never mutated), derives the lowest
-// free index against the registry UNION the markers, creates the subdevice, and
+// (2) for a whole-accelerator slice writes only an occupancy marker; (3) for a partial
+// slice ensures the accelerator is in sgpu mode with a fixed-share class (only when the
+// accelerator has no existing subdevice, so a live accelerator is never mutated), derives
+// the lowest free index against the registry UNION the markers, creates the subdevice, and
 // writes the marker. wholeCard is decided by the caller (cores>=100 AND mem>=VRAM).
 func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, memMiB int64, wholeCard bool) (sliceResult, error) {
 	allocMu.Lock()
@@ -288,16 +298,16 @@ func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, 
 		}
 		return sliceResult{index: m.Index, envValue: encodeMetaxSGPUs(bdf, m.Index, coresPct, memMiB, encodeAlias(podUID))}, nil
 	} else if !os.IsNotExist(err) {
-		// The marker exists but is corrupt: fail closed for this pod (this card) only.
+		// The marker exists but is corrupt: fail closed for this pod (this accelerator) only.
 		return sliceResult{}, fmt.Errorf("read self marker %q: %w", self, err)
 	}
 
 	markers, _ := scanMarkers(deviceplugin.OperatorPodsDir)
 
 	if wholeCard {
-		// A whole card cannot be taken while it hosts partial slices or is already held
+		// A whole accelerator cannot be taken while it hosts partial slices or is already held
 		// whole by another pod (accounting should prevent this; fail closed if it slips
-		// through rather than expose a shared card).
+		// through rather than expose a shared accelerator).
 		if len(usedIndexesOnCard(registry, markers, bdf)) > 0 || cardTakenWhole(markers, bdf) {
 			return sliceResult{}, fmt.Errorf("card %s is already occupied, cannot take it whole", bdf)
 		}
@@ -308,7 +318,7 @@ func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, 
 		return sliceResult{wholeCard: true}, nil
 	}
 
-	// A partial slice must never land on a card already taken whole by another pod.
+	// A partial slice must never land on an accelerator already taken whole by another pod.
 	if cardTakenWhole(markers, bdf) {
 		return sliceResult{}, fmt.Errorf("card %s is held whole, cannot slice it", bdf)
 	}
@@ -319,9 +329,9 @@ func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, 
 		return sliceResult{}, fmt.Errorf("card %s: %w", bdf, err)
 	}
 
-	// A card with no existing subdevice needs its mode + fixed-share class set once;
-	// a card already hosting subdevices is already configured, and re-writing the
-	// class of a live card is rejected by the driver, so never touch it.
+	// An accelerator with no existing subdevice needs its mode + fixed-share class set once;
+	// an accelerator already hosting subdevices is already configured, and re-writing the
+	// class of a live accelerator is rejected by the driver, so never touch it.
 	if !cardHasSubdevice(registry, bdf) {
 		if err := mgr.EnsureModel(bdf); err != nil {
 			return sliceResult{}, fmt.Errorf("card %s: ensure sgpu model: %w", bdf, err)
@@ -347,8 +357,9 @@ func reserveSlice(mgr sgpuManager, podUID, container, bdf string, coresPct int, 
 	return sliceResult{index: index, envValue: encodeMetaxSGPUs(bdf, index, coresPct, memMiB, alias)}, nil
 }
 
-// cardTakenWhole reports whether bdf is held by a whole-card occupancy marker, so a
-// partial slice never silently shares a card another pod owns whole (and vice versa).
+// cardTakenWhole reports whether bdf is held by a whole-accelerator occupancy marker, so
+// a partial slice never silently shares an accelerator another pod owns whole (and vice
+// versa).
 func cardTakenWhole(markers []markerEntry, bdf string) bool {
 	for i := range markers {
 		m := markers[i].marker
@@ -379,7 +390,7 @@ func cardHasSubdevice(registry []sgpuSubdevice, bdf string) bool {
 	return false
 }
 
-// reclaimer is the level-based per-vendor reclaim loop's state. It is driven by the
+// reclaimer is the level-based per-manufacturer reclaim loop's state. It is driven by the
 // broadcast livePodUIDs AND a periodic resync ticker (Task 2 wiring), so a dropped
 // broadcast tick never starves reclamation. Each reconcile re-scans the registry and
 // markers, so it self-heals across restarts with no in-memory slot counter.
@@ -394,7 +405,8 @@ func newReclaimer(mgr sgpuManager, podsDir string, logger klog.Logger) *reclaime
 	return &reclaimer{mgr: mgr, podsDir: podsDir, logger: logger, misses: make(map[string]int)}
 }
 
-// cardMissPrefix namespaces a per-card miss counter (drained-card orphan reclaim) in
+// cardMissPrefix namespaces a per-accelerator miss counter (drained-accelerator orphan
+// reclaim) in
 // the same misses map as the per-pod counters; pod UIDs are UUIDs, so they never
 // collide with this prefix.
 const cardMissPrefix = "card:"
@@ -411,9 +423,10 @@ const cardMissPrefix = "card:"
 //     embedded UID is still live (a create-before-marker crash on a reserved pod) is
 //     left intact;
 //   - a marker-less subdevice with no decodable alias (the driver did not expose the
-//     tag, as on current MetaX) is reclaimed only once its card hosts no live-reserved
-//     pod at all (a per-card decision) — trading a bounded leak, reclaimed when the
-//     card drains, against ever destroying a live slice. A card still hosting any live
+//     tag, as on current MetaX) is reclaimed only once its accelerator hosts no
+//     live-reserved pod at all (a per-accelerator decision) — trading a bounded leak,
+//     reclaimed when the accelerator drains, against ever destroying a live slice. An
+//     accelerator still hosting any live
 //     pod keeps such subdevices intact (one could be that pod's create-before-marker
 //     crash orphan).
 func (r *reclaimer) reconcile(livePodUIDs []string) {
@@ -444,9 +457,10 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 	// Collect reclaim targets per pod UID: the markers to remove and the subdevices to
 	// destroy. Markers contribute their (bdf,index); marker-less aliased subdevices
 	// contribute their (bdf,index) under their decoded UID. Marker-less subdevices with
-	// no decodable owner are held per card, reclaimed only when the card has no live
-	// pod. liveOnCard records which cards host a live-reserved pod (via a live marker or
-	// a live-UID aliased subdevice), so those cards' unidentifiable subdevices are kept.
+	// no decodable owner are held per accelerator, reclaimed only when the accelerator has no
+	// live pod. liveOnCard records which accelerators host a live-reserved pod (via a live
+	// marker or a live-UID aliased subdevice), so those accelerators' unidentifiable
+	// subdevices are kept.
 	type target struct {
 		markers    []markerEntry
 		subdevices []subdevKey
@@ -506,7 +520,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		r.destroy(uid, t.subdevices, t.markers)
 	}
 
-	// Per-card drained-card reclaim of unidentifiable subdevices + debounce.
+	// Per-accelerator drained-accelerator reclaim of unidentifiable subdevices + debounce.
 	for bdf, keys := range unidentified {
 		key := cardMissPrefix + bdf
 		touched.Insert(key)
@@ -521,7 +535,7 @@ func (r *reclaimer) reconcile(livePodUIDs []string) {
 		r.destroyCard(key, keys)
 	}
 
-	// Drop miss counters no longer relevant (pod gone / card no longer holds orphans).
+	// Drop miss counters no longer relevant (pod gone / accelerator no longer holds orphans).
 	for k := range r.misses {
 		if !touched.Has(k) {
 			delete(r.misses, k)
@@ -558,7 +572,7 @@ func (r *reclaimer) destroy(uid string, subdevices []subdevKey, markers []marker
 }
 
 // destroyCard removes the unidentifiable marker-less subdevices on a fully drained
-// card (no live pod). The miss counter is cleared only when every removal succeeds, so
+// accelerator (no live pod). The miss counter is cleared only when every removal succeeds, so
 // a partial failure retries next pass.
 func (r *reclaimer) destroyCard(missKey string, subdevices []subdevKey) {
 	ok := true
@@ -584,7 +598,7 @@ func removeIfEmpty(dir string) {
 	_ = os.Remove(dir)
 }
 
-// subdevKey identifies a subdevice by card and per-card index.
+// subdevKey identifies a subdevice by accelerator and per-accelerator index.
 type subdevKey struct {
 	bdf   string
 	index int
@@ -594,7 +608,7 @@ type subdevKey struct {
 // sysfs sgpu controls under root (default /sys/bus/pci/devices).
 //
 // The exact sysfs schema is a documented hardware open question (see the spec): the
-// paths below follow the vendor documentation but are unvalidated on real hardware,
+// paths below follow the manufacturer documentation but are unvalidated on real hardware,
 // which is why every write goes through this thin seam so only this type changes when
 // the layout is confirmed. All unit tests use a fake manager, not this impl.
 type sysfsSGPUManager struct {
@@ -623,8 +637,8 @@ func (m *sysfsSGPUManager) Create(bdf string, index int, vramMiB int64, alias st
 	// to read the created index back from List() before the marker is written. The alias is
 	// carried in METAX_SGPUS (the runtime's key), not persisted to sysfs — current MetaX
 	// exposes no subdevice tag to read back — so reclaim does not rely on it: a crash-orphan
-	// is caught by the marker and, failing that, the drained-card rule in reconcile. The
-	// alias-based orphan rule only engages if a future driver exposes the tag via List.
+	// is caught by the marker and, failing that, the drained-accelerator rule in reconcile.
+	// The alias-based orphan rule only engages if a future driver exposes the tag via List.
 	_ = index
 	_ = alias
 	return os.WriteFile(filepath.Join(m.cardDir(bdf), "create"), []byte(strconv.FormatInt(vramMiB, 10)), 0o600)

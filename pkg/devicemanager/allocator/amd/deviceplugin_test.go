@@ -19,7 +19,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// The card every fixture below is a slice of: the 60 CU / 3 SE / 1 XCC gfx1101 the conformance
+// The accelerator every fixture below is a slice of: the 60 CU / 3 SE / 1 XCC gfx1101 the conformance
 // tables were measured on, so the masks these cases assert are the table's own rows rather than a
 // number invented here.
 var testTopology = Topology{Name: "gfx1101", CU: 60, SE: 3, SAPerSE: 2, XCC: 1}
@@ -43,8 +43,8 @@ func redirectLogicalSliceDirs(t *testing.T) {
 	})
 }
 
-// stubTopology supplies the card the placement arithmetic runs against. The real reader is a cgo
-// seam that exists only on linux; the arithmetic above it must stay testable with no card.
+// stubTopology supplies the accelerator the placement arithmetic runs against. The real reader is a cgo
+// seam that exists only on linux; the arithmetic above it must stay testable with no accelerator.
 func stubTopology(t *testing.T, topo Topology) {
 	t.Helper()
 	orig := readTopologyFn
@@ -74,6 +74,11 @@ func testDevices(uuids ...string) *workercore.Devices {
 	}
 }
 
+// testResource is the placement-ledger key of one accelerator in the fixture group.
+func testResource(uuid string) deviceplugin.Resource {
+	return deviceplugin.Resource{Group: "grp-0", Device: uuid}
+}
+
 func testAllocated(uuids ...string) map[deviceplugin.Resource]int32 {
 	allocated := make(map[deviceplugin.Resource]int32, len(uuids))
 	for _, uuid := range uuids {
@@ -82,8 +87,8 @@ func testAllocated(uuids ...string) map[deviceplugin.Resource]int32 {
 	return allocated
 }
 
-// testContainer builds a container requesting a slice: coresPct of the card's compute and memPct of
-// its VRAM. A zero percentage omits that request, which is how the defaults are exercised.
+// testContainer builds a container requesting a slice: coresPct of the accelerator's compute and
+// memPct of its VRAM. A zero percentage omits that request, which is how the defaults are exercised.
 func testContainer(coresPct, memPct int64, envs ...core.EnvVar) *core.Container {
 	limits := core.ResourceList{
 		nodefeature.GetAcceleratableResourceName(Manufacturer, workercore.DeviceAllocationModeSliced): resource.MustParse("1"),
@@ -131,7 +136,7 @@ func TestNew_ServerSet(t *testing.T) {
 			},
 		},
 		{
-			name: "--no-shared and --no-sliced leave the whole-card modes",
+			name: "--no-shared and --no-sliced leave the whole-accelerator modes",
 			opts: device.AllocatorOptions{Logger: klog.Background(), NoShared: true, NoSliced: true},
 			want: []workercore.DeviceAllocationMode{
 				workercore.DeviceAllocationModeExclusive,
@@ -155,7 +160,7 @@ func TestNew_ServerSet(t *testing.T) {
 }
 
 // TestGetContainerAllocateResponse pins the non-sliced response as it stands: one env, no mounts,
-// the card's UUID for the container runtime to inject device nodes from.
+// the accelerator's UUID for the container runtime to inject device nodes from.
 func TestGetContainerAllocateResponse(t *testing.T) {
 	s := &server{}
 	resp, err := s.GetContainerAllocateResponse(
@@ -170,40 +175,40 @@ func TestPlaceLogicalSliced(t *testing.T) {
 	cases := []struct {
 		name     string
 		coresPct int64
-		occupied []workercore.AcceleratorPhysicalPlacement
-		want     workercore.AcceleratorPhysicalPlacement
+		occupied []workercore.AcceleratorPlacement
+		want     workercore.AcceleratorPlacement
 		wantErr  string
 	}{
 		{
 			// Conformance table A's 25% row: 7.5 WGPs rounds to 8, aligns DOWN to 6, and the naive
-			// answer (15 CUs, "0:0-14") would have left the container on the whole card.
+			// answer (15 CUs, "0:0-14") would have left the container on the whole accelerator.
 			name:     "25 percent takes six WGPs, not the naive fifteen CUs",
 			coresPct: 25,
-			want:     workercore.AcceleratorPhysicalPlacement{Start: 0, Length: 12},
+			want:     workercore.AcceleratorPlacement{Start: 0, Length: 12},
 		},
 		{
 			name:     "a second slice is packed beside the first, not on top of it",
 			coresPct: 25,
-			occupied: []workercore.AcceleratorPhysicalPlacement{{Start: 0, Length: 12}},
-			want:     workercore.AcceleratorPhysicalPlacement{Start: 12, Length: 12},
+			occupied: []workercore.AcceleratorPlacement{{Start: 0, Length: 12}},
+			want:     workercore.AcceleratorPlacement{Start: 12, Length: 12},
 		},
 		{
 			name:     "a hole is reused ahead of the tail",
 			coresPct: 25,
-			occupied: []workercore.AcceleratorPhysicalPlacement{{Start: 24, Length: 12}},
-			want:     workercore.AcceleratorPhysicalPlacement{Start: 0, Length: 12},
+			occupied: []workercore.AcceleratorPlacement{{Start: 24, Length: 12}},
+			want:     workercore.AcceleratorPlacement{Start: 0, Length: 12},
 		},
 		{
-			// SlicedCoresPercent returns 100 when nothing was requested, and a whole-card mask is
+			// SlicedCoresPercent returns 100 when nothing was requested, and a whole-accelerator mask is
 			// still emitted: it states what the container may reach rather than leaving it unsaid.
-			name:     "no request at all is a whole card",
+			name:     "no request at all is a whole accelerator",
 			coresPct: 0,
-			want:     workercore.AcceleratorPhysicalPlacement{Start: 0, Length: 60},
+			want:     workercore.AcceleratorPlacement{Start: 0, Length: 60},
 		},
 		{
 			// Below one shader-engine round the mask stops confining, so the request is refused
 			// rather than quietly rounded up to a ceiling nobody asked for or accounted.
-			name:     "a sub-quantum request is refused, naming the card's minimum",
+			name:     "a sub-quantum request is refused, naming the accelerator's minimum",
 			coresPct: 5,
 			wantErr:  "smallest slice is 9%",
 		},
@@ -218,7 +223,7 @@ func TestPlaceLogicalSliced(t *testing.T) {
 			placed, err := s.PlaceLogicalSliced(
 				context.Background(), testPod(), testContainer(c.coresPct, 50),
 				testDevices(testCardUUID), testAllocated(testCardUUID),
-				deviceplugin.LogicalPlacements{testCardUUID: c.occupied})
+				deviceplugin.Placements{testResource(testCardUUID): c.occupied})
 
 			if c.wantErr != "" {
 				require.ErrorContains(t, err, c.wantErr)
@@ -226,16 +231,17 @@ func TestPlaceLogicalSliced(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t,
-				deviceplugin.LogicalPlacements{
-					testCardUUID: {c.want},
+				deviceplugin.Placements{
+					testResource(testCardUUID): {c.want},
 				}, placed)
 		})
 	}
 }
 
-// TestPlaceLogicalSliced_RefusesACardWithNoIdentity pins the one card shape that cannot be sliced:
-// an empty UUID is what AsicInfo.GetUniqueId returns when the ASIC serial reads N/A, and emitting it
-// would widen the container to every card on the node instead of narrowing it to this one.
+// TestPlaceLogicalSliced_RefusesACardWithNoIdentity pins the one accelerator shape that cannot be
+// sliced: an empty UUID is what AsicInfo.GetUniqueId returns when the ASIC serial reads N/A, and
+// emitting it would widen the container to every accelerator on the node instead of narrowing it to
+// this one.
 func TestPlaceLogicalSliced_RefusesACardWithNoIdentity(t *testing.T) {
 	stubTopology(t, testTopology)
 	s := &server{}
@@ -247,7 +253,7 @@ func TestPlaceLogicalSliced_RefusesACardWithNoIdentity(t *testing.T) {
 }
 
 // TestGetLogicalSlicedResponse_SingleCard asserts the whole injection for the case admission
-// actually admits: one card, one window, every environment key and every mount.
+// actually admits: one accelerator, one window, every environment key and every mount.
 func TestGetLogicalSlicedResponse_SingleCard(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := &server{}
@@ -255,7 +261,7 @@ func TestGetLogicalSlicedResponse_SingleCard(t *testing.T) {
 
 	resp, err := s.GetLogicalSlicedResponse(
 		context.Background(), pod, ctr, testDevices(testCardUUID), testAllocated(testCardUUID),
-		deviceplugin.LogicalPlacements{testCardUUID: {{Start: 0, Length: 12}}})
+		deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}})
 	require.NoError(t, err)
 
 	assert.Equal(t, map[string]string{
@@ -278,10 +284,11 @@ func TestGetLogicalSlicedResponse_SingleCard(t *testing.T) {
 	}, resp.Mounts)
 }
 
-// TestGetLogicalSlicedResponse_MultiCard pins the loop's shape. Admission does not admit a two-card
-// logical slice today (the Pod webhook requires <base>.sliced to be exactly 1), so this case exists
-// to keep the indexing honest for the day that gate is lifted: each memory figure is against its own
-// card, and each mask segment carries that card's position in ROCR_VISIBLE_DEVICES.
+// TestGetLogicalSlicedResponse_MultiCard pins the loop's shape. Admission does not admit a
+// two-accelerator logical slice today (the Pod webhook requires <base>.sliced to be exactly 1), so
+// this case exists to keep the indexing honest for the day that gate is lifted: each memory figure
+// is against its own
+// accelerator, and each mask segment carries that accelerator's position in ROCR_VISIBLE_DEVICES.
 func TestGetLogicalSlicedResponse_MultiCard(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := &server{}
@@ -289,9 +296,9 @@ func TestGetLogicalSlicedResponse_MultiCard(t *testing.T) {
 	resp, err := s.GetLogicalSlicedResponse(
 		context.Background(), testPod(), testContainer(25, 50),
 		testDevices(testCardUUID, testCardUUID2), testAllocated(testCardUUID, testCardUUID2),
-		deviceplugin.LogicalPlacements{
-			testCardUUID:  {{Start: 0, Length: 12}},
-			testCardUUID2: {{Start: 12, Length: 12}},
+		deviceplugin.Placements{
+			testResource(testCardUUID):  {{Start: 0, Length: 12}},
+			testResource(testCardUUID2): {{Start: 12, Length: 12}},
 		})
 	require.NoError(t, err)
 
@@ -306,19 +313,19 @@ func TestGetLogicalSlicedResponse_Rejections(t *testing.T) {
 	cases := []struct {
 		name       string
 		ctr        *core.Container
-		placements deviceplugin.LogicalPlacements
+		placements deviceplugin.Placements
 		wantErr    string
 	}{
 		{
-			name:       "a card with no placed window is refused rather than left unmasked",
+			name:       "an accelerator with no placed window is refused rather than left unmasked",
 			ctr:        testContainer(25, 50),
-			placements: deviceplugin.LogicalPlacements{},
+			placements: deviceplugin.Placements{},
 			wantErr:    "no compute window was placed",
 		},
 		{
 			name:       "a container with neither memory request is refused",
 			ctr:        testContainer(25, 0),
-			placements: deviceplugin.LogicalPlacements{testCardUUID: {{Start: 0, Length: 12}}},
+			placements: deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}},
 			wantErr:    "derive sliced memory limit",
 		},
 	}
@@ -347,7 +354,7 @@ func TestGetLogicalSlicedResponse_KeepsADeclaredLogLevel(t *testing.T) {
 		context.Background(), testPod(),
 		testContainer(25, 50, core.EnvVar{Name: "LIBVROCM_LOG_LEVEL", Value: "2"}),
 		testDevices(testCardUUID), testAllocated(testCardUUID),
-		deviceplugin.LogicalPlacements{testCardUUID: {{Start: 0, Length: 12}}})
+		deviceplugin.Placements{testResource(testCardUUID): {{Start: 0, Length: 12}}})
 	require.NoError(t, err)
 	assert.NotContains(t, resp.Envs, "LIBVROCM_LOG_LEVEL")
 }

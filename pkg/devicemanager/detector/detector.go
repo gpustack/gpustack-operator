@@ -356,7 +356,7 @@ func (d *Detector) reportDevices(ctx context.Context, eGroups device.DevicesGrou
 	// collector resolves a cluster-scoped dependent's owner in the EMPTY namespace. A namespaced
 	// owner is therefore unresolvable — it yields an OwnerRefInvalidNamespace warning on every
 	// sweep and the object is never collected, so a Devices outlives the node it describes and
-	// keeps reporting that node's cards to every consumer that lists them.
+	// keeps reporting that node's accelerators to every consumer that lists them.
 	kubemeta.ControlOnWithoutBlock(eDevs, nd, core.SchemeGroupVersion.WithKind("Node"))
 	devsAlginFn := func(aDevs *workercore.Devices) (_ *workercore.Devices, skip bool, err error) {
 		skip = true
@@ -416,8 +416,9 @@ func controlOnNodeWithoutBlock(obj kubemeta.MetaObject, nd *core.Node) {
 // whether the returned list differs from aGroups.
 //
 // Note: the caller's re-detect trigger only watches the {manufacturer, id, unhealthy} device-key set
-// (see Start), so toggling a card's partitioning mode without changing that set never fires a
-// re-detect; the stale capability then only clears on the next re-detect (e.g. a DaemonSet restart).
+// (see Start), so toggling an accelerator's partitioning mode without changing that set never
+// fires a re-detect; the stale capability then only clears on the next re-detect (e.g. a DaemonSet
+// restart).
 func alignDeviceGroups(
 	aGroups, eGroups device.DevicesGroupList, allowedManufacturers sets.Set[string],
 ) (groups device.DevicesGroupList, changed bool) {

@@ -1,6 +1,7 @@
 package cambricon
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -241,7 +242,7 @@ func Test_reserveInstance_idempotentReuseAndFailClosed(t *testing.T) {
 	assert.Equal(t, 1, d.instanceCreates)
 	assert.NotEmpty(t, r0.devNode)
 
-	// Re-Allocate the same pod+container+card+cores+mem: reuse, no new instance.
+	// Re-Allocate the same pod+container+accelerator+cores+mem: reuse, no new instance.
 	r1, err := reserveInstance(d, "uid-a", "train", testCard0, 25, 16384)
 	require.NoError(t, err)
 	assert.Equal(t, r0.name, r1.name)
@@ -252,7 +253,7 @@ func Test_reserveInstance_idempotentReuseAndFailClosed(t *testing.T) {
 	require.Error(t, err)
 }
 
-// Two instances with an identical quota on one card share a single profile; a differing
+// Two instances with an identical quota on one accelerator share a single profile; a differing
 // quota cuts a new profile.
 func Test_reserveInstance_exactMatchProfileReuse(t *testing.T) {
 	redirectLogicalSliceDirs(t)
@@ -265,12 +266,12 @@ func Test_reserveInstance_exactMatchProfileReuse(t *testing.T) {
 	assert.Equal(t, 1, d.profileCreates, "identical quota reuses the profile")
 	assert.Equal(t, 2, d.instanceCreates)
 
-	// A different quota (here a smaller memory size) on the same card creates a second profile.
+	// A different quota (here a smaller memory size) on the same accelerator creates a second profile.
 	_, err = reserveInstance(d, "pod-c", "train", testCard0, 25, 8192)
 	require.NoError(t, err)
 	assert.Equal(t, 2, d.profileCreates)
 
-	// The same quota on a DIFFERENT card creates its own profile (reuse is per card).
+	// The same quota on a DIFFERENT accelerator creates its own profile (reuse is per accelerator).
 	_, err = reserveInstance(d, "pod-d", "train", testCard1, 25, 16384)
 	require.NoError(t, err)
 	assert.Equal(t, 3, d.profileCreates)
@@ -526,5 +527,65 @@ func Test_reserveInstance_reclaim_race(t *testing.T) {
 	for _, inst := range list {
 		assert.Falsef(t, seen[inst.name], "instance %q double-created", inst.name)
 		seen[inst.name] = true
+	}
+}
+
+// TestLegacyMarkerRoundTrip pins the marker's ON-DISK format (F9/AC9.1). smluMarker.Accelerator is
+// serialized under the "card" JSON key, and markers carrying it are already on real nodes: a
+// renamed tag
+// would make every pre-upgrade marker unreadable and break retry, visibility, adoption and
+// reclamation. The other marker tests write and read through the same struct, so they stay green
+// under a coordinated tag rename; this one feeds a literal pre-refactor document instead, and
+// asserts the exact legacy key still comes back out.
+func TestLegacyMarkerRoundTrip(t *testing.T) {
+	testCases := []struct {
+		name string
+		doc  string
+		want smluMarker
+	}{
+		{
+			name: "pre-refactor marker",
+			doc: `{"podUID":"pod-a","container":"train","card":"0000:5c:00.0",` +
+				`"instance":"gpustack:pod-a:abcdef","profileID":7,"coresPct":25,"memMiB":16384}`,
+			want: smluMarker{
+				PodUID:    "pod-a",
+				Container: "train",
+				Card:      "0000:5c:00.0",
+				Instance:  "gpustack:pod-a:abcdef",
+				ProfileID: 7,
+				CoresPct:  25,
+				MemMiB:    16384,
+			},
+		},
+		{
+			name: "pre-refactor marker with reordered keys",
+			doc: `{"card":"0000:5d:00.0","memMiB":8192,"coresPct":50,"profileID":1,` +
+				`"instance":"gpustack:pod-b:123456","container":"infer","podUID":"pod-b"}`,
+			want: smluMarker{
+				PodUID:    "pod-b",
+				Container: "infer",
+				Card:      "0000:5d:00.0",
+				Instance:  "gpustack:pod-b:123456",
+				ProfileID: 1,
+				CoresPct:  50,
+				MemMiB:    8192,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), markerName)
+			require.NoError(t, os.WriteFile(path, []byte(tc.doc), 0o600))
+
+			got, err := parseMarker(path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got, "every identity must survive the legacy document")
+
+			data, err := json.Marshal(got)
+			require.NoError(t, err)
+			assert.Contains(t, string(data), `"card":`, "the legacy on-disk key must be re-emitted")
+			assert.NotContains(t, string(data), `"accelerator"`, "no vocabulary key may leak on disk")
+		})
 	}
 }

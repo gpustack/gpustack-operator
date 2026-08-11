@@ -27,9 +27,9 @@ const Manufacturer = nodefeature.ManufacturerAscend
 
 func New(opts device.AllocatorOptions) device.Allocator {
 	logger := opts.Logger.WithName(Manufacturer)
-	// Every mode that can put a second container on one card drives the same container-share
-	// seam, so it is built once and shared by them. Exclusive gets nil: it owns whole cards and
-	// must not touch the flag.
+	// Every mode that can put a second container on one accelerator drives the same
+	// container-share seam, so it is built once and shared by them. Exclusive gets nil: it owns
+	// whole accelerators and must not touch the flag.
 	share := newShareDriver(logger)
 
 	servers := []deviceplugin.Server{
@@ -96,8 +96,8 @@ func (in aggregated) Stop() {
 type server struct {
 	deviceplugin.ResourceServer
 
-	// share is the dcmi container-share seam the responder turns on for the cards it hands out.
-	// It is nil for exclusive alone, which owns whole cards and must not touch the flag.
+	// share is the dcmi container-share seam the responder turns on for the accelerators it hands
+	// out. It is nil for exclusive alone, which owns whole accelerators and must not touch the flag.
 	share shareDriver
 }
 
@@ -167,11 +167,11 @@ func (s *server) GetContainerAllocateResponse(
 		return s.getSlicedContainerAllocateResponse(pod, ctr, indexes, accelerators)
 	}
 
-	// Shared and visibility put a second container on a card, which the driver refuses unless
-	// container-share mode is on, so they need the same preflight a slice does. Unlike a slice
-	// they may hold several cards, hence the loop. Exclusive is named out on purpose: one
-	// container owns the whole card, so there is nothing to permit and no reason to drop the
-	// driver's own single-container guard.
+	// Shared and visibility put a second container on an accelerator, which the driver refuses
+	// unless container-share mode is on, so they need the same preflight a slice does. Unlike a
+	// slice they may hold several accelerators, hence the loop. Exclusive is named out on purpose:
+	// one container owns the whole accelerator, so there is nothing to permit and no reason to
+	// drop the driver's own single-container guard.
 	switch s.AllocationMode {
 	case workercore.DeviceAllocationModeShared, workercore.DeviceAllocationModeVisibility:
 		for i := range accelerators {
@@ -211,8 +211,8 @@ const (
 // runtime; this only stages quota + library mounts.
 //
 // vcann-rt's npu_info.config models a single physical NPU, so a sliced Ascend
-// container maps to one card; ASCEND_VISIBLE_DEVICES still lists every allocated
-// index for visibility.
+// container maps to one accelerator; ASCEND_VISIBLE_DEVICES still lists every
+// allocated index for visibility.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
@@ -223,13 +223,13 @@ func (s *server) getSlicedContainerAllocateResponse(
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
 	// vcann-rt's npu_info.config models a single physical NPU, so a sliced Ascend
-	// container maps to exactly one card. Reject a multi-card allocation rather than
-	// silently quota-isolating only the first card while exposing the rest.
+	// container maps to exactly one accelerator. Reject a multi-accelerator allocation
+	// rather than silently quota-isolating only the first accelerator while exposing the rest.
 	if len(accels) > 1 {
 		return nil, fmt.Errorf("sliced container %q allocated %d accelerators, but vcann-rt logical slicing is single-NPU", ctr.Name, len(accels))
 	}
 
-	// vcann-rt is single-NPU; configure the first allocated card.
+	// vcann-rt is single-NPU; configure the first allocated accelerator.
 	group, accel := accels[0].group, accels[0].accel
 
 	// SM (aicore) and VRAM are independent dimensions (no single ratio).
@@ -324,11 +324,14 @@ func lowestFreeVNPUID(podsDir string, npuId uint32, selfConfigPath string) int {
 	}
 }
 
-// renderNPUInfoConfig builds the vcann-rt npu_info.config body. aicore-quota is the
-// compute percent (.sliced.cores-percentage); memory-quota is the per-card VRAM MiB
-// (.sliced.memory-percentage/.sliced.memory-mib); shm-id is the accelerator ID with
-// spaces replaced by '-' (the hyphen-joined VDie-ID form vcann-rt expects);
-// scheduling-policy is fixed to elastic (2).
+// renderNPUInfoConfig builds the vcann-rt npu_info.config body:
+//
+//   - aicore-quota is the compute percent (.sliced.cores-percentage).
+//   - memory-quota is the per-accelerator VRAM MiB
+//     (.sliced.memory-percentage/.sliced.memory-mib).
+//   - shm-id is the accelerator ID with spaces replaced by '-' (the hyphen-joined
+//     VDie-ID form vcann-rt expects).
+//   - scheduling-policy is fixed to elastic (2).
 func renderNPUInfoConfig(npuId uint32, vnpuId, aicoreQuota int, memoryQuotaMib int64, acceleratorID string) string {
 	shmID := strings.ReplaceAll(acceleratorID, " ", "-")
 	var b strings.Builder
@@ -373,7 +376,7 @@ func parseNPUInfoConfig(path string) (npuId, vnpuId int, ok bool) {
 	return phy, vnpu, true
 }
 
-// ascendCANNDir returns the vcann-rt library subdirectory for a card's CANN runtime
+// ascendCANNDir returns the vcann-rt library subdirectory for an accelerator's CANN runtime
 // version and family ("cann-<major>-<family>"), defaulting the major to "cann-8" when
 // the version is unknown. Family is lower-cased (e.g. "910B" -> "910b").
 func ascendCANNDir(runtimeVersion, family string) string {

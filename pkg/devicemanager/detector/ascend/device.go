@@ -56,16 +56,10 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// device.Detector implementation, in the interface's declaration order.
+
 func (in *ascend) Name() string {
 	return Manufacturer
-}
-
-func (in *ascend) init() {
-	in.once.Do(func() {
-		if ret := in.dcmi.Init(in.logger); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize DCMI library")
-		}
-	})
 }
 
 func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -222,7 +216,9 @@ func (in *ascend) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList,
 
 			topo := device.ConstructTopology(pciBusId, pciDev.Root, pciDev.Class)
 
-			// RoCE is per-card networking, recorded on the card's topology.
+			// RoCE networking belongs to the dcmi card, a hardware level above the
+			// accelerator that carries several NPUs; it is recorded on the topology of
+			// each accelerator in it.
 			if ip, snm, ret := dev.GetIp(dcmi.ROCE_PORT, 0); ret.IsSuccess() {
 				if gw, ret := dev.GetGateway(dcmi.ROCE_PORT, 0); ret.IsSuccess() {
 					topo.RoCE = &device.Ethernet{
@@ -418,6 +414,14 @@ func (in *ascend) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList
 	return grpList, nil
 }
 
+func (in *ascend) init() {
+	in.once.Do(func() {
+		if ret := in.dcmi.Init(in.logger); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize DCMI library")
+		}
+	})
+}
+
 // Borrowed from https://gitcode.com/Ascend/pytorch/blob/master/torch_npu/csrc/core/npu/NpuVariables.cpp#L13-L40 and
 // https://gitcode.com/Ascend/pytorch/blob/master/torch_npu/csrc/core/npu/NpuVariables.h#L5-L34.
 // Ascend product category, please refer to:
@@ -503,7 +507,7 @@ var slicedRuntimeMajors = map[string][]int{
 
 // getLogicalSliced reports the logical (software) slicing a family supports on a host running
 // the given CANN runtime version: temporal compute sharing plus software VRAM partitioning
-// through vcann-rt's preloaded runtime, with the per-card slice count capped at the maximum
+// through vcann-rt's preloaded runtime, with the per-accelerator slice count capped at the maximum
 // user processes a device serves (63). A family/major pair the image ships no runtime for yields
 // the zero value, so slicing is simply not offered rather than offered and then unstartable.
 //

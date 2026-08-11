@@ -24,8 +24,8 @@ func newMigDriver() migDriver {
 	}
 }
 
-// hgmlMigDriver is the real migDriver, driving the vendor management binding on a card addressed
-// by its card UUID over the partition GPU/compute-instance lifecycle wrappers.
+// hgmlMigDriver is the real migDriver, driving the vendor management binding on an accelerator
+// addressed by its UUID over the partition GPU/compute-instance lifecycle wrappers.
 //
 // Every enumeration here reports either a state it can prove whole or an error. It never degrades
 // to partial state on a failed query, which is where it is deliberately stricter than the vendor
@@ -40,14 +40,14 @@ type hgmlMigDriver struct {
 	// obscurely deeper in a call that cannot possibly work.
 	initRet hgml.Return
 
-	// profiles caches each card's partition-profile catalogue under profilesMu. The catalogue is a
-	// property of the card and of its partitioning mode, and both are fixed for this process's life:
-	// a mode change is only ever picked up by a restart. Caching it is worth the state because
-	// probing it walks the vendor's whole profile id space — 85 ids, up to three library calls each,
-	// so ~255 calls — and that walk happens on every allocation and on every reclaim pass, the
-	// latter with a card's lock held.
+	// profiles caches each accelerator's partition-profile catalog under profilesMu. The catalog
+	// is a property of the accelerator and of its partitioning mode, and both are fixed for this
+	// process's life: a mode change is only ever picked up by a restart. Caching it is worth the state
+	// because probing it walks the vendor's whole profile id space — 85 ids, up to three library calls
+	// each, so ~255 calls — and that walk happens on every allocation and on every reclaim pass, the
+	// latter with an accelerator's lock held.
 	//
-	// An EMPTY catalogue is deliberately not cached. That is what a card reads as while its
+	// An EMPTY catalog is deliberately not cached. That is what an accelerator reads as while its
 	// partitioning mode is off, and remembering it would outlive the restart that turns the mode on.
 	// The lock is real rather than theoretical: one driver value is shared by the partitioned and the
 	// visibility servers.
@@ -55,8 +55,8 @@ type hgmlMigDriver struct {
 	profiles   map[string][]hgml.GpuInstanceProfileInfo_v3
 }
 
-// cardProfileCatalogue returns the card's partition-profile catalogue, probing the driver only the
-// first time it is asked for a card that offers any.
+// cardProfileCatalogue returns the accelerator's partition-profile catalog, probing the driver
+// only the first time it is asked for an accelerator that offers any.
 func (d *hgmlMigDriver) cardProfileCatalogue(dev hgml.Device, cardUUID string) ([]hgml.GpuInstanceProfileInfo_v3, error) {
 	d.profilesMu.Lock()
 	cached, ok := d.profiles[cardUUID]
@@ -79,9 +79,9 @@ func (d *hgmlMigDriver) cardProfileCatalogue(dev hgml.Device, cardUUID string) (
 	return probed, nil
 }
 
-// CardInstances enumerates one card's live GPU instances. It is the whole-node enumeration's unit of
-// work, and the reclaim loop's verification re-read calls it directly so that read costs one card
-// rather than the node while it holds that card's lock.
+// CardInstances enumerates one accelerator's live GPU instances. It is the whole-node enumeration's
+// unit of work, and the reclaim loop's verification re-read calls it directly so that read costs one
+// accelerator rather than the node while it holds that accelerator's lock.
 func (d *hgmlMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 	dev, err := d.device(cardUUID)
 	if err != nil {
@@ -91,7 +91,7 @@ func (d *hgmlMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 }
 
 // cardInstances is CardInstances over a handle the caller already resolved, so the whole-node walk
-// does not resolve every card twice.
+// does not resolve every accelerator twice.
 func (d *hgmlMigDriver) cardInstances(dev hgml.Device, cardUUID string) ([]migInstance, error) {
 	partitioning, err := migModeEnabled(dev, cardUUID)
 	if err != nil {
@@ -120,7 +120,7 @@ func (d *hgmlMigDriver) ready() error {
 	return nil
 }
 
-// device resolves a card handle from the card UUID the operator addresses accelerators by.
+// device resolves an accelerator handle from the UUID the operator addresses accelerators by.
 func (d *hgmlMigDriver) device(cardUUID string) (hgml.Device, error) {
 	if err := d.ready(); err != nil {
 		return hgml.Device{}, err
@@ -133,11 +133,11 @@ func (d *hgmlMigDriver) device(cardUUID string) (hgml.Device, error) {
 }
 
 // driverReportsAbsent reports whether a return code is the driver's own statement that the probed
-// id or index names nothing on this card, which is the normal answer for most of a probe space.
-// Only these three codes are skipped during a probe; every other failure means the query itself
-// could not be answered, and an enumeration that cannot be proven complete must fail instead. A
-// missing library symbol is deliberately not in this set: it makes every id unreadable rather than
-// absent, and silently reporting an empty card for it is the failure this contract exists to
+// id or index names nothing on this accelerator, which is the normal answer for most of a probe
+// space. Only these three codes are skipped during a probe; every other failure means the query
+// itself could not be answered, and an enumeration that cannot be proven complete must fail instead.
+// A missing library symbol is deliberately not in this set: it makes every id unreadable rather than
+// absent, and silently reporting an empty accelerator for it is the failure this contract exists to
 // prevent.
 func driverReportsAbsent(ret hgml.Return) bool {
 	switch ret {
@@ -155,11 +155,12 @@ func driverReportsInUse(ret hgml.Return) bool {
 	return ret == hgml.ERROR_IN_USE
 }
 
-// migModeEnabled reports whether the card is currently in the partitioning mode, so a card that
+// migModeEnabled reports whether the accelerator is currently in the partitioning mode, so one that
 // provably holds no partition is skipped by the global enumeration. It errors when the mode itself
-// could not be read: an unreadable card's partition state is unknown, and treating unknown as
-// "holds nothing" is the same "a live partition reads as absent" failure in another costume. A card
-// whose driver answers that the mode is unsupported is not partitionable, which is an answer.
+// could not be read: an unreadable accelerator's partition state is unknown, and treating unknown as
+// "holds nothing" is the same "a live partition reads as absent" failure in another costume. An
+// accelerator whose driver answers that the mode is unsupported is not partitionable, which is an
+// answer.
 func migModeEnabled(dev hgml.Device, cardUUID string) (bool, error) {
 	current, _, ret := dev.GetMigMode()
 	if ret.IsSuccess() {
@@ -171,8 +172,8 @@ func migModeEnabled(dev hgml.Device, cardUUID string) (bool, error) {
 	return false, fmt.Errorf("card %s: read partitioning mode: %s", cardUUID, ret.Error())
 }
 
-// cardProfiles probes the card's whole GPU-instance profile space and returns every profile the
-// driver answered for. The probe takes a profile ENUM INDEX, while every later call takes the
+// cardProfiles probes the accelerator's whole GPU-instance profile space and returns every profile
+// the driver answered for. The probe takes a profile ENUM INDEX, while every later call takes the
 // creation id the probe returns in the profile's own record, and the two differ on this hardware —
 // so no id here is ever computed, only carried.
 //
@@ -217,10 +218,10 @@ func sameProfileOffer(a, b hgml.GpuInstanceProfileInfo_v3) bool {
 		a.InstanceCount == b.InstanceCount
 }
 
-// matchProfile resolves a requested profile name to the card's own GPU-instance profile record, by
-// comparing normalized names over the probed profiles. The name is the only key: a compute-slice
-// count cannot pick a profile, because this vendor's ids carry no slice-count meaning and several
-// profiles can share a width.
+// matchProfile resolves a requested profile name to the accelerator's own GPU-instance profile
+// record, by comparing normalized names over the probed profiles. The name is the only key: a
+// compute-slice count cannot pick a profile, because this vendor's ids carry no slice-count meaning
+// and several profiles can share a width.
 //
 // Both ends of the round trip normalize through the one shared function: the detector publishes a
 // profile's resource key from the normalized driver name, and this resolves that key back to a raw
@@ -281,8 +282,8 @@ type migIdentity struct {
 	CiID uint32
 }
 
-// migIdentities maps each GPU-instance id on the card to its partition's addressing record, by
-// enumerating the card's partition-device handles and reading each one's owning GPU-instance id. A
+// migIdentities maps each GPU-instance id on the accelerator to its partition's addressing record,
+// by enumerating its partition-device handles and reading each one's owning GPU-instance id. A
 // GPU instance with no partition device materialized yet is simply absent from the map — that is a
 // GPU instance without its compute instance, which addresses nothing and which reclaim destroys.
 //
@@ -298,9 +299,9 @@ type migIdentity struct {
 // not create, and the map has exactly one slot to describe it with: whichever the driver happened to
 // return last would become that GPU instance's recorded address. Reclaim would then read a
 // compute-instance id its marker never recorded and drop the marker without destroying, leaking the
-// partition, while a reserve for the same card would fail closed on the mismatch and keep failing for
-// as long as the extra device exists. Refusing names the card instead of silently addressing the
-// wrong half of it.
+// partition, while a reserve for the same accelerator would fail closed on the mismatch and keep
+// failing for as long as the extra device exists. Refusing names the accelerator instead of silently
+// addressing the wrong half of it.
 func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, error) {
 	count, ret := dev.GetMaxMigDeviceCount()
 	if !ret.IsSuccess() {
@@ -321,7 +322,7 @@ func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, er
 				"card %s: partition-device handle %d is absent though the driver reported success", cardUUID, i)
 		}
 		// Read the owning GPU-instance id from the partition-device handle directly; resolving the
-		// full instance needs the parent card handle and fails on this one.
+		// full instance needs the parent accelerator handle and fails on this one.
 		giID, ret := mig.GetGpuInstanceId()
 		if !ret.IsSuccess() {
 			return nil, fmt.Errorf(
@@ -347,11 +348,11 @@ func migIdentities(dev hgml.Device, cardUUID string) (map[uint32]migIdentity, er
 	return out, nil
 }
 
-// liveInstances enumerates every live GPU instance on the card across all profiles, each carrying
-// the raw profile id it was carved from, its compute-slice count, its memory-slice placement and
-// its partition's addressing record — the identity string and the compute-instance id. Occupancy
-// must span every profile, because an instance of one profile occupies placements another profile
-// could otherwise use.
+// liveInstances enumerates every live GPU instance on the accelerator across all profiles, each
+// carrying the raw profile id it was carved from, its compute-slice count, its memory-slice
+// placement and its partition's addressing record — the identity string and the compute-instance
+// id. Occupancy must span every profile, because an instance of one profile occupies placements
+// another profile could otherwise use.
 //
 // The addressing record matters beyond occupancy: one of these instances is what adoption reuses,
 // and the marker it writes is what the allocation resolves a capability node from. An adopted
@@ -406,8 +407,8 @@ func liveInstances(
 // The probe walks the profile *index* space, and an index is not an identity: this driver answers
 // several indices with one and the same profile, so a candidate already seen by its id is skipped.
 // Counting an alias as a second candidate would fail closed on a product that offers exactly one
-// profile — which is what a whole-card partition ran into, where two indices both answered with the
-// driver's single default profile.
+// profile — which is what a whole-accelerator partition ran into, where two indices both answered
+// with the driver's single default profile.
 //
 // Genuine ambiguity still fails closed. Unlike a GPU-instance profile, a compute-instance profile
 // probed before its instance exists carries neither a name nor capability bits, so a plain
@@ -582,14 +583,15 @@ func (d *hgmlMigDriver) CreateInstance(
 	}, nil
 }
 
-// ListInstances enumerates every live GPU instance across the node's partitioning cards, each
-// carrying its card id, so the orphan collector can find a marker-less instance on a drained card.
-// A GPU instance carries no operator tag, so this is the only way an untracked one is ever seen.
+// ListInstances enumerates every live GPU instance across the node's partitioning accelerators, each
+// carrying its accelerator id, so the orphan collector can find a marker-less instance on a drained
+// accelerator. A GPU instance carries no operator tag, so this is the only way an untracked one is
+// ever seen.
 //
-// A card the driver answers is not in the partitioning mode holds no partition and is skipped; a
-// card whose mode, profiles, identities or instances could not be read fails the whole enumeration,
-// because a caller acting on a list missing one card's partitions would destroy or double-book
-// exactly what it could not see.
+// An accelerator the driver answers is not in the partitioning mode holds no partition and is
+// skipped; one whose mode, profiles, identities or instances could not be read fails the whole
+// enumeration, because a caller acting on a list missing one accelerator's partitions would destroy
+// or double-book exactly what it could not see.
 func (d *hgmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	if err := d.ready(); err != nil {
 		return nil, err
@@ -621,11 +623,12 @@ func (d *hgmlMigDriver) ListInstances() ([]migLiveInstance, error) {
 	return out, nil
 }
 
-// DestroyInstance tears down the partition the caller snapshotted, under the card lock the caller
-// holds. It re-reads the card's live set inside that critical section and verifies the GPU-instance
-// id still carries the recorded identity before destroying anything: a destroyed instance's id can
-// be reassigned, so a snapshot that aged by one allocation can point at a different — possibly
-// live — partition. On a mismatch nothing is destroyed and the contradiction is returned.
+// DestroyInstance tears down the partition the caller snapshotted, under the accelerator lock the
+// caller holds. It re-reads that accelerator's live set inside the critical section and verifies the
+// GPU-instance id still carries the recorded identity before destroying anything: a destroyed
+// instance's id can be reassigned, so a snapshot that aged by one allocation can point at a
+// different — possibly live — partition. On a mismatch nothing is destroyed and the contradiction is
+// returned.
 //
 // An id absent from a complete enumeration is a partition that is already gone, which is a success:
 // the reclaim loop's removal of the ownership marker depends on that idempotence.

@@ -39,7 +39,7 @@ func mthreadsDevicesFixture() *workercore.Devices {
 
 // slicedPod builds a pending pod whose container requests the decoupled compute and
 // VRAM dimensions the allocator reads: ".sliced.cores-percentage" (compute weight) and
-// ".sliced.memory-percentage" (per-card VRAM). A non-positive dimension is omitted so a
+// ".sliced.memory-percentage" (per-accelerator VRAM). A non-positive dimension is omitted so a
 // test can exercise the defaults.
 func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, *core.Container) {
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
@@ -79,7 +79,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	s := newServerWithMode(workercore.DeviceAllocationModeSliced)
 	devs := mthreadsDevicesFixture()
 
-	// cores=8% weight + memory=50% of a 48 GiB card -> 24 GiB hard cap.
+	// cores=8% weight + memory=50% of a 48 GiB accelerator -> 24 GiB hard cap.
 	pod, ctr := slicedPod("pod-uid-1", "train", 8, 50)
 	allocated := map[deviceplugin.Resource]int32{{Group: "mtt-s4000", Device: testAccelID0}: 1}
 
@@ -95,7 +95,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	assert.Empty(t, resp.Devices, "MThreads slicing is pure env, no device nodes")
 }
 
-// An absent .sliced.cores-percentage defaults the compute weight to 100 (a whole card's
+// An absent .sliced.cores-percentage defaults the compute weight to 100 (a whole accelerator's
 // compute); the memory cap is still honored.
 func TestGetSlicedContainerAllocateResponse_DefaultCores(t *testing.T) {
 	s := newServerWithMode(workercore.DeviceAllocationModeSliced)
@@ -113,7 +113,7 @@ func TestGetSlicedContainerAllocateResponse_DefaultCores(t *testing.T) {
 }
 
 // A sliced container with no memory dimension (neither .sliced.memory-percentage nor
-// .sliced.memory-mib) must be rejected rather than silently given the whole card.
+// .sliced.memory-mib) must be rejected rather than silently given the whole accelerator.
 func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	s := newServerWithMode(workercore.DeviceAllocationModeSliced)
 	devs := mthreadsDevicesFixture()

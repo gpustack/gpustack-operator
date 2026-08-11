@@ -109,8 +109,8 @@ func (s *server) GetContainerAllocateResponse(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
-	// Sliced containers get per-card vdev.conf + CU-mask isolation; exclusive/shared/
-	// visibility keep the whole-card passthrough below.
+	// Sliced containers get per-accelerator vdev.conf + CU-mask isolation; exclusive/shared/
+	// visibility keep the whole-accelerator passthrough below.
 	if s.AllocationMode == workercore.DeviceAllocationModeSliced {
 		return s.getSlicedContainerAllocateResponse(pod, ctr, devs, allocated)
 	}
@@ -146,11 +146,12 @@ func (s *server) GetContainerAllocateResponse(
 			}
 
 			// Each recorded index is guarded by its own length, as the sliced path below already
-			// does. The detector reads them from this vendor's sysfs drm directory, which yields
-			// both numbers, the card number alone, or nothing at all — so a pair is not something
-			// this can assume. Indexing an absent one panics, and no interceptor recovers a panic
-			// in this handler: the process that serves every allocation on the node dies with it,
-			// for every manufacturer, over one card whose drm directory could not be read.
+			// does. The detector reads them from this manufacturer's sysfs drm directory, which
+			// yields both numbers, the drm card<N> number alone, or nothing at all — so a pair is
+			// not something this can assume. Indexing an absent one panics, and no interceptor
+			// recovers a panic in this handler: the process that serves every allocation on the node
+			// dies with it, for every manufacturer, over one accelerator whose drm directory could
+			// not be read.
 			if len(devsAccelerator.PhysicalIndexes) > 0 {
 				if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", devsAccelerator.PhysicalIndexes[0]); pDev != nil {
 					ctrResp.Devices = append(ctrResp.Devices, pDev)
@@ -192,12 +193,12 @@ const (
 )
 
 // getSlicedContainerAllocateResponse renders the Hygon logical-slicing injection for a sliced
-// container: one vdev.conf per allocated card carrying a cores%-derived CU bitmask and a
-// per-card VRAM cap, published into the pod work dir and mounted at /etc/vdev/docker/, plus
-// the DTK/hyhal runtime dirs and per-card device nodes. The host DTK/hyhal user-space
-// runtime reads the vdev.conf to enforce the slice. A whole-card slice still writes a
-// full-mask / full-memory vdev.conf occupancy marker (allocateVdev never skips a write), so
-// the on-disk scanner never misses a taken card.
+// container: one vdev.conf per allocated accelerator carrying a cores%-derived CU bitmask and
+// a per-accelerator VRAM cap, published into the pod work dir and mounted at /etc/vdev/docker/,
+// plus the DTK/hyhal runtime dirs and per-accelerator device nodes. The host DTK/hyhal
+// user-space runtime reads the vdev.conf to enforce the slice. A whole-accelerator slice still
+// writes a full-mask / full-memory vdev.conf occupancy marker (allocateVdev never skips a
+// write), so the on-disk scanner never misses a taken accelerator.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,
@@ -231,7 +232,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 
 	ctrResp := &deviceplugin.ContainerAllocateResponse{}
 
-	// Control device nodes (the compute path, shared by every allocated card).
+	// Control device nodes (the compute path, shared by every allocated accelerator).
 	for _, p := range []string{"/dev/kfd", "/dev/mkfd"} {
 		if pDev := deviceplugin.NewDevice(p, "rwm"); pDev != nil {
 			ctrResp.Devices = append(ctrResp.Devices, pDev)
@@ -257,13 +258,13 @@ func (s *server) getSlicedContainerAllocateResponse(
 	ctrResp.Mounts = append(ctrResp.Mounts,
 		&deviceplugin.Mount{ContainerPath: ctrVdevDir, HostPath: vdevHostDir, ReadOnly: true})
 
-	// One vdev.conf per allocated card, each independently slotted; a whole-card slice
-	// (cores% >= 100 && memMiB >= card VRAM) resolves to a full-mask / full-memory conf.
-	// The loop index i is the container-local device_id (the DTK device_id semantics are a
-	// hardware-validation item). A partial failure part-way through a multi-card allocation
-	// leaves the earlier cards' confs on disk: intentional under the level-based design — an
-	// idempotent kubelet retry reuses them and podDirGC reclaims them once the pod is gone,
-	// so no rollback is attempted.
+	// One vdev.conf per allocated accelerator, each independently slotted; a whole-accelerator
+	// slice (cores% >= 100 && memMiB >= accelerator VRAM) resolves to a full-mask / full-memory
+	// conf. The loop index i is the container-local device_id (the DTK device_id semantics are a
+	// hardware-validation item). A partial failure part-way through a multi-accelerator
+	// allocation leaves the earlier accelerators' confs on disk: intentional under the
+	// level-based design — an idempotent kubelet retry reuses them and podDirGC reclaims them
+	// once the pod is gone, so no rollback is attempted.
 	for i := range accels {
 		group, accel := accels[i].group, accels[i].accel
 		memMib, err := deviceplugin.SlicedMemoryMib(ctr, memPctRes, memMibRes, int64(group.Memory))
@@ -275,7 +276,7 @@ func (s *server) getSlicedContainerAllocateResponse(
 			return nil, fmt.Errorf("allocate vdev for card %s: %w", accel.Topology.PciBusID, err)
 		}
 
-		// Per-card DRM device nodes.
+		// Per-accelerator DRM device nodes.
 		if len(accel.PhysicalIndexes) > 0 {
 			if pDev := deviceplugin.NewRWDevicef("/dev/dri/card%d", accel.PhysicalIndexes[0]); pDev != nil {
 				ctrResp.Devices = append(ctrResp.Devices, pDev)

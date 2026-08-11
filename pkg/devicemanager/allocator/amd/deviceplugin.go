@@ -118,24 +118,25 @@ const (
 	ctrLedgerPath     = ctrLedgerDir + "/ledger"
 )
 
-// readTopologyFn is the card-topology reader. It is a var so a test can supply a card: the real
+// readTopologyFn is the accelerator-topology reader. It is a var so a test can supply one: the real
 // implementation is a cgo seam that exists only on linux, while every decision above it is integer
-// arithmetic that must stay testable with no card and no ROCm.
+// arithmetic that must stay testable with no accelerator and no ROCm.
 var readTopologyFn = readTopology
 
-// _AllocatedAccelerator pairs a granted card with the group carrying its VRAM figure.
+// _AllocatedAccelerator pairs a granted accelerator with the group carrying its VRAM figure.
 type _AllocatedAccelerator struct {
 	group *workercore.DevicesGroup
 	accel *workercore.Accelerator
 }
 
-// allocatedAccelerators lists the cards this container was granted, in the Devices spec's own order.
+// allocatedAccelerators lists the accelerators this container was granted, in the Devices spec's
+// own order.
 //
 // That order is load-bearing rather than incidental: it is the order ROCR_VISIBLE_DEVICES is emitted
 // in, and ROCr applies that variable before it enumerates agents — so it is also the index space
 // HSA_CU_MASK's GPU_list and VROCM_DEVICE_MEMORY_LIMIT_<i> both live in. Every consumer below walks
 // this one slice, because three consumers walking their own order is exactly how the tuple
-// misaligns, and a misaligned tuple caps and masks a card the container was never given.
+// misaligns, and a misaligned tuple caps and masks an accelerator the container was never given.
 func allocatedAccelerators(
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
@@ -164,7 +165,7 @@ func allocatedAccelerators(
 // is byte-for-byte what the detector recorded as the accelerator ID. The two variables are read by
 // different things — the container runtime injects device nodes from the first, the ROCm user-space
 // runtime filters and orders agents from the second — and giving them one value is what keeps the
-// container's device set and its agent list describing the same cards.
+// container's device set and its agent list describing the same accelerators.
 func visibleDevices(accels []_AllocatedAccelerator) string {
 	ids := make([]string, 0, len(accels))
 	for i := range accels {
@@ -190,8 +191,8 @@ func (s *server) GetContainerAllocateResponse(
 	return ctrResp, nil
 }
 
-// PlaceLogicalSliced derives this container's CU-mask window on each granted card and places it
-// beside the windows the node's live allocations already hold.
+// PlaceLogicalSliced derives this container's CU-mask window on each granted accelerator and places
+// it beside the windows the node's live allocations already hold.
 //
 // It runs under the device-plugin's node allocate mutex, so it does no I/O: the topology read is a
 // cached agent-info query and everything else is integer arithmetic. The window it returns is
@@ -203,8 +204,8 @@ func (s *server) PlaceLogicalSliced(
 	ctr *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
-	occupied deviceplugin.LogicalPlacements,
-) (deviceplugin.LogicalPlacements, error) {
+	occupied deviceplugin.Placements,
+) (deviceplugin.Placements, error) {
 	accels := allocatedAccelerators(devs, allocated)
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
@@ -213,14 +214,15 @@ func (s *server) PlaceLogicalSliced(
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
 	coresPct := deviceplugin.SlicedCoresPercent(ctr, coresRes)
 
-	placed := make(deviceplugin.LogicalPlacements, len(accels))
+	placed := make(deviceplugin.Placements, len(accels))
 	for i := range accels {
 		accel := accels[i].accel
 		if accel.ID == "" {
 			// The ID is the identity both visible-devices variables carry; an empty one would
-			// widen the container to every card on the node rather than narrow it to this one.
+			// widen the container to every accelerator on the node rather than narrow it to this one.
 			return nil, fmt.Errorf("card at index %d reports no unique id, so it cannot be sliced", accel.Index)
 		}
+		res := deviceplugin.Resource{Group: accels[i].group.ID, Device: accel.ID}
 		topo, err := readTopologyFn(accel.Topology.PciBusID, accel.ID)
 		if err != nil {
 			return nil, fmt.Errorf("read topology of card %s: %w", accel.ID, err)
@@ -229,17 +231,17 @@ func (s *server) PlaceLogicalSliced(
 		if err != nil {
 			return nil, fmt.Errorf("derive the compute window of card %s: %w", accel.ID, err)
 		}
-		// A request that does not land on the card's allocation atom is aligned DOWN, and the
+		// A request that does not land on the accelerator's allocation atom is aligned DOWN, and the
 		// refusal path below it is loud while this one would otherwise be mute. Say it: the tenant
-		// is charged for what it asked and served what the hardware can express, and on a card with
-		// many shader engines those differ by several points.
+		// is charged for what it asked and served what the hardware can express, and on an accelerator
+		// with many shader engines those differ by several points.
 		if delivered := length * 100 / topo.CU; delivered != coresPct {
 			s.Logger.Info("compute request aligned down to the card's allocation atom",
 				"card", accel.ID, "requested", coresPct, "delivered", delivered,
 				"atomCUs", topo.Quantum(), "cardCUs", topo.CU)
 		}
-		placed[accel.ID] = []workercore.AcceleratorPhysicalPlacement{
-			PackWindow(topo, length, occupied[accel.ID]),
+		placed[res] = []workercore.AcceleratorPlacement{
+			PackWindow(topo, length, occupied[res]),
 		}
 	}
 	return placed, nil
@@ -257,17 +259,17 @@ func (s *server) GetLogicalSlicedResponse(
 	ctr *core.Container,
 	devs *workercore.Devices,
 	allocated map[deviceplugin.Resource]int32,
-	placements deviceplugin.LogicalPlacements,
+	placements deviceplugin.Placements,
 ) (*deviceplugin.ContainerAllocateResponse, error) {
 	accels := allocatedAccelerators(devs, allocated)
 	if len(accels) == 0 {
 		return nil, fmt.Errorf("no allocated accelerator found for sliced container %q", ctr.Name)
 	}
 
-	// The usage region is per container rather than per node: it is addressed by the card's
+	// The usage region is per container rather than per node: it is addressed by the accelerator's
 	// position in ROCR_VISIBLE_DEVICES, which is container-local, so a shared location would let
-	// two containers' index 0 — two different physical cards — charge one slot. Under the pod work
-	// dir, so the existing per-pod reclaim removes it with the pod. The shim creates the region
+	// two containers' index 0 — two different physical accelerators — charge one slot. Under the pod
+	// work dir, so the existing per-pod reclaim removes it with the pod. The shim creates the region
 	// file itself; this is only its directory, world-writable because the workload's user is not
 	// ours to predict.
 	ledgerDir := filepath.Join(deviceplugin.PodWorkDir(string(pod.UID), ctr.Name), "run/vrocm")
@@ -280,9 +282,9 @@ func (s *server) GetLogicalSlicedResponse(
 
 	visible := visibleDevices(accels)
 	envs := map[string]string{
-		// The container runtime reads the first to inject /dev/kfd and the card's render node; the
-		// ROCm user-space runtime reads the second to filter and order its agents. Neither is read
-		// by the other, and both name the same cards in the same order.
+		// The container runtime reads the first to inject /dev/kfd and the accelerator's render node;
+		// the ROCm user-space runtime reads the second to filter and order its agents. Neither is read
+		// by the other, and both name the same accelerators in the same order.
 		"AMD_VISIBLE_DEVICES":  visible,
 		"ROCR_VISIBLE_DEVICES": visible,
 		"VROCM_LEDGER_PATH":    ctrLedgerPath,
@@ -300,16 +302,17 @@ func (s *server) GetLogicalSlicedResponse(
 		}
 		envs["VROCM_DEVICE_MEMORY_LIMIT_"+strconv.Itoa(i)] = strconv.FormatInt(memMib, 10)
 
-		window, ok := placements[accel.ID]
+		res := deviceplugin.Resource{Group: accels[i].group.ID, Device: accel.ID}
+		window, ok := placements[res]
 		if !ok || len(window) == 0 {
 			return nil, fmt.Errorf("no compute window was placed for card %s", accel.ID)
 		}
-		// The GPU_list index is i, the card's position in the list above — never its physical
+		// The GPU_list index is i, the accelerator's position in the list above — never its physical
 		// ordinal, and never its UUID: a GPU_list that is not a decimal index is discarded whole,
-		// silently, leaving the container on the entire card.
+		// silently, leaving the container on the entire accelerator.
 		masks = append(masks, Mask(i, window[0]))
 	}
-	// One segment per card, as the runtime's own grammar spells it: GPU_list:CU_list[;...].
+	// One segment per accelerator, as the runtime's own grammar spells it: GPU_list:CU_list[;...].
 	envs["HSA_CU_MASK"] = strings.Join(masks, ";")
 
 	// State the verbosity the slice runs at rather than inheriting it: level 1 reports denials and

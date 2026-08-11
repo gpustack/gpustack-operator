@@ -63,7 +63,7 @@ func nvidiaDevices(runtimeVersion string, memoryMiB uint64, uuids ...string) *wo
 
 // slicedPod builds a sliced container requesting the decoupled compute and VRAM
 // dimensions the allocator now reads: ".sliced.cores-percentage" (SM) and
-// ".sliced.memory-percentage" (per-card VRAM).
+// ".sliced.memory-percentage" (per-accelerator VRAM).
 func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, *core.Container) {
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
@@ -245,7 +245,7 @@ func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing
 	assert.False(t, injected, "must not override a container-declared LIBCUDA_LOG_LEVEL")
 }
 
-// One CUDA_DEVICE_MEMORY_LIMIT_<i> per allocated card (.sliced card count).
+// One CUDA_DEVICE_MEMORY_LIMIT_<i> per allocated accelerator (.sliced accelerator count).
 func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -261,12 +261,12 @@ func TestGetSlicedContainerAllocateResponse_MultiCard(t *testing.T) {
 
 	assert.Equal(t, testGPUUUID0+","+testGPUUUID1, resp.Envs["NVIDIA_VISIBLE_DEVICES"])
 	assert.Equal(t, "50", resp.Envs["CUDA_DEVICE_SM_LIMIT"]) // .sliced.cores-percentage
-	// floor(24576 MiB * 25%) = 6144 MiB, one entry per card.
+	// floor(24576 MiB * 25%) = 6144 MiB, one entry per accelerator.
 	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	assert.Equal(t, "6144m", resp.Envs["CUDA_DEVICE_MEMORY_LIMIT_1"])
 }
 
-// The libvgpu.so mount tracks the card's CUDA runtime major (default cuda-12).
+// The libvgpu.so mount tracks the accelerator's CUDA runtime major (default cuda-12).
 func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -295,7 +295,7 @@ func TestGetSlicedContainerAllocateResponse_CUDADir(t *testing.T) {
 }
 
 // A sliced container with no memory dimension (neither .sliced.memory-percentage nor
-// .sliced.memory-mib) must be rejected rather than silently given the whole card.
+// .sliced.memory-mib) must be rejected rather than silently given the whole accelerator.
 func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -351,7 +351,7 @@ func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 	}
 	devs := nvidiaDevices("12.4", 24576, testGPUUUID0, testGPUUUID1)
 	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "sshd-pod", UID: types.UID("uid-vis")}}
-	// Only the first card is reserved to the workload; visibility must scope to exactly it.
+	// Only the first accelerator is reserved to the workload; visibility must scope to exactly it.
 	allocated := map[deviceplugin.Resource]int32{{Group: "a10g", Device: testGPUUUID0}: 1}
 
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs, allocated)

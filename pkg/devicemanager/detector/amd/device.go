@@ -49,22 +49,9 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// Name, DetectAccelerator and MonitorAccelerator implement device.Detector.
 func (in *amd) Name() string {
 	return Manufacturer
-}
-
-func (in *amd) init() {
-	in.once.Do(func() {
-		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize AMDGPU library")
-		}
-		if ret := in.amdsmi.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize AMDSMI library")
-		}
-		if ret := in.hsa.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize HSA library")
-		}
-	})
 }
 
 func (in *amd) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -348,6 +335,20 @@ func (in *amd) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupList, e
 	}
 
 	return grpList, nil
+}
+
+func (in *amd) init() {
+	in.once.Do(func() {
+		if ret := in.amdgpu.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize AMDGPU library")
+		}
+		if ret := in.amdsmi.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize AMDSMI library")
+		}
+		if ret := in.hsa.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize HSA library")
+		}
+	})
 }
 
 func getPhysicalIndexes(bdf string) []uint32 {

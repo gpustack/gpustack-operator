@@ -28,25 +28,25 @@ const (
 	testOtherProfileID = uint32(9)
 )
 
-// fakeMigDriver is an in-memory migDriver: it records create/destroy calls and holds a per-card
+// fakeMigDriver is an in-memory migDriver: it records create/destroy calls and holds a per-accelerator
 // possible-placement set, resolved profile id and live-instance list, so the marker/slot-pick/
 // adoption core is table-tested without the vendor library. It is concurrency-safe (the caller
-// holds the per-card lock, but different cards run in parallel and Go maps are not).
+// holds the per-accelerator lock, but different accelerators run in parallel and Go maps are not).
 type fakeMigDriver struct {
 	mu sync.Mutex
-	// possible and profileIDs are keyed by card and profile name, mirroring the seam's contract
-	// that a profile is resolved to a raw vendor id by name, per card.
+	// possible and profileIDs are keyed by accelerator and profile name, mirroring the seam's contract
+	// that a profile is resolved to a raw vendor id by name, per accelerator.
 	possible   map[string][]migPlacement
 	profileIDs map[string]uint32
 	live       map[string][]migInstance
 
 	nextGiID    uint32
 	createCalls int
-	// stateCalls, listCalls and cardListCalls count the per-card profile read, the node-wide
-	// enumeration and the per-card enumeration. They are the cost side of the seam contract: the
-	// node-wide one probes every card's whole profile space, so a loop that calls it once per marker
-	// instead of once per card is a defect the counts make visible — and so is one that reaches for it
-	// at all where it already knows which card it is deciding about.
+	// stateCalls, listCalls and cardListCalls count the per-accelerator profile read, the node-wide
+	// enumeration and the per-accelerator enumeration. They are the cost side of the seam contract:
+	// the node-wide one probes every accelerator's whole profile space, so a loop that calls it once
+	// per marker instead of once per accelerator is a defect the counts make visible — and so is one
+	// that reaches for it at all where it already knows which accelerator it is deciding about.
 	stateCalls    int
 	listCalls     int
 	cardListCalls int
@@ -121,8 +121,8 @@ func (f *fakeMigDriver) DestroyInstance(cardUUID string, inst migInstance) error
 	return nil
 }
 
-// CardInstances returns one card's seeded live instances (the verification-re-read seam), so a caller
-// holding that card's lock never pays for the node-wide walk.
+// CardInstances returns one accelerator's seeded live instances (the verification-re-read seam), so
+// a caller holding that accelerator's lock never pays for the node-wide walk.
 func (f *fakeMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -133,7 +133,7 @@ func (f *fakeMigDriver) CardInstances(cardUUID string) ([]migInstance, error) {
 	return append([]migInstance(nil), f.live[cardUUID]...), nil
 }
 
-// ListInstances returns every seeded live instance across all cards (the orphan-collection seam).
+// ListInstances returns every seeded live instance across all accelerators (the orphan-collection seam).
 func (f *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -150,26 +150,26 @@ func (f *fakeMigDriver) ListInstances() ([]migLiveInstance, error) {
 	return out, nil
 }
 
-// seedCard makes the card offer testProfile at its raw id, with the placements of a 2-slice profile
-// on an 8-slice card.
+// seedCard makes the accelerator offer testProfile at its raw id, with the placements of a 2-slice
+// profile on an 8-slice accelerator.
 func (f *fakeMigDriver) seedCard(cardUUID string) {
 	f.seedProfile(cardUUID, testProfile, testProfileID, evenSlots())
 }
 
-// seedProfile makes the card offer one more profile, so a request naming it resolves to its own raw
-// id and its own legal placement set.
+// seedProfile makes the accelerator offer one more profile, so a request naming it resolves to its
+// own raw id and its own legal placement set.
 func (f *fakeMigDriver) seedProfile(cardUUID, profile string, profileID uint32, possible []migPlacement) {
 	key := cardUUID + "/" + profile
 	f.profileIDs[key] = profileID
 	f.possible[key] = possible
 }
 
-// seedLive appends a live instance to a card (an out-of-band or adoptable leftover).
+// seedLive appends a live instance to an accelerator (an out-of-band or adoptable leftover).
 func (f *fakeMigDriver) seedLive(cardUUID string, inst migInstance) {
 	f.live[cardUUID] = append(f.live[cardUUID], inst)
 }
 
-// evenSlots returns the memory-slice placements of a 2-slice profile on an 8-slice card
+// evenSlots returns the memory-slice placements of a 2-slice profile on an 8-slice accelerator
 // ([0,2),[2,2),[4,2),[6,2)) — the legal set used across the tests.
 func evenSlots() []migPlacement {
 	return []migPlacement{{0, 2}, {2, 2}, {4, 2}, {6, 2}}
@@ -231,7 +231,7 @@ func TestPickPlacement(t *testing.T) {
 		wantOK   bool
 	}{
 		{
-			name:     "empty card picks lowest",
+			name:     "empty accelerator picks lowest",
 			possible: evenSlots(),
 			want:     migPlacement{0, 2},
 			wantOK:   true,
@@ -251,7 +251,7 @@ func TestPickPlacement(t *testing.T) {
 			wantOK:   true,
 		},
 		{
-			name:     "full card yields nothing",
+			name:     "full accelerator yields nothing",
 			possible: evenSlots(),
 			occupied: []migPlacement{{0, 8}},
 			wantOK:   false,
@@ -281,7 +281,7 @@ func TestReserveMigInstance(t *testing.T) {
 
 	cases := []struct {
 		name string
-		// setup seeds the driver and the marker root; the card under test is always testPPUUUID0.
+		// setup seeds the driver and the marker root; the accelerator under test is always testPPUUUID0.
 		setup  func(t *testing.T, drv *fakeMigDriver, podsDir string)
 		podUID string
 		// wantErr is the substring the reservation must fail with; keepsSelfMarker marks the cases
@@ -434,13 +434,13 @@ func TestReserveMigInstance(t *testing.T) {
 			wantGiID:        1,
 		},
 		{
-			name: "refuses adoption while a marker of that card is unparseable",
+			name: "refuses adoption while a marker of that accelerator is unparseable",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				drv.seedLive(testPPUUUID0, migInstance{
 					GiID: 12, CiID: 12, ProfileID: testProfileID, ComputeSlices: 1,
 					Placement: migPlacement{0, 2}, UUID: "MIG-maybe-owned",
 				})
-				// A corrupt marker naming this card: its owner is unknowable, so the leftover
+				// A corrupt marker naming this accelerator: its owner is unknowable, so the leftover
 				// above may already be bound and must not be adopted.
 				path := markerPath(podsDir, "pod-unknown", "c", testPPUUUID0)
 				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
@@ -453,14 +453,14 @@ func TestReserveMigInstance(t *testing.T) {
 			wantGiID:        1,
 		},
 		{
-			name: "refuses adoption while an unparseable marker names no card at all",
+			name: "refuses adoption while an unparseable marker names no accelerator at all",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				drv.seedLive(testPPUUUID0, migInstance{
 					GiID: 14, CiID: 14, ProfileID: testProfileID, ComputeSlices: 1,
 					Placement: migPlacement{0, 2}, UUID: "MIG-maybe-owned",
 				})
-				// This card's own markers all parse, but a corrupt file naming no card may stand for a
-				// record of any card — including this one — so the leftover above cannot be proven
+				// This accelerator's own markers all parse, but a corrupt file naming no accelerator may stand for a
+				// record of any accelerator — including this one — so the leftover above cannot be proven
 				// unbound. Capacity is unaffected: the create below still takes a free slot.
 				path := markerPath(podsDir, "pod-unknown", "c", "")
 				require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
@@ -473,11 +473,11 @@ func TestReserveMigInstance(t *testing.T) {
 			wantGiID:        1,
 		},
 		{
-			// The marker parses, carries every required field, and owns the leftover — but it names a
-			// card its own file name does not. Grouping the ownership set by the recorded card alone
-			// would leave the leftover looking unowned and hand it to this second Pod, putting two Pods
-			// on one hardware partition. It must instead count as unreadable ownership on the card its
-			// file belongs to, which refuses the adoption.
+			// The marker parses, carries every required field, and owns the leftover — but it names an
+			// accelerator its own file name does not. Grouping the ownership set by the recorded
+			// accelerator alone would leave the leftover looking unowned and hand it to this second Pod,
+			// putting two Pods on one hardware partition. It must instead count as unreadable ownership
+			// on the accelerator its file belongs to, which refuses the adoption.
 			name: "refuses adoption while a marker's record disagrees with its own file name",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				inst := migInstance{
@@ -495,7 +495,7 @@ func TestReserveMigInstance(t *testing.T) {
 			wantGiID:        1,
 		},
 		{
-			name: "a corrupt marker of another card does not block adoption",
+			name: "a corrupt marker of another accelerator does not block adoption",
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				drv.seedLive(testPPUUUID0, migInstance{
 					GiID: 13, CiID: 13, ProfileID: testProfileID, ComputeSlices: 1,
@@ -512,7 +512,7 @@ func TestReserveMigInstance(t *testing.T) {
 			wantUUID:      "MIG-adoptable",
 		},
 		{
-			name: "a full card fails without creating",
+			name: "a full accelerator fails without creating",
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				drv.seedLive(testPPUUUID0, migInstance{
 					GiID: 1, CiID: 1, ProfileID: testOtherProfileID, ComputeSlices: 7,
@@ -533,7 +533,7 @@ func TestReserveMigInstance(t *testing.T) {
 			wantErr: "read self marker",
 		},
 		{
-			name: "an incomplete card enumeration is an error, not an empty card",
+			name: "an incomplete accelerator enumeration is an error, not an empty accelerator",
 			setup: func(_ *testing.T, drv *fakeMigDriver, _ string) {
 				drv.cardStateErr = errEnumeration
 			},
@@ -617,7 +617,7 @@ func TestReserveMigInstanceIdempotentRetry(t *testing.T) {
 	assert.Equal(t, 1, drv.createCalls, "no second create on retry")
 }
 
-// TestReserveMigInstanceSecondProfile asserts a request naming another profile the card offers is
+// TestReserveMigInstanceSecondProfile asserts a request naming another profile the accelerator offers is
 // carved from that profile's own raw id and its own legal placement set, and that a partition
 // already carved from the first profile only removes the slots it occupies.
 func TestReserveMigInstanceSecondProfile(t *testing.T) {
@@ -644,7 +644,7 @@ func TestReserveMigInstanceSecondProfile(t *testing.T) {
 }
 
 // TestReserveMigInstancePerContainer asserts the ownership record is per container, not per pod: two
-// partitioned containers of one pod on one card each carve their own partition and keep their own
+// partitioned containers of one pod on one accelerator each carve their own partition and keep their own
 // marker, so one container's teardown cannot free the other's.
 func TestReserveMigInstancePerContainer(t *testing.T) {
 	podsDir := t.TempDir()
@@ -718,9 +718,9 @@ func TestReserveMigInstanceMarkerWriteFailure(t *testing.T) {
 	}
 }
 
-// TestReserveMigInstanceConcurrentSameCard asserts concurrent same-card reservations, serialized by
-// the per-card lock, resolve to distinct non-overlapping slots with no double-create, while a
-// sibling card proceeds in parallel.
+// TestReserveMigInstanceConcurrentSameCard asserts concurrent same-accelerator reservations,
+// serialized by the per-accelerator lock, resolve to distinct non-overlapping slots with no
+// double-create, while a sibling accelerator proceeds in parallel.
 func TestReserveMigInstanceConcurrentSameCard(t *testing.T) {
 	podsDir := t.TempDir()
 	drv := newFakeMigDriver()
@@ -820,7 +820,7 @@ func TestParseMarkerFailsClosed(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "a card-less record is an error",
+			name: "an accelerator-less record is an error",
 			write: func(t *testing.T, path string) {
 				m := good
 				m.Card = ""
@@ -830,9 +830,9 @@ func TestParseMarkerFailsClosed(t *testing.T) {
 		},
 		{
 			// Complete in every field, so nothing but the disagreement with its own file name can
-			// reject it — and it must, because the ownership set is grouped by the recorded card while
-			// the file belongs to the card its name encodes.
-			name: "a complete record naming another card is an error",
+			// reject it — and it must, because the ownership set is grouped by the recorded accelerator while
+			// the file belongs to the accelerator its name encodes.
+			name: "a complete record naming another accelerator is an error",
 			write: func(t *testing.T, path string) {
 				m := good
 				m.Card = testPPUUUID1
@@ -857,7 +857,7 @@ func TestParseMarkerFailsClosed(t *testing.T) {
 }
 
 // TestScanMarkers asserts the scan collects every parseable marker with its path, reports an
-// unparseable one instead of aborting, and that a corrupt file is attributed to the card its own
+// unparseable one instead of aborting, and that a corrupt file is attributed to the accelerator its own
 // name records — the only scope in which an unknowable ownership set changes a decision.
 func TestScanMarkers(t *testing.T) {
 	podsDir := t.TempDir()
@@ -893,8 +893,8 @@ func TestScanMarkers(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "pod-c", uid, "the owner parses from the path even when the record does not")
 
-	// A path naming no card leaves the scope of what is unknown itself unknown, so it darkens every
-	// card; a path that is not a marker file at marker depth names no owner either.
+	// A path naming no accelerator leaves the scope of what is unknown itself unknown, so it darkens every
+	// accelerator; a path that is not a marker file at marker depth names no owner either.
 	nameless := markerPath(podsDir, "pod-d", "c", "")
 	_, ok = cardFromMarkerPath(nameless)
 	assert.False(t, ok)
@@ -948,33 +948,34 @@ func TestProfileGeometry(t *testing.T) {
 	}
 }
 
-// TestAllocatedCards asserts the allocated cards are returned in devs order — the order every
-// container's partition list is assembled in — and that an unallocated card is left out.
-func TestAllocatedCards(t *testing.T) {
+// TestAllocatedAccelerators asserts the allocated accelerators are returned in devs order — the
+// order every container's partition list is assembled in — and that an unallocated accelerator is
+// left out.
+func TestAllocatedAccelerators(t *testing.T) {
 	devs := theadDevices(testProfile, 1, 2, testPPUUUID0, testPPUUUID1)
 
 	both := map[deviceplugin.Resource]int32{
 		{Group: "ppu", Device: testPPUUUID1}: 1,
 		{Group: "ppu", Device: testPPUUUID0}: 1,
 	}
-	assert.Equal(t, []string{testPPUUUID0, testPPUUUID1}, allocatedCards(devs, both))
+	assert.Equal(t, []string{testPPUUUID0, testPPUUUID1}, allocatedAccelerators(devs, both))
 
 	one := map[deviceplugin.Resource]int32{{Group: "ppu", Device: testPPUUUID1}: 1}
-	assert.Equal(t, []string{testPPUUUID1}, allocatedCards(devs, one))
+	assert.Equal(t, []string{testPPUUUID1}, allocatedAccelerators(devs, one))
 
-	// A resource naming another group is not this group's card.
+	// A resource naming another group is not this group's accelerator.
 	other := map[deviceplugin.Resource]int32{{Group: "gpu", Device: testPPUUUID0}: 1}
-	assert.Empty(t, allocatedCards(devs, other))
+	assert.Empty(t, allocatedAccelerators(devs, other))
 }
 
-func TestResourceForCard(t *testing.T) {
+func TestResourceForAccelerator(t *testing.T) {
 	devs := theadDevices(testProfile, 1, 2, testPPUUUID0)
 	assert.Equal(t,
 		deviceplugin.Resource{Group: "ppu", Device: testPPUUUID0},
-		resourceForCard(devs, testPPUUUID0))
+		resourceForAccelerator(devs, testPPUUUID0))
 	assert.Equal(t,
 		deviceplugin.Resource{Device: testPPUUUID1},
-		resourceForCard(devs, testPPUUUID1))
+		resourceForAccelerator(devs, testPPUUUID1))
 }
 
 // TestFakeDriverBusyDestroy pins the seam's busy-destroy contract the reclaim loop reads with

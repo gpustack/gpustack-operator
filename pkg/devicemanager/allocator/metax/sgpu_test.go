@@ -1,6 +1,7 @@
 package metax
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -189,19 +190,19 @@ func Test_reserveSlice_indexDerivation(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	mgr := newFakeMgr()
 
-	// First slice on card 0 -> index 0.
+	// First slice on accelerator 0 -> index 0.
 	r0, err := reserveSlice(mgr, "uid-a", "train", testBDF0, 50, 1024, false)
 	require.NoError(t, err)
 	assert.Equal(t, 0, r0.index)
 	assert.True(t, mgr.ensured[testBDF0], "first slice ensures sgpu model")
 	assert.Equal(t, schedFixedShare, mgr.sched[testBDF0], "first slice sets fixed-share")
 
-	// Second slice on the SAME card -> index 1 (lowest free).
+	// Second slice on the SAME accelerator -> index 1 (lowest free).
 	r1, err := reserveSlice(mgr, "uid-b", "train", testBDF0, 50, 1024, false)
 	require.NoError(t, err)
 	assert.Equal(t, 1, r1.index)
 
-	// Slice on a DIFFERENT card -> index 0 again.
+	// Slice on a DIFFERENT accelerator -> index 0 again.
 	r2, err := reserveSlice(mgr, "uid-c", "train", testBDF1, 50, 1024, false)
 	require.NoError(t, err)
 	assert.Equal(t, 0, r2.index)
@@ -229,7 +230,7 @@ func Test_reserveSlice_idempotentReuseAndFailClosed(t *testing.T) {
 	assert.Equal(t, 0, r0.index)
 	assert.Equal(t, 1, mgr.creates)
 
-	// Re-Allocate the same pod+container+card+cores+mem: reuse, no new subdevice.
+	// Re-Allocate the same pod+container+accelerator+cores+mem: reuse, no new subdevice.
 	r1, err := reserveSlice(mgr, "uid-a", "train", testBDF0, 60, 2048, false)
 	require.NoError(t, err)
 	assert.Equal(t, 0, r1.index)
@@ -257,7 +258,7 @@ func Test_reserveSlice_wholeCard(t *testing.T) {
 	assert.Empty(t, res.envValue, "whole card injects no METAX_SGPUS entry")
 	assert.Equal(t, 0, mgr.creates, "whole card creates no sgpu subdevice")
 
-	// The occupancy marker is written with the whole-card sentinel index.
+	// The occupancy marker is written with the whole-accelerator sentinel index.
 	m, err := parseMarker(markerPath("uid-whole", "train"))
 	require.NoError(t, err)
 	assert.True(t, m.wholeCard())
@@ -268,7 +269,7 @@ func Test_reserveSlice_wholeCard(t *testing.T) {
 	assert.True(t, res.wholeCard)
 	assert.Equal(t, 0, mgr.creates)
 
-	// A partial slice cannot land on a card already taken whole, and vice versa.
+	// A partial slice cannot land on an accelerator already taken whole, and vice versa.
 	_, err = reserveSlice(mgr, "uid-partial", "train", testBDF0, 50, 1024, false)
 	require.Error(t, err)
 }
@@ -363,7 +364,7 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 		assert.True(t, mgr.has(testBDF0, 5), "a live-UID marker-less subdevice is never destroyed")
 	})
 
-	t.Run("undecodable alias on a drained card reclaimed", func(t *testing.T) {
+	t.Run("undecodable alias on a drained accelerator reclaimed", func(t *testing.T) {
 		redirectLogicalSliceDirs(t)
 		mgr := newFakeMgr()
 		mgr.seed(testBDF0, 5, "")            // driver did not expose the operator's alias
@@ -378,10 +379,10 @@ func Test_reclaim_markerLessOrphan(t *testing.T) {
 		assert.False(t, mgr.has(testBDF1, 2))
 	})
 
-	t.Run("undecodable alias on a card with a live pod left intact", func(t *testing.T) {
+	t.Run("undecodable alias on an accelerator with a live pod left intact", func(t *testing.T) {
 		redirectLogicalSliceDirs(t)
 		mgr := newFakeMgr()
-		// A live pod holds a slice on the card, plus an unidentifiable subdevice (could be
+		// A live pod holds a slice on the accelerator, plus an unidentifiable subdevice (could be
 		// that pod's own create-before-marker crash orphan) — never destroy it.
 		_, err := reserveSlice(mgr, "pod-live", "train", testBDF0, 60, 1024, false)
 		require.NoError(t, err)
@@ -495,5 +496,63 @@ func Test_reserveSlice_reclaim_race(t *testing.T) {
 	for _, sd := range list {
 		assert.Falsef(t, seen[sd.index], "index %d double-booked", sd.index)
 		seen[sd.index] = true
+	}
+}
+
+// TestLegacyMarkerRoundTrip pins the marker's ON-DISK format (F9/AC9.1). sgpuMarker.CardBDF is
+// serialized under the "cardBDF" JSON key, and markers carrying it are already on real nodes: a
+// renamed tag
+// would make every pre-upgrade marker unreadable and break retry, visibility, adoption and
+// reclamation. The other marker tests write and read through the same struct, so they stay green
+// under a coordinated tag rename; this one feeds a literal pre-refactor document instead, and
+// asserts the exact legacy key still comes back out.
+func TestLegacyMarkerRoundTrip(t *testing.T) {
+	testCases := []struct {
+		name string
+		doc  string
+		want sgpuMarker
+	}{
+		{
+			name: "pre-refactor partial-slice marker",
+			doc: `{"podUID":"pod-a","container":"train","cardBDF":"0000:3d:00.0",` +
+				`"index":2,"coresPct":25,"memMiB":16384}`,
+			want: sgpuMarker{
+				PodUID:    "pod-a",
+				Container: "train",
+				CardBDF:   "0000:3d:00.0",
+				Index:     2,
+				CoresPct:  25,
+				MemMiB:    16384,
+			},
+		},
+		{
+			name: "pre-refactor whole-accelerator occupancy marker",
+			doc: `{"memMiB":32768,"coresPct":100,"index":-1,"cardBDF":"0000:3e:00.0",` +
+				`"container":"infer","podUID":"pod-b"}`,
+			want: sgpuMarker{
+				PodUID:    "pod-b",
+				Container: "infer",
+				CardBDF:   "0000:3e:00.0",
+				Index:     wholeCardIndex,
+				CoresPct:  100,
+				MemMiB:    32768,
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), markerName)
+			require.NoError(t, os.WriteFile(path, []byte(tc.doc), 0o600))
+
+			got, err := parseMarker(path)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, got, "every identity must survive the legacy document")
+
+			data, err := json.Marshal(got)
+			require.NoError(t, err)
+			assert.Contains(t, string(data), `"cardBDF":`, "the legacy on-disk key must be re-emitted")
+			assert.NotContains(t, string(data), `"accelerator"`, "no vocabulary key may leak on disk")
+		})
 	}
 }

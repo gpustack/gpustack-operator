@@ -13,7 +13,7 @@ import (
 	"gpustack.ai/gpustack/pkg/nodefeature"
 )
 
-// deriveSlicedProfiles turns a probed set of GPU-instance profiles into the card's
+// deriveSlicedProfiles turns a probed set of GPU-instance profiles into the accelerator's
 // physical-slice profile inventory: it drops the media-engine and graphics variants,
 // normalizes each kept profile's name into the bare geometry its resource key carries, and
 // derives the slice geometry. It returns the inventory together with one human-readable
@@ -23,7 +23,7 @@ import (
 // infos holds one entry per successfully probed profile id; the caller skips ids the driver
 // reports as unsupported.
 //
-// placementsFor returns a profile's full empty-card legal placement set to cache in
+// placementsFor returns a profile's full empty-accelerator legal placement set to cache in
 // Placements, keyed by the profile's own probed profile id — the authoritative id, since the
 // vendor does not assign its ids the upstream slice-count meaning, so profiles of equal
 // compute width are told apart by id alone. It is injected so this derivation stays
@@ -36,8 +36,8 @@ import (
 // matches a leftover instance's identity by and creates an instance with, so a span this
 // derivation computed rather than read would be a guess in the one place a guess can hand out
 // somebody else's partition. Nothing else can supply it — a profile's compute-slice count
-// cannot, and dividing card memory by an assumed slice count assumes exactly the number that
-// cannot be recovered. An absent placement set here always means "the driver enumerated none"
+// cannot, and dividing accelerator memory by an assumed slice count assumes exactly the number
+// that cannot be recovered. An absent placement set here always means "the driver enumerated none"
 // — a profile whose placement query failed never reaches this derivation, and both cost the
 // profile its place in the inventory rather than only one of them.
 //
@@ -57,7 +57,7 @@ import (
 //     entirely rather than aggregated.
 func deriveSlicedProfiles(
 	infos []hgml.GpuInstanceProfileInfo_v3,
-	placementsFor func(giProfileID uint32) []device.AcceleratorPhysicalPlacement,
+	placementsFor func(giProfileID uint32) []device.AcceleratorPlacement,
 ) (profiles []device.AcceleratorPhysicalSlicedProfile, rejected []string) {
 	seen := make(map[string]int, len(infos))
 	withheld := make(map[string]struct{}, len(infos))
@@ -76,7 +76,7 @@ func deriveSlicedProfiles(
 
 		// Refused before the name bookkeeping below, so a profile with no span never claims a
 		// name a sibling id could still publish, and never withholds one.
-		var placements []device.AcceleratorPhysicalPlacement
+		var placements []device.AcceleratorPlacement
 		if placementsFor != nil {
 			placements = placementsFor(info.Id)
 		}
@@ -133,14 +133,14 @@ func profileEqual(a, b device.AcceleratorPhysicalSlicedProfile) bool {
 		slices.Equal(a.Placements, b.Placements)
 }
 
-// rejectDivergentGroupProfiles withholds, from every card of one group, each profile name the
-// group's cards do not agree on, and returns one reason per withheld name for the caller to
-// log. It runs before the shared group aggregation, which merges profiles by name, sums their
-// per-card counts and keeps the first card's memory — so two cards exposing one name with
-// different geometry, memory, count or placements would publish capacity and Kueue credits
-// that describe neither card. Each card's physical ceiling is recomputed from what survives,
-// so a ceiling can never outlive the profile it was taken from, and a card left with no
-// profile reports no physical capability rather than an empty one.
+// rejectDivergentGroupProfiles withholds, from every accelerator of one group, each profile name
+// the group's accelerators do not agree on, and returns one reason per withheld name for the
+// caller to log. It runs before the shared group aggregation, which merges profiles by name, sums
+// their per-accelerator counts and keeps the first accelerator's memory — so two accelerators
+// exposing one name with different geometry, memory, count or placements would publish capacity
+// and Kueue credits that describe neither. Each accelerator's physical ceiling is recomputed from
+// what survives, so a ceiling can never outlive the profile it was taken from, and an accelerator
+// left with no profile reports no physical capability rather than an empty one.
 func rejectDivergentGroupProfiles(group *device.DevicesGroup) (rejected []string) {
 	first := make(map[string]device.AcceleratorPhysicalSlicedProfile)
 	divergent := make(map[string]struct{})
@@ -184,13 +184,13 @@ func rejectDivergentGroupProfiles(group *device.DevicesGroup) (rejected []string
 // migPlacementsFromHGML converts the vendor library's GPU-instance placement slots to the
 // operator placement type. It returns nil for an empty input so a profile with no enumerated
 // placements omits the field.
-func migPlacementsFromHGML(slots []hgml.GpuInstancePlacement) []device.AcceleratorPhysicalPlacement {
+func migPlacementsFromHGML(slots []hgml.GpuInstancePlacement) []device.AcceleratorPlacement {
 	if len(slots) == 0 {
 		return nil
 	}
-	out := make([]device.AcceleratorPhysicalPlacement, len(slots))
+	out := make([]device.AcceleratorPlacement, len(slots))
 	for i := range slots {
-		out[i] = device.AcceleratorPhysicalPlacement{
+		out[i] = device.AcceleratorPlacement{
 			Start:  int32(slots[i].Start),
 			Length: int32(slots[i].Size),
 		}
@@ -198,12 +198,12 @@ func migPlacementsFromHGML(slots []hgml.GpuInstancePlacement) []device.Accelerat
 	return out
 }
 
-// migPlacementsByProfile resolves every probed profile's empty-card legal placement set up
+// migPlacementsByProfile resolves every probed profile's empty-accelerator legal placement set up
 // front, and returns only the profiles whose query the driver actually answered, together
 // with their placement sets keyed by the profile's own probed profile id.
 //
 // Separating a driver that enumerates no placement from a query that failed is the point: a
-// lookup collapsing a failure to an empty set makes an unreadable card indistinguishable
+// lookup collapsing a failure to an empty set makes an unreadable accelerator indistinguishable
 // from a placement-free one, and the derivation would then publish a span from unverified
 // geometry. A profile whose query failed is therefore withheld from the returned set — it
 // could not be admitted without a placement set anyway — and named in the returned error,
@@ -214,9 +214,9 @@ func migPlacementsFromHGML(slots []hgml.GpuInstancePlacement) []device.Accelerat
 func migPlacementsByProfile(
 	infos []hgml.GpuInstanceProfileInfo_v3,
 	query func(giProfileID uint32) ([]hgml.GpuInstancePlacement, hgml.Return),
-) ([]hgml.GpuInstanceProfileInfo_v3, map[uint32][]device.AcceleratorPhysicalPlacement, error) {
+) ([]hgml.GpuInstanceProfileInfo_v3, map[uint32][]device.AcceleratorPlacement, error) {
 	answered := make([]hgml.GpuInstanceProfileInfo_v3, 0, len(infos))
-	byID := make(map[uint32][]device.AcceleratorPhysicalPlacement, len(infos))
+	byID := make(map[uint32][]device.AcceleratorPlacement, len(infos))
 	var errs []error
 	for _, info := range infos {
 		slots, ret := query(info.Id)
@@ -247,9 +247,9 @@ func isMediaOrGraphicsVariant(info hgml.GpuInstanceProfileInfo_v3, name string) 
 // driverReportsAbsent reports whether a non-success return is the driver ANSWERING that it has
 // nothing at the id asked about, rather than failing to answer at all. It draws the same line the
 // placement resolution above rests on: an id the driver disclaims is inventory information, while an
-// id it could not read leaves the inventory short of a profile the card may well offer. The two are
-// worth separating because the inventory is published either way, and a short one is
-// indistinguishable from a card that never had the profile.
+// id it could not read leaves the inventory short of a profile the accelerator may well offer. The
+// two are worth separating because the inventory is published either way, and a short one is
+// indistinguishable from an accelerator that never had the profile.
 func driverReportsAbsent(ret hgml.Return) bool {
 	switch ret {
 	case hgml.ERROR_NOT_SUPPORTED, hgml.ERROR_NOT_FOUND, hgml.ERROR_INVALID_ARGUMENT:
@@ -261,9 +261,10 @@ func driverReportsAbsent(ret hgml.Return) bool {
 
 // probeMigProfiles walks the whole GPU-instance profile-id space and separates the three answers a
 // probe can give: a profile, an id the driver disclaims, and an id it could not answer for. The
-// disclaimed ids are the ordinary case — the space is a fixed enumeration and a card offers a few of
-// it — so they are skipped without comment, and only the unanswered ones are joined into the returned
-// error, which leaves that error meaning "this card's inventory is short" and nothing else.
+// disclaimed ids are the ordinary case — the space is a fixed enumeration and an accelerator offers
+// a few of it — so they are skipped without comment, and only the unanswered ones are joined into the
+// returned error, which leaves that error meaning "this accelerator's inventory is short" and nothing
+// else.
 //
 // probe is injected so the walk stays hardware-free and unit-testable, as the placement resolution is.
 func probeMigProfiles(
@@ -284,17 +285,18 @@ func probeMigProfiles(
 	return infos, errors.Join(unreadable...)
 }
 
-// detectMigProfiles probes every GPU-instance profile id on the device and returns the card's
+// detectMigProfiles probes every GPU-instance profile id on the device and returns the accelerator's
 // physical-slice profile inventory. An id the driver disclaims is skipped as the answer it is; every
 // id that answers is carried by its own value, never by one derived from it.
 //
 // An id the driver could not answer for is also skipped — a profile cannot be published without the
 // geometry the probe carries — but it is reported rather than dropped in silence, because what it
-// costs is not local. A profile missing from this inventory is missing from the card's Devices
-// record, from the node's capacity keys, from its flavor and from its InstanceType: a Pod already
-// holding a partition of that profile stops being able to have it named, and a new request for it is
-// refused by admission as a profile the card does not offer. The disclaimed ids are filtered out
-// first precisely so that what remains is a driver fault worth an error rather than a routine answer.
+// costs is not local. A profile missing from this inventory is missing from the accelerator's
+// Devices record, from the node's capacity keys, from its flavor and from its InstanceType: a Pod
+// already holding a partition of that profile stops being able to have it named, and a new request
+// for it is refused by admission as a profile the accelerator does not offer. The disclaimed ids are
+// filtered out first precisely so that what remains is a driver fault worth an error rather than a
+// routine answer.
 func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.AcceleratorPhysicalSlicedProfile {
 	infos, err := probeMigProfiles(dev.GetGpuInstanceProfileInfo)
 	if err != nil {
@@ -304,8 +306,8 @@ func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.Accelerator
 				"InstanceType, so a partition of it can stop being nameable and a new request for it is refused")
 	}
 
-	// Cache each profile's empty-card legal placement set at detect time so the reconciler
-	// can derive the card's remaining profiles by pure arithmetic (subtracting the occupied
+	// Cache each profile's empty-accelerator legal placement set at detect time so the reconciler
+	// can derive the accelerator's remaining profiles by pure arithmetic (subtracting the occupied
 	// intervals it reconstructs from Pod annotations) without any per-reconcile device query.
 	//
 	// A profile whose placement query failed is withheld rather than published from an
@@ -317,7 +319,7 @@ func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.Accelerator
 	}
 
 	profiles, rejected := deriveSlicedProfiles(answered,
-		func(giProfileID uint32) []device.AcceleratorPhysicalPlacement {
+		func(giProfileID uint32) []device.AcceleratorPlacement {
 			return placementsByID[giProfileID]
 		})
 	for _, reason := range rejected {
@@ -326,9 +328,9 @@ func detectMigProfiles(dev hgml.Device, logger klog.Logger) []device.Accelerator
 	return profiles
 }
 
-// physicalSliced presents a card's detected partition profiles as its physical slicing
+// physicalSliced presents an accelerator's detected partition profiles as its physical slicing
 // capability, and reports no capability at all when the driver offered none: an inventory
-// with nothing in it describes a card that cannot be partitioned, and advertising the
+// with nothing in it describes an accelerator that cannot be partitioned, and advertising the
 // capability anyway would publish a family with nothing behind it.
 func physicalSliced(profiles []device.AcceleratorPhysicalSlicedProfile) device.AcceleratorPhysicalSliced {
 	if len(profiles) == 0 {
@@ -340,7 +342,7 @@ func physicalSliced(profiles []device.AcceleratorPhysicalSlicedProfile) device.A
 	}
 }
 
-// maxProfileCount returns the card's physical-slice ceiling — the largest per-profile Count.
+// maxProfileCount returns the accelerator's physical-slice ceiling — the largest per-profile Count.
 // Zero for an empty profile list.
 func maxProfileCount(profiles []device.AcceleratorPhysicalSlicedProfile) int32 {
 	var ceiling int32

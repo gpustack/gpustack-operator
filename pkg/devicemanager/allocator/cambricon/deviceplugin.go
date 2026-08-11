@@ -54,7 +54,7 @@ type aggregated struct {
 	logger     klog.Logger
 	servers    []deviceplugin.Server
 	kubeSocket string
-	// sliced reports whether a Sliced server is registered, gating the per-vendor
+	// sliced reports whether a Sliced server is registered, gating the per-manufacturer
 	// stateful sMLU reclaim loop.
 	sliced bool
 }
@@ -164,12 +164,13 @@ func (s *server) GetContainerAllocateResponse(
 // getSlicedContainerAllocateResponse renders the sMLU logical-slicing injection for a sliced
 // container: it reserves a cnDev sMLU instance (a profile with the compute quota + VRAM
 // cap, instantiated) via the driver seam, writing the correlation + profile marker under
-// the pod work dir, and injects the instance's device node plus the card's control nodes.
+// the pod work dir, and injects the instance's device node plus the accelerator's control nodes.
 // A VIRTUAL_DEVICES env is set as the fallback for --use-runtime deployments (sMLU/mim do
 // not support CDI).
 //
-// An sMLU request is 1 pod / 1 container / 1 card, so a multi-card sliced allocation is
-// rejected (the Ascend single-card pattern) rather than silently slicing only one.
+// An sMLU request is 1 pod / 1 container / 1 accelerator, so a multi-accelerator sliced
+// allocation is rejected (the Ascend single-accelerator pattern) rather than silently slicing
+// only one.
 func (s *server) getSlicedContainerAllocateResponse(
 	pod *core.Pod,
 	ctr *core.Container,

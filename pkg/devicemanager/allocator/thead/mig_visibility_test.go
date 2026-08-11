@@ -22,8 +22,8 @@ const (
 	visSidecar = "sshd"
 )
 
-// visInstance is the partition the owner holds on the first card, and visInstance1 the one it holds
-// on the second — matching the node fixtures the actuator tests already use for those cards.
+// visInstance is the partition the owner holds on the first accelerator, and visInstance1 the one it
+// holds on the second — matching the node fixtures the actuator tests already use for those two.
 var (
 	visInstance = migInstance{
 		GiID: 1, CiID: 1, ProfileID: testProfileID, ComputeSlices: 1,
@@ -35,7 +35,7 @@ var (
 	}
 )
 
-// seedOwnedPartition puts a card into the state the owner's own Allocate left behind: a live
+// seedOwnedPartition puts an accelerator into the state the owner's own Allocate left behind: a live
 // partition plus the ownership marker naming it.
 func seedOwnedPartition(t *testing.T, drv *fakeMigDriver, podsDir, cardUUID string, inst migInstance) {
 	t.Helper()
@@ -43,7 +43,7 @@ func seedOwnedPartition(t *testing.T, drv *fakeMigDriver, podsDir, cardUUID stri
 	writeMarkerFixture(t, podsDir, ownerMarker(cardUUID, inst))
 }
 
-// ownerMarker is the marker the owner container's reservation would have written for a card.
+// ownerMarker is the marker the owner container's reservation would have written for an accelerator.
 func ownerMarker(cardUUID string, inst migInstance) migMarker {
 	m := selfMarker(visPodUID, cardUUID, inst)
 	m.Container = visOwner
@@ -57,10 +57,10 @@ func visibilityPod() (*core.Pod, *core.Container) {
 }
 
 // TestGetPhysicalSlicedVisibilityResponse covers the co-allocating container's partition resolution:
-// the happy path hands it the very node set the owner's own response carried, in the same card
+// the happy path hands it the very node set the owner's own response carried, in the same accelerator
 // order, and every record the resolver cannot prove still describes a live partition of the owner's
-// on that card fails the allocation closed — answering with the parent card would grant a
-// device-cgroup access over every partition carved on it, including other tenants'.
+// on that accelerator fails the allocation closed — answering with the parent accelerator would
+// grant a device-cgroup access over every partition carved on it, including other tenants'.
 func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -69,13 +69,13 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 		setup func(t *testing.T, drv *fakeMigDriver, podsDir string)
 		// wantNodes are the device-node names, in order, relative to the redirected /dev root.
 		wantNodes []string
-		// breakOrdinal drops the first card's recorded minor number, leaving nothing to prove that its
-		// ordinal addresses the card the detector measured.
+		// breakOrdinal drops the first accelerator's recorded minor number, leaving nothing to prove that its
+		// ordinal addresses the accelerator the detector measured.
 		breakOrdinal bool
 		wantErr      string
 	}{
 		{
-			name:  "one card is shown the owner's partition, not the parent card alone",
+			name:  "one accelerator is shown the owner's partition, not the parent accelerator alone",
 			cards: []string{testPPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID0, visInstance)
@@ -90,7 +90,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 		{
 			// Seeded in reverse, so the order can only come from devs — the order the owner's own
 			// response used, which is the whole point of the two responses reading the same.
-			name:  "two cards join in devs order, not marker-write order",
+			name:  "two accelerators join in devs order, not marker-write order",
 			cards: []string{testPPUUUID0, testPPUUUID1},
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID1, visInstance1)
@@ -130,19 +130,19 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			wantErr: "ownership marker",
 		},
 		{
-			name:  "a marker recording another card fails closed",
+			name:  "a marker recording another accelerator fails closed",
 			cards: []string{testPPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				drv.seedLive(testPPUUUID0, visInstance)
 				createdFixture().write(t)
-				// Written at the first card's own path, but recording the second card.
+				// Written at the first accelerator's own path, but recording the second accelerator.
 				m := ownerMarker(testPPUUUID1, visInstance)
 				require.NoError(t, writeMarker(markerPath(podsDir, visPodUID, visOwner, testPPUUUID0), m))
 			},
 			wantErr: "records card",
 		},
 		{
-			name:  "a profile the card no longer offers fails closed",
+			name:  "a profile the accelerator no longer offers fails closed",
 			cards: []string{testPPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				drv.seedLive(testPPUUUID0, visInstance)
@@ -191,7 +191,7 @@ func TestGetPhysicalSlicedVisibilityResponse(t *testing.T) {
 			wantErr: "read capability file",
 		},
 		{
-			name:  "a card the detector recorded no minor number for is refused rather than addressed",
+			name:  "an accelerator the detector recorded no minor number for is refused rather than addressed",
 			cards: []string{testPPUUUID0},
 			setup: func(t *testing.T, drv *fakeMigDriver, podsDir string) {
 				seedOwnedPartition(t, drv, podsDir, testPPUUUID0, visInstance)
@@ -278,7 +278,7 @@ func TestGetPhysicalSlicedVisibilityResponseMatchesOwner(t *testing.T) {
 }
 
 // TestGetPhysicalSlicedVisibilityResponseRefusals pins the states the resolution refuses before it
-// reads any record, each an error rather than a container shown the parent card.
+// reads any record, each an error rather than a container shown the parent accelerator.
 func TestGetPhysicalSlicedVisibilityResponseRefusals(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -293,7 +293,7 @@ func TestGetPhysicalSlicedVisibilityResponseRefusals(t *testing.T) {
 			wantErr:   "mig driver not configured",
 		},
 		{
-			name:      "no card was allocated",
+			name:      "no accelerator was allocated",
 			allocated: map[deviceplugin.Resource]int32{},
 			wantErr:   "no allocated card",
 		},
@@ -319,9 +319,9 @@ func TestGetPhysicalSlicedVisibilityResponseRefusals(t *testing.T) {
 	}
 }
 
-// TestGetPhysicalSlicedVisibilityResponseCardStateError asserts a card state the driver cannot prove
-// complete is an error, never an empty card — reading a live partition as absent here would deny a
-// legitimate co-allocation, and reading one as present would be worse.
+// TestGetPhysicalSlicedVisibilityResponseCardStateError asserts an accelerator state the driver
+// cannot prove complete is an error, never an empty accelerator — reading a live partition as absent
+// here would deny a legitimate co-allocation, and reading one as present would be worse.
 func TestGetPhysicalSlicedVisibilityResponseCardStateError(t *testing.T) {
 	_, podsDir := redirectNodeRoots(t)
 	s, drv := newPartitionedServer(testPPUUUID0)

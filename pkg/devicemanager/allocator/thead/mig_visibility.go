@@ -16,19 +16,19 @@ import (
 var _ deviceplugin.PhysicalSlicedResponder = (*server)(nil)
 
 // GetPhysicalSlicedVisibilityResponse returns the device specifications showing the partitions the
-// owner container already holds on the allocated cards, for the container co-allocating them. The
-// identity comes from the owner's on-disk ownership markers — the record that survives a
+// owner container already holds on the allocated accelerators, for the container co-allocating
+// them. The identity comes from the owner's on-disk ownership markers — the record that survives a
 // device-manager restart — and each one is proven to still describe a live partition before its
 // nodes are injected.
 //
 // The response carries device nodes rather than an environment variable: this vendor has no
 // container-runtime hook, so the nodes are the whole of the container's access. The co-allocating
 // container is given exactly what the owner's own response carried — the shared control nodes once,
-// then each card's own node and the capability nodes of its partition's GPU and compute instances —
-// resolved through the same helpers the actuator uses, and in the same card order, so the two
-// responses are assembled the same way and read the same.
+// then each accelerator's own node and the capability nodes of its partition's GPU and compute
+// instances — resolved through the same helpers the actuator uses, and in the same accelerator
+// order, so the two responses are assembled the same way and read the same.
 //
-// It fails closed on anything it cannot prove. Naming the parent card instead would grant the
+// It fails closed on anything it cannot prove. Naming the parent accelerator instead would grant the
 // co-allocating container every partition carved on it, including other tenants'.
 func (s *server) GetPhysicalSlicedVisibilityResponse(
 	_ context.Context,
@@ -43,14 +43,14 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	}
 
 	// Resolve in devs order — the order the owner's own response used — so the co-allocating
-	// container's device set is identical to the owner's, card for card.
-	cards := allocatedCards(devs, allocated)
+	// container's device set is identical to the owner's, accelerator for accelerator.
+	cards := allocatedAccelerators(devs, allocated)
 	if len(cards) == 0 {
 		return nil, fmt.Errorf("no allocated card for visibility container %q", ctr.Name)
 	}
 
-	// The shared control nodes are needed by every card's partition and are per container rather
-	// than per card, so they are verified once, up front.
+	// The shared control nodes are needed by every accelerator's partition and are per container
+	// rather than per accelerator, so they are verified once, up front.
 	sharedPaths := sharedControlNodePaths()
 	devices := make([]*deviceplugin.DeviceSpec, 0, len(sharedPaths)+3*len(cards))
 	for _, path := range sharedPaths {
@@ -62,11 +62,11 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	}
 
 	for _, cardUUID := range cards {
-		// The card's ordinal names both its device node and its procfs capability subtree, and it is
-		// proven to reach the card the detector measured before either is built — through the same guard
-		// the actuator cleared, so this response addresses the card exactly as the owner's own did.
-		// Addressing an unproven ordinal would show this container a neighboring card's partition, which
-		// is the very isolation this response exists to keep.
+		// The accelerator's card ordinal names both its device node and its procfs capability subtree,
+		// and it is proven to reach the accelerator the detector measured before either is built —
+		// through the same guard the actuator cleared, so this response addresses the accelerator exactly
+		// as the owner's own did. Addressing an unproven ordinal would show this container a neighboring
+		// accelerator's partition, which is the very isolation this response exists to keep.
 		ordinal, cardNode, err := requireCardNode(devs, cardUUID)
 		if err != nil {
 			return nil, err
@@ -87,9 +87,10 @@ func (s *server) GetPhysicalSlicedVisibilityResponse(
 	return &deviceplugin.ContainerAllocateResponse{Devices: devices}, nil
 }
 
-// liveOwnedInstance returns the partition the owner container holds on cardUUID: read from its
-// ownership marker, then verified against the card's live state. A missing, malformed, wrong-card,
-// unknown-profile, dead or id-reused record is an error, never a fallback.
+// liveOwnedInstance returns the partition the owner container holds on the accelerator cardUUID:
+// read from its ownership marker, then verified against that accelerator's live state. A missing,
+// malformed, wrong-accelerator, unknown-profile, dead or id-reused record is an error, never a
+// fallback.
 //
 // The instance returned is the marker's own, not the driver's: the driver enumerates GPU instances,
 // which cannot report the compute instance inside one, so the seam's live record carries no
@@ -106,16 +107,16 @@ func (s *server) liveOwnedInstance(devs *workercore.Devices, podUID, owner, card
 	if m.Card != cardUUID {
 		return migInstance{}, fmt.Errorf("marker %q records card %s, not %s: fail closed", path, m.Card, cardUUID)
 	}
-	// The card's own detect-time capability supplies the geometry the state read needs; a card that
-	// no longer offers the recorded profile cannot be asked about it, so fail closed rather than
-	// guess.
+	// The accelerator's own detect-time capability supplies the geometry the state read needs; an
+	// accelerator that no longer offers the recorded profile cannot be asked about it, so fail closed
+	// rather than guess.
 	computeSlices, memorySlices, ok := profileGeometry(devs, cardUUID, m.Profile)
 	if !ok {
 		return migInstance{}, fmt.Errorf("card %s no longer offers the profile %q recorded by marker %q: fail closed",
 			cardUUID, m.Profile, path)
 	}
 
-	// Snapshot the card's state under the card lock — the same critical section reserveMigInstance
+	// Snapshot the accelerator's state under its lock — the same critical section reserveMigInstance
 	// takes — so a concurrent create or reclaim cannot tear this one read. The checks below run on
 	// the snapshot, outside the lock: they can only turn a still-live partition into a rejection,
 	// never the reverse.

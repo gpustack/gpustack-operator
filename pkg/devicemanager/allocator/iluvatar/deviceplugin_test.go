@@ -41,7 +41,7 @@ func redirectLogicalSliceDirs(t *testing.T) string {
 	return root
 }
 
-// iluvatarDevices builds a fixture with one group (memory drives the per-card VRAM limit)
+// iluvatarDevices builds a fixture with one group (memory drives the per-accelerator VRAM limit)
 // holding the given GPU UUIDs. corex presents a single CUDA-compatible driver level, so no
 // runtime version is needed — the sliced path mounts one HAMi-core libvgpu regardless.
 func iluvatarDevices(memoryMiB uint64, uuids ...string) *workercore.Devices {
@@ -62,7 +62,8 @@ func iluvatarDevices(memoryMiB uint64, uuids ...string) *workercore.Devices {
 }
 
 // slicedPod builds a sliced container requesting the decoupled compute and VRAM dimensions the
-// allocator reads: ".sliced.cores-percentage" (SM) and ".sliced.memory-percentage" (per-card VRAM).
+// allocator reads: ".sliced.cores-percentage" (SM) and ".sliced.memory-percentage" (per-accelerator
+// VRAM).
 func slicedPod(uid, ctrName string, coresPercent, memPercent int64) (*core.Pod, *core.Container) {
 	coresRes := nodefeature.GetAcceleratableSlicedCoresPercentageResourceName(Manufacturer)
 	memPctRes := nodefeature.GetAcceleratableSlicedMemoryPercentageResourceName(Manufacturer)
@@ -155,13 +156,14 @@ func TestNew_ServerSet(t *testing.T) {
 		"iluvatar declares no partition kind, so it registers no partitioned server")
 }
 
-// TestGetSlicedContainerAllocateResponse pins the single-card HAMi-core injection contract: the
-// compute (SM) and per-card VRAM limits, the shared cache, the quiet-by-default log level, and the
-// preload/lib mounts under ${OperatorLibDir}/iluvatar (one library, no CUDA-major subdir).
+// TestGetSlicedContainerAllocateResponse pins the single-accelerator HAMi-core injection contract:
+// the compute (SM) and per-accelerator VRAM limits, the shared cache, the quiet-by-default log
+// level, and the preload/lib mounts under ${OperatorLibDir}/iluvatar (one library, no CUDA-major
+// subdir).
 func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
-	// 32 GiB card. cores=25% SM, memory=50% VRAM (independent dimensions).
+	// 32 GiB accelerator. cores=25% SM, memory=50% VRAM (independent dimensions).
 	devs := iluvatarDevices(32768, testGPUUUID0)
 	pod, ctr := slicedPod("pod-uid-1", "train", 25, 50)
 	allocated := map[deviceplugin.Resource]int32{{Group: "bi150", Device: testGPUUUID0}: 1}
@@ -212,7 +214,7 @@ func TestGetSlicedContainerAllocateResponse(t *testing.T) {
 }
 
 // A sliced container with no compute dimension (.sliced.cores-percentage absent) gets the whole
-// card's 100% SM budget, mirroring SlicedCoresPercent's default.
+// accelerator's 100% SM budget, mirroring SlicedCoresPercent's default.
 func TestGetSlicedContainerAllocateResponse_DefaultCores(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -252,7 +254,7 @@ func TestGetSlicedContainerAllocateResponse_RespectsContainerLogLevel(t *testing
 }
 
 // A sliced container with no memory dimension (neither .sliced.memory-percentage nor
-// .sliced.memory-mib) must be rejected rather than silently given the whole card.
+// .sliced.memory-mib) must be rejected rather than silently given the whole accelerator.
 func TestGetSlicedContainerAllocateResponse_NoMemoryRequest(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	s := newSlicedServer()
@@ -278,7 +280,7 @@ func TestGetContainerAllocateResponse_Visibility(t *testing.T) {
 	}
 	devs := iluvatarDevices(32768, testGPUUUID0, testGPUUUID1)
 	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{Name: "sshd-pod", UID: types.UID("uid-vis")}}
-	// Only the first card is reserved to the workload; visibility must scope to exactly it.
+	// Only the first accelerator is reserved to the workload; visibility must scope to exactly it.
 	allocated := map[deviceplugin.Resource]int32{{Group: "bi150", Device: testGPUUUID0}: 1}
 
 	resp, err := s.GetContainerAllocateResponse(context.Background(), pod, nil, devs, allocated)

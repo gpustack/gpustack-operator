@@ -42,16 +42,9 @@ func New(opts device.DetectorOptions) device.Detector {
 	}
 }
 
+// Name, DetectAccelerator and MonitorAccelerator implement device.Detector.
 func (in *iluvatar) Name() string {
 	return Manufacturer
-}
-
-func (in *iluvatar) init() {
-	in.once.Do(func() {
-		if ret := in.ixml.Init(); !ret.IsSuccess() {
-			in.logger.Error(ret, "failed to initialize IXML library")
-		}
-	})
 }
 
 func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupList, err error) {
@@ -159,12 +152,13 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 			grpIndex = len(grpList) - 1
 		}
 
-		// The recorded minor number is what a card's device node is NAMED after on the vendors that
-		// build one from it (/dev/dri/card<minor> and friends), so it is left ABSENT when the driver
-		// cannot answer for it rather than substituted by the enumeration index: a substituted value is
-		// indistinguishable from a real minor at every later consumer, which would then build a device
-		// path out of a guess. No allocator of this vendor reads the field today; publishing a number
-		// the driver never gave is what the next consumer would inherit.
+		// The recorded minor number is what an accelerator's device node is NAMED after on the
+		// manufacturers that build one from it. "card" survives here only as the Linux DRM node name
+		// /dev/dri/card<minor>, which this repository does not own; the number is left ABSENT when the
+		// driver cannot answer for it rather than substituted by the enumeration index: a substituted
+		// value is indistinguishable from a real minor at every later consumer, which would then build
+		// a device path out of a guess. No allocator of this manufacturer reads the field today;
+		// publishing a number the driver never gave is what the next consumer would inherit.
 		var physicalIndexes []uint32
 		if minorNum, ret := dev.GetMinorNumber(); ret.IsSuccess() {
 			physicalIndexes = []uint32{minorNum}
@@ -180,7 +174,8 @@ func (in *iluvatar) DetectAccelerator(noPciCheck bool) (_ device.DevicesGroupLis
 		{
 			status.Unhealthy = memoryUnhealthy
 			// Logical (software) slicing via HAMi-core ld.preload; Iluvatar's native vcuda-core model
-			// is 1%-granular with 100 == a whole card, so the per-card slice ceiling is 100.
+			// is 1%-granular with 100 == a whole accelerator, so the per-accelerator slice ceiling
+			// is 100.
 			status.LogicalSliced = device.AcceleratorLogicalSliced{
 				Count:                     100,
 				CoresPercentageOvercommit: true,
@@ -342,6 +337,14 @@ func (in *iluvatar) MonitorAccelerator(noPciCheck bool) (_ device.MetricsGroupLi
 	}
 
 	return grpList, nil
+}
+
+func (in *iluvatar) init() {
+	in.once.Do(func() {
+		if ret := in.ixml.Init(); !ret.IsSuccess() {
+			in.logger.Error(ret, "failed to initialize IXML library")
+		}
+	})
 }
 
 func stringifyRuntimeVersion(rtVer int32) string {
