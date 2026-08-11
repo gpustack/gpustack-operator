@@ -81,6 +81,8 @@ Each case is self-contained; its header (see **Case header contract**) states go
 | 35 | Ascend logical-slice placement: claims pack, spill only on a misfit, and never cross into an exclusive card | `pkg/deviceplugin/{server,helper}.go`, `pkg/devicemanager/allocator/ascend/**`, `pkg/worker/webhooks/worker/pod.go` | `cases/case-35.sh` | yes (confirm) | real **Ascend** hardware, >=3 logically sliceable cards on one node with >=1 free at start, **+ a CANN-family image** · skips: <3 logically sliceable ascend cards; fails setup: no free card |
 | 36 | Node-pinned Instance with additional volumes, and the host-access gates | `pkg/worker/controllers/worker/instance.go`, `pkg/worker/webhooks/worker/instance.go`, `pkg/worker/settings/value.go`, `api/worker/v1alpha1/instance.go` | `cases/case-36.sh` | yes (confirm) | any + a default StorageClass · sub-checks skip: <2 schedulable managed nodes (the pin-chose-the-node reading), no `ssh`/`ssh-keygen` (the sidecar and over-SSH readings) |
 | 37 | Instance metrics subresource serves the current instance-scoped utilization | `pkg/worker/extensionapis/worker/**`, `pkg/devicemanager/**`, `pkg/utils/datax/snapshot.go`, `api/worker/v1/instance.metrics.go` | `cases/case-37.sh` | yes (confirm) | any (chain materialized) |
+| 38 | AMD accelerator claims over both carriers: exclusive whole cards, logical slices, and the Instance metrics array | `pkg/devicemanager/allocator/amd/**`, `pkg/devicemanager/detector/amd/device.go`, `binding/amdsmi/**`, `csrc/amd/rocm-slicing-shim/**`, `pkg/worker/extensionapis/worker/instance.metrics.go` | `cases/case-38.sh` | yes (confirm) | real **AMD** hardware · skips: no healthy logically sliceable amd accelerator; sub-checks skip: <2 accelerators, no default StorageClass |
+| 39 | T-Head PPU: a pinned claim lands exactly where it was told, and a logical slice is capped inside the container | `pkg/devicemanager/allocator/thead/**`, `pkg/devicemanager/detector/thead/device.go`, `binding/hgml/**`, `pkg/deviceplugin/{controller,server}.go`, `csrc/thead/ppu-slicing-shim/**` | `cases/case-39.sh` | yes (confirm) | real **T-Head** hardware, >=2 accelerators IDLE at each claim, **+ the node's own host context** (reached directly when run on the node, else `PPU_NODE_SSH`, exit 2) · skips: no thead group / <2 idle |
 
 - Also run **CASE 1 at minimum** for changes under `pkg/worker/controllers/**`, `pkg/*/webhooks/**`, `pkg/worker/extensionapis/**`, `api/**`, `pkg/extensionapi/**`, `pkg/worker/kuberess/**`.
 - `spec.os`/`spec.arch` materialization is asserted **inline** — CASE 1 (cpu pool) + CASE 6 (accelerated) — not as a standalone case.
@@ -91,6 +93,54 @@ Each case is self-contained; its header (see **Case header contract**) states go
 - CASE 23 is the **only** case that toggles node hardware state (`nvidia-smi -mig`), so it needs the node's SSH address and will **not** guess it: it reads `MIG_NODE_SSH=<user@host>` and **exits 2 (input required)** — proceeding no further — when it is unset. **Ask the user for the node address and pass it inline at run time** (`MIG_NODE_SSH=<user@host> bash …/case-23.sh <NS>`); never hardcode it. It auto-skips (exit 0) when the card is not MIG-capable. It is self-recovering: the trap restores the card's original MIG mode (and re-detects) on pass AND fail. Because enabling MIG moves the card from the logical family to the partition family **entirely** — the `.sliced.*` keys disappear and the `.partitioned.*` keys appear — this case owns the whole mode transition, driving the Device Manager re-detect between every mode change by **rollout-restarting the DaemonSet only**: the detect loop watches `{manufacturer, id, unhealthy}`, which a mode toggle does not change, but an existing group's capability is now rewritten in place, so deleting the `Devices` object is *not* required (and the case deliberately does not, so a regression of that stays visible). It asserts the family swap only when **every** card of the group is partitioned; with an unpartitioned sibling the logical keys legitimately survive and that sub-check records SKIP.
 
 - CASE 35 is the **Ascend** logical-slice placement case, and the only one whose expectations are **computed from the ledger immediately before each claim** rather than hardcoded — so it is valid on a pool that already carries unrelated workloads, which is the normal state of an accelerator cluster someone is actually using. It splits the contract in two per claim: *did it join an in-use card that had room* (the defect — opening a fresh card strands the node) and *did it take the fullest card that fits* (the policy). When no in-use card had room the first records **SKIP**, never a vacuous PASS. Ascend-only because the runtime-confinement cross-check reads `ASCEND_VISIBLE_DEVICES`; the placement assertions themselves read the allocation the plugin recorded on the Pod and are vendor-neutral, so a sibling case needs only that variable's name. Its claim carrier must be a **CANN-family image**: allocating an Ascend slice installs an `/etc/ld.so.preload` pulling in the Ascend userspace runtime, and in a bare base image every process — `sleep` included — dies with exit 127 (`libc_sec.so`), which the vendor runtimeClass does **not** fix. Override with `E2E_SLICE_IMAGE=<ref>`. CASE 11 covers the same packing property on NVIDIA and needs a pristine pool.
+- CASE 38 is the **AMD** claim-matrix case, and the only one that asserts every row **twice** — once
+  from what the operator recorded (the allocation annotation, the per-accelerator ledger, the Instance
+  metrics subresource) and once from **inside the container with AMD's own tooling**. The split is the
+  point: a ledger that says the right thing about a container that cannot touch an accelerator is the
+  failure it exists to catch, and one merged verdict would hide it behind whichever half passed. It
+  covers the exclusive family over both carriers at one and two accelerators and the three logical-slice
+  shapes (memory percentage, memory MiB, cores percentage). It also owns the only shape that exercises
+  **CU-window packing**: two slices of UNEQUAL shares on ONE accelerator. Every other sliced row is one
+  claim on one accelerator, where the first window always starts at 0, so nothing else tests seating a
+  window beside the ones the node's live allocations already hold — and an overlap there hands two
+  containers the same compute units while the ledger still reads correctly. Co-location is arranged
+  rather than hoped for: if the packing policy opens an idle accelerator instead of joining the one in
+  use, the case occupies that accelerator whole so one sliceable candidate remains, and prints which
+  route it took. The disjointness verdict is gated on the DELIVERED window lengths leaving room for two
+  seats, because compute shares are overcommittable and the placement's documented fallback on a full
+  accelerator is the least-overlapping seat — an overlap there is behaviour, not a defect. It is also
+  the only case that exercises the
+  metrics sample's **accelerator array**: on an exclusive Instance it asserts one entry per allocated
+  accelerator matched **by accelerator identity, never by ordinal**, the physical capacity, both
+  utilizations in range, and temperature/power cross-checked against the container's own reading; on a
+  **sliced** Instance per-slice figures are not offered yet, so it records what the subresource returned
+  — absent array, or whole-accelerator figures — as an **observation, never a FAIL**. Each in-container
+  instrument is chosen for what it can actually see: `amd-smi` for which accelerators are visible and
+  their physical capacity (it reads the kernel, so it is deliberately **not** used for a slice's memory
+  cap), the **HIP surface** for the capped capacity, and the bundled CU-mask reader for the compute
+  window — which also reports the accelerator's own compute-unit count, so the expected window needs no
+  assumption about the part. Every expectation is computed from the live ledger and the pool's
+  descriptors; carrier choice is computed too (no default StorageClass, or unit resources that do not
+  fit the node, demote a row to the Pod carrier or to SKIP with the arithmetic shown). Correlation
+  between the two halves is the accelerator's **PCI address**, because AMD's tooling renumbers its
+  ordinals to whatever the container was granted.
+- CASE 39 is the **T-Head** case, and the only one that asserts a claim landed on a *named*
+  accelerator rather than merely on an appropriate one: it sets
+  `device.gpustack.ai/accelerator.preferred-id` and checks the result three independent ways — the
+  allocation the device plugin recorded, the identities `ppu-smi` reports inside the container, and the
+  pool's exclusive view shrinking by exactly the count claimed. Correlation is the **PCI bus address**,
+  never the index, and that is measured rather than stylistic: a container is offered its accelerator
+  renumbered to 0 whichever one it got, so an index comparison passes on the wrong accelerator.
+  Its second contract is that a VRAM share and a compute share are **independent** — one Pod asks for
+  both at different percentages and each is asserted separately, so neither can be reported by
+  accident from the other. Like CASE 35 it computes every expectation from the live ledger immediately
+  before each claim, which is mandatory here rather than merely tidy: this hardware normally carries
+  unrelated work, and the ledger records no accelerator memory usage, so it **cannot tell a busy
+  accelerator from a free one**. The case therefore verifies each accelerator idle against the vendor
+  tool in the node's own host context before claiming it, and carries as its closing verdict that no
+  claim ever landed on one that was not. It needs no `runtimeClassName` and no vendor carrier image —
+  a T-Head fact, not a general one. A `Devices` read that *errors* fails setup rather than skipping,
+  so "no T-Head hardware" can never be confused with "the query did not answer".
 - CASE 36 covers node pinning and the volumes an Instance mounts beside its workspace in **one** Pod —
   four additional volumes, one per source, so all four render and are asserted from a single wait. Two
   of its readings are only meaningful on a wider cluster and record **SKIP** rather than a vacuous PASS:
