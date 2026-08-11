@@ -430,7 +430,13 @@ func (s *ResourceServer) getContainerPreferredAllocationResponse(
 		if len(sel.Unselected) == 0 {
 			return &ContainerPreferredAllocationResponse{}, nil
 		}
-		if remainingSize <= int32(len(sel.Unselected)) {
+		// remainingSize can be negative: the walk keeps taking preferred cards after the claim is
+		// full, because it only stops early once the preferred set is ALSO empty — and a
+		// "accelerator.preferred-id" annotation is taken at face value, so an ID naming no card on
+		// this node never clears from that set. A pod rescheduled onto a different node carries
+		// exactly such an annotation. Without the lower bound the slice below panics on a negative
+		// index and takes the device-manager down with it.
+		if remainingSize > 0 && remainingSize <= int32(len(sel.Unselected)) {
 			s.Logger.Info("try to allocate from unselected devices since preferred devices are not enough")
 			selectedResUnits = append(selectedResUnits, sel.Unselected[:remainingSize]...)
 			remainingSize = 0

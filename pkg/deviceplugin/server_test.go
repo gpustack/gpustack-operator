@@ -3506,3 +3506,42 @@ func TestResourceServer_Allocate_LegacyResponderFailureKeepsItsShape(t *testing.
 	assert.NotEmpty(t, allocations,
 		"the annotation is written before a non-logical responder runs, exactly as before this branch")
 }
+
+// TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic pins the lower bound on the
+// unselected-devices fallback.
+//
+// The walk keeps taking preferred cards after the claim is already full, because it only stops
+// early once the preferred set is ALSO empty — and "accelerator.preferred-id" is taken at face
+// value, never checked against this node's inventory, so an ID naming no card here never clears
+// from that set. A Pod rescheduled onto a different node carries exactly such an annotation.
+//
+// That drives remainingSize negative. The fallback then sliced its candidate list with that
+// negative bound, panicking inside the gRPC handler, which grpc-go does not recover: the
+// device-manager died and every accelerator admission on the node stalled until it re-registered.
+func TestResourceServer_PreferredAllocation_StalePreferredIDDoesNotPanic(t *testing.T) {
+	const tokensPerCard = 64
+	full := int32(nodefeature.ResourceMaxUnits)
+	// Three untouched cards. The annotation names two of them, plus one that is not on this node.
+	devs := slicedLedgerDevices("node-stale", tokensPerCard, full, full, full)
+	availableDeviceIDs := availableDeviceIDsFor(devs, workercore.DeviceAllocationModeSliced, tokensPerCard)
+
+	pod := &core.Pod{ObjectMeta: meta.ObjectMeta{
+		Annotations: map[string]string{_PreferredAcceleratorIDAnnoKey: "dev-0,dev-1,dev-from-another-node"},
+	}}
+	s := &ResourceServer{
+		Manufacturer:   nodefeature.ManufacturerNVIDIA,
+		AllocationMode: workercore.DeviceAllocationModeSliced,
+	}
+
+	// A claim of one against two honourable preferred cards drives remainingSize to -1, and the
+	// third card lands in the unselected list the fallback would have sliced.
+	resp, err := s.getContainerPreferredAllocationResponse(
+		&ContainerPreferredAllocationRequest{AvailableDeviceIDs: availableDeviceIDs, AllocationSize: 1},
+		pod, slicedUnitsContainer(800_000), devs)
+	require.NoError(t, err)
+
+	offered := sets.New(availableDeviceIDs...)
+	for _, id := range resp.GetDeviceIDs() {
+		assert.True(t, offered.Has(id), "the hint must name a token kubelet offered: %q", id)
+	}
+}
