@@ -218,18 +218,18 @@ func TestPadIndex(t *testing.T) {
 	}
 }
 
-// TestResourceUnit_String pins the token form a ResourceUnit renders, and its round-trip through
-// ParseResourceUnit. A unit names one token of one accelerator, so it must render the same
+// TestResourceToken_String pins the token form a ResourceToken renders, and its round-trip through
+// ParseResourceToken. A unit names one token of one accelerator, so it must render the same
 // three-segment form that accelerator advertises and the parser accepts — dropping the index yields a
 // string no consumer can read back.
-func TestResourceUnit_String(t *testing.T) {
-	unit := func(group, device string, index uint64) ResourceUnit {
-		return ResourceUnit{Resource: Resource{Group: group, Device: device}, Index: index}
+func TestResourceToken_String(t *testing.T) {
+	unit := func(group, device string, index uint64) ResourceToken {
+		return ResourceToken{Resource: Resource{Group: group, Device: device}, Index: index}
 	}
 
 	cases := []struct {
 		name string
-		unit ResourceUnit
+		unit ResourceToken
 		want string
 	}{
 		{"first token pads to four digits", unit("grp-0", "dev-0", 0), "grp-0:dev-0:0000"},
@@ -245,32 +245,32 @@ func TestResourceUnit_String(t *testing.T) {
 			got := c.unit.String()
 			assert.Equal(t, c.want, got)
 
-			back, err := ParseResourceUnit(got)
+			back, err := ParseResourceToken(got)
 			require.NoError(t, err, "a rendered unit must parse back as a device ID")
 			assert.Equal(t, c.unit, back, "round-trip must preserve the Resource and the token index")
 		})
 	}
 }
 
-// TestResourceUnit_Parse pins what ParseResourceUnit accepts off the wire. kubelet hands back the
+// TestResourceToken_Parse pins what ParseResourceToken accepts off the wire. kubelet hands back the
 // exact string it was offered, so anything that is not a three-segment device ID with a numeric
 // index is a protocol error, not a Resource.
-func TestResourceUnit_Parse(t *testing.T) {
+func TestResourceToken_Parse(t *testing.T) {
 	cases := []struct {
 		name    string
 		id      string
-		want    ResourceUnit
+		want    ResourceToken
 		wantErr bool
 	}{
 		{
 			name: "a padded index parses to its numeric value",
 			id:   "grp-0:dev-0:0007",
-			want: ResourceUnit{Resource: Resource{Group: "grp-0", Device: "dev-0"}, Index: 7},
+			want: ResourceToken{Resource: Resource{Group: "grp-0", Device: "dev-0"}, Index: 7},
 		},
 		{
 			name: "an unpadded shared offset parses to its numeric value",
 			id:   "grp-0:dev-0:160000",
-			want: ResourceUnit{Resource: Resource{Group: "grp-0", Device: "dev-0"}, Index: 160000},
+			want: ResourceToken{Resource: Resource{Group: "grp-0", Device: "dev-0"}, Index: 160000},
 		},
 		{
 			name:    "a bare Resource is not a device ID",
@@ -301,7 +301,7 @@ func TestResourceUnit_Parse(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got, err := ParseResourceUnit(c.id)
+			got, err := ParseResourceToken(c.id)
 			if c.wantErr {
 				require.Error(t, err)
 				return

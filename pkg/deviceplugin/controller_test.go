@@ -22,37 +22,38 @@ import (
 )
 
 // pl builds one placement interval [start, start+length).
-func pl(start, length int32) workercore.AcceleratorPhysicalPlacement {
-	return workercore.AcceleratorPhysicalPlacement{Start: start, Length: length}
+func pl(start, length int32) workercore.AcceleratorPlacement {
+	return workercore.AcceleratorPlacement{Start: start, Length: length}
 }
 
-// a100Placements is the A100 capability inventory for the four worked-example profiles,
-// each carrying its full empty-card legal placement set (the detect-time cache the
-// reconciler subtracts occupied from).
+// a100Placements is the A100 capability inventory for the four worked-example profiles, each
+// carrying its full empty-accelerator legal placement set (the detect-time cache the reconciler
+// subtracts occupied from).
 func a100Placements() []workercore.AcceleratorPhysicalSlicedProfile {
 	return []workercore.AcceleratorPhysicalSlicedProfile{
 		{
 			Name: "1g.5gb", MemoryMib: 5120, ComputeSlices: 1, MemorySlices: 1, Count: 7,
-			Placements: []workercore.AcceleratorPhysicalPlacement{pl(0, 1), pl(1, 1), pl(2, 1), pl(3, 1), pl(4, 1), pl(5, 1), pl(6, 1)},
+			Placements: []workercore.AcceleratorPlacement{pl(0, 1), pl(1, 1), pl(2, 1), pl(3, 1), pl(4, 1), pl(5, 1), pl(6, 1)},
 		},
 		{
 			Name: "1g.10gb", MemoryMib: 10240, ComputeSlices: 1, MemorySlices: 2, Count: 4,
-			Placements: []workercore.AcceleratorPhysicalPlacement{pl(0, 2), pl(2, 2), pl(4, 2), pl(6, 2)},
+			Placements: []workercore.AcceleratorPlacement{pl(0, 2), pl(2, 2), pl(4, 2), pl(6, 2)},
 		},
 		{
 			Name: "2g.10gb", MemoryMib: 10240, ComputeSlices: 2, MemorySlices: 2, Count: 3,
-			Placements: []workercore.AcceleratorPhysicalPlacement{pl(0, 2), pl(2, 2), pl(4, 2)},
+			Placements: []workercore.AcceleratorPlacement{pl(0, 2), pl(2, 2), pl(4, 2)},
 		},
 		{
 			Name: "3g.20gb", MemoryMib: 20480, ComputeSlices: 3, MemorySlices: 4, Count: 2,
-			Placements: []workercore.AcceleratorPhysicalPlacement{pl(0, 4), pl(4, 4)},
+			Placements: []workercore.AcceleratorPlacement{pl(0, 4), pl(4, 4)},
 		},
 	}
 }
 
-// physicalAndLogicalDevices returns a node's Devices with one MIG-enabled card (mig-0, a non-empty
-// PhysicalSliced.Profiles carrying cached Placements) and one logical-slice card (logical-0), so
-// a reconcile exercises the ledger fold on the MIG card and its absence on the logical card.
+// physicalAndLogicalDevices returns a node's Devices with one MIG-enabled accelerator (mig-0, a
+// non-empty PhysicalSliced.Profiles carrying cached Placements) and one logical-slice accelerator
+// (logical-0), so a reconcile exercises the ledger fold on the MIG accelerator and its absence on
+// the logical accelerator.
 func physicalAndLogicalDevices(nodeName string) *workercore.Devices {
 	return &workercore.Devices{
 		ObjectMeta: meta.ObjectMeta{Name: nodeName},
@@ -90,8 +91,8 @@ func allocationAnnotation(t *testing.T, allocations PodAllocations) map[string]s
 }
 
 // physicalSliceAllocation records one MIG instance of profile on (group, device) at the given
-// placements — the upward record the reconciler unions into the card's occupied set.
-func physicalSliceAllocation(group, device, profile string, placements ...workercore.AcceleratorPhysicalPlacement) workercore.DevicesStatus {
+// placements — the upward record the reconciler unions into the accelerator's occupied set.
+func physicalSliceAllocation(group, device, profile string, placements ...workercore.AcceleratorPlacement) workercore.DevicesStatus {
 	return workercore.DevicesStatus{Groups: []workercore.DevicesAllocationGroup{{
 		ID:           group,
 		Manufacturer: nodefeature.ManufacturerNVIDIA,
@@ -106,7 +107,7 @@ func physicalSliceAllocation(group, device, profile string, placements ...worker
 }
 
 // physicalSlicePod builds a Pod whose single workload container holds one MIG instance.
-func physicalSlicePod(t *testing.T, name, group, device, profile, node string, placements ...workercore.AcceleratorPhysicalPlacement) *core.Pod {
+func physicalSlicePod(t *testing.T, name, group, device, profile, node string, placements ...workercore.AcceleratorPlacement) *core.Pod {
 	t.Helper()
 	return &core.Pod{
 		ObjectMeta: meta.ObjectMeta{
@@ -123,9 +124,9 @@ func physicalSlicePod(t *testing.T, name, group, device, profile, node string, p
 
 // TestDevicesReconciler_PatchAllocatingPod_PerContainer verifies the durable allocation record is
 // keyed by container. A single slot lets a second container's Allocate erase the first from the
-// ledger the reconciler rebuilds, so a card still running a container would read free after a
-// device-manager restart; and a repeated Allocate for one container must overwrite its own entry
-// rather than charge its card twice.
+// ledger the reconciler rebuilds, so an accelerator still running a container would read free after
+// a device-manager restart; and a repeated Allocate for one container must overwrite its own entry
+// rather than charge its accelerator twice.
 func TestDevicesReconciler_PatchAllocatingPod_PerContainer(t *testing.T) {
 	const nodeName = "node-acc"
 	ctx := context.Background()
@@ -188,8 +189,9 @@ func TestDevicesReconciler_PatchAllocatingPod_PerContainer(t *testing.T) {
 }
 
 // TestDevicesReconciler_TerminatingPodStillCharges verifies a terminating Pod keeps charging its
-// card. The reclaimer destroys an instance when the Pod object is gone, not when its containers
-// exit, so dropping it at the deletion timestamp would advertise a slot the hardware still holds.
+// accelerator. The reclaimer destroys an instance when the Pod object is gone, not when its
+// containers exit, so dropping it at the deletion timestamp would advertise a slot the hardware
+// still holds.
 func TestDevicesReconciler_TerminatingPodStillCharges(t *testing.T) {
 	const nodeName = "node-term"
 	capture := &statusCapture{}
@@ -209,10 +211,11 @@ func TestDevicesReconciler_TerminatingPodStillCharges(t *testing.T) {
 }
 
 // TestDevicesReconciler_TerminatedContainerStillCharges verifies a container that has already
-// exited keeps charging its card while its Pod lives. The reclaimer and kubelet both scope a
-// device to the Pod's life, so filtering by container liveness would report a card free while its
-// instance still occupies memory slices — room the placement would then refuse. The assertion is
-// on the resulting per-profile capacity, because the ledger fixture alone passes either way.
+// exited keeps charging its accelerator while its Pod lives. The reclaimer and kubelet both scope a
+// device to the Pod's life, so filtering by container liveness would report an accelerator free
+// while its instance still occupies memory slices — room the placement would then refuse. The
+// assertion is on the resulting per-profile capacity, because the ledger fixture alone passes
+// either way.
 func TestDevicesReconciler_TerminatedContainerStillCharges(t *testing.T) {
 	const nodeName = "node-exited"
 	capture := &statusCapture{}
@@ -264,7 +267,8 @@ func acceleratorByID(t *testing.T, status *workercore.DevicesStatus, id string) 
 	return workercore.AcceleratorAllocation{}
 }
 
-// remainingByProfile returns the reconciled RemainingProfiles count for a card's profile, 0 if absent.
+// remainingByProfile returns the reconciled RemainingProfiles count for an accelerator's profile, 0
+// if absent.
 func remainingByProfile(t *testing.T, status *workercore.DevicesStatus, id, profile string) int32 {
 	t.Helper()
 	acc := acceleratorByID(t, status, id)
@@ -300,12 +304,12 @@ func reconcileNode(t *testing.T, rec *DevicesReconciler, nodeName string) {
 	require.NoError(t, err)
 }
 
-// TestDevicesReconciler_PhysicalLedgerFold verifies the placement-aware MIG ledger is derived
-// by pure annotation-merge (no NVML): an empty MIG card reports its full free ceilings and
-// a logical card none; annotated placements fold to the worked-example Allocated/Free; two
-// same-profile Pods at different slots reconstruct the real occupied set; the ledger is
-// recomputed (not stomped) on a second reconcile; and missing occupancy only overstates
-// Free, never understates it.
+// TestDevicesReconciler_PhysicalLedgerFold verifies the placement-aware MIG ledger is derived by
+// pure annotation-merge (no NVML): an empty MIG accelerator reports its full free ceilings and a
+// logical accelerator none; annotated placements fold to the worked-example Allocated/Free; two
+// same-profile Pods at different slots reconstruct the real occupied set; the ledger is recomputed
+// (not stomped) on a second reconcile; and missing occupancy only overstates Free, never
+// understates it.
 func TestDevicesReconciler_PhysicalLedgerFold(t *testing.T) {
 	const nodeName = "node-mig"
 

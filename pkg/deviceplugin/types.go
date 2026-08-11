@@ -6,9 +6,21 @@ import (
 	deviceplugin "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
-// The first block below aliases k8s.io/kubelet's device-plugin v1beta1 API types, re-exported
-// so a vendor allocator can name the gRPC payloads it builds without importing the kubelet
-// package itself.
+// The first block below aliases k8s.io/kubelet's device-plugin v1beta1 API types, re-exported so
+// a manufacturer's allocator can name the gRPC payloads it builds without importing the kubelet
+// package itself. The aliases keep kubelet's own names deliberately: the block's whole value is
+// that it mirrors that API 1:1, and a renamed mirror is a worse mirror.
+//
+// The price of the mirror is that "Device" names three different things here — two of kubelet's and
+// one of this package's own — so a reader has to know which is which:
+//
+//   - Device is kubelet's advertised device: the {ID, Health, Topology} record ListAndWatch
+//     publishes. Its ID is a device ID (a token string), not a Device ID in our sense.
+//   - DeviceSpec is kubelet's host device-node spec: the /dev path a response asks the runtime to
+//     inject into the container.
+//   - Device, on Resource, is the ID of the physical device a token names. It is this package's
+//     own vocabulary, not kubelet's — see the package doc of pkg/device for the
+//     Device/Accelerator/Resource layering.
 type (
 	Options                              = deviceplugin.DevicePluginOptions
 	Device                               = deviceplugin.Device
