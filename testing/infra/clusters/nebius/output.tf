@@ -20,5 +20,5 @@ output "node_group_names" {
 
 output "ssh_note" {
   description = "How to reach individual nodes over SSH (node groups don't surface per-node IPs in Terraform state)."
-  value       = "kubectl --context ${local.context_name} get nodes -o wide, then ssh ubuntu@<ExternalIP>"
+  value       = "kubectl --context ${local.context_name} get nodes -o wide, then ssh ubuntu@<ExternalIP> (only groups with public_ip = true have one; the cpu group has none)"
 }

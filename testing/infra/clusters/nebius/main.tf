@@ -30,7 +30,10 @@ locals {
         os            = var.cpu_instance_types.os
         preemptible   = false
         mig           = false
-        gpu           = null
+        # Nothing logs in to the CPU node, and a public address is a quota'd resource
+        # (vpc.ipv4-address.public.count), so this group does not take one.
+        public_ip = false
+        gpu       = null
       }
     },
     {
@@ -44,7 +47,12 @@ locals {
         # its GPU telemetry and its platform-level auto-repair instead of losing both for a
         # capability it will never have.
         mig = coalesce(cfg.mig, contains(local.mig_platforms, cfg.platform))
-        gpu = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
+        # A GPU node is driven from outside the cluster over SSH — the hardware-partition tests
+        # toggle MIG on the card that way, and they take the node's address as an input rather than
+        # guess it — and that inbound reach is what the public address buys. Turn it off per group
+        # (`public_ip = false`) only for a GPU group nobody has to log in to.
+        public_ip = cfg.public_ip
+        gpu       = { drivers_preset = coalesce(cfg.drivers_preset, data.external.gpu_compat[name].result.drivers_preset) }
       }
     },
   )
@@ -261,8 +269,15 @@ resource "nebius_mk8s_v1_node_group" "this" {
     }
 
     network_interfaces = [{
-      subnet_id         = nebius_vpc_v1_subnet.this.id
-      public_ip_address = {}
+      subnet_id = nebius_vpc_v1_subnet.this.id
+      # An empty object is how the API asks for a public IPv4; null leaves the node private-only.
+      # This buys INBOUND reach (SSH), not egress: the network's default route table carries a
+      # 0.0.0.0/0 route through Nebius' default egress gateway, which NATs a node that has no
+      # public address behind a dynamic one from a region-wide pool — so a private-only node still
+      # joins the cluster and pulls images. Each address is charged against the project's
+      # vpc.ipv4-address.public.count quota, which is small and counts allocations rather than
+      # running instances, so a group nothing logs in to must not take one.
+      public_ip_address = each.value.public_ip ? {} : null
       security_groups   = [{ id = nebius_vpc_v1_security_group.this.id }]
     }]
 
