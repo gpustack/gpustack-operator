@@ -167,20 +167,29 @@ Two Go tests hold the chart's `global.manufacturers` map and its `deviceClassWhi
 
 **The manufacturer map is where a manufacturer's whole identity lives**: one row per manufacturer
 carrying its `pciVendorID`, the `resourceName` its device-plugin advertises, the `runtimeName` its
-workloads run under, its `partitionKind`, and `runtimeInjectsDriver` — the last saying that this
-manufacturer's user-space driver reaches a container only through its container runtime, which is
-why the NVIDIA and MThreads device-managers run under a RuntimeClass while every other
-manufacturer's reads its management library from a hostPath mount.
+workloads run under, its `partitionKind`, and two `runtimeInjects*` facts about what a container
+would be missing without that manufacturer's container runtime:
 
-`runtimeInjectsDriver` also decides which RuntimeClasses the chart creates
-(`deviceManager.createRuntimeClasses`, and only where the class is absent or already this release's)
-— deliberately a narrower set than the six manufacturers that state a `runtimeName`. The two answer
-different questions: `runtimeName` is the class the operator will *use*, while
-`runtimeInjectsDriver` marks the only manufacturers whose runtime is certain to be installed, since
-their accelerators cannot work at all unless its handler is registered. Every other manufacturer's
-device plugin needs no RuntimeClass, so creating one would break them: the operator attaches a
-RuntimeClass whenever one exists, and the kubelet rejects a Pod naming a runtime nothing configured.
-A class the manufacturer's own operator created is still used; the chart never conjures one.
+- `runtimeInjectsDriver` — the user-space driver reaches a container only through the runtime. This
+  is why the NVIDIA and MThreads **device-managers** run under a RuntimeClass, while every other
+  manufacturer's reads its management library from a hostPath mount.
+- `runtimeInjectsDevices` — the allocator contributes no device node of its own, so the runtime is
+  the only thing that turns an allocation into `/dev` entries inside the container. This is the
+  **workload's** need alone: AMD sets it because its allocator returns no device spec and leaves
+  injection entirely to `amd-container-runtime`, driven by the `AMD_VISIBLE_DEVICES` the allocator
+  writes — yet the AMD device-manager still reads its library from `/opt/rocm` on the host and does
+  not run under the class.
+
+**Either** of the two — never `runtimeName` — decides which RuntimeClasses the chart creates
+(`deviceManager.createRuntimeClasses`, and only where the class is absent or already this release's),
+so the set is deliberately narrower than the manufacturers that merely state a `runtimeName`. The
+fields answer different questions: `runtimeName` is the class the operator will *use*, while either
+`runtimeInjects*` fact means the runtime's presence can be **inferred**, since a manufacturer missing
+what it names cannot work at all unless the handler is registered. A manufacturer with neither
+injects its own device nodes and needs no RuntimeClass, so creating one would break it: the operator
+attaches a RuntimeClass whenever one exists, and the kubelet rejects a Pod naming a runtime nothing
+configured. A class the manufacturer's own operator created is still used; the chart never conjures
+one.
 
 ## Stage 2: the Device Manager (DM)
 
