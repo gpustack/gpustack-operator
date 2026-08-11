@@ -24,10 +24,10 @@ along the path.
 | # | Gate | What it can see | What it cannot |
 |---|---|---|---|
 | 1 | Pod webhook (Worker) | the request's shape; folds memory into credits | cluster-wide capacity |
-| 2 | Kueue `credits` | the pool's aggregate total | per-card fragmentation |
-| 3 | `NodeDevicesAdmission` AdmissionCheck | every card of the assigned flavor, via the ledger | which node the scheduler will pick |
-| 4 | Default scheduler / kubelet | per-node remaining capacity keys | which card, for the partitioned family |
-| 5 | Device-plugin allocator | the live card state, under a per-node mutex | anything upstream of its own node |
+| 2 | Kueue `credits` | the pool's aggregate total | per-accelerator fragmentation |
+| 3 | `NodeDevicesAdmission` AdmissionCheck | every accelerator of the assigned flavor, via the ledger | which node the scheduler will pick |
+| 4 | Default scheduler / kubelet | per-node remaining capacity keys | which accelerator, for the partitioned family |
+| 5 | Device-plugin allocator | the live accelerator state, under a per-node mutex | anything upstream of its own node |
 
 ### Gate 1 — the Pod webhook
 
@@ -36,7 +36,7 @@ the [normative request rules](../accelerator-requests.md#the-request-rules) and 
 credit input:
 
 - for a **logical slice**, `.sliced.memory-percentage` / `.sliced.memory-mib` into `.sliced.units`,
-  dividing the memory demand by the pool InstanceType's per-card `Memory`;
+  dividing the memory demand by the pool InstanceType's per-accelerator `Memory`;
 - for a **hardware partition**, the requested profile's VRAM into `.partitioned.units` through the same
   VRAM-anchored fold, so a `3g.40gb` partition and a same-VRAM logical slice cost identical credits.
 
@@ -50,22 +50,22 @@ most one slicing container, and no accelerator on a restartable init container. 
 accepted and a rejected example each, are in [Accelerator
 Requests](../accelerator-requests.md#the-request-rules).
 
-The per-card VRAM divisor for the fold is read from the operator-owned **InstanceType**'s
-`spec.memory` (reverse-looked-up by the `schedule.gpustack.ai/queue-entrance` label), **never** from the
-user-writable LocalQueue. Its `MutatingWebhookConfiguration` name sorts before
+The per-accelerator VRAM divisor for the fold is read from the operator-owned **InstanceType**'s
+`spec.memory` (reverse-looked-up by the `schedule.gpustack.ai/queue-entrance` label), **never** from
+the user-writable LocalQueue. Its `MutatingWebhookConfiguration` name sorts before
 `kueue-mutating-webhook-configuration` so the fold runs before Kueue hashes container resources.
 
 ### Gate 2 — Kueue `credits`
 
 Coarse total admission by fractional scoring (`capacity × M`); ensures the pool has enough aggregate
-capacity, but a scalar total cannot see per-card fragmentation.
+capacity, but a scalar total cannot see per-accelerator fragmentation.
 
-### Gate 3 — the per-card AdmissionCheck
+### Gate 3 — the per-accelerator AdmissionCheck
 
-`NodeDevicesAdmissionReconciler` (`node_devices_admission.go`) introspects every node of the assigned
-ResourceFlavor through the `Devices` ledger for per-card feasibility, closing the credits
-"over-admit exclusive" gap (a scalar total cannot see that 8 cards each 50 %-sliced satisfy no
-5-exclusive request).
+`NodeDevicesAdmissionReconciler` (`node_devices_admission.go`) introspects every node of the
+assigned ResourceFlavor through the `Devices` ledger for per-accelerator feasibility, closing the
+credits "over-admit exclusive" gap (a scalar total cannot see that 8 accelerators each 50 %-sliced
+satisfy no 5-exclusive request).
 
 The worker's `Prepare()` applies the `gpustack-node-devices` AdmissionCheck object as its last startup
 step, retrying until Kueue's CRD is established (the chart cannot ship it — Kueue templates its own
@@ -75,19 +75,20 @@ reconciler keeps it `Active`, and the `NodeQueueReconciler` makes the accelerate
 `spec.admissionChecksStrategy` **only once it is Active**.
 
 After Kueue reserves quota, the check reads the assigned pool's `Devices` ledger (uncached, via
-`APIReader`) and computes per-card feasibility (`Remaining ≥ demand`: a whole card for exclusive,
-`.sliced.units` for sliced, an owner share for shared, and — for a partition request — a free placement
-of the requested profile).
+`APIReader`) and computes per-accelerator feasibility (`Remaining ≥ demand`: a whole accelerator for
+exclusive, `.sliced.units` for sliced, an owner share for shared, and — for a partition request — a
+free placement of the requested profile).
 
-It carries one correlated `(cards, per-card demand, profile)` demand tuple **per family** and scopes
-every family to the cards that can serve it, so an exclusive or shared request is never judged feasible
-against a partitioned card and is left queued instead of being admitted into a permanent `Pending`. On
-the partition side a request's `cards` term counts *instances*, not distinct cards: one card hosts as
-many replicas as its remaining geometry allows.
+It carries one correlated `(accelerators, per-accelerator demand, profile)` demand tuple **per
+family** and scopes every family to the accelerators that can serve it, so an exclusive or shared
+request is never judged feasible against a partitioned accelerator and is left queued instead of
+being admitted into a permanent `Pending`. On the partition side a request's `accelerators` term
+counts *instances*, not distinct accelerators: one accelerator hosts as many replicas as its
+remaining geometry allows.
 
-Since the ledger seeds every card at `M`, an exclusive over-admit that coarse `credits` let through (a
-scalar total can hide that no *single* card is free) is caught exactly and held with `Retry` — a
-transient state that self-heals when Kueue re-admits after the backoff.
+Since the ledger seeds every accelerator at `M`, an exclusive over-admit that coarse `credits` let
+through (a scalar total can hide that no *single* accelerator is free) is caught exactly and held
+with `Retry` — a transient state that self-heals when Kueue re-admits after the backoff.
 
 > **Why it skips an evicted Workload** — that self-healing is the reason. Kueue resets the checks to
 > `Pending` and drops the quota reservation in two separate writes, so between them an evicted Workload
@@ -106,23 +107,23 @@ Node-level counting of the remaining `.sliced` / `.sliced.units` / `.sliced.core
 `.partitioned.<kind>-<profile>` capacities (physical) picks the best-fitting node among that
 ResourceFlavor's nodes.
 
-Because the two families' keys are advertised by disjoint card populations, the resource name alone
-rules out a node that cannot serve the kind at all — the one placement error `Allocate` can never
-repair.
+Because the two families' keys are advertised by disjoint accelerator populations, the resource name
+alone rules out a node that cannot serve the kind at all — the one placement error `Allocate` can
+never repair.
 
 ### Gate 5 — the device-plugin allocator
 
-At `Allocate`, the Device Manager settles the card, injects the container's visibility env and runtime
-isolation, and records the allocation into the `Devices` ledger. What "settles" means differs by
-family: for the card-bound families the kubelet already chose the card by choosing the token, and the
-allocator only refuses one another mode holds; for the **partitioned** family the tokens are a fungible
-count, so the allocator picks the card itself and materializes the hardware instance on it. Both paths,
-and the per-vendor isolation each slice gets, are in [Device
-Discovery](discovery.md#the-device-plugin-allocator).
+At `Allocate`, the Device Manager settles the accelerator, injects the container's visibility env
+and runtime isolation, and records the allocation into the `Devices` ledger. What "settles" means
+differs by family: for the accelerator-bound families the kubelet already chose the accelerator by
+choosing the token, and the allocator only refuses one another mode holds; for the **partitioned**
+family the tokens are a fungible count, so the allocator picks the accelerator itself and
+materializes the hardware instance on it. Both paths, and the per-manufacturer isolation each slice
+gets, are in [Device Discovery](discovery.md#the-device-plugin-allocator).
 
-Per-slice runtime isolation covers every sliceable vendor. `.sliced` and `.partitioned` are both capped
-at exactly **1** by the Pod webhook, so the vendor-specific multi-slice divergence that cap used to hide
-can no longer be requested at all.
+Per-slice runtime isolation covers every sliceable manufacturer. `.sliced` and `.partitioned` are
+both capped at exactly **1** by the Pod webhook, so the manufacturer-specific multi-slice divergence
+that cap used to hide can no longer be requested at all.
 
 ## The `Devices` ledger beneath the gates
 
@@ -132,42 +133,43 @@ four-view and is the store beneath gate 3, not a numbered gate itself.
 
 ## Four-view status
 
-`InstanceType.status` carries four per-card bin-packing projections computed from the `Devices` ledger
-(not a credits fold-down):
+`InstanceType.status` carries four per-accelerator bin-packing projections computed from the
+`Devices` ledger (not a credits fold-down):
 
 | View | Column | What it counts |
 |---|---|---|
-| `Accelerator` | **EX** | free whole cards |
+| `Accelerator` | **EX** | free whole accelerators |
 | `AcceleratorShared` | **SH** | shareable ownership slots |
 | `AcceleratorSliced` | **SL** | logically sliceable VRAM-percent units |
-| `AcceleratorPartitioned` | **PT** | hardware partition instances the pool's partitioned cards can still host |
+| `AcceleratorPartitioned` | **PT** | hardware partition instances the pool's partitioned accelerators can still host |
 
-Each card feeds **exactly one** of the two groups, decided by the capability it reports and never by
-its scalar ledger: `EX`/`SH`/`SL` count unpartitioned cards only, `PT` partitioned cards only. So a
-partition-only pool reads `0/0 0/0 0/0` for the first three, a logical-only pool reads `0/0` for `PT`,
-and an exclusive tenant is never shown capacity a partitioned card could not actually serve.
+Each accelerator feeds **exactly one** of the two groups, decided by the capability it reports and
+never by its scalar ledger: `EX`/`SH`/`SL` count unpartitioned accelerators only, `PT` partitioned
+accelerators only. So a partition-only pool reads `0/0 0/0 0/0` for the first three, a logical-only
+pool reads `0/0` for `PT`, and an exclusive tenant is never shown capacity a partitioned accelerator
+could not actually serve.
 
 `EX` and `SH`'s `OnceMaxRequest` is the largest single *node*'s availability (one request can span a
-node's cards); `SL`'s is the freest single *card*'s, since a slice targets one card; and `PT`'s is `1`
-while any card can still host an instance, else `0`, because a partition request is validated to be
-exactly one instance on exactly one card, so no larger value is ever requestable. `kubectl get
-instancetypes` folds them into the `Accelerator(EX/SH/SL/PT)` column as four
-`onceMaxRequest/remaining` groups.
+node's accelerators); `SL`'s is the freest single *accelerator*'s, since a slice targets one
+accelerator; and `PT`'s is `1` while any accelerator can still host an instance, else `0`, because a
+partition request is validated to be exactly one instance on exactly one accelerator, so no larger
+value is ever requestable. `kubectl get instancetypes` folds them into the
+`Accelerator(EX/SH/SL/PT)` column as four `onceMaxRequest/remaining` groups.
 
 ## Capability versus availability
 
 **Which field answers "what can I still get".** Neither `PT` number can answer it for a
 hardware-partitioned pool: its `onceMaxRequest` is only the `1`/`0` "is there room at all", and its
-`remaining` is a best case over profiles that compete for the same physical slices — each card
-contributes its largest per-profile free count, never a per-profile total.
+`remaining` is a best case over profiles that compete for the same physical slices — each
+accelerator contributes its largest per-profile free count, never a per-profile total.
 
 The per-profile answer is `status.acceleratorPartitioned.remainingProfiles`, paired with
-`allocatedProfiles` — the pool-level Σ, by profile name, of the per-card ledger on `Devices.status`.
-**Every profile the pool offers is listed even at zero**, so a profile whose room a sibling's instance
-consumed reads `0` instead of vanishing and "offered but currently full" stays distinguishable from
-"not offered at all"; `kubectl get instancetypes -o wide` shows the same list as the `PARTITIONS`
-column, and the worker gateway sums it across clusters (Active members only, like every other
-availability dimension).
+`allocatedProfiles` — the pool-level Σ, by profile name, of the per-accelerator ledger on
+`Devices.status`. **Every profile the pool offers is listed even at zero**, so a profile whose room
+a sibling's instance consumed reads `0` instead of vanishing and "offered but currently full" stays
+distinguishable from "not offered at all"; `kubectl get instancetypes -o wide` shows the same list
+as the `PARTITIONS` column, and the worker gateway sums it across clusters (Active members only,
+like every other availability dimension).
 
 **Do not read `status.detail.slicedDetail` for this.** It is the static slicing **capability** catalog,
 aggregated from the `Devices` **spec** side, and by design does not move as instances are carved and
@@ -178,10 +180,10 @@ from the offered set, turning a request that should stay `Retry` at the Admissio
 rejection.
 
 Symmetrically, the partition views are enumerated from the capability side, scoped to the pool's own
-accelerator group (a node can carry several models) and joined to the ledger, so a card the detector
-has reported is never dropped for lacking a ledger row nor read as full for carrying an empty one:
-either way it falls back to its catalog ceilings, the same fallback the node's per-profile capacity keys
-take.
+accelerator group (a node can carry several models) and joined to the ledger, so an accelerator the
+detector has reported is never dropped for lacking a ledger row nor read as full for carrying an
+empty one: either way it falls back to its catalog ceilings, the same fallback the node's
+per-profile capacity keys take.
 
 > **Why the status lives on a real CRD** — because the reconciler watches the `Devices` CR and writes
 > the result into a real CRD's `.status`, a `kubectl get instancetype -w` observes capacity move as pods

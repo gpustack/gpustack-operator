@@ -195,7 +195,7 @@ so one left behind is ignored and its device-managers fall back to the default v
 
 The RuntimeClasses this chart creates are unchanged — `nvidia` and `mthreads`, and still only where
 the class is absent or already belongs to this release. A row's `runtimeName` says which class the
-operator will *use* for that vendor, and six rows state one; creating a class is gated on the
+operator will *use* for that manufacturer, and six rows state one; creating a class is gated on the
 narrower `runtimeInjectsDriver` instead, because that is the only case where the container runtime
 is certain to be installed. `deviceManager.createRuntimeClasses=false` remains the way to opt out.
 

@@ -119,10 +119,11 @@ Discovery](discovery.md#the-gpustack-cpu-info-nodefeaturerule).
 
 ## CGO bindings (`binding/`)
 
-Generated Go bindings to vendor GPU runtime/management libraries (nvml, rsmi/amdsmi/amdgpu, cndev, dcmi,
-hgml, ixml, mtml/mxsml, hsa, dl). The generators read `gen/binding/<runtime>/config.yaml` and emit into
-`binding/<runtime>/` via `make generate binding` (c-for-go is vendored in `.sbin/`). The top-level
-`binding/helper*.go` files are hand-written CPU/NUMA topology helpers — those are *not* generated.
+Generated Go bindings to the manufacturers' GPU runtime/management libraries (nvml,
+rsmi/amdsmi/amdgpu, cndev, dcmi, hgml, ixml, mtml/mxsml, hsa, dl). The generators read
+`gen/binding/<runtime>/config.yaml` and emit into `binding/<runtime>/` via `make generate binding`
+(c-for-go is vendored in `.sbin/`). The top-level `binding/helper*.go` files are hand-written
+CPU/NUMA topology helpers — those are *not* generated.
 
 ## The 63-character constraint, recurring
 

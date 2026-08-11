@@ -18,12 +18,13 @@ The `kubectl get instancetypes` columns used throughout:
 
 - **UNIT(CPU/RAM)/STORAGE** — the per-unit request the InstanceType charges.
 - **ACCELERATOR(EX/SH/SL/PT)** — the four-view `onceMaxRequest/remaining` for **EX**clusive (whole
-  cards), **SH**ared (ownership units), **SL**iced (logical, per-card VRAM-percent budget), and
-  **PT** — physically **P**ar**T**itioned (hardware partition instances, e.g. NVIDIA MIG). Every card
-  feeds exactly one side of the split: `EX`/`SH`/`SL` count unpartitioned cards, `PT` partitioned ones,
-  so the `0/0` in the `PT` group throughout this run means "no card here is in a partitioning mode".
-  For the other two configurations — every card partitioned, and a **mixed** node serving both families
-  at once — see the [three-configuration walkthrough](./operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
+  accelerators), **SH**ared (ownership units), **SL**iced (logical, per-accelerator VRAM-percent
+  budget), and **PT** — physically **P**ar**T**itioned (hardware partition instances, e.g. NVIDIA
+  MIG). Every accelerator feeds exactly one side of the split: `EX`/`SH`/`SL` count unpartitioned
+  accelerators, `PT` partitioned ones, so the `0/0` in the `PT` group throughout this run means "no
+  accelerator here is in a partitioning mode". For the other two configurations — every accelerator
+  partitioned, and a **mixed** node serving both families at once — see the [three-configuration
+  walkthrough](./operation/nvidia-mig.md#walkthrough-three-mig-configurations-on-one-node).
 - **CPU** — the collapsed CPU pool's `remaining/capacity` cores.
 
 ## Contents
@@ -95,8 +96,9 @@ Reading the initial state:
 - **7 ResourceFlavors** — one per `(gKey, [aKey,] os, arch, count)`; e.g. `node-t4-b` (48 cores, 4×T4)
   yields both `…-48c` and `…--nvidia-tesla-t4-…-4d`.
 - **3 ClusterQueues / InstanceTypes** — collapsed: one generic CPU pool + one per accelerator.
-- **A10G InstanceType** shows `1/1 10/10 100/100 0/0` (1 whole card, 10 shared units, 100 % logical
-  slice budget, no partitioned card) and the **T4** shows `4/5 40/50 100/500 0/0` (5 cards total across `node-t4-a`'s 1 + `node-t4-b`'s 4).
+- **A10G InstanceType** shows `1/1 10/10 100/100 0/0` (1 whole accelerator, 10 shared units, 100 %
+  logical slice budget, no partitioned accelerator) and the **T4** shows `4/5 40/50 100/500 0/0` (5
+  accelerators total across `node-t4-a`'s 1 + `node-t4-b`'s 4).
 - **`node-cpu` has no `Devices`** object — it carries no accelerator.
 
 Below is one representative of each kind, keyed off the A10G node.
@@ -131,8 +133,8 @@ metadata:
 
 ### Devices
 
-Cluster-scoped, named after the node. The worker stamps `gpustack.ai/managed` + the real CPU key; the
-Device Manager stamps the accelerator key and reports the per-card ledger in `.status`:
+Cluster-scoped, named after the node. The worker stamps `gpustack.ai/managed` + the real CPU key;
+the Device Manager stamps the accelerator key and reports the per-accelerator ledger in `.status`:
 
 ```yaml
 kind: Devices
@@ -152,7 +154,7 @@ status:
         - id: GPU-e0587d2e-127c-4fb8-e2c1-6e517529f575
           index: 0
           mode: 0
-          remaining: 1600000        # per-card credit ledger the AdmissionCheck reads
+          remaining: 1600000        # per-accelerator credit ledger the AdmissionCheck reads
 ```
 
 ### ResourceFlavor
@@ -171,7 +173,7 @@ metadata:
     feature.gpustack.ai/acceleratable: "true"
     general.feature.gpustack.ai/amd-epyc-7r32: "true"
     acceleratable.feature.gpustack.ai/nvidia-a10g: "true"
-    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"       # per-node card count
+    acceleratable.feature.gpustack.ai/nvidia-a10g.count: "1"       # per-node accelerator count
     acceleratable.feature.gpustack.ai/nvidia-a10g.capacity: "1"    # pooled capacity (nodes × count)
     resource.gpustack.ai/type: nodes                               # operator-owned marker
 spec:
@@ -210,9 +212,9 @@ spec:
 
 ### ClusterQueue
 
-One isolated pool per accelerator. Its labels mirror the flavor discriminators (**no** `general.` key
-while awareness is off, so it aggregates the A10G across every CPU). It covers the manufacturer's
-`credits` resource and gates admission with the per-card `AdmissionCheck`:
+One isolated pool per accelerator. Its labels mirror the flavor discriminators (**no** `general.`
+key while awareness is off, so it aggregates the A10G across every CPU). It covers the
+manufacturer's `credits` resource and gates admission with the per-accelerator `AdmissionCheck`:
 
 ```yaml
 kind: ClusterQueue
@@ -291,7 +293,7 @@ status:
     capacity: "100"
     onceMaxRequest: "100"
     remaining: "100"
-  acceleratorPartitioned:          # no card here is in a partitioning mode
+  acceleratorPartitioned:          # no accelerator here is in a partitioning mode
     capacity: "0"
     onceMaxRequest: "0"
     remaining: "0"
@@ -374,8 +376,9 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 
 ## 3. Requesting a logical sliced GPU
 
-A sliceable InstanceType (the A10G reports logical slicing in its observed status detail) admits fractional-card workloads. Request 20 % of
-a card's VRAM with `acceleratorSlicedMemoryPercentage`:
+A sliceable InstanceType (the A10G reports logical slicing in its observed status detail) admits
+fractional-accelerator workloads. Request 20 % of an accelerator's VRAM with
+`acceleratorSlicedMemoryPercentage`:
 
 ```yaml
 kind: Instance
@@ -390,7 +393,7 @@ spec:
     - "86400"
   resources:
     accelerator: "1"
-    acceleratorSlicedMemoryPercentage: 20      # 20% of the card's VRAM
+    acceleratorSlicedMemoryPercentage: 20      # 20% of the accelerator's VRAM
     acceleratorSlicedCoresPercentage: 100
   volume:
     ephemeral:
@@ -411,12 +414,13 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 The comparison — the A10G row moves `1/1 10/10 100/100 0/0` → `0/0 0/0 80/80 0/0`:
 
 - **SL** (logical slice) drops `100 → 80` — the 20 % slice is taken.
-- **EX** and **SH** drop to `0/0` — a partially-sliced card can no longer be handed out whole or as a
-  shared unit.
-- **PT** stays `0/0` — the card is not in a partitioning mode, so it serves no hardware partition.
+- **EX** and **SH** drop to `0/0` — a partially-sliced accelerator can no longer be handed out whole
+  or as a shared unit.
+- **PT** stays `0/0` — the accelerator is not in a partitioning mode, so it serves no hardware
+  partition.
 
-Inside the Instance, the GPU's visible VRAM is capped to the slice — the logical-slicing runtime enforces
-the budget (≈ 20 % of the card's 24 GiB):
+Inside the Instance, the GPU's visible VRAM is capped to the slice — the logical-slicing runtime
+enforces the budget (≈ 20 % of the accelerator's 24 GiB):
 
 ```console
 $ kubectl exec sliced-demo -- nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
@@ -425,14 +429,14 @@ NVIDIA A10G, 4912 MiB
 
 Deleting the Instance releases the slice (the A10G row returns to `1/1 10/10 100/100 0/0`).
 
-> **Physical partitioning (MIG).** The A10G slices *logically* — a runtime caps a shared card, and the
-> `SL` view above tracks the per-card credit budget. A MIG-capable card (A100 / H100) instead
-> **hard-partitions** into fixed hardware instances the operator materializes on demand, which is a
-> different resource family (`.partitioned*`, reported under `PT`) and a different request shape. MIG
-> *mode* is driven by the administrator with `nvidia-smi`, so it has its own runbook and a worked
-> enable → request → reclaim → disable walkthrough (with real `kubectl` output at every step) in
-> [NVIDIA MIG Operations](./operation/nvidia-mig.md); the request keys and rules for every family are in
-> [Accelerator Requests](./accelerator-requests.md).
+> **Physical partitioning (MIG).** The A10G slices *logically* — a runtime caps a shared
+> accelerator, and the `SL` view above tracks the per-accelerator credit budget. A MIG-capable
+> accelerator (A100 / H100) instead **hard-partitions** into fixed hardware instances the operator
+> materializes on demand, which is a different resource family (`.partitioned*`, reported under
+> `PT`) and a different request shape. MIG *mode* is driven by the administrator with `nvidia-smi`,
+> so it has its own runbook and a worked enable → request → reclaim → disable walkthrough (with real
+> `kubectl` output at every step) in [NVIDIA MIG Operations](./operation/nvidia-mig.md); the request
+> keys and rules for every family are in [Accelerator Requests](./accelerator-requests.md).
 
 ---
 
@@ -459,8 +463,8 @@ spec:
   localStorage: 200Gi
 ```
 
-Apply it — the defaulting webhook enriches the descriptors from the matching flavor, and it appears as
-a **sibling** of the auto-derived A10G pool (both feed off the one physical card):
+Apply it — the defaulting webhook enriches the descriptors from the matching flavor, and it appears
+as a **sibling** of the auto-derived A10G pool (both feed off the one physical accelerator):
 
 ```console
 $ kubectl apply -f a10g-12c128g.yaml
@@ -473,9 +477,9 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 ```
 
 - The new row carries the admin's unit spec `12/128Gi/200Gi` (vs the derived preset `8/64Gi/100Gi`).
-- Both A10G siblings show `1/1` — they share the same single card.
+- Both A10G siblings show `1/1` — they share the same single accelerator.
 
-Deploy an Instance onto the custom type (whole card):
+Deploy an Instance onto the custom type (whole accelerator):
 
 ```yaml
 kind: Instance
@@ -495,7 +499,8 @@ spec:
       capacity: 1Gi
 ```
 
-Once `custom-demo` is `Ready`, the consumption shows up **consistently on both siblings** (same card):
+Once `custom-demo` is `Ready`, the consumption shows up **consistently on both siblings** (same
+accelerator):
 
 ```console
 $ kubectl apply -f custom-demo.yaml
@@ -527,7 +532,8 @@ gpustack--nvidia-tesla-t4-linux-amd64   gpustack-fnv64-6b371caa2da0b799   8/32Gi
 ```
 
 - `a10g-12c128g` is gone; the `custom-demo` Instance is `Stopped` (kept for section 5).
-- The shared card is released — `gpustack--nvidia-a10g-linux-amd64` returns to `1/1 10/10 100/100`.
+- The shared accelerator is released — `gpustack--nvidia-a10g-linux-amd64` returns to
+  `1/1 10/10 100/100`.
 
 ---
 
@@ -583,8 +589,8 @@ gpustack--nvidia-a10g-linux-amd64                  gpustack-fnv64-c4680bb149644f
 
 - `custom-demo` becomes `Ready` on the aware pool `gpustack--amd-epyc-7r32--nvidia-a10g-linux-amd64`,
   which drops to `0/0 0/0 0/0`.
-- The old collapsed `gpustack--nvidia-a10g-linux-amd64` **also** drops to `0/0` — the same physical card
-  is consumed, and both views of it stay consistent.
+- The old collapsed `gpustack--nvidia-a10g-linux-amd64` **also** drops to `0/0` — the same physical
+  accelerator is consumed, and both views of it stay consistent.
 
 The aware ClusterQueue's labels now **carry the CPU key** (the difference from section 1):
 
@@ -666,17 +672,17 @@ spec:
         type: DirectoryOrCreate
 ```
 
-- **The pin is a `nodeSelector`, never a direct assignment.** The backing Pod gets exactly one selector
-  entry, `kubernetes.io/hostname: <the node's own hostname label>` — read from the Node, because a
-  provider may set that label to something other than the Node's name. `pod.spec.nodeName` is left to
-  the scheduler, so the Pod still queues through Kueue and its `ClusterQueue` quota, and the
-  `node-devices` AdmissionCheck still gates per-card feasibility. A pin that cannot be satisfied
-  therefore surfaces as a Pending Pod with the scheduler's own reason, not as a Pod running somewhere
-  else.
+- **The pin is a `nodeSelector`, never a direct assignment.** The backing Pod gets exactly one
+  selector entry, `kubernetes.io/hostname: <the node's own hostname label>` — read from the Node,
+  because a provider may set that label to something other than the Node's name. `pod.spec.nodeName`
+  is left to the scheduler, so the Pod still queues through Kueue and its `ClusterQueue` quota, and
+  the `node-devices` AdmissionCheck still gates per-accelerator feasibility. A pin that cannot be
+  satisfied therefore surfaces as a Pending Pod with the scheduler's own reason, not as a Pod
+  running somewhere else.
 - **The node only has to exist.** It is checked when the Instance is *created*, and nothing more is
-  required of it: it need not be managed by the operator, nor belong to the pinned type's pool. That is
-  deliberate — a card-less Instance that only downloads a model must still be able to land on a
-  specific accelerated node.
+  required of it: it need not be managed by the operator, nor belong to the pinned type's pool. That
+  is deliberate — an accelerator-less Instance that only downloads a model must still be able to
+  land on a specific accelerated node.
 - **Pool membership is still the scheduler's business.** The pool a `type` covers and the node a pin
   names are decided independently, so pinning into a heterogeneous pool can be admitted by Kueue and
   then stay Pending because the chosen flavor's labels do not match that node.
