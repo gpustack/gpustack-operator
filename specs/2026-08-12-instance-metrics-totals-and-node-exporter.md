@@ -597,7 +597,7 @@ alongside the code, snake_case multi-word file names, `make generate` after any 
       default to `false`** so an upgrade changes no existing behaviour.
       Verify: `make lint chart`, then the manual round above against the user-supplied context
 
-- [ ] **T7 · Documentation**
+- [x] **T7 · Documentation**
       Blocked by: T1, T5, T6
       Owns: `docs/**`
       Acceptance: AC5.1, including the scrape configuration an operator actually needs, the
