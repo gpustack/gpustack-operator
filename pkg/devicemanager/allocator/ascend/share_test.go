@@ -3,6 +3,7 @@ package ascend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,20 +93,89 @@ func TestEnsureShareEnabled_SetFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "npu-smi set -t device-share -i 0 -c 0 -d 1")
 }
 
-// A driver that cannot even be read fails the allocation: proceeding would gamble the pod on an
-// unknown flag.
-func TestEnsureShareEnabled_GetFails(t *testing.T) {
+// The marking is the whole contract between the build-tagged driver and the core: the driver reads
+// the vendor code, and everything downstream reads only this sentinel. Without this test, dropping
+// the sentinel from shareModeError would leave every other test in this file green while production
+// silently lost the ability to refuse.
+func TestShareModeError(t *testing.T) {
+	cause := errors.New("FUNCTION_NOT_FOUND")
+
+	marked := shareModeError("dcmi get device share enable", cause, true)
+	assert.ErrorIs(t, marked, errShareUnsupported, "an unavailable API must carry the sentinel")
+	assert.ErrorIs(t, marked, cause, "and must keep the vendor's own reason")
+
+	plain := shareModeError("dcmi get device share enable", cause, false)
+	assert.NotErrorIs(t, plain, errShareUnsupported, "anything else must not carry it")
+	assert.ErrorIs(t, plain, cause)
+}
+
+// A driver whose libdcmi has no container-share entry point is refused without the device being
+// written to, and without an `npu-smi` command being offered: no command adds an API the driver does
+// not carry.
+//
+// The flag's own state is not varied here: a failed read returns no state at all, so the refusal is
+// decided by the read alone and a second run with the flag on would exercise the same code.
+func TestEnsureShareEnabled_APIAbsent(t *testing.T) {
 	redirectLogicalSliceDirs(t)
 	share := &fakeShareDriver{
 		enabled: map[[2]int32]bool{},
-		getErr:  errors.New("dcmi get device share enable: FUNCTION_NOT_FOUND"),
+		getErr:  fmt.Errorf("dcmi get device share enable: FUNCTION_NOT_FOUND: %w", errShareUnsupported),
 	}
 	s := newSlicedServerWithShare(share)
 
-	err := allocateSlice(t, s, "uid-share-getfail")
+	err := allocateSlice(t, s, "uid-share-absent")
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read container-share mode of card 0 device 0")
-	assert.Empty(t, share.setCalls, "a failed read must not be followed by a blind write")
+	assert.Contains(t, err.Error(), "card 0 device 0 cannot be shared")
+	assert.Contains(t, err.Error(), "FUNCTION_NOT_FOUND")
+	assert.NotContains(t, err.Error(), "npu-smi", "no command repairs an absent API, so none is offered")
+	assert.Empty(t, share.setCalls, "an absent API is never written to")
+}
+
+// dcmi resolves each symbol independently, so the absence can surface on the write after a read that
+// worked. Offering `npu-smi` there would send the operator after a fix that adds no missing symbol.
+func TestEnsureShareEnabled_APIAbsentOnTheWrite(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServerWithShare(&fakeShareDriver{
+		enabled: map[[2]int32]bool{{0, 0}: false},
+		setErr:  fmt.Errorf("dcmi set device share enable: FUNCTION_NOT_FOUND: %w", errShareUnsupported),
+	})
+
+	err := allocateSlice(t, s, "uid-share-absent-setter")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "card 0 device 0 cannot be shared")
+	assert.NotContains(t, err.Error(), "npu-smi", "no command repairs an absent API, so none is offered")
+}
+
+// A read that merely failed says nothing about whether the API exists, so the write still runs and
+// the allocation succeeds. Refusing here instead would fail an allocation the write completes.
+func TestEnsureShareEnabled_TransientGetFailureStillWrites(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	share := &fakeShareDriver{
+		enabled: map[[2]int32]bool{},
+		getErr:  errors.New("dcmi get device share enable: TIME_OUT"),
+	}
+	s := newSlicedServerWithShare(share)
+
+	require.NoError(t, allocateSlice(t, s, "uid-share-transient"))
+	assert.Equal(t, [][2]int32{{0, 0}}, share.setCalls, "the write is attempted despite the failed read")
+	assert.True(t, share.enabled[[2]int32{0, 0}], "and it leaves the flag on")
+}
+
+// When the write fails too, both failures reach the operator: the write's own reason, the read that
+// could not rule it out beforehand, and the manual remedy.
+func TestEnsureShareEnabled_TransientGetThenSetFails(t *testing.T) {
+	redirectLogicalSliceDirs(t)
+	s := newSlicedServerWithShare(&fakeShareDriver{
+		enabled: map[[2]int32]bool{},
+		getErr:  errors.New("dcmi get device share enable: TIME_OUT"),
+		setErr:  errors.New("dcmi set device share enable: OPER_NOT_PERMITTED"),
+	})
+
+	err := allocateSlice(t, s, "uid-share-bothfail")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "OPER_NOT_PERMITTED")
+	assert.Contains(t, err.Error(), "the flag read failed too: dcmi get device share enable: TIME_OUT")
+	assert.Contains(t, err.Error(), "npu-smi set -t device-share -i 0 -c 0 -d 1")
 }
 
 // An accelerator carrying no dcmi addressing cannot be targeted, so the allocation fails rather

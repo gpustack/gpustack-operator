@@ -334,6 +334,12 @@ allocator reads the flag through `binding/dcmi`, writing only when off, so an ac
 carrying a tenant costs one query. One whose flag cannot be set fails `Allocate` naming both
 accelerator and flag, rather than admitting a pod that cannot use its device.
 
+The read is classified, not treated as fatal on its own. A read reporting the dcmi entry point missing
+— or a libdcmi that never loaded — refuses the allocation without writing, since no `npu-smi` command
+adds an API the driver lacks, and that holds even for a device whose flag is already on. Any other
+read failure still writes: the write is what makes the flag known, so a timeout cannot refuse an
+allocation the write completes. When the write fails too, the error carries both reasons.
+
 > **Why the flag is not optional** — without it the driver admits one container per device: the
 > *second* pod on an accelerator starts, then dies inside the container at `acl.rt.set_device` with
 > `507899` (`ACL_ERROR_RT_DRV_INTERNAL_ERROR`), naming neither the accelerator nor the flag.

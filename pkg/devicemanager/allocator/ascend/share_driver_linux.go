@@ -1,7 +1,6 @@
 package ascend
 
 import (
-	"fmt"
 	"sync"
 
 	klog "k8s.io/klog/v2"
@@ -60,7 +59,9 @@ func (d *dcmiShareDriver) ready() error {
 		return nil
 	}
 	if d.initRet = d.lib.Init(d.logger); !d.initRet.IsSuccess() {
-		return fmt.Errorf("dcmi init failed: %w", d.initRet)
+		// A libdcmi that never loaded offers no container-share API either, so the preflight must
+		// read this the same way it reads an absent entry point rather than trying to write past it.
+		return shareModeError("dcmi init failed", d.initRet, d.initRet.IsAPIUnavailable())
 	}
 	return nil
 }
@@ -72,7 +73,7 @@ func (d *dcmiShareDriver) GetShareEnabled(cardID, deviceID int32) (bool, error) 
 	}
 	enabled, ret := dev.GetShareEnabled()
 	if !ret.IsSuccess() {
-		return false, fmt.Errorf("dcmi get device share enable: %w", ret)
+		return false, shareModeError("dcmi get device share enable", ret, ret.IsAPIUnavailable())
 	}
 	return enabled, nil
 }
@@ -83,7 +84,7 @@ func (d *dcmiShareDriver) SetShareEnabled(cardID, deviceID int32, enabled bool) 
 		return err
 	}
 	if ret := dev.SetShareEnabled(enabled); !ret.IsSuccess() {
-		return fmt.Errorf("dcmi set device share enable: %w", ret)
+		return shareModeError("dcmi set device share enable", ret, ret.IsAPIUnavailable())
 	}
 	return nil
 }
